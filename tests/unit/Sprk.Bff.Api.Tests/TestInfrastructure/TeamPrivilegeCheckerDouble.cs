@@ -19,6 +19,13 @@ public sealed class TeamPrivilegeCheckerDouble : IDataversePrivilegeChecker
     /// <summary>Teams whose roles do NOT hold Read on any table (the Secure Record Owner role before the prerequisite).</summary>
     public HashSet<Guid> TeamsLackingRead { get; } = new();
 
+    /// <summary>
+    /// Review round 5 (K2): teams with a YES the real checker remembered (its per-team cache), seeded by a test. A question
+    /// that is not fresh is answered YES from it, as <c>UserPrivilegeChecker</c> answers from its cache; a fresh question
+    /// reads the truth, and a NO drops the remembered YES (the checker's eviction).
+    /// </summary>
+    public HashSet<Guid> RememberedYes { get; } = new();
+
     /// <summary>When set, every team question throws it (the privileges could not be read).</summary>
     public Exception? Fault { get; set; }
 
@@ -36,9 +43,14 @@ public sealed class TeamPrivilegeCheckerDouble : IDataversePrivilegeChecker
     public Task<bool> TeamHasReadPrivilegeAsync(Guid teamId, string entityLogicalName, bool fresh, CancellationToken ct)
     {
         TeamQuestions.Enqueue((teamId, entityLogicalName, fresh));
+        if (!fresh && RememberedYes.Contains(teamId))
+            return Task.FromResult(true);
         if (Fault is not null)
             return Task.FromException<bool>(Fault);
-        return Task.FromResult(!TeamsLackingRead.Contains(teamId));
+        var holds = !TeamsLackingRead.Contains(teamId);
+        if (!holds)
+            RememberedYes.Remove(teamId);
+        return Task.FromResult(holds);
     }
 
     public Task<bool> HasReadPrivilegeAsync(Guid userOid, string entityLogicalName, CancellationToken ct) =>

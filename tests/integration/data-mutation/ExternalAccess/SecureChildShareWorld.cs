@@ -234,6 +234,18 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    private readonly Dictionary<Guid, Exception> _ownerWriteFaults = new();
+
+    /// <summary>
+    /// UAC task 099b review round 5: an owner write to THIS row throws <paramref name="fault"/> (recorded first) — Dataverse
+    /// refusing the re-own with a specific fault, e.g. the Web API client's bare 403 on a privilege check.
+    /// </summary>
+    public SecureChildShareWorld RefusingOwnerWritesOf(Guid id, Exception fault)
+    {
+        _ownerWriteFaults[id] = fault;
+        return this;
+    }
+
     /// <summary>Task 148: an owner write to THIS row is accepted (recorded) but not applied — the read-back must catch it.</summary>
     public SecureChildShareWorld IgnoringOwnerWritesOf(Guid id)
     {
@@ -246,6 +258,7 @@ internal sealed class SecureChildShareWorld
     {
         _refusedOwnerWrites.Clear();
         _ignoredOwnerWrites.Clear();
+        _ownerWriteFaults.Clear();
         return this;
     }
 
@@ -387,6 +400,8 @@ internal sealed class SecureChildShareWorld
         OwnerWrites.Add((table, id, principal, Sequence?.Invoke() ?? 0));
         if (_refusedOwnerWrites.Contains(id))
             throw new InvalidOperationException("Test: Dataverse refused the re-own.");
+        if (_ownerWriteFaults.TryGetValue(id, out var fault))
+            throw fault;
         if (_ignoredOwnerWrites.Contains(id))
             return;
         MoveOwner(table, id, principal);

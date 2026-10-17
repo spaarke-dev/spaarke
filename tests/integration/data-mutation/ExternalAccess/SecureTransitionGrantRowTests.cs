@@ -202,6 +202,117 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
         problem.GetProperty("detail").GetString().Should().Contain("Calling provisioning again (the same caller may) completes them");
     }
 
+    // ── Review round 5: a refused assignment is classified fresh; one privilege read per team per pass ──────────────
+
+    private static HttpRequestException Forbidden() =>
+        new("Simulated Dataverse 403 on the owner write.", null, HttpStatusCode.Forbidden);
+
+    [Fact]
+    public async Task MakeSecure_WhenARememberedYesLetsTheAssignThrough_AndDataverseRefusesItOnPrivilege_NamesTheOwnerPrivilege_AndDropsTheYes()
+    {
+        // K2: the team's YES was remembered before an administrator removed the privilege, so the pre-check passes and the
+        // assignment reaches Dataverse, which refuses it (a bare 403). The refusal is confirmed fresh: the detail names the
+        // owner privilege (childrenBlockedBy) and the stale YES is dropped.
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId);
+        _fixture.UseChildWorldForRoots();
+        var grants = SeedGrants("sprk_project", rootId, owner: GeneralTeam);
+        _fixture.OwnerPrivileges = TeamPrivilegeCheckerDouble.Lacking(SecureTeam);
+        _fixture.OwnerPrivileges.RememberedYes.Add(SecureTeam);
+        foreach (var grant in grants.Moving())
+            _fixture.ChildWorld.RefusingOwnerWritesOf(grant, Forbidden());
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(ProvisionRoute, new { projectId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await JsonOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonChildrenIncomplete);
+        problem.GetProperty(SecureChildPassSummary.ChildrenBlockedByKey).GetString()
+            .Should().Be(ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode);
+        _fixture.OwnerPrivileges.TeamQuestions.Should().Contain(q => q.TeamId == SecureTeam && q.Fresh,
+            "the refused assignment is confirmed past the cache");
+        _fixture.OwnerPrivileges.RememberedYes.Should().NotContain(SecureTeam, "the stale YES is evicted");
+        _fixture.ChildWorld.OwnerWrites.Where(w => w.Table == GrantTable).Should().ContainSingle(
+            "once the pass knows the team may not own a grant, it attempts no further assignment to it");
+        foreach (var grant in grants.Moving())
+            OwnerOf(grant).Should().NotBe(DataversePrincipalRef.Team(SecureTeam));
+    }
+
+    [Fact]
+    public async Task MakeSecure_WhenDataverseRefusesAGrantAssignWith403_ButTheTeamHoldsRead_IsTheGenericFailure()
+    {
+        // Twin: the 403 is not the owner privilege (the fresh check says the team holds Read), so the generic failure stands
+        // and the retry is still promised.
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId);
+        _fixture.UseChildWorldForRoots();
+        var grants = SeedGrants("sprk_project", rootId, owner: GeneralTeam);
+        _fixture.ChildWorld.RefusingOwnerWritesOf(grants.TeamOwned, Forbidden());
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(ProvisionRoute, new { projectId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await JsonOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonChildrenIncomplete);
+        problem.TryGetProperty(SecureChildPassSummary.ChildrenBlockedByKey, out _).Should().BeFalse();
+        problem.GetProperty("detail").GetString().Should().Contain("Calling provisioning again (the same caller may) completes them");
+        _fixture.OwnerPrivileges.TeamQuestions.Should().Contain(q => q.TeamId == SecureTeam && q.Fresh);
+        OwnerOf(grants.AppOwned).Should().Be(DataversePrincipalRef.Team(SecureTeam), "the other grants still move");
+    }
+
+    [Fact]
+    public async Task MakeSecure_WhenDataverseRefusesAGrantAssignWith403_AndThePrivilegeCheckFaults_IsTheGenericFailure()
+    {
+        // Twin: the fresh check cannot be read — fail closed, the generic failure, no named cause.
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId);
+        _fixture.UseChildWorldForRoots();
+        var grants = SeedGrants("sprk_project", rootId, owner: GeneralTeam);
+        _fixture.OwnerPrivileges = new TeamPrivilegeCheckerDouble { Fault = new HttpRequestException("Simulated Dataverse 503.") };
+        _fixture.OwnerPrivileges.RememberedYes.Add(SecureTeam);
+        _fixture.ChildWorld.RefusingOwnerWritesOf(grants.TeamOwned, Forbidden());
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(ProvisionRoute, new { projectId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await JsonOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonChildrenIncomplete);
+        problem.TryGetProperty(SecureChildPassSummary.ChildrenBlockedByKey, out _).Should().BeFalse();
+        OwnerOf(grants.TeamOwned).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+    }
+
+    [Fact]
+    public async Task MakeSecure_WhenSecureRecordOwnersMayNotOwnAGrant_ReadsItsPrivilegesOnce_NotOncePerGrantRow()
+    {
+        // K perf: three grant rows to the one team; the pass asks once.
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId);
+        _fixture.UseChildWorldForRoots();
+        SeedGrants("sprk_project", rootId, owner: GeneralTeam);
+        _fixture.OwnerPrivileges = TeamPrivilegeCheckerDouble.Lacking(SecureTeam);
+
+        await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(ProvisionRoute, new { projectId = rootId });
+
+        _fixture.OwnerPrivileges.TeamQuestions.Should().ContainSingle().Which.Should().Be((SecureTeam, GrantTable, false));
+    }
+
+    [Fact]
+    public async Task MakeSecure_WhenSecureRecordOwnersMayOwnAGrant_ReadsItsPrivilegesOnce_AndMovesEveryGrantRow()
+    {
+        // Twin: the YES is reused across the pass's grant rows too, and every one of them is still moved.
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId);
+        _fixture.UseChildWorldForRoots();
+        var grants = SeedGrants("sprk_project", rootId, owner: GeneralTeam);
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(ProvisionRoute, new { projectId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.OwnerPrivileges.TeamQuestions.Should().ContainSingle();
+        foreach (var grant in grants.Moving())
+            OwnerOf(grant).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+    }
+
     // ── Unsecure ─────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Theory]

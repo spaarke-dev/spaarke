@@ -954,6 +954,11 @@ public sealed class SecureChildReconciler
         // that row instead of its stored owner (RecordOwnershipContext.PlannedOwningTeams). Always empty when the pass writes.
         private readonly Dictionary<RecordOwnershipParent, Guid> _planned = new();
 
+        // UAC task 099b review round 5 (K perf): this pass's latest answer, per target team, to "may it own a grant row"
+        // (GrantOwnerRefusalAsync), so N grant rows to one team cost one privilege read, not N. Local to the pass, never the
+        // shared cache: it lives exactly as long as one decision over one root's rows.
+        private readonly Dictionary<Guid, string?> _grantOwnerAnswers = new();
+
         public Pass(
             SecureChildReconciler owner, SecureChildReconcileMode mode, RecordOwnershipParent root, bool rootIsolated,
             bool unsecuring, bool mayRelease, Guid secureTeamId, CancellationToken ct)
@@ -1083,22 +1088,30 @@ public sealed class SecureChildReconciler
         /// the row is reported Failed WITHOUT a write and the pass is incomplete (children_incomplete), like any row this pass
         /// could not move.
         /// </summary>
-        private async Task<string?> GrantOwnerRefusalAsync(Guid target)
+        /// <param name="fresh">Review round 5 (K2): <c>true</c> after Dataverse refused the assignment on a privilege check —
+        /// asked past the shared cache (as the grant core classifies its refused create), so a YES remembered before an
+        /// administrator removed the privilege neither names the refusal wrongly nor stays cached. Otherwise the pass's own
+        /// answer for <paramref name="target"/> is reused (one read per team per pass, review round 5 K perf).</param>
+        private async Task<string?> GrantOwnerRefusalAsync(Guid target, bool fresh = false)
         {
             if (_owner._ownerPrivileges is not { } privileges)
                 return null;
+            if (!fresh && _grantOwnerAnswers.TryGetValue(target, out var known))
+                return known;
             var rootType = Enum.GetValues<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRootType>()
                 .First(t => string.Equals(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRoot.LogicalNameFor(t),
                     _root.EntityLogicalName, StringComparison.OrdinalIgnoreCase));
             var refusal = await Sprk.Bff.Api.Api.ExternalAccess.GrantExternalAccessEndpoint.CheckGrantOwnerPrivilegeAsync(
-                privileges, target, rootType, _root.RecordId, key: null, fresh: false, Log, _ct).ConfigureAwait(false);
+                privileges, target, rootType, _root.RecordId, key: null, fresh, Log, _ct).ConfigureAwait(false);
             // Review round 3 (K2): the detail reaches the endpoint's problem detail, so it names no team id (the helper has
             // logged it); the privilege refusal's detail is the one IsGrantOwnerPrivilegeRefusal recognises.
-            return refusal is null
+            var answer = refusal is null
                 ? null
                 : refusal.ReasonCode == Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode
                     ? GrantOwnerPrivilegeMissingDetail
                     : $"{refusal.ReasonCode}: whether the owner team may own an access grant could not be read; it is left as it is";
+            _grantOwnerAnswers[target] = answer;
+            return answer;
         }
 
         private async Task<IReadOnlyList<Entity>> ReadAllPagesAsync(string table, QueryExpression query)
@@ -1247,10 +1260,22 @@ public sealed class SecureChildReconciler
                         // Reversal evidence BEFORE the write (constraint "every assign").
                         Log.LogInformation("[SECURE-CHILD-RECONCILE] reassign: {Table} {Id} owner {Previous} -> team {Target}.",
                             key.Table, key.Id, Describe(current[key]), target);
-                        var fault = await AssignAsync(key.Table, key.Id, decision.Resolution!).ConfigureAwait(false);
+                        Exception? writeFault = null;
+                        var fault = await AssignAsync(key.Table, key.Id, decision.Resolution!, ex => writeFault = ex)
+                            .ConfigureAwait(false);
                         if (fault is not null)
                         {
-                            failures[key] = fault;
+                            // Review round 5 (K2): a grant row's assignment refused on a privilege check is confirmed FRESH, as
+                            // the grant core confirms its refused create: named owner_privilege_missing only when the team
+                            // really lacks Read (and the stale YES that let the write through is dropped); a team that holds
+                            // it, or a check that faults, keeps the generic failure (fail closed, the retry still promised).
+                            failures[key] = IsGrant(key.Table)
+                                && writeFault is not null
+                                && Sprk.Bff.Api.Services.Signals.SignalWriter.IsDataverseAccessDenied(writeFault)
+                                && await GrantOwnerRefusalAsync(target, fresh: true).ConfigureAwait(false)
+                                    == GrantOwnerPrivilegeMissingDetail
+                                    ? GrantOwnerPrivilegeMissingDetail
+                                    : fault;
                             continue;
                         }
                     }
@@ -1598,14 +1623,17 @@ public sealed class SecureChildReconciler
         /// it back. <c>null</c> on success, else what went wrong. A write that reports failure may still have landed, so the
         /// read-back decides (the task 133 restore rule). The write, eviction and read-back are the class's ONE sequence
         /// (<see cref="WriteOwnerAndReadBackAsync"/>, UAC task 183), shared with <see cref="ReownOrdinaryRowAsync"/>.
+        /// <paramref name="onWriteFault"/> (review round 5, K2) sees the write's fault, so a refused grant assignment can be
+        /// classified; it has no default (the owner-write census reads a parameter default as an assignment).
         /// </summary>
-        private async Task<string?> AssignAsync(string table, Guid id, RecordOwnerResolution resolution)
+        private async Task<string?> AssignAsync(
+            string table, Guid id, RecordOwnerResolution resolution, Action<Exception> onWriteFault)
         {
             var teamId = resolution.OwningTeamId!.Value;
             var ownerUpdate = new Dictionary<string, object> { [OwnerColumn] = new EntityReference("team", teamId) };
             return await _owner.WriteOwnerAndReadBackAsync(
                 table, id, DataversePrincipalRef.Team(teamId), c => _owner._dataverse.UpdateAsync(table, id, ownerUpdate, c),
-                entitySet: null, EvictionReason, _ct).ConfigureAwait(false);
+                entitySet: null, EvictionReason, _ct, onWriteFault: onWriteFault).ConfigureAwait(false);
         }
 
         /// <summary>The reason this pass's owner-change evictions carry (batch-4 integration, 148 × 132).</summary>
