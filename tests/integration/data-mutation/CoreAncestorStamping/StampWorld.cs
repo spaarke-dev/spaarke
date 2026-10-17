@@ -96,7 +96,11 @@ internal sealed class StampWorld
     private readonly Dictionary<(string Entity, Guid Id), Exception> _writeFaults = new();
     private readonly Dictionary<string, Exception> _scanFaults = new(StringComparer.OrdinalIgnoreCase);
 
-    public StampWorld()
+    /// <param name="resolverLogger">
+    /// The real <see cref="CoreAncestorResolver"/>'s logger (default: none) — GitHub #2049 asserts the level of its
+    /// no-ancestor line when the job's scan resolves an intermediate with no root.
+    /// </param>
+    public StampWorld(Microsoft.Extensions.Logging.ILogger<CoreAncestorResolver>? resolverLogger = null)
     {
         var service = new Mock<IGenericEntityService>();
         Service = service.Object;
@@ -186,7 +190,7 @@ internal sealed class StampWorld
             (entity, _) => Task.FromResult<IReadOnlySet<string>>(
                 new HashSet<string>(
                     _columns.TryGetValue(entity, out var c) ? c : Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase)),
-            NullLogger<CoreAncestorResolver>.Instance);
+            resolverLogger ?? NullLogger<CoreAncestorResolver>.Instance);
 
         Restamper = new CoreAncestorRestamper(Service, Resolver, NullLogger<CoreAncestorRestamper>.Instance);
     }
