@@ -51,6 +51,7 @@
     <constraint source="ADR-019, 040">ProblemDetails with stable codes; RequireEbillingEnabled() on every route (503 ebilling.disabled when off).</constraint>
     <constraint source="ADR-010, ADR-002">Projection registered in AddFinanceModule; read-only, no writes.</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement BFF (B1 caller identity, B4 live request), no package, publish-size delta recorded, no new HIGH CVE.</constraint>
+    <constraint source="task 026 fix-round-2 (ontology-r1 note; D-95(2))">The firm-reason projection reads sprk_signal.sprk_firmreason as the BFF / app identity, never as the caller. The column is field-secured: a caller identity reads it only through the "Spaarke BFF-Managed Field Readers" profile, and a caller-identity read without that profile returns null silently (no error), so a firm would be shown an empty reason.</constraint>
   </constraints>
 
   <knowledge>
