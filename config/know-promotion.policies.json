@@ -7,7 +7,7 @@
       "policyId": "00000000-0000-4000-8000-000000006301",
       "code": "POL-MATTER-NOBUDGET",
       "name": "Matter created more than five days ago with no active budget",
-      "shortName": "Matter has no budget",
+      "shortName": "Matter has no active budget",
       "lane": "Decide",
       "subjectType": "Matter",
       "workType": "Approve or rebudget",

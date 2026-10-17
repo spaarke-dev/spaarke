@@ -119,6 +119,9 @@ public class KnowPromotionPolicyDefinitionTests
         var body = Version()["ruleBody"]!.AsObject();
         var template = Version()["messageTemplate"]!.GetValue<string>();
         var headline = Version()["shortHeadline"]!.GetValue<string>();
+        // The policy's short name becomes the Signal title (the worklist row text), so it carries the same claims.
+        var shortName = Policy()["shortName"]!.GetValue<string>();
+        var name = Policy()["name"]!.GetValue<string>();
 
         // (1) "created more than 5 days ago" <-> when.createdon <= now-5d
         body["when"]!["createdon"]!["<="]!.GetValue<string>().Should().Be("now-5d");
@@ -128,11 +131,15 @@ public class KnowPromotionPolicyDefinitionTests
         // (3) "active" <-> filter statecode 0 (an inactive budget row is not counted, so the sentence must say so)
         body["all"]![0]!["filter"]!["statecode"]!.GetValue<int>().Should().Be(0);
         template.Should().Contain("no active budget");
+        shortName.Should().Contain("no active budget");
+        name.Should().Contain("no active budget");
         // Nothing the body does not read: no revision, document, communication, amount or recency-of-news claim.
         foreach (var banned in new[] { "revision", "revised", "document", "communication", "amount", "spend", "opened", "overdue" })
         {
             template.Should().NotContainEquivalentOf(banned);
             headline.Should().NotContainEquivalentOf(banned);
+            shortName.Should().NotContainEquivalentOf(banned);
+            name.Should().NotContainEquivalentOf(banned);
         }
 
         // The body offers a template only its own createdon (the budget clause pins nothing); the literal sentence names no token at all.

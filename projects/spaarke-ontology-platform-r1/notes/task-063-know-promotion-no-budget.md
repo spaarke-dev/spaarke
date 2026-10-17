@@ -136,3 +136,7 @@ The BFF change is one dictionary entry and its doc comment in `PredicateCompiler
 ## ADR tensions
 
 ADR-039 path A (Policy decides what is true; Binding what executes) applies as for every policy row; no other ADR tension. ADR-002: no plugin, no write path added. Review: self-review of the diff (no sub-agents per the lane brief): no F-class finding; the fail-closed property (a wrong path for the pair is refused, and the message names the verified path) is pinned by 5 theory cases.
+
+## Review round (2026-10-17)
+
+Opus review F1: the policy `shortName` becomes the Signal title (worklist row text) and said "Matter has no budget" while the rule only reads active budgets. Now "Matter has no active budget". `TheMessageTemplate_AssertsOnlyWhatTheBodyReads` asserts the claim on `shortName` and `name` too and runs the banned-word loop over both. Seeding proof: with the old short name the test fails ("Expected shortName ... to contain \"no active budget\""), restored 9/9 pass. Known limits (K2/K4) recorded in the PR review: no `sprk_domain` set by the apply script (empty reads as Ontology), no cross-file id check, a new budget clears the Signal only at the nightly pass, live seam returns early when unconfigured.
