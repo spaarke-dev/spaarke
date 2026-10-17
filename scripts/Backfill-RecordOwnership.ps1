@@ -65,6 +65,8 @@
       - SAMPLE FIRST: -MaxWritesPerRun bounds a run (e.g. 5) so the result can be checked in the app before a
         wholesale run. The summary always reports the true totals regardless of the cap.
       - Idempotent: a re-owned row is team-owned, so it is no longer a candidate. Re-running reports ToWrite: 0.
+      - VERIFY (review round 5, F1-b) is ToWrite: 0, printed per entity as "VERIFY <entity>: PASS". Unfiled and
+        Unresolvable rows are known residue — never written, counted and logged per row — and do not fail it.
       - A todo filed to a document derives from the DOCUMENT'S business unit: run sprk_document first (the default
         order), then re-run for sprk_todo, so todos follow their documents' new units.
 
@@ -115,9 +117,12 @@
 
 .EXAMPLE
     .\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Entities sprk_externalrecordaccess
-    The grant backfill dry run (task 099b). It is also the VERIFY: after -Apply, it must report ToWrite: 0 and
-    Candidates: 0 — no grant in any state owned by a user, application or human (review rounds 1 and 4), and no grant in
-    any state owned by a team other than its root's (TeamMismatch 0, review rounds 2 and 3).
+    The grant backfill dry run (task 099b). It is also the VERIFY: after -Apply, it must report ToWrite: 0 (the
+    "VERIFY <entity>: PASS" line) — no grant in any state owned by a user, application or human, that the backfill can
+    re-own (review rounds 1 and 4), and no grant in any state owned by a team other than its root's (TeamMismatch 0, review
+    rounds 2 and 3). Candidates is NOT the rule (review round 5, F1-b): Unfiled rows (filed to nothing — e.g. an inactive
+    grant whose root was deleted, which empties the lookup) and Unresolvable rows are never written, so they stay in the
+    candidate read forever. They are KNOWN RESIDUE: each is counted (Unfiled, Unresolvable), logged with its id, and left.
 
 .EXAMPLE
     .\Backfill-RecordOwnership.ps1 -SelfTest
@@ -229,8 +234,10 @@ function Get-OwnerTeamDecision {
     return @{ Team = $team; Bu = $Facts.Bu; Reason = $null }
 }
 
-# ── PURE: the candidate $filter for an entity: its user-owned rows, in EVERY state (review round 4: no state clause — an
-#    inactive user-owned grant was left on the user, against D-11). ──
+# ── PURE: the candidate $filter for an entity, in EVERY state (review round 4: no state clause — an inactive user-owned
+#    grant was left on the user, against D-11). It NARROWS the read; it does not select the user-owned rows: measured on
+#    spaarkedev1 2026-10-17, '_owninguser_value ne null' returns the same rows as '_owningteam_value ne null', team-owned
+#    ones included. Select-UserOwnedRows decides, per row (review round 5, F1-a). ──
 function Get-CandidateFilter {
     param([string]$Entity, [string[]]$AppUserIds)
     if ($AnyUserOwned[$Entity]) { return '_owninguser_value ne null' }
@@ -256,7 +263,24 @@ function Get-TeamOwnedQuery {
     return "$EntitySetName`?`$select=$Select"
 }
 
-# ── PURE: of the rows Get-TeamOwnedFilter read, the TEAM-owned ones (a user-owned row is a Get-CandidateFilter candidate). ──
+# ── PURE (review round 5, F1-a): of the rows the candidate $filter read, the USER-owned ones — owninguser set AND owningteam
+#    empty, the mirror of Select-TeamOwnedRows. Every entity's candidate read goes through it: the filter does not select
+#    (see Get-CandidateFilter), and a team-owned row taken as a candidate indexed the application-user set with $null, which
+#    stopped the run (ErrorActionPreference Stop) — on the VERIFY run after the first grant -Apply. ──
+function Select-UserOwnedRows {
+    param([object[]]$Rows)
+    return , @($Rows | Where-Object {
+            $null -ne $_ -and $_.PSObject.Properties['_owninguser_value'] -and $_._owninguser_value -and
+            -not ($_.PSObject.Properties['_owningteam_value'] -and $_._owningteam_value) })
+}
+
+# ── PURE: of the user-owned candidates, how many an APPLICATION user owns (the rest are HumanOwned). ──
+function Measure-AppOwnedRows {
+    param([object[]]$Rows, [hashtable]$AppUserSet)
+    return @($Rows | Where-Object { $AppUserSet[(Get-Lookup $_ 'owninguser')] }).Count
+}
+
+# ── PURE: of the rows Get-TeamOwnedQuery read, the TEAM-owned ones (a user-owned row is a Select-UserOwnedRows candidate). ──
 function Select-TeamOwnedRows {
     param([object[]]$Rows)
     return , @($Rows | Where-Object { $null -ne $_ -and $_.PSObject.Properties['_owningteam_value'] -and $_._owningteam_value })
@@ -311,6 +335,29 @@ function Get-RowPlan {
     }
     $plan.Outcome = if ($plan.Decision.Team) { 'Write' } else { 'Unresolvable' }
     return $plan
+}
+
+# ── PURE (review round 5, F1-b): one row's plan counted into its entity's summary. Unfiled and Unresolvable are counted (known
+#    residue, never written); Write counts ToWrite (and Candidates + TeamMismatch for a team-owned row on another team than its
+#    root's, NotActive for an inactive row). ──
+function Add-PlanToStats {
+    param([System.Collections.IDictionary]$Stats, [hashtable]$Plan, [bool]$ReportNotActive)
+    switch ($Plan.Outcome) {
+        'Unfiled' { $Stats.Unfiled++ }
+        'Unresolvable' { $Stats.Unresolvable++ }
+        'Write' {
+            if ($Plan.Mismatch) { $Stats.Candidates++; $Stats.TeamMismatch++ }
+            $Stats.ToWrite++
+            if ($ReportNotActive -and $Plan.Inactive) { $Stats.NotActive++ }
+        }
+    }
+}
+
+# ── PURE (review round 5, F1-b): the VERIFY rule — nothing left that the backfill would write. Unfiled and Unresolvable rows
+#    stay candidates forever by design, so Candidates is not the rule. ──
+function Test-VerifySatisfied {
+    param($Stats)
+    return [bool]($Stats.ToWrite -eq 0)
 }
 
 # ══ SELF-TEST (offline) ══════════════════════════════════════════════════════════════════════════════════════
@@ -384,6 +431,29 @@ if ($SelfTest) {
         @{ Name = 'plan: an INACTIVE grant already on its root''s team is left (Correct)'; Got = (& $planWithState (& $row 'r10' $null $secureTeam 'p1' 1)); Want = 'Correct inactive=True' }
         @{ Name = 'plan: an ACTIVE user-owned grant is written and not reported inactive'; Got = (& $planWithState (& $row 'r11' 'u1' $null 'p1')); Want = 'Write inactive=False' }
         @{ Name = 'dedup: an INACTIVE row in both the user-owned and the team-owned reads is processed once'; Got = (((Merge-BackfillRows -Candidates @((& $row 'r12' 'u1' $null 'p1' 1)) -TeamOwned @((& $row 'R12' 'u1' $childTeam 'p1' 1)) -IdColumn 'sprk_externalrecordaccessid').Rows | ForEach-Object { $_.sprk_externalrecordaccessid }) -join ','); Want = 'r12' }
+    )
+    # Review round 5 (F1-a): the candidate read returns team-owned rows too; they are not candidates and do not stop the run.
+    $appSet = @{ 'u-app' = $true }
+    $candidateRead = @((& $row 'c1' 'u-app' $null 'p1'), (& $row 'c2' 'u-human' $null 'p1'), (& $row 'c3' $null $childTeam 'p1'), (& $row 'c4' $null $secureTeam 'p1' 1))
+    $countOrCrash = { param($rows) try { [string](Measure-AppOwnedRows $rows $appSet) } catch { 'CRASH' } }
+    $rowCases += @(
+        @{ Name = 'candidates: team-owned rows in the candidate read are not candidates (owninguser set AND owningteam empty)'; Got = ((Select-UserOwnedRows $candidateRead) | ForEach-Object { $_.sprk_externalrecordaccessid }) -join ','; Want = 'c1,c2' }
+        @{ Name = 'candidates: a row naming both owners is not a user-owned candidate'; Got = [string](Select-UserOwnedRows @((& $row 'c5' 'u-app' $childTeam 'p1'))).Count; Want = '0' }
+        @{ Name = 'candidates: the AppOwned count over the selected rows does not crash'; Got = (& $countOrCrash (Select-UserOwnedRows $candidateRead)); Want = '1' }
+        @{ Name = 'candidates (must-fire control): the AppOwned count over the UNSELECTED read crashes on the team-owned row'; Got = (& $countOrCrash $candidateRead); Want = 'CRASH' }
+    )
+    # Review round 5 (F1-b): VERIFY is ToWrite 0; an unfiled inactive grant (its root deleted) is counted Unfiled and does not fail it.
+    $verifyOf = { param([object[]]$rows, [scriptblock]$decide = $toSecure)
+        # Candidates seeded as the main loop seeds it: the user-owned rows of the read, written or not.
+        $s = [ordered]@{ Candidates = (Select-UserOwnedRows $rows).Count; TeamMismatch = 0; ToWrite = 0; Unfiled = 0; Unresolvable = 0; NotActive = 0 }
+        foreach ($r in $rows) { Add-PlanToStats -Stats $s -Plan (Get-RowPlan -Row $r -Order $grantOrder -Decide $decide) -ReportNotActive $true }
+        "Unfiled=$($s.Unfiled) Unresolvable=$($s.Unresolvable) ToWrite=$($s.ToWrite) NotActive=$($s.NotActive) verify=$(Test-VerifySatisfied $s)" }
+    $toUnresolvable = { param($t) Get-OwnerTeamDecision -Facts @{ Bu = $childBu; Flagged = $true } -Topology $ok -DefaultTeamOf $defaults }
+    $rowCases += @(
+        @{ Name = 'verify: an unfiled INACTIVE grant (root deleted) is counted Unfiled and VERIFY is satisfied'; Got = (& $verifyOf @((& $row 'v1' 'u1' $null $null 1))); Want = 'Unfiled=1 Unresolvable=0 ToWrite=0 NotActive=0 verify=True' }
+        @{ Name = 'verify: a grant already on its root''s team beside unfiled residue -> VERIFY satisfied'; Got = (& $verifyOf @((& $row 'v2' $null $secureTeam 'p1'), (& $row 'v3' $null $childTeam $null 1))); Want = 'Unfiled=1 Unresolvable=0 ToWrite=0 NotActive=0 verify=True' }
+        @{ Name = 'verify: an Unresolvable grant is counted and does not fail VERIFY'; Got = (& $verifyOf @((& $row 'v4' 'u1' $null 'p1')) $toUnresolvable); Want = 'Unfiled=0 Unresolvable=1 ToWrite=0 NotActive=0 verify=True' }
+        @{ Name = 'verify (must-fire control): a user-owned grant left to write fails VERIFY'; Got = (& $verifyOf @((& $row 'v5' 'u1' $null 'p1' 1))); Want = 'Unfiled=0 Unresolvable=0 ToWrite=1 NotActive=1 verify=False' }
     )
     foreach ($r in $rowCases) {
         $pass = $r.Got -eq $r.Want
@@ -581,9 +651,10 @@ foreach ($entity in $Entities) {
     # Review round 4: the user-owned candidates in EVERY state (no state clause), so an inactive user-owned grant is re-owned
     # like an active one. NotActive counts, of the planned writes, the inactive rows (reporting only).
     $notActive = if ($ReportNotActive[$entity]) { 0 } else { '-' }
-    $candidates = Invoke-DvGet "$set`?`$select=$select&`$filter=$(Get-CandidateFilter $entity $appUserIds)"
+    # Review round 5 (F1-a): the filter narrows the read; Select-UserOwnedRows decides (a team-owned row is not a candidate).
+    $candidates = Select-UserOwnedRows (Invoke-DvGet "$set`?`$select=$select&`$filter=$(Get-CandidateFilter $entity $appUserIds)")
 
-    $appOwnedCount = @($candidates | Where-Object { $appUserSet[(Get-Lookup $_ 'owninguser')] }).Count
+    $appOwnedCount = Measure-AppOwnedRows $candidates $appUserSet
     $userOwnedCount = @($candidates).Count
     # Review round 2: the TEAM-owned grants, each checked against its root's team below (TeamMismatch) — in every state since
     # review round 3 (F1), so the read has no filter.
@@ -604,9 +675,9 @@ foreach ($entity in $Entities) {
         $target = $plan.Target
         $ownedBy = if ($currentTeam) { " (team-owned by $currentTeam)" } else { '' }
 
+        Add-PlanToStats -Stats $stats -Plan $plan -ReportNotActive ([bool]$ReportNotActive[$entity])
         if ($plan.Outcome -eq 'Unfiled') {
-            # Review round 3 (K4): a team-owned row filed to nothing is counted too, never skipped silently.
-            $stats.Unfiled++
+            # Review round 3 (K4): a team-owned row filed to nothing is counted too, never skipped silently (known residue).
             Write-BackfillLog "UNFILED $entity $id$ownedBy — filed to nothing; the acting user is not recorded (app-only create). Not written."
             continue
         }
@@ -614,18 +685,11 @@ foreach ($entity in $Entities) {
         $team = $plan.Decision.Team
         if ($plan.Outcome -eq 'Correct') { continue }
         if ($plan.Outcome -eq 'Unresolvable') {
-            $stats.Unresolvable++
             Write-BackfillLog "UNRESOLVABLE $entity $id$ownedBy — target $($target.Attribute)=$($target.Id) BU=${bu}: $($plan.Decision.Reason). Not written."
             continue
         }
-        if ($plan.Mismatch) {
-            # A TEAM-owned grant (review round 2): a candidate only when its team is not its root's.
-            $stats.Candidates++
-            $stats.TeamMismatch++
-        }
-
-        $stats.ToWrite++
-        if ($ReportNotActive[$entity] -and $plan.Inactive) { $stats.NotActive++ }
+        # Counted by Add-PlanToStats above: ToWrite; Candidates and TeamMismatch for a TEAM-owned grant on another team than its
+        # root's (review round 2); NotActive for an inactive row.
         $teamKey = "$entity|$team"
         $teamCounts[$teamKey] = 1 + $(if ($teamCounts.Contains($teamKey)) { $teamCounts[$teamKey] } else { 0 })
         $previousBu = Get-Lookup $row 'owningbusinessunit'
@@ -657,6 +721,11 @@ Write-Host "Application users: $($appUserIds.Count) (the defective owner for spr
 # Review round 4: -Property * - Format-Table shows only the first 10 columns of an object without it, so Unresolvable and
 # NotActive were never printed; -Width keeps a narrow console from cutting them.
 $summary | Format-Table -Property * -AutoSize | Out-String -Width 4096 | Write-Host
+# Review round 5 (F1-b): the VERIFY rule, per entity — ToWrite 0. Unfiled and Unresolvable are known residue (logged per row).
+foreach ($s in $summary) {
+    Write-Host ("VERIFY {0}: {1} — ToWrite {2} (must be 0). Known residue, never written, each row in the log: Unfiled {3}, Unresolvable {4}." -f
+        $s.Entity, $(if (Test-VerifySatisfied $s) { 'PASS' } else { 'NOT MET' }), $s.ToWrite, $s.Unfiled, $s.Unresolvable)
+}
 
 # Rows planned per target team (read-only name lookups). The Secure Record owner team is always listed, even at 0.
 $secureTopology = Get-SecureTopology
