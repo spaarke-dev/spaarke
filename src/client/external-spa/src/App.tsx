@@ -25,6 +25,7 @@ import { RecordDeepLink } from './components/detail/RecordDeepLink';
 import { WorkspaceHomePage } from './pages/WorkspaceHomePage';
 import { ProjectPage } from './pages/ProjectPage';
 import { DocumentUploadPage } from './pages/DocumentUploadPage';
+import { InvoiceSubmitPage, INVOICE_SUBMIT_PATH } from './pages/InvoiceSubmitPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TeamsHostProvider } from './components/auth/TeamsHostContext';
 import type { PortalUser } from './types';
@@ -158,6 +159,7 @@ const AppShell: React.FC<{
               <Route path="/" element={<WorkspaceHomePage teamsHost={teamsHost} />} />
               <Route path="/project/:id" element={<ProjectPage />} />
               <Route path="/upload" element={<DocumentUploadPage teamsHost={teamsHost} />} />
+              <Route path={INVOICE_SUBMIT_PATH} element={<InvoiceSubmitPage />} />
               <Route
                 path="/settings"
                 element={<SettingsPage isDark={isDark} onToggleDark={onToggleDark} portalUser={portalUser} />}

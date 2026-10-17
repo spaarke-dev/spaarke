@@ -21,6 +21,8 @@
  *   DELETE /api/v1/external/documents/{id}                    → delete own document (task 032 / 054)
  *   DELETE /api/v1/external/todos/{id}                        → delete own to-do (task 032 / 054)
  *   DELETE /api/v1/external/events/{id}                       → delete own event (task 032 / 054)
+ *   POST  /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions → submit an invoice PDF (ebilling-r1 051)
+ *   GET   /api/v1/external/invoice-submissions[/{id}]         → the caller's submissions / one submission (ebilling-r1 051)
  *
  * Contract change (R3 task 007): the legacy event-as-todo boolean toggle was
  * removed; to-dos are now first-class `sprk_todo` records with
@@ -30,7 +32,20 @@
  */
 
 import { bffApiCall } from '../auth/bff-client';
+import { ApiError } from '../types';
+import { gridDataverseClient } from '../services/gridDataverseClient';
+import { InvoiceSubmissionError, isEbillingDisabledError } from '@spaarke/ui-components/components/InvoiceSubmission';
+import type {
+  InvoiceCoreRecordKind,
+  InvoiceCoreRecordList,
+  InvoiceCoreRecordOption,
+  InvoiceSubmissionAccepted,
+  InvoiceSubmissionInput,
+  InvoiceSubmissionStatusView,
+} from '@spaarke/ui-components/components/InvoiceSubmission';
 import type { CreatorStamps } from './delete-own';
+
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ---------------------------------------------------------------------------
 // Re-export ApiError for module consumers
@@ -813,6 +828,156 @@ export async function deleteOwnServiceRequest(serviceRequestId: string): Promise
 /** Hard-deletes an event the caller created. */
 export async function deleteOwnEvent(eventId: string): Promise<void> {
   await bffApiCall<void>(`/api/v1/external/events/${encodeURIComponent(eventId)}`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
+// Invoice submission (ebilling-r1 task 051, FR-18 / FR-19 / FR-45) - the BFF's task 044 external routes
+// ---------------------------------------------------------------------------
+//
+//   POST /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions
+//        multipart: file, firmInvoiceNumber, poNumber; optional ?firmId=   -> 202 { submissionId, jobId, trackingNumber, statusUrl }
+//   GET  /api/v1/external/invoice-submissions/{id}                          -> the status view
+//   GET  /api/v1/external/invoice-submissions                               -> the caller's firms' submissions (flag probe)
+//
+// The server decides who may submit and for which firm (ADR-002 / FR-17): this client names no firm (the server takes
+// the caller's only firm), creates nothing in Dataverse and shows the server's refusals by code. A refusal is an
+// ApiError whose message is the ProblemDetails body; `toInvoiceSubmissionError` adapts it to the shared wizard's error.
+
+/** The external route segment of each core record kind an invoice can be submitted against. */
+const INVOICE_SUBMISSION_SEGMENT: Readonly<Record<InvoiceCoreRecordKind, string>> = {
+  matter: 'matters',
+  project: 'projects',
+  workassignment: 'workassignments',
+};
+
+/** Adapts a failed BFF call (an ApiError carrying a ProblemDetails body, or anything else) for the shared wizard. */
+export function toInvoiceSubmissionError(err: unknown): InvoiceSubmissionError {
+  if (err instanceof InvoiceSubmissionError) return err;
+  if (err instanceof ApiError) {
+    let detail: string | undefined;
+    let errorCode: string | undefined;
+    try {
+      const body = JSON.parse(err.message) as { detail?: unknown; errorCode?: unknown };
+      if (typeof body.detail === 'string' && body.detail.trim()) detail = body.detail;
+      if (typeof body.errorCode === 'string' && body.errorCode) errorCode = body.errorCode;
+    } catch {
+      /* not a ProblemDetails body: the status alone is used */
+    }
+    return new InvoiceSubmissionError({ statusCode: err.statusCode, errorCode, detail });
+  }
+  // No response (a network failure, a sign-in that could not start): the request may not have reached the server.
+  return new InvoiceSubmissionError({ message: err instanceof Error ? err.message : undefined });
+}
+
+/** Submits one PDF invoice against a core record. Rejects with an {@link InvoiceSubmissionError}. */
+export async function submitInvoice(input: InvoiceSubmissionInput): Promise<InvoiceSubmissionAccepted> {
+  if (!GUID_RE.test(input.record.recordId)) {
+    throw new InvoiceSubmissionError({ message: 'Invalid record id.' });
+  }
+  const form = new FormData();
+  form.append('file', input.file);
+  form.append('firmInvoiceNumber', input.firmInvoiceNumber);
+  if (input.poNumber) form.append('poNumber', input.poNumber);
+  try {
+    // No Content-Type: the browser sets multipart/form-data with its boundary (executeFetch drops the JSON default).
+    return await bffApiCall<InvoiceSubmissionAccepted>(
+      `/api/v1/external/${INVOICE_SUBMISSION_SEGMENT[input.record.kind]}/${input.record.recordId}/invoice-submissions`,
+      { method: 'POST', body: form, headers: {} }
+    );
+  } catch (err) {
+    throw toInvoiceSubmissionError(err);
+  }
+}
+
+/** Reads one submission's current status. Rejects with an {@link InvoiceSubmissionError}. */
+export async function getInvoiceSubmission(submissionId: string): Promise<InvoiceSubmissionStatusView> {
+  try {
+    return await bffApiCall<InvoiceSubmissionStatusView>(
+      `/api/v1/external/invoice-submissions/${encodeURIComponent(submissionId)}`
+    );
+  } catch (err) {
+    throw toInvoiceSubmissionError(err);
+  }
+}
+
+/**
+ * Whether invoice submission is on, from the one route every caller may read: the caller's own submissions list.
+ * 503 with the `ebilling.disabled` code is the only "off" answer (FR-45). Any other failure is `unknown`: an outage or a
+ * refusal must not read as "off", so the entry stays and the server answers when it is used.
+ */
+export async function probeInvoiceSubmission(): Promise<'available' | 'disabled' | 'unknown'> {
+  try {
+    await bffApiCall<InvoiceSubmissionStatusView[]>('/api/v1/external/invoice-submissions');
+    return 'available';
+  } catch (err) {
+    return isEbillingDisabledError(toInvoiceSubmissionError(err)) ? 'disabled' : 'unknown';
+  }
+}
+
+/** Rows asked of each core-record read; a longer list is flagged truncated so the picker says so. */
+const INVOICE_RECORD_PAGE = 200;
+
+/**
+ * The columns each Tier-2 module read admits for these roots (ExternalAccessModule.cs ReadableColumns): id, name and
+ * number only. A column outside that list is refused with a 400 before the query runs.
+ */
+const INVOICE_RECORD_READS = [
+  { kind: 'matter', entity: 'sprk_matter', id: 'sprk_matterid', name: 'sprk_mattername', number: 'sprk_matternumber' },
+  {
+    kind: 'workassignment',
+    entity: 'sprk_workassignment',
+    id: 'sprk_workassignmentid',
+    name: 'sprk_name',
+    number: 'sprk_workassignmentnumber',
+  },
+] as const;
+
+/**
+ * The core records the caller can pick for an invoice: their accessible projects (the external projects route) plus
+ * matters and work assignments (the Tier-2-scoped module read). The server re-checks Read and Create on the chosen
+ * record when the invoice is submitted. If one source fails the others are still offered, flagged as a partial list;
+ * if all fail the first failure is thrown.
+ */
+export async function listInvoiceCoreRecords(): Promise<InvoiceCoreRecordList> {
+  const reads = await Promise.allSettled<InvoiceCoreRecordList>([
+    getProjects().then(list => ({
+      truncated: list.truncated,
+      records: list.items.map<InvoiceCoreRecordOption>(p => ({
+        kind: 'project',
+        recordId: p.sprk_projectid,
+        name: p.sprk_name,
+        number: p.sprk_referencenumber,
+      })),
+    })),
+    ...INVOICE_RECORD_READS.map(async read => {
+      const fetchXml =
+        `<fetch count="${INVOICE_RECORD_PAGE}"><entity name="${read.entity}">` +
+        `<attribute name="${read.id}"/><attribute name="${read.name}"/><attribute name="${read.number}"/>` +
+        `<order attribute="${read.number}"/></entity></fetch>`;
+      const result = await gridDataverseClient.retrieveMultipleRecords<Record<string, unknown>>(read.entity, fetchXml);
+      return {
+        truncated: result.moreRecords,
+        records: result.entities
+          .filter(row => typeof row[read.id] === 'string')
+          .map<InvoiceCoreRecordOption>(row => ({
+            kind: read.kind,
+            recordId: String(row[read.id]),
+            name: String(row[read.name] ?? row[read.number] ?? ''),
+            number: row[read.number] == null ? null : String(row[read.number]),
+          })),
+      };
+    }),
+  ]);
+
+  const fulfilled = reads.filter((r): r is PromiseFulfilledResult<InvoiceCoreRecordList> => r.status === 'fulfilled');
+  if (fulfilled.length === 0) {
+    const first = reads.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    throw toInvoiceSubmissionError(first?.reason);
+  }
+  return {
+    records: fulfilled.flatMap(r => r.value.records).sort((a, b) => a.name.localeCompare(b.name)),
+    truncated: fulfilled.length < reads.length || fulfilled.some(r => r.value.truncated === true),
+  };
 }
 
 // ---------------------------------------------------------------------------

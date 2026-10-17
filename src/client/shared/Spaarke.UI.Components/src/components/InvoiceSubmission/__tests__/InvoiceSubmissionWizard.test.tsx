@@ -334,6 +334,29 @@ describe('InvoiceSubmissionWizard — refusals do not advance the flow', () => {
   });
 });
 
+describe('InvoiceSubmissionWizard — phone width', () => {
+  it('hides the fixed-width step list under 600px, inside the wizard wrapper only (each step carries its own caption)', async () => {
+    const { container } = mount();
+    await screen.findByRole('radio', { name: /Acme/ });
+    // jsdom has no layout; what can be proven is the rule Griffel emitted and that the wrapper carries its class.
+    const rules: string[] = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      for (const rule of Array.from(sheet.cssRules)) {
+        if (rule.cssText.includes('Wizard steps')) rules.push(rule.cssText);
+      }
+    }
+    expect(rules).toHaveLength(1);
+    expect(rules[0]).toMatch(/@media \(max-width: 600px\)/);
+    expect(rules[0]).toMatch(/display: none/);
+    const wrapperClass = /\.([\w-]+) nav\[/.exec(rules[0])?.[1];
+    expect(wrapperClass).toBeTruthy();
+    // The class is on an element that contains the step list, so the rule reaches it.
+    const wrapper = container.querySelector(`.${wrapperClass}`);
+    expect(wrapper?.querySelector('nav[aria-label="Wizard steps"]')).not.toBeNull();
+    expect(screen.getByText('Step 1 of 3')).toBeInTheDocument();
+  });
+});
+
 describe('isEbillingDisabledError', () => {
   it('is true only for the 503 ebilling.disabled answer', () => {
     expect(
