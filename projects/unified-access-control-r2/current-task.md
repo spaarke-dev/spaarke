@@ -32,7 +32,7 @@
 ## Dev BFF = R3 build d5401cf2d (deployed 2026-10-17 02:27–02:29Z; contains master e702c3401)
 - **Batch 6 gates** (`notes/batch6-live-gates-2026-10-17.md`): #2021, #1620, #994 and #1755 PASS. The #1755 fixture is the secure project `a9e04977-…`, kept with its container.
 - #1363: registration PASS. **First run PENDING: after 2026-10-18 00:15Z**, run the KQL in the batch6 notes and `GET /api/admin/jobs/demo-expiration/status`.
-- #2002: **FAIL** → #2049. The reconciliation job still resolves with Write intent. Fix in progress in C:/wt2049 `fix/uac-2049-reconciliation-readonly-intent`. Then PR → merge → next R3 deploy → re-gate (0 Warnings in 1 h).
+- #2002: **FAIL** → #2049. The reconciliation job still resolves with Write intent. Fixed by PR #2052, **merged at 901c7eeed** (R3 told). Next R3 deploy, then re-gate: 0 Warnings in 1 h.
 - Still to gate on later builds: #1576 (after #2025), 099a (after #2035).
 
 ## Waiting on others
