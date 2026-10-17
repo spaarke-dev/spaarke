@@ -1068,7 +1068,7 @@ public static class FieldMappingEndpoints
                         errors.Add(new PushFieldMappingsError
                         {
                             RecordId = childRecordId,
-                            Error = $"Not written: the invoice-family rule refused it ({familyCode})."
+                            Error = $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(familyCode)}"
                         });
                         continue;
                     }

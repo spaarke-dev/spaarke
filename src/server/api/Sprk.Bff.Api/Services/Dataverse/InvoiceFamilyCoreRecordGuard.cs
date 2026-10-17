@@ -404,6 +404,18 @@ public static class InvoiceFamilyCoreRecordGuard
         return decided.IsRefused ? decided : null;
     }
 
+    /// <summary>
+    /// The refusal text the generic update paths surface (task 026 fix-round-2): the stable code and a fixed sentence, never
+    /// <see cref="InvoiceFamilyCoreRecord.Reason"/> — those paths read the stored row and the other invoice as the APP, so
+    /// the reason can name a record or core record the caller has not read.
+    /// </summary>
+    public static string CodeOnlyRefusalMessage(string refusalCode) =>
+        $"The invoice-family core-record rule refused this write ({refusalCode}); nothing was written.";
+
+    /// <summary>The generic update paths' refusal on the existing "throw" contract (<see cref="CodeOnlyRefusalMessage"/>).</summary>
+    public static RecordOwnerUnresolvedException RefusalException(string entityLogicalName, string refusalCode) =>
+        new(entityLogicalName, refusalCode, CodeOnlyRefusalMessage(refusalCode));
+
     private const string BindSuffix = "@odata.bind";
 
     private static bool IsBindKey(string key) => key.EndsWith(BindSuffix, StringComparison.OrdinalIgnoreCase);

@@ -149,10 +149,10 @@ internal sealed class UpdateRecordActionCore
             if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
                     input.EntityLogicalName, input.RecordId, updatePayload,
                     familyScope.ServiceProvider.GetService<IGenericEntityService>(), cancellationToken).ConfigureAwait(false)
-                is { RefusalCode: { } familyCode } family)
+                is { RefusalCode: { } familyCode })
             {
-                throw new RecordOwnerUnresolvedException(
-                    input.EntityLogicalName, RecordOwnerResolution.Refused(familyCode, family.Reason ?? familyCode));
+                // Code only: the guard read as the app, so its reason can name records the caller has not read.
+                throw InvoiceFamilyCoreRecordGuard.RefusalException(input.EntityLogicalName, familyCode);
             }
         }
 

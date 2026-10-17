@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -30,6 +31,45 @@ public class InvoiceFamilyGenericUpdatePathTests
     private static readonly Guid Project = Guid.Parse("02200000-0000-4000-8000-0000000000a3");
     private static readonly Guid Event = Guid.Parse("02200000-0000-4000-8000-0000000000a4");
     private static readonly Guid Caller = Guid.Parse("02200000-0000-4000-8000-0000000000aa");
+    private static readonly Guid OtherInvoice = Guid.Parse("02200000-0000-4000-8000-0000000000a5");
+    private static readonly Guid OtherMatter = Guid.Parse("02200000-0000-4000-8000-0000000000a6");
+    private static readonly Guid Line = Guid.Parse("02200000-0000-4000-8000-0000000000a7");
+
+    private static readonly Regex AnyGuid = new("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+
+    /// <summary>
+    /// Task 026 fix-round-2: the app-only world of the two mismatch cases — the invoice and a line under the matter, and
+    /// another invoice under ANOTHER matter (whose id only the app has read).
+    /// </summary>
+    private static Mock<IGenericEntityService> MismatchWorld()
+    {
+        var app = InvoiceUnderAMatter();
+        app.Setup(a => a.RetrieveAsync("sprk_invoice", OtherInvoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_invoice", OtherInvoice) { ["sprk_matter"] = new EntityReference("sprk_matter", OtherMatter) });
+        app.Setup(a => a.RetrieveAsync("sprk_billingevent", Line, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_billingevent", Line) { ["sprk_matter"] = new EntityReference("sprk_matter", Matter) });
+        return app;
+    }
+
+    /// <summary>(table, record, patch, expected code) for the superseded-invoice and line-invoice mismatch cases.</summary>
+    public static TheoryData<string, string> MismatchCases() => new()
+    {
+        { "sprk_invoice", InvoiceFamilyCoreRecordGuard.SupersedesCoreRecordMismatchCode },
+        { "sprk_billingevent", InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode },
+    };
+
+    private static (Guid Id, Dictionary<string, object?> Patch) MismatchWrite(string table) => table == "sprk_invoice"
+        ? (Invoice, new Dictionary<string, object?> { ["sprk_SupersedesInvoice@odata.bind"] = $"/sprk_invoices({OtherInvoice:D})" })
+        : (Line, new Dictionary<string, object?> { ["sprk_Invoice@odata.bind"] = $"/sprk_invoices({OtherInvoice:D})" });
+
+    /// <summary>The refusal names no record (no GUID at all), carries the code, and is not worded as an owner failure.</summary>
+    private static void CodeOnly(RecordOwnerUnresolvedException refused, string code)
+    {
+        refused.RefusalCode.Should().Be(code);
+        AnyGuid.IsMatch(refused.Message).Should().BeFalse($"no id read as the app may reach the caller: \"{refused.Message}\"");
+        AnyGuid.IsMatch(refused.Reason ?? string.Empty).Should().BeFalse();
+        refused.Message.Should().Contain(code).And.NotStartWith("No owner could be resolved");
+    }
 
     private readonly Mock<IFieldMappingDataverseService> _writes = new();
 
@@ -65,8 +105,20 @@ public class InvoiceFamilyGenericUpdatePathTests
             "sprk_invoice", Invoice, new Dictionary<string, object?> { ["sprk_project"] = new EntityReference("sprk_project", Project) },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
-        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
-            .Which.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        CodeOnly((await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which,
+            InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        NothingWritten();
+    }
+
+    [Theory]
+    [MemberData(nameof(MismatchCases))]
+    public async Task DataverseUpdateHandler_ASupersededOrLineInvoiceMismatch_IsRefusedCodeOnly_NamingNoRecord(string table, string code)
+    {
+        var (id, patch) = MismatchWrite(table);
+
+        var act = () => Handler(MismatchWorld().Object).UpdateAsync(table, id, patch, ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        CodeOnly((await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which, code);
         NothingWritten();
     }
 
@@ -102,8 +154,24 @@ public class InvoiceFamilyGenericUpdatePathTests
                 Lookups: [new RenderedLookup("sprk_project", "sprk_project", Project.ToString())]),
             CancellationToken.None);
 
-        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
-            .Which.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        CodeOnly((await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which,
+            InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        NothingWritten();
+    }
+
+    [Theory]
+    [MemberData(nameof(MismatchCases))]
+    public async Task UpdateRecordActionCore_ASupersededOrLineInvoiceMismatch_IsRefusedCodeOnly_NamingNoRecord(string table, string code)
+    {
+        var (id, _) = MismatchWrite(table);
+        var lookup = table == "sprk_invoice"
+            ? new RenderedLookup("sprk_supersedesinvoice", "sprk_invoice", OtherInvoice.ToString())
+            : new RenderedLookup("sprk_invoice", "sprk_invoice", OtherInvoice.ToString());
+
+        var act = () => Core(MismatchWorld().Object).UpdateAsync(
+            new UpdateRecordActionInput(table, id, FieldMappings: null, LegacyFields: null, Lookups: [lookup]), CancellationToken.None);
+
+        CodeOnly((await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which, code);
         NothingWritten();
     }
 
@@ -142,9 +210,9 @@ public class InvoiceFamilyGenericUpdatePathTests
 
         updated.Should().Be(0);
         failed.Should().Be(1);
-        errors.Should().ContainSingle().Which.Error.Should()
-            .Contain(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode)
-            .And.NotContain(Matter.ToString("D"), "the reason can name records the caller has not read: code only");
+        var error = errors.Should().ContainSingle().Subject.Error;
+        error.Should().Contain(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        AnyGuid.IsMatch(error).Should().BeFalse("the reason can name records the caller has not read: code only");
         NothingWritten();
     }
 

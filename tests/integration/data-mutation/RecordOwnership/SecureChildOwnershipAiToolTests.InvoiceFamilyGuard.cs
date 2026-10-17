@@ -383,6 +383,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
         Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
         ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
         Detail(result).Should().NotContain(hidden.ToString("D"));
+        // Fix-round-2: the only id in the refusal is the core record the caller's own write names (nothing read as the app).
+        System.Text.RegularExpressions.Regex.Matches(Detail(result) ?? string.Empty,
+                "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+            .Select(m => Guid.Parse(m.Value)).Should().OnlyContain(id => id == OrdinaryProject);
         _user.Patches.Should().BeEmpty();
     }
 
