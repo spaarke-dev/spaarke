@@ -27,8 +27,9 @@ public partial class OntologyAdminAuthoringEndpointTests
         await _client.PostAsJsonAsync($"{Root}/dry-run",
             new { policyId, lane, ruleType = "Existence", ruleBody = body, messageTemplate = Template, matterId, tenant, allMatters });
 
-    private async Task<HttpResponseMessage> ScopedValidate(Guid? matterId, object? draft = null, Guid? policyId = null, string? tenant = null) =>
-        await _client.PostAsJsonAsync($"{Root}/validate", new { policyId, lane = "Decide", draft = draft ?? Draft(), matterId, tenant });
+    private async Task<HttpResponseMessage> ScopedValidate(
+        Guid? matterId, object? draft = null, Guid? policyId = null, string? tenant = null, bool? allMatters = null) =>
+        await _client.PostAsJsonAsync($"{Root}/validate", new { policyId, lane = "Decide", draft = draft ?? Draft(), matterId, tenant, allMatters });
 
     private async Task<HttpResponseMessage> ScopedSave(Guid? matterId, object? draft = null, string? tenant = null) =>
         await _client.PostAsJsonAsync($"{Root}/policies",
@@ -148,6 +149,48 @@ public partial class OntologyAdminAuthoringEndpointTests
     }
 
     [Fact]
+    public async Task Scope_Validate_OnAScopedPolicy_RefusesNoIntent_LikeTheDryRunAndPublish()
+    {
+        // Fix round 2 (K2): validate reads the stored scope and applies the one shared check, with the same code, field and message.
+        // Validate answers a refusal as 200 not valid (never an error status), as for every other validate refusal.
+        _fixture.World.Policies[PolicyId].Matter = MatterA;
+
+        var validate = await ScopedValidate(null, policyId: PolicyId);
+        var dryRun = await ScopedDryRun(PolicyId, null);
+
+        validate.StatusCode.Should().Be(HttpStatusCode.OK, await validate.Content.ReadAsStringAsync());
+        var result = await Json(validate);
+        result.GetProperty("valid").GetBoolean().Should().BeFalse();
+        result.GetProperty("reasonCode").GetString().Should().Be(ScopeIntentRequired);
+        ValidateErrors(result).Should().ContainKey("matterId").WhoseValue.Should().Equal(
+            (await Json(dryRun)).GetProperty("errors").GetProperty("matterId")[0].GetString());
+        _fixture.World.Writes.Should().BeEmpty();
+
+        // Must-not-fire: the same policy with a matter, or with allMatters, validates; an unscoped policy with neither does too.
+        (await Json(await ScopedValidate(MatterA, policyId: PolicyId))).GetProperty("valid").GetBoolean().Should().BeTrue();
+        (await Json(await ScopedValidate(null, policyId: PolicyId, allMatters: true))).GetProperty("valid").GetBoolean().Should().BeTrue();
+        _fixture.World.Policies[PolicyId].Matter = null;
+        (await Json(await ScopedValidate(null, policyId: PolicyId))).GetProperty("valid").GetBoolean().Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Scope_Validate_AMatterAndAllMattersTogether_IsRefused_WithTheIntentCode(bool storedScope)
+    {
+        _fixture.World.Policies[PolicyId].Matter = storedScope ? MatterA : null;
+
+        var response = await ScopedValidate(MatterB, policyId: PolicyId, allMatters: true);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var result = await Json(response);
+        result.GetProperty("valid").GetBoolean().Should().BeFalse();
+        result.GetProperty("reasonCode").GetString().Should().Be(ScopeIntentRequired);
+        ValidateErrors(result).Should().ContainKey("matterId").WhoseValue.Should().Equal("Send a matter or all matters, not both.");
+        MatterWasRead(MatterB).Should().BeFalse("a contradictory request is not read on");
+    }
+
+    [Fact]
     public async Task Scope_AllMattersFalse_IsNoIntent_OnAScopedPolicy()
     {
         _fixture.World.Policies[PolicyId].Matter = MatterA;
@@ -239,6 +282,26 @@ public partial class OntologyAdminAuthoringEndpointTests
         w.Policies[PolicyId].Matter = null;
         var unscoped = await Json(await ScopedDryRun(PolicyId, null));
         unscoped.GetProperty("storedMatterId").ValueKind.Should().Be(JsonValueKind.Null, "an unscoped policy with no intent: as before");
+    }
+
+    [Fact]
+    public async Task Scope_DryRun_AFaultReadingTheStoredMattersName_NeverFailsTheDryRun()
+    {
+        // Fix round 2 (uac-r2 F1): the name is display only. An HttpClient timeout is a TaskCanceledException while the request's own
+        // token is not cancelled; the dry run still answers 200 with its counts, the stored id and a null name.
+        var w = _fixture.World;
+        w.Policies[PolicyId].Matter = MatterA;
+        w.MatterNames[MatterA] = "Alpha matter";
+        w.MatterNameReadThrows = new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.");
+
+        var response = await ScopedDryRun(PolicyId, MatterA);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = await Json(response);
+        body.GetProperty("storedMatterId").GetGuid().Should().Be(MatterA);
+        body.GetProperty("storedMatterName").ValueKind.Should().Be(JsonValueKind.Null);
+        body.TryGetProperty("wouldReraise", out _).Should().BeTrue("the dry run's counts are still returned");
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("Alpha matter");
     }
 
     // ── Unscoped behaviour is unchanged (AC4) ─────────────────────────────────────────────────────────────────────

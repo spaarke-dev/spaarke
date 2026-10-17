@@ -152,7 +152,8 @@ export interface RuleScopeRequest {
 /**
  * Task 102b fix round 1 (F4): the test and the publish say the scope they mean explicitly: a matter, or `allMatters: true`. A publish of
  * a rule limited to a matter that names neither is refused (`ontology.admin.scope_intent_required`), so a limit is never cleared by
- * omission. Validate and save carry only `matterId` (a new rule has no stored scope).
+ * omission. Validate (fix round 2, K2) carries the intent the same way, so it refuses what the test and the publish refuse; save carries
+ * only `matterId` (a save only ever creates a new rule, which has no stored scope).
  */
 export interface RuleScopeIntentRequest extends RuleScopeRequest {
   allMatters?: true;
@@ -168,7 +169,7 @@ export interface RuleDraftPayload {
   decisionPlan: string;
 }
 
-export interface ValidateRequest extends RuleScopeRequest {
+export interface ValidateRequest extends RuleScopeIntentRequest {
   policyId?: string;
   lane?: string;
   draft: RuleDraftPayload;

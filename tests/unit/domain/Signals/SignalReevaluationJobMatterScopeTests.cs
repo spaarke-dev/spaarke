@@ -118,6 +118,79 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task Run_AMatterScopeChange_ClosingManySignals_LogsTheExactCount_AndOnlyTheFirstFiftyIds()
+    {
+        // Fix round 2 (K4): one bounded line however many Signals a scope change closes.
+        var h = ScopedHarness(MatterId);
+        QualifyingMatter(h, MatterId, "M");
+        var outside = Enumerable.Range(0, 60).Select(_ => SeedOpenSignal(h, Guid.NewGuid())).ToList();
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.ResultJson.Should().Contain("\"outOfScopeSuperseded\":60", "the count is exact");
+        outside.Should().OnlyContain(id => h.Org.Rows[id].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value == SignalWriter.ResolutionSuperseded);
+        var line = h.Log.Should().ContainSingle(e => e.Level == LogLevel.Information
+            && e.Message.Contains("outside its matter scope", StringComparison.Ordinal)).Subject.Message;
+        line.Should().Contain("60 open Signal(s)").And.Contain("and 10 more");
+        outside.Count(id => line.Contains(id.ToString("D"), StringComparison.Ordinal)).Should().Be(SignalReevaluationJob.MaxLoggedOutOfScopeIds);
+    }
+
+    [Fact]
+    public async Task Run_AMatterScopedRule_NeverReopensOrOverwrites_ADecidedSignalOutsideItsMatter()
+    {
+        // Fix round 2 (F3): the out-of-scope supersede is for OPEN Signals only (SignalClosureService, `s.IsOpen`). A Signal a person
+        // already dismissed, on a matter outside the scope and citing the current version, keeps its resolution and status.
+        var h = ScopedHarness(MatterId);
+        QualifyingMatter(h, MatterId, "M");
+        var dismissedOnN = h.Org.SeedSignal(Key(ScopedPolicyCode, "sprk_matter", OtherMatterId, 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionDismissed, resolvedOn: RunAt.UtcDateTime.AddDays(-1), coreId: OtherMatterId,
+            policyId: h.Sysadmin.PolicyIdOf(ScopedPolicyCode), versionId: h.Sysadmin.CurrentVersionOf(ScopedPolicyCode));
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var row = h.Org.Rows[dismissedOnN];
+        row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value.Should().Be(SignalWriter.SignalStatusResolved);
+        row.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value.Should().Be(SignalWriter.ResolutionDismissed,
+            "a decided Signal is never re-closed as Superseded");
+        h.Org.ConditionalUpdates.Should().NotContain(u => u.Id == dismissedOnN, "no conditional update targets it");
+        result.ResultJson.Should().Contain("\"outOfScopeSuperseded\":0");
+        CreatedKeys(h).Should().Equal(Key(ScopedPolicyCode, "sprk_matter", MatterId, 1)); // M still qualifies and is raised
+    }
+
+    [Fact]
+    public async Task Run_AMatterScopedRule_StillRedactsTheStoredEvidenceOfASignalOutsideItsMatter()
+    {
+        // Fix round 2 (F3): the D-123 redaction covers the policy's Signals in and out of the scope (SignalReevaluationJob passes
+        // existing + outOfScope). The policy is valid and evaluated, so only its own pass (not the sweep) can redact this Signal.
+        var h = ScopedHarness(MatterId);
+        QualifyingMatter(h, MatterId, "M");
+        h.WithMatterHit(OtherMatterId); // the witness communication is filed on N, outside the scope
+        var secureProject = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001c1");
+        h.Sysadmin.SecureProject(secureProject);
+        h.Sysadmin.Stub(new Entity("sprk_matter", OtherMatterId) { ["owningteam"] = new EntityReference("team", DefaultTeamId), ["sprk_issecure"] = false });
+        h.Sysadmin.WitnessRows["sprk_communication"].Single()["owningteam"] = new EntityReference("team", DefaultTeamId);
+        var onN = h.Org.SeedSignal(Key(ScopedPolicyCode, "sprk_matter", OtherMatterId, 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionDismissed, resolvedOn: RunAt.UtcDateTime.AddDays(-1), coreId: OtherMatterId,
+            policyId: h.Sysadmin.PolicyIdOf(ScopedPolicyCode), versionId: h.Sysadmin.CurrentVersionOf(ScopedPolicyCode));
+        h.Org.Rows[onN]["sprk_regardingmatter"] = new EntityReference("sprk_matter", OtherMatterId);
+        h.Org.Rows[onN]["sprk_matter"] = new EntityReference("sprk_matter", OtherMatterId);
+        h.Org.Rows[onN]["sprk_evidencerefs"] = StoredEvidenceQuotingTheWitness();
+        RefileTheWitnessUnder(h, secureProject); // the witness now sits behind secure X
+
+        var result = await h.RunAsync();
+
+        result.ResultJson.Should().Contain("\"evidenceRedacted\":1");
+        var redaction = h.Org.ConditionalUpdates.Where(u => u.Fields.ContainsKey("sprk_evidencerefs")).Should().ContainSingle().Subject;
+        redaction.Id.Should().Be(onN);
+        ((string)redaction.Fields["sprk_evidencerefs"]).Should().NotContain("Rate increase").And.NotContain("partner@firm.example")
+            .And.Contain($"sprk_communication:{Lower(CommunicationId)}");
+        h.Org.Rows[onN].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value.Should().Be(SignalWriter.ResolutionDismissed,
+            "the redaction removes detail and nothing else");
+    }
+
+    [Fact]
     public async Task Run_AScopeChangedInDataverseFromMToN_WithoutAPublish_ClosesMsOpenSignal_Superseded_AndRaisesN()
     {
         // Fix round 1 (uac-r2 F2), route (a): sprk_matter edited from M to N directly in Dataverse, so M's open Signal cites the CURRENT

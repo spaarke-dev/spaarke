@@ -179,6 +179,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// <summary>The one subject a matter scope is allowed on (task 102b, D-165).</summary>
     internal const string MatterScopeSubject = "sprk_matter";
 
+    /// <summary>Task 102b fix round 2 (K4): the most Signal ids the out-of-scope closure log line names (the count is always exact).</summary>
+    internal const int MaxLoggedOutOfScopeIds = 50;
+
     /// <param name="scope">An event trigger's one subject (task 032), or null for the whole policy. A policy's OWN matter scope (task
     /// 102b) is read from <paramref name="policy"/>, never from here.</param>
     private async Task EvaluatePolicyAsync(PolicyRow policy, RunCounts counts, CancellationToken ct, SubjectScope? scope = null)
@@ -327,9 +330,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 if (closedOutside.Count > 0)
                 {
                     counts.OutOfScopeSuperseded += closedOutside.Count;
+                    // Fix round 2 (K4): the count, and at most the first MaxLoggedOutOfScopeIds ids, so one scope change on a policy with
+                    // thousands of Signals is one bounded line.
                     _logger.LogInformation(
                         "Policy {PolicyCode}: {Count} open Signal(s) outside its matter scope were closed Superseded (the policy's scope " +
-                        "supersedes them): {SignalIds}.", policy.Code, closedOutside.Count, string.Join(",", closedOutside));
+                        "supersedes them): {SignalIds}{More}.", policy.Code, closedOutside.Count,
+                        string.Join(",", closedOutside.Take(MaxLoggedOutOfScopeIds)),
+                        closedOutside.Count > MaxLoggedOutOfScopeIds ? $" and {closedOutside.Count - MaxLoggedOutOfScopeIds} more" : string.Empty);
                 }
             }
             // Task 034 (FR-17) and #1661: place every stamped or countable Signal in its secure-family partition, stamp a partition

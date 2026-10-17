@@ -1661,6 +1661,10 @@ public sealed class AuthoringWorld : IDataverseUserClient
 
     /// <summary>Task 102b fix round 1 (F4): matter names, for the dry run's read of the stored matter's name as the caller.</summary>
     public Dictionary<Guid, string> MatterNames { get; } = new();
+
+    /// <summary>Task 102b fix round 2 (uac-r2 F1): when set, the read of a matter's name throws it (an HttpClient timeout surfaces as a
+    /// <see cref="TaskCanceledException"/> while the request is still live).</summary>
+    public Exception? MatterNameReadThrows { get; set; }
     public List<string> Requests { get; } = new();
     public List<Write> Writes { get; } = new();
 
@@ -1684,6 +1688,7 @@ public sealed class AuthoringWorld : IDataverseUserClient
         Unreadable.Clear();
         Missing.Clear();
         MatterNames.Clear();
+        MatterNameReadThrows = null;
         Requests.Clear();
         Writes.Clear();
     }
@@ -1874,6 +1879,7 @@ public sealed class AuthoringWorld : IDataverseUserClient
             var matterName = Regex.Match(relativePath, @"^sprk_matters\?\$select=sprk_mattername&\$filter=sprk_matterid eq ([0-9a-f-]{36})&\$top=1$");
             if (matterName.Success)
             {
+                if (MatterNameReadThrows is { } thrown) throw thrown;
                 var id = Guid.Parse(matterName.Groups[1].Value);
                 return Ok(new
                 {

@@ -780,6 +780,7 @@ public sealed partial class OntologyAdminAuthoringService
             var errors = new Dictionary<string, string[]>(StringComparer.Ordinal);
             DecisionLane? lane = null;
             var newRule = true;
+            Guid? storedMatter = null;
             if (request.PolicyId is { } policyId)
             {
                 if (policyId == Guid.Empty)
@@ -794,6 +795,7 @@ public sealed partial class OntologyAdminAuthoringService
                 }
 
                 lane = read.Value!.Lane; // as publish: the policy's own lane, never the request's
+                storedMatter = read.Value!.MatterId; // fix round 2 (K2): the stored scope, as the dry run and publish read it
                 newRule = false;
             }
             else if (TryParseLane(request.Lane, out var parsedLane))
@@ -819,8 +821,10 @@ public sealed partial class OntologyAdminAuthoringService
                 }
             }
 
-            // Task 102b: the scope, exactly as save and publish check it.
-            var scope = await CheckScopeAsync(request.MatterId, null, null, request.Tenant, request.Draft?.RuleBody, errors, ct).ConfigureAwait(false);
+            // Task 102b: the scope, through the one check the dry run, save and publish use. Fix round 2 (K2): with the stored scope and the
+            // request's intent, so validate refuses the same no-intent and matter-plus-allMatters cases, with the same codes and fields.
+            var scope = await CheckScopeAsync(request.MatterId, request.AllMatters, storedMatter, request.Tenant, request.Draft?.RuleBody, errors, ct)
+                .ConfigureAwait(false);
             if (scope.Failure is { } scopeFailure)
             {
                 return Fail<OntologyRuleValidation>(scopeFailure);
@@ -1078,7 +1082,7 @@ public sealed partial class OntologyAdminAuthoringService
             var check = ValidateDraft(draft, policy.Lane, errors);
             ruleTypeName = check.RuleTypeName;
 
-            // Task 102b (D-165): the scope this version is published with (null: all matters), checked as save checks it.
+            // Task 102b (D-165): the scope this version is published with (null: all matters), checked by the shared scope check.
             // Fix round 1 (F4): a policy limited to a matter is published only with an explicit scope intent; none never clears it.
             var scope = await CheckScopeAsync(request.MatterId, request.AllMatters, policy.MatterId, request.Tenant, draft.RuleBody, errors, ct)
                 .ConfigureAwait(false);
@@ -1568,7 +1572,8 @@ public sealed partial class OntologyAdminAuthoringService
     /// No matter id means all matters: the rule behaves exactly as before task 102b, except (fix round 1, F4) on a dry run or publish of a
     /// policy whose <paramref name="storedMatter"/> is set: there, no matter id needs <paramref name="allMatters"/> true, or the request is
     /// refused with <see cref="ReasonScopeIntentRequired"/>; a matter id with <paramref name="allMatters"/> true is refused the same way.
-    /// Validate and save pass null for both (validate has no intent field; a new rule has no stored scope).
+    /// Save passes null for both (a save only ever creates a new rule, which has no stored scope). Validate (fix round 2, K2) passes the
+    /// stored scope of the policy it is asked about, and null for a new rule.
     /// </summary>
     private async Task<ScopeCheck> CheckScopeAsync(
         Guid? matterId, bool? allMatters, Guid? storedMatter, string? tenant, string? ruleBody, Dictionary<string, string[]> errors,
@@ -1665,19 +1670,29 @@ public sealed partial class OntologyAdminAuthoringService
     /// returned, and the name is display only, so it never fails the dry run.</summary>
     private async Task<string?> ReadMatterNameAsync(Guid matterId, CancellationToken ct)
     {
-        var response = await _user.GetAsync(
-            $"{MatterEntitySet}?$select=sprk_mattername&$filter=sprk_matterid eq {matterId:D}&$top=1", ct).ConfigureAwait(false);
-        if (!response.IsSuccess)
+        try
         {
-            if (response.ErrorCode != DataverseUserClientErrorCodes.AccessDenied)
+            var response = await _user.GetAsync(
+                $"{MatterEntitySet}?$select=sprk_mattername&$filter=sprk_matterid eq {matterId:D}&$top=1", ct).ConfigureAwait(false);
+            if (!response.IsSuccess)
             {
-                _logger.LogWarning("Ontology dry run: the stored matter's name could not be read ({ErrorCode}).", response.ErrorCode);
+                if (response.ErrorCode != DataverseUserClientErrorCodes.AccessDenied)
+                {
+                    _logger.LogWarning("Ontology dry run: the stored matter's name could not be read ({ErrorCode}).", response.ErrorCode);
+                }
+
+                return null;
             }
 
+            return Rows(response.Body).Select(row => ReadString(row, "sprk_mattername")).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // Fix round 2 (uac-r2 F1): the name is display only, so a fault (an HttpClient timeout is a TaskCanceledException while the
+            // request is still live) never fails the dry run. The matter name is not logged.
+            _logger.LogWarning("Ontology dry run: the stored matter's name could not be read ({ExceptionType}).", ex.GetType().Name);
             return null;
         }
-
-        return Rows(response.Body).Select(row => ReadString(row, "sprk_mattername")).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name));
     }
 
     // =================================================================================================================

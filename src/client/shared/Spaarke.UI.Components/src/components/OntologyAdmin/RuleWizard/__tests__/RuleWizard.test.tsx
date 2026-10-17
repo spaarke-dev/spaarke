@@ -1104,6 +1104,7 @@ describe('RuleWizard - matter scope', () => {
 
     const scopeValidate = service.validate.mock.calls[service.validate.mock.calls.length - 1][0];
     expect(scopeValidate.matterId).toBe('m-2');
+    expect('allMatters' in scopeValidate).toBe(false);
     expect(service.dryRun.mock.calls[0][0].matterId).toBe('m-2');
     const save = service.savePolicy.mock.calls[0][0];
     expect(save.matterId).toBe('m-2');
@@ -1113,7 +1114,7 @@ describe('RuleWizard - matter scope', () => {
     }
   });
 
-  it('sends no matter for all matters, and says allMatters on the test (fix round 1, F4)', async () => {
+  it('sends no matter for all matters, and says allMatters on validate and the test (fix rounds 1 and 2)', async () => {
     const { service } = setup({ matterPicker: makePicker() });
     await toScopeAsNewRule();
     await next('rule-wizard-test');
@@ -1121,9 +1122,10 @@ describe('RuleWizard - matter scope', () => {
 
     expect('matterId' in service.dryRun.mock.calls[0][0]).toBe(false);
     expect(service.dryRun.mock.calls[0][0].allMatters).toBe(true);
+    expect(service.validate.mock.calls.length).toBeGreaterThan(0);
     for (const [request] of service.validate.mock.calls) {
       expect('matterId' in request).toBe(false);
-      expect('allMatters' in request).toBe(false);
+      expect(request.allMatters).toBe(true); // fix round 2 (K2): validate says the intent like the test and the publish
     }
   });
 

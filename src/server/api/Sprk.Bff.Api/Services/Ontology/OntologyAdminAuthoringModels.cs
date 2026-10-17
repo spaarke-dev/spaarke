@@ -106,8 +106,12 @@ public sealed record OntologyPublishRequest(OntologyRuleDraft? Draft, Guid? Matt
 
 /// <summary>A compile-only check of a draft (task 102a). With <paramref name="PolicyId"/> it is checked as a new version of that Ontology
 /// policy would be on publish (its lane, read as the caller). Without one, <paramref name="Lane"/> is required and it is checked as a new
-/// rule would be on save. <paramref name="MatterId"/> and <paramref name="Tenant"/> are checked as save and publish check them (task 102b).</summary>
-public sealed record OntologyValidateRequest(Guid? PolicyId, string? Lane, OntologyRuleDraft? Draft, Guid? MatterId = null, string? Tenant = null);
+/// rule would be on save. <paramref name="MatterId"/> and <paramref name="Tenant"/> are checked as the dry run and publish check them (task
+/// 102b); <paramref name="AllMatters"/> (fix round 2, K2) is the explicit "all matters" intent, with the same meaning as on
+/// <see cref="OntologyDryRunRequest"/>: for an existing policy limited to a matter, neither a matter nor <c>AllMatters: true</c>, or both,
+/// is refused with the same code and field as on a dry run or publish. A new rule has no stored scope, so there it may be omitted.</summary>
+public sealed record OntologyValidateRequest(
+    Guid? PolicyId, string? Lane, OntologyRuleDraft? Draft, Guid? MatterId = null, string? Tenant = null, bool? AllMatters = null);
 
 /// <summary>The answer of the validate route. Nothing was written or evaluated.</summary>
 /// <param name="Valid">True when save or publish would accept the draft, apart from the dry-run proof and the policy's own fields.</param>

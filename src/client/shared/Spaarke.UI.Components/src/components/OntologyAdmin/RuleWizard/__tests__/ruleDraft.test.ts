@@ -362,6 +362,19 @@ describe('the matter scope (task 102b; D-165)', () => {
     }
   });
 
+  it('validate says the scope it means, like the test and the publish: the matter, or allMatters when All matters is chosen', () => {
+    const body = buildDraftBody(draft, catalog).ruleBody as string;
+    expect(validateRequest(draft, body, 'p-1')).toMatchObject({ allMatters: true });
+    expect(validateRequest(draft, body, 'p-1')).not.toHaveProperty('matterId');
+    expect(validateRequest(draft, body, null)).toMatchObject({ allMatters: true });
+    expect(validateRequest(scoped, body, 'p-1')).toMatchObject({ matterId: 'm-1' });
+    expect(validateRequest(scoped, body, 'p-1')).not.toHaveProperty('allMatters');
+    expect(validateRequest(scoped, body, null)).not.toHaveProperty('allMatters');
+    // Save carries only the matter: it only ever creates a new rule.
+    expect(newPolicyRequest(draft, body)).not.toHaveProperty('allMatters');
+    expect(newPolicyRequest(scoped, body)).not.toHaveProperty('allMatters');
+  });
+
   it('places a matterId refusal on the Scope and noise step', () => {
     expect(stepOfField('matterId')).toBe('scope');
     expect(STEP_FIELDS.scope).toContain('matterId');

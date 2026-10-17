@@ -249,3 +249,65 @@ or write, the "returned another subject" Error. Must-not-fire control: `Run_AMat
 - uac K3: a reader who cannot read the matter sees its id but not its name.
 - `RuleSubjectOf` in the authoring service duplicates the job's private `RuleSubjectEntity` (both read the body's `subject`).
 - Validate carries no `allMatters` (the brief's closed set is dry run and publish); it checks a scope as save does.
+
+## Fix round 2 (PR #2075 review)
+
+Model: Sonnet-tier implementer brief, executed literally. The cascade finding (F1) still awaits the owner; nothing under `src/dataverse/**` changed.
+
+### F3 (a). The `s.IsOpen` check on the out-of-scope supersede is pinned
+
+`SignalClosureService.SupersedeInPassAsync` closes out-of-scope Signals only when `s.IsOpen`. Test
+`Run_AMatterScopedRule_NeverReopensOrOverwrites_ADecidedSignalOutsideItsMatter`: a Signal on the other matter, Resolved/Dismissed and citing the
+current version, keeps its status and resolution, no conditional update targets it, `outOfScopeSuperseded` is 0. Fail-before: with
+`s.IsOpen &&` removed it fails (the resolution becomes Superseded); restored, it passes.
+
+### F3 (b). The redaction of out-of-scope Signals is pinned
+
+Test `Run_AMatterScopedRule_StillRedactsTheStoredEvidenceOfASignalOutsideItsMatter`. The brief named the T145 sweep test as the model, but
+that test stops at the validator gate and is redacted by the post-loop sweep, which would pass even with the policy's own pass broken. So
+the scoped variant uses a VALID, evaluated scoped policy (the policy's own pass runs the redaction; the sweep skips a policy already attempted):
+a Dismissed Signal on `OtherMatterId` with stored evidence quoting a witness re-filed under secure X is redacted once, and nothing else on the
+row changes. Fail-before: with only `existing` passed at the redaction call (`SignalReevaluationJob.cs`) it fails (`evidenceRedacted` 0).
+
+### uac-r2 minor F1. The stored-matter name read never fails the dry run
+
+`ReadMatterNameAsync` now catches `(Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)`, logs a Warning
+with the exception type only (no matter name) and returns null. Test `Scope_DryRun_AFaultReadingTheStoredMattersName_NeverFailsTheDryRun`
+(world switch `MatterNameReadThrows`): a `TaskCanceledException` (an HttpClient timeout) with the request token live gives 200, the counts,
+`storedMatterId` and a null `storedMatterName`. Fail-before: the old method returns 503 `ontology.admin.unavailable`.
+
+### K2. Validate carries the scope intent
+
+- `OntologyValidateRequest` gains `bool? AllMatters`. For an existing policy validate passes the stored `policy.MatterId` to `CheckScopeAsync`, so it
+  refuses the no-intent and matter-plus-allMatters cases with the same code (`ontology.admin.scope_intent_required`), field (`matterId`) and
+  messages as the dry run and publish. Validate answers a refusal as 200 `valid:false` (as for every validate refusal), not a 400.
+- Save only ever creates a new policy (`OntologyNewPolicyRequest` has no policy id, so there is no stored scope), so it is left as is.
+- The doc comments that claimed validate/save/publish check the scope alike are corrected (`OntologyValidateRequest`, the validate and publish
+  comments, `CheckScopeAsync`).
+- Wizard: `validateRequest` now uses `scopeIntentRequest`, so validate sends `{ allMatters: true }` when "All matters" is chosen and `{ matterId }`
+  otherwise (needed: without it every validate of a scoped policy's new version would now be refused). `ValidateRequest` extends
+  `RuleScopeIntentRequest`; save still sends only `matterId`.
+- Tests: `Scope_Validate_OnAScopedPolicy_RefusesNoIntent_LikeTheDryRunAndPublish` (with must-not-fire: matter, allMatters, unscoped policy),
+  `Scope_Validate_AMatterAndAllMattersTogether_IsRefused_WithTheIntentCode` (stored and unstored); jest `ruleDraft.test.ts` (the validate shape) and
+  `RuleWizard.test.tsx` (validate says `allMatters` for All matters, and not for a matter). Fail-before: the service and models from the previous
+  head: the 3 server cases fail; `ruleDraft.ts` from the previous head: the 2 jest tests fail.
+
+### K4. The out-of-scope closure log is capped
+
+The Information line now carries the exact count and at most the first `MaxLoggedOutOfScopeIds` (50) ids, with " and N more". Test
+`Run_AMatterScopeChange_ClosingManySignals_LogsTheExactCount_AndOnlyTheFirstFiftyIds` (60 Signals: `outOfScopeSuperseded` 60, 50 ids in the line,
+"and 10 more"). Fail-before: with the cap removed all 60 ids are logged and it fails. The earlier one-id log assertions are unchanged and green.
+
+### K3. Deploy order
+
+Deploy the BFF before the Console bundle. An old BFF ignores `matterId` (and the new `allMatters`) and never widens a rule; the reverse order
+would let the new wizard send an intent an old BFF does not read.
+
+### Tests run (fix round 2)
+
+| Suite | Result |
+|---|---|
+| BFF, filtered (`Ontology\|Signal\|Reevaluation\|PolicyVersion`) | 2413 passed, 3 skipped, 0 failed |
+| `Spaarke.ArchTests`, full | 1076 passed, 0 failed |
+| Jest, Spaarke.UI.Components (OntologyAdmin) | 8 suites, 206 passed |
+| Jest, Spaarke.AI.Widgets (OntologyAdminWorkspaceWidget, ontologyAdminGate) | 2 suites, 18 passed |

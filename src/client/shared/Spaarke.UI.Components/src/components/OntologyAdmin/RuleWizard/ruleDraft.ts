@@ -431,7 +431,7 @@ export function scopeRequest(draft: RuleDraft): RuleScopeRequest {
 }
 
 /**
- * Task 102b fix round 1 (F4): the scope the test and the publish carry, said explicitly: the matter id, or `allMatters: true` when "All
+ * Task 102b fix round 1 (F4): the scope the validate (fix round 2, K2), the test and the publish carry, said explicitly: the matter id, or `allMatters: true` when "All
  * matters" is chosen. Never neither: the BFF refuses a publish of a rule limited to a matter that names no scope, so a limit is cleared
  * only when the admin chose All matters.
  */
@@ -457,8 +457,8 @@ export function scopeChangeSentence(
 
 export function validateRequest(draft: RuleDraft, ruleBody: string, policyId: string | null): ValidateRequest {
   return policyId === null
-    ? { lane: draft.lane, draft: draftPayload(draft, ruleBody), ...scopeRequest(draft) }
-    : { policyId, draft: draftPayload(draft, ruleBody), ...scopeRequest(draft) };
+    ? { lane: draft.lane, draft: draftPayload(draft, ruleBody), ...scopeIntentRequest(draft) }
+    : { policyId, draft: draftPayload(draft, ruleBody), ...scopeIntentRequest(draft) };
 }
 
 export function newPolicyRequest(draft: RuleDraft, ruleBody: string): NewPolicyRequest {
