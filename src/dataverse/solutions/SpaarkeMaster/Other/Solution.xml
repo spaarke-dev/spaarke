@@ -519,7 +519,6 @@
       <RootComponent type="9" schemaName="sprk_fieldmappingtypes" behavior="0" />
       <RootComponent type="9" schemaName="sprk_identitycollisionreason" behavior="0" />
       <RootComponent type="9" schemaName="sprk_identityplane" behavior="0" />
-      <RootComponent type="9" schemaName="sprk_invoicestatus" behavior="0" />
       <RootComponent type="9" schemaName="sprk_noderunstatus" behavior="0" />
       <RootComponent type="9" schemaName="sprk_observationdisposition" behavior="0" />
       <RootComponent type="9" schemaName="sprk_outputformat" behavior="0" />
