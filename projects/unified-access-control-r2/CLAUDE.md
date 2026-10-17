@@ -256,6 +256,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 - Python needs `PYTHONIOENCODING=utf-8`; scratchpad PowerShell stays ASCII under `pwsh`.
 - Count TASK-INDEX by its ASCII tokens (`[open]` `[wip]` `[done]` `[cancelled]` `[deferred]`); every row carries one.
 - Azure.Identity needs `AZURE_TOKEN_CREDENTIALS=dev`; the 034 canary needs `AzureCliCredential` + `SPAARKE_TESTS_ALLOW_OUTBOUND=1`.
+- **Master needs TWO required checks (2026-10-17): `Router` AND `Client lint (type-aware ratchet)`** (`gh api repos/spaarke-dev/spaarke/rules/branches/master`). A merge watcher must wait for every required check, not only Router, or `gh pr merge` fails with "base branch policy prohibits the merge". Client changes must pass `node scripts/quality/client-lint/client-lint.mjs check` (fix new `no-unnecessary-condition` findings; don't suppress them).
 - **Import every PCF/solution with `scripts/Import-SolutionScoped.ps1`, never a bare `pac solution import`.** A bare import leaves the `cc_…/bundle.js` web resources unpublished, so users keep getting the old bundle (2026-10-17: TrackingFieldTrio 1.0.50 stayed on 1.0.47 until a `-PublishOnly` run). Verify by the SERVED bundle's sha256 (`/WebResources/cc_<ns>.<control>/bundle.js`), not `customcontrols.version`.
 
 ## 7. Key documents
