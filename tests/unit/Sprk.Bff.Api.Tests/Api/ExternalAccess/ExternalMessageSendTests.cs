@@ -212,16 +212,18 @@ public class ExternalMessageSendTests
             CancellationToken.None, data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync);
     }
 
-    /// <summary>Task 036: a post with the Dataverse rights reader the route passes (the probe, as the caller).</summary>
+    /// <summary>Task 036: a post with the Dataverse rights reader the route passes (the probe, as the caller), and (fix
+    /// round 1, F1) its privilege reader.</summary>
     private Task<IResult> Post(
         string root, Guid id, CallerPrincipal caller,
-        Func<string, Guid, CancellationToken, Task<AccessRights>>? readCallerRights)
+        Func<string, Guid, CancellationToken, Task<AccessRights>>? readCallerRights,
+        Func<string, CancellationToken, Task<bool>>? readCallerPrivilege = null)
     {
         var data = _roots.NewService();
         return ExternalMessageEndpoints.PostMessageCoreAsync(
             root, id, new PostExternalMessageRequest { SprkBody = "Can you confirm the filing date?" }, caller,
             ProductionRegistry(), ReadRecord, Service(), NullLogger.Instance, CancellationToken.None,
-            data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync, readCallerRights);
+            data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync, readCallerRights, readCallerPrivilege);
     }
 
     /// <summary>A request body bound exactly as the route binds it (System.Text.Json, web defaults).</summary>
@@ -649,12 +651,55 @@ public class ExternalMessageSendTests
     {
         var (caller, record) = SystemUserReading(root, dataverseDecides: true);
         var asked = new List<(string EntitySet, Guid RecordId)>();
+        var privileges = new List<string>();
 
-        Created(await Post(root, record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked)));
+        Created(await Post(root, record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked),
+            Holds(privileges, ExternalMessageEndpoints.CreateMessagePrivilege)));
 
         TheRow();
         asked.Should().ContainSingle();
+        privileges.Should().Equal(new[] { "prvCreatesprk_Communication" }, "the message row's own table privilege is asked");
     }
+
+    // ── Task 036 fix round 1 (F1): AppendTo on the record is not enough — the message row is written app-only, so the
+    //    caller must also hold Create on sprk_communication, as MDA would require of them ───────────────────────────
+
+    [Theory]
+    [MemberData(nameof(DataverseConfirmedRoots))]
+    public async Task Fr20_AppendToButNoCreatePrivilegeOnTheMessageTable_Is403InsufficientRights_AndCreatesNoRow(string root)
+    {
+        var (caller, record) = SystemUserReading(root, dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+        var privileges = new List<string>();
+
+        var result = await Post(root, record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked),
+            Holds(privileges /* holds nothing */));
+
+        ShouldBeForbidden(result, ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldHaveWrittenNothing();
+        privileges.Should().Equal(new[] { ExternalMessageEndpoints.CreateMessagePrivilege });
+    }
+
+    [Fact]
+    public async Task Fr20_APrivilegeReaderThatThrows_OrNoPrivilegeReader_Is403_AndCreatesNoRow()
+    {
+        var (caller, record) = SystemUserReading("projects", dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        ShouldBeForbidden(
+            await Post("projects", record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked),
+                (_, _) => throw new HttpRequestException("RetrieveUserSetOfPrivilegesByNames failed")),
+            ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldBeForbidden(
+            await Post("projects", record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked)),
+            ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    public void Fr20_TheMessageCreatePrivilege_IsTheLiveName() =>
+        ExternalMessageEndpoints.CreateMessagePrivilege.Should().Be("prvCreatesprk_Communication",
+            "the name the SpaarkeMaster roles carry; a wrong name is never held, so every post would deny");
 
     [Fact]
     public async Task Fr20_AReaderThatThrows_OrNoReader_Is403_AndCreatesNoRow()
@@ -760,6 +805,14 @@ public class ExternalMessageSendTests
         "workassignments" => "sprk_workassignments",
         _ => "sprk_invoices",
     };
+
+    /// <summary>Task 036 fix round 1 (F1): the caller holds exactly <paramref name="held"/>; every question is recorded.</summary>
+    private static Func<string, CancellationToken, Task<bool>> Holds(List<string> asked, params string[] held) =>
+        (privilege, _) =>
+        {
+            asked.Add(privilege);
+            return Task.FromResult(held.Contains(privilege, StringComparer.Ordinal));
+        };
 
     /// <summary>Dataverse's answer for the caller, recording every question.</summary>
     private static Func<string, Guid, CancellationToken, Task<AccessRights>> Dataverse(

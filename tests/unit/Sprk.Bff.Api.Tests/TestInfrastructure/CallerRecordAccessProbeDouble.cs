@@ -35,11 +35,46 @@ public sealed class CallerRecordAccessProbeDouble : CallerRecordAccessProbe
         return this;
     }
 
+    /// <summary>Task 036 fix round 1 (F1): the table privileges the caller holds. Any other name is not held, the real
+    /// probe's fail-closed answer.</summary>
+    public ConcurrentDictionary<string, bool> HeldPrivileges { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>When set, the privilege question throws (an unexpected fault; the real probe answers false instead).</summary>
+    public Exception? PrivilegeFault { get; set; }
+
+    /// <summary>Every privilege asked about, in order.</summary>
+    public ConcurrentQueue<string> PrivilegeCalls { get; } = new();
+
+    public CallerRecordAccessProbeDouble Holds(params string[] privileges)
+    {
+        foreach (var privilege in privileges)
+        {
+            HeldPrivileges[privilege] = true;
+        }
+
+        return this;
+    }
+
     public void Reset()
     {
         Answers.Clear();
         Fault = null;
         Calls.Clear();
+        HeldPrivileges.Clear();
+        PrivilegeFault = null;
+        PrivilegeCalls.Clear();
+    }
+
+    public override Task<bool> CallerHoldsPrivilegeAsync(
+        string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+    {
+        PrivilegeCalls.Enqueue(privilegeName);
+        if (PrivilegeFault is not null)
+        {
+            throw PrivilegeFault;
+        }
+
+        return Task.FromResult(HeldPrivileges.TryGetValue(privilegeName, out var held) && held);
     }
 
     public override Task<AccessRights> GetCallerRightsAsync(

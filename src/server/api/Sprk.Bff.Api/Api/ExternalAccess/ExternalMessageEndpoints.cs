@@ -155,8 +155,16 @@ public static class ExternalMessageEndpoints
         return PostMessageCoreAsync(
             root, id, request, principal, registry, recordService.GetRecordAsync, communicationService, logger, ct,
             dataService.GetNonSecureRootsAsync, dataService.GetLiveParentRootsAsync,
-            ExternalProjectDataEndpoints.CallerRightsReader(probe, httpContext));
+            ExternalProjectDataEndpoints.CallerRightsReader(probe, httpContext),
+            ExternalProjectDataEndpoints.CallerPrivilegeReader(probe, httpContext));
     }
+
+    /// <summary>
+    /// The Dataverse Create privilege on <c>sprk_communication</c>, the table a post writes (app-only), by its live name
+    /// as the SpaarkeMaster role definitions carry it (<c>Spaarke Basic User.xml</c>, <c>Spaarke Core User.xml</c>). Task 036
+    /// fix round 1 (F1): a Dataverse-decided caller's post needs it besides AppendTo on the record. Pinned by a test.
+    /// </summary>
+    internal const string CreateMessagePrivilege = "prvCreatesprk_Communication";
 
     /// <summary>
     /// The entity set a post on <paramref name="root"/> is confirmed against Dataverse on (task 036, FR-20): the record
@@ -193,7 +201,8 @@ public static class ExternalMessageEndpoints
         CancellationToken ct,
         NonSecureRootReader? readNonSecureRoots = null,
         LiveParentRootReader? readLiveParents = null,
-        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>>? readCallerRights = null)
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>>? readCallerRights = null,
+        Func<string, CancellationToken, Task<bool>>? readCallerPrivilege = null)
     {
         if (string.IsNullOrWhiteSpace(root) || !Roots.TryGetValue(root, out var messageRoot))
         {
@@ -247,11 +256,14 @@ public static class ExternalMessageEndpoints
             }
 
             // Task 036 (FR-20, owner round 59 item 2): a caller whose access Dataverse decided is confirmed against Dataverse
-            // on the record (AppendTo, read as Create). No reader (a test drive of the core) adds nothing: fail closed.
+            // on the record (AppendTo, read as Create) AND, since fix round 1 (F1), on their own Create privilege on
+            // sprk_communication — the message row is written app-only. No reader (a test drive of the core) adds nothing:
+            // fail closed.
             if (DataverseConfirmedEntitySet(messageRoot) is { } entitySet)
             {
                 rights = await ExternalProjectDataEndpoints.WithDataverseRightsAsync(
-                    principal, rights, entitySet, id, readCallerRights, logger, ct).ConfigureAwait(false);
+                    principal, rights, entitySet, id, readCallerRights, logger, ct,
+                    CreateMessagePrivilege, readCallerPrivilege).ConfigureAwait(false);
             }
 
             if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
