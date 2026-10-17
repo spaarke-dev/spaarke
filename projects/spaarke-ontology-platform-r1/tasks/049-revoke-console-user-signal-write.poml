@@ -4,7 +4,7 @@
     <title>Remove Spaarke Console User Write on sprk_signal once the BFF closes Signals</title>
     <phase>4b Commit and actions</phase>
     <gate>043, 055 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One owner-approved privilege removal plus the union re-verify; no code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -87,4 +87,5 @@
   <notes>spec.md FR-18 (amended), NFR-11; D-17.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion date="2026-10-17">Live: 049 script -Apply 03:17Z (3 removals, K-A order) plus owner Q6 admin Signal Write removal; -Verify with no waiver PASS (security-roles §17). Repo: #2022 (script, Console User + admin DR Create) and #2050 merged 32a923ca4 (admin Signal Write, script carries the Q6 removal + generic K-A gate, guard forbids admin Signal Write and checks named roles exist; Opus review F1/F3 fixed, re-checked; uac-r2 OK). Open owner question: admin Assign/Delete on sprk_signal.</completion>
 </task>

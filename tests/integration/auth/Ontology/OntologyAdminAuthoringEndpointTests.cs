@@ -126,7 +126,8 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
     [Fact]
     public void Catalog_EveryOfferedSubjectFieldOperatorAndJoin_Compiles()
     {
-        // The acceptance criterion, exhaustively: a rule body built from each catalog entry passes the SAME ValidateForSave save uses.
+        // The acceptance criterion, exhaustively: a rule body built from each catalog entry passes the SAME validation save uses
+        // (ValidateForAuthoring since task 102a: ValidateForSave plus the authorable-column allow-list).
         var validator = _fixture.Services.GetRequiredService<PolicyVersionValidator>();
         var category = Guid.NewGuid();
         var catalog = OntologyAdminAuthoringService.BuildCatalog(new[] { new OntologyCatalogCategory(category, "Fee or scope change", true) });
@@ -177,7 +178,7 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
         bodies.Should().HaveCountGreaterThan(40);
         foreach (var (what, type, body) in bodies)
         {
-            var result = validator.ValidateForSave(type, body, null);
+            var result = validator.ValidateForAuthoring(type, body, null).Validation;
             result.IsValid.Should().BeTrue($"the catalog offers '{what}', so it must compile: {string.Join("; ", result.Errors)}");
         }
 
@@ -187,6 +188,283 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
                 .Replace("@N", (catalog.RelativeDates.MaxDays + 1).ToString(System.Globalization.CultureInfo.InvariantCulture)),
             null).IsValid.Should().BeFalse();
         catalog.RuleTypes.Should().Equal("Existence", "Threshold");
+    }
+
+
+    // ── Task 102a: the per-lane lists and the authorable fields ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Catalog_EachLane_CarriesTheServerCatalogs_ReadFromTheirSources()
+    {
+        var response = await _client.GetAsync($"{Root}/catalog");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var lanes = (await Json(response)).GetProperty("lanes").EnumerateArray().ToList();
+        lanes.Select(l => l.GetProperty("lane").GetString()).Should().Equal("Decide", "Do");
+
+        static IEnumerable<(string Code, string Label, string[] Excludes)> Actions(JsonElement list) =>
+            list.EnumerateArray().Select(a => (a.GetProperty("code").GetString()!, a.GetProperty("label").GetString()!,
+                a.GetProperty("excludes").EnumerateArray().Select(e => e.GetString()!).ToArray()));
+        static IEnumerable<(string Code, string Label, string[] Excludes)> Expected(IEnumerable<DecisionActionDefinition> defs) =>
+            defs.Select(d => (d.Code, d.Label, d.Excludes.ToArray()));
+        static IEnumerable<(int, string)> Options(JsonElement list) =>
+            list.EnumerateArray().Select(o => (o.GetProperty("value").GetInt32(), o.GetProperty("label").GetString()!));
+
+        foreach (var lane in lanes)
+        {
+            var which = Enum.Parse<DecisionLane>(lane.GetProperty("lane").GetString()!);
+            Actions(lane.GetProperty("actions")).Should().BeEquivalentTo(
+                Expected(DecisionActionCatalog.All.Where(a => a.PlanLane == which)), o => o.WithStrictOrdering(), $"{which}: the plan actions");
+            Actions(lane.GetProperty("nextSteps")).Should().BeEquivalentTo(
+                Expected(DecisionActionCatalog.All.Where(a => a.IsNextStep)), o => o.WithStrictOrdering(), "the Next-step creators");
+            lane.GetProperty("dismissalReasons").EnumerateArray().Select(r => (r.GetProperty("value").GetString(), r.GetProperty("label").GetString()))
+                .Should().Equal(DecisionActionCatalog.DismissalReasons(which).Select(r => ((string?)r.Code, (string?)r.Label)));
+            Options(lane.GetProperty("severities")).Should().Equal(OntologyAdminRulesService.SeverityLabels.OrderBy(kv => kv.Key).Select(kv => (kv.Key, kv.Value)));
+            Options(lane.GetProperty("workTypes")).Should().Equal(OntologyAdminRulesService.WorkTypeLabels.OrderBy(kv => kv.Key).Select(kv => (kv.Key, kv.Value)),
+                "the server has no lane mapping for work types, so each lane carries the full list");
+        }
+
+        // Spot checks against the catalog's declared shape, so a test that only mirrors the source cannot hide a broken source.
+        var decide = Actions(lanes[0].GetProperty("actions")).ToDictionary(a => a.Code);
+        decide.Keys.Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance", "assign-work");
+        decide["revise-budget"].Excludes.Should().Equal("approve-variance");
+        decide["approve-variance"].Excludes.Should().Equal("revise-budget");
+        var doActions = Actions(lanes[1].GetProperty("actions")).ToDictionary(a => a.Code);
+        doActions["mark-complete"].Excludes.Should().BeEquivalentTo("reschedule", "reassign");
+        Options(lanes[1].GetProperty("severities")).Select(o => o.Item2).Should().Equal("Info", "Warning", "Critical");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Catalog_SeveritiesAndWorkTypes_AreExactlyTheValuesTheSaveAccepts()
+    {
+        // The catalog reads OntologyAdminRulesService's labels; the save checks SignalWriter's severities and SignalReadService's work
+        // types. Two sources: this pins them to the same sets, so the wizard never offers a value the save refuses, or hides one.
+        var catalog = OntologyAdminAuthoringService.BuildCatalog(Array.Empty<OntologyCatalogCategory>());
+        int[] saveSeverities = [SignalWriter.SeverityInfo, SignalWriter.SeverityWarning, SignalWriter.SeverityCritical];
+
+        foreach (var lane in catalog.Lanes)
+        {
+            lane.Severities.Select(o => o.Value).Should().BeEquivalentTo(saveSeverities, $"{lane.Lane}: the severities the save accepts");
+            lane.WorkTypes.Select(o => o.Value).Should().BeEquivalentTo(SignalReadService.WorkTypeKeys.Keys, $"{lane.Lane}: the work types the save accepts");
+        }
+    }
+
+    [Fact]
+    public void Catalog_EveryColumnItOffers_IsAllowListed_AndEveryAuthorableFieldCompiles()
+    {
+        var validator = _fixture.Services.GetRequiredService<PolicyVersionValidator>();
+        var catalog = OntologyAdminAuthoringService.BuildCatalog(Array.Empty<OntologyCatalogCategory>());
+        var allow = PolicyVersionValidator.AuthorableColumns;
+        var nullTest = catalog.Operators.NullTests[0];
+
+        foreach (var subject in catalog.Subjects)
+        {
+            subject.AuthorableFields.Should().NotBeEmpty($"{subject.Entity} must offer at least one field");
+            foreach (var field in subject.DateOnlyFields.Concat(subject.ThresholdFields.Select(t => t.Field)).Concat(subject.AuthorableFields))
+            {
+                allow.Should().Contain((subject.Entity, field), $"the catalog offers {subject.Entity}.{field}");
+            }
+
+            foreach (var field in subject.AuthorableFields)
+            {
+                var body = """{"type":"Existence","subject":"@S","when":{"@F":{"@T":true}},"all":[]}"""
+                    .Replace("@S", subject.Entity, StringComparison.Ordinal).Replace("@F", field, StringComparison.Ordinal).Replace("@T", nullTest, StringComparison.Ordinal);
+                var result = validator.ValidateForAuthoring("Existence", body, null).Validation;
+                result.IsValid.Should().BeTrue($"{subject.Entity}.{field} is offered, so it must compile: {string.Join("; ", result.Errors)}");
+            }
+
+            foreach (var join in subject.Joins)
+            {
+                allow.Should().Contain((join.Related, join.Path));
+                foreach (var field in join.DateOnlyFields.Concat(join.AuthorableFields))
+                {
+                    allow.Should().Contain((join.Related, field), $"the catalog offers {join.Related}.{field}");
+                    var body = """{"type":"Existence","subject":"@S","all":[{"exists":"@R","path":"@P","filter":{"@F":{"@T":true}}}]}"""
+                        .Replace("@S", subject.Entity, StringComparison.Ordinal).Replace("@R", join.Related, StringComparison.Ordinal)
+                        .Replace("@P", join.Path, StringComparison.Ordinal).Replace("@F", field, StringComparison.Ordinal).Replace("@T", nullTest, StringComparison.Ordinal);
+                    var result = validator.ValidateForAuthoring("Existence", body, null).Validation;
+                    result.IsValid.Should().BeTrue($"{join.Related}.{field} is offered, so it must compile: {string.Join("; ", result.Errors)}");
+                }
+            }
+        }
+
+        var matter = catalog.Subjects.Single(s => s.Entity == "sprk_matter");
+        matter.AuthorableFields.Should().NotContain(matter.ThresholdFields.Select(t => t.Field), "a Threshold column is offered as a ThresholdField only");
+        matter.Joins.Single(j => j.Related == "sprk_communication").AuthorableFields
+            .Should().Contain(new[] { "sprk_triagecategory", "sprk_receiveddate", "sprk_reviewoutcome" }, "the flagship rule can be rebuilt from the catalog")
+            .And.NotContain("sprk_regardingmatter", "the join path is named by path, not as a filter field");
+    }
+
+    // ── Task 102a: the validate route (compile only) ──────────────────────────────────────────────────────────
+
+    private const string FlagshipShapedBody =
+        """{"type":"Existence","subject":"sprk_matter","when":{"statecode":0},"all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"sprk_triagecategory":["8b62dd84-1fbc-f111-aaaf-3833c5e9614d"],"sprk_receiveddate":{">=":"now-30d"}}}]}""";
+
+    private async Task<HttpResponseMessage> Validate(object? draft = null, string? lane = "Decide", Guid? policyId = null) =>
+        await _client.PostAsJsonAsync($"{Root}/validate", new { policyId, lane, draft = draft ?? Draft() });
+
+    private static Dictionary<string, string[]> ValidateErrors(JsonElement result) =>
+        result.GetProperty("errors").EnumerateArray()
+            .GroupBy(e => e.GetProperty("field").GetString()!)
+            .ToDictionary(g => g.Key, g => g.Select(e => e.GetProperty("message").GetString()!).ToArray());
+
+    [Fact]
+    public async Task Validate_AValidDraft_Is200Valid_WithTheTemplateEligibleFields_AndNothingIsWrittenEvaluatedOrProved()
+    {
+        var w = _fixture.World;
+
+        var response = await Validate(Draft(body: FlagshipShapedBody));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var result = await Json(response);
+        result.GetProperty("valid").GetBoolean().Should().BeTrue();
+        result.GetProperty("errors").GetArrayLength().Should().Be(0);
+        result.GetProperty("reasonCode").ValueKind.Should().Be(JsonValueKind.Null);
+        result.GetProperty("templateEligibleFields").EnumerateArray().Select(f => f.GetString())
+            .Should().Equal(new[] { "sprk_triagecategory", "statecode" }, "the when field, and the exists field pinned to one value; never the ranged date");
+        w.Requests.Should().Equal(new[] { "GET WhoAmI()", PrivilegeRequest(w.Caller) }, "a new rule is compiled only: no other read");
+        w.Writes.Should().BeEmpty();
+        _fixture.Engine.Evaluated.Should().BeEmpty();
+
+        // Validate is not a test run: no proof was recorded, so the save still needs a dry run.
+        var save = await Save(draft: Draft(body: FlagshipShapedBody));
+        save.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReasonOf(save)).Should().Be("ontology.admin.dry_run_required");
+    }
+
+    [Fact]
+    public async Task Validate_AnInvalidDraft_Is200NotValid_WithExactlyTheFieldErrorsTheSaveReturns()
+    {
+        var draft = Draft(template: "The {{sprk_secretfield}} is wrong.", plan: """{"actions":["mark-complete"]}""");
+
+        var validate = await Json(await Validate(draft));
+        var save = await Save(draft: draft);
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var saveErrors = (await Json(save)).GetProperty("errors").EnumerateObject()
+            .ToDictionary(p => p.Name, p => p.Value.EnumerateArray().Select(m => m.GetString()!).ToArray());
+        ValidateErrors(validate).Should().BeEquivalentTo(saveErrors, "one validation path: validate and save cannot disagree");
+        ValidateErrors(validate).Keys.Should().BeEquivalentTo("messageTemplate", "decisionPlan");
+        validate.GetProperty("templateEligibleFields").EnumerateArray().Select(f => f.GetString()).Should().Equal(new[] { "statecode" },
+            "the body compiled, so the Wording step can still offer its fields");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Validate_ForAnExistingPolicy_ChecksAgainstThePolicysOwnLane_NotTheRequests()
+    {
+        // PolicyId is a Decide-lane policy: a Do-lane plan is refused even though the request says Do, as publish would refuse it.
+        var other = await Json(await Validate(Draft(plan: """{"actions":["mark-complete"]}"""), lane: "Do", policyId: PolicyId));
+        var own = await Json(await Validate(Draft(), lane: "Do", policyId: PolicyId));
+
+        other.GetProperty("valid").GetBoolean().Should().BeFalse();
+        ValidateErrors(other).Keys.Should().Equal("decisionPlan");
+        own.GetProperty("valid").GetBoolean().Should().BeTrue(own.ToString());
+        _fixture.World.Requests.Should().Contain(r => r.Contains($"sprk_policyid eq {PolicyId:D} and (sprk_domain eq null or sprk_domain eq 100000001)",
+            StringComparison.Ordinal), "the policy is read as the caller through the domain allow-list");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Validate_ACodeInBothActionsAndNextSteps_GetsTheDuplicateMessageAndCode_AsTheSaveDoes()
+    {
+        // The catalog offers assign-work as a Decide action AND as a next step; the plan resolver refuses a code in both lists. The
+        // author must be told that, not that the code is outside the lane's catalog.
+        var draft = Draft(plan: """{"actions":["assign-work"],"nextSteps":["assign-work"]}""");
+
+        var validate = await Json(await Validate(draft));
+        var save = await Save(draft: draft);
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        validate.GetProperty("reasonCode").GetString().Should().Be("ontology.admin.duplicate_action");
+        var message = ValidateErrors(validate)["decisionPlan"].Single();
+        message.Should().Contain("duplicate_action").And.Contain("never in both").And.NotContain("lane's catalog");
+        save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ReasonOf(save)).Should().Be("ontology.admin.duplicate_action");
+        (await Json(save)).GetProperty("errors").GetProperty("decisionPlan")[0].GetString().Should().Be(message);
+
+        // A code outside the lane keeps the catalog message and carries no code.
+        var outside = await Json(await Validate(Draft(plan: """{"actions":["mark-complete"]}""")));
+        ValidateErrors(outside)["decisionPlan"].Single().Should().Contain("Decide lane's catalog");
+        outside.GetProperty("reasonCode").ValueKind.Should().Be(JsonValueKind.Null);
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Validate_ANewRuleAboutATableWithNoPolicySubjectType_IsNotValid_AsTheSaveWouldRefuseIt()
+    {
+        var result = await Json(await Validate(Draft(body: """{"type":"Existence","subject":"sprk_budgetrevision","when":{"statecode":0},"all":[]}""")));
+
+        result.GetProperty("valid").GetBoolean().Should().BeFalse();
+        ValidateErrors(result)["ruleBody"].Single().Should().Contain("no policy subject type");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Validate_ANonOntologyOrUnreadablePolicy_IsTheUniform404(bool billing)
+    {
+        if (!billing) _fixture.World.Unreadable.Add(("sprk_policy", PolicyId));
+
+        var response = await Validate(policyId: billing ? BillingPolicyId : PolicyId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await ReasonOf(response)).Should().Be("ontology.admin.not_found");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Validate_AsAConsoleUser_WithoutTheAuthoringPrivilege_Is403_AndNothingElseIsRead(bool existingPolicy)
+    {
+        var w = _fixture.World;
+        w.HoldsAuthoringPrivilege = false;
+
+        var response = await Validate(policyId: existingPolicy ? PolicyId : null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        (await ReasonOf(response)).Should().Be("ontology.admin.forbidden");
+        w.Requests.Should().Equal(new[] { "GET WhoAmI()", PrivilegeRequest(w.Caller) }, "the same gate as the dry run, before anything else");
+        w.Writes.Should().BeEmpty();
+    }
+
+    // ── Task 102a: an unlisted column is refused by every authoring route, with one code ─────────────────────────
+
+    public static TheoryData<string> UnlistedColumnBodies => new()
+    {
+        """{"type":"Existence","subject":"sprk_matter","when":{"statecode":0,"sprk_secretnotes":"x"},"all":[]}""",
+        """{"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"sprk_body":"x"}}]}""",
+        """{"type":"Existence","subject":"sprk_matter","all":[{"notExists":"sprk_budgetrevision","path":"sprk_matter","filter":{"sprk_amount":{">":0}}}]}""",
+    };
+
+    [Theory]
+    [MemberData(nameof(UnlistedColumnBodies))]
+    public async Task AnUnlistedColumn_IsRefusedWithTheSameCode_ByValidateDryRunSaveAndPublish(string body)
+    {
+        const string code = "ontology.admin.column_not_authorable";
+
+        var validate = await Json(await Validate(Draft(body: body)));
+        var dryRunExisting = await DryRun(PolicyId, body);
+        var dryRunNew = await DryRun(null, body, lane: "Decide");
+        var save = await Save(draft: Draft(body: body));
+        var publish = await Publish(PolicyId, Draft(body: body));
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        validate.GetProperty("reasonCode").GetString().Should().Be(code);
+        ValidateErrors(validate).Keys.Should().Equal("ruleBody");
+        foreach (var (route, response) in new[] { ("dry run", dryRunExisting), ("dry run (new)", dryRunNew), ("save", save), ("publish", publish) })
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest, $"{route}: {await response.Content.ReadAsStringAsync()}");
+            (await ReasonOf(response)).Should().Be(code, route);
+            (await Json(response)).GetProperty("errors").GetProperty("ruleBody")[0].GetString()
+                .Should().Be(ValidateErrors(validate)["ruleBody"][0], $"{route} and validate give the same message");
+        }
+
+        _fixture.Engine.Evaluated.Should().BeEmpty("a refused body is never evaluated");
+        _fixture.World.Writes.Should().BeEmpty();
     }
 
     // ── Dry run (#39) ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -1117,6 +1395,7 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
     {
         { "GET", "/catalog" },
         { "POST", "/dry-run" },
+        { "POST", "/validate" },
         { "POST", "/policies" },
         { "POST", $"/policies/{PolicyId:D}/versions" },
     };

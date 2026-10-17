@@ -4,7 +4,7 @@
     <title>The first Know-promotion rule: new matter with no budget after 5 days</title>
     <phase>6 Do lane and Briefing fold-in</phase>
     <gate>061, 036, 046 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One policy row over an existing rule shape.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -89,4 +89,5 @@
   <notes>spec.md FR-33, FR-49. design.md BR-6. Amended 2026-10-07 per reconciliation B.2 row 063 (X-5); D-51 (O-12 decided: Assign Work).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion date="2026-10-17">PR #2053 merged `73960ac90` (Opus review: F1 Signal title "no active budget" fixed with seeding proof; K-limits in notes/task-063-know-promotion-no-budget.md). VerifiedJoins (sprk_matter, sprk_budget) = sprk_matter, checked against live metadata (sprk_Matter_Budget_1n). Real-data proof: budget matter 0 rows, no-budget matter 1 row, 58 of 62 dev matters. Live: POL-MATTER-NOBUDGET `…6301` (enabled = No) + v1 `…6311` created 2026-10-17 via Apply-DoLanePolicies.ps1 (-WhatIf, apply, -Verify -RequireRows IN SYNC). ENABLING is an owner decision (about 58 Signals on the first nightly run).</completion>
 </task>
