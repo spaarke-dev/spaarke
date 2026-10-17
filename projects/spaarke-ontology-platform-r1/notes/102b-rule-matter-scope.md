@@ -412,8 +412,10 @@ nobody knows whether `Restrict` is accepted there.
 
 The `DeleteRequest` remarks say a cascade delete checks the caller's Delete privilege on each child, and if any check is
 refused, the whole matter delete fails (probably `0x80040220`, not verified). So a user without Delete on `sprk_policy` cannot
-delete a matter that a rule names. For that user it behaves as Restrict: an Ontology Administrator must delete or retire the
-rule first. Nobody gains the right to delete rules through this change. *The main session confirms this live on dev.*
+delete a matter that a rule names. For that user it behaves as Restrict: an Ontology Administrator deletes the rule, or removes
+its matter limit (which widens it to all matters), first. Retiring does NOT free the matter: a retired rule keeps its matter link
+(corrected in fix round 4). Nobody gains the right to delete rules through this change. *The main session confirms this live on
+dev.*
 
 ### `SignalSuppressionService` retrieves of `sprk_policy` (checked)
 
@@ -456,9 +458,186 @@ No test pins `sprk_policy_matter` or its cascade; a grep of `tests/` found none.
 
 - An unparseable key on a policy-less Signal is left open with a Warning, and it does not fail the run. The job never read these
   Signals before, so failing on them would turn every run red over data the job cannot fix.
-- If a new policy reuses a deleted policy's code, the old Signals are left alone because the code exists. The new policy's prefix
+- *(Fixed in fix round 4, item 3.)* If a new policy reuses a deleted policy's code, the old Signals are left alone because the code exists. The new policy's prefix
   read then treats them as its own episodes, which is how a recreated policy already behaved.
-- The redaction sweep (task 145) covers Off/Retired policies by code. A deleted policy's code is in neither list, so its Signals'
+- *(Fixed in fix round 4, item 1.)* The redaction sweep (task 145) covers Off/Retired policies by code. A deleted policy's code is in neither list, so its Signals'
   stored evidence is not re-checked. Reported; not fixed here because it is out of scope.
 - The per-run bound could in theory starve an orphan: that needs more than 100,000 policy-less Signals (live codes or
   unparseable keys) to sort ahead of it by id.
+
+## Fix round 4 (2026-10-17)
+
+Two reviews of `854c0b0b6..2f210d545` ran: an adversarial pass and uac-r2. This round fixes their closed set. Fail-before evidence
+for each item is a mutation of the fix (applied, tested, restored) or the pre-round file, as noted.
+
+### Item 1 (F, D-123): a deleted rule's Signals are redacted again
+
+**Before.** The job gave the task 145 stored-evidence sweep only the enabled codes and the Off/Retired codes. A deleted rule's code
+is on neither list. The round-3 sweep closed Open/Acknowledged Signals but never redacted, and never revisited Resolved ones. So a
+deleted rule's Signal whose witness later moved into a Secure record kept the witness's detail in its stored evidence for good.
+
+**After.**
+
+- `SignalClosureService.ExistingPolicyCodesAsync` reads every policy code, in any state, with its `createdon`, paged; it throws past
+  `MaxPages` (the round-3 rule). The job reads it ONCE per run (`CloseSignalsOfDeletedPoliciesAsync` in the job) and passes it to
+  both deleted-policy steps, so the same list is never read twice.
+- `SignalClosureService.DeletedPolicyCodesWithSignalsAsync` reads `sprk_dedupekey` and `createdon` of every Signal with an EMPTY
+  `sprk_policy`, in ANY status (no status condition), paged and bounded by `MaxPages`. It keeps each parseable code that is an
+  orphan by the item-3 rule (`ExistingPolicyCodes.IsOrphan`).
+- `SignalReevaluationJob.RedactSignalsOfDeletedPoliciesAsync` runs after the Off/Retired redaction. It passes those codes to
+  `SweepStoredEvidenceAsync(codes, "was deleted", counts, ct)`, which reads by prefix across every status. A code this run already
+  swept (in force, or Off/Retired) is skipped by the existing `EvidenceRedactionAttempted` set, so no code is swept twice.
+- Fail closed: if the policy list could not be read, the run is already failed and logged, and nothing extra is redacted. A fault
+  reading the codes redacts nothing extra, counts one policy failure (the run fails visibly), logs `EvaluatorPolicyFailed`, and the
+  run continues.
+- Bound: past `MaxPages` pages the codes read so far are swept, a Warning is logged and the run is failed. Unlike the close, Resolved
+  Signals never drop out of this read, so reaching the bound is a standing condition that an operator must see. It needs more than
+  100,000 Signals with an empty lookup.
+
+| Test (`SignalReevaluationJobDeletedPolicyTests.cs`) | Covers |
+|---|---|
+| `Run_R4_AResolvedSignalOfADeletedRule_WhoseWitnessMovedIntoASecureRecord_HasItsStoredEvidenceRedacted` | must-fire (shape of `Run_T145F1_…`) |
+| `DeletedPolicyCodes_R4_ACodeThatStillExists_IsNotADeletedCode_WhateverTheSignalsStatus` | must-not-fire: the list itself |
+| `Run_R4_ACodeThatStillExists_IsSweptOnce_AndNeverAsDeleted` | must-not-fire: one prefix read; the fault names "is not in force", never "was deleted" |
+| `Run_R4_WhenTheDeletedCodesCannotBeRead_NothingExtraIsRedacted_TheRunFailsVisibly_AndTheCloseStillHappens` | fail closed |
+
+- **Seeding proof:** with the `RedactSignalsOfDeletedPoliciesAsync` call dropped, 4 tests fail: the must-fire test, the fail-closed
+  test, `Run_R4_ACodeThatStillExists_IsSweptOnce…` (its control) and the `MoreRemain` test (its redaction-bound assertion). Restored:
+  all pass.
+- The round-3 fail-closed test (`Run_WhenTheSweepCannotRead…("signals")`) now faults only the close's read (it has a status
+  condition). The new read has its own fail-closed test above. Its intent and assertions are unchanged.
+
+### Item 2 (F3): the schema change is guarded
+
+`tests/Spaarke.ArchTests/PolicyMatterCascadeGuardTests.cs` scans `src/dataverse/solutions/SpaarkeMaster/Other/Relationships/*.xml`.
+It asserts that `sprk_policy_matter` has CascadeDelete=Cascade, and that `sprk_Policy` is the referencing side of EXACTLY one
+relationship with CascadeDelete=Cascade (compared ignoring case).
+
+- Controls on in-memory XML. Must-not-fire: the real shape, a Cascade where `sprk_Policy` is the PARENT
+  (`sprk_policyversion_policy`), and another table's Cascade. Must-fire: the matter relationship as RemoveLink, Restrict or
+  NoCascade; the matter relationship missing; and a second Cascade parent spelled `sprk_policy`.
+- **Seeding proof:** with the real `sprk_policy_matter` set to RemoveLink, the real-tree test fails. Restored: 7/7 pass. Nothing
+  under `src/dataverse/**` is committed.
+- Placement: the brief said "next to `SignalPairTypeSchemaAgreementTests` under `tests/Spaarke.ArchTests`", but that test lives in
+  `tests/integration/data-mutation/Signals/`. The guard is in `tests/Spaarke.ArchTests` beside `OntologyWriterAppendToGuardTests`
+  (the other relationship scan), so it runs with the ArchTests (Stop hook and CI).
+
+### Item 3 (F1, low): a reused code no longer keeps a deleted rule's open Signals open
+
+**Before.** A new rule saves Off (`OntologyAdminAuthoringService.cs:970`). Delete a rule and recreate its code before the nightly
+run, and the orphans match an existing code, so the sweep skipped them.
+
+**After.** `ExistingPolicyCodes.IsOrphan(code, signalCreatedOn)` is the one rule for both the close and item 1's code list. A
+Signal with an empty `sprk_policy` is an orphan when no policy holds its code, or when the policy now holding that code was created
+AFTER the Signal. It is never an orphan when the Signal was created at or after that policy, or when either date is unknown. The
+hand-edited case is the reason: Console User has Write on `sprk_signal`. When two rows hold a code that matches ignoring case, the
+earliest date is kept, and an unknown date wins. Both keep more Signals as "still exists", the direction that never closes a live
+rule's Signal. Both reads now select `createdon`.
+
+| Test | Covers |
+|---|---|
+| `Run_R4_AReusedCode_TheOldRulesSignalIsClosed_AndASignalCreatedAfterTheNewRuleIsNeverTouched` | must-fire (old Signal closed) and must-not-fire (newer Signal, empty lookup, untouched) |
+| `DeletedPolicyCodes_R4_AReusedCode_IsListedOnlyForASignalOlderThanThePolicyHoldingIt` (-10 d listed, -0.5 d not) | the same rule on item 1's list (redaction) |
+
+- **Seeding proof (must-fire):** with the date rule removed (IsOrphan = "code missing" only, the round-3 behaviour), 2 tests fail:
+  the run test and the theory's listed case.
+- **Seeding proof (must-not-fire):** with any dated code treated as an orphan, 3 tests fail: the run test (hand-edited Signal
+  closed), the theory's not-listed case, and `DeletedPolicyCodes_R4_ACodeThatStillExists…`.
+- Redaction note: a reused code still exists, so its prefix is also swept by the in-force or Off/Retired sweep, and those run first.
+  Listing it again is harmless: `EvidenceRedactionAttempted` skips it.
+
+### Item 4 (F, D-123, uac-r2 E): no rule limit on a Secure or Restricted matter
+
+**Canonical source.** `ExternalParticipationService.FlagsFrom(isSecure, accessPermission, stateCode)` with the columns
+`ExternalParticipationService.RootFlagColumns` (`sprk_issecure,sprk_accesspermission,statecode`). It is the one column-to-flag
+mapping every access consumer uses (`RootRecordFlags`: `IsSecure`, `IsRestricted` = `sprk_accesspermission` 100000002,
+`IsUnreadable` = an EMPTY `sprk_issecure`). Neither the columns nor the rule are new.
+
+**Change.** `CheckScopeAsync`, shared by validate, dry run, save and publish, now reads the matter AS THE CALLER with
+`sprk_matters?$select=sprk_matterid,sprk_issecure,sprk_accesspermission,statecode&$filter=sprk_matterid eq {id}&$top=1`
+(`ReadMatterAccessAsync`). This replaces the id-only readable read, so it is still one read.
+
+- No row (missing, or the caller cannot read it) gives `matterId` = "The matter was not found.", unchanged.
+- Secure, Restricted, or `IsUnreadable` gives reason `ontology.admin.scope_matter_secured` on `matterId`, with "A rule cannot be
+  limited to a Secure or Restricted matter, or to one whose access level could not be read."
+- An unresolved caller is the single 403. Another non-success, or an exception, is 503 `ontology.admin.unavailable`. The scope is
+  never allowed on a fault.
+- Limited and Standard are allowed. Inactive is not refused; that behaviour is unchanged.
+
+**Message decision (existence oracle).** "Missing" and "unreadable" keep ONE message, as before. "Secured" gets its own message and
+reason code. That opens no oracle: the refusal is reached only after the caller's own read returned the row. `sprk_issecure` is
+readable by every user (field profile "Spaarke BFF-Managed Field Readers", on every business-unit default team), and
+`sprk_accesspermission` is not field-secured. So the caller learns nothing their read did not already show. A masked
+`sprk_issecure` is named in the message as "could not be read", and is not claimed as Secure.
+
+**Inheritance.** The check reads the matter's OWN stored columns. Secure inheritance stamps `sprk_issecure` on a record filed under
+a secure root (`SecureRootInheritance`), and the access-permission floor (owner round 87) refuses a value below the inherited one,
+so the stored columns carry what is inherited. The ancestry fold (`EffectiveRootFlags.ReadAncestryAsync`) is not applied, because
+a matter is a root.
+
+| Test (`OntologyAdminAuthoringScopeEndpointTests.cs`) | Covers |
+|---|---|
+| `Scope_R4_ASecureOrRestrictedMatter_IsRefused_ScopeMatterSecured_OnEveryRoute` (5 routes x secure / restricted / both / flag not returned) | must-fire; nothing evaluated or written |
+| `Scope_R4_AnOrdinaryOrLimitedMatter_IsAllowed` (5 routes) | must-not-fire |
+| `Scope_R4_WhenTheMattersAccessCannotBeRead_TheScopeIsNeverAllowed` (500 on 4 routes, throws on 2) | fail closed: 503, nothing evaluated or written |
+
+- **Fail before** (the pre-round service): 26 fail (20 refusal cases, 6 fault cases); the must-not-fire cases pass.
+- **Seeding proof (secure refusal):** with `flags.IsSecure` removed from the condition, the secure cases of the refusal theory fail.
+  Restored: all 165 authoring endpoint tests pass.
+- **Wizard.** The matter picker searches every matter the caller can read, secure ones included, so the refusal can arise. The BFF
+  puts the message on `matterId`, which the Scope and noise step already shows. `authoringService.ts` now also maps
+  `REASON_SCOPE_MATTER_SECURED` to `matterId`, so the code alone still shows a message there. Jest case:
+  `puts a scope_matter_secured refusal on matterId, the scope field, with or without a message (fix round 4)`. It fails without the
+  mapping (1 failed / 20 passed) and passes with it.
+
+**Known limit: a stored scope that later becomes Secure or Restricted (out of scope this round).** The check runs on dry run,
+validate, save and publish. A matter made Secure or Restricted after a rule was limited to it keeps the link, so a non-member with
+Deep Read on `sprk_policy` still sees it.
+
+*Proposed handling:*
+
+- (a) The nightly job already reads each policy's `sprk_matter`. With the app identity it reads that matter's `RootFlagColumns`. When
+  the matter is Secure or Restricted (or unreadable), it does not evaluate the policy: a partition-style skip, logged, with the run
+  failed visibly.
+- (b) The rules list shows that rule as "limit needs review", and an Ontology Administrator deletes it or removes the limit.
+- (c) uac-r2's Make Secure / Restricted flow warns when a rule names the matter.
+- (a) is the minimum. The link itself stays visible until (b) is done. Closing the read fully needs the rule row in the matter's
+  secure family, or a narrower Console User read on `sprk_policy`. That is a uac-r2 decision.
+
+### Item 5: cheap K items
+
+- **(a)** The round-3 closure log line now ends with `policy code(s) {codes}{ and N more}`, capped at `MaxLoggedOutOfScopeIds` (50)
+  like the ids (`DeletedPolicySweep.ClosedCodes`). Test: the round-3 must-fire test asserts `policy code(s) POL-DELETED.`. With the
+  codes removed from the line, that test fails.
+- **(b)** The unparseable-key Warning lists at most 50 Signal ids, plus "and N more" (`DeletedPolicySweep.UnparseableIds`). Tests:
+  round-3 test (d) asserts the id; `Run_R4_ManyUnparseableKeys_LogTheExactCount_AndOnlyTheFirstFiftyIds` (55 keys) asserts the cap.
+  With the cap removed, the cap test fails.
+- **(c)** The job test fake (`World.RetrieveMultipleAsync`) now answers a query with `PageInfo.Count` set one page at a time,
+  ordered by id, with `MoreRecords` and a paging cookie (`Paged`). It does this for the `sprk_policy` read and the two reads of
+  Signals with an empty lookup. `PageSizeCap` shrinks a page so a test reaches page 2 or the bound; `PagedReads` records each page.
+  - `Run_R4_ThePolicyListIsReadOverTwoPages_AndAPolicyOnTheSecondPageStillExists`: reads pages 1 and 2. With the read stopped
+    after page 1, it fails (the policy on page 2 looked deleted and its Signal was closed).
+  - `Run_R4_MoreOrphansThanOneRunReads_ClosesTheBound_WarnsMoreRemain_AndLeavesTheRestForTheNextRun`: 201 orphans, one per page.
+    It closes 200, leaves 1 and warns `MoreRemain`. It also asserts the redaction bound's Warning and the failed run.
+
+### Known limits after fix round 4
+
+- **K1.** Ontology Administrator `prvDeletesprk_Policy` is Deep. A matter delete whose cascade reaches a rule in another business
+  unit is refused as a whole, so it fails closed: the matter is not deleted and the rule survives.
+- **K2.** The cascade refusal (a user without Delete on `sprk_policy` cannot delete a matter a rule names) is to be confirmed live by
+  the main session on dev.
+- **K3.** The refusal UX is the raw platform privilege dialog. There is no Spaarke message naming the rule.
+- **Archive.** Set `CascadeArchive` on `sprk_policy_matter` (today RemoveLink, which would widen the rule to all matters) before
+  long-term retention is enabled on `sprk_matter` or `sprk_policy`.
+- A stored scope that later becomes Secure or Restricted is not re-checked (item 4 above, with its proposed handling).
+- The deleted-policy redaction read is bounded at 100,000 Signals with an empty lookup per run. Past that the run fails every night
+  until an operator acts (item 1).
+
+### Suites (fix round 4)
+
+| Suite (fix round 4) | Result |
+|---|---|
+| BFF, filtered `Ontology\|Signal\|Reevaluation\|PolicyVersion\|Closure` | 2497 passed, 3 skipped, 0 failed |
+| `Spaarke.ArchTests`, full | 1083 passed, 0 failed |
+| Jest, `Spaarke.UI.Components` `src/components/OntologyAdmin` | 207 passed (8 suites) |
+| `tsc --noEmit`, `Spaarke.UI.Components` | no error in the changed files (9 errors elsewhere, in files this round did not touch) |
