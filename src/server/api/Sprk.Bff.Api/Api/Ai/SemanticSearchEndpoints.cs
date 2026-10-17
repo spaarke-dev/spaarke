@@ -548,12 +548,11 @@ public static class SemanticSearchEndpoints
     /// holds Read. "Unknown parentage" is the case that must not be served, so it is never a skip.
     /// </para>
     /// <para>
-    /// <b>Sequential, deliberately</b> — the same constraint documented on task 070's documentIds loop.
-    /// <c>DataverseAccessDataSource</c> assigns <c>_httpClient.DefaultRequestHeaders.Authorization</c>
-    /// before issuing its request, and that client instance is shared within one HTTP request scope;
-    /// running these checks concurrently would mutate that header while siblings were mid-send.
-    /// <c>HttpHeaders</c> is not thread-safe, and the resulting failure is an intermittent phantom
-    /// denial — the kind of flakiness that gets an authorization gate disabled rather than debugged.
+    /// <b>Sequential, deliberately</b> — the same constraint documented on task 070's documentIds loop. Its
+    /// original reason (<c>DataverseAccessDataSource</c> assigning the shared
+    /// <c>_httpClient.DefaultRequestHeaders.Authorization</c> mid-request) is gone since issue #1576 — every read
+    /// there carries its own token. It stays sequential because nothing above the data source has been reviewed for
+    /// concurrent use within one request scope, and a flaky authorization result is worse than a slower one.
     /// </para>
     /// <para>
     /// <b>Why a short page is announced.</b> Because rows are authorized after the index ranks them, a
