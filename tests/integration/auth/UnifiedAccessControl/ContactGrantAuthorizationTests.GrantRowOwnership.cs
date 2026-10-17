@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -66,5 +67,47 @@ public partial class ContactGrantAuthorizationTests
 
         Problem(result).Should().Be((StatusCodes.Status500InternalServerError, ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode));
         AssertNothingWritten();
+    }
+
+    // Review round 2 (F1 low): this caller is an EXTERNAL contact. The owner refusals' detail is written for an internal
+    // administrator (the role, the table, what to add); the contact gets a neutral sentence. The internal routes keep the
+    // actionable text (GrantRowOwnershipTests.Grant_WhenDataverseRefusesTheOwnerOnAPrivilegeCheck_…, the twin).
+
+    [Fact]
+    public async Task ContactGrant_OwnerPrivilegeMissing_TellsTheExternalCallerNothingAboutRolesOrTables()
+    {
+        Ownership = OwnershipDirectory.Standard().WithOrdinaryRoot("sprk_project", ProjectId).Resolver();
+        OwnerPrivileges = TeamPrivilegeCheckerDouble.Lacking(OwnershipDirectory.ChildTeam);
+        _dataverse.BeforeCreate = () => throw new HttpRequestException(
+            "Response status code does not indicate success: 403 (Forbidden).", null, System.Net.HttpStatusCode.Forbidden);
+
+        var result = await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate));
+
+        Problem(result).Should().Be((StatusCodes.Status500InternalServerError, ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode));
+        AssertNeutralDetail(result);
+    }
+
+    [Fact]
+    public async Task ContactGrant_OwnerUnresolved_TellsTheExternalCallerNothingAboutAdministrators()
+    {
+        Ownership = OwnershipDirectory.Standard(withDefaultTeams: false).WithOrdinaryRoot("sprk_project", ProjectId).Resolver();
+
+        var result = await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate));
+
+        Problem(result).Should().Be((StatusCodes.Status500InternalServerError, ExternalGrantLifecycle.GrantOwnerUnresolvedReasonCode));
+        AssertNeutralDetail(result);
+    }
+
+    private static void AssertNeutralDetail(IResult result)
+    {
+        var detail = result.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails.Detail;
+        detail.Should().NotBeNullOrWhiteSpace();
+        foreach (var internalTerm in new[]
+                 {
+                     "Secure Record Owner", "External Record Access", "sprk_", "security role", "privilege", "administrator",
+                 })
+        {
+            detail.Should().NotContainEquivalentOf(internalTerm, "an external caller is told nothing about internal roles or tables");
+        }
     }
 }

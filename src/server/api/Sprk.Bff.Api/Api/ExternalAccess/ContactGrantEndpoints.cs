@@ -190,6 +190,17 @@ public static class ContactGrantEndpoints
                              "them or the record's team to change it. Nothing was changed.",
                 };
             }
+            else if (refusal.IsOwnerRefusal)
+            {
+                // Task 099b review round 2 (F1 low): the owner refusals' detail is written for an INTERNAL administrator — it
+                // names the internal role, the table and what to add. This caller is an external contact, who can act on none
+                // of it, so they get a neutral sentence; the code and status are unchanged, and the log below keeps the reason.
+                refusal = refusal with
+                {
+                    Detail = "Access could not be granted right now because of a problem on our side. Nothing was " +
+                             "granted; try again later, or ask the record's team for help.",
+                };
+            }
 
             // Round 42 item 1: a row that changed after the issuer check gets the same managed_elsewhere answer; what the
             // re-read found is recorded with it.
