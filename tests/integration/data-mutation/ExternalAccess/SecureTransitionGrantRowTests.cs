@@ -201,4 +201,60 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
         AssertDecoyUntouched(grants);
         _fixture.IsSecureOf(rootId).Should().BeFalse();
     }
+
+    // ── The grant row's owner comes from its ROOT lookup only (review round 3, K1) ──────────────────────────────────
+
+    /// <summary>A grant of <paramref name="rootId"/> owned by <paramref name="owner"/> that also names an invoice.</summary>
+    private Guid SeedGrantNamingAnInvoice(Guid rootId, Guid owner, Guid invoiceId)
+    {
+        var grant = Guid.NewGuid();
+        _fixture.ChildWorld.Add(GrantTable, grant, ("owningteam", new EntityReference("team", owner)),
+            ("sprk_project", new EntityReference("sprk_project", rootId)),
+            ("sprk_invoice", new EntityReference("sprk_invoice", invoiceId)),
+            ("statecode", new OptionSetValue(0)));
+        return grant;
+    }
+
+    [Fact]
+    public async Task Unsecure_DecidesAGrantRowFromItsRootOnly_NotFromAnIsolatedInvoiceItAlsoNames()
+    {
+        // The grant core creates a grant owned by its ROOT's team (ResolveGrantOwnerAsync names the root alone). The row's
+        // sprk_invoice lookup is an ownership parent: read as one, an invoice still owned by the Secure team would hold the
+        // grant on that team after the record is unsecured, a different owner than a create would give it.
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId, owningTeam: SecureTeam);
+        _fixture.UseChildWorldForRoots();
+        _fixture.SeedShare(rootId, DataversePrincipalRef.User(Creator), RecordShareLevels.CollaborateRights);
+        var isolatedInvoice = Guid.NewGuid();
+        _fixture.ChildWorld.SecureChild("sprk_invoice", isolatedInvoice);
+        var grant = SeedGrantNamingAnInvoice(rootId, SecureTeam, isolatedInvoice);
+
+        var response = await _fixture.CreateAuthenticatedClient()
+            .PostAsJsonAsync(UnsecureRoute, new { recordType = "project", recordId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        OwnerOf(grant).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
+            "the grant follows its root, as a create on the ordinary record would own it");
+        _fixture.ChildWorld.OwnerOf("sprk_invoice", isolatedInvoice).Should().Be(DataversePrincipalRef.Team(SecureTeam),
+            "the invoice is another record's: this transition does not touch it");
+    }
+
+    [Fact]
+    public async Task MakeSecure_DecidesAGrantRowFromItsRootOnly_AnOrdinaryInvoiceItAlsoNamesDoesNotHoldItBack()
+    {
+        // Twin: the invoice the grant names is owned by an ordinary team; the grant still follows its root into isolation.
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId);
+        _fixture.UseChildWorldForRoots();
+        var ordinaryInvoice = Guid.NewGuid();
+        _fixture.ChildWorld.OrdinaryChild("sprk_invoice", ordinaryInvoice);
+        var grant = SeedGrantNamingAnInvoice(rootId, GeneralTeam, ordinaryInvoice);
+
+        var response = await _fixture.CreateAuthenticatedClient()
+            .PostAsJsonAsync(ProvisionRoute, new { recordType = "project", recordId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        OwnerOf(grant).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+        _fixture.ChildWorld.OwnerOf("sprk_invoice", ordinaryInvoice).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+    }
 }

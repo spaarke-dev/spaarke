@@ -1632,11 +1632,16 @@ public sealed class SecureChildReconciler
         /// <summary>
         /// The resolver's input for an existing row — the reparent's input (task 146): every ownership-parent lookup it
         /// carries; a message in a record thread also takes that thread's filing (S6); a row naming no parent keeps its
-        /// owner; and, mid-unsecure, the root is named as the one whose flag is not a failed provisioning.
+        /// owner; and, mid-unsecure, the root is named as the one whose flag is not a failed provisioning. A GRANT row takes its
+        /// root lookup only (UAC task 099b review round 3, K1): the parent the grant core hands the resolver when it creates
+        /// the row (<c>GrantExternalAccessEndpoint.ResolveGrantOwnerAsync</c>), so a transition and a create cannot disagree on
+        /// its owner — its other lookups (<c>sprk_invoice</c> is an ownership parent) do not file it.
         /// </summary>
         private RecordOwnershipContext ContextFor(Entity row)
         {
-            var parents = RecordOwnershipContext.ParentsOf(row.Attributes).ToList();
+            var parents = IsGrant(row.LogicalName)
+                ? GrantRootParent(row)
+                : RecordOwnershipContext.ParentsOf(row.Attributes).ToList();
             if (string.Equals(row.LogicalName, CommunicationTable, StringComparison.OrdinalIgnoreCase)
                 && row.GetAttributeValue<EntityReference>(ThreadLookupOnCommunication) is { Id: var threadId } && threadId != Guid.Empty
                 && _byRef.TryGetValue(("sprk_communicationthread", threadId), out var thread))
@@ -1652,6 +1657,15 @@ public sealed class SecureChildReconciler
                 PlannedOwningTeams = _planned.Count > 0 ? new Dictionary<RecordOwnershipParent, Guid>(_planned) : null,
             };
         }
+
+        /// <summary>
+        /// A grant row's root, read from its own lookup to the pass's root table (the lookup <see cref="LoadGrantRowsAsync"/>
+        /// selects it by); none when it names none, so the row keeps its owner.
+        /// </summary>
+        private List<RecordOwnershipParent> GrantRootParent(Entity row) =>
+            row.GetAttributeValue<EntityReference>(_root.EntityLogicalName) is { Id: var rootId } && rootId != Guid.Empty
+                ? [new RecordOwnershipParent(_root.EntityLogicalName, rootId)]
+                : [];
 
         /// <summary>A row of the pass as the resolver names a parent (lower-case table).</summary>
         private static RecordOwnershipParent PlannedKey((string Table, Guid Id) key) =>
