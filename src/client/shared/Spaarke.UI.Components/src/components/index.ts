@@ -93,6 +93,10 @@ export * from './CreateEventWizard';
 // CreateInvoiceWizard - Create New Invoice wizard (IDataService abstraction, task 030)
 export * from './CreateInvoiceWizard';
 
+// InvoiceSubmission - shared "submit an invoice PDF" wizard + Processing/Result screen (ebilling-r1 task 051;
+// callbacks injected, so the external SPA and the internal entry point (task 052) both use it)
+export * from './InvoiceSubmission';
+
 // CreateReportCardWizard - Create New Report Card wizard (IDataService abstraction, task 040)
 export * from './CreateReportCardWizard';
 
