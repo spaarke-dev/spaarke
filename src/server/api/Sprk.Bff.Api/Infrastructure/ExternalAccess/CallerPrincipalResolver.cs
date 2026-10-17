@@ -768,8 +768,8 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                 .Select(set => set.EntityType)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase),
             // Task 036 (FR-20): Dataverse decided this caller's own access, so its writes are confirmed against Dataverse.
-            // The flag is read once per composition and is the same for all three, so ANY is ALL; ANY is the fail-closed
-            // reading if they ever differed (a write is then confirmed, never waved through on a Read-only term).
+            // The flag is read once per composition, so the three sets agree; if flags ever become per type, decide this
+            // per entity type — the confirmation only adds rights, never removes them.
             DataverseConfirmsWrites = accessibleProjects.Sources.ImpersonatedRootSet
                 || accessibleMatters.Sources.ImpersonatedRootSet
                 || accessibleWorkAssignments.Sources.ImpersonatedRootSet,

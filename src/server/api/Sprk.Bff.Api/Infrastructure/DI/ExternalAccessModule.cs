@@ -311,8 +311,9 @@ public static class ExternalAccessModule
         // contract — communication-specific in NAME only. Declaring an identical second interface is
         // the duplication CLAUDE.md §11 exists to prevent.
         //
-        // ⚠️ NOT consumed by AccessibleRecordSetService yet — that swap is task 036's obligation, and
-        // it is gated on the NFR-04 negative canary (task 034). Registering it here is inert until then.
+        // Consumed by AccessibleRecordSetService (task 036) only while ExternalAccess:ImpersonatedRootSets:Enabled
+        // is true (default false; enabling it is gated on the NFR-04 negative canary, task 034). Flag off, it is
+        // registered but never asked.
         // Scoped: it reads the caller's tenant claim off IHttpContextAccessor for the cache key.
         services.AddScoped<IImpersonatedRootSetSource, ImpersonatedRootSetSource>();
 
