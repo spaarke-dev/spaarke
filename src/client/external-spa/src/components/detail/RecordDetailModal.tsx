@@ -386,6 +386,8 @@ function uploadOverride(
   context: ExternalUserContextResponse | null
 ): boolean | undefined {
   if (root !== 'projects') return undefined;
+  // Task 036 fix round 1: a per-record caller's level says only what they may see; the list's `canCreate` decides.
+  if (context?.writeAccessPerRecord === true) return undefined;
   const entry = context?.projects.find(p => p.projectId.toLowerCase() === id.toLowerCase());
   return levelCanUpload(mapAccessLevelString(entry?.accessLevel));
 }
@@ -410,6 +412,7 @@ const DocumentsSection: React.FC<{
         canUpload={uploadOverride(root, id, context)}
         canDownload
         caller={caller}
+        writeAccessPerRecord={context?.writeAccessPerRecord === true}
       />
     </section>
   );

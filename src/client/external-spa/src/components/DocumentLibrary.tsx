@@ -686,6 +686,11 @@ export type DocumentLibraryProps = DocumentLibraryTarget & {
   canDownload?: boolean;
   /** The signed-in principal. With it, rows the caller created show Delete; without it, no row does (task 054). */
   caller?: CallerIdentity | null;
+  /**
+   * The caller's write access is decided per record (`/me` `writeAccessPerRecord`, task 036 fix round 1): a project's
+   * Upload then follows the BFF's `canCreate` on its document list, like every other record, instead of `accessLevel`.
+   */
+  writeAccessPerRecord?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -717,6 +722,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   canUpload,
   canDownload,
   caller,
+  writeAccessPerRecord = false,
 }) => {
   const styles = useStyles();
   // The props type refuses a call with neither; an empty id that still arrives (a caller that casts, or a blank id from
@@ -731,7 +737,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const [documents, setDocuments] = React.useState<ODataDocument[]>([]);
   // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
   const [truncated, setTruncated] = React.useState<boolean>(false);
-  // The BFF's `canCreate` for this record (null = not said; projects never use it, they follow the access level).
+  // The BFF's `canCreate` for this record (null = not said). A project follows the access level unless the caller's write
+  // access is per record (task 036 fix round 1); then it follows `canCreate` too, and a missing one reads as "cannot".
   const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
   const [loading, setLoading] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -773,7 +780,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         const data = await getDocuments(recordId);
         setDocuments(data.items);
         setTruncated(data.truncated);
-        setListCanCreate(null);
+        setListCanCreate(writeAccessPerRecord ? (data.canCreate ?? false) : null);
       } else {
         const data = await getRecordDocuments(root, recordId);
         setDocuments(data.items);
@@ -786,7 +793,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [root, recordId]);
+  }, [root, recordId, writeAccessPerRecord]);
 
   React.useEffect(() => {
     void fetchDocuments();

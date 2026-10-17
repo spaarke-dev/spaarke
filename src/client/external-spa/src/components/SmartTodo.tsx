@@ -597,6 +597,12 @@ export interface SmartTodoProps {
   accessLevel: AccessLevel;
   /** The signed-in principal. With it, to-dos the caller created show Delete (task 054); without it, none do. */
   caller?: CallerIdentity | null;
+  /**
+   * The caller's write access is decided per record (`/me` `writeAccessPerRecord`, task 036 fix round 1): "Add Task"
+   * then follows the BFF's `canCreate` on this record's to-do list instead of `accessLevel`. The status toggle still
+   * follows `accessLevel` (a per-row Write is not asked of a list).
+   */
+  writeAccessPerRecord?: boolean;
 }
 
 /**
@@ -612,6 +618,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
   root = 'projects',
   accessLevel: levelProp,
   caller,
+  writeAccessPerRecord = false,
 }) => {
   // Create and the status toggle are project routes' actions: a matter or work assignment list is read-only here whatever
   // level the host passes (task 057). Delete-own is independent of the level.
@@ -638,6 +645,10 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
   const [submitError, setSubmitError] = React.useState<string | null>(null);
 
   const allowEdit = canEdit(accessLevel);
+  // Task 036 fix round 1: the BFF's `canCreate` on this list (null = not said). With per-record write access it decides
+  // "Add Task" (create is a project action here, task 057); otherwise the level does, as before.
+  const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
+  const allowCreate = writeAccessPerRecord ? root === 'projects' && listCanCreate === true : allowEdit;
 
   // Delete-own (task 054): the to-do leaves the list on the server's 204; any refusal keeps it and is shown.
   const del = useDeleteOwn<ODataTodo>({
@@ -667,6 +678,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
       });
       setTasks(todos.items);
       setTruncated(todos.truncated);
+      setListCanCreate(todos.canCreate ?? null);
     } catch (err) {
       const failure = accessFailureOf(err);
       if (failure) {
@@ -723,10 +735,10 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
   // ---------------------------------------------------------------------------
 
   const handleOpenDialog = React.useCallback(() => {
-    if (!allowEdit) return;
+    if (!allowCreate) return;
     setSubmitError(null);
     setIsDialogOpen(true);
-  }, [allowEdit]);
+  }, [allowCreate]);
 
   const handleDismissDialog = React.useCallback(() => {
     if (isSubmitting) return;
@@ -778,7 +790,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
 
   const cardTitle = totalCount > 0 ? `Tasks (${pendingCount} of ${totalCount} pending)` : 'Tasks';
 
-  const cardActions = allowEdit ? (
+  const cardActions = allowCreate ? (
     <Button
       appearance="primary"
       icon={<AddRegular />}
@@ -832,7 +844,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
             <div className={styles.emptyState} role="status" aria-live="polite">
               <TaskListSquareLtrRegular className={styles.emptyStateIcon} />
               <Text>No tasks yet</Text>
-              {allowEdit && (
+              {allowCreate && (
                 <Text size={200} style={{ color: tokens.colorNeutralForeground4 }}>
                   Use "Add Task" to create the first task for this project.
                 </Text>
@@ -893,8 +905,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
 
       <DeleteOwnConfirm del={del} />
 
-      {/* Create task dialog — only rendered when allowEdit */}
-      {allowEdit && (
+      {/* Create task dialog — only rendered when allowCreate */}
+      {allowCreate && (
         <CreateTaskDialog
           open={isDialogOpen}
           onDismiss={handleDismissDialog}
