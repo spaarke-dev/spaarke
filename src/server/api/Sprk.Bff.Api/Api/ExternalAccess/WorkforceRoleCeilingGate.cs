@@ -134,8 +134,12 @@ internal static class WorkforceRoleCeilingGate
     /// <summary><c>DELETE /events/{id}</c> (delete own).</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> DeleteEvent = Set((EventTable, AccessRights.Delete));
 
-    /// <summary><c>GET /contact-grants</c>: the grant rows the caller issued on a record.</summary>
-    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ListIssuedGrants = Set((GrantTable, AccessRights.Read));
+    /// <summary>
+    /// <c>GET /contact-grants</c>: the grant rows the caller issued on a record, each with the grantee contact's name and
+    /// email (review round 2 F1: the response reads <c>contact</c> too).
+    /// </summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ListIssuedGrants = Set(
+        (GrantTable, AccessRights.Read), (ContactTable, AccessRights.Read));
 
     /// <summary><c>POST /contact-grants/revoke</c>: the grant rows are deactivated (an update).</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> RevokeIssuedGrant = Set((GrantTable, AccessRights.Write));
