@@ -185,3 +185,30 @@ deployed BFF's impersonated reads, not by this run.
 
 **Consequence:** task 036 is unblocked. The live layer must be re-run (same procedure) before 036 merges
 if the canary code or the impersonation primitive changes, and before every FR-20 rollout.
+
+## 9. Manual live gate — RE-RUN 2026-10-17 (task 036 pre-merge)
+
+**Result: all four live tests PASS.** Run from `C:\wt036` (branch `feat/uac-036-fr20-flag-gated-swap` @
+`c7ad7b65a`, PR #2078) against dev, `SPAARKE_CANARY_REQUIRED=true`, operator `az` login. All 20 tests in
+the class pass (4 live + 16 tenant-free, including the config tripwire); none halted as NOT RUN.
+
+| Test | Result |
+|---|---|
+| `ImpersonatedMatterRead_AgainstTheCanaryUser_ReturnsAStrictSubsetAndStrictlyFewerRows` | PASS — impersonated **59** ⊂ app-only **62** |
+| `ImpersonatedMatterRead_AgainstTheCanaryUser_ReturnsExactlyTheSeededMatters` | PASS — impersonated = the independently derived 59 |
+| `RetrieveMultipleImpersonatedAsync_OnTheLiveConfiguredService_RefusesAnEmptyCaller` | PASS |
+| `HelperStampedMatterRead_AgainstTheCanaryUser_ReturnsAStrictSubsetAndStrictlyFewerRows` | PASS — 59 ⊂ 62 |
+
+**Canary re-verified app-only, read-only (same user as §8, nothing created or re-roled).**
+`d6f8f439-40bf-f111-a05b-3833c5e9614d`, enabled, BU1; direct roles Spaarke Basic User + Spaarke Core User;
+team Spaarke Business Unit 1 only. Effective `prvReadsprk_Matter` (`RetrieveUserPrivilegeByPrivilegeName`,
+which folds in team roles): one entry, **Deep** at BU1 — no Organization depth. Hierarchy security off.
+
+**Expected set, app-only.** BU1 has no child business units → matters owned in BU1 = **59**; Read-bit
+`principalobjectaccess` rows on `sprk_matter` for the user or its team = **0**. Expected **59** of the org's
+**62**. Outside it (root BU "Spaarke"): `0ee64da4-9dbe-f111-aaaf-0022482913fc`,
+`ced2c3d9-47bf-f111-aaaf-0022482913fc`, and new since §8 `d14d79f4-8fbf-f111-aaaf-0022482913fc`. Margin 3.
+
+The inversion check is one-time (§8, 2026-10-03) and the canary code is unchanged since; not repeated.
+**Consequence:** the NFR-04 live half of the 036 merge gate is satisfied for `c7ad7b65a`. Re-run before an
+FR-20 rollout in any environment, or if the impersonation primitive changes before merge.
