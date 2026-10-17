@@ -1172,7 +1172,8 @@ public sealed class AssignedAccessMaterializer
         /// <summary>The caller's oid is a contact's (a partner, task 140 / I-4): contacts never invite.</summary>
         Partner,
 
-        /// <summary>The caller's oid is neither a systemuser's nor a contact's, or could not be read: no invite.</summary>
+        /// <summary>The caller's oid is neither a systemuser's nor a contact's, is a DISABLED systemuser's (issue #1576 —
+        /// nobody, and never a partner), or could not be read: no invite.</summary>
         Unresolved,
     }
 
@@ -1239,8 +1240,13 @@ public sealed class AssignedAccessMaterializer
     /// <summary>
     /// Who is behind this pass, resolved once per run. The job is never a person. Otherwise the request's oid: a systemuser's
     /// (the read <c>sprk_grantedby</c> already uses) is internal; a contact's (bound to it) is a partner; anything else —
-    /// no oid, an unknown oid, a read that failed — invites nobody (fail closed).
+    /// no oid, an unknown oid, a DISABLED systemuser's oid, a read that failed — invites nobody (fail closed).
     /// </summary>
+    /// <remarks>Issue #1576: the systemuser read deliberately does NOT filter <c>isdisabled</c>; it selects it and checks it.
+    /// Filtering would make a disabled user's oid look like "no systemuser" and fall through to the contact lookup, so a
+    /// disabled internal user whose oid a contact also carries would be classed as a PARTNER. A disabled systemuser is
+    /// therefore nobody here (as <c>WorkforcePrincipalResolver</c>'s <c>DenySystemUserDisabled</c>), never a partner; a row
+    /// whose <c>isdisabled</c> is absent is treated as disabled (fail closed).</remarks>
     private async Task<(ActorKind Kind, Guid? PartnerContactId)> ResolveActorAsync(Run run, CancellationToken ct)
     {
         if (run.Actor is { } known)
@@ -1256,7 +1262,7 @@ public sealed class AssignedAccessMaterializer
             try
             {
                 users = await _dataverse.QueryAsync<GrantExternalAccessEndpoint.SystemUserRow>(
-                    "systemusers", filter: $"azureactivedirectoryobjectid eq {oid:D}", select: "systemuserid", top: 1,
+                    "systemusers", filter: $"azureactivedirectoryobjectid eq {oid:D}", select: "systemuserid,isdisabled", top: 2,
                     cancellationToken: ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -1271,9 +1277,17 @@ public sealed class AssignedAccessMaterializer
             {
                 resolved = (ActorKind.Unresolved, null);
             }
-            else if (users.Any(u => u.systemuserid is { } id && id != Guid.Empty))
+            else if (users.Any(u => u.systemuserid is { } id && id != Guid.Empty && u.isdisabled == false))
             {
                 resolved = (ActorKind.Internal, null);
+            }
+            else if (users.Any(u => u.systemuserid is { } id && id != Guid.Empty))
+            {
+                // Only DISABLED systemusers carry this oid: nobody — never fall through to the contact lookup (a partner).
+                _logger.LogInformation(
+                    "[ASSIGNED-ACCESS] {Type} {RootId}: the systemuser behind this pass is disabled; no invite is sent.",
+                    run.Logical, run.RootId);
+                resolved = (ActorKind.Unresolved, null);
             }
             else
             {

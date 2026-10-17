@@ -193,6 +193,11 @@ public static class ExternalAccessEndpoints
         // contradict. Detaching the filter would make it answer "yes" to everyone — see the endpoint's remarks.
         adminGroup.MapRecordAccessGateEndpoint();
 
+        // GET /api/v1/external-access/record-grants — the record's active external grants for Manage Access's Current
+        // Access (task 099a, #1010(a)). On this group so the delegation filter gates it with the /can-manage-access rule
+        // (Write and Share on the record): the reader is the dialog's audience, whatever business unit owns the grant rows.
+        adminGroup.MapRecordGrantsEndpoint();
+
         // POST /share-user · POST /unshare-user · GET /user-shares — internal system-user shares on a record
         // (spec FR-29, task 063): the server half of the Manage Access "+ User" picker (task 065). On this group so
         // they inherit the same delegation gate (Write and Share on the record) as every route above.

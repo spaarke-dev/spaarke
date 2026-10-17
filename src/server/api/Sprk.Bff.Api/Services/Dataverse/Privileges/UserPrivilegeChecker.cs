@@ -253,7 +253,10 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
                         new ConditionExpression(
                             "azureactivedirectoryobjectid",
                             ConditionOperator.Equal,
-                            userOid)
+                            userOid),
+                        // Issue #1576: a disabled systemuser resolves to Guid.Empty (empty privilege set) here,
+                        // explicitly, instead of relying on the impersonated read failing.
+                        new ConditionExpression("isdisabled", ConditionOperator.Equal, false)
                     }
                 }
             };

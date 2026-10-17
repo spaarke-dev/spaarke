@@ -308,6 +308,21 @@ public class RecordOwnershipResolverTests
         directory.UserKeyColumns.Should().ContainSingle().Which.Should().Be("azureactivedirectoryobjectid");
     }
 
+    [Fact]
+    public async Task ResolveOwner_WhenTheActingUserIsDisabled_RefusesRatherThanFilingUnderTheirBusinessUnit()
+    {
+        // Issue #1576: a disabled systemuser keeps its oid. Its business unit must not own a new record.
+        var disabledOid = Guid.Parse("15760000-0000-0000-0000-0000000001d1");
+        var directory = Directory().WithDisabledUser(Guid.Parse("15760000-0000-0000-0000-0000000001d2"), disabledOid, GeneralBu);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { CallerObjectId = disabledOid },
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue();
+        resolution.OwningTeamId.Should().BeNull();
+    }
+
     // =====================================================================================
     // Refuse branch 2 — nothing to resolve from, or an ambiguous answer
     // =====================================================================================
@@ -1756,6 +1771,24 @@ public class RecordOwnershipResolverTests
 
         resolution.CreatedByPerson.Should().Be(CallerUserId);
         directory.UserKeyColumns.Should().Equal("azureactivedirectoryobjectid");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_ADisabledObjectIdRequesterIsNobodysCreatorPerson()
+    {
+        // Issue #1576: a disabled systemuser keeps its oid; it must not be recorded as who asked for the row.
+        var disabledOid = Guid.Parse("15760000-0000-0000-0000-0000000002d1");
+        var directory = Directory()
+            .WithDisabledUser(Guid.Parse("15760000-0000-0000-0000-0000000002d2"), disabledOid, GeneralBu)
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_matter", MatterId) })
+                with { RequestedBy = RecordRequester.Of(objectId: disabledOid) },
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam, "who asked never changes the owner");
+        resolution.CreatedByPerson.Should().BeNull();
     }
 
     [Theory]
