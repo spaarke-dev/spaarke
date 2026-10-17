@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-10-16
+> **Last Updated**: 2026-10-17
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file; never prepend new blocks above old ones. Target ≤ 10 KB.
 
@@ -11,21 +11,22 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. Done (40/79): 001-005, 010-014, 016-025, 027-029, 040-048, 054, 078, 106, 107, 108, 109. WIP: 026 (fix-round-1 running, agent a89b3b0fa808c1b23), 070 (waits for the master merge + ontology paired change). ADR-010 ceiling 165; route ledger 131 |
-| **Step** | 026 fix-round-1 running. It merges three reviews: ours, ontology-r1 K1-K5 and uac-r2 (no fix-now; condition 4 accepted as met, with the deviation carried in #2047). Items: refusal kinds (MultipleRoots → CoreRecordAmbiguous); sprk_firmreason field security per D-95; line core = derived core guards; deploy-order step (SpaarkeMaster import before the BFF) in 053 + DEF-021; RemoveLink doc; notes corrections; order-sensitive lockstep; project CLAUDE.md line "no line upload/storage route before #2047" |
+| **Task** | Parallel mode. Done 40/79. Running (4 agents, base 16c76e7d8): 070 fix-round-2 (ontology paired change), 026 fix-round-2 + DEF-022 (D-96 invoice-side line check, app identity; guard on three generic update paths; uac K4; 053/130 doc items), 015 (retire sprk_invoicestatus, owner D-97 incl. live delete), 051 (SPA submission UI). ADR-010 ceiling 166; route ledger 136 (after the master merge) |
+| **Step** | origin/master 1df4ee12d merged as 49acd2f78. Conflicts: ADR010 166, ledger 136, SignalReevaluationJobTests fake, PolicyVersionValidator (ValidateForAuthoring passes RuleDomain.Ontology). The full unit suite is running on 49acd2f78 with TRX, results in scratchpad/full-49acd2f78. The earlier 25 failures came from a pre-#2074 master regression (#2072); clean master 1df4ee12d passes TodoAssigneeOwnerReconciliationJobTests 34/34 |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | When 026 reports: cherry-pick (trailer rewrite, background, 600 s), build + Signals/Finance filter + ArchTests. Send the range to ontology-r1 (all) and uac-r2 (only the CoreAncestorResolver commits; check existing callers are unchanged). After both OK, mark 026 ✅. Then merge origin/master (>= e702c3401; conflicts expected in ADR010_DITests, the route ledger (master 129 vs ours 131), SignalReevaluationJobTests), then 070 fix-round-2 = ontology paired change (OntologyAdminAuthoringService:1226 passes RuleDomain.Ontology + RuleTypeWrongDomain → "ruleType"; OntologyDomain + OntologyAdminRulesService :48/:142 use RuleDomains; dry-run 400 test), send to ontology-r1, then 070 ✅. Then 015 (owner OK, destructive) |
+| **Next Action** | As each agent reports: cherry-pick (trailer rewrite, background, 600 s), build, targeted tests and ArchTests. 070 → send its range to ontology-r1, including the merge-time ValidateForAuthoring change; on approval mark 070 ✅, then start 071/074/075/076 (≤4 at a time). 026 fr2 → send to uac-r2 (resolver K4, OwnedChildWrite D-96, the three DEF-022 paths) and ontology-r1 (053/130 docs); on OK mark 026 ✅ and close #2056 via the PR. 015 → apply the ACT-004.json edit in the main session (.claude), send ontology-r1 the notice the agent wrote, review the live delete evidence, mark ✅. 051 → review, then mark ✅ (052 also needs 105) |
 
 ### Files Modified This Session
-- All committed (last: 794dd173c D-95a).
+- All committed (last: D-97 16c76e7d8, plus this checkpoint).
 
 ### Critical Context
-- Decisions: D-87…D-91 (earlier); D-92 schema on ontology policy tables approved as built; D-93 code-set matching tuning (task 054, done); D-94 sprk_billingevent as an intermediate (uac-r2); D-95 Ontology Service AppendTo on billing event + invoice, firm reason under field security; D-95a ontology-r1 applied the grants live and owns Roles/Spaarke Ontology Service.xml + its guard test (026 must not touch them).
-- Standing: no line (sprk_billingevent) upload/storage route before uac-r2 #2047.
-- 053 deploy: 047 seeding order (Ensure-ActionRow → Deploy-ActionMirrors → BFF deploy + Seed-PlaybookConsumers -DiffOnly), 054 rerun Deploy-ActionMirrors -Filter invoice-codeset-match + tuning seed; SpaarkeMaster import before the BFF (026).
-- 029: Activate/Deactivate hide is source-only until a release import; pac in pwsh: prepend %LOCALAPPDATA%/Microsoft/PowerAppsCLI to PATH.
-- Owner action pending: add the 7 new tables to the Matter Management and Spaarke Administration apps in the app designer (save + publish).
-- Open: 015 owner OK; optional owner question on 106 rate history (whole section vs firm-wide cards when the core read is refused); DEF-015 Procedure Library; ISS-009; #2010, #2011, #2045 (DEF-021); write-path registry row for the tracking number not yet in DATAVERSE-WRITE-PATH-ARCHITECTURE.md.
+- Decisions: D-92 (= ontology D-153); D-93 tuning (054 done); D-94 billingevent intermediate; D-95/D-95a AppendTo (ontology #2048) + firm reason FLS (applied live; profile "Spaarke Ontology Writer Firm Reason Writers", accepted by ontology); D-96 invoice re-file refused when lines name another core (app identity); D-97 owner OK for 015 incl. delete.
+- 015 code check (owner asked to cover ontology code): indirect readers via the FinanceBaseValues constants (FinanceRollupService); live-only aiskillconfig a32ae5a7 (Copilot form-fill opt-out) blocks the attribute delete; 3 live rows (ToReview, statuscode 1); stale ontology branches carry the old FinanceRollupService. All of this is in the 015 POML constraints.
+- DEF-022 (#2056): FR-05 guard missing on UpdateRecordActionCore, DataverseUpdateHandler and the FieldMappingEndpoints push; uac-r2 direction is to guard each path (fix in 026 fr2).
+- Standing: no line (sprk_billingevent) upload/storage route before uac-r2 #2047. The 053 deploy needs the SpaarkeMaster import (or schema) before the BFF, then the firm-reason script.
+- The full Sprk.Bff.Api.Tests run takes ~45 min (24.5k tests); agents run filtered sets only.
+- Owner action pending: add the 7 new tables to the Matter Management and Spaarke Administration apps (app designer).
+- Open: 106 rate-history question (optional); DEF-015; ISS-009; #2010, #2011, #2045; write-path registry row for the tracking number.
 
 ---
 
@@ -33,7 +34,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 026 (agent fix-round-1); 070 queued behind the master merge |
+| **Task ID** | 070 fr2, 026 fr2, 015, 051 (agents) |
 
 ## Next Action
 

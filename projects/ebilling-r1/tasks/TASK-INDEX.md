@@ -29,7 +29,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 012 | ✅ [done] | Invoice header schema: core-record fields, totals, supersedes, lifecycle statuscodes | STANDARD | sonnet / high | P1-A | none |
 | 013 | ✅ [done] | Core-ancestor derivation and one-lookup guard for the invoice family | FULL | opus / high | none (p-safe false: uac-r2 security files, census test shared with 011) | 010, 012, 020, 021, 022, 023, 027 |
 | 014 | ✅ [done] | Invoice lifecycle transition service | FULL | sonnet / high | P1-B | 012 |
-| 015 | 🔲 [open] | Retire `sprk_invoicestatus` — data, readers, forms, views, docs; notify ontology-r1 | FULL | opus / high | none (main-session) | 014, 029 |
+| 015 | 🟡 [wip] | Retire `sprk_invoicestatus` — data, readers, forms, views, docs; notify ontology-r1 | FULL | opus / high | none (main-session) | 014, 029 |
 | 016 | ✅ [done] | Invoice totals calculator (I-1) | STANDARD | sonnet / high | P1-B | 010, 012 |
 | 017 | ✅ [done] | Timekeeper (extend stub) and rate card schema | STANDARD | sonnet / high | P1-A | none |
 | 018 | ✅ [done] | UTBMS code sets: schema, mapping lookups, seed files, seed script | STANDARD | sonnet / high | P1-A | none |
@@ -60,7 +60,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 048 | ✅ [done] | AI code-set mapping proposals (admin-confirmed) | STANDARD | sonnet / high | P2-C | 047 |
 | 049 | 🔲 [open] | `InvoiceSubmissionProcessing` job | FULL | opus / high | none | 014, 016, 043, 044, 046, 047, 072, 073 |
 | 050 | 🔲 [open] | Retire the legacy extraction path | STANDARD | sonnet / high | none | 042, 049 |
-| 051 | 🔲 [open] | SPA submission UI (shared wizard component) | STANDARD | sonnet / high | P2-D | 044 |
+| 051 | 🟡 [wip] | SPA submission UI (shared wizard component) | STANDARD | sonnet / high | P2-D | 044 |
 | 052 | 🔲 [open] | `CreateInvoiceWizard` rewired to the internal entry point | STANDARD | sonnet / high | P4-C | 044, 051, 105 |
 | 053 | 🔲 [open] | Deploy WP2 to dev | STANDARD | sonnet / high | none (deploy) | 042, 043, 044, 045, 046, 047, 048, 049, 050, 051, 054 |
 | 054 | ✅ [done] | Code-set matching: tuning data, full coverage and an AI review step (D-93) | FULL | opus / high | P2-D | 047, 048 |
