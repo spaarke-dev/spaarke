@@ -71,7 +71,38 @@ public class RegardingBuilderHostTableTests
         todo.Attributes.Should().BeEmpty("nothing is written on a refused host");
     }
 
-    private static void AssertSubjectAndPair(Entity host, string subject, Guid subjectId, string subjectLookup, bool typed)
+    // ── ebilling-r1 task 026 (FR-15, D-94): the invoice-line subject ─────────────────────────────────────────────────
+
+    private static readonly Guid LineTypeRefId = Guid.Parse("fb30d221-bbc9-f111-a05a-7c1e520a989f"); // spaarkedev1, created 2026-10-16
+    private static readonly Guid LineId = Guid.Parse("02600000-0000-0000-0000-000000000b01");
+
+    [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    public async Task OntologyHost_InvoiceLineSubject_IsFiledUnderSprkRegardingInvoiceLine_WithTheTypedPair(string table)
+    {
+        var builder = Builder(CoreAncestorResolverFixtures.Inert());
+        var host = new Entity(table);
+
+        await builder.ApplySubjectLookupAndPairAsync(host, "sprk_billingevent", LineId, "Subject name");
+
+        AssertSubjectAndPair(host, "sprk_billingevent", LineId, "sprk_regardinginvoiceline", typed: true, LineTypeRefId);
+    }
+
+    [Fact]
+    public async Task TodoHost_InvoiceLineSubject_IsStillUnsupported_ItHasNoLineLookup()
+    {
+        var builder = Builder(CoreAncestorResolverFixtures.Inert());
+        var todo = new Entity("sprk_todo");
+
+        var act = async () => await builder.ApplyResolverFieldsAsync(todo, "sprk_billingevent", LineId, "Subject name");
+
+        await act.Should().ThrowAsync<ArgumentException>().WithParameterName("regardingEntityName");
+        todo.Attributes.Should().BeEmpty();
+    }
+
+    private static void AssertSubjectAndPair(
+        Entity host, string subject, Guid subjectId, string subjectLookup, bool typed, Guid? typeRefId = null)
     {
         var lookups = TodoRegardingBuilder.RegardingLookupsByHostTable[host.LogicalName].Values;
         host.Attributes.Keys.Where(k => lookups.Contains(k)).Should().Equal(new[] { subjectLookup },
@@ -89,7 +120,7 @@ public class RegardingBuilderHostTableTests
         {
             var type = host["sprk_regardingrecordtype"].Should().BeOfType<EntityReference>().Subject;
             type.LogicalName.Should().Be("sprk_recordtype_ref");
-            type.Id.Should().Be(MatterTypeRefId);
+            type.Id.Should().Be(typeRefId ?? MatterTypeRefId);
         }
         else
         {
@@ -105,6 +136,8 @@ public class RegardingBuilderHostTableTests
             .ReturnsAsync(new Entity("sprk_recordtype_ref", MatterTypeRefId) { ["sprk_recorddisplayname"] = "Matter" });
         catalog.Setup(c => c.QueryRecordTypeRefAsync("sprk_communication", It.IsAny<CancellationToken>()))
             .ReturnsAsync((Entity?)null);
+        catalog.Setup(c => c.QueryRecordTypeRefAsync("sprk_billingevent", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", LineTypeRefId) { ["sprk_recorddisplayname"] = "Invoice Line" });
         return new TodoRegardingBuilder(catalog.Object, coreAncestors, NullLogger<TodoRegardingBuilder>.Instance);
     }
 }

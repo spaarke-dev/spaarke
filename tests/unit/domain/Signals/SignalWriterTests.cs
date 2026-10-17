@@ -1127,6 +1127,158 @@ public class SignalWriterTests
             "the subject IS the core record: one parent");
     }
 
+    // ── ebilling-r1 task 026 (FR-05, FR-15, D-75, D-94): an invoice or invoice-line subject ─────────────────────────────
+
+    private static readonly Guid LineId = Guid.Parse("55555555-0000-0000-0000-0000000000b1");
+    private static readonly Guid OtherLineId = Guid.Parse("55555555-0000-0000-0000-0000000000b2");
+    private static readonly Guid InvoiceId = Guid.Parse("55555555-0000-0000-0000-0000000000a1");
+
+    [Fact]
+    public async Task WriteAsync_InvoiceLineOfAProject_GroupsUnderTheProject_RegardingTheLine_NoMatter()
+    {
+        var sysadmin = new FakeSysadminClient().WithBusinessUnit("sprk_project", ProjectId, ProjectBusinessUnitId)
+            .Stub(new Entity("sprk_billingevent", LineId) { ["sprk_project"] = new EntityReference("sprk_project", ProjectId) });
+        var writerOrg = new FakeOrganizationService();
+        var ownership = new FakeOwnershipResolver();
+
+        var result = await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun), ownership: ownership)
+            .WriteAsync(DoRequest("sprk_billingevent", LineId));
+        var row = writerOrg.Rows[result.SignalId];
+
+        row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id.Should().Be(sysadmin.CatalogId("sprk_project"));
+        row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(ProjectId));
+        row.Attributes.Keys.Should().NotContain("sprk_matter");
+        row.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline").Should().BeEquivalentTo(new EntityReference("sprk_billingevent", LineId));
+        row.GetAttributeValue<EntityReference>("sprk_regardingrecordtype").Id.Should().Be(RecordTypeCatalogStub.SpaarkeDev1["sprk_billingevent"]);
+        row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(Lower(LineId));
+        row.Attributes.Keys.Where(k => k.StartsWith("sprk_regarding", StringComparison.Ordinal) && row[k] is EntityReference
+                && k != "sprk_regardingrecordtype")
+            .Should().Equal(new[] { "sprk_regardinginvoiceline" }, "ADR-024: one subject lookup per row");
+        result.CoreRecordEntity.Should().Be("sprk_project");
+        ownership.Contexts.Should().ContainSingle().Which.Parents.Should().Equal(
+            new Ownership.RecordOwnershipParent("sprk_project", ProjectId), new Ownership.RecordOwnershipParent("sprk_billingevent", LineId));
+    }
+
+    [Fact]
+    public async Task WriteAsync_InvoiceLineOfAWorkAssignment_GroupsUnderTheWorkAssignment()
+    {
+        var sysadmin = new FakeSysadminClient().WithBusinessUnit("sprk_workassignment", WorkAssignmentId, WorkAssignmentBusinessUnitId)
+            .Stub(new Entity("sprk_billingevent", LineId)
+            {
+                ["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", WorkAssignmentId),
+            });
+        var writerOrg = new FakeOrganizationService();
+
+        var result = await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun)).WriteAsync(DoRequest("sprk_billingevent", LineId));
+        var row = writerOrg.Rows[result.SignalId];
+
+        row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id.Should().Be(sysadmin.CatalogId("sprk_workassignment"));
+        row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(WorkAssignmentId));
+        row.Attributes.Keys.Should().NotContain("sprk_matter");
+    }
+
+    [Fact]
+    public async Task WriteAsync_InvoiceLine_TakesItsOwnRoot_NeverItsInvoicesMatter_D75()
+    {
+        // The line is filed under a project; its invoice sits under a matter. The line's own lookup wins, and the invoice is
+        // never read for the line's core record.
+        var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId)
+            .WithBusinessUnit("sprk_project", ProjectId, ProjectBusinessUnitId)
+            .Stub(new Entity("sprk_invoice", InvoiceId) { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) })
+            .Stub(new Entity("sprk_billingevent", LineId)
+            {
+                ["sprk_project"] = new EntityReference("sprk_project", ProjectId),
+                ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
+            });
+        var writerOrg = new FakeOrganizationService();
+
+        var result = await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun)).WriteAsync(DoRequest("sprk_billingevent", LineId));
+
+        writerOrg.Rows[result.SignalId].GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(ProjectId));
+        sysadmin.Retrieved.Should().NotContain(r => r.Entity == "sprk_invoice", "D-75: a line is never resolved through its invoice");
+        sysadmin.Retrieved.Where(r => r.Entity == "sprk_billingevent").SelectMany(r => r.Columns).Should().NotContain("sprk_invoice");
+    }
+
+    [Fact]
+    public async Task WriteAsync_InvoiceLineWithNoCoreRecord_IsRefused_NeverANoCoreDoItem_WritesNothing()
+    {
+        // Without the FR-05 check a Do-lane subject with no ancestor is written as a no-core item owned by the resolver's team.
+        var sysadmin = new FakeSysadminClient()
+            .Stub(new Entity("sprk_billingevent", LineId) { ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId) });
+        var writerOrg = new FakeOrganizationService();
+
+        var act = async () => await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun)).WriteAsync(DoRequest("sprk_billingevent", LineId));
+
+        (await act.Should().ThrowAsync<SignalWriterEscalationException>())
+            .Which.Reason.Should().Be(OntologyWriterFailureReason.CoreRecordUnresolved);
+        writerOrg.Rows.Should().BeEmpty();
+        writerOrg.CreatedPayloads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WriteAsync_InvoiceLineWithTwoRoots_IsRefused_WritesNothing()
+    {
+        var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId)
+            .WithBusinessUnit("sprk_project", ProjectId, ProjectBusinessUnitId)
+            .Stub(new Entity("sprk_billingevent", LineId)
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+                ["sprk_project"] = new EntityReference("sprk_project", ProjectId),
+            });
+        var writerOrg = new FakeOrganizationService();
+
+        var act = async () => await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun)).WriteAsync(DoRequest("sprk_billingevent", LineId));
+
+        (await act.Should().ThrowAsync<SignalWriterEscalationException>())
+            .Which.Reason.Should().Be(OntologyWriterFailureReason.CoreRecordUnresolved);
+        writerOrg.CreatedPayloads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WriteAsync_InvoiceUnderAMatterAndAProject_IsAmbiguous_NeverPicksMatterOverProject()
+    {
+        // D-37's matter-over-project rule would pick the matter for any other subject; FR-05 refuses instead.
+        var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId)
+            .WithBusinessUnit("sprk_project", ProjectId, ProjectBusinessUnitId)
+            .Stub(new Entity("sprk_invoice", InvoiceId)
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+                ["sprk_project"] = new EntityReference("sprk_project", ProjectId),
+            });
+        var writerOrg = new FakeOrganizationService();
+
+        var act = async () => await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun)).WriteAsync(DoRequest("sprk_invoice", InvoiceId));
+
+        (await act.Should().ThrowAsync<SignalWriterEscalationException>())
+            .Which.Reason.Should().Be(OntologyWriterFailureReason.CoreRecordAmbiguous);
+        writerOrg.CreatedPayloads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WriteAsync_InvoiceOfAMatter_GroupsUnderTheMatter_RegardingTheInvoice()
+    {
+        var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId)
+            .Stub(new Entity("sprk_invoice", InvoiceId) { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
+        var writerOrg = new FakeOrganizationService();
+
+        var result = await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun)).WriteAsync(DoRequest("sprk_invoice", InvoiceId));
+        var row = writerOrg.Rows[result.SignalId];
+
+        row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(MatterId));
+        row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId);
+        row.GetAttributeValue<EntityReference>("sprk_regardinginvoice").Id.Should().Be(InvoiceId);
+    }
+
+    [Fact]
+    public void BuildDedupeKey_TwoLinesOfOneInvoice_HaveDifferentKeys_InTheUnchangedFormat()
+    {
+        var first = SignalWriter.BuildDedupeKey("POL-LINE-RATE", "sprk_billingevent", Lower(LineId), 1);
+        var second = SignalWriter.BuildDedupeKey("POL-LINE-RATE", "sprk_billingevent", Lower(OtherLineId), 1);
+
+        first.Should().Be($"POL-LINE-RATE|sprk_billingevent|{Lower(LineId)}|1");
+        second.Should().NotBe(first, "a finding about one line never dedupes against a finding about its sibling");
+    }
+
     [Fact]
     public async Task WriteAsync_TodoWithNoMatterAndNoProject_HasNoCoreRecord_IsOwnedByTheResolversTeam_NeverAUser_D130()
     {
@@ -2060,9 +2212,15 @@ public class SignalWriterTests
         return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }
 
+    /// <summary>The four stamp columns; for an invoice-family subject (ebilling-r1 task 026) also its typed root columns
+    /// (<c>sprk_matter</c>, <c>sprk_project</c>), which those tables carry instead of <c>sprk_regarding{core}</c>.</summary>
     private static Task<IReadOnlySet<string>> StampColumnProbe(string entityLogicalName, CancellationToken ct) =>
         Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
-            Ownership.CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute), StringComparer.OrdinalIgnoreCase));
+            Ownership.CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute)
+                .Concat(Ownership.InvoiceFamilyCoreRecordGuard.CoreRecordLookups.TryGetValue(entityLogicalName, out var lookups)
+                    ? lookups.Select(l => l.Column).Append("sprk_invoice")
+                    : []),
+            StringComparer.OrdinalIgnoreCase));
 
     private static readonly Guid SecureTeamId = Guid.Parse("6eabc7f9-13be-f111-a05b-0022482913fc");
     private static readonly Guid SecureBusinessUnitId = Guid.Parse("d9ec0b6f-80a0-f111-aaac-000d3a99d1d7");
