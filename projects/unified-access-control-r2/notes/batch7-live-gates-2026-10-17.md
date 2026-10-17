@@ -135,3 +135,8 @@ traces | where timestamp > datetime(2026-10-16T06:03:13Z) and cloud_RoleName == 
   - `core-ancestor-stamp-reconciliation`: 11 "Dispatching", 11 "success=True".
 - **Before** (d5401cf2d, batch 6): 18 Warnings per run.
 - **Status:** PASS. Both issues were already closed (by the PR); the evidence is commented on both.
+
+## 099c (PR #2062, merged 883e415c0): TrackingFieldTrio 1.0.54 on dev
+- **Import:** `Import-SolutionScoped.ps1 -ZipPath …TrackingFieldTrioSolution_v1.0.54.zip` at about 07:47Z. The scoped publish covered 2 web resources; there was no tenant-wide publish. The source in C:/wt099c is byte-identical to master 883e415c0 for TrackingFieldTrio and AccessGrantModal.
+- **Served bundle:** `/WebResources/cc_Spaarke.Controls.TrackingFieldTrio/bundle.js` → 200, 1,066,484 B, sha256 `39bdc0b1d74a268abd870cd37cf84a154461229dfcbc455a835b23009cf94a62`. It equals the committed bundle, version 1.0.54, with 0 `context.webAPI` grant reads and `record-grants` ×1. **PASS.**
+- **Behaviour:** covered by 253 AccessGrantModal tests: the Expiration display and divergence, Apply → `/set-record-share-expiry`, every add sending the record date, the Apply/add race, and the lapsed case. The interactive check (pick a date, Apply, add a contact) writes live grant expiries, so it goes to the owner's UAT checklist rather than an agent write.
