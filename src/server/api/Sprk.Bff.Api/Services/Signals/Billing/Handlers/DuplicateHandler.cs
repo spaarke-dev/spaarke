@@ -12,9 +12,10 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// consequence, never decided here (D-88).</para>
 /// <para><b>Line level</b> (the other match fields): a line is a duplicate when every configured field of it equals the same field
 /// of an earlier line, in an active prior submission (reported first) or earlier in this invoice. The earlier line is not flagged,
-/// the repeat is. A line missing any configured field is not compared (nothing to match); the timekeeper compares by roster
-/// match when both lines have one, else by billed name; narratives compare with whitespace and case ignored; hours, amount and date
-/// exactly. A line-level finding never rejects (task 073).</para>
+/// the repeat is. A line missing any configured field is not compared (nothing to match); a line's timekeeper is its roster match
+/// when it has one, else its billed name (so two spellings of one rostered person are one, and a rostered line never equals an
+/// unrostered one: known limit, the unrostered line is already an ApprovedTimekeeper finding); narratives compare with whitespace
+/// and case ignored; hours, amount and date exactly. A line-level finding never rejects (task 073).</para>
 /// <para><b>Reads:</b> the invoice level reads FirmInvoiceNumber. The line level reads TimekeeperAsBilled and Date, the configured
 /// Hours, Narrative and Amount, and FirmInvoiceNumber (it is a template token). The original's tracking number is a reference value.</para>
 /// </remarks>
