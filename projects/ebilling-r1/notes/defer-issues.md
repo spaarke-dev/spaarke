@@ -815,6 +815,8 @@ Measured on 120 lines: 55.0% task top-1 on gpt-4.1-mini and 63.3% on gpt-5.4-min
 
 **Suggested fix**: bring the components into scope (or move dependants out) with their owning projects, then re-baseline drift per project.
 
+**Deploy order while this is open (task 026 fix-round-1)**: the BFF from task 026 on selects `sprk_regardinginvoiceline` on every Signal and Decision Record read, so in any environment the SpaarkeMaster schema (an import, or on dev `Deploy-EbillingSignalLineSubjectSchema.ps1`) must land BEFORE that BFF, or every Signal and Decision Record read answers 400. Then run `Set-EbillingFirmReasonFieldSecurity.ps1` (its profile member is per environment). Task 053 step 5 is the binding check.
+
 **Estimated effort**: 0.5–1 day (owning projects). **Related**: task 026, 053.
 
 ---
