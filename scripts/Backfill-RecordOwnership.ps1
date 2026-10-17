@@ -18,8 +18,21 @@
       sprk_document : the filed record — sprk_matter, sprk_project, sprk_invoice, sprk_workassignment, then the
                       related-family slots the save also writes: sprk_relatedevent, sprk_relatedtodo, sprk_relatedcontact.
       sprk_todo     : the record regarding (matter / project / invoice), then the document, then the communication.
+      sprk_externalrecordaccess (unified-access-control-r2 task 099b, D-11, #1010): the grant's ROOT — sprk_project,
+                      sprk_matter, sprk_workassignment (a grant binds exactly one) — the SAME parent the BFF's grant core
+                      hands RecordOwnershipResolver for a new grant. ACTIVE grants only (statecode = 0); app-owned inactive
+                      grants are counted (NotActive) and left alone.
     The target's owningbusinessunit → that unit's default owner team (isdefault = true AND teamtype = 0 — both
     predicates are required; dev has non-default Owner teams and Access teams in the same units).
+
+    SECURE ROOTS (sprk_externalrecordaccess) — the resolver's task 144 / 146 rules, as in
+    Migrate-SecureRecordsToNamedOwnerTeam.ps1:
+      - a root owned in the Secure Record business unit → that unit's NAMED owner team ('Secure Record Owners',
+        teamtype = 0, isdefault = false, exactly one) — never the Secure Record unit's default team;
+      - a root whose sprk_issecure is true OR EMPTY (fail closed, task 150) but is owned OUTSIDE the Secure Record unit is
+        NOT ISOLATED (an interrupted provisioning) → UNRESOLVABLE, never an ordinary team;
+      - more than one business unit with the Secure Record name, or a missing/duplicate named team → UNRESOLVABLE.
+    (sprk_document / sprk_todo keep the rule this script always applied to them; see the PR for 099b.)
 
     WHAT IT WILL NOT GUESS. A row filed against nothing (an unfiled save, or an app-created matter/project/invoice)
     was created on behalf of a user this data does not record — the create was app-only, so createdby is the app
@@ -49,7 +62,14 @@
     Forces a dry-run even when -Apply is passed.
 
 .PARAMETER Entities
-    Entities to re-own (default: sprk_document, sprk_todo, in that order).
+    Entities to re-own (default: sprk_document, sprk_todo, in that order). sprk_externalrecordaccess is opt-in:
+    -Entities sprk_externalrecordaccess.
+
+.PARAMETER SecureBusinessUnitName
+    The Secure Record business unit (SecureRecord:BusinessUnitName). Default 'Secure Record'.
+
+.PARAMETER SecureOwnerTeamName
+    Its named owner team (SecureRecord:OwnerTeamName). Default 'Secure Record Owners'.
 
 .PARAMETER MaxWritesPerRun
     Cap on actual writes in one -Apply run (0 = unlimited). Use a small number for the sample run.
@@ -72,6 +92,11 @@
 .EXAMPLE
     .\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -RevertManifest .\logs\record-ownership-manifest-20260930-120000.csv -Apply
     Undo that run exactly.
+
+.EXAMPLE
+    .\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Entities sprk_externalrecordaccess
+    The grant backfill dry run (task 099b). It is also the VERIFY: after -Apply, it must report ToWrite: 0 and
+    Candidates: 0 (no active grant owned by an application user).
 #>
 
 [CmdletBinding()]
@@ -83,8 +108,12 @@ param(
 
     [switch]$WhatIf,
 
-    [ValidateSet('sprk_document', 'sprk_todo')]
+    [ValidateSet('sprk_document', 'sprk_todo', 'sprk_externalrecordaccess')]
     [string[]]$Entities = @('sprk_document', 'sprk_todo'),
+
+    [string]$SecureBusinessUnitName = 'Secure Record',
+
+    [string]$SecureOwnerTeamName = 'Secure Record Owners',
 
     [int]$MaxWritesPerRun = 0,
 
@@ -118,8 +147,19 @@ $TargetOrder = @{
         'sprk_regardingdocument'      = 'sprk_documents'
         'sprk_regardingcommunication' = 'sprk_communications'
     }
+    # Task 099b: a grant binds exactly ONE root (GrantExternalAccessEndpoint.BuildGrantPayload), the parent the grant core
+    # hands the resolver.
+    'sprk_externalrecordaccess' = [ordered]@{
+        'sprk_project'        = 'sprk_projects'
+        'sprk_matter'         = 'sprk_matters'
+        'sprk_workassignment' = 'sprk_workassignments'
+    }
 }
-$EntitySet = @{ 'sprk_document' = 'sprk_documents'; 'sprk_todo' = 'sprk_todos' }
+$EntitySet = @{ 'sprk_document' = 'sprk_documents'; 'sprk_todo' = 'sprk_todos'; 'sprk_externalrecordaccess' = 'sprk_externalrecordaccesses' }
+# Entities whose candidates are ACTIVE rows only (amendment 4: "0 active grants owned by an application user").
+$ActiveOnly = @{ 'sprk_externalrecordaccess' = $true }
+# Entities resolved with the resolver's secure-root rules (task 144 / 146 / 150) — see SECURE ROOTS above.
+$SecureAware = @{ 'sprk_externalrecordaccess' = $true }
 $OwnerTeamType = 0
 
 # ── Logging ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -210,6 +250,64 @@ function Resolve-TargetBusinessUnit {
     return $bu
 }
 
+# ── Task 099b: the resolver's secure-root rules (RecordOwnershipResolver.ResolveFromParentsAsync) ─────────────────
+# Resolved ONCE per run. Ambiguity is recorded, not thrown: every secure-aware row is then UNRESOLVABLE (the resolver
+# refuses every create in that state), and the other entities are unaffected.
+$script:SecureTopology = $null
+function Get-SecureTopology {
+    if ($script:SecureTopology) { return $script:SecureTopology }
+    $escapedBu = $SecureBusinessUnitName.Replace("'", "''")
+    $bus = @(Invoke-DvGet "businessunits?`$select=businessunitid&`$filter=name eq '$escapedBu'&`$top=2")
+    $topology = @{ BuId = $null; Ambiguous = $false; TeamId = $null; TeamCount = 0 }
+    if ($bus.Count -gt 1) { $topology.Ambiguous = $true }
+    elseif ($bus.Count -eq 1) {
+        $topology.BuId = ConvertTo-CleanGuid $bus[0].businessunitid
+        $escapedTeam = $SecureOwnerTeamName.Replace("'", "''")
+        $teams = @(Invoke-DvGet "teams?`$select=teamid&`$filter=_businessunitid_value eq $($topology.BuId) and name eq '$escapedTeam' and teamtype eq $OwnerTeamType and isdefault eq false&`$top=2")
+        $topology.TeamCount = $teams.Count
+        if ($teams.Count -eq 1) { $topology.TeamId = ConvertTo-CleanGuid $teams[0].teamid }
+    }
+    $script:SecureTopology = $topology
+    Write-BackfillLog "SECURE-TOPOLOGY bu='$SecureBusinessUnitName' id=$($topology.BuId) ambiguous=$($topology.Ambiguous) namedTeam='$SecureOwnerTeamName' id=$($topology.TeamId) matches=$($topology.TeamCount)"
+    return $topology
+}
+
+# A ROOT's owning business unit and its secure flag. sprk_issecure EMPTY reads as flagged (fail closed, task 150).
+$script:RootFacts = @{}
+function Get-RootFacts {
+    param([string]$EntitySetName, [string]$RecordId)
+    $key = "$EntitySetName|$RecordId"
+    if ($script:RootFacts.ContainsKey($key)) { return $script:RootFacts[$key] }
+    try {
+        $row = (Invoke-DvGet "$EntitySetName($RecordId)?`$select=_owningbusinessunit_value,sprk_issecure")[0]
+        $flag = $row.PSObject.Properties['sprk_issecure']
+        $facts = @{ Bu = (Get-Lookup $row 'owningbusinessunit'); Flagged = ($null -eq $flag -or $null -eq $flag.Value -or $flag.Value -eq $true) }
+    } catch {
+        $facts = @{ Bu = $null; Flagged = $true }
+    }
+    $script:RootFacts[$key] = $facts
+    return $facts
+}
+
+# The team the resolver would answer for a row filed under ONE root, or a refusal reason. Returns @{ Team; Bu; Reason }.
+function Resolve-SecureAwareTeam {
+    param([string]$EntitySetName, [string]$RecordId)
+    $facts = Get-RootFacts $EntitySetName $RecordId
+    if (-not $facts.Bu) { return @{ Team = $null; Bu = $null; Reason = 'the root does not exist or has no owning business unit' } }
+    $secure = Get-SecureTopology
+    if ($secure.Ambiguous) { return @{ Team = $null; Bu = $facts.Bu; Reason = "more than one business unit is named '$SecureBusinessUnitName'" } }
+    if ($facts.Flagged -and $facts.Bu -ne $secure.BuId) {
+        return @{ Team = $null; Bu = $facts.Bu; Reason = 'the root is flagged secure (or its flag is empty) but is not owned in the Secure Record business unit (not isolated)' }
+    }
+    if ($secure.BuId -and $facts.Bu -eq $secure.BuId) {
+        if (-not $secure.TeamId) { return @{ Team = $null; Bu = $facts.Bu; Reason = "the named owner team '$SecureOwnerTeamName' resolved to $($secure.TeamCount) teams, not one" } }
+        return @{ Team = $secure.TeamId; Bu = $facts.Bu; Reason = $null }
+    }
+    $team = Resolve-DefaultOwnerTeam $facts.Bu
+    if (-not $team) { return @{ Team = $null; Bu = $facts.Bu; Reason = 'the business unit has no single default owner team' } }
+    return @{ Team = $team; Bu = $facts.Bu; Reason = $null }
+}
+
 # ── One write: assign, then READ BACK. Returns $null on success or an error string. ──────────────────────────
 function Set-Owner {
     param([string]$EntitySetName, [string]$RecordId, [string]$OwnerSet, [string]$OwnerId, [string]$ExpectedOwningColumn)
@@ -276,9 +374,17 @@ foreach ($entity in $Entities) {
     $order = $TargetOrder[$entity]
     $select = (@("$($entity)id", '_ownerid_value', '_owninguser_value', '_owningbusinessunit_value') +
         ($order.Keys | ForEach-Object { "_$($_)_value" })) -join ','
-    $candidates = Invoke-DvGet "$set`?`$select=$select&`$filter=Microsoft.Dynamics.CRM.In(PropertyName='owninguser',PropertyValues=[$inList])"
+    $appOwned = "Microsoft.Dynamics.CRM.In(PropertyName='owninguser',PropertyValues=[$inList])"
+    $notActive = '-'
+    if ($ActiveOnly[$entity]) {
+        $candidates = Invoke-DvGet "$set`?`$select=$select&`$filter=$appOwned and statecode eq 0"
+        # Reported, never written: an inactive grant confers nothing and is out of D-11's "active grants" check.
+        $notActive = @(Invoke-DvGet "$set`?`$select=$($entity)id&`$filter=$appOwned and statecode ne 0").Count
+    } else {
+        $candidates = Invoke-DvGet "$set`?`$select=$select&`$filter=$appOwned"
+    }
 
-    $stats = [ordered]@{ Entity = $entity; Candidates = @($candidates).Count; ToWrite = 0; Written = 0; Failed = 0; Unfiled = 0; Unresolvable = 0 }
+    $stats = [ordered]@{ Entity = $entity; Candidates = @($candidates).Count; ToWrite = 0; Written = 0; Failed = 0; Unfiled = 0; Unresolvable = 0; NotActive = $notActive }
     foreach ($row in $candidates) {
         $id = ConvertTo-CleanGuid $row."$($entity)id"
         $target = $null
@@ -293,12 +399,23 @@ foreach ($entity in $Entities) {
             continue
         }
 
-        $bu = Resolve-TargetBusinessUnit $target.Set $target.Id
-        $team = if ($bu) { Resolve-DefaultOwnerTeam $bu } else { $null }
-        if (-not $team) {
-            $stats.Unresolvable++
-            Write-BackfillLog "UNRESOLVABLE $entity $id — target $($target.Attribute)=$($target.Id) BU=$bu has no single default owner team. Not written."
-            continue
+        if ($SecureAware[$entity]) {
+            $answer = Resolve-SecureAwareTeam $target.Set $target.Id
+            $bu = $answer.Bu
+            $team = $answer.Team
+            if (-not $team) {
+                $stats.Unresolvable++
+                Write-BackfillLog "UNRESOLVABLE $entity $id — target $($target.Attribute)=$($target.Id) BU=${bu}: $($answer.Reason). Not written."
+                continue
+            }
+        } else {
+            $bu = Resolve-TargetBusinessUnit $target.Set $target.Id
+            $team = if ($bu) { Resolve-DefaultOwnerTeam $bu } else { $null }
+            if (-not $team) {
+                $stats.Unresolvable++
+                Write-BackfillLog "UNRESOLVABLE $entity $id — target $($target.Attribute)=$($target.Id) BU=$bu has no single default owner team. Not written."
+                continue
+            }
         }
 
         $stats.ToWrite++
