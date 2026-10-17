@@ -17,9 +17,10 @@
 |---|---|---|---|---|
 | (099b, pending) | #1010 D-11 half | C:/wt099b `feat/uac-099b-grant-team-ownership` from bed14dd67 | — | Executor running (Opus high). Then 2 adversarial passes (auth) and owner sign-off; the main session runs backfill -Apply after merge. |
 | #2061 (186, DRAFT) | task 186 | C:/wt186 `feat/uac-186-workforce-ceiling` (base b59e7e2a1 = master + R3 61e74ef64) | a6d12a0b5 | Built: 44/44 new tests, 1598 external-access tests, guard 87, +0.008 MB, no R3-file hunks. **Adversarial pass 1 running.** Still owed: pass 2, a full integration run before merge, owner questions K1 (unmapped routes) and K2 (/me/entitlements), the owner's role edit, and R3's interim PR merging first. |
-| #2035 (099a) | task 099 (amendment 5) + #1010 read half | C:/wt099a `feat/uac-099a-record-grants-read` | 1def4ee06 | **OWNER SIGNED OFF (round 101).** Master (bed14dd67) merged again 2026-10-17: guards 126/126, ledger 130, 107/107 unit tests. Merge watcher bn1vqa55m running. After merge: send R3 the SHA; start **099c**; live check after the R3 deploy (child-BU Core User sees root-owned grant G; TrackingFieldTrio 1.0.50 import). |
+| (099c, pending) | #961 | C:/wt099c `feat/uac-099c-expiration-picker` from 1d435e695 | — | Executor running (Opus high): Expiration picker, TrackingFieldTrio 1.0.51. Then one adversarial pass; import on dev after merge, once the BFF with 1d435e695 is live. |
 
 ## Merged (2026-10-16/17)
+- **#2035 `1d435e695`** (2026-10-17; 099a; #1010 commented: the read half; R3 told, and the owner approved the next BFF deploy)
 - **#2025 `bed14dd67`** (2026-10-17; #1576 (b)+(d); #1576 commented and stays open until the dev gate; R3 and provisioning (`-bb`) told)
 - #2007 `96d5b16c2` (#2005, live gate PASS)
 - #1983 `42aecf064`
@@ -35,7 +36,7 @@
 - **Batch 6 gates** (`notes/batch6-live-gates-2026-10-17.md`): #2021, #1620, #994 and #1755 PASS. The #1755 fixture is the secure project `a9e04977-…`, kept with its container.
 - #1363: registration PASS. **First run PENDING: after 2026-10-18 00:15Z**, run the KQL in the batch6 notes and `GET /api/admin/jobs/demo-expiration/status`.
 - #2002: **FAIL** → #2049. The reconciliation job still resolves with Write intent. Fixed by PR #2052, **merged at 901c7eeed** (R3 told). Next R3 deploy, then re-gate: 0 Warnings in 1 h.
-- Still to gate on later builds: #1576 (bed14dd67 is merged; needs an R3 deploy that contains it), 099a (after #2035).
+- Still to gate on later builds: #1576 (bed14dd67 is merged; needs an R3 deploy that contains it), 099a (1d435e695: an R3 deploy plus the TrackingFieldTrio 1.0.50 import, then the live check in #2035's body). Waiting on R3 for the deployed SHA and time.
 
 ## Waiting on others
 - **Ontology:** RESOLVED: #2039 option (b)/(c) = owner D-151 (both; 102a PR #2054 is UAC-OK at decbc9e6a). Ontology Administrator Append is live. 049 is applied live, including Q6 (Ontology Administrator Signal Write removed); repo PR #2050 is UAC-OK. **OPEN with the owner, through ontology:** remove the Ontology Administrator's prvAssignsprk_Signal and prvDeletesprk_Signal (recommended: remove).
