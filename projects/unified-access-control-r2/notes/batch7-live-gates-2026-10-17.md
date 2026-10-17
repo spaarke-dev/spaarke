@@ -127,3 +127,11 @@ traces | where timestamp > datetime(2026-10-16T06:03:13Z) and cloud_RoleName == 
   | Served `/WebResources/cc_Spaarke.Controls.TrackingFieldTrio/bundle.js` | same | 200, 1,061,698 B, version 1.0.50, 0 `context.webAPI` grant reads, `record-grants` ×1 |
 
   Both match master's bundle. **PASS.**
+
+## #2049 / #2002 re-gate (one hour after deploy): PASS
+- **Window:** 06:03:49Z → 07:03:49Z, App Insights `spe-insights-dev-67e2xz` (appId 6a76b012…), `cloud_RoleName == "spaarke-bff-dev"`.
+- **Results:**
+  - "carries no core-ancestor stamp": 187 lines, **0 at severity ≥ 2 (Warning)**;
+  - `core-ancestor-stamp-reconciliation`: 11 "Dispatching", 11 "success=True".
+- **Before** (d5401cf2d, batch 6): 18 Warnings per run.
+- **Status:** PASS. Both issues were already closed (by the PR); the evidence is commented on both.
