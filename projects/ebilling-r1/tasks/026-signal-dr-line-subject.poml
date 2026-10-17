@@ -4,7 +4,7 @@
     <title>Signal / Decision Record invoice-line subject and derivation</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>completed</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies ontology-owned and access-control C# (SignalWriter, TodoRegardingBuilder, CoreAncestorResolver, SecureChildLineage) plus schema and solution source.</rigor-reason>
     <model-tier>opus</model-tier>

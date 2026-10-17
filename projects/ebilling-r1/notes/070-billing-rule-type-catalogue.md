@@ -293,3 +293,7 @@ Naming: at ontology-r1's request the reason code is namespaced as `ontology.admi
 Known limits accepted by ontology-r1, no action:
 - **K-a:** `RuleBodyDescriber.cs:127` calls ValidateForSave with no domain. Its callers read Ontology-filtered policies, so reaching it needs privileged mis-seeding. This is K1 above.
 - **K-b:** a blank ruleBody reports "ruleBody required" before the type check. This is harmless.
+
+ontology-r1 checked the namespacing commit cc01731b3 and found it clean. Its run of the `OntologyAdminAuthoringEndpointTests` filter at cc01731b3 passed 96 tests with 0 failures. That clears the 070 paired change (the 49acd2f78 resolution plus 7496afb1c..cc01731b3) on the ontology side for the master PR. **Task 070 is complete as of 2026-10-17.**
+
+Merge note: ontology task 102b changes the same authoring files. Whichever project reaches master second resolves the conflict.
