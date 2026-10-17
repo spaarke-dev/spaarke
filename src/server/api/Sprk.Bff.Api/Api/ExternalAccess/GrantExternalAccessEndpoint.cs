@@ -336,6 +336,13 @@ public static class GrantExternalAccessEndpoint
     /// today + <see cref="ExternalGrantLifecycle.DefaultExpiryDays"/>. Without it (the Assigned-To rule), such a request is
     /// refused and writes nothing (task 113). A still-live key keeps its date either way (task 097).</para>
     /// </remarks>
+    /// <param name="resolvedOwnerTeamId">
+    /// Task 099b review round 1 (F2): the new row's owner team when the caller has ALREADY resolved it through
+    /// <see cref="ResolveGrantOwnerAsync"/> — <c>/invite-and-grant</c> does so BEFORE onboarding, so a refused owner leaves no
+    /// Contact and no CIAM account behind — so the core does not resolve it twice. <c>null</c> (every other caller): the core
+    /// resolves it itself, on a create only. Either way the ONE place that writes <c>ownerid</c> is
+    /// <see cref="BuildGrantPayload"/>.
+    /// </param>
     internal static async Task<GrantUpsertOutcome> CreateGrantAsync(
         GrantAccessRequest request,
         ExternalGrantRootType rootType,
@@ -350,7 +357,8 @@ public static class GrantExternalAccessEndpoint
         ILogger logger,
         CancellationToken ct,
         ContactGrantIssuer? contactIssuer = null,
-        bool reAddRestoresLapsed = false)
+        bool reAddRestoresLapsed = false,
+        Guid? resolvedOwnerTeamId = null)
     {
         // A missing ceiling is a caller bug, never "uncapped" (WP-1). Thrown, so it surfaces as the caller's 500.
         ArgumentNullException.ThrowIfNull(ceiling);
@@ -628,7 +636,10 @@ public static class GrantExternalAccessEndpoint
         // an unresolved team refuses 500 (the ExternalIntakeEndpoints idiom); both are returned as values, like every other
         // refusal of this core. Only a CREATE needs it: the match path above changes an existing row's level or date and
         // never its owner (rows written before 099b are re-owned by scripts/Backfill-RecordOwnership.ps1).
-        var owner = await ResolveGrantOwnerAsync(ownership, rootType, rootId, key, logger, ct);
+        // Review round 1 (F2): a caller that resolved the owner before its own side effects passes it in; it is not re-read.
+        var owner = resolvedOwnerTeamId is { } preResolvedTeamId
+            ? new GrantOwner(preResolvedTeamId, null)
+            : await ResolveGrantOwnerAsync(ownership, rootType, rootId, key, logger, ct);
         if (owner.Refusal is { } ownerRefusal)
             return GrantUpsertOutcome.Refused(ownerRefusal);
 
@@ -1157,9 +1168,11 @@ public static class GrantExternalAccessEndpoint
     /// <para>The <see cref="ExternalIntakeEndpoints"/> step 4 idiom: a Dataverse fault (the resolver propagates it) is
     /// <see cref="GrantPolicyDecision.OwnerUnreadable"/> (503); no team is <see cref="GrantPolicyDecision.OwnerUnresolved"/>
     /// (500). The caller's own cancellation propagates.</para>
+    /// <para><paramref name="key"/> is for the log only: <c>null</c> when <c>/invite-and-grant</c> asks before the grantee's
+    /// Contact exists (review round 1, F2).</para>
     /// </remarks>
     internal static async Task<GrantOwner> ResolveGrantOwnerAsync(
-        IRecordOwnershipResolver ownership, ExternalGrantRootType rootType, Guid rootId, ExternalGrantKey key,
+        IRecordOwnershipResolver ownership, ExternalGrantRootType rootType, Guid rootId, ExternalGrantKey? key,
         ILogger logger, CancellationToken ct)
     {
         RecordOwnerResolution resolution;

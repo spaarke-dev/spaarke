@@ -677,8 +677,24 @@ internal static class AssignedAccessTestDoubles
             }
         }
 
+        /// <summary>
+        /// Task 099b review round 1 (F2): when true, a <c>contacts</c> create (the invite core onboarding a NEW person) is
+        /// recorded in <see cref="ContactCreates"/> and answered with a new id, instead of failing as an unexpected create.
+        /// </summary>
+        public bool AcceptContactCreates { get; set; }
+
+        /// <summary>Task 099b review round 1 (F2): every <c>contacts</c> payload created (with <see cref="AcceptContactCreates"/>).</summary>
+        public List<string> ContactCreates { get; } = new();
+
         public override Task<Guid> CreateAsync(string entitySetName, object entity, CancellationToken cancellationToken = default)
         {
+            if (entitySetName == "contacts" && AcceptContactCreates)
+            {
+                lock (_gate)
+                    ContactCreates.Add(JsonSerializer.Serialize(entity));
+                return Task.FromResult(Guid.NewGuid());
+            }
+
             if (entitySetName != GrantSet)
                 throw new InvalidOperationException($"Unexpected create in {entitySetName}.");
 

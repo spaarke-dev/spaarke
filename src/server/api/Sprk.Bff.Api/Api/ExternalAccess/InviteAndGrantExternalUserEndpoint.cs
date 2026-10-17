@@ -231,6 +231,30 @@ public static class InviteAndGrantExternalUserEndpoint
             return GrantExternalAccessEndpoint.PolicyRefusalProblem(preRefusal, httpContext);
         }
 
+        // ── Task 099b review round 1 (F2): the new grant row's OWNER, BEFORE onboarding ──
+        // With no existing row on the key the core will CREATE one, and a create needs its owner team (D-11). It is resolved
+        // HERE, so a refusal — 503 owner_unreadable on a read fault, 500 owner_unresolved when no team resolves — leaves no
+        // Contact, no CIAM account and no onboarding email behind (the rule above). The team is handed to the core, which
+        // does not resolve it a second time; BuildGrantPayload stays the one place that writes ownerid. An existing row is
+        // updated in place and never re-owned, so no owner is asked for then (if that row vanishes before the write, the core
+        // resolves the owner itself).
+        Guid? ownerTeamId = null;
+        if (preCheck.ExistingRows.Count == 0)
+        {
+            var owner = await GrantExternalAccessEndpoint.ResolveGrantOwnerAsync(
+                ownership, grantRoot.Type, grantRoot.Id, preGrantee.Key, logger, ct);
+            if (owner.Refusal is { } ownerRefusal)
+            {
+                logger.LogWarning(
+                    "[EXT-INVITE-GRANT] Refused {Email} on {RootType} {RootId} before onboarding: the new grant row's owner " +
+                    "team could not be resolved ({ReasonCode}). Nothing was onboarded or granted.",
+                    request.Email, grantRoot.Type, grantRoot.Id, ownerRefusal.ReasonCode);
+                return GrantExternalAccessEndpoint.PolicyRefusalProblem(ownerRefusal, httpContext);
+            }
+
+            ownerTeamId = owner.TeamId;
+        }
+
         var portalUrl = configuration["ExternalAccess:PortalUrl"]
             ?? throw new InvalidOperationException("ExternalAccess:PortalUrl is not configured.");
 
@@ -307,7 +331,8 @@ public static class InviteAndGrantExternalUserEndpoint
             // not happen.
             grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 grantRequest, grantRoot.Type, grantRoot.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, ownership, logger, ct, reAddRestoresLapsed: true);
+                dataverseClient, participations, accessibleRecords, ownership, logger, ct, reAddRestoresLapsed: true,
+                resolvedOwnerTeamId: ownerTeamId);
 
             // Task 138: the core's own policy check refused (the record changed after the pre-check above) — or, since
             // task 139, its ceiling, never-lower or No Access check did. The Contact was onboarded; the refusal is
@@ -315,8 +340,8 @@ public static class InviteAndGrantExternalUserEndpoint
             if (grantOutcome.Refusal is { } refusal)
             {
                 logger.LogWarning(
-                    "[EXT-INVITE-GRANT] Onboarded Contact {ContactId} but the grant was refused by the record's " +
-                    "access policy: {ReasonCode}.", contactId, refusal.ReasonCode);
+                    "[EXT-INVITE-GRANT] Onboarded Contact {ContactId} but the grant core refused the grant: {ReasonCode}.",
+                    contactId, refusal.ReasonCode);
                 return GrantExternalAccessEndpoint.PolicyRefusalProblem(
                     refusal, httpContext, new Dictionary<string, object?> { ["contactId"] = contactId });
             }

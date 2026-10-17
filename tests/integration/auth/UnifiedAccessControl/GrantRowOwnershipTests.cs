@@ -265,6 +265,61 @@ public class GrantRowOwnershipTests
         _h.Grants.Creates.Should().BeEmpty("no grant row is written; the onboarding is idempotent, so a retry re-issues only the grant");
     }
 
+    // Review round 1, F2: a NEW person's owner is resolved BEFORE onboarding: "a refused request must leave no Contact and no
+    // CIAM account behind" (InviteAndGrantExternalUserEndpoint). Before the fix the owner was decided in the core, after the
+    // Contact, the CIAM account and the onboarding email.
+
+    [Fact]
+    public async Task InviteAndGrant_ANewPerson_WhenNoOwnerTeamResolves_Is500OwnerUnresolved_AndOnboardsNothing()
+    {
+        ChildBuMatter(OwnershipDirectory.Standard(withDefaultTeams: false));
+        _h.Grants.AcceptContactCreates = true; // the email matches no contact: onboarding WOULD create one
+
+        var result = await InviteAndGrant();
+
+        Problem(result).Should().Be((StatusCodes.Status500InternalServerError, ExternalGrantLifecycle.GrantOwnerUnresolvedReasonCode));
+        AssertNothingOnboardedOrGranted();
+    }
+
+    [Fact]
+    public async Task InviteAndGrant_ANewPerson_WhenTheOwnerReadFaults_Is503OwnerUnreadable_AndOnboardsNothing()
+    {
+        OwnerReadFaults();
+        _h.Grants.AcceptContactCreates = true;
+
+        var result = await InviteAndGrant();
+
+        Problem(result).Should().Be((StatusCodes.Status503ServiceUnavailable, ExternalGrantLifecycle.GrantOwnerUnreadableReasonCode));
+        AssertNothingOnboardedOrGranted();
+    }
+
+    [Fact]
+    public async Task InviteAndGrant_AnExistingContact_ResolvesTheOwnerOnce_BeforeOnboarding_AndTheCoreReusesIt()
+    {
+        ChildBuMatter();
+        var counting = new CountingResolver(_h.Ownership);
+        _h.Ownership = counting;
+        var contact = _h.Contact();
+        _h.Identities.Contacts[contact].Email = Email;
+
+        var result = await InviteAndGrant();
+
+        result.Should().BeOfType<Ok<InviteAndGrantResponse>>();
+        OwnerOfTheOneCreatedRow().Should().Be(Team(OwnershipDirectory.ChildTeam));
+        counting.ResolveOwnerCalls.Should().Be(1, "the owner resolved before onboarding is handed to the core, not resolved twice");
+    }
+
+    private void AssertNothingOnboardedOrGranted()
+    {
+        _h.Grants.ContactCreates.Should().BeEmpty("a refused request leaves no Contact behind");
+        _h.Ciam.Attempts.Should().BeEmpty("a refused request leaves no CIAM account behind");
+        _h.Emails.Onboarding.Should().BeEmpty("no onboarding email for a refused request");
+        _h.Emails.ExistingAccount.Should().BeEmpty();
+        _h.Emails.Sent.Should().BeEmpty();
+        _h.Identities.Writes.Should().BeEmpty("no invite marker and no binding is written");
+        _h.Grants.Creates.Should().BeEmpty("no grant row");
+    }
+
     // =========================================================================================================
     // The Assigned-To materializer (a background writer — no exception for the rule's own grants)
     // =========================================================================================================
@@ -311,6 +366,30 @@ public class GrantRowOwnershipTests
         outcome.Failures.Should().ContainSingle().Which.Kind.Should().Be("subject-failed");
         _h.Grants.Creates.Should().BeEmpty();
         _h.Store.RowsOf(_matter, contact).Should().NotContain(r => r.State == AssignedAccessState.Granted);
+    }
+
+    /// <summary>Counts <c>ResolveOwnerAsync</c> calls over an inner resolver.</summary>
+    private sealed class CountingResolver : Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver
+    {
+        private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _inner;
+
+        public CountingResolver(Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver inner) => _inner = inner;
+
+        public int ResolveOwnerCalls { get; private set; }
+
+        public Task<Guid?> ResolveOwningTeamAsync(Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext context, CancellationToken ct)
+            => _inner.ResolveOwningTeamAsync(context, ct);
+
+        public Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution> ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext context, CancellationToken ct)
+        {
+            ResolveOwnerCalls++;
+            return _inner.ResolveOwnerAsync(context, ct);
+        }
+
+        public Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution> ReparentAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordReparent request, Func<CancellationToken, Task> applyChange, CancellationToken ct)
+            => _inner.ReparentAsync(request, applyChange, ct);
     }
 
     /// <summary>A caller who holds every right on the record, so the grantor ceiling passes.</summary>
