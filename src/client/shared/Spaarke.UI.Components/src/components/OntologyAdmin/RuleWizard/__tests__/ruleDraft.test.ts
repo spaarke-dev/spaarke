@@ -91,6 +91,20 @@ describe('buildRuleBody - Existence', () => {
     expect(JSON.stringify(body)).not.toContain('Cheese');
   });
 
+  it('sends chosen ids only for the triage column of the triage table; another column never inherits them', () => {
+    const stale = row({ field: 'zz_noted', test: 'in', ids: ['cat-aaa'], listText: '7', valueKind: 'number' });
+    const clause = { ...emptyClause(catalog, 'zz_mail'), filter: [stale] };
+    expect(bodyOf(existence({ clauses: [clause] })).all).toEqual([
+      { exists: 'zz_mail', path: 'zz_widgetlink', filter: { zz_noted: [7] } },
+    ]);
+    // The triage column's name on another table is not the triage column.
+    const elsewhere = row({ field: 'zz_triage', test: 'in', ids: ['cat-aaa'], listText: '5', valueKind: 'number' });
+    const other = { ...emptyClause(catalog, 'zz_note'), filter: [elsewhere] };
+    expect(bodyOf(existence({ clauses: [other] })).all).toEqual([
+      { exists: 'zz_note', path: 'zz_widgetref', filter: { zz_triage: [5] } },
+    ]);
+  });
+
   it('writes the join path from the catalog into a clause; the admin never chooses it', () => {
     const clause = { ...emptyClause(catalog, 'zz_note'), kind: 'notExists' as const, filter: [row({ field: 'zz_kind', value: 'x' })] };
     expect(bodyOf(existence({ clauses: [clause] })).all).toEqual([

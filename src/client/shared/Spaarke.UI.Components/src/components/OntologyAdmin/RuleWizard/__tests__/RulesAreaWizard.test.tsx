@@ -10,7 +10,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { RulesArea } from '../../Rules/RulesArea';
 import type { OntologyRulesService, RuleDetail, RuleListResponse, RuleSummary } from '../../Rules/rulesService';
-import { makeAuthoringService } from './fixtures';
+import { failure, makeAuthoringService } from './fixtures';
 
 jest.setTimeout(120000);
 
@@ -129,8 +129,7 @@ const makeRules = (over: Partial<OntologyRulesService> = {}): OntologyRulesServi
   ...over,
 });
 
-const renderArea = (rules: OntologyRulesService, withWizard = true) => {
-  const authoring = makeAuthoringService();
+const renderArea = (rules: OntologyRulesService, withWizard = true, authoring = makeAuthoringService()) => {
   render(
     <FluentProvider theme={webLightTheme}>
       <RulesArea service={rules} authoringService={withWizard ? authoring : undefined} />
@@ -239,6 +238,48 @@ describe('RulesArea - the rule wizard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Done', hidden: true }));
     await waitFor(() => expect(screen.queryByRole('dialog', { hidden: true })).toBeNull());
+    await waitFor(() => expect(rules.list).toHaveBeenCalledTimes(2));
+  });
+
+  it('a save whose outcome is unknown reloads the list when the wizard is closed, without the discard question', async () => {
+    const rules = makeRules();
+    const savePolicy = jest.fn(async () =>
+      failure({ status: 503, outcomeUnknown: true, message: 'The change may not have been saved. Reload to check.' })
+    );
+    renderArea(rules, true, makeAuthoringService({ savePolicy }));
+    await find('rule-row-POL-A');
+
+    click('rules-new-rule');
+    await find('rule-wizard-basics');
+    change('rule-wizard-code', 'POL-ZZ');
+    change('rule-wizard-name', 'Zed rule');
+    change('rule-wizard-lane', 'Decide');
+    click('rule-wizard-next');
+    await find('rule-wizard-condition');
+    change('rule-wizard-subject', 'zz_widget');
+    click('rule-wizard-next');
+    await find('rule-wizard-wording');
+    change('rule-wizard-headline', 'A headline');
+    change('rule-wizard-message', 'About it.');
+    change('rule-wizard-proposed-action', 'Do the thing');
+    click('rule-wizard-next');
+    await find('rule-wizard-actions');
+    change('rule-wizard-code-frobnicate-role', 'action');
+    for (const arrives of ['rule-wizard-scope', 'rule-wizard-test']) {
+      click('rule-wizard-next');
+      await find(arrives);
+    }
+    click('rule-wizard-run-test');
+    await find('rule-wizard-test-result');
+    click('rule-wizard-next');
+    await find('rule-wizard-save');
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule', hidden: true }));
+    await find('rule-wizard-write-lock');
+    expect(rules.list).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel', hidden: true }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { hidden: true })).toBeNull());
+    expect(screen.queryByRole('alertdialog', { hidden: true })).toBeNull();
     await waitFor(() => expect(rules.list).toHaveBeenCalledTimes(2));
   });
 });

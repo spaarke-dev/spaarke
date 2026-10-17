@@ -25,7 +25,7 @@ import { CheckmarkCircleRegular } from '@fluentui/react-icons';
 import { ConfirmModal, SprkModal } from '../../SprkModal';
 import { WizardShell } from '../../Wizard/WizardShell';
 import type { IWizardFooterContext, IWizardFooterSlots, IWizardStepConfig, IWizardSuccessConfig } from '../../Wizard/wizardShellTypes';
-import { fieldErrorsOfValidation, REASON_POLICY_CODE_TAKEN } from './authoringService';
+import { fieldErrorsOfValidation, REASON_DRY_RUN_REQUIRED, REASON_POLICY_CODE_TAKEN } from './authoringService';
 import type {
   AuthoringCatalog,
   AuthoringFailure,
@@ -61,12 +61,15 @@ import type { RuleWizardStepId } from './wizardSteps';
 
 // ---- public contract --------------------------------------------------------------------------------------------------------
 
-/** What the wizard did, for the host to refresh what it shows. Null from `onClose` when nothing was written. */
-export interface RuleWizardResult {
-  kind: 'saved' | 'published';
-  policyId: string;
-  versionNumber: number;
-}
+/**
+ * What the wizard did, for the host to refresh what it shows. Null from `onClose` when nothing was written.
+ *
+ * `unknown` is a write that was attempted and ended without a proven outcome (or a policy that was created Off but not finished): the
+ * host must reload what it shows, because the rule may or may not exist now.
+ */
+export type RuleWizardResult =
+  | { kind: 'saved' | 'published'; policyId: string; versionNumber: number }
+  | { kind: 'unknown'; policyId: string | null; versionNumber: null };
 
 export interface RuleWizardProps {
   service: OntologyAuthoringService;
@@ -261,6 +264,10 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
   const [checking, setChecking] = React.useState(false);
   /** The write ended without a proven outcome, or the policy was created but not finished: nothing more is sent from this wizard. */
   const [writeLock, setWriteLock] = React.useState<string | null>(null);
+  /** The policy a failed save left Off, when the BFF named one; handed to the host on close. */
+  const lockedPolicyId = React.useRef<string | null>(null);
+  /** A save or publish is in flight. The modal's own close control stays live, so closing is ignored until the write has an answer. */
+  const writing = React.useRef(false);
   const [result, setResult] = React.useState<RuleWizardResult | null>(null);
   const [discardOpen, setDiscardOpen] = React.useState(false);
   const [publishAsk, setPublishAsk] = React.useState<((confirmed: boolean) => void) | null>(null);
@@ -435,19 +442,34 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
     }
   };
 
-  /** A refused or failed write: keep the wizard open, place the refusal on its fields, and stop sending when the outcome is unknown. */
-  const failWrite = (failure: AuthoringFailure, asked: string): never => {
-    if (mounted.current) {
-      const errors = refusalErrorsOf(failure);
-      setRefusal(Object.keys(errors).length > 0 ? { key: asked, errors } : null);
-      if (failure.outcomeUnknown || failure.policyId !== null) {
-        setWriteLock(failure.message);
-      }
+  /**
+   * A refused or failed write: keep the wizard open, place the refusal on its fields, and stop sending when the outcome is unknown.
+   * The message is shown ONCE: in the banner (a field refusal) or the write lock when either is set, and by the shell's own error
+   * bar (the thrown message) only when neither is.
+   */
+  const failWrite = (failure: AuthoringFailure, asked: string): undefined => {
+    if (!mounted.current) {
+      return undefined;
+    }
+    if (failure.reasonCode === REASON_DRY_RUN_REQUIRED) {
+      // The BFF no longer holds the proof for this draft: the test on screen is spent, whatever the draft says.
+      setTest(current => ({ ...current, forKey: null, expired: true }));
+    }
+    const errors = refusalErrorsOf(failure);
+    const hasErrors = Object.keys(errors).length > 0;
+    const locks = failure.outcomeUnknown || failure.policyId !== null;
+    setRefusal(hasErrors ? { key: asked, errors } : null);
+    if (locks) {
+      lockedPolicyId.current = failure.policyId;
+      setWriteLock(failure.message);
+    }
+    if (hasErrors || locks) {
+      return undefined;
     }
     throw new Error(failure.message);
   };
 
-  const finishNew = async (body: string, asked: string): Promise<IWizardSuccessConfig> => {
+  const finishNew = async (body: string, asked: string): Promise<IWizardSuccessConfig | void> => {
     const answer = await service.savePolicy(newPolicyRequest(draft, body));
     if (!answer.ok) {
       return failWrite(answer, asked);
@@ -505,14 +527,27 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
     }
     setRefusal(null);
     const asked = key;
-    return mode.kind === 'new' ? finishNew(body, asked) : finishVersion(mode, body, asked);
+    writing.current = true;
+    try {
+      return await (mode.kind === 'new' ? finishNew(body, asked) : finishVersion(mode, body, asked));
+    } finally {
+      writing.current = false;
+    }
   };
 
   // ---- closing ----------------------------------------------------------------------------------------------------------------
 
   const handleClose = () => {
+    if (writing.current) {
+      // A write is out and its answer is not in: closing now would drop the answer and the admin's chance to see it.
+      return;
+    }
     if (result !== null) {
       onClose(result);
+    } else if (writeLock !== null) {
+      // A write was attempted and its outcome is not proven: there may be a rule now, so "nothing has been saved" would be untrue. Close
+      // without the discard question and tell the host to reload.
+      onClose({ kind: 'unknown', policyId: lockedPolicyId.current, versionNumber: null });
     } else if (hasWork(draft, initial)) {
       setDiscardOpen(true);
     } else {
@@ -653,6 +688,9 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
         will be replaced and {plural(reraise, 'item', 'items')} will be raised again, as the test showed.
         {counts !== null && counts.policyEnabled === false
           ? ' The rule is Off, so nothing is replaced or raised until it is turned On.'
+          : ''}
+        {current.scope.tenant !== null || current.scope.matter !== null
+          ? " These counts are worked out without the rule's scope, so once it is published they may be lower."
           : ''}
       </span>
     );

@@ -262,7 +262,10 @@ const RowEditor: React.FC<RowEditorProps> = ({ catalog, row, columns, categories
           value={row.field}
           disabled={disabled}
           aria-label="Column"
-          onChange={(_event, data) => onChange({ ...row, field: data.value })}
+          onChange={(_event, data) =>
+            // A value belongs to the column it was entered for; a new column starts without the old column's value, list or ids.
+            onChange(data.value === row.field ? row : { ...row, field: data.value, value: '', listText: '', ids: [] })
+          }
           data-testid={`${testId}-field`}
         >
           <option value="">Choose a column</option>

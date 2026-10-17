@@ -24,6 +24,8 @@ export interface TestRun {
   result: DryRunResult | null;
   /** The BFF's readable reason when the run was refused or failed. */
   failure: string | null;
+  /** The BFF refused a save or publish because it no longer holds the proof of this test (409 dry_run_required). */
+  expired?: boolean;
 }
 
 export const NO_TEST_RUN: TestRun = { status: 'idle', forKey: null, result: null, failure: null };
@@ -105,7 +107,9 @@ export const TestStep: React.FC<TestStepProps> = ({ mode, ready, run, isCurrent,
 
       {run.result !== null && !isCurrent ? (
         <Text role="status" className={styles.error} data-testid="rule-wizard-test-stale">
-          The rule has changed since the last test. Run the test again.
+          {run.expired === true
+            ? 'The proof of the last test has expired. Run the test again.'
+            : 'The rule has changed since the last test. Run the test again.'}
         </Text>
       ) : null}
 

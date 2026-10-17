@@ -235,6 +235,8 @@ export interface BuiltBody {
 
 function filterOf(
   rows: FilterRow[],
+  /** The table the rows are about: chosen category ids count only on the catalog's triage column of the triage table. */
+  entity: string,
   catalog: AuthoringCatalog,
   issues: Record<string, string>
 ): Record<string, unknown> {
@@ -257,7 +259,7 @@ function filterOf(
       case 'in': {
         const values: Array<string | number> = [];
         let problem: string | undefined;
-        if (row.ids.length > 0) {
+        if (entity === catalog.triage.entity && row.field === catalog.triage.field && row.ids.length > 0) {
           values.push(...row.ids);
         } else {
           for (const part of row.listText.split(',')) {
@@ -317,7 +319,7 @@ export function buildRuleBody(condition: ConditionDraft, quietWindowDays: string
   }
 
   const body: Record<string, unknown> = { type: condition.ruleType, subject: condition.subject };
-  const when = filterOf(condition.when, catalog, issues);
+  const when = filterOf(condition.when, condition.subject, catalog, issues);
 
   if (condition.ruleType === RULE_TYPE_THRESHOLD) {
     const value = scalarOf('number', condition.thresholdValue, emptyDate(catalog));
@@ -340,7 +342,7 @@ export function buildRuleBody(condition: ConditionDraft, quietWindowDays: string
       if (join === undefined) {
         issues[clause.id] = 'Choose the related records.';
       }
-      return { [clause.kind]: clause.related, path: join?.path ?? '', filter: filterOf(clause.filter, catalog, issues) };
+      return { [clause.kind]: clause.related, path: join?.path ?? '', filter: filterOf(clause.filter, clause.related, catalog, issues) };
     });
   }
 

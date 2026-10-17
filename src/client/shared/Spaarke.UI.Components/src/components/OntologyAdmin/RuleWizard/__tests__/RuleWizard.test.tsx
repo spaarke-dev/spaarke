@@ -19,7 +19,12 @@ import '@testing-library/jest-dom';
 import * as React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
-import { REASON_COLUMN_NOT_AUTHORABLE, REASON_DUPLICATE_ACTION, REASON_POLICY_CODE_TAKEN } from '../authoringService';
+import {
+  REASON_COLUMN_NOT_AUTHORABLE,
+  REASON_DRY_RUN_REQUIRED,
+  REASON_DUPLICATE_ACTION,
+  REASON_POLICY_CODE_TAKEN,
+} from '../authoringService';
 import type { OntologyAuthoringService } from '../authoringService';
 import { RuleWizard } from '../RuleWizard';
 import type { RuleWizardResult } from '../RuleWizard';
@@ -36,6 +41,8 @@ const change = (id: string, value: string) => fireEvent.change(byId(id), { targe
 const click = (id: string) => fireEvent.click(byId(id));
 const optionValues = (id: string) => Array.from((byId(id) as HTMLSelectElement).options).map(o => o.value);
 const valueOf = (id: string) => (byId(id) as HTMLInputElement).value;
+/** How many times `text` is rendered anywhere on the page, hidden or not. */
+const occurrencesOf = (text: string) => (document.body.textContent ?? '').split(text).length - 1;
 
 const versionMode: NewVersionMode = {
   kind: 'version',
@@ -248,6 +255,41 @@ describe('RuleWizard - the condition is built only from the catalog', () => {
     const preview = byId('rule-wizard-body-preview').textContent as string;
     expect(preview).toContain('"zz_triage": "cat-aaa"');
     expect(preview).not.toContain('Cheese');
+  });
+
+  it('forgets the values chosen for a column when the row is pointed at another column: the hidden ids are never sent', () => {
+    change('rule-wizard-subject', 'zz_widget');
+    click('rule-wizard-add-clause');
+    change('rule-wizard-clause-0-related', 'zz_mail');
+    change('rule-wizard-clause-0-row-0-field', 'zz_triage');
+    change('rule-wizard-clause-0-row-0-test', 'in');
+    const tick = byId('rule-wizard-clause-0-row-0-category-cat-aaa');
+    fireEvent.click(tick.querySelector('input') ?? tick);
+    expect(byId('rule-wizard-body-preview').textContent).toContain('cat-aaa');
+
+    change('rule-wizard-clause-0-row-0-field', 'zz_noted');
+    // The new column starts empty: the old column's ticked category is gone, not merely hidden.
+    expect(valueOf('rule-wizard-clause-0-row-0-list')).toBe('');
+    change('rule-wizard-clause-0-row-0-list', '100000001');
+
+    const preview = byId('rule-wizard-body-preview').textContent as string;
+    expect(preview).toContain('100000001');
+    expect(preview).not.toContain('cat-aaa');
+  });
+
+  it('starts the value and the list empty when the column changes', () => {
+    change('rule-wizard-subject', 'zz_widget');
+    click('rule-wizard-add-clause');
+    change('rule-wizard-clause-0-related', 'zz_note');
+    change('rule-wizard-clause-0-row-0-field', 'zz_kind');
+    change('rule-wizard-clause-0-row-0-value', 'abc');
+    change('rule-wizard-clause-0-row-0-field', 'zz_noted');
+    expect(valueOf('rule-wizard-clause-0-row-0-value')).toBe('');
+
+    change('rule-wizard-clause-0-row-0-test', 'in');
+    change('rule-wizard-clause-0-row-0-list', '1,2');
+    change('rule-wizard-clause-0-row-0-field', 'zz_kind');
+    expect(valueOf('rule-wizard-clause-0-row-0-list')).toBe('');
   });
 
   it('says what is missing and keeps Next shut until the condition can be written', () => {
@@ -580,6 +622,97 @@ describe('RuleWizard - a new rule', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save rule', hidden: true })).toBeDisabled());
     expect(savePolicy).toHaveBeenCalledTimes(1);
   });
+
+  it('shows a refused save (400) once: in the banner, not again as the shell\'s own error', async () => {
+    const message = 'Each code may appear once, in actions or in next steps, never twice in one list and never in both.';
+    const savePolicy = jest.fn(async () =>
+      failure({ status: 400, reasonCode: REASON_DUPLICATE_ACTION, fieldErrors: { decisionPlan: [message] }, message })
+    );
+    setup({ service: makeAuthoringService({ savePolicy }) });
+    await toTestAsNewRule();
+    await runTest();
+    click('rule-wizard-next');
+    await find('rule-wizard-save');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule', hidden: true }));
+    await find('rule-wizard-problems');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save rule', hidden: true })).toBeEnabled());
+
+    expect(occurrencesOf(message)).toBe(1);
+  });
+
+  it('shows a refusal that has no field once: the shell\'s error bar carries it, with no banner', async () => {
+    const message = 'Dataverse refused this for your account. Nothing was changed.';
+    const savePolicy = jest.fn(async () => failure({ status: 403, message }));
+    setup({ service: makeAuthoringService({ savePolicy }) });
+    await toTestAsNewRule();
+    await runTest();
+    click('rule-wizard-next');
+    await find('rule-wizard-save');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule', hidden: true }));
+    await waitFor(() => expect(occurrencesOf(message)).toBe(1));
+    expect(maybe('rule-wizard-problems')).toBeNull();
+  });
+
+  it('closes without "nothing has been saved" after a write lock, and tells the host to reload', async () => {
+    const savePolicy = jest.fn(async () =>
+      failure({ status: 503, outcomeUnknown: true, message: 'The change may not have been saved. Reload to check.' })
+    );
+    const { onClose } = setup({ service: makeAuthoringService({ savePolicy }) });
+    await toTestAsNewRule();
+    await runTest();
+    click('rule-wizard-next');
+    await find('rule-wizard-save');
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule', hidden: true }));
+    await find('rule-wizard-write-lock');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel', hidden: true }));
+
+    expect(screen.queryByRole('alertdialog', { hidden: true })).toBeNull();
+    expect(document.body.textContent).not.toContain('Nothing has been saved');
+    expect(onClose).toHaveBeenCalledWith({ kind: 'unknown', policyId: null, versionNumber: null });
+  });
+
+  it('hands the host the policy a failed save left Off, when the BFF named one', async () => {
+    const savePolicy = jest.fn(async () =>
+      failure({ status: 503, outcomeUnknown: true, policyId: 'policy-half', message: 'The rule was created Off but not finished.' })
+    );
+    const { onClose } = setup({ service: makeAuthoringService({ savePolicy }) });
+    await toTestAsNewRule();
+    await runTest();
+    click('rule-wizard-next');
+    await find('rule-wizard-save');
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule', hidden: true }));
+    await find('rule-wizard-write-lock');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel', hidden: true }));
+    expect(onClose).toHaveBeenCalledWith({ kind: 'unknown', policyId: 'policy-half', versionNumber: null });
+  });
+
+  it('ignores the close control while a save is out, so the answer is not lost', async () => {
+    let answer: (value: { ok: true; data: typeof saved }) => void = () => undefined;
+    const savePolicy = jest.fn(
+      () =>
+        new Promise<{ ok: true; data: typeof saved }>(resolve => {
+          answer = resolve;
+        })
+    );
+    const { onClose } = setup({ service: makeAuthoringService({ savePolicy }) });
+    await toTestAsNewRule();
+    await runTest();
+    click('rule-wizard-next');
+    await find('rule-wizard-save');
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule', hidden: true }));
+    await waitFor(() => expect(savePolicy).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close', hidden: true }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog', { hidden: true })).toBeNull();
+
+    answer({ ok: true, data: saved });
+    expect(await find('rule-wizard-saved')).toBeInTheDocument();
+  });
 });
 
 // ---- the test gates the end ----------------------------------------------------------------------------------------------------------------
@@ -747,6 +880,48 @@ describe('RuleWizard - a new version', () => {
     // Fluent's focus manager can leave the dialog marked aria-hidden in jsdom after a nested confirmation closes; it is still the button.
     fireEvent.click(screen.getByRole('button', { name: 'Done', hidden: true }));
     expect(onClose).toHaveBeenCalledWith({ kind: 'published', policyId: published.policyId, versionNumber: 3 });
+  });
+
+  async function toPublishConfirmation(mode: NewVersionMode, service?: OntologyAuthoringService) {
+    const set = setup({ mode, service });
+    await toTestAsNewVersion();
+    await runTest();
+    click('rule-wizard-next');
+    await find('rule-wizard-save');
+    fireEvent.click(screen.getByRole('button', { name: 'Publish', hidden: true }));
+    const confirm = await find('rule-wizard-publish-confirm');
+    return { ...set, confirm, dialog: confirm.closest('[role="alertdialog"]') as HTMLElement };
+  }
+
+  it('says on the confirmation that a scoped rule\'s counts are worked out without its scope', async () => {
+    const { confirm } = await toPublishConfirmation(versionMode);
+    expect(confirm).toHaveTextContent("These counts are worked out without the rule's scope, so once it is published they may be lower.");
+  });
+
+  it('does not say so for a rule with no scope', async () => {
+    const { confirm } = await toPublishConfirmation({ ...versionMode, scope: { tenant: null, matter: null } });
+    expect(confirm).not.toHaveTextContent('without the rule');
+  });
+
+  it('marks the test stale when the BFF no longer holds its proof (409 dry_run_required), and says it must be run again', async () => {
+    const publishVersion = jest.fn(async () =>
+      failure({
+        status: 409,
+        reasonCode: REASON_DRY_RUN_REQUIRED,
+        message: 'Run Test on this exact rule before saving it; any edit needs a new test run.',
+      })
+    );
+    const { dialog } = await toPublishConfirmation(versionMode, makeAuthoringService({ publishVersion }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Publish', hidden: true }));
+    await waitFor(() => expect(publishVersion).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Publish', hidden: true })).toBeDisabled());
+
+    // Back to the Test step: the result is gone and the step says the proof expired.
+    fireEvent.click(screen.getByRole('button', { name: 'Back', hidden: true }));
+    await find('rule-wizard-test');
+    expect(byId('rule-wizard-test-stale')).toHaveTextContent('expired');
+    expect(maybe('rule-wizard-test-result')).toBeNull();
+    expect(byId('rule-wizard-next')).toBeDisabled();
   });
 
   it('shows a publish the BFF refused (400) on the field it concerns', async () => {
