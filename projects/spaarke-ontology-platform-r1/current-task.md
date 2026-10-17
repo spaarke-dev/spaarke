@@ -26,6 +26,8 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 1. **111 row 4** (owner): `/upload` needs `?entityType=sprk_project&entityId=<GUID>`; the GUID comes from opening a project in My Projects (`/project/<GUID>`). No in-app link to `/upload` is a known R3 limit (R3 task 042 notes). Then close 111 → 114.
 2. **CORS on `/api/v1/external/notifications`** (R3 owns): the owner saw it, time unknown (probably after the 14:32Z deploy). Owner to reload and report; R3 wants owner approval for live reads (platform CORS, anonymous preflight). **Never dispatch `deploy-external-spa.yml` from master** (task 122) while R3's SPA work is off master.
 3. **POL-MATTER-NOBUDGET** is on (D-163): the owner bulk-closes the dev Signals after the next evaluation.
+4. **Owner: does ebilling 015 supersede D-137 Q24?** ebilling task 015 (retire `sprk_invoicestatus`, owner-OK'd live delete) changes `FinanceBaseValues.CountedInvoiceStatuses` from Reviewed only (Q24, "for now") to statuscode In Review, Approved, Sent to AP, Paid. That changes every ontology spend/budget Threshold (POL-COMMIT-BUDGET). Asked ebilling not to merge that change to master until the owner confirms directly. When 015 lands: update `notes/102a-authoring-contract.md` residual row and D-161 base columns.
+5. **ebilling 070 re-check** includes their master-merge resolution of `PolicyVersionValidator.ValidateInternal` (domain + authoring). 102b touches the same files; second to master resolves.
 
 ## Next, in order
 
