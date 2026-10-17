@@ -4,7 +4,7 @@
     <title>Retire scaffolding-class SpeAdmin tests per ADR-038</title>
     <phase>4 Workstream D — Build the harness</phase>
     <gate>040 complete, 041 complete</gate>
-    <status>partial</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING override row (root CLAUDE.md §8): unconditional code-review + adr-check. Tags include testing and deletion.</rigor-reason>
     <model-tier>sonnet</model-tier>

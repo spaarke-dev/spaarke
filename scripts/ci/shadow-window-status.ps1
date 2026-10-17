@@ -312,7 +312,8 @@ if ($ready) {
     Write-Host '  then branch protection with `Router` as the required check (the check-run name; not `CI / Router`).' -ForegroundColor Green
 } else {
     Write-Host '  Window still open. Nothing to do -- keep merging normally.' -ForegroundColor Cyan
-    Write-Host '  Do NOT edit ci-router.yml / ci-tier1-blocking.yml / ci-tier2-advisory.yml' -ForegroundColor Cyan
-    Write-Host '  while it runs: changing the configuration invalidates what was observed.' -ForegroundColor Cyan
+    Write-Host '  (The 2026-10-15 owner ruling lifted the rule against editing ci-router.yml /' -ForegroundColor Cyan
+    Write-Host '  ci-tier1-blocking.yml / ci-tier2-advisory.yml; a tier edit now only changes what' -ForegroundColor Cyan
+    Write-Host '  later PRs in this comparison observe.)' -ForegroundColor Cyan
 }
 Write-Host ''

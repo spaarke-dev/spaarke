@@ -142,7 +142,7 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
     /// <summary>
     /// After RegistrationDataverseService adds or removes a team member, or binds a business unit, against THIS BFF's
     /// own environment, that user's identity, membership and root-set entries are gone — though the write ran with no
-    /// HttpContext (the DemoExpirationService path) and the entries were cached under a real tenant id.
+    /// HttpContext (the DemoExpirationJob path) and the entries were cached under a real tenant id.
     /// </summary>
     [Theory]
     [InlineData("team-add")]
@@ -526,7 +526,7 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
 
     /// <summary>
     /// The registration service's Dataverse surface over an in-memory server: business-unit and team lookups by name,
-    /// the team-membership association writes, and the systemuser create (answering with the created id).
+    /// the team-membership read and association writes, and the systemuser create (answering with the created id).
     /// </summary>
     private sealed class RegistrationDataverse : IAsyncDisposable
     {
@@ -619,6 +619,13 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
             {
                 await context.Response.WriteAsync(
                     $"{{\"value\":[{{\"teamid\":\"{TeamId}\",\"_businessunitid_value\":\"{BusinessUnitId}\"}}]}}");
+                return;
+            }
+
+            if (path.EndsWith("/teammembership_association", StringComparison.Ordinal))
+            {
+                // The idempotent team removal (#1363) reads membership first; the created user is a member.
+                await context.Response.WriteAsync($"{{\"value\":[{{\"systemuserid\":\"{_createdUserId}\"}}]}}");
                 return;
             }
 

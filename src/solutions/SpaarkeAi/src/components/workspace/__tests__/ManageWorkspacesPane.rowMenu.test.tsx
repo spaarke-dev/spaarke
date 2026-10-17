@@ -34,12 +34,14 @@ jest.mock('../../../services/workspaceLayoutMutations', () => ({
   deleteWorkspaceLayout: jest.fn(),
 }));
 
-// The pane needs four things from the shared barrel; load the REAL RowActionMenu by deep path (the barrel pulls in
-// the whole library) and stub the rest.
+// The pane needs five things from the shared barrel; load the REAL RowActionMenu by deep path (the barrel pulls in
+// the whole library) and stub the rest. The Edit item launches the layout wizard through
+// navigateToWebResourceSurfaceAsync (task 113); unstubbed, the click rejects unhandled and kills the jest worker.
 jest.mock('@spaarke/ui-components', () => ({
   OOB_MODAL_SIZES: {},
   formatRelativeTime: () => 'just now',
   getXrm: () => null,
+  navigateToWebResourceSurfaceAsync: () => Promise.resolve({ launched: true, busy: false }),
   RowActionMenu: jest.requireActual('@spaarke/ui-components/components/RowActionMenu/RowActionMenu').RowActionMenu,
 }));
 

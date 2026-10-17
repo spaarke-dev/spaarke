@@ -181,6 +181,37 @@ public sealed class ArmDeploymentRunnerTests
         }
     }
 
+    // ---------- T186 L20: a subscription-scope deployment carries its location ----------
+
+    [Fact]
+    public async Task DeployAsync_SubscriptionScopeDeployment_CarriesTheRequestLocation()
+    {
+        string? deploymentBody = null;
+        var handler = ArmSdkTestFakes.NewHandler(request =>
+        {
+            if (request.Method == HttpMethod.Put && request.Content is not null
+                && request.RequestUri!.AbsolutePath.Contains("Microsoft.Resources/deployments", StringComparison.OrdinalIgnoreCase))
+            {
+                deploymentBody = request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            }
+            return RespondHappyPath(request);
+        });
+        var runner = new ArmDeploymentRunner(
+            ArmSdkTestFakes.NewArmClient(handler),
+            ArmSdkTestFakes.NewBlobContainerClient(handler),
+            Options.Create(NewOptions()),
+            Identity(),
+            NullLogger<ArmDeploymentRunner>.Instance);
+
+        await runner.DeployAsync(NewRequest(), CancellationToken.None);
+
+        deploymentBody.Should().NotBeNull("the deployment PUT was sent");
+        using var body = System.Text.Json.JsonDocument.Parse(deploymentBody!);
+        body.RootElement.TryGetProperty("location", out var location).Should().BeTrue(
+            "ARM refuses a subscription-scope deployment without a location: 400 InvalidDeployment (T186 L20)");
+        location.GetString().Should().Be("westus2");
+    }
+
     // ---------- T2 both models deploy the dedicated customer stamp (D-12; T228 made Model 1 deployable) ----------
 
     [Fact]

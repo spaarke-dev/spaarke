@@ -4,7 +4,7 @@
     <title>Expand container-type settings from 4 properties to the real 9-property v1.0 shape</title>
     <phase>3 Workstream C — Correct the API surface</phase>
     <gate>023 complete</gate>
-    <status>partial</status>
+    <status>completed</status>
     <!-- 2026-08-24: server read+write complete for all nine. FR-C07's list was wrong -
          agent.chatEmbedAllowedHosts does not exist; sharingCapability was omitted. AC-1 (UI render)
          deferred: the settings form is bound to the Dataverse config record, not the Graph settings

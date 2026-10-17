@@ -434,11 +434,19 @@ internal sealed class SecureChildShareWorld
     public SecureChildShareWorld Add(string table, Guid id, params (string Column, object Value)[] columns)
     {
         var row = new Entity(table, id);
+        // #1943: a project, matter or work assignment always has a modifiedon in Dataverse, and the reconciliation job's
+        // recent-changes pass reconciles a secure record whose own modifiedon is in its window (one with none counts as
+        // changed). A record a test does not touch was therefore last modified long ago; Modified() moves it.
+        if (SecureChildLineage.IsRoot(table))
+            row["modifiedon"] = RecordsLastModified;
         foreach (var (column, value) in columns)
             row[column] = value;
         _rows[(table, id)] = row;
         return this;
     }
+
+    /// <summary>#1943: when a project, matter or work assignment a test does not touch was last modified.</summary>
+    public static readonly DateTime RecordsLastModified = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     private static EntityReference TeamRef(Guid id) => new("team", id);
 

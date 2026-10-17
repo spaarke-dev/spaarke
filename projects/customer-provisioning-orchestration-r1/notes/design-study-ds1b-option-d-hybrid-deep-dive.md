@@ -40,6 +40,8 @@ Legend: ✅ SDK = mature .NET SDK · ✅ REST = documented REST API, no SDK wrap
 | 3 | → `Test-SubscriptionVCpuQuota.ps1` (227 L) | `az vm list-usage` ×12 | ✅ SDK `Azure.ResourceManager.Compute` — `SubscriptionResource.GetUsagesAsync(location)` |
 | 4 | → `Test-SpeCertBootstrap.ps1` (212 L) | `az keyvault secret` ×8 | ✅ SDK `Azure.Security.KeyVault.Secrets.SecretClient` (already in BFF) |
 
+> **Superseded by T186 L17 (2026-10-15):** row 3 (the Compute vCPU check, `Test-SubscriptionVCpuQuota.ps1` and its `ArmComputeVCpuProbe` port) was removed. The stamp deploys no Microsoft.Compute resources, so `standardDv5Family` quota is irrelevant; App Service plans use their own per-SKU worker quota (no supported read API), and a real shortfall surfaces at H2a. Rows 2 and 4 were likewise retired earlier (T228, task 248). The table above is kept as the historical record.
+
 ### H2a — Bicep infra deploy (3 collaborators)
 
 | # | Collaborator | What it calls | .NET equivalent |

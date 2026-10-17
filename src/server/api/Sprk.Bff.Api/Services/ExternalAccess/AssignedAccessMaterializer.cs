@@ -480,6 +480,7 @@ public sealed class AssignedAccessMaterializer
 
         if (root is null)
             return run.ToOutcome(AssignedAccessStatus.NotFound);
+        run.RootOwner = root.Owner;
 
         // ── The ledger ────────────────────────────────────────────────────────────────
         IReadOnlyList<AssignedAccessLedgerRow> ledger;
@@ -1171,7 +1172,8 @@ public sealed class AssignedAccessMaterializer
         /// <summary>The caller's oid is a contact's (a partner, task 140 / I-4): contacts never invite.</summary>
         Partner,
 
-        /// <summary>The caller's oid is neither a systemuser's nor a contact's, or could not be read: no invite.</summary>
+        /// <summary>The caller's oid is neither a systemuser's nor a contact's, is a DISABLED systemuser's (issue #1576 —
+        /// nobody, and never a partner), or could not be read: no invite.</summary>
         Unresolved,
     }
 
@@ -1238,8 +1240,13 @@ public sealed class AssignedAccessMaterializer
     /// <summary>
     /// Who is behind this pass, resolved once per run. The job is never a person. Otherwise the request's oid: a systemuser's
     /// (the read <c>sprk_grantedby</c> already uses) is internal; a contact's (bound to it) is a partner; anything else —
-    /// no oid, an unknown oid, a read that failed — invites nobody (fail closed).
+    /// no oid, an unknown oid, a DISABLED systemuser's oid, a read that failed — invites nobody (fail closed).
     /// </summary>
+    /// <remarks>Issue #1576: the systemuser read deliberately does NOT filter <c>isdisabled</c>; it selects it and checks it.
+    /// Filtering would make a disabled user's oid look like "no systemuser" and fall through to the contact lookup, so a
+    /// disabled internal user whose oid a contact also carries would be classed as a PARTNER. A disabled systemuser is
+    /// therefore nobody here (as <c>WorkforcePrincipalResolver</c>'s <c>DenySystemUserDisabled</c>), never a partner; a row
+    /// whose <c>isdisabled</c> is absent is treated as disabled (fail closed).</remarks>
     private async Task<(ActorKind Kind, Guid? PartnerContactId)> ResolveActorAsync(Run run, CancellationToken ct)
     {
         if (run.Actor is { } known)
@@ -1255,7 +1262,7 @@ public sealed class AssignedAccessMaterializer
             try
             {
                 users = await _dataverse.QueryAsync<GrantExternalAccessEndpoint.SystemUserRow>(
-                    "systemusers", filter: $"azureactivedirectoryobjectid eq {oid:D}", select: "systemuserid", top: 1,
+                    "systemusers", filter: $"azureactivedirectoryobjectid eq {oid:D}", select: "systemuserid,isdisabled", top: 2,
                     cancellationToken: ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -1270,9 +1277,17 @@ public sealed class AssignedAccessMaterializer
             {
                 resolved = (ActorKind.Unresolved, null);
             }
-            else if (users.Any(u => u.systemuserid is { } id && id != Guid.Empty))
+            else if (users.Any(u => u.systemuserid is { } id && id != Guid.Empty && u.isdisabled == false))
             {
                 resolved = (ActorKind.Internal, null);
+            }
+            else if (users.Any(u => u.systemuserid is { } id && id != Guid.Empty))
+            {
+                // Only DISABLED systemusers carry this oid: nobody — never fall through to the contact lookup (a partner).
+                _logger.LogInformation(
+                    "[ASSIGNED-ACCESS] {Type} {RootId}: the systemuser behind this pass is disabled; no invite is sent.",
+                    run.Logical, run.RootId);
+                resolved = (ActorKind.Unresolved, null);
             }
             else
             {
@@ -1744,12 +1759,26 @@ public sealed class AssignedAccessMaterializer
     {
         var entitySet = ExternalGrantRoot.BindFor(run.Request.RootType).EntitySet;
         var principal = DataversePrincipalRef.User(user);
+
+        // #1620: Dataverse refuses an app-only revoke of the owning user's own share (0x80040223), so the revoke names the
+        // root's owner and the seam sends THAT one as the owner. An owner the root read did not carry is a failure here
+        // (fail closed) — never a fall-back to the app-only revoke.
+        if (restoreTo == 0 && run.RootOwner is null)
+        {
+            _logger.LogError("[ASSIGNED-ACCESS] Ending {User}'s auto share on {Type} {RootId}: the record's owner was not read; " +
+                "nothing was removed.", user, run.Logical, run.RootId);
+            run.Fail(subject, "owner-unreadable",
+                $"Who owns this record could not be read, so the automatic share of user {user} was not removed. The next " +
+                "update will try again.");
+            return false;
+        }
+
         int? remaining = null;
         Exception? failure = null;
         try
         {
             if (restoreTo == 0)
-                await _recordShare.RevokeAccessAsync(entitySet, run.RootId, principal, ct).ConfigureAwait(false);
+                await _recordShare.RevokeAccessAsync(entitySet, run.RootId, principal, run.RootOwner!.Value, ct).ConfigureAwait(false);
             else
                 await _recordShare.ModifyAccessAsync(entitySet, run.RootId, principal, RecordShareLevels.RightsCsvForMask(restoreTo), ct)
                     .ConfigureAwait(false);
@@ -2322,6 +2351,10 @@ public sealed class AssignedAccessMaterializer
 
         /// <summary>Task 174 (F1-c): the record's OWN stored Secure flag (unreadable counts as secure), for the S5 keep only.</summary>
         public bool OwnIsSecure { get; set; } = true;
+
+        /// <summary>#1620: the root's CURRENT owner as the root read returned it — <c>null</c> when it carried neither owner
+        /// column. Named on every revoke of an auto share, so the owning user's own share is revoked as that user.</summary>
+        public DataversePrincipalRef? RootOwner { get; set; }
 
         public List<AssignedAccessEntryOutcome> Entries { get; } = new();
         public List<AssignedAccessFailure> Failures { get; } = new();

@@ -1064,8 +1064,10 @@ public static class RagEndpoints
     /// already spends, per document, one Dataverse read + an SPE download + extraction + embedding +
     /// an index write + a Dataverse write, so the check is a small fraction of existing per-document
     /// cost — unlike a keystroke-driven typeahead, where task 062 rejected exactly this mechanism for
-    /// exactly that reason. Sequential, because <c>DataverseAccessDataSource</c> mutates a shared
-    /// request-scoped <c>HttpClient</c>'s auth header per call.
+    /// exactly that reason. Sequential: it once had to be, because <c>DataverseAccessDataSource</c> mutated a
+    /// shared request-scoped <c>HttpClient</c>'s auth header per call; since issue #1576 every read there carries its
+    /// own token, and the loop stays sequential only because nothing above the data source has been reviewed for
+    /// concurrent use within one request.
     /// </para>
     /// </remarks>
     private static async Task<IResult> SendToIndex(

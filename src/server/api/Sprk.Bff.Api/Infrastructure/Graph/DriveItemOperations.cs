@@ -911,43 +911,6 @@ public class DriveItemOperations
     }
 
     /// <summary>
-    /// Creates a recipient-openable SPE sharing link for a DriveItem APP-ONLY (email-communication-solution-r5 R2 item
-    /// 12 — the composer's "Link" attachments). Mirrors the Graph <c>createLink</c> body used by
-    /// <see cref="SpeAdminGraphService.CreateSharingLinkAsync"/>, with the drive already resolved. Returns the sharing
-    /// URL, or <see langword="null"/> when Graph returns no link. No Graph SDK types are returned.
-    /// </summary>
-    /// <remarks>
-    /// The route's per-document <c>share</c> gate (task 072) is the authorization; it is unchanged. Task 171 only
-    /// changes WHO mints the link: the BFF identity instead of the caller, so a caller with Share on the document no
-    /// longer also needs a container role.
-    /// </remarks>
-    /// <param name="linkType">"view", "edit", or "embed".</param>
-    /// <param name="scope">"anonymous", "organization", or "users".</param>
-    public async Task<string?> CreateSharingLinkAsync(
-        string driveId,
-        string itemId,
-        string linkType,
-        string scope,
-        DateTimeOffset? expiration = null,
-        CancellationToken ct = default)
-    {
-        var requestBody = new Microsoft.Graph.Drives.Item.Items.Item.CreateLink.CreateLinkPostRequestBody
-        {
-            Type = linkType,
-            Scope = scope,
-            ExpirationDateTime = expiration
-        };
-
-        var graphClient = await _ownership.ForOwnedContainerAsync(driveId, ct);   // task 227d
-        var permission = await graphClient.Drives[driveId]
-            .Items[itemId]
-            .CreateLink
-            .PostAsync(requestBody, cancellationToken: ct);
-
-        return permission?.Link?.WebUrl;
-    }
-
-    /// <summary>
     /// Retrieves drive-item metadata APP-ONLY, projected into a Spaarke-domain <see cref="SpeDriveItemSummary"/> (no
     /// Graph SDK types returned). The <c>webUrl</c> / <c>webDavUrl</c> it returns are POINTERS: opening one in Office
     /// still needs the user's own role on the container (standing BU writer, or the JIT grant on a secure container).

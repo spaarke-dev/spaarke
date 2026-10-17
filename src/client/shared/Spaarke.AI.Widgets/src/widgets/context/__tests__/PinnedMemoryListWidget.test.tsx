@@ -260,7 +260,14 @@ describe('PinnedMemoryListWidget — create flow (POML test #4)', () => {
     });
     // task 050 re-base: Save is now FormModal's own footer button (no data-testid
     // exposed by the shared preset) — query by its accessible name instead.
-    await user.click(screen.getByRole('button', { name: 'Create pin' }));
+    // `hidden: true` — the FIRST Fluent modal opened in a jsdom window renders its
+    // DialogSurface `aria-hidden="true"` (tabster's modalizer API initialises after
+    // jsdom has already focused the surface, so it is never activated; any later
+    // dialog in the same file is fine). Testing Library's default role query skips
+    // an aria-hidden subtree, so the button is "not accessible" to it (nightly
+    // #1906). The button is present and clickable. jsdom-only: in a real browser the
+    // surface is not aria-hidden (verified 2026-10-15). See .claude/FAILURE-MODES.md G-21.
+    await user.click(screen.getByRole('button', { name: 'Create pin', hidden: true }));
 
     // Wait for the new pin to appear in the list.
     await screen.findByText(newPin.title);
@@ -377,7 +384,8 @@ describe('PinnedMemoryListWidget — server detail on a thrown failure', () => {
     await user.click(screen.getByTestId('pinned-memory-create-button'));
     fireEvent.change(screen.getByTestId('pinned-memory-edit-title'), { target: { value: 'A title' } });
     fireEvent.change(screen.getByTestId('pinned-memory-edit-content'), { target: { value: 'Some content' } });
-    await user.click(screen.getByRole('button', { name: 'Create pin' }));
+    // `hidden: true` — see the create-flow test above (first-modal aria-hidden surface).
+    await user.click(screen.getByRole('button', { name: 'Create pin', hidden: true }));
 
     expect(await screen.findByText(lengthCap)).toBeInTheDocument();
     expect(screen.queryByText('Could not save the pin. Please try again.')).not.toBeInTheDocument();

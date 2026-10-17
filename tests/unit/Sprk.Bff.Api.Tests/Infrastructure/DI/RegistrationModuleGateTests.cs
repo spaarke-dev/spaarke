@@ -1,7 +1,7 @@
 // Task 261 (G31): the demo self-service registration feature — the BFF's only app-only caller of Graph /users and
 // /groups (directory WRITE) — is registered only where DemoProvisioning:AccountDomain is configured (Spaarke's platform
 // BFF). On a customer stamp it is absent, so the stamp identity needs no directory role, and the stamp no longer fails
-// at start constructing DemoExpirationService without its [Required] options.
+// at start constructing DemoExpirationJob without its [Required] options.
 
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -45,7 +45,7 @@ public class RegistrationModuleGateTests
     [InlineData("DemoProvisioning:AdminNotificationEmails:0")]
     public void IsDemoProvisioningEnabled_AnyMissingOrBlankRequiredKey_DisablesTheFeature_NotTheHost(string missing)
     {
-        // A PARTIAL set would make DemoExpirationService's options read throw at host start. It fails closed instead.
+        // A PARTIAL set would make DemoExpirationJob's options read throw at host start. It fails closed instead.
         var withoutKey = FullSet().Where(v => v.Key != missing).ToArray();
         var blank = FullSet().Select(v => v.Key == missing ? (v.Key, (string?)"  ") : v).ToArray();
 
@@ -54,7 +54,7 @@ public class RegistrationModuleGateTests
 
         var services = new ServiceCollection();
         services.AddRegistrationModule(Config(withoutKey));
-        services.Should().NotContain(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(DemoExpirationService));
+        services.Should().NotContain(d => d.ServiceType == typeof(DemoExpirationJob));
     }
 
     [Fact]
@@ -68,8 +68,10 @@ public class RegistrationModuleGateTests
             "GraphUserService creates, licenses and disables Entra users — a stamp identity must not need those roles");
         services.Should().NotContain(d => d.ServiceType == typeof(DemoProvisioningService));
         services.Should().NotContain(d => d.ServiceType == typeof(EmailDomainValidator));
-        services.Should().NotContain(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(DemoExpirationService),
+        services.Should().NotContain(d => d.ServiceType == typeof(DemoExpirationJob),
             "its constructor reads the [Required] DemoProvisioning options, which a stamp does not have");
+        services.Should().NotContain(d => d.ServiceType == typeof(Spaarke.Scheduling.ScheduledJobRegistration),
+            "the scheduler's registry would build the job at host start");
     }
 
     [Fact]
@@ -89,7 +91,7 @@ public class RegistrationModuleGateTests
     [Fact]
     public void WithoutTheSettings_TheExpiryJobsOptionsCannotBeRead_WhichIsWhyAStampMustNotRegisterIt()
     {
-        // Pins finding F1: DemoExpirationService (a hosted service) reads IOptions<DemoProvisioningOptions>.Value in its
+        // Pins finding F1: DemoExpirationJob (a scheduled job) reads IOptions<DemoProvisioningOptions>.Value in its
         // constructor. With no DemoProvisioning:* settings — every stamp — that read throws, so the host failed to start.
         var services = new ServiceCollection();
         services.AddRegistrationModule(Config());
@@ -109,6 +111,10 @@ public class RegistrationModuleGateTests
 
         services.Should().Contain(d => d.ServiceType == typeof(GraphUserService));
         services.Should().Contain(d => d.ServiceType == typeof(DemoProvisioningService));
-        services.Should().Contain(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(DemoExpirationService));
+        services.Should().Contain(d => d.ServiceType == typeof(DemoExpirationJob));
+        services.Should().ContainSingle(d => d.ServiceType == typeof(Spaarke.Scheduling.ScheduledJobRegistration),
+            "the expiry is a scheduled job (#1363, ADR-036 A1 rule 6)");
+        services.Should().NotContain(d => d.ServiceType == typeof(IHostedService),
+            "the expiry is no longer a hand-rolled timer BackgroundService (ADR-052 §1)");
     }
 }

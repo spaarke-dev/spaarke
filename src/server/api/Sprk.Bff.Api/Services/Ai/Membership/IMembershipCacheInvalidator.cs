@@ -104,7 +104,7 @@ public interface IMembershipCacheInvalidator : IRecordShareWriteObserver
     /// changes a user's teams or business unit MUST call it too — nothing else observes the change (no Dataverse
     /// plugins, ADR-002), so a writer that skips it leaves the old access in place for the identity + membership TTLs
     /// (over-grant after a removal).</para>
-    /// <para><b>Works with no HttpContext</b> (a background job such as <c>DemoExpirationService</c>): eviction is
+    /// <para><b>Works with no HttpContext</b> (a background job such as <c>DemoExpirationJob</c>): eviction is
     /// tenant-agnostic. Only meaningful for a write to THIS BFF's own Dataverse environment — a write to another
     /// environment's users needs none (D-13), and the caller decides that.</para>
     /// <para>The user's per-record access SNAPSHOTS (60 s, keyed by Entra oid, which a team write does not carry) are

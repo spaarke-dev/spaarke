@@ -188,6 +188,11 @@ public class ScheduledJobLeaseTests
     [Fact]
     public async Task LeaseLapsedMidRun_WithNoOtherHolder_IsRetakenAndTheRunCompletes()
     {
+        // The schedule is deliberately one tick a minute. The hold renews a third of the lease duration (10s) after the
+        // run starts, so on the ten-second schedule the first renewal fell on the very instant of the NEXT tick. Both
+        // then raced for the lease the test had just expired: a tick that won started a second run and the renewal
+        // found "another holder" — a legitimate outcome, but not the scenario named here. A minute schedule leaves
+        // nobody else to hold the lease while it is lapsed, which is what "WithNoOtherHolder" means.
         var time = new FakeTimeProvider(Start);
         var lease = new FakeDistributedLease(time);
         var log = new ListLogger<ScheduledJobHost>();
@@ -197,18 +202,25 @@ public class ScheduledJobLeaseTests
             await release.Task.WaitAsync(ct);
             return new JobRunResult(true, null, 1, TimeSpan.Zero);
         });
-        var (host, store) = NewHost(job, time, lease, log);
+        var (host, store) = NewHost(job, time, lease, log, cron: EveryMinute);
+        var interruptedTick = Start.AddMinutes(1);
 
         await host.StartAsync(CancellationToken.None);
-        await AdvanceUntilAsync(time, () => job.InvocationCount == 1, "the run starts under the lease");
+        await AdvanceUntilAsync(time, () => job.InvocationCount == 1, "the 12:01:00 run starts under the lease", maxSteps: 1000);
         lease.Expire("lapse-job");
         await AdvanceUntilAsync(time, () => lease.Grants.Count(g => g.JobId == "lapse-job") == 2,
             "the next renewal is refused and the free lease is re-taken");
+        job.InvocationCount.Should().Be(1, "re-taking the lease happened under the one run in flight — no second run overlapped it");
         release.SetResult();
-        await AdvanceUntilAsync(time, () => store.RunRecords.Any(r => r.Result is { Skipped: false }), "the run completes");
+        // Wait for THE interrupted run — keyed by the occurrence it was started for, so a later tick cannot satisfy or
+        // spoil the wait however far the virtual clock has run on.
+        await AdvanceUntilAsync(time, () => store.RunRecords.Any(r => r.ScheduledFireUtc == interruptedTick && r.Result is not null),
+            "the interrupted run completes");
         await host.StopAsync(CancellationToken.None);
 
-        store.RunRecords.Single(r => r.Result is { Skipped: false }).Result!.Success.Should().BeTrue();
+        var interrupted = store.RunRecords.Single(r => r.ScheduledFireUtc == interruptedTick);
+        interrupted.Result!.Skipped.Should().BeFalse();
+        interrupted.Result.Success.Should().BeTrue("the run whose lease lapsed finished normally once the lease was re-taken");
         log.Count(LogLevel.Warning, "was re-taken").Should().Be(1);
     }
 

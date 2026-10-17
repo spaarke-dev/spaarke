@@ -288,8 +288,10 @@ public static class CommunicationModule
         //     Stateless pass-through over the singleton DataverseWebApiService → singleton.
         //   • CommunicationThreadReadService — SCOPED, because it consumes the Scoped ICallerSystemUserResolver
         //     (a captive scoped dependency inside the Singleton CommunicationService would be an anti-pattern).
-        //   • ICallerSystemUserResolver — REUSED (§11) for oid→systemuserid; TryAdd so this module is self-contained
-        //     even if the AI module (its usual registrant) is not composed, without clobbering that registration.
+        //   • ICallerSystemUserResolver — REUSED (§11) for oid→systemuserid; TryAdd so the registration exists even if
+        //     the AI module (its usual registrant) is not composed, without clobbering that registration. It depends on
+        //     ISystemUserIdentityResolver (issue #1576: the disabled-user filter lives there), which NotificationsModule
+        //     registers unconditionally from Program.cs — this module is NOT self-contained without it.
         services.AddSingleton<IImpersonatedCommunicationQuery, DataverseImpersonatedCommunicationQuery>();
         // The app-only twin for the EXTERNAL-plane message read only (spaarke-SPA-external-access-platform-r3 task 033,
         // FR-04): a contact has no systemuser to impersonate and the external plane forbids OBO. Consumed solely by

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -721,6 +722,48 @@ public class CoreAncestorStampReconciliationJobTests
         world.Patches.Should().BeEmpty();
         Counts(run).GetProperty("sampleStale").EnumerateArray().Select(e => e.GetString())
             .Should().Contain($"sprk_signal:{OntologyRow:D}");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // GitHub #2049 (follow-up to #2002): the scan resolves an intermediate's root only to compare it with the copies its
+    // children carry; it writes nothing against the intermediate, so a no-root intermediate is not a Warning.
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact(DisplayName = "GitHub #2049: the scan resolving a child's intermediate that has NO root logs no 'carries no core-ancestor stamp' Warning - the run and its counts are unchanged")]
+    public async Task ScanOfAChildWhoseIntermediateHasNoRoot_LogsNoWarning()
+    {
+        // The live shape: a to-do filed under a communication that is itself filed under no matter or project (an orphan
+        // the scan sees on every 5-minute tick). The to-do carries no copy either, so nothing is stale.
+        var log = new CapturingResolverLogger();
+        var world = new StampWorld(log)
+            .Row("sprk_communication", Communication, [])
+            .Row("sprk_todo", Todo, [("sprk_regardingcommunication", "sprk_communication", Communication)],
+                pairId: Communication.ToString());
+
+        var run = await Job(world).ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        Counts(run).GetProperty("status").GetString().Should().Be(CoreAncestorStampReconciliationJob.StatusOk);
+        Counts(run).GetProperty("scanned").GetInt32().Should().Be(1, "the to-do is filed under a source column");
+        Counts(run).GetProperty("stale").GetInt32().Should().Be(0);
+        Counts(run).GetProperty("unverified").GetInt32().Should().Be(0, "no root is an answer, not an unverified row");
+        world.Patches.Should().BeEmpty();
+        log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning && e.Message.Contains("carries no core-ancestor stamp"),
+            "the scan writes nothing against the communication, so it resolves with CoreAncestorIntent.ReadOnly");
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Debug && e.Message.Contains("carries no core-ancestor stamp"),
+            "the scan did resolve the communication (must-fire control: without it the assertion above proves nothing)");
+    }
+
+    private sealed class CapturingResolverLogger : ILogger<CoreAncestorResolver>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, formatter(state, exception)));
     }
 
     private static CoreAncestorStampReconciliationJob Job(
