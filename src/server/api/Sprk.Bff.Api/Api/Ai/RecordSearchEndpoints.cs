@@ -228,11 +228,10 @@ public static class RecordSearchEndpoints
     /// never asked for — which is a reason to drop it, not to trust it.
     /// </para>
     /// <para>
-    /// <b>Sequential</b>, for the reason documented on the document-search equivalent:
-    /// <c>DataverseAccessDataSource</c> assigns <c>_httpClient.DefaultRequestHeaders.Authorization</c>
-    /// before issuing its request and that client is shared within one request scope, so concurrent
-    /// checks would mutate the header mid-send. <c>HttpHeaders</c> is not thread-safe and the resulting
-    /// failure is an intermittent phantom denial.
+    /// <b>Sequential</b>, for the reason documented on the document-search equivalent. The original reason —
+    /// <c>DataverseAccessDataSource</c> assigning the shared <c>_httpClient.DefaultRequestHeaders.Authorization</c>
+    /// before each request — is gone since issue #1576 (every read carries its own token); it stays sequential
+    /// because nothing above the data source has been reviewed for concurrent use within one request scope.
     /// </para>
     /// <para>
     /// <b>Known limitation (task 077 follow-up F-4).</b> Rows are authorized after the index ranks them,

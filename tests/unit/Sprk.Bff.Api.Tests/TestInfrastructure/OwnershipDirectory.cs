@@ -42,7 +42,7 @@ internal sealed class OwnershipDirectory
 
     private readonly Dictionary<(string Entity, Guid Id), Entity> _records = new();
     private readonly HashSet<string> _unreadable = new(StringComparer.OrdinalIgnoreCase);
-    private readonly List<(Guid SystemUserId, Guid ObjectId, Guid BusinessUnit)> _users = new();
+    private readonly List<(Guid SystemUserId, Guid ObjectId, Guid BusinessUnit, bool Disabled)> _users = new();
     private readonly List<(Guid TeamId, Guid BusinessUnit, bool IsDefault, int TeamType, string Name)> _teams = new();
     private readonly List<(Guid BusinessUnitId, string Name)> _businessUnits = new();
     private bool _ignoreAssignments;
@@ -270,7 +270,15 @@ internal sealed class OwnershipDirectory
 
     public OwnershipDirectory WithUser(Guid systemUserId, Guid objectId, Guid businessUnit)
     {
-        _users.Add((systemUserId, objectId, businessUnit));
+        _users.Add((systemUserId, objectId, businessUnit, false));
+        return this;
+    }
+
+    /// <summary>A systemuser with <c>isdisabled = true</c> (issue #1576): it keeps its oid, and a query that filters
+    /// <c>isdisabled = false</c> does not return it.</summary>
+    public OwnershipDirectory WithDisabledUser(Guid systemUserId, Guid objectId, Guid businessUnit)
+    {
+        _users.Add((systemUserId, objectId, businessUnit, true));
         return this;
     }
 
@@ -335,10 +343,13 @@ internal sealed class OwnershipDirectory
 
     private IEnumerable<Entity> UsersMatching(IReadOnlyDictionary<string, object> conditions)
     {
-        var (column, key) = conditions.Single();
+        // The KEY condition (systemuserid or azureactivedirectoryobjectid) plus, optionally, isdisabled (issue #1576),
+        // which Dataverse evaluates against the row like any column. Anything else is not a query this fake answers.
+        var (column, key) = conditions.Single(c => !string.Equals(c.Key, "isdisabled", StringComparison.OrdinalIgnoreCase));
         UserKeyColumns.Add(column);
         return _users
             .Where(u => column == "systemuserid" ? u.SystemUserId.Equals(key) : u.ObjectId.Equals(key))
+            .Where(u => Matches(conditions, "isdisabled", u.Disabled))
             .Select(u => new Entity("systemuser", u.SystemUserId)
             {
                 ["businessunitid"] = new EntityReference("businessunit", u.BusinessUnit),

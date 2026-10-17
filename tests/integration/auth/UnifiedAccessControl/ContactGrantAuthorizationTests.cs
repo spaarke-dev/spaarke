@@ -1905,10 +1905,11 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
         return rows.ToList();
     }
 
-    /// <summary>The internal caller's systemuser by Entra object id — the one clause the issuer-stamp lookup sends (strict).</summary>
+    /// <summary>The internal caller's ACTIVE systemuser by Entra object id — the one clause pair the issuer-stamp lookup sends
+    /// (strict; the isdisabled clause is issue #1576's).</summary>
     private List<Dictionary<string, object?>> MatchSystemUsers(string filter)
     {
-        var oid = Regex.Match(filter, @"^azureactivedirectoryobjectid eq ([0-9a-fA-F-]{36})$");
+        var oid = Regex.Match(filter, @"^azureactivedirectoryobjectid eq ([0-9a-fA-F-]{36}) and isdisabled eq false$");
         if (!oid.Success)
             throw new InvalidOperationException($"The fake does not understand the systemusers filter '{filter}'.");
 

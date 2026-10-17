@@ -864,7 +864,8 @@ public class SpeAdminTenantScope
         {
             var rows = await _dataverseClient.QueryAsync<SystemUserRow>(
                 "systemusers",
-                filter: $"azureactivedirectoryobjectid eq {callerOid:D}",
+                // Issue #1576: a disabled systemuser keeps its oid; it scopes no business unit (denied, fail closed).
+                filter: $"azureactivedirectoryobjectid eq {callerOid:D} and isdisabled eq false",
                 select: "systemuserid,_businessunitid_value",
                 top: 1,
                 cancellationToken: ct).ConfigureAwait(false);
