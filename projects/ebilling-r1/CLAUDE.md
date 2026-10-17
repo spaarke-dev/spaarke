@@ -141,6 +141,13 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-15 — D-79: rule set with "visible to firms" off → firm sees reason + rule set name, never clause text or section reference.
 - 2026-10-15 — D-80: task 001 baseline accepted without a live legacy run; dev not repaired (legacy path replaced in 044, deleted in 050).
 - 2026-10-15 — D-81: extraction GO on Content Understanding with a preview exception (path A): preview analyzer primary, GA fallback analyzer kept in step and selectable by config, REST client for both versions (no beta SDK), 161 / 162 measure both.
+- 2026-10-17 — D-96: an invoice core-lookup change is refused if its lines name another core; the line check runs as the app identity.
+- 2026-10-17 — D-97: 015 approved in full, including the live delete of `sprk_invoicestatus`.
+- 2026-10-17 — D-98: counted spend = `statuscode` In Review, Approved, Sent to AP, Paid. **PR #1911 does not merge to master until ontology-r1's owner confirms Q24.**
+- 2026-10-17 — D-99: callers linked to several firms choose the firm when submitting (`firms` on `GET /external/me`).
+- 2026-10-17 — D-100: billing Decision Records use the additive `DecisionRecordWriter.WriteBillingDecisionAsync` (§6.5 path B). `WriteAsync` stays byte-identical, and ontology-r1's 7 conditions apply.
+- 2026-10-17 — D-101: every submission that is read creates its invoice. Rejected → created Rejected. Blocked → In Review, held until Override / Return. Their Decision Records file under the invoice; `sprk_decisionrecord` gets no submission lookup.
+- 2026-10-17 — D-102: held invoices are excluded from spend on both sum paths (FinanceRollupService and `FinanceBaseValues.BuildGroupedSumFetchXml`). One predicate in FinanceBaseValues, shipped with 049, reviewed by ontology-r1.
 
 ### Open owner questions
 
