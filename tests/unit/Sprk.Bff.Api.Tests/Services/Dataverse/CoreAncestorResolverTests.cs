@@ -219,8 +219,10 @@ public class CoreAncestorResolverTests
 
         tsRows.Should().OnlyHaveUniqueItems("a duplicated TypeScript row hides a missing one from a count check");
         tsRows.Should().HaveCount(csRows.Count);
-        tsRows.Should().BeEquivalentTo(csRows,
-            "the TypeScript stamp derivation must read exactly the server's intermediate table");
+        tsRows.Should().BeEquivalentTo(csRows, options => options.WithStrictOrdering(),
+            "the TypeScript stamp derivation must read exactly the server's intermediate table, in the same order "
+            + "(ebilling-r1 026 fix-round-1 item 6: each intermediate's root columns are read and reported in this order "
+            + "on both sides, so a reordering on one side is a drift too)");
     }
 
     /// <summary>
