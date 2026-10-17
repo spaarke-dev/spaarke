@@ -1557,8 +1557,7 @@ public static class ProvisionProjectEndpoint
             ("childrenRemaining", summary.Remaining),
             ("childTables", summary.Tables),
         };
-        if (blockedByOwnerPrivilege)
-            extensions.Add((ChildrenBlockedByKey, ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode));
+        extensions.AddRange(SecureChildPassSummary.BlockedByExtensions(pass));
 
         return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
             $"The {root.DisplayLabel.ToLowerInvariant()} is secured, shared and has its document container, but its existing " +
@@ -1575,12 +1574,6 @@ public static class ProvisionProjectEndpoint
             traceId,
             extensions.ToArray());
     }
-
-    /// <summary>
-    /// UAC task 099b review round 3 (K2): the problem-detail extension naming what blocks a <see cref="ReasonChildrenIncomplete"/>
-    /// that a repeat call cannot complete — today only <c>sdap.access.grant.owner_privilege_missing</c>. Absent otherwise.
-    /// </summary>
-    internal const string ChildrenBlockedByKey = "childrenBlockedBy";
 
     /// <summary>
     /// Task 158 — the work assignments and projects filed under the record (a matter or project) were not all made secure

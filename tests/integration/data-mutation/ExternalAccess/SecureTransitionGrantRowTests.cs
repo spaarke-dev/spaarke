@@ -5,6 +5,7 @@ using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
+using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -157,7 +158,7 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
         var problem = await JsonOf(first);
         problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonChildrenIncomplete);
         // Review round 3 (K2): the cause is named, and a repeat call is not promised to complete it before the role is fixed.
-        problem.GetProperty(ProvisionProjectEndpoint.ChildrenBlockedByKey).GetString()
+        problem.GetProperty(SecureChildPassSummary.ChildrenBlockedByKey).GetString()
             .Should().Be(ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode);
         var detail = problem.GetProperty("detail").GetString();
         detail.Should().Contain("until an administrator").And.Contain("does not complete them")
@@ -197,7 +198,7 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
         var problem = await JsonOf(response);
         problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonChildrenIncomplete);
-        problem.TryGetProperty(ProvisionProjectEndpoint.ChildrenBlockedByKey, out _).Should().BeFalse();
+        problem.TryGetProperty(SecureChildPassSummary.ChildrenBlockedByKey, out _).Should().BeFalse();
         problem.GetProperty("detail").GetString().Should().Contain("Calling provisioning again (the same caller may) completes them");
     }
 
@@ -228,6 +229,72 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
 
         AssertDecoyUntouched(grants);
         _fixture.IsSecureOf(rootId).Should().BeFalse();
+    }
+
+    /// <summary>A secure record (shared with its creator) whose grants are all on the Secure team, ready to unsecure.</summary>
+    private Grants SeedSecureRecordWithGrants(Guid rootId)
+    {
+        SeedRoot("sprk_project", rootId, owningTeam: SecureTeam);
+        _fixture.UseChildWorldForRoots();
+        _fixture.SeedShare(rootId, DataversePrincipalRef.User(Creator), RecordShareLevels.CollaborateRights);
+        var grants = SeedGrants("sprk_project", rootId, owner: SecureTeam);
+        _fixture.ChildWorld.MoveOwner(GrantTable, grants.AppOwned, DataversePrincipalRef.Team(SecureTeam));
+        return grants;
+    }
+
+    [Fact]
+    public async Task Unsecure_WhenTheBusinessUnitsTeamMayNotOwnAGrant_IsChildrenIncomplete_NamesTheCause_AndASecondCallCompletesIt()
+    {
+        // Review round 4 (round 3's K2 on this endpoint): the team the ordinary rule gives the grant may not own one. A repeat
+        // call cannot complete that until an administrator adds the privilege, so the detail does not promise it.
+        var rootId = Guid.NewGuid();
+        var grants = SeedSecureRecordWithGrants(rootId);
+        _fixture.OwnerPrivileges = TeamPrivilegeCheckerDouble.Lacking(GeneralTeam);
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var first = await client.PostAsJsonAsync(UnsecureRoute, new { recordType = "project", recordId = rootId });
+
+        first.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await JsonOf(first);
+        problem.GetProperty("reasonCode").GetString().Should().Be(UnsecureProjectEndpoint.ReasonChildrenIncomplete,
+            "the reason code is unchanged");
+        problem.GetProperty(SecureChildPassSummary.ChildrenBlockedByKey).GetString()
+            .Should().Be(ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode);
+        var detail = problem.GetProperty("detail").GetString();
+        detail.Should().Contain("until an administrator").And.Contain("does not complete it")
+            .And.NotContain("Calling again completes it", "a repeat call does not complete it before the role is fixed")
+            .And.NotContain(GeneralTeam.ToString(), "the detail names no team id");
+        _fixture.IsSecureOf(rootId).Should().BeTrue("an incomplete child pass stops before the flag is cleared");
+        foreach (var grant in grants.Moving())
+            OwnerOf(grant).Should().Be(DataversePrincipalRef.Team(SecureTeam), "no grant is assigned to a team that may not own it");
+
+        _fixture.OwnerPrivileges = new TeamPrivilegeCheckerDouble(); // the administrator added the privilege
+        var second = await client.PostAsJsonAsync(UnsecureRoute, new { recordType = "project", recordId = rootId });
+
+        second.StatusCode.Should().Be(HttpStatusCode.OK, await second.Content.ReadAsStringAsync());
+        foreach (var grant in grants.Moving())
+            OwnerOf(grant).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        AssertDecoyUntouched(grants);
+    }
+
+    [Fact]
+    public async Task Unsecure_WhenAGrantRowFailsForAnotherReason_IsChildrenIncomplete_AndStillPromisesTheRetry()
+    {
+        // Twin of the privilege case: the team may own the row, but its assignment fails (a transient write fault). A repeat
+        // call does complete that, so the detail keeps its promise and names no blocking cause.
+        var rootId = Guid.NewGuid();
+        var grants = SeedSecureRecordWithGrants(rootId);
+        _fixture.ChildWorld.RefusingOwnerWritesOf(grants.TeamOwned);
+
+        var response = await _fixture.CreateAuthenticatedClient()
+            .PostAsJsonAsync(UnsecureRoute, new { recordType = "project", recordId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await JsonOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(UnsecureProjectEndpoint.ReasonChildrenIncomplete);
+        problem.TryGetProperty(SecureChildPassSummary.ChildrenBlockedByKey, out _).Should().BeFalse();
+        problem.GetProperty("detail").GetString().Should().Contain("Calling again completes it")
+            .And.NotContain("until an administrator");
     }
 
     // ── The grant row's owner comes from its ROOT lookup only (review round 3, K1) ──────────────────────────────────
