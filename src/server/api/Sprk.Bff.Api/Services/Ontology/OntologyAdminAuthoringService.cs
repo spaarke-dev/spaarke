@@ -67,6 +67,11 @@ public sealed partial class OntologyAdminAuthoringService
     /// <see cref="PolicyVersionValidator.AuthorableColumns"/> (task 102a, owner option 101(b)).</summary>
     internal const string ReasonColumnNotAuthorable = "ontology.admin.column_not_authorable";
 
+    /// <summary>The stable code every authoring route (validate, dry run, save, publish) returns when the rule type belongs to another
+    /// domain, e.g. a billing type (ebilling-r1 task 070, FR-24): the validator refuses it as
+    /// <see cref="OntologyWriterFailureReason.RuleTypeWrongDomain"/> before any body check.</summary>
+    internal const string ReasonRuleTypeWrongDomain = "ontology.admin.rule_type_wrong_domain";
+
     /// <summary>The stable code a plan refused for <see cref="DecisionPlanRefusalReason.DuplicateAction"/> carries: a code listed twice
     /// in one list, or in both <c>actions</c> and <c>nextSteps</c> (PR #2054 review). The catalog offers <c>assign-work</c> in both the
     /// Decide lane's actions and the next steps, so the wizard must pick one place for it.</summary>
@@ -1380,10 +1385,10 @@ public sealed partial class OntologyAdminAuthoringService
             };
             errors[field] = result.Errors.ToArray();
             // A billing rule type (ebilling-r1 070) is refused by ValidateForAuthoring (RuleDomain.Ontology) as RuleTypeWrongDomain,
-            // reported on ruleType with that reason as its code, before any body check: nothing is compiled or evaluated.
+            // reported on ruleType with ReasonRuleTypeWrongDomain as its code, before any body check: nothing is compiled or evaluated.
             return new RuleCheck(null, authoring.TemplateEligibleFields,
                 result.Reason == OntologyWriterFailureReason.ColumnNotAuthorable ? ReasonColumnNotAuthorable
-                : result.Reason == OntologyWriterFailureReason.RuleTypeWrongDomain ? OntologyWriterFailureReason.RuleTypeWrongDomain
+                : result.Reason == OntologyWriterFailureReason.RuleTypeWrongDomain ? ReasonRuleTypeWrongDomain
                 : null);
         }
 

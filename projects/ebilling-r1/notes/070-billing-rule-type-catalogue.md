@@ -235,7 +235,7 @@ change; `PolicyVersionValidator` is unchanged by this round.
 
 **What changed**
 - `OntologyAdminAuthoringService.ValidateRule` (the shared reason-to-field map; no per-route code): `RuleTypeWrongDomain => "ruleType"`,
-  and the refusal's reason code is `rule_type_wrong_domain` (the `OntologyWriterFailureReason` value itself; before this it fell to the
+  and the refusal's reason code is `ontology.admin.rule_type_wrong_domain` (`ReasonRuleTypeWrongDomain`, namespaced like every authoring code at ontology-r1's request; before this it fell to the
   `ruleBody` default arm with no code). The "type is Existence or Threshold" comment now says billing types are refused before that point.
 - `OntologyAdminAuthoringService.OntologyDomain` takes `Value` / `Column` from `RuleDomains.PolicyDomainOntology` /
   `PolicyDomainColumn`; `OntologyAdminRulesService.OntologyDomain` and `OntologyOnly()` likewise; both "swap to RuleDomains" comments
@@ -243,9 +243,9 @@ change; `PolicyVersionValidator` is unchanged by this round.
   remaining `100000001` literals there are other choices: lane, severity, direction, signal status).
 
 **Refusal shape (billing ruleType, e.g. ApprovedTimekeeper, 100000003, AiObservation)**
-- validate: 200, `valid: false`, `errors: [{field: "ruleType", ...}]` only, `reasonCode: "rule_type_wrong_domain"`, `templateEligibleFields: []`.
+- validate: 200, `valid: false`, `errors: [{field: "ruleType", ...}]` only, `reasonCode: "ontology.admin.rule_type_wrong_domain"`, `templateEligibleFields: []`.
 - dry run (existing policy and new rule), save, publish: 400 validation problem, `errors` has only `ruleType` (same message as validate),
-  `reasonCode: "rule_type_wrong_domain"`. The engine records no evaluation and Dataverse records no write.
+  `reasonCode: "ontology.admin.rule_type_wrong_domain"`. The engine records no evaluation and Dataverse records no write.
 
 **Tests**
 - `OntologyAdminAuthoringEndpointTests.ABillingRuleType_IsRefusedOnRuleType_WithTheWrongDomainCode_ByValidateDryRunSaveAndPublish` (3 rows).

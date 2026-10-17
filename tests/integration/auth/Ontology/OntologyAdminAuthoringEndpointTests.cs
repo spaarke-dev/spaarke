@@ -468,7 +468,7 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
     }
 
     /// <summary>ebilling-r1 070 fix-round-2 (ontology-r1's paired change): a billing rule type is refused by the one shared
-    /// validation on <c>ruleType</c> with code <c>rule_type_wrong_domain</c>, identically on every authoring route, never as a
+    /// validation on <c>ruleType</c> with code <c>ontology.admin.rule_type_wrong_domain</c>, identically on every authoring route, never as a
     /// <c>ruleBody</c> error, and nothing is evaluated or written. The body is a valid Ontology body, so only the type is wrong.</summary>
     [Theory]
     [InlineData("ApprovedTimekeeper")]
@@ -476,7 +476,7 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
     [InlineData("AiObservation")]
     public async Task ABillingRuleType_IsRefusedOnRuleType_WithTheWrongDomainCode_ByValidateDryRunSaveAndPublish(string ruleType)
     {
-        const string code = "rule_type_wrong_domain";
+        const string code = "ontology.admin.rule_type_wrong_domain";
         var draft = new
         {
             ruleType,
