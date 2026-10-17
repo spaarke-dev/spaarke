@@ -2202,14 +2202,16 @@ state.
    task 036 notes. A write is confirmed by asking Dataverse with the user's own token (on-behalf-of), and a token issued by
    the customer's directory cannot be exchanged for a Dataverse token in Spaarke's tenant. So in a tenant with
    WorkforceHome-linked systemusers, those users still read under "on", but **every write of theirs is refused** unless a
-   contact grant allows it, and their lists offer no create/upload. Until (a) is settled, keep the setting off in such a
+   contact grant allows it or it is a service-request write (those keep the requester rule in both states), and their
+   lists offer no create/upload. Until (a) is settled, keep the setting off in such a
    tenant.
 4. **Internal users who write in the SPA or Teams hold Spaarke Core User** (or a role with the same privileges). Under
    "on", Dataverse decides writes from the user's own roles, as the model-driven app does. Spaarke Core User grants
    Create, Write and Delete on `sprk_todo`, `sprk_document`, `sprk_event` and `sprk_communication`. **Spaarke Basic User**
    grants them on `sprk_communication` only (Basic depth), and **Spaarke Office Add In User** grants only Create and Write
-   on `sprk_event`. A user whose only role is one of these two keeps reading, and can post messages (Basic User), but
-   loses the to-do, document and event writes (and Office Add In users lose delete-own on events), exactly as in the
+   on `sprk_event`. A user whose only role is one of these two keeps reading. A Basic User can post messages but loses
+   the to-do, document and event writes; an Office Add In User keeps creating events (the role also grants AppendTo on
+   `sprk_project` and `sprk_matter`) but loses the to-do and document writes and delete-own on events — exactly as in the
    model-driven app. Check the roles of SPA/Teams writers before turning it on.
 5. **The task 034 negative canary passes against the environment, in this rollout** (`tests/integration/auth/README.md`
    § Provisioning the canary user, then § Running it):

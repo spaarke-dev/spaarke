@@ -769,7 +769,8 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                 .ToHashSet(StringComparer.OrdinalIgnoreCase),
             // Task 036 (FR-20): Dataverse decided this caller's own access, so its writes are confirmed against Dataverse.
             // The flag is read once per composition, so the three sets agree; if flags ever become per type, decide this
-            // per entity type — the confirmation only adds rights, never removes them.
+            // per entity type: the confirmation widens composed rights on the write routes, but delete-own then also needs
+            // Dataverse Delete, and /me switches the SPA's create controls to each list's canCreate.
             DataverseConfirmsWrites = accessibleProjects.Sources.ImpersonatedRootSet
                 || accessibleMatters.Sources.ImpersonatedRootSet
                 || accessibleWorkAssignments.Sources.ImpersonatedRootSet,

@@ -265,6 +265,38 @@ describe('per-record write access: SmartTodo status toggle (fix round 2, F1)', (
     expect(screen.queryByRole('button', { name: 'Mark task complete' })).toBeNull();
   });
 
+  // The failure text changed for EVERY caller in fix round 2 (re-check F4): a contact's refusal used to show the raw body.
+  it('a Collaborate contact refused by PATCH sees the same plain message, never the server body', async () => {
+    answerTodos(() => {
+      throw new ApiError(403, JSON.stringify({ status: 403, detail: 'internal: grant does not cover sprk_todo' }));
+    });
+    inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark task complete' }));
+
+    expect(await screen.findByText('You do not have permission to change this task.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Mark task complete' })).toBeTruthy();
+    expect(screen.queryByText(/grant does not cover/)).toBeNull();
+  });
+
+  it('any other failure shows the ProblemDetails detail, else a fixed fallback, never the raw body', async () => {
+    answerTodos(() => {
+      throw new ApiError(503, JSON.stringify({ status: 503, detail: 'Dataverse is temporarily unavailable.' }));
+    });
+    const first = inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark task complete' }));
+    expect(await screen.findByText('Dataverse is temporarily unavailable.')).toBeTruthy();
+    first.unmount();
+
+    answerTodos(() => {
+      throw new TypeError('Failed to fetch');
+    });
+    inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark task complete' }));
+    expect(await screen.findByText('The task status could not be updated just now.')).toBeTruthy();
+    expect(screen.queryByText(/Failed to fetch/)).toBeNull();
+  });
+
   it('a matter to-do list stays read-only for a per-record caller (task 057)', async () => {
     answerTodos(() => undefined);
     inFluent(<SmartTodo projectId="m-036" root="matters" accessLevel={AccessLevel.ViewOnly} writeAccessPerRecord />);

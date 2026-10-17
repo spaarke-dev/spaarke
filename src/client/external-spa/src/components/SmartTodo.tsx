@@ -259,10 +259,10 @@ const useStyles = makeStyles({
 // To-Do status mapping (sprk_todo.statuscode per FR-24)
 // ---------------------------------------------------------------------------
 
-/** To-Do statuscode values per FR-24. */
 /** A refused status toggle (403 from PATCH /todos/{id}); never the server's body (task 036 fix round 2). */
 const TOGGLE_DENIED = 'You do not have permission to change this task.';
 
+/** To-Do statuscode values per FR-24. */
 const TODO_STATUS = {
   OPEN: 1,
   IN_PROGRESS: 659490001,
@@ -729,7 +729,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
         setTasks(prev =>
           prev.map(t => (t.sprk_todoid === task.sprk_todoid ? { ...t, statuscode: task.statuscode } : t))
         );
-        // A refusal says so plainly; it never shows the server's body (task 036 fix round 2).
+        // For every caller, a refusal says so plainly; no failure shows the server's raw body (task 036 fix round 2).
         setToggleError(
           err instanceof ApiError && err.statusCode === 403
             ? TOGGLE_DENIED
