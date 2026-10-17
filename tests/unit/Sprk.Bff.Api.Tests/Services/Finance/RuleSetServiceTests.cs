@@ -59,6 +59,7 @@ public sealed class RuleSetServiceTests
         public readonly List<string> FileDeletes = new();
         public readonly List<CreateDocumentRequest> DocumentCreates = new();
         public readonly List<string> Order = new();
+        public readonly List<(string Entity, int Size)> BulkCalls = new();
         public Func<string, bool>? FailBulkFor;
         public Func<Entity, bool>? FailCreateWhen;
         public bool IgnoreQueryFilters;
@@ -141,6 +142,7 @@ public sealed class RuleSetServiceTests
                     }
 
                     Order.Add("bulk:" + entity);
+                    BulkCalls.Add((entity, updates.Count));
                     foreach (var (id, fields) in updates)
                     {
                         Writes.Add((Write.BulkUpdate, entity, id, fields));
@@ -398,6 +400,26 @@ public sealed class RuleSetServiceTests
         h.FileDeletes.Should().Equal("item-1");
         h.Writes.Should().Contain(w => w.Kind == Write.Delete && w.Entity == "sprk_document");
         h.Rows.GetValueOrDefault("sprk_ruleset").Should().BeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task Create_WhenTheCallerCancelsMidWay_StillRemovesTheDocumentRowAndTheUploadedFile_AndRethrows()
+    {
+        using var cts = new CancellationTokenSource();
+        var h = new Harness
+        {
+            FailCreateWhen = e =>
+            {
+                cts.Cancel();
+                throw new OperationCanceledException(cts.Token);
+            },
+        };
+
+        var act = () => h.Service().CreateAsync(CreateRequest(), new byte[] { 1 }, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        h.FileDeletes.Should().Equal("item-1");
+        h.Writes.Should().Contain(w => w.Kind == Write.Delete && w.Entity == "sprk_document");
     }
 
     [Fact]
@@ -914,6 +936,47 @@ public sealed class RuleSetServiceTests
         predecessor.Attributes.Where(a => a.Key != "sprk_inforceto").Should().BeEquivalentTo(v1Before, "only the end stamp is written to a published version");
         h.Row("sprk_policyversion", v2).GetAttributeValue<DateTime>("sprk_inforcefrom").Should().Be(Utc(2026, 11, 1));
         h.Row("sprk_ruleset", set).GetAttributeValue<DateTime>("sprk_effectivefrom").Should().Be(Utc(2026, 1, 1), "an already effective set keeps its start");
+    }
+
+    [Fact]
+    public async Task Publish_OfMoreThan1000Rules_WritesInTransactionsOfAtMost1000_VersionsThenPolicies_RuleSetLast()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        for (var i = 0; i < 1001; i++)
+        {
+            h.Rule(set, "BILL-" + i, ProposalState.Accepted);
+        }
+
+        var outcome = await h.Service().PublishAsync(set, Effective, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        outcome.Value!.Published.Should().HaveCount(1001);
+        h.BulkCalls.Should().Equal(
+            ("sprk_policyversion", 1000), ("sprk_policyversion", 1), ("sprk_policy", 1000), ("sprk_policy", 1));
+        h.Order.Last().Should().Be("update:sprk_ruleset");
+    }
+
+    [Fact]
+    public async Task Get_ReadsTheVersionsOfManyRulesInBatchesOfAtMost500InValues()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        for (var i = 0; i < 501; i++)
+        {
+            h.Rule(set, "BILL-" + i);
+        }
+
+        var outcome = await h.Service().GetAsync(set, default);
+
+        outcome.Value!.Proposals.Should().HaveCount(501);
+        var inLists = h.Queries
+            .SelectMany(q => q.Criteria.Conditions.Concat(q.Criteria.Filters.SelectMany(f => f.Conditions)))
+            .Where(c => c.Operator == ConditionOperator.In)
+            .ToList();
+        inLists.Should().NotBeEmpty();
+        inLists.Should().OnlyContain(c => c.Values.Count <= 500, "SQL Server refuses about 2,100 parameters in one statement");
+        inLists.Max(c => c.Values.Count).Should().Be(500);
     }
 
     [Fact]
