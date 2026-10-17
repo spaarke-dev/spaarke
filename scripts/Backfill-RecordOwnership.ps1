@@ -10,9 +10,14 @@
     descendants, never its parent, so no child-business-unit user could read them. New creates are now owned by a
     default owner team (RecordOwnershipResolver). This script fixes the rows that already exist.
 
-    WHICH ROWS (candidates): rows of the chosen entities whose owner is an APPLICATION user (systemuser with an
-    applicationid). Rows owned by a human user or by a team are left alone and only counted — they are not the
-    defect this fixes, and re-owning them would change who they belong to.
+    WHICH ROWS (candidates):
+      sprk_document, sprk_todo : rows whose owner is an APPLICATION user (systemuser with an applicationid). Rows
+                      owned by a human user or by a team are left alone — they are not the defect this fixes, and
+                      re-owning them would change who they belong to.
+      sprk_externalrecordaccess : every ACTIVE row owned by ANY systemuser — application OR human (task 099b review
+                      round 1, F3). D-11 says a grant row is owned by a team, never a user, so a human-owned grant is
+                      the same defect. The summary splits the candidates into AppOwned and HumanOwned, and the
+                      manifest records each row's previous owner, so either is restored exactly by -RevertManifest.
 
     WHICH TEAM — record-first, the SAME order RecordOwnershipResolver applies to new creates:
       sprk_document : the filed record — sprk_matter, sprk_project, sprk_invoice, sprk_workassignment, then the
@@ -20,19 +25,21 @@
       sprk_todo     : the record regarding (matter / project / invoice), then the document, then the communication.
       sprk_externalrecordaccess (unified-access-control-r2 task 099b, D-11, #1010): the grant's ROOT — sprk_project,
                       sprk_matter, sprk_workassignment (a grant binds exactly one) — the SAME parent the BFF's grant core
-                      hands RecordOwnershipResolver for a new grant. ACTIVE grants only (statecode = 0); app-owned inactive
-                      grants are counted (NotActive) and left alone.
+                      hands RecordOwnershipResolver for a new grant. ACTIVE grants only (statecode = 0); user-owned
+                      inactive grants are counted (NotActive) and left alone.
     The target's owningbusinessunit → that unit's default owner team (isdefault = true AND teamtype = 0 — both
     predicates are required; dev has non-default Owner teams and Access teams in the same units).
 
-    SECURE ROOTS (sprk_externalrecordaccess) — the resolver's task 144 / 146 rules, as in
-    Migrate-SecureRecordsToNamedOwnerTeam.ps1:
-      - a root owned in the Secure Record business unit → that unit's NAMED owner team ('Secure Record Owners',
+    SECURE TARGETS (every entity) — the resolver's task 144 / 146 rules, as in Migrate-SecureRecordsToNamedOwnerTeam.ps1
+    (Get-OwnerTeamDecision; task 099b review round 1 extended them from grants to documents and to-dos too):
+      - a target owned in the Secure Record business unit → that unit's NAMED owner team ('Secure Record Owners',
         teamtype = 0, isdefault = false, exactly one) — never the Secure Record unit's default team;
-      - a root whose sprk_issecure is true OR EMPTY (fail closed, task 150) but is owned OUTSIDE the Secure Record unit is
-        NOT ISOLATED (an interrupted provisioning) → UNRESOLVABLE, never an ordinary team;
+      - a ROOT target (sprk_project, sprk_matter, sprk_workassignment — the tables that carry sprk_issecure) whose
+        sprk_issecure is true OR EMPTY (fail closed, task 150) but is owned OUTSIDE the Secure Record unit is NOT
+        ISOLATED (an interrupted provisioning) → UNRESOLVABLE, never an ordinary team;
       - more than one business unit with the Secure Record name, or a missing/duplicate named team → UNRESOLVABLE.
-    (sprk_document / sprk_todo keep the rule this script always applied to them; see the PR for 099b.)
+    Not mirrored: the resolver's look-through for a target that is itself a CHILD row and is not team-owned (it reads
+    that row's own filing, up to four levels, to find a secure ancestor). Such a target is decided by its own unit here.
 
     WHAT IT WILL NOT GUESS. A row filed against nothing (an unfiled save, or an app-created matter/project/invoice)
     was created on behalf of a user this data does not record — the create was app-only, so createdby is the app
@@ -53,7 +60,10 @@
         order), then re-run for sprk_todo, so todos follow their documents' new units.
 
 .PARAMETER EnvironmentUrl
-    Dataverse environment URL, e.g. https://spaarkedev1.crm.dynamics.com
+    Dataverse environment URL, e.g. https://spaarkedev1.crm.dynamics.com. Required except with -SelfTest.
+
+.PARAMETER SelfTest
+    Offline: runs the pure owner decision and candidate filters over inline cases; exits 1 on any mismatch.
 
 .PARAMETER Apply
     Write mode. Without it the script always dry-runs.
@@ -83,7 +93,8 @@
 
 .EXAMPLE
     .\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
-    Dry run: candidates, the planned team per row, unresolvable rows, and per-entity totals. Zero writes.
+    Dry run: candidates, the planned team per row, unresolvable rows, per-entity totals and the count per target
+    team (the Secure Record owner team always listed). Zero writes.
 
 .EXAMPLE
     .\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply -MaxWritesPerRun 5
@@ -96,12 +107,16 @@
 .EXAMPLE
     .\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Entities sprk_externalrecordaccess
     The grant backfill dry run (task 099b). It is also the VERIFY: after -Apply, it must report ToWrite: 0 and
-    Candidates: 0 (no active grant owned by an application user).
+    Candidates: 0 — no ACTIVE grant owned by a user, application or human (review round 1, F3).
+
+.EXAMPLE
+    .\Backfill-RecordOwnership.ps1 -SelfTest
+    Offline: the owner decision (Get-OwnerTeamDecision) and the candidate filters over inline cases — a secure
+    target never maps to an ordinary team. Needs no environment; exits 1 on any mismatch.
 #>
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
     [string]$EnvironmentUrl,
 
     [switch]$Apply,
@@ -119,11 +134,14 @@ param(
 
     [string]$RevertManifest,
 
-    [string]$LogPath
+    [string]$LogPath,
+
+    [switch]$SelfTest
 )
 
 $ErrorActionPreference = 'Stop'
-$EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
+if (-not $SelfTest -and [string]::IsNullOrWhiteSpace($EnvironmentUrl)) { throw '-EnvironmentUrl is required (except with -SelfTest).' }
+if ($EnvironmentUrl) { $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/') }
 $IsDryRun = (-not $Apply.IsPresent) -or $WhatIf.IsPresent
 
 # ── Record-first target order per entity. MUST mirror the writers (OfficeService / RecordOwnershipResolver) ──
@@ -158,9 +176,86 @@ $TargetOrder = @{
 $EntitySet = @{ 'sprk_document' = 'sprk_documents'; 'sprk_todo' = 'sprk_todos'; 'sprk_externalrecordaccess' = 'sprk_externalrecordaccesses' }
 # Entities whose candidates are ACTIVE rows only (amendment 4: "0 active grants owned by an application user").
 $ActiveOnly = @{ 'sprk_externalrecordaccess' = $true }
-# Entities resolved with the resolver's secure-root rules (task 144 / 146 / 150) — see SECURE ROOTS above.
-$SecureAware = @{ 'sprk_externalrecordaccess' = $true }
+# Entities whose candidates are rows owned by ANY systemuser, human included (D-11: a grant is never user-owned; review
+# round 1, F3). The others re-own application-owned rows only.
+$AnyUserOwned = @{ 'sprk_externalrecordaccess' = $true }
+# The tables that carry sprk_issecure (RecordOwnershipResolver.SecureFlaggedRoots): only these are read for the flag.
+$SecureFlaggedSets = @{ 'sprk_projects' = $true; 'sprk_matters' = $true; 'sprk_workassignments' = $true }
 $OwnerTeamType = 0
+
+# ── PURE: the resolver's owner decision for a row filed under ONE target (RecordOwnershipResolver.ResolveFromParentsAsync) ──
+#    $Facts    : @{ Bu = <target's owning business unit or $null>; Flagged = <sprk_issecure true/empty on a ROOT target> }
+#    $Topology : @{ BuId = <Secure Record unit or $null>; Ambiguous = <bool>; TeamId = <named team or $null>; TeamCount = <n> }
+#    $DefaultTeamOf : { param($bu) <that unit's single default owner team, or $null> }
+#    Returns @{ Team; Bu; Reason } — Reason is set exactly when Team is $null (UNRESOLVABLE, never written).
+function Get-OwnerTeamDecision {
+    param([hashtable]$Facts, [hashtable]$Topology, [scriptblock]$DefaultTeamOf)
+    if (-not $Facts.Bu) { return @{ Team = $null; Bu = $null; Reason = 'the target does not exist or has no owning business unit' } }
+    if ($Topology.Ambiguous) { return @{ Team = $null; Bu = $Facts.Bu; Reason = "more than one business unit is named '$SecureBusinessUnitName'" } }
+    if ($Facts.Flagged -and $Facts.Bu -ne $Topology.BuId) {
+        return @{ Team = $null; Bu = $Facts.Bu; Reason = 'the target is flagged secure (or its flag is empty) but is not owned in the Secure Record business unit (not isolated)' }
+    }
+    if ($Topology.BuId -and $Facts.Bu -eq $Topology.BuId) {
+        if (-not $Topology.TeamId) { return @{ Team = $null; Bu = $Facts.Bu; Reason = "the named owner team '$SecureOwnerTeamName' resolved to $($Topology.TeamCount) teams, not one" } }
+        return @{ Team = $Topology.TeamId; Bu = $Facts.Bu; Reason = $null }
+    }
+    $team = & $DefaultTeamOf $Facts.Bu
+    if (-not $team) { return @{ Team = $null; Bu = $Facts.Bu; Reason = 'the business unit has no single default owner team' } }
+    return @{ Team = $team; Bu = $Facts.Bu; Reason = $null }
+}
+
+# ── PURE: the candidate $filter for an entity. Active-only entities take the state clause; -Inactive inverts it. ──
+function Get-CandidateFilter {
+    param([string]$Entity, [string[]]$AppUserIds, [switch]$Inactive)
+    $state = if ($Inactive) { 'statecode ne 0' } else { 'statecode eq 0' }
+    $owned = if ($AnyUserOwned[$Entity]) { '_owninguser_value ne null' } else {
+        "Microsoft.Dynamics.CRM.In(PropertyName='owninguser',PropertyValues=[$(($AppUserIds | ForEach-Object { "'$_'" }) -join ',')])"
+    }
+    if ($ActiveOnly[$Entity]) { return "$owned and $state" }
+    return $owned
+}
+
+# ══ SELF-TEST (offline) ══════════════════════════════════════════════════════════════════════════════════════
+if ($SelfTest) {
+    $secureBu = 'aaaaaaaa-0000-0000-0000-000000000001'; $secureTeam = 'aaaaaaaa-0000-0000-0000-0000000000f1'
+    $childBu = 'bbbbbbbb-0000-0000-0000-000000000002'; $childTeam = 'bbbbbbbb-0000-0000-0000-0000000000f2'
+    $secureDefault = 'aaaaaaaa-0000-0000-0000-0000000000d1'
+    $defaults = { param($bu) switch ($bu) { $secureBu { $secureDefault } $childBu { $childTeam } default { $null } } }
+    $ok = @{ BuId = $secureBu; Ambiguous = $false; TeamId = $secureTeam; TeamCount = 1 }
+    $cases = @(
+        @{ Name = 'secure root (flagged, in the Secure BU) -> the named team'; Facts = @{ Bu = $secureBu; Flagged = $true }; Topology = $ok; Team = $secureTeam }
+        @{ Name = 'unflagged target owned in the Secure BU (a child row) -> the named team'; Facts = @{ Bu = $secureBu; Flagged = $false }; Topology = $ok; Team = $secureTeam }
+        @{ Name = 'ordinary target -> its unit default team'; Facts = @{ Bu = $childBu; Flagged = $false }; Topology = $ok; Team = $childTeam }
+        @{ Name = 'flagged root NOT isolated -> UNRESOLVABLE'; Facts = @{ Bu = $childBu; Flagged = $true }; Topology = $ok; Team = $null }
+        @{ Name = 'flagged root, no Secure BU in the environment -> UNRESOLVABLE'; Facts = @{ Bu = $childBu; Flagged = $true }; Topology = @{ BuId = $null; Ambiguous = $false; TeamId = $null; TeamCount = 0 }; Team = $null }
+        @{ Name = 'secure root, named team missing -> UNRESOLVABLE (never the Secure BU default team)'; Facts = @{ Bu = $secureBu; Flagged = $true }; Topology = @{ BuId = $secureBu; Ambiguous = $false; TeamId = $null; TeamCount = 0 }; Team = $null }
+        @{ Name = 'secure root, named team duplicated -> UNRESOLVABLE'; Facts = @{ Bu = $secureBu; Flagged = $true }; Topology = @{ BuId = $secureBu; Ambiguous = $false; TeamId = $null; TeamCount = 2 }; Team = $null }
+        @{ Name = 'two Secure Record BUs -> UNRESOLVABLE, even for an ordinary target'; Facts = @{ Bu = $childBu; Flagged = $false }; Topology = @{ BuId = $null; Ambiguous = $true; TeamId = $null; TeamCount = 0 }; Team = $null }
+        @{ Name = 'target unreadable (no BU) -> UNRESOLVABLE'; Facts = @{ Bu = $null; Flagged = $true }; Topology = $ok; Team = $null }
+        @{ Name = 'unit with no default team -> UNRESOLVABLE'; Facts = @{ Bu = 'cccccccc-0000-0000-0000-000000000003'; Flagged = $false }; Topology = $ok; Team = $null }
+    )
+    $failures = 0
+    foreach ($c in $cases) {
+        $d = Get-OwnerTeamDecision -Facts $c.Facts -Topology $c.Topology -DefaultTeamOf $defaults
+        $pass = ($d.Team -eq $c.Team) -and ([bool]$d.Reason -eq (-not $c.Team))
+        # The invariant this whole check exists for: a target in the Secure BU, or a flagged root, NEVER gets an ordinary team.
+        if (($c.Facts.Bu -eq $secureBu -or $c.Facts.Flagged) -and $d.Team -and $d.Team -ne $secureTeam) { $pass = $false }
+        if (-not $pass) { $failures++ }
+        Write-Host ("{0} {1} -> team={2} reason={3}" -f $(if ($pass) { 'PASS' } else { 'FAIL' }), $c.Name, $d.Team, $d.Reason)
+    }
+    $filters = @(
+        @{ Name = 'grant candidates: active rows owned by ANY user (F3)'; Got = (Get-CandidateFilter 'sprk_externalrecordaccess' @('11')); Want = '_owninguser_value ne null and statecode eq 0' }
+        @{ Name = 'grant NotActive: inactive rows owned by any user'; Got = (Get-CandidateFilter 'sprk_externalrecordaccess' @('11') -Inactive); Want = '_owninguser_value ne null and statecode ne 0' }
+        @{ Name = 'document candidates: application-owned rows only'; Got = (Get-CandidateFilter 'sprk_document' @('11', '22')); Want = "Microsoft.Dynamics.CRM.In(PropertyName='owninguser',PropertyValues=['11','22'])" }
+    )
+    foreach ($f in $filters) {
+        $pass = $f.Got -eq $f.Want
+        if (-not $pass) { $failures++ }
+        Write-Host ("{0} {1}: {2}" -f $(if ($pass) { 'PASS' } else { 'FAIL' }), $f.Name, $f.Got)
+    }
+    Write-Host "Self-test: $($cases.Count + $filters.Count - $failures) passed, $failures failed."
+    exit ([int]($failures -gt 0))
+}
 
 # ── Logging ────────────────────────────────────────────────────────────────────────────────────────────────
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -235,21 +330,6 @@ function Resolve-DefaultOwnerTeam {
     return $team
 }
 
-$script:BuByTarget = @{}
-function Resolve-TargetBusinessUnit {
-    param([string]$EntitySetName, [string]$RecordId)
-    $key = "$EntitySetName|$RecordId"
-    if ($script:BuByTarget.ContainsKey($key)) { return $script:BuByTarget[$key] }
-    try {
-        $row = (Invoke-DvGet "$EntitySetName($RecordId)?`$select=_owningbusinessunit_value")[0]
-        $bu = Get-Lookup $row 'owningbusinessunit'
-    } catch {
-        $bu = $null
-    }
-    $script:BuByTarget[$key] = $bu
-    return $bu
-}
-
 # ── Task 099b: the resolver's secure-root rules (RecordOwnershipResolver.ResolveFromParentsAsync) ─────────────────
 # Resolved ONCE per run. Ambiguity is recorded, not thrown: every secure-aware row is then UNRESOLVABLE (the resolver
 # refuses every create in that state), and the other entities are unaffected.
@@ -257,13 +337,15 @@ $script:SecureTopology = $null
 function Get-SecureTopology {
     if ($script:SecureTopology) { return $script:SecureTopology }
     $escapedBu = $SecureBusinessUnitName.Replace("'", "''")
-    $bus = @(Invoke-DvGet "businessunits?`$select=businessunitid&`$filter=name eq '$escapedBu'&`$top=2")
+    # Assigned, never wrapped in @(...): Invoke-DvGet returns its array as ONE pipeline object (`return , $array`), so
+    # @(Invoke-DvGet ...) is a one-element array whose Count is always 1 (review round 1: ambiguity was never detected).
+    $bus = Invoke-DvGet "businessunits?`$select=businessunitid&`$filter=name eq '$escapedBu'&`$top=2"
     $topology = @{ BuId = $null; Ambiguous = $false; TeamId = $null; TeamCount = 0 }
     if ($bus.Count -gt 1) { $topology.Ambiguous = $true }
     elseif ($bus.Count -eq 1) {
         $topology.BuId = ConvertTo-CleanGuid $bus[0].businessunitid
         $escapedTeam = $SecureOwnerTeamName.Replace("'", "''")
-        $teams = @(Invoke-DvGet "teams?`$select=teamid&`$filter=_businessunitid_value eq $($topology.BuId) and name eq '$escapedTeam' and teamtype eq $OwnerTeamType and isdefault eq false&`$top=2")
+        $teams = Invoke-DvGet "teams?`$select=teamid&`$filter=_businessunitid_value eq $($topology.BuId) and name eq '$escapedTeam' and teamtype eq $OwnerTeamType and isdefault eq false&`$top=2"
         $topology.TeamCount = $teams.Count
         if ($teams.Count -eq 1) { $topology.TeamId = ConvertTo-CleanGuid $teams[0].teamid }
     }
@@ -272,40 +354,32 @@ function Get-SecureTopology {
     return $topology
 }
 
-# A ROOT's owning business unit and its secure flag. sprk_issecure EMPTY reads as flagged (fail closed, task 150).
+# A target's owning business unit and, for a ROOT table (the three that carry sprk_issecure), its secure flag. An EMPTY
+# flag reads as flagged (fail closed, task 150). Any other table has no flag (Flagged = $false); its unit decides.
 $script:RootFacts = @{}
 function Get-RootFacts {
     param([string]$EntitySetName, [string]$RecordId)
     $key = "$EntitySetName|$RecordId"
     if ($script:RootFacts.ContainsKey($key)) { return $script:RootFacts[$key] }
+    $isRoot = [bool]$SecureFlaggedSets[$EntitySetName]
     try {
-        $row = (Invoke-DvGet "$EntitySetName($RecordId)?`$select=_owningbusinessunit_value,sprk_issecure")[0]
+        $columns = if ($isRoot) { '_owningbusinessunit_value,sprk_issecure' } else { '_owningbusinessunit_value' }
+        $row = (Invoke-DvGet "$EntitySetName($RecordId)?`$select=$columns")[0]
         $flag = $row.PSObject.Properties['sprk_issecure']
-        $facts = @{ Bu = (Get-Lookup $row 'owningbusinessunit'); Flagged = ($null -eq $flag -or $null -eq $flag.Value -or $flag.Value -eq $true) }
+        $flagged = $isRoot -and ($null -eq $flag -or $null -eq $flag.Value -or $flag.Value -eq $true)
+        $facts = @{ Bu = (Get-Lookup $row 'owningbusinessunit'); Flagged = $flagged }
     } catch {
-        $facts = @{ Bu = $null; Flagged = $true }
+        $facts = @{ Bu = $null; Flagged = $isRoot }
     }
     $script:RootFacts[$key] = $facts
     return $facts
 }
 
-# The team the resolver would answer for a row filed under ONE root, or a refusal reason. Returns @{ Team; Bu; Reason }.
+# The team the resolver would answer for a row filed under ONE target, or a refusal reason. Returns @{ Team; Bu; Reason }.
 function Resolve-SecureAwareTeam {
     param([string]$EntitySetName, [string]$RecordId)
-    $facts = Get-RootFacts $EntitySetName $RecordId
-    if (-not $facts.Bu) { return @{ Team = $null; Bu = $null; Reason = 'the root does not exist or has no owning business unit' } }
-    $secure = Get-SecureTopology
-    if ($secure.Ambiguous) { return @{ Team = $null; Bu = $facts.Bu; Reason = "more than one business unit is named '$SecureBusinessUnitName'" } }
-    if ($facts.Flagged -and $facts.Bu -ne $secure.BuId) {
-        return @{ Team = $null; Bu = $facts.Bu; Reason = 'the root is flagged secure (or its flag is empty) but is not owned in the Secure Record business unit (not isolated)' }
-    }
-    if ($secure.BuId -and $facts.Bu -eq $secure.BuId) {
-        if (-not $secure.TeamId) { return @{ Team = $null; Bu = $facts.Bu; Reason = "the named owner team '$SecureOwnerTeamName' resolved to $($secure.TeamCount) teams, not one" } }
-        return @{ Team = $secure.TeamId; Bu = $facts.Bu; Reason = $null }
-    }
-    $team = Resolve-DefaultOwnerTeam $facts.Bu
-    if (-not $team) { return @{ Team = $null; Bu = $facts.Bu; Reason = 'the business unit has no single default owner team' } }
-    return @{ Team = $team; Bu = $facts.Bu; Reason = $null }
+    return Get-OwnerTeamDecision -Facts (Get-RootFacts $EntitySetName $RecordId) -Topology (Get-SecureTopology) `
+        -DefaultTeamOf { param($bu) Resolve-DefaultOwnerTeam $bu }
 }
 
 # ── One write: assign, then READ BACK. Returns $null on success or an error string. ──────────────────────────
@@ -357,7 +431,8 @@ if ($RevertManifest) {
 $appUsers = Invoke-DvGet "systemusers?`$select=systemuserid&`$filter=applicationid ne null"
 $appUserIds = @($appUsers | ForEach-Object { ConvertTo-CleanGuid $_.systemuserid })
 if ($appUserIds.Count -eq 0) { throw 'No application users found — nothing can be app-owned; refusing to guess.' }
-$inList = ($appUserIds | ForEach-Object { "'$_'" }) -join ','
+$appUserSet = @{}; foreach ($a in $appUserIds) { $appUserSet[$a] = $true }
+$teamCounts = [ordered]@{}   # "<entity>|<team>" -> rows planned to that team
 
 $manifestPath = Join-Path $logDir "record-ownership-manifest-$stamp.csv"
 $manifest = $null
@@ -374,17 +449,17 @@ foreach ($entity in $Entities) {
     $order = $TargetOrder[$entity]
     $select = (@("$($entity)id", '_ownerid_value', '_owninguser_value', '_owningbusinessunit_value') +
         ($order.Keys | ForEach-Object { "_$($_)_value" })) -join ','
-    $appOwned = "Microsoft.Dynamics.CRM.In(PropertyName='owninguser',PropertyValues=[$inList])"
     $notActive = '-'
+    $candidates = Invoke-DvGet "$set`?`$select=$select&`$filter=$(Get-CandidateFilter $entity $appUserIds)"
     if ($ActiveOnly[$entity]) {
-        $candidates = Invoke-DvGet "$set`?`$select=$select&`$filter=$appOwned and statecode eq 0"
-        # Reported, never written: an inactive grant confers nothing and is out of D-11's "active grants" check.
-        $notActive = @(Invoke-DvGet "$set`?`$select=$($entity)id&`$filter=$appOwned and statecode ne 0").Count
-    } else {
-        $candidates = Invoke-DvGet "$set`?`$select=$select&`$filter=$appOwned"
+        # Reported, never written: an inactive grant confers nothing and is out of D-11's "active grants" check. Assigned
+        # first: @(Invoke-DvGet ...).Count was always 1 (the array is returned as one object) — review round 1.
+        $inactiveRows = Invoke-DvGet "$set`?`$select=$($entity)id&`$filter=$(Get-CandidateFilter $entity $appUserIds -Inactive)"
+        $notActive = @($inactiveRows).Count
     }
 
-    $stats = [ordered]@{ Entity = $entity; Candidates = @($candidates).Count; ToWrite = 0; Written = 0; Failed = 0; Unfiled = 0; Unresolvable = 0; NotActive = $notActive }
+    $appOwnedCount = @($candidates | Where-Object { $appUserSet[(Get-Lookup $_ 'owninguser')] }).Count
+    $stats = [ordered]@{ Entity = $entity; Candidates = @($candidates).Count; AppOwned = $appOwnedCount; HumanOwned = @($candidates).Count - $appOwnedCount; ToWrite = 0; Written = 0; Failed = 0; Unfiled = 0; Unresolvable = 0; NotActive = $notActive }
     foreach ($row in $candidates) {
         $id = ConvertTo-CleanGuid $row."$($entity)id"
         $target = $null
@@ -399,29 +474,24 @@ foreach ($entity in $Entities) {
             continue
         }
 
-        if ($SecureAware[$entity]) {
-            $answer = Resolve-SecureAwareTeam $target.Set $target.Id
-            $bu = $answer.Bu
-            $team = $answer.Team
-            if (-not $team) {
-                $stats.Unresolvable++
-                Write-BackfillLog "UNRESOLVABLE $entity $id — target $($target.Attribute)=$($target.Id) BU=${bu}: $($answer.Reason). Not written."
-                continue
-            }
-        } else {
-            $bu = Resolve-TargetBusinessUnit $target.Set $target.Id
-            $team = if ($bu) { Resolve-DefaultOwnerTeam $bu } else { $null }
-            if (-not $team) {
-                $stats.Unresolvable++
-                Write-BackfillLog "UNRESOLVABLE $entity $id — target $($target.Attribute)=$($target.Id) BU=$bu has no single default owner team. Not written."
-                continue
-            }
+        # Every entity: the resolver's secure-aware decision (review round 1 — documents and to-dos owned in the Secure Record
+        # unit used to map to that unit's DEFAULT team, and a flagged-but-not-isolated root to an ordinary team).
+        $answer = Resolve-SecureAwareTeam $target.Set $target.Id
+        $bu = $answer.Bu
+        $team = $answer.Team
+        if (-not $team) {
+            $stats.Unresolvable++
+            Write-BackfillLog "UNRESOLVABLE $entity $id — target $($target.Attribute)=$($target.Id) BU=${bu}: $($answer.Reason). Not written."
+            continue
         }
 
         $stats.ToWrite++
+        $teamKey = "$entity|$team"
+        $teamCounts[$teamKey] = 1 + $(if ($teamCounts.Contains($teamKey)) { $teamCounts[$teamKey] } else { 0 })
         $previousBu = Get-Lookup $row 'owningbusinessunit'
         $previousOwner = Get-Lookup $row 'owninguser'
-        Write-BackfillLog "PLAN $entity $id — via $($target.Attribute)=$($target.Id): owner systemuser($previousOwner)@$previousBu -> team($team)@$bu"
+        $ownerKind = if ($appUserSet[$previousOwner]) { 'application' } else { 'human' }
+        Write-BackfillLog "PLAN $entity $id — via $($target.Attribute)=$($target.Id): owner systemuser($previousOwner, $ownerKind)@$previousBu -> team($team)@$bu"
 
         if ($IsDryRun -or ($MaxWritesPerRun -gt 0 -and $writes -ge $MaxWritesPerRun)) { continue }
 
@@ -438,12 +508,29 @@ foreach ($entity in $Entities) {
 }
 
 if ($manifest) { $manifest.Dispose() }
-$script:LogWriter.Dispose()
 
 Write-Host ''
 Write-Host "Record-ownership backfill — $(if ($IsDryRun) { 'DRY RUN (no writes)' } else { 'APPLY' }) — $EnvironmentUrl"
-Write-Host "Application users treated as the defective owner: $($appUserIds.Count)"
+Write-Host "Application users: $($appUserIds.Count) (the defective owner for sprk_document / sprk_todo; sprk_externalrecordaccess re-owns ANY user-owned active row)"
 $summary | Format-Table -AutoSize | Out-String | Write-Host
+
+# Rows planned per target team (read-only name lookups). The Secure Record owner team is always listed, even at 0.
+$secureTopology = Get-SecureTopology
+$teamRows = [System.Collections.Generic.List[object]]::new()
+foreach ($k in $teamCounts.Keys) {
+    $entityName, $teamId = $k -split '\|', 2
+    $teamName = try { (Invoke-DvGet "teams($teamId)?`$select=name")[0].name } catch { '?' }
+    $teamRows.Add([pscustomobject]@{ Entity = $entityName; Team = $teamName; TeamId = $teamId; Rows = $teamCounts[$k] })
+}
+foreach ($entity in $Entities) {
+    if ($secureTopology.TeamId -and -not $teamCounts.Contains("$entity|$($secureTopology.TeamId)")) {
+        $teamRows.Add([pscustomobject]@{ Entity = $entity; Team = $SecureOwnerTeamName; TeamId = $secureTopology.TeamId; Rows = 0 })
+    }
+}
+Write-Host "Rows planned per target team:"
+$teamRows | Format-Table -AutoSize | Out-String | Write-Host
 if (-not $IsDryRun) { Write-Host "Reversal manifest: $manifestPath  (undo: -RevertManifest `"$manifestPath`" -Apply)" }
+# Disposed last: the per-team summary above may be the first caller of Get-SecureTopology, which logs.
+$script:LogWriter.Dispose()
 Write-Host "Log: $LogPath"
 exit ([int](@($summary | Where-Object { $_.Failed -gt 0 }).Count -gt 0))
