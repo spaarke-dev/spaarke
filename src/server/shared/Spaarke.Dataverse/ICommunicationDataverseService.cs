@@ -86,5 +86,9 @@ public interface ICommunicationDataverseService
     Task<IReadOnlyList<Entity>> QueryRecordsByNumberFieldValuesAsync(
         string entityLogicalName, string numberFieldLogicalName, IReadOnlyCollection<string> values, CancellationToken ct = default);
 
+    /// <summary>
+    /// Resolves the ACTIVE systemuser whose <c>azureactivedirectoryobjectid</c> is <paramref name="azureAdObjectId"/>;
+    /// null when there is none. Disabled systemusers are excluded (issue #1576).
+    /// </summary>
     Task<Guid?> QuerySystemUserByAzureAdOidAsync(string azureAdObjectId, CancellationToken ct = default);
 }

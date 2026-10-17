@@ -319,6 +319,16 @@ public class ADR010_DITests
         // app-only member to IImpersonatedCommunicationQuery instead would contradict that interface's "no app-only
         // fallback" contract and break its hand-written test doubles.
         //
+        // ───────── Ceiling raised 159 → 160, 2026-10-16 (spaarke-ontology-platform-r1 task 101) ─────────
+        // IOntologyAdminAuthoringSignalEngine -> OntologyAdminAuthoringSignalEngine. SEAM JUSTIFICATION: the module boundary
+        // between the admin authoring routes (which run AS THE CALLER) and the evaluator identity: the dry run's
+        // SignalEvaluator.EvaluateAsync and the publish's SignalReevaluationJob.ReevaluatePolicyAsync. Both targets are sealed
+        // concrete singletons over the application-identity client and the writer, so the route tests could not run them
+        // without a full Dataverse fake. The production implementation is two delegating lines and holds no logic. It is a real
+        // test seam: RecordingEngine (tests/integration/auth/Ontology/OntologyAdminAuthoringEndpointTests.cs) is its double, and
+        // the security negatives are proven through it. They are: the dry run evaluates a policy built from the CALLER's read,
+        // never the request's lane; a non-Ontology or unreadable policy is never evaluated; publish re-evaluates once, after the
+        // pointer moved. Same category as IAppOnlyCommunicationQuery.
         // ───────── Ceiling raised 159 → 160, 2026-10-15 (ebilling-r1 task 025) ─────────
         // IEbillingSettingsReader -> EbillingSettingsReader. SEAM JUSTIFICATION: it is the Dataverse boundary of the eBilling
         // business settings (FR-48, D-59) and the module boundary every eBilling consumer fakes: the rejection gate (task 046),
@@ -374,7 +384,9 @@ public class ADR010_DITests
         // 048 registers in its place), so it is a genuine seam and no longer a 1:1 mapping; this is the "gains the second in 048" the task 047
         // entry above promised. 048 adds no interface (CodeSetProposalService is registered concrete, ADR-010). Measured with the ceiling at 0:
         // 165 mappings, ICodeSetSuggestionProvider not among them.
-        const int knownOneToOneCeiling = 165;
+        // ───────── Integration 2026-10-17 (ebilling-r1 merge of origin/master 1df4ee12d) ─────────
+        // Both sides raised from 159: master +1 (ontology-r1 task 101, 160) and ebilling-r1 net +6 (165). Combined 166.
+        const int knownOneToOneCeiling = 166;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

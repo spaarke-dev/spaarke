@@ -4,7 +4,7 @@
     <title>Ontology admin slice (a): Rules list and rule page read-only, On/Off, Retire</title>
     <phase>10 Ontology admin (D-22)</phase>
     <gate>104, 033, 034, 057, 026 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Admin write routes (enable, retire) that close live Signals, plus new UI.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -41,6 +41,7 @@
     <constraint source="ADR-021">Scope: tokens only; light and dark correct.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
     <constraint source="task 033 hand-off (PR #1653, 2026-10-11)">Retire closes the policy's open Signals by calling SignalClosureService.ClosePolicyRetiredNowAsync(policyId) AFTER the policy row is Retired (the method does not check that itself). Check outcome.IsComplete, not a count: if it is false only because ChangedSinceRead &gt; 0 (a person acted on a Signal concurrently), re-run once and report failure only if the re-run is still incomplete; any Failed &gt; 0 is reported to the admin. The nightly job also closes Off/Retired policies' Signals, so an incomplete close self-heals within a day.</constraint>
+    <constraint source="cross-project">Scope: every read, list or edit of sprk_policy in this task applies the ebilling-r1 domain allow-list (`RuleDomains.AddOntologyPolicyAllowlist` on queries, `RuleDomains.IsOntologyPolicy` on single rows; sprk_domain empty or Ontology). Billing-domain policies are never listed, toggled, retired or edited from the Ontology admin tab. Added 2026-10-16 at ebilling-r1 task 070 review; re-read their code on the docs branch before implementing, since it lands via ebilling #1911.</constraint>
   </constraints>
 
   <knowledge>
@@ -111,6 +112,8 @@
     <criterion testable="true">Negative: a Console User calling any write route is refused by Dataverse (403 from the route); an unresolved caller gets 403; every route is in the census.</criterion>
     <criterion testable="true">Tests cover the stated contract and authorization cases; anything beyond needs a one-line justification in task notes. Both sides build.</criterion>
   </acceptance-criteria>
+
+  <completion date="2026-10-16">PR #2037 merged `315d2d55c` into docs/ontology-platform-design. Rules list and rule page (read-only, D-22 caller reads), On/Off and Retire written as the caller; Retire is a row-version conditional PATCH (412 maps to 409 ontology.rule.changed_since_read) and closes open Signals as PolicyRetired through the production SignalClosureService chain. Metrics (rate, open, last fired in 90 days) read independently with per-cell availability. Interim sprk_domain filter (null or 100000001) until ebilling RuleDomains (#1911). Reviews: Opus pass 1, fix round, Sonnet re-check (merge, no F-class). Known limits (K4, notes file): On/Off last write wins; server Retire accepts an inactive rule; 409 wording; Retire dialog jest findBy default 1 s timeout.</completion>
 
   <notes>spec.md FR-16 (amended), FR-57; D-22; reconciliation M-3..M-5, H-7; #43, #44.</notes>
 

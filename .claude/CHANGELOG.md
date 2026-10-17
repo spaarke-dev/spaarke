@@ -7,6 +7,43 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-15 — Guard: no `python3` where it is the Windows Store stub (FAILURE-MODES G-22)
+
+Third occurrence of the `python3` Store-stub hang: another session's `python3 -` call spun at 100% CPU for 76 minutes. The rule "use `python`" had been prose only.
+
+- **`scripts/quality/guard-python3-stub.py`** (new PreToolUse hook on `Bash|PowerShell`, registered in `.claude/settings.json`): denies `python3` in command position when it resolves into `WindowsApps`, and tells the agent to use `python`. It does nothing where `python3` is real. Quoted text, heredoc and here-string bodies, comments and arguments are ignored. About 0.25 s; fails open.
+- **Controls**: `scripts/quality/tests/test_guard_python3_stub.py` (18 must-fire, 30 must-not-fire including multi-line commit messages and PR bodies, a 3 s budget), picked up by the existing CI job `agent-guard-tests`.
+- **`.claude/FAILURE-MODES.md`**: G-22.
+
+---
+###### 2026-10-15 — CI polling with `gh --jq`; lint hook skips the `python3` Store stub
+
+A `/worktree-sync` CI wait failed silently. The agent piped `gh pr checks` into `jq`, which is not installed in Git Bash here. The loop read the empty result as "pending" and used up its 30-minute window without reading a check.
+
+- **`worktree-sync` skill** Step 4: exact poll commands using gh's built-in `--jq` (pending count; failures including cancelled checks, with links), a note that plain `jq` is absent, and fail-fast when the pending count errors or prints nothing (except "no checks reported" just after the PR opens).
+- **`devops-project-start` skill** Step 1: same fix for its `gh project item-list | jq` example, plus `--limit 1000` (the default 30 items would miss most issues).
+- **`scripts/quality/post-edit-lint.sh`**: both Python lookups (file-path parse, findings report) now prefer `python` and skip the `…/WindowsApps/python3` alias stub. That stub spun at 100% CPU on 2026-10-13 and again on 2026-10-15, when another session's `python3 -` call ran for 76 minutes.
+
+---
+###### 2026-10-15 — Fluent dialogs hidden from role queries in jsdom (FAILURE-MODES G-21)
+
+Nightly quality alert #1906: three client-test packages failed because jsdom left Fluent's `DialogSurface` `aria-hidden`, so Testing Library role queries could not find the dialog's contents. The fixes shipped in PR #1925.
+
+- **`.claude/FAILURE-MODES.md`**: G-21. It is prose only and says why: a lint rule cannot tell that a query runs inside an open dialog. A real-browser check found that this is not an accessibility defect.
+
+---
+###### 2026-10-15 — Safe worktree removal + cross-worktree link guard (FAILURE-MODES G-20)
+
+Incident 2026-10-13: a bulk worktree cleanup deleted through `node_modules` junctions that agents had pointed at another worktree, emptying 70 tracked files in the uac-r2 worktree.
+
+- **`scripts/worktree/Remove-WorktreeSafe.ps1`** (new): unlinks junctions/symlinks as links, then `git worktree remove`; never a recursive-delete fallback. Pester: `tests/scripts/Remove-WorktreeSafe.Tests.ps1`.
+- **`.claude/settings.json`**: new `PreToolUse` hook on `Bash|PowerShell`, `scripts/quality/guard-worktree-links.py`. It denies a link into another worktree and a recursive delete or `git worktree remove` of a worktree root. Controls: `scripts/quality/tests/test_guard_worktree_links.py`.
+- **CI**: `ci-standalone-checks.yml` job `agent-guard-tests` (windows-latest) now runs all `scripts/quality/tests` hook controls (previously run by hand only) and the Pester file.
+- **`worktree-setup` skill + command, `docs/procedures/parallel-claude-sessions.md`**: removal examples use the script; new failure-mode row.
+- **`.claude/FAILURE-MODES.md`**: G-20.
+- **Root `CLAUDE.md`** §16 hooks bullet: one sentence (+403 bytes, no new lines).
+
+---
 ###### 2026-10-10 — Client lint ratchet: dead `!res.ok` after a throwing fetch fails CI (client-lint-ratchet-r1)
 
 Phase 3 / P2 of the client error-handling cleanup. Owner decisions 2026-10-09: one shared lint toolchain, and block NEW violations only.

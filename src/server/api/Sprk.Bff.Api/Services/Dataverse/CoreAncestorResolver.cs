@@ -575,19 +575,31 @@ public sealed class CoreAncestorResolver
     /// must never share a branch.
     /// </para>
     /// </remarks>
+    /// <param name="targetEntityLogicalName">The regarding target (the intermediate or core record) to derive for.</param>
+    /// <param name="targetRecordId">The target's id.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <param name="intent">
+    /// What the caller does with the answer (GitHub #2002). Defaults to <see cref="CoreAncestorIntent.Write"/>: a record is
+    /// written against the target, so a target with no root is logged at Warning because that record will inherit no access.
+    /// A caller that only READS the answer (a scan, a report, a preview that writes nothing against the target) passes
+    /// <see cref="CoreAncestorIntent.ReadOnly"/>, which logs that same condition at Debug. The intent changes only that log
+    /// level, never the status, the stamps or any other branch.
+    /// </param>
     public async Task<CoreAncestorResult> ResolveStampsAsync(
         string targetEntityLogicalName,
         Guid targetRecordId,
-        CancellationToken ct = default) =>
+        CancellationToken ct = default,
+        CoreAncestorIntent intent = CoreAncestorIntent.Write) =>
         // Ontology task 042 (uac-r2 re-check F1): the result records the target it was derived for, so a caller that hands it back to
         // StampAsync can only have it reused for the SAME target. Set here, in the one public derivation, and nowhere else.
-        (await DeriveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false))
+        (await DeriveStampsAsync(targetEntityLogicalName, targetRecordId, ct, intent).ConfigureAwait(false))
             with { For = (targetEntityLogicalName, targetRecordId) };
 
     private async Task<CoreAncestorResult> DeriveStampsAsync(
         string targetEntityLogicalName,
         Guid targetRecordId,
-        CancellationToken ct)
+        CancellationToken ct,
+        CoreAncestorIntent intent)
     {
         if (string.IsNullOrWhiteSpace(targetEntityLogicalName))
         {
@@ -713,7 +725,10 @@ public sealed class CoreAncestorResolver
 
         if (stamps.Count == 0)
         {
-            _logger.LogWarning(
+            // GitHub #2002: "a record written against it will inherit no access" is true only when one is written. A read-only
+            // resolution (a reconciliation scan) writes nothing against the target, so it is a Debug line, not a Warning.
+            _logger.Log(
+                intent == CoreAncestorIntent.ReadOnly ? LogLevel.Debug : LogLevel.Warning,
                 "Child target {Entity}({Id}) carries no core-ancestor stamp; a record written against it will inherit no access.",
                 targetEntityLogicalName, targetRecordId);
             return new CoreAncestorResult(CoreAncestorStatus.NoAncestor, [], null);
@@ -1306,6 +1321,20 @@ public sealed class CoreAncestorResolver
 
     private static readonly IReadOnlySet<string> EmptyColumns =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// What a caller of <see cref="CoreAncestorResolver.ResolveStampsAsync"/> does with the answer (GitHub #2002). It selects the
+/// log level of the "carries no core-ancestor stamp" line only; it never changes a status, a stamp or an access decision.
+/// </summary>
+public enum CoreAncestorIntent
+{
+    /// <summary>A record is written against the target (the default): a target with no root logs at Warning.</summary>
+    Write = 0,
+
+    /// <summary>The answer is only read (a reconciliation scan, an index lookup): nothing is written against the target, so
+    /// a target with no root logs at Debug.</summary>
+    ReadOnly = 1,
 }
 
 /// <summary>

@@ -12,7 +12,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Edits AccessGrantModal.tsx, which task 065 also edits. Sequence with 065; never run both at once.</parallel-reason>
-    <deps>097, 098, 065, 066</deps>
+    <deps>097, 098, 065</deps>
     <tags>pcf, react, fluent-ui, frontend, testing</tags>
     <estimated-effort>3-5 hours</estimated-effort>
     <origin>Owner 2026-09-10, with screenshot: "add to the toolbar a field 'Expiration' and a date picker so the write user can set it (and it applies to all sharing)"</origin>
@@ -84,4 +84,10 @@
 ESCALATION FIRED 2026-09-15 (session 12) — no code written. M8 has not landed: AccessGrantModal.tsx:334 is still `return (await res.json()) as T` with no res.ok check, and the doc comment at :325 wrongly says it "throws (message-bearing) on failure". OWNER DECISION: option (a), wait for 065. This task now depends on 065, which lands M8 (and M2 on top of it); 065 is itself blocked behind 063. Do not take M8 here. Also correct when resuming: the justification's "every share would be rejected" is stale. Since task 097 the server defaults an absent expiry to today + 90, so shares work without the picker. What is missing is the user's ability to see and set the date.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 099)">
+    <verdict>KEEP (owner round 59 item 3). A promised feature with class (a) defects attached.</verdict>
+    <amendment n="1" title="Scope">A user with Write can see and change the expiry date that applies to a record's external shares (the toolbar Expiration picker over /set-record-share-expiry, which has no client caller today). Grants lapse at 90 days with no in-product way to extend: a re-grant keeps the old date (GrantExternalAccessEndpoint.cs:371-387).</amendment>
+    <amendment n="2" title="Defects added to scope">fetchExistingGrants (TrackingFieldTrio/index.ts:903-950) selects sprk_expiresdate and marks expired rows as expired (they show as live today). A failed read shows an error state, not 'No active grants'. The picker changes the date only, never the level (ISS-023: the renewal route writes only sprk_expiresdate).</amendment>
+    <amendment n="3" title="Dependencies">066 is removed from deps: the dependency was not real, and 066 is merged into 067. 065's M8 blocker is cleared. In practice this runs after 067 (same PCF, one deploy).</amendment>
+  </amendments>
 </task>

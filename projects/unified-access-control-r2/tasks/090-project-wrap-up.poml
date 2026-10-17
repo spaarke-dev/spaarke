@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Project-close task: reconciles the whole tree (test-diet, README, register) — nothing may run beside it.</parallel-reason>
-    <deps>050, 051, 052, 053, 054, 055, 056, 057, 058, 060, 061, 062, 063, 064, 065, 066, 067, 068, 069, 080, 081, 082, 083, 099, 101, 104, 105, 106, 107, 036, 043, 044, 047, 087, 088, 089, 093, 094, 095 (plus all Phase 0-2 tasks per TASK-INDEX)</deps>
+    <deps>050, 051, 052, 053, 060, 061, 062, 063, 064, 065, 066, 067, 068, 080, 081, 083, 099, 101, 104, 105, 106, 107, 036, 043, 044, 047, 093, 113, 114, 136, 153, 154, 003, 013, 037, 039 (plus all Phase 0-2 tasks per TASK-INDEX)</deps>
     <tags>documentation, testing, wrap-up</tags>
     <estimated-effort>2-4 hours</estimated-effort>
   </metadata>
@@ -102,4 +102,11 @@
 AMENDED 2026-09-15 — owner rule for the register: "issues should only go past the project if they are not material to the project or they are confirmed/validated as another project's subject matter." Added the disposition gate (step 1, constraint, criterion, second escalation trigger) and deps 099, 101, 104–107.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 090)">
+    <verdict>KEEP, TRIMMED (owner round 59 item 5). Runs last. Absorbs 058, 082's paragraph, 087's doc correction and 089's known-gap line.</verdict>
+    <amendment n="1" title="Scope">Register disposition (the owner confirms hand-offs); /test-diet; H-8a stale comments (6 ExternalCallerAuthorizationFilter comments: ExternalAccessEndpoints.cs:52, ExternalUserContextEndpoint.cs:14,18, CallerPrincipalAuthorizationFilter.cs:9, ExternalCallerContext.cs:7, ExternalDataService.cs:16); README Complete; live gates recorded or explicitly carried forward. H-8b is already met (017 removed WebRoleRemoved), so step 4 is dropped.</amendment>
+    <amendment n="2" title="Absorbed">058: a docs section on parents vs children, core-ancestor-stamp inheritance, and that a matter does not inherit from its project; correct the No Access schema doc's per-child blocking claim. 082: one paragraph (PR #840's CallerIdentityGuardTests is the ratchet; the four helpers have distinct jobs). 087: doc correction (sprk_accessevent is not deployed; Dataverse audit is the source; docs/data-model/sprk_accessevent.md). 089: one known-gap line (FR-32 point-in-time replay is unmet in UAC-r2; deferred as #1303/#1304).</amendment>
+    <amendment n="3" title="Ceremony cut">A short lessons list; no success-criteria 1-9 map (step 6); no publish-size run for a comment-only diff; step 4 dropped.</amendment>
+    <amendment n="4" title="Dependencies">Removed: cut tasks 054, 055, 057, 069, 082, 087, 110, 111, 112, 170 and deferred tasks 056, 088, 089, 094, 095 (deferred work is tracked by #1072, #1303, #1304, #1305, #1306); 058 is absorbed into this task. Added: the batch-5 KEEPs 113, 114, 136, 153, 154 and the merged 003, 013, 037, 039, whose gates must be recorded first.</amendment>
+  </amendments>
 </task>

@@ -70,6 +70,8 @@ public sealed class SpeAdminBulkPerContainerTests : IClassFixture<AdminSurfaceHo
         await _fixture.StartBulkProcessorOnceAsync();
         _fixture.Graph.StubPost($"{ContainersPath}/c-own/permissions",
             """{"id":"p1","roles":["owner"],"grantedToV2":{"user":{"id":"u-1","displayName":"U"}}}""", 201);
+        // A container grant names the user by UPN, so the object id is resolved first.
+        _fixture.Graph.StubGet("/users/u-1", """{"userPrincipalName":"u1@contoso.com"}""");
         using var client = Admin();
 
         var operationId = await Accepted(await client.PostAsJsonAsync("/api/spe/bulk/permissions",

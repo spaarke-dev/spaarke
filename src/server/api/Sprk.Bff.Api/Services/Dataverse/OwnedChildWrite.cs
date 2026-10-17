@@ -43,8 +43,10 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// user- or team-owned target; for an ORGANIZATION-OWNED target (the ADR-024 record-type catalog <c>sprk_recordtype_ref</c>,
 /// the matter-type and practice-area reference tables), which that message refuses (400 0x80040800), the table's AppendTo
 /// PRIVILEGE plus a read of the row as the caller (<see cref="CallerMayAppendToOrganizationOwnedAsync"/>) — what a
-/// run-as-user create checks there. A target neither path can answer (a BUSINESS-OWNED table such as <c>systemuser</c> or
-/// <c>team</c>, which RetrievePrincipalAccess also refuses) is denied, and a missing row answers like an unappendable one
+/// run-as-user create checks there; for a BUSINESS-OWNED target (<c>systemuser</c>, <c>team</c>, <c>businessunit</c>),
+/// which RetrievePrincipalAccess also refuses, that privilege at a DEPTH covering the row's business unit, plus a read of
+/// the row as the caller (<see cref="CallerMayAppendToBusinessOwnedAsync"/>, ontology task 126, uac-r2's rule). A target no
+/// path can answer is denied, and a missing row answers like an unappendable one
 /// (the uniform not-found); (3) no column under field-level security
 /// (refused: an app-only write would pass the caller's column security); (4) no owner or audit column (the server sets
 /// the owner). Every question is asked through <see cref="IDataverseUserClient"/> under the caller's own token, so the
@@ -1215,8 +1217,11 @@ internal static class OwnedChildWrite
             // spaarkedev1 2026-10-07: 400 0x80040800 "The 'RetrievePrincipalAccess' method does not support entities of type
             // 'sprk_recordtype_ref'"), so RightsOnAsync reads None and every ADR-024 resolver payload was refused as
             // "not found". What a run-as-user create checks there is the table's AppendTo PRIVILEGE, and the row must exist.
+            // Ontology task 126 (#1399; uac-r2's rule, #1355 comment 6089838200 §6, D-113): a BUSINESS-OWNED target
+            // (systemuser, team, businessunit) is refused the same way; there the privilege's DEPTH must cover the row's
+            // business unit (CallerMayAppendToBusinessOwnedAsync).
             if (!rights.HasFlag(AccessRights.AppendTo)
-                && !await CallerMayAppendToOrganizationOwnedAsync(user, me, lookup, ct).ConfigureAwait(false))
+                && !await CallerMayAppendToByPrivilegeAsync(user, me, lookup, ct).ConfigureAwait(false))
             {
                 return new Outcome
                 {
@@ -1230,13 +1235,14 @@ internal static class OwnedChildWrite
     }
 
     /// <summary>
-    /// AS THE CALLER, for a lookup target RetrievePrincipalAccess cannot answer: <c>true</c> only when the target table is
-    /// ORGANIZATION-OWNED (its own metadata says so), the caller holds that table's AppendTo privilege, and the row exists
-    /// for them (read under their token). Anything else — a user/team-owned table, a privilege not held, a row that is
-    /// missing or unreadable, a question Dataverse does not answer — is <c>false</c> (fail closed; the caller keeps the
-    /// uniform not-found, so a missing row and an unappendable one still look alike).
+    /// AS THE CALLER, for a lookup target RetrievePrincipalAccess cannot answer: the target table's own metadata says how it
+    /// is owned and names its AppendTo privilege, and the answer is that ownership's — ORGANIZATION-OWNED
+    /// (<see cref="CallerMayAppendToOrganizationOwnedAsync"/>) or BUSINESS-OWNED (<see cref="CallerMayAppendToBusinessOwnedAsync"/>).
+    /// Anything else — a user/team-owned table (RetrievePrincipalAccess answered it), no AppendTo privilege declared, a
+    /// question Dataverse does not answer — is <c>false</c> (fail closed; the caller keeps the uniform not-found, so a
+    /// missing row and an unappendable one still look alike).
     /// </summary>
-    private static async Task<bool> CallerMayAppendToOrganizationOwnedAsync(
+    private static async Task<bool> CallerMayAppendToByPrivilegeAsync(
         IDataverseUserClient user, Guid me, DataverseWriteItemMapper.MappedLookup lookup, CancellationToken ct)
     {
         var metadata = await user.GetAsync(
@@ -1246,12 +1252,28 @@ internal static class OwnedChildWrite
             || metadata.Body is not { } body
             || !body.TryGetProperty("OwnershipType", out var ownership)
             || ownership.ValueKind != JsonValueKind.String
-            || !string.Equals(ownership.GetString(), "OrganizationOwned", StringComparison.Ordinal)
             || PrivilegeNamed(body, "AppendTo", 8) is not { } appendTo)
         {
             return false;
         }
 
+        return ownership.GetString() switch
+        {
+            "OrganizationOwned" => await CallerMayAppendToOrganizationOwnedAsync(user, me, lookup, body, appendTo, ct).ConfigureAwait(false),
+            "BusinessOwned" => await CallerMayAppendToBusinessOwnedAsync(user, me, lookup, appendTo, ct).ConfigureAwait(false),
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// AS THE CALLER, an ORGANIZATION-OWNED target: <c>true</c> only when the caller holds that table's AppendTo privilege
+    /// (any depth: an organization-owned row has no business unit to reach) and the row exists for them (read under their
+    /// token). Anything else is <c>false</c>.
+    /// </summary>
+    private static async Task<bool> CallerMayAppendToOrganizationOwnedAsync(
+        IDataverseUserClient user, Guid me, DataverseWriteItemMapper.MappedLookup lookup, JsonElement body, string appendTo,
+        CancellationToken ct)
+    {
         var names = Uri.EscapeDataString(JsonSerializer.Serialize(new[] { appendTo }));
         var held = await user.GetAsync(
                 $"systemusers({me:D})/Microsoft.Dynamics.CRM.RetrieveUserSetOfPrivilegesByNames(PrivilegeNames=@p1)?@p1={names}", ct)
@@ -1265,6 +1287,158 @@ internal static class OwnedChildWrite
         var row = await user.GetAsync($"{lookup.RelatedEntitySet}({lookup.RecordId:D})?$select={primaryId}", ct).ConfigureAwait(false);
         return row.IsSuccess;
     }
+
+    /// <summary>
+    /// The business-owned tables a lookup may name (Dataverse's own three), and the column a row of each, read as the
+    /// caller, reports its business unit in. A business unit is its own business unit.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> BusinessUnitColumnOf = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["systemuser"] = "_businessunitid_value",
+        ["team"] = "_businessunitid_value",
+        ["businessunit"] = "businessunitid",
+    };
+
+    /// <summary>
+    /// AS THE CALLER, a BUSINESS-OWNED target (<c>systemuser</c>, <c>team</c>, <c>businessunit</c>) — ontology task 126
+    /// (#1399), uac-r2's rule (#1355 comment 6089838200 §6, D-113), mirroring what a create run as the user checks:
+    /// <c>true</c> only when the caller holds the table's AppendTo privilege
+    /// (<c>RetrieveUserSetOfPrivilegesByNames</c>, which returns each grant's depth and the business unit it is anchored
+    /// at), the row is readable as the caller, and some grant covers the ROW's business unit FROM ITS OWN ANCHOR — the way
+    /// Dataverse evaluates it (a privilege inherited through a team applies at the team's business unit; D-113 as amended
+    /// by uac-r2's review of PR #2012):
+    /// <list type="bullet">
+    /// <item>Global — any business unit;</item>
+    /// <item>Deep — the anchor business unit or one under it (<c>UnderOrEqual</c>, the Web API's EqOrUnder, on
+    /// <c>businessunitid</c>, asked as the caller);</item>
+    /// <item>Local — the anchor business unit only;</item>
+    /// <item>Basic — only a <c>systemuser</c> target that is the caller (<paramref name="me"/>, which every caller takes
+    /// from WhoAmI under the caller's own token); a team or business-unit target is denied.</item>
+    /// </list>
+    /// A grant with no anchor reported is not counted, at any depth (D-148). Anything unanswered — another business-owned table,
+    /// an unknown depth, an unreadable or missing row, no business unit on it, a question Dataverse does not answer — is
+    /// <c>false</c>, and the caller gets the uniform not-found.
+    /// </summary>
+    /// <remarks>The depth meanings repeat <c>SecureBuRoleDepthAssertion.Reaches</c> on purpose: that census evaluator walks a
+    /// business-unit tree it reads app-only, where this question must be asked as the caller.</remarks>
+    private static async Task<bool> CallerMayAppendToBusinessOwnedAsync(
+        IDataverseUserClient user, Guid me, DataverseWriteItemMapper.MappedLookup lookup, string appendTo, CancellationToken ct)
+    {
+        if (!BusinessUnitColumnOf.TryGetValue(lookup.RelatedTable, out var businessUnitColumn))
+            return false;
+
+        var names = Uri.EscapeDataString(JsonSerializer.Serialize(new[] { appendTo }));
+        var held = await user.GetAsync(
+                $"systemusers({me:D})/Microsoft.Dynamics.CRM.RetrieveUserSetOfPrivilegesByNames(PrivilegeNames=@p1)?@p1={names}", ct)
+            .ConfigureAwait(false);
+        if (!held.IsSuccess)
+            return false;
+        var grants = PrivilegeGrantsIn(held.Body, appendTo);
+        if (grants.Count == 0)
+            return false;
+
+        // The row, read as the caller: it must be readable, and it reports the business unit the depth must reach.
+        var row = await user.GetAsync($"{lookup.RelatedEntitySet}({lookup.RecordId:D})?$select={businessUnitColumn}", ct)
+            .ConfigureAwait(false);
+        if (!row.IsSuccess || GuidIn(row.Body, businessUnitColumn) is not { } rowBusinessUnit)
+            return false;
+
+        foreach (var (depth, anchor) in grants)
+        {
+            var covers = depth switch
+            {
+                PrivilegeDepth.Global => anchor != Guid.Empty,
+                PrivilegeDepth.Basic => anchor != Guid.Empty
+                    && string.Equals(lookup.RelatedTable, "systemuser", StringComparison.Ordinal) && lookup.RecordId == me,
+                PrivilegeDepth.Local => anchor != Guid.Empty && rowBusinessUnit == anchor,
+                PrivilegeDepth.Deep => anchor != Guid.Empty
+                    && (rowBusinessUnit == anchor
+                        || await IsBusinessUnitUnderAsync(user, rowBusinessUnit, anchor, ct).ConfigureAwait(false)),
+                _ => false,
+            };
+            if (covers)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// AS THE CALLER, whether business unit <paramref name="candidate"/> is <paramref name="ancestor"/> or one under it
+    /// (Web API <c>UnderOrEqual</c> on <c>businessunitid</c>, live on spaarkedev1 2026-10-16). A business unit the caller
+    /// cannot read, or a question Dataverse does not answer, is <c>false</c>.
+    /// </summary>
+    private static async Task<bool> IsBusinessUnitUnderAsync(
+        IDataverseUserClient user, Guid candidate, Guid ancestor, CancellationToken ct)
+    {
+        var filter = $"businessunitid eq {candidate:D} and Microsoft.Dynamics.CRM.UnderOrEqual(PropertyName='businessunitid',PropertyValue='{ancestor:D}')";
+        var answer = await user.GetAsync($"businessunits?$select=businessunitid&$filter={Uri.EscapeDataString(filter)}", ct)
+            .ConfigureAwait(false);
+        if (!answer.IsSuccess
+            || answer.Body is not { } body
+            || !body.TryGetProperty("value", out var rows)
+            || rows.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        return rows.EnumerateArray().Any(r => r.ValueKind == JsonValueKind.Object && GuidIn(r, "businessunitid") == candidate);
+    }
+
+    /// <summary>
+    /// The grants of <paramref name="privilegeName"/> in a <c>RetrieveUserSetOfPrivilegesByNames</c> response, each with
+    /// its depth and the business unit Dataverse anchors it at — live shape (spaarkedev1, 2026-10-16):
+    /// <c>{"RolePrivileges":[{"Depth":"Local","BusinessUnitId":"…","PrivilegeName":"prvAppendToUser",…}]}</c>. A depth that
+    /// is not one of the four names is dropped (fail closed); a missing anchor is <see cref="Guid.Empty"/>, which no grant
+    /// counts with.
+    /// </summary>
+    internal static IReadOnlyList<(PrivilegeDepth Depth, Guid Anchor)> PrivilegeGrantsIn(JsonElement? body, string privilegeName)
+    {
+        var grants = new List<(PrivilegeDepth, Guid)>();
+        if (body is not { } root
+            || root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("RolePrivileges", out var privileges)
+            || privileges.ValueKind != JsonValueKind.Array)
+        {
+            return grants;
+        }
+
+        foreach (var privilege in privileges.EnumerateArray())
+        {
+            if (privilege.ValueKind != JsonValueKind.Object
+                || !privilege.TryGetProperty("PrivilegeName", out var name)
+                || name.ValueKind != JsonValueKind.String
+                || !string.Equals(name.GetString(), privilegeName, StringComparison.OrdinalIgnoreCase)
+                || !privilege.TryGetProperty("Depth", out var depth)
+                || depth.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            PrivilegeDepth? parsed = depth.GetString() switch
+            {
+                "Basic" => PrivilegeDepth.Basic,
+                "Local" => PrivilegeDepth.Local,
+                "Deep" => PrivilegeDepth.Deep,
+                "Global" => PrivilegeDepth.Global,
+                _ => null,
+            };
+            if (parsed is { } known)
+                grants.Add((known, GuidIn(privilege, "BusinessUnitId") ?? Guid.Empty));
+        }
+
+        return grants;
+    }
+
+    /// <summary>A non-empty GUID held as a string property of <paramref name="body"/>, or <c>null</c>.</summary>
+    private static Guid? GuidIn(JsonElement? body, string property) =>
+        body is { ValueKind: JsonValueKind.Object } root
+        && root.TryGetProperty(property, out var value)
+        && value.ValueKind == JsonValueKind.String
+        && Guid.TryParse(value.GetString(), out var id)
+        && id != Guid.Empty
+            ? id
+            : null;
 
     /// <summary>
     /// AS THE CALLER, their rights on one record (<c>RetrievePrincipalAccess</c> under their own token);

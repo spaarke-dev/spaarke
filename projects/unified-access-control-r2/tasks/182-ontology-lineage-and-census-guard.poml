@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="182" project="unified-access-control-r2">
+  <metadata>
+    <title>UAC half of the ontology child-record contract: Decision Record subject lineage rows (C4) and the census guard for Signal, Decision Record and Budget Revision (C7 / audit F4), landed on the ontology integration branch</title>
+    <phase>Session 28 — UAC (owner round 95, 2026-10-12)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes SecureChildLineage, which drives secure reconciliation, share mirroring and the 2-minute job, and changes ArchTests guards.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Secure-wall code on another project's branch; the guard must fail on the real gaps without blocking legitimate pending work.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Separate worktree on the ontology branch. It touches no file that UAC's open PRs (#1732) touch.</parallel-reason>
+    <deps>ontology task 140 (live on spaarkedev1, draft PR #1763)</deps>
+    <tags>bff-api, security, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+    <origin>Owner round 95 (notes/session27-owner-decisions-and-research.md). Contract notes/ontology-standard-child-contract-2026-10-12.md §3 C4 and C7, §4 "unified-access-control-r2" items 1-2. Audit notes/ontology-secure-schema-audit-2026-10-12.md F4.</origin>
+  </metadata>
+
+  <prompt>Implement UAC's items 1-2 of the child-record contract on the ontology integration branch, then open a PR INTO `docs/ontology-platform-design`, not master. Read the contract note and the audit's F4 first. Do not change any ontology writer: those are ontology tasks 141-145.</prompt>
+
+  <goal>(1) BRANCH. Create a fresh worktree from `origin/docs/ontology-platform-design` on a new branch `uac/182-ontology-lineage-census`. The PR's base is `docs/ontology-platform-design`. The ontology main session merges it; you never merge it.
+
+(2) LINEAGE (C4). In `src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs`, the `sprk_decisionrecord` row gains the 8 subject lookups now live on spaarkedev1 (ontology task 140): `sprk_regarding{communication,document,event,invoice,matter,project,todo,workassignment}`. Use the existing `Regarding(...)` helper, as the `sprk_signal` row does.
+- KEEP the existing typed `sprk_matter`, `sprk_project` and `sprk_workassignment` entries. Contract C2 says they leave only after ontology task 145's backfill is verified.
+- EXCLUDE `sprk_regardingservicerequest`, the same as Signal's row; a service request cannot be secure.
+- Update the row's comment with the source: live 2026-10-12, task 140 / #1763.
+
+(3) CENSUS CHILD TABLES (C7, F4). In `tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs`, add `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision` to `ChildTables`.
+- Every create of those tables that the scanner then finds gets a `CensusEntry` that tells the truth about the code AT THE BRANCH HEAD.
+  - A create that resolves its owner through `IRecordOwnershipResolver` is `Routed`.
+  - A create that does not yet is `Waived` with `WaiverKind.Pending`, naming the ontology task that routes it: 142 for the Decision Record writer, 143 for SignalWriter's no-core and D-130 owner.
+- Follow the file's maintenance procedure exactly. Never mark something `Routed` that is not, and never `Permanent`.
+
+(4) CONSISTENCY GUARD (C7). A new source-only ArchTest (no DI, no network; ADR-038 B3) asserting that three sets agree:
+- every table in `SecureChildLineage.Children`;
+- every table in `config/secure-record-owner-role.json` `tables[]` whose `kind` is `child`;
+- every table in the census `ChildTables` that is a lineage child.
+
+Specifically:
+- A table in lineage but not in the role config fails.
+- A table in the role config (kind child) but not in lineage fails.
+- A lineage table missing from `ChildTables` fails.
+- Tables that are deliberately in one set and not another are allow-listed, with a reason per entry.
+- It needs a negative control proving it fires.
+
+(5) DIRECT OWNINGBUSINESSUNIT WRITES (F4). Extend the census so a write of the `owningbusinessunit` attribute (a literal or const key) in `src/server` fails unless it is listed. List today's sites truthfully; the audit F2 SignalWriter site goes as Pending against task 143. Add a negative control. Use the existing owner-write census (`OwnerWriteEntry`) shape if it fits, rather than a new mechanism (CLAUDE.md §11).</goal>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">Extend the existing census and SourceScan helpers. Add no new framework.</constraint>
+    <constraint source="contract">No change to any ontology writer, the resolver, CoreAncestorResolver or the restamper. Those are ontology tasks 141-145, and UAC reviews them separately.</constraint>
+    <constraint source="git">Stage explicit paths only. Never force-push, never bare `git stash`, never `--no-verify`. Do not merge the PR, and do not touch master.</constraint>
+    <constraint source="machine">The machine is shared and loaded. Kill only your own PIDs, never by image name.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/ontology-standard-child-contract-2026-10-12.md</file>
+      <file>projects/unified-access-control-r2/notes/ontology-secure-schema-audit-2026-10-12.md</file>
+      <file>tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs (maintenance procedure in the header comment)</file>
+      <file>config/secure-record-owner-role.json (howToExtend)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Worktree from origin/docs/ontology-platform-design; read the contract C4/C7 and the census header.</step>
+    <step>Lineage row; ChildTables; the census entries the scanner now demands, with truthful dispositions.</step>
+    <step>Consistency guard and owningbusinessunit detection, each with a negative control.</step>
+    <step>Build the BFF; run Spaarke.ArchTests in full, plus SecureChildLineage, SecureChildReconciler and SecureChildShareSynchronizer unit tests. Open the PR into docs/ontology-platform-design and report counts.</step>
+  </steps>
+
+  <escalation>
+    <trigger>A create or owner write on these tables that you cannot classify truthfully: STOP and report the site.</trigger>
+    <trigger>The consistency guard finds a disagreement between lineage, the role config and the census that is not obviously an allow-list case: STOP and list it. Do not "fix" the role config. Role privilege changes are recorded as refusal first, per howToExtend, and the owner decides.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion>The DR lineage row lists the 8 subject lookups and keeps the three typed core lookups. servicerequest is absent (a unit test pins this).</criterion>
+    <criterion>ChildTables contains sprk_signal, sprk_decisionrecord and sprk_budgetrevision. The census passes at the branch head, with every new entry's disposition matching the code.</criterion>
+    <criterion>The consistency guard passes at the head and fails in its negative control. It also fails if a lineage table is removed from the role config, demonstrated once.</criterion>
+    <criterion>An unlisted `owningbusinessunit` write fails the census (negative control). The listed sites are truthful.</criterion>
+    <criterion>Spaarke.ArchTests: all pass. The BFF build has 0 errors. The PR targets docs/ontology-platform-design.</criterion>
+    <criterion>Test scope: the cases named above. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+</task>

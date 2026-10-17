@@ -12,7 +12,7 @@
 - **Entity**: `sprk_fieldmappingrule` (metadata + views + N:1 relationship to profile)
 - **Main form**: `Field Mapping Profile main form` (`{4d66f128-7800-f111-8407-7c1e520aa4df}`) — the canonical authoring form
 - **SavedQuery**: `Active Field Mapping Rules` — the 12-column view used by the profile form's rules subgrid
-- **PCF Control**: `Spaarke.Controls.FieldMappingAdmin` (unrelated, pre-existing; retained to avoid regression)
+- ~~PCF Control `Spaarke.Controls.FieldMappingAdmin`~~: **retired 2026-10-15** (`pcf-orphan-cleanup-r1`). It was on no form, view or sitemap; profiles and rules are authored on the native forms above. It was deleted from spaarkedev1 and removed from this solution, so a redeploy no longer brings it back. Backup: `projects/pcf-orphan-cleanup-r1/backups-2026-10-14/baseline-FieldMappingAdminSolution-unmanaged-pre-cleanup-2026-10-15.zip`
 
 ## Field Mapping Profile Main Form structure
 

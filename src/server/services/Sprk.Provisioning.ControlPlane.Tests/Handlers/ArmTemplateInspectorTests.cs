@@ -198,6 +198,47 @@ public sealed class ArmTemplateInspectorTests
             .Should().Be(PinnedModelCatalog.DefaultOpenAiLocation);
     }
 
+    /// <summary>
+    /// T186 L21: H2a verifies T1 (keyVaultReferenceIdentity == the stamp UAMI on both slots) right after the deploy, before
+    /// H4 runs — so the template itself must set it. R3 only rejects an explicit 'SystemAssigned'; an ABSENT property also
+    /// leaves App Service on 'SystemAssigned', which quarantined the first live run. Every site and slot the compiled
+    /// customer.json creates (module templates included) must bind it to the UAMI parameter.
+    /// </summary>
+    [Fact]
+    public void RealCustomerTemplate_EverySiteAndSlot_SetsKeyVaultReferenceIdentityToTheUami()
+    {
+        using var template = JsonDocument.Parse(File.ReadAllText(Path.Combine(RepoRoot(), "infrastructure", "bicep", "customer.json")));
+        var sites = new List<JsonElement>();
+        CollectResources(template.RootElement, sites, "Microsoft.Web/sites", "Microsoft.Web/sites/slots");
+
+        sites.Should().HaveCountGreaterThanOrEqualTo(2, "customer.json creates the BFF site and its staging slot");
+        foreach (var site in sites)
+        {
+            var properties = site.GetProperty("properties");
+            properties.TryGetProperty("keyVaultReferenceIdentity", out var kvRefIdentity).Should().BeTrue(
+                $"{site.GetProperty("type").GetString()} must set keyVaultReferenceIdentity at creation (T1; T186 L21)");
+            kvRefIdentity.GetString().Should().Be("[parameters('userAssignedIdentityResourceId')]");
+        }
+    }
+
+    private static void CollectResources(JsonElement element, List<JsonElement> found, params string[] types)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            if (element.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String
+                && types.Contains(type.GetString(), StringComparer.OrdinalIgnoreCase)
+                && element.TryGetProperty("properties", out _))
+            {
+                found.Add(element);
+            }
+            foreach (var property in element.EnumerateObject()) CollectResources(property.Value, found, types);
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray()) CollectResources(item, found, types);
+        }
+    }
+
     private static string RepoRoot()
     {
         // A worktree's .git is a FILE; a regular checkout's is a directory (parity with RunContextContractTests).

@@ -3,7 +3,7 @@
   <metadata>
     <title>Caller-identity census — a downward ratchet on direct claim reads, and the §11 consolidation decision</title>
     <phase>0c Secure Documents — post-merge</phase>
-    <status>pending</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a build-blocking ArchTest over the authorization surface and makes a §11 consolidation decision affecting four existing primitives. A wrong allow-list entry silently licenses the exact defect the ratchet exists to stop.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -151,4 +151,8 @@ Kind ≠ oid ≠ plane ≠ contact resolution. The likely correct answer is "fou
 
 The number to drive down is the count of files reading identity claims directly. It was 71 on 2026-08-27 against an unmerged tree; PR #832 covered 30 `src/server` files. Do not treat 71 as the seed — measure the merged tree.
 </notes>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 082)">
+    <verdict>CUT. Status set to cancelled by owner round 59 item 7. Nothing in this task is to be built.</verdict>
+    <amendment n="1" title="Reason">PR #840's guard exists: CallerIdentityGuardTests.cs (Rule 1 :89, Rule 2 :121, allowlist :59-80) is the ratchet, and the four helpers have distinct jobs. A second guard would be a duplicate mechanism. One paragraph goes into 090's closing note.</amendment>
+  </amendments>
 </task>

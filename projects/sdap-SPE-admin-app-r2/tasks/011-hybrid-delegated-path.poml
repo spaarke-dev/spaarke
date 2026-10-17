@@ -4,7 +4,7 @@
     <title>Wire the hybrid delegated path for container-type operations</title>
     <phase>2 Workstream B — Resolve the auth model (GATED)</phase>
     <gate>010 complete with a WORKABLE verdict</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-sensitive auth implementation in a BFF hot path; tags include auth. Root CLAUDE.md §8 FULL trigger.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -4,7 +4,7 @@
     <title>Worklist widget assembly: two lanes, count filters, narrative slot, aggregate row, disclosures</title>
     <phase>5 The worklist surface</phase>
     <gate>038, 051, 052, 054, 058 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Composes the Console's primary surface from the read route, the row, the filters and the wizard.</rigor-reason>
     <model-tier>sonnet</model-tier>

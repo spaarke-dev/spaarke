@@ -27,9 +27,10 @@ name: Master CI Alert
 # .github/actions/quality-alert. Docs: docs/procedures/ci-cd-workflow.md
 # "How CI problems are surfaced".
 #
-# workflow_run, not an edit to ci-router.yml: the tier files are under a standing owner
-# no-edit rule. GitHub runs workflow_run workflows from the DEFAULT branch's copy only, so
-# this file takes effect once merged.
+# workflow_run rather than a job inside ci-router.yml: it must run AFTER the whole Router run
+# has completed (it reads the finished run's job conclusions and Tier 2 verdict artifacts), and
+# a job inside the Router cannot observe the Router's own final result. GitHub runs workflow_run
+# workflows from the DEFAULT branch's copy only, so this file takes effect once merged.
 
 on:
   workflow_run:

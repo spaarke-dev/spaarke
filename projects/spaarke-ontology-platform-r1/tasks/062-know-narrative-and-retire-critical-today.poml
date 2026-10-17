@@ -4,7 +4,7 @@
     <title>Know becomes narrative, Critical Today is retired, the LLM Top action is removed</title>
     <phase>6 Do lane and Briefing fold-in</phase>
     <gate>061, 038, 059 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Removes an LLM-chosen priority that violates the row contract, and changes what users see.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -125,6 +125,8 @@
     <criterion testable="true">Negative: no prompt or playbook still asks the model to choose a top action.</criterion>
     <criterion testable="true">All tests pass; both sides build.</criterion>
   </acceptance-criteria>
+
+  <completion date="2026-10-16">PR #2018 merged `33a98774` into docs/ontology-platform-design. The LLM Top action and Critical Today are retired from the Briefing; the worklist narrative is count-only over the list's own categories, can never change order or membership (WorkItemOrderAndMembershipTests, must-fire + must-not-fire), and is dropped fail-closed when the scrubber removes anything. "Monitored records changed in the last {N} hours" states the window it counted. Opus review (F1 scrub dropped count-only text, F1 sync script would write example names into the prompt, F1 "prioritize" in the prompt, F4 lint) fixed in one round plus the connector-regex `word-boundary ` fix; scoped re-check clean (K3 only). Deferred: DI-106 #2030 (scrubber allow-list substring match). AFTER master + dev BFF: run `pwsh ./scripts/dataverse/Sync-BriefNarrateOutputSchemas.ps1 -IncludeSystemPrompt -DryRun`, then the real run (row ce299eb4-fc70-f111-ab0e-7ced8ddc4cc6); either order vs the Console is safe (fix-round trace), but schema and prompt must be written together.</completion>
 
   <notes>spec.md FR-31, FR-32, FR-34. design.md BR-3, BR-5. Amended 2026-10-07 per reconciliation B.2 row 062 (W-10, W-13, W-14) and #38; C-9 open (O-2).</notes>
 

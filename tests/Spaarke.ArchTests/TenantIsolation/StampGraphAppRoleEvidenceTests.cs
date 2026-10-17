@@ -127,7 +127,7 @@ public class StampGraphAppRoleEvidenceTests
         var gate = module.IndexOf("if (IsDemoProvisioningEnabled(configuration))", StringComparison.Ordinal);
         Assert.True(gate > 0, "RegistrationModule no longer gates the demo registration feature on IsDemoProvisioningEnabled.");
         var gatedBlock = module[gate..];
-        foreach (var registration in new[] { "AddSingleton<GraphUserService>", "AddSingleton<DemoProvisioningService>", "AddHostedService<DemoExpirationService>" })
+        foreach (var registration in new[] { "AddSingleton<GraphUserService>", "AddSingleton<DemoProvisioningService>", "AddScheduledJob<DemoExpirationJob>" })
         {
             Assert.True(Regex.Matches(module, Regex.Escape(registration)).Count == 1 && gatedBlock.Contains(registration, StringComparison.Ordinal),
                 $"{registration} must appear once, inside the IsDemoProvisioningEnabled block (task 261).");

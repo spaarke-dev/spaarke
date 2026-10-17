@@ -5,16 +5,17 @@
 //
 // ADR-038 CATEGORY:
 //   Path #1 — pure C# unit test. NO live Cosmos / Service Bus / pwsh /
-//   Azure API. Fakes replace the repository, enqueuer, and probes so the
+//   Azure API. Fakes replace the repository, and probes so the
 //   handler orchestration logic is exercised in isolation. Live-resource
 //   coverage lives in env-guarded smoke tests (Cosmos + SB round-trips;
 //   the PowerShell probe itself is out of the CI unit suite by design —
 //   integration coverage would ship alongside a real dev-env probe wiring).
 //
 // COVERAGE:
-//   T1  Happy path: all four probes Pass → Success + Cosmos state advances
-//                   to CurrentPhase=H0.5 + CompletedPhase for H0 recorded +
-//                   H0.5 enqueued.
+//   T1  Happy path: all probes Pass → Success + Cosmos state advances
+//                   to CurrentPhase=H0 + CompletedPhase for H0 recorded.
+//                   H0 enqueues nothing (T186 L19; chaining is the
+//                   reconciler's - guarded by HandlerEnqueuerUsageGuardTests).
 //   T2  Idempotent no-op: run already has an H0 CompletedPhase matching the
 //                         computed idempotency key → Success (no state
 //                         mutation, no enqueue).
@@ -29,9 +30,8 @@
 //   T5  Dataverse env-creation rate insufficient: Failure with distinct
 //                                                  quota-dataverse-env-rate
 //                                                  rejection code.
-//   T6  Subscription vCPU insufficient: Failure with distinct
-//                                        quota-subscription-vcpu rejection
-//                                        code.
+//   T6  (retired 2026-10-15, T186 L17 — the Compute vCPU check was removed;
+//        the stamp consumes no Microsoft.Compute quota.)
 //   T7  SPE owner check fails: H0 uses the code the probe names
 //       (SpeOwnerCredentialProbe has three — task 248), not a check-name default.
 //   T8  Run not found in Cosmos partition: Failure(Resumable, run-not-found).
@@ -91,18 +91,16 @@ public sealed class H0PreflightHandlerTests
     // ---------- T1 happy path ----------
 
     [Fact]
-    public async Task HappyPath_AllProbesPass_ReturnsSuccessAndEnqueuesDownstream()
+    public async Task HappyPath_AllProbesPass_ReturnsSuccess_RecordsH0Complete_AndDoesNotChainDownstream()
     {
         var run = BuildRunWithTenant();
         var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
         var probes = new[]
         {
             FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-            FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
             FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
         };
-        var handler = CreateHandler(repo, enqueuer, probes);
+        var handler = CreateHandler(repo, probes);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -110,19 +108,13 @@ public sealed class H0PreflightHandlerTests
         var success = (HandlerResult.Success)result;
         success.IdempotencyKey.Should().StartWith($"preflight-{CustomerId}-");
 
-        // Cosmos state: CurrentPhase advanced to H0.5, CompletedPhase for H0 recorded, Status = Running.
+        // Cosmos state: CompletedPhase for H0 recorded, CurrentPhase = H0 (the reconciler chains H1; T186 L19: H0 must not dispatch H0.5), Status = Running.
         repo.LastWrittenRun.Should().NotBeNull();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Running);
-        repo.LastWrittenRun.CurrentPhase.Should().Be("H0.5");
+        repo.LastWrittenRun.CurrentPhase.Should().Be("H0");
         repo.LastWrittenRun.CompletedPhases.Should().ContainSingle()
             .Which.Phase.Should().Be("H0");
         repo.LastWrittenRun.CompletedPhases[0].IdempotencyKey.Should().Be(success.IdempotencyKey);
-
-        // Downstream enqueue happened, with the H0.5 handler id.
-        enqueuer.Sent.Should().ContainSingle();
-        enqueuer.Sent[0].HandlerId.Should().Be("H0.5");
-        enqueuer.Sent[0].RunId.Should().Be(RunId);
-        enqueuer.Sent[0].CustomerId.Should().Be(CustomerId);
 
         // Every probe was called exactly once.
         probes.All(p => ((FakeProbe)p).CallCount == 1).Should().BeTrue();
@@ -144,16 +136,14 @@ public sealed class H0PreflightHandlerTests
             JobId = "prior-run",
         });
         var repo = new FakeRepository(run, etag: "etag-2");
-        var enqueuer = new FakeEnqueuer();
         var probes = new[] { FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom) };
-        var handler = CreateHandler(repo, enqueuer, probes);
+        var handler = CreateHandler(repo, probes);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
         ((HandlerResult.Success)result).IdempotencyKey.Should().Be(expectedKey);
         repo.LastWrittenRun.Should().BeNull("idempotent no-op does not mutate state");
-        enqueuer.Sent.Should().BeEmpty("idempotent no-op does not re-enqueue");
         ((FakeProbe)probes[0]).CallCount.Should().Be(0, "idempotent no-op does not fire probes");
     }
 
@@ -164,9 +154,8 @@ public sealed class H0PreflightHandlerTests
     {
         var run = BuildRun(); // No tenantId parameter.
         var repo = new FakeRepository(run, etag: "etag-3");
-        var enqueuer = new FakeEnqueuer();
         var probes = new[] { FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom) };
-        var handler = CreateHandler(repo, enqueuer, probes);
+        var handler = CreateHandler(repo, probes);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -176,7 +165,6 @@ public sealed class H0PreflightHandlerTests
         failure.Diagnostic.Should().Contain("§ 4D I1");
 
         ((FakeProbe)probes[0]).CallCount.Should().Be(0, "§ 4D I1 guard fires before any probe");
-        enqueuer.Sent.Should().BeEmpty();
 
         // Cosmos was marked Failed with the specific rejection code.
         repo.LastWrittenRun.Should().NotBeNull();
@@ -189,7 +177,6 @@ public sealed class H0PreflightHandlerTests
 
     [Theory]
     [InlineData(PreflightCheckNames.AzureOpenAiTpmHeadroom, "quota-openai-tpm")]
-    [InlineData(PreflightCheckNames.SubscriptionVCpuQuota, "quota-subscription-vcpu")]
     [InlineData(PreflightCheckNames.SpeOwnerCredential, SpeOwnerCredentialProbe.OwnerTokenFailedRejectionCode)]
     public async Task ProbeFailure_ProducesDistinctRejectionCode_AndMarksCosmosFailed(
         string failingCheck,
@@ -197,21 +184,17 @@ public sealed class H0PreflightHandlerTests
     {
         var run = BuildRunWithTenant();
         var repo = new FakeRepository(run, etag: "etag-4");
-        var enqueuer = new FakeEnqueuer();
         var probes = new IPreflightQuotaProbe[]
         {
             failingCheck == PreflightCheckNames.AzureOpenAiTpmHeadroom
                 ? FakeProbe.Fail(PreflightCheckNames.AzureOpenAiTpmHeadroom, "OpenAI TPM: observed 100/1000 required in eastus")
                 : FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-            failingCheck == PreflightCheckNames.SubscriptionVCpuQuota
-                ? FakeProbe.Fail(PreflightCheckNames.SubscriptionVCpuQuota, "vCPU: 0/8 required standardDv5Family in eastus")
-                : FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
             failingCheck == PreflightCheckNames.SpeOwnerCredential
                 ? FakeProbe.Fail(PreflightCheckNames.SpeOwnerCredential, "SPE owner: token exchange failed",
                     SpeOwnerCredentialProbe.OwnerTokenFailedRejectionCode)
                 : FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
         };
-        var handler = CreateHandler(repo, enqueuer, probes);
+        var handler = CreateHandler(repo, probes);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -223,18 +206,16 @@ public sealed class H0PreflightHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
         repo.LastWrittenRun.ErrorDetail.Should().Contain(expectedRejectionCode);
         repo.LastWrittenRun.GateStates.Should().ContainKey($"preflight-{expectedRejectionCode}");
-        enqueuer.Sent.Should().BeEmpty("H0 blocks the run; no downstream enqueue on preflight failure");
     }
 
     // ---------- T8 run not found ----------
 
     [Fact]
-    public async Task RunNotFound_ReturnsResumableFailure_NoStateWriteNoEnqueue()
+    public async Task RunNotFound_ReturnsResumableFailure_NoStateWrite()
     {
         var repo = new FakeRepository(run: null, etag: null);
-        var enqueuer = new FakeEnqueuer();
         var probes = new[] { FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom) };
-        var handler = CreateHandler(repo, enqueuer, probes);
+        var handler = CreateHandler(repo, probes);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -242,7 +223,6 @@ public sealed class H0PreflightHandlerTests
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be("run-not-found");
         repo.LastWrittenRun.Should().BeNull();
-        enqueuer.Sent.Should().BeEmpty();
     }
 
     // ---------- T9 defensive dispatch check ----------
@@ -252,8 +232,7 @@ public sealed class H0PreflightHandlerTests
     {
         var run = BuildRunWithTenant();
         var repo = new FakeRepository(run, etag: "etag-5");
-        var enqueuer = new FakeEnqueuer();
-        var handler = CreateHandler(repo, enqueuer, Array.Empty<IPreflightQuotaProbe>());
+        var handler = CreateHandler(repo, Array.Empty<IPreflightQuotaProbe>());
 
         var wrongEnvelope = new HandlerEnvelope
         {
@@ -297,10 +276,9 @@ public sealed class H0PreflightHandlerTests
     {
         var run = BuildUpgradeRun();
         var repo = new FakeRepository(run, etag: "etag-11");
-        var enqueuer = new FakeEnqueuer();
         var probes = AllPassProbes();
         var matrix = new FakeMatrix(VersionCompatVerdict.Green);
-        var handler = CreateHandler(repo, enqueuer, probes, matrix);
+        var handler = CreateHandler(repo, probes, matrix);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -309,7 +287,6 @@ public sealed class H0PreflightHandlerTests
         matrix.LastCurrent.Should().Be(new VersionPair("1.0.0-net10", "S2026.08"));
         matrix.LastTarget.Should().Be(new VersionPair("1.1.0-net10", "S2026.09"));
         probes.All(p => ((FakeProbe)p).CallCount == 1).Should().BeTrue("Green verdict does not block the probes");
-        enqueuer.Sent.Should().ContainSingle();
         repo.LastWrittenRun!.GateStates.Should().NotContainKey(
             H0PreflightHandler.UpgradeCompatYellowGateId, "Green records no operator-ACK gate");
     }
@@ -319,10 +296,9 @@ public sealed class H0PreflightHandlerTests
     {
         var run = BuildUpgradeRun();
         var repo = new FakeRepository(run, etag: "etag-12");
-        var enqueuer = new FakeEnqueuer();
         var probes = AllPassProbes();
         var matrix = new FakeMatrix(VersionCompatVerdict.Red, ucbClasses: new[] { "U-CB-1" });
-        var handler = CreateHandler(repo, enqueuer, probes, matrix);
+        var handler = CreateHandler(repo, probes, matrix);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -332,7 +308,6 @@ public sealed class H0PreflightHandlerTests
         failure.Diagnostic.Should().Contain("stub-Red");
 
         probes.All(p => ((FakeProbe)p).CallCount == 0).Should().BeTrue("Red blocks BEFORE any quota probe fires");
-        enqueuer.Sent.Should().BeEmpty();
         repo.LastWrittenRun.Should().NotBeNull();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
         repo.LastWrittenRun.ErrorDetail.Should().Contain("upgrade-compat-red");
@@ -344,16 +319,14 @@ public sealed class H0PreflightHandlerTests
     {
         var run = BuildUpgradeRun();
         var repo = new FakeRepository(run, etag: "etag-13");
-        var enqueuer = new FakeEnqueuer();
         var probes = AllPassProbes();
         var matrix = new FakeMatrix(VersionCompatVerdict.Yellow, ucbClasses: new[] { "U-CB-3" });
-        var handler = CreateHandler(repo, enqueuer, probes, matrix);
+        var handler = CreateHandler(repo, probes, matrix);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>("Yellow warns but does NOT block");
         probes.All(p => ((FakeProbe)p).CallCount == 1).Should().BeTrue();
-        enqueuer.Sent.Should().ContainSingle();
 
         // The operator-ACK obligation is persisted on the success write.
         repo.LastWrittenRun.Should().NotBeNull();
@@ -372,10 +345,9 @@ public sealed class H0PreflightHandlerTests
     {
         var run = BuildUpgradeRun(includeVersions: false);
         var repo = new FakeRepository(run, etag: "etag-14");
-        var enqueuer = new FakeEnqueuer();
         var probes = AllPassProbes();
         var matrix = new FakeMatrix(VersionCompatVerdict.Green);
-        var handler = CreateHandler(repo, enqueuer, probes, matrix);
+        var handler = CreateHandler(repo, probes, matrix);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -396,12 +368,11 @@ public sealed class H0PreflightHandlerTests
     {
         var run = BuildUpgradeRun();
         var repo = new FakeRepository(run, etag: "etag-15");
-        var enqueuer = new FakeEnqueuer();
         var probes = AllPassProbes();
         var matrix = new FakeMatrix(
             VersionCompatVerdict.Green,
             throws: new InvalidOperationException("matrix file corrupt"));
-        var handler = CreateHandler(repo, enqueuer, probes, matrix);
+        var handler = CreateHandler(repo, probes, matrix);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -410,7 +381,6 @@ public sealed class H0PreflightHandlerTests
         failure.RejectionCode.Should().Be("upgrade-compat-matrix-unavailable");
         failure.Diagnostic.Should().Contain("matrix file corrupt");
         probes.All(p => ((FakeProbe)p).CallCount == 0).Should().BeTrue();
-        enqueuer.Sent.Should().BeEmpty();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
     }
 
@@ -440,16 +410,14 @@ public sealed class H0PreflightHandlerTests
     [Fact]
     public async Task OpenAiPinFreshnessProbeFailure_H0MapsToQuotaOpenAiPinStaleRejectionCode()
     {
-        // Arrange — five probes, only the pin-freshness one fails. Fake stub
+        // Arrange — several probes, only the pin-freshness one fails. Fake stub
         // returns the exact per-pin diagnostic shape the real probe emits so
         // the assertion on ErrorDetail is meaningful.
         var run = BuildRunWithTenant();
         var repo = new FakeRepository(run, etag: "etag-h03a");
-        var enqueuer = new FakeEnqueuer();
         var probes = new IPreflightQuotaProbe[]
         {
             FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-            FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
             FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
             FakeProbe.Fail(
                 PreflightCheckNames.OpenAiPinFreshness,
@@ -457,7 +425,7 @@ public sealed class H0PreflightHandlerTests
                 "gpt-4o@2024-08-06: lifecycleStatus='Deprecating' inferenceDeprecationOn=2026-11-30T00:00:00Z. " +
                 "ADR-020 pin bump required BEFORE next provisioning run (H2a would otherwise fail with ServiceModelDeprecated)."),
         };
-        var handler = CreateHandler(repo, enqueuer, probes);
+        var handler = CreateHandler(repo, probes);
 
         // Act
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -476,7 +444,6 @@ public sealed class H0PreflightHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
         repo.LastWrittenRun.ErrorDetail.Should().Contain("quota-openai-pin-stale");
         repo.LastWrittenRun.GateStates.Should().ContainKey("preflight-quota-openai-pin-stale");
-        enqueuer.Sent.Should().BeEmpty("H0 blocks the run on any preflight probe failure — no H0.5 dispatch");
     }
 
     [Fact]
@@ -491,7 +458,6 @@ public sealed class H0PreflightHandlerTests
         run.Parameters.NonSecret["openAiLocation"] = region;   // task 247: the probe reads the OpenAI region
         run.Parameters.NonSecret["subscriptionId"] = subscriptionId;
         var repo = new FakeRepository(run, etag: "etag-h03b");
-        var enqueuer = new FakeEnqueuer();
 
         // Fake ARM transport returns a `Microsoft.CognitiveServices/models`
         // page where the gpt-4o@2024-11-20 pin is scheduled to deprecate and
@@ -563,17 +529,16 @@ public sealed class H0PreflightHandlerTests
             TimeProvider.System,
             NullLogger<ArmOpenAiPinFreshnessProbe>.Instance);
 
-        // Compose alongside the four other probes as no-ops so the H0
+        // Compose alongside the other probes as no-ops so the H0
         // orchestration decision is driven by the pin-freshness verdict
         // alone.
         var probes = new IPreflightQuotaProbe[]
         {
             FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-            FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
             FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
             realPinnedProbe,
         };
-        var handler = CreateHandler(repo, enqueuer, probes);
+        var handler = CreateHandler(repo, probes);
 
         // Act
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -611,7 +576,6 @@ public sealed class H0PreflightHandlerTests
         evidenceJson.Should().Contain("deprecating-status",
             "the machine-stable reason code must accompany the human-readable diagnostic");
 
-        enqueuer.Sent.Should().BeEmpty("H0 blocks the run on any preflight probe failure — no H0.5 dispatch");
     }
 
     // ---------- COMP-10 cost-envelope gate (task 229: one decision path for every model) ----------
@@ -645,9 +609,8 @@ public sealed class H0PreflightHandlerTests
     {
         // smb ceiling $700; $800 is over it.
         var repo = new FakeRepository(RunWithCost(model, "smb", "800"), etag: "etag-comp10-red");
-        var enqueuer = new FakeEnqueuer();
         var probes = AllPassProbes();
-        var handler = CreateHandler(repo, enqueuer, probes);
+        var handler = CreateHandler(repo, probes);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -657,7 +620,6 @@ public sealed class H0PreflightHandlerTests
         failure.Diagnostic.Should().Contain("smb").And.Contain("800.00").And.Contain("700.00");
         probes.All(p => ((FakeProbe)p).CallCount == 0).Should().BeTrue(
             "COMP-10: cost-envelope gate MUST short-circuit before any Azure probe fires");
-        enqueuer.Sent.Should().BeEmpty("H0 blocks; no H0.5 dispatch on cost overrun");
 
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
         var gateKey = $"preflight-{H0PreflightHandler.CostOverrunRejectionCode}";
@@ -675,14 +637,12 @@ public sealed class H0PreflightHandlerTests
         var run = RunWithCost("Model1", "smb", "800");
         run.Parameters.NonSecret["costEnvelopePolicy"] = "warnAndProceed";
         var repo = new FakeRepository(run, etag: "etag-comp10-old-waiver");
-        var enqueuer = new FakeEnqueuer();
-        var handler = CreateHandler(repo, enqueuer, AllPassProbes());
+        var handler = CreateHandler(repo, AllPassProbes());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Failure>()
             .Which.RejectionCode.Should().Be(H0PreflightHandler.CostOverrunRejectionCode);
-        enqueuer.Sent.Should().BeEmpty();
     }
 
     [Theory]
@@ -699,9 +659,8 @@ public sealed class H0PreflightHandlerTests
         string model, string? tier, string? estimate, string rejectionCode)
     {
         var repo = new FakeRepository(RunWithCost(model, tier, estimate), etag: "etag-comp10-input");
-        var enqueuer = new FakeEnqueuer();
         var probes = AllPassProbes();
-        var handler = CreateHandler(repo, enqueuer, probes);
+        var handler = CreateHandler(repo, probes);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -710,7 +669,6 @@ public sealed class H0PreflightHandlerTests
         failure.Class.Should().Be(FailureClass.Resumable, "H0 refusals are Resumable; the remedy is a new run with a corrected intake");
         failure.RejectionCode.Should().Be(rejectionCode);
         probes.All(p => ((FakeProbe)p).CallCount == 0).Should().BeTrue();
-        enqueuer.Sent.Should().BeEmpty();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
     }
 
@@ -720,15 +678,13 @@ public sealed class H0PreflightHandlerTests
     public async Task CostEnvelope_WithinTheCeiling_Proceeds(string model, string tier, string estimate)
     {
         var repo = new FakeRepository(RunWithCost(model, tier, estimate), etag: "etag-comp10-green");
-        var enqueuer = new FakeEnqueuer();
         var probes = AllPassProbes();
-        var handler = CreateHandler(repo, enqueuer, probes);
+        var handler = CreateHandler(repo, probes);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
         probes.All(p => ((FakeProbe)p).CallCount == 1).Should().BeTrue();
-        enqueuer.Sent.Should().ContainSingle();
     }
 
     [Fact]
@@ -736,17 +692,15 @@ public sealed class H0PreflightHandlerTests
     {
         // smb's built-in ceiling is $700; configured $1000 lets an $800 estimate through.
         var repo = new FakeRepository(RunWithCost("Model1", "smb", "800"), etag: "etag-comp10-configured");
-        var enqueuer = new FakeEnqueuer();
         var options = Options.Create(new H0Options
         {
             TierMonthlyCostCeilingsUsd = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase) { ["smb"] = 1000m },
         });
-        var handler = CreateHandler(repo, enqueuer, AllPassProbes(), h0Options: options);
+        var handler = CreateHandler(repo, AllPassProbes(), h0Options: options);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
-        enqueuer.Sent.Should().ContainSingle();
     }
 
     [Fact]
@@ -756,7 +710,7 @@ public sealed class H0PreflightHandlerTests
         // (POST /api/runs still requires the inputs).
         var repo = new FakeRepository(RunWithCost("Model2", "smb", "5000"), etag: "etag-comp10-disabled");
         var options = Options.Create(new H0Options { CostEnvelopeAbortsPreflight = false });
-        var handler = CreateHandler(repo, new FakeEnqueuer(), AllPassProbes(), h0Options: options);
+        var handler = CreateHandler(repo, AllPassProbes(), h0Options: options);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -811,13 +765,11 @@ public sealed class H0PreflightHandlerTests
     /// </summary>
     private static H0PreflightHandler CreateHandler(
         FakeRepository repo,
-        FakeEnqueuer enqueuer,
         IPreflightQuotaProbe[] probes,
         IVersionCompatMatrix? matrix = null,
         IOptions<H0Options>? h0Options = null)
         => new(
             repo,
-            enqueuer,
             probes,
             matrix ?? new FakeMatrix(
                 VersionCompatVerdict.Green,
@@ -829,7 +781,6 @@ public sealed class H0PreflightHandlerTests
     private static IPreflightQuotaProbe[] AllPassProbes() => new IPreflightQuotaProbe[]
     {
         FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-        FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
         FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
     };
 
@@ -959,18 +910,6 @@ public sealed class H0PreflightHandlerTests
             }
             return Task.FromResult(new VersionCompatCheckResult(
                 _verdict, $"stub-{_verdict}", _ucbClasses));
-        }
-    }
-
-    /// <summary>In-memory <see cref="IHandlerEnqueuer"/> fake that records sent envelopes.</summary>
-    private sealed class FakeEnqueuer : IHandlerEnqueuer
-    {
-        public List<HandlerEnvelope> Sent { get; } = new();
-
-        public Task EnqueueAsync(HandlerEnvelope envelope, CancellationToken cancellationToken)
-        {
-            Sent.Add(envelope);
-            return Task.CompletedTask;
         }
     }
 

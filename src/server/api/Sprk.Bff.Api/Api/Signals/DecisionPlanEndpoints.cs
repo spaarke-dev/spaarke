@@ -39,20 +39,24 @@ public static class DecisionPlanEndpoints
             .WithName("GetSignalDecisionPlan")
             .WithSummary("Get a Signal's decision plan resolved against the action catalog")
             .WithDescription("Returns the plan's actions in plan order (the first is the recommendation), the Next-steps set and the "
-                + "lane's closed dismissal reasons. 404 when the Signal or its core record is not readable by the caller; "
+                + "lane's closed dismissal reasons. 404 when the Signal or its core record is not readable by the caller, or a Do item "
+                + "is not the caller's own work (D-141); 503 when that could not be checked; "
                 + "422 when the plan does not resolve against the closed catalog.")
             .Produces<DecisionPlanResponse>(200)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // Task 034 (FR-17, reconciliation B.2 row 034): the suppression count the wizard's dismissal step and admin show.
         group.MapGet("/{signalId:guid}/suppression", GetSuppressionAsync)
             .WithName("GetSignalSuppression")
             .WithSummary("Get the (policy, core record) dismissal count and suppression date for a Signal")
             .WithDescription("Returns the counted and recorded dismissals in the trailing 30 days for the Signal's policy on the Signal's "
-                + "core record (or on the item itself when it has none) and the current sprk_suppresseduntil. 404 when the Signal or its "
-                + "core record is not readable by the caller; 403 when the caller cannot be resolved; 503 when an authorized caller's count cannot be read.")
+                + "core record (or on the item itself when it has none) and the current sprk_suppresseduntil; for a Do item, only the dismissals "
+                + "of that item's person's own Do items, reported only to that person (D-145a). 404 when the Signal or its "
+                + "core record is not readable by the caller, or a Do item is not the caller's own work (D-141); 403 when the caller cannot be "
+                + "resolved; 503 when access could not be checked or an authorized caller's count cannot be read.")
             .Produces<SuppressionResponse>(200)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -90,7 +94,8 @@ public static class DecisionPlanEndpoints
         SuppressionStatus? status;
         try
         {
-            status = await suppression.GetStatusForSignalAsync(signalId, caller, ct);
+            // D-145a (task 152): a Do item's count is its person's own, and only that person is told it.
+            status = await suppression.GetStatusForSignalAsync(signalId, caller, ct, decision.CallerContactId);
         }
         catch (SuppressionPartitionUndeterminedException)
         {
@@ -128,7 +133,8 @@ public static class DecisionPlanEndpoints
             : Results.Ok(SuppressionResponse.From(signalId, status));
     }
 
-    /// <summary>A no-core Signal's subject could not be read because of a fault: 503, never the uniform 404 (that is for "not yours").</summary>
+    /// <summary>A no-core Signal's subject, or a Do-lane Signal's "mine" read, could not be answered because of a fault: 503, never the
+    /// uniform 404 (that is for "not yours").</summary>
     private static IResult AccessUnavailable(HttpContext httpContext) =>
         Results.Problem(
             title: "Service Unavailable",
@@ -189,6 +195,24 @@ public static class DecisionPlanEndpoints
                     ["reason"] = resolution.RefusalReason,
                     ["correlationId"] = httpContext.TraceIdentifier,
                 });
+        }
+
+        // Task 154 (D-111): an OPEN inquiry's "Record the outcome" To Do is completed by recording the disposition, never by Mark
+        // complete. Pass 2 F1: identified exactly as the commit route identifies it (the hint, else the To Do's matter's open
+        // inquiries), from the notes and matter the gate's own "mine" read returned, as the caller; only for a To Do whose plan offers
+        // Mark complete. Once the inquiry is closed the To Do is ordinary (adversarial pass 1). A fault offers nothing (503).
+        if (plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode))
+        {
+            var inquiry = await signalAccess.CheckSubjectTodoInquiryAsync(decision, ct);
+            if (inquiry == InquiryOutcomeTodoCheck.Unavailable)
+            {
+                return AccessUnavailable(httpContext);
+            }
+
+            if (inquiry == InquiryOutcomeTodoCheck.OpenInquiry)
+            {
+                plan = plan.WithoutMarkComplete();
+            }
         }
 
         // "How this was determined" (task 026). A body that cannot be described is shown without the description, never

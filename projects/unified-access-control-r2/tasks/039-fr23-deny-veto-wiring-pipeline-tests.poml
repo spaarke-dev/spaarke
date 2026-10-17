@@ -145,4 +145,9 @@ status was changed on the index alone.</status-note>
       <criterion testable="true">Only then are this task's status and its TASK-INDEX marker set back to completed, and scripts/check-task-status-drift.ps1 is clean for id 039.</criterion>
     </acceptance-criteria-amended>
   </amendments>
+  <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 039)">
+    <verdict>MERGED into 136's combined CIAM session. No separate work remains in this task. &lt;status&gt; stays pending until the absorbing gate passes; the task is then marked completed together with it, citing that gate's evidence.</verdict>
+    <amendment n="1" title="Evidence">Already met in code by 135 (b477497aa) and 136. Only the CIAM live check is open.</amendment>
+    <amendment n="2" title="Closing gate">Live session A item 3, owned by task 136. That one session closes 135's gate, 136, 037 and 039 together; mark all four completed in one change.</amendment>
+  </amendments>
 </task>

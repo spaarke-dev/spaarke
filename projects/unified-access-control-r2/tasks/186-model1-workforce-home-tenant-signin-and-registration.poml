@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="186" project="unified-access-control-r2">
+  <metadata>
+    <title>Model 1 workforce contacts: baseline access. How the BFF applies the role "Spaarke Internal Contact User (Workforce)" to workforce-contact callers (ADR-028 A9; sign-in and registration are owned by SPA-r3)</title>
+    <phase>Session 28 — UAC (owner round 97, rescoped by ADR-028 A9 on 2026-10-13)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Access decisions for callers who are not Dataverse systemusers. A wrong ceiling over-shares a customer's matters with every self-registered employee.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-relevant access model; fails closed by design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Needs SPA-r3's workforce-contact caller principal (the A9 token acceptance and registration) to exist, at least as a contract.</parallel-reason>
+    <deps>184 (#1801) merged; SPA-r3's A9 workforce-contact principal (contract at least)</deps>
+    <tags>bff-api, security, access-control, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <origin>
+      Owner round 97 (2026-10-13): there is no approval for workforce-contact registration, and baseline access uses the Dataverse role "Spaarke Internal Contact User (Workforce)". The owner created it on dev on 2026-10-13: role 9deaac9c-02c7-f111-a05c-0022482913fc in the root BU, 655 privileges, held by no one, described as "Internal contact user for Service Request Portal (SPA)". The owner will change its privileges as needed.
+      ADR-028 A9 (owner-confirmed 2026-10-13, PR #1810) supersedes this task's earlier scope (commit 4dcb3d661: token acceptance, registration and visibility). Workforce contacts sign in at their customer's home directory and are NOT B2B guests or systemusers.
+      Ownership: SPA-r3 owns sign-in, registration and the stored link to licensed users end to end. UAC owns ONLY baseline access, which is this task.
+      Design draft: notes/186-model1-workforce-design.md. Its sections on token acceptance, registration and visibility are inputs for SPA-r3, not this task's scope.
+    </origin>
+  </metadata>
+
+  <prompt>Design first: get the baseline-access decision (goal 1) through owner review before any code. Then implement it on a branch from master and open a PR into master.</prompt>
+
+  <goal>(1) DECISION (owner).
+- Workforce contacts are not systemusers, so the role cannot be assigned to them directly.
+- The draft recommends option (a): the BFF reads the role's table and operation privileges as the CEILING for workforce-contact callers. Depth only separates "none" from "some". Record scope comes from UAC grants and participation, the same as for any contact.
+- Assigning the role directly to a just-in-time systemuser is rejected. On dev, the role's Deep Read on matters, projects, documents and invoices would let every self-registered employee read every matter in the business unit, and it would add a pay-as-you-go cost per person.
+- Also state how the owner's later privilege edits take effect: a cache with a TTL of about 5 minutes, and fail closed when the role can't be read.
+
+(2) THE CEILING IN THE EVALUATOR.
+- A workforce-contact caller, as SPA-r3's principal identifies it, may perform an operation on a table only if the role grants that privilege (any depth).
+- A missing role, an unreadable role, or an ambiguous role (the same name in several business units) denies.
+- Systemusers and partner (CIAM) contacts are unchanged.
+
+(3) SERVICE REQUESTS.
+- The dev intake 403 is NOT this task's question.
+  - The intake create is app-only and sets the owner to the requester's BU default team (owner decision I-6).
+  - Dataverse's "Read Privilege Check For Owner" fails because that owning team lacks prvReadsprk_ServiceRequest.
+  - SPA-r3 put the fix to the owner on 2026-10-13: Basic-level Read on sprk_servicerequest in Spaarke Basic User. Reference that decision; do not raise a second ask.
+- This task's own question is separate: if the ceiling needs `sprk_servicerequest` privileges on the Workforce role for workforce-contact callers (the role has none today), state exactly which privileges, as part of the goal (1) decision. The owner edits the role; do not edit it.
+
+(4) No change to sign-in, registration or the stored link. Those are SPA-r3's.</goal>
+
+  <constraints>
+    <constraint source="ADR-028 A9">Sign-in, registration and the stored link are SPA-r3's. UAC changes only the access evaluation.</constraint>
+    <constraint source="ADR-028 / §9">No new identity or credential. Read the role app-only with the BFF's existing Dataverse client.</constraint>
+    <constraint source="owner">Never edit the role or its privileges. The owner does.</constraint>
+    <constraint source="§11">The ceiling extends the existing evaluator. Answer the three questions for any new surface.</constraint>
+    <constraint source="git">Stage explicit paths only. Never force-push, never use bare stash, never use --no-verify. Do not merge.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>A workforce-contact caller can do only what the role's privileges allow AND its grants or participation allow. Removing a privilege from the role takes effect within the stated TTL.</criterion>
+    <criterion>A missing, unreadable or ambiguous role denies every workforce-contact operation (fail closed).</criterion>
+    <criterion>Systemuser and CIAM-partner outcomes are unchanged, and their existing tests are unchanged and green.</criterion>
+    <criterion>Mutation proofs: dropping the ceiling, and treating an unreadable role as "allow", each fail a test.</criterion>
+    <criterion>The BFF builds with 0 errors, the full ArchTests pass, and the publish-size delta is measured.</criterion>
+  </acceptance-criteria>
+</task>
