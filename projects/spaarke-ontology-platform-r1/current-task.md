@@ -10,9 +10,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | Lane 102a running; 063 PR #2053 in Opus review |
+| **Task** | Lanes 102a and 064 running |
 | **Status** | 055 done, 073 deferred (#2051), admin Append live (§16), 049 done (§17, #2050 `32a923ca4`), #2048 merged `adc213d9b` (#2046 closed) |
-| **Next Action** | On each lane notification: independent review → fix round → re-check → merge into docs. 063: merge #2053 after review, then run its prepared policy seed (dry run first) |
+| **Next Action** | On each lane notification: independent review → fix round → re-check → merge into docs. 063 done: POL-MATTER-NOBUDGET on dev Off; enabling is the owner's call (~58 Signals) |
 
 ## Lanes in flight
 
@@ -20,7 +20,7 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 
 | Task | Worktree / branch | Model | State |
 |---|---|---|---|
-| 063 first Know rule | `C:\wts-063` `task/ontology-063` | sonnet/high (agent `lane-063`) | Running. Owner D-156: add `(sprk_matter, sprk_budget)` VerifiedJoin inside 063 + real-data proof. Live policy seed prepared, main session runs it |
+| 064 replace Briefing tab | `C:\wts-064` `task/ontology-064` | sonnet/high (agent `lane-064`) | Running. Escalates if a lane lacks real data. No deploy; Console ships from master |
 | 102a authoring contract + allow-list [auth] | `C:\wts-102a` `task/ontology-102a` | opus/high (agent `lane-102a`) | Running. D-149 + D-151(b). Agent writes the POML `102a-authoring-contract-for-rule-wizard.poml`; add the TASK-INDEX row (`🔄 [wip] 102a`, after 102) when its PR merges. Approved extra scope: nextSteps[] and authorableFields[] in the catalog. Two adversarial passes + uac-r2 |
 | 102 rule wizard UI | `C:\wts-102` `task/ontology-102` | sonnet/xhigh | Waits on 102a. Local commit `8993db08c` (Retire dialog jest timeouts) not pushed. On restart: rebase onto docs after 102a merges; contract per D-149 (rebuild condition on New version) |
 
@@ -32,7 +32,7 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 ## Next, in order
 
 1. 049 done (#2050 merged `32a923ca4`).
-2. Lane results: 063 (then run its prepared live seed with owner OK if it is a write), 102a (two passes + uac-r2), then relaunch 102.
+2. Lane results: 102a (two passes + uac-r2), then relaunch 102; 064 (review, merge; ships with the next docs→master sync).
 3. ebilling: 070 PR (paired F3 change) and 026 fix round (K1–K5, FLS on `sprk_firmreason`) come back for re-check. Temp worktrees `C:\wts-eb070`, `C:\wts-eb026`.
 4. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882), close #1882.
 5. 064 (after 063), 114 (after 111), 105 UAT (include the Next step To Do not exercised in 055), 090 wrap-up.
