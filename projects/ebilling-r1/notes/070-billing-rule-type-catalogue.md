@@ -261,3 +261,35 @@ change; `PolicyVersionValidator` is unchanged by this round.
 
 **Verification:** BFF build 0 warnings / 0 errors; unit filter `Ontology|PolicyVersion|RuleType|Signal` 2623 passed / 3 skipped / 0 failed
 (2626); `tests/Spaarke.ArchTests` 1126 / 1126.
+
+## ontology-r1 re-check of fix-round-2 (2026-10-17)
+
+**Verdict: CLEAN at 288c53acb, with no fix-now findings.**
+
+Scope:
+- the 49acd2f78 merge resolution of PolicyVersionValidator;
+- the fix range 7496afb1c..288c53acb.
+
+Merge resolution:
+- 102a behaviour is fully preserved, and the allow-list still runs on all four routes through the one ValidateForAuthoring call.
+- Conclude never hands over a predicate after a refusal.
+- The evaluator path is unchanged for Ontology types.
+
+Fix:
+- The field mapping is in the one shared map.
+- The RuleDomains constants are used.
+- The refusal shape holds.
+- Nothing is evaluated or written.
+
+Ontology-r1 independently reverted three mutations, and each one failed the tests:
+- null domain: 14 of 14 failed;
+- field arm: 3 of 3 failed;
+- reason-code arm: 3 of 3 failed.
+
+Results: build 0 warnings; filtered tests 2,623 passed, 0 failed; ArchTests 1,126/1,126; `git merge-tree` against ontology's docs branch is conflict-free.
+
+Naming: at ontology-r1's request the reason code is namespaced as `ontology.admin.rule_type_wrong_domain` (cc01731b3). Ontology-r1 checks only that diff.
+
+Known limits accepted by ontology-r1, no action:
+- **K-a:** `RuleBodyDescriber.cs:127` calls ValidateForSave with no domain. Its callers read Ontology-filtered policies, so reaching it needs privileged mis-seeding. This is K1 above.
+- **K-b:** a blank ruleBody reports "ruleBody required" before the type check. This is harmless.
