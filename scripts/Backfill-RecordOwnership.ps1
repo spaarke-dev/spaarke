@@ -1,4 +1,5 @@
 #!/usr/bin/env pwsh
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Re-owns EXISTING app-owned records to a business unit's DEFAULT OWNER TEAM, record-first — the backfill for
@@ -225,7 +226,8 @@ function Get-Lookup {
 #                   ReadFailed = <the read failed with anything but a 404 (review round 6)>; Status; Error }
 #    $Topology : @{ BuId = <Secure Record unit or $null>; Ambiguous = <bool>; TeamId = <named team or $null>; TeamCount = <n> }
 #    $DefaultTeamOf : { param($bu) <that unit's single default owner team, or $null> }
-#    Returns @{ Team; Bu; Reason } — Reason is set exactly when Team is $null (UNRESOLVABLE, never written).
+#    Returns @{ Team; Bu; Reason; ReadFailed; Status } — Reason is set exactly when Team is $null (never written): UNRESOLVABLE,
+#    or READ-FAILED when ReadFailed is $true (Status = the HTTP status, or "none" when there was no response).
 function Get-OwnerTeamDecision {
     param([hashtable]$Facts, [hashtable]$Topology, [scriptblock]$DefaultTeamOf)
     # Review round 6 (F2): a target that could not be READ (any error but a 404) is not "does not exist": the owner is undecided.
