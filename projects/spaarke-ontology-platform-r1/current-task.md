@@ -10,8 +10,8 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No lane running. 102 done (#2066 `b9603bab3`); 064 merged, switch pending owner |
-| **Next Action** | docs→master sync PR (#2048, #2050, #2053, 102a, 064, 102; full ArchTests; endpoint census; sync branch in `C:\wts-sync`), then ask R3 for a BFF deploy (063 join + 102a routes). Owner questions below |
+| **Task** | No lane running. Sync #2073 merged to master `88b3ecb1f` (#2048, #2050, #2053, 102a, 064, 102); Console deploy from master running |
+| **Next Action** | Confirm the Console deploy, notify word-add-in/R3/uac-r2 after. R3 prepares the dev BFF deploy (063 join + 102a routes); it needs a FRESH owner approval (owner Q7). Then 105 UAT, DI-83 #1882 re-run, 090 wrap-up |
 
 ## Lanes in flight
 
@@ -28,6 +28,7 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 4. **POL-MATTER-NOBUDGET** enable (~58 Signals)?
 5. **064 switch**: §6.1 non-admin checks done or waived, then approve the switch.
 6. **Rule scope in R1** (102 review): the save route takes no tenant/matter, so the wizard shows scope read-only. Accept for R1, or add scope to the BFF?
+7. **Dev BFF deploy (R3) of master with #2073**: needs a fresh owner approval (R3: earlier approvals covered only the named deploys). Without it the wizard cannot validate/save on dev and POL-MATTER-NOBUDGET cannot run.
 
 ## Next, in order
 
