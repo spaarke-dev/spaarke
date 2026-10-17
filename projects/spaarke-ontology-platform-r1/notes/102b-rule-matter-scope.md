@@ -311,3 +311,11 @@ would let the new wizard send an intent an old BFF does not read.
 | `Spaarke.ArchTests`, full | 1076 passed, 0 failed |
 | Jest, Spaarke.UI.Components (OntologyAdmin) | 8 suites, 206 passed |
 | Jest, Spaarke.AI.Widgets (OntologyAdminWorkspaceWidget, ontologyAdminGate) | 2 suites, 18 passed |
+
+### Re-check of fix round 2 (2026-10-17)
+
+- **Scoped re-check (sonnet, `d2b2ee72b..af6ce7171`):** all five items closed, no F-class findings. The checker mutated `s.IsOpen &&` and the redaction call site (`SignalReevaluationJob.cs:419`; the finding said ~412) and both tests failed. It confirmed save only creates new policies: no policy id on `OntologyNewPolicyRequest`, `Guid.NewGuid()`, a deep-insert POST, and no update route.
+- **uac-r2:** approved, 374 filtered tests passed, all five guard mutations caught. Validate is not an existence oracle: the stored matter comes from `ReadPolicyAsync` as the caller, and the request matterId still goes through `ReadableIdsAsync`.
+- **Known limits, accepted (no fix):**
+  - K2: the cancellation half of the catch at `OntologyAdminAuthoringService.cs:1689` has no test. A bare catch would pass all tests; the code mirrors :498 and a swallowed cancel would only send 200 to a client that has gone. Optional: a must-not-fire test with a cancelled request token.
+  - K1: the 50 logged ids are in read order; the count is exact. The log test covers 60 Signals, not the 50/51 boundary (the code is correct at both, by reading).
