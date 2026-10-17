@@ -4,7 +4,7 @@
     <title>Signal / Decision Record invoice-line subject and derivation</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies ontology-owned and access-control C# (SignalWriter, TodoRegardingBuilder, CoreAncestorResolver, SecureChildLineage) plus schema and solution source.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -135,6 +135,9 @@
     013 was added to deps by the main session (2026-10-15): 013 extends CoreAncestorResolver for the line and invoice and this task edits the same file and depends on that derivation; see escalation.
     "Firm-visible reason text" in FR-15 is placed on sprk_signal (findings are Signals); 130 projects it to firms.
     Ontology-owned file changes need ontology-r1 review (CLAUDE.md section 4).
+
+Completed 2026-10-16 (notes/026-signal-dr-line-subject.md). uac-r2 D-94 option A: sprk_billingevent is an intermediate stamp root whose root columns are only its own project / matter / work-assignment lookups (live read 2026-10-16), never sprk_invoice; it is mirrored in C#, TS and the storage resolver, and a line naming two roots is refused in all three (SingleRootIntermediates). SignalWriter accepts invoice and line subjects and refuses an invoice-family subject with no core or more than one; DecisionRecordWriter refuses SubjectUnfileable. Live (spaarkedev1, additive, WhatIf → apply → rerun 0 changes): sprk_regardinginvoiceline on sprk_signal / sprk_decisionrecord, sprk_signal.sprk_firmreason, and the Invoice Line catalog row fb30d221-bbc9-f111-a05a-7c1e520a989f. Solution source: only the 4 task files were copied from the export; the export's F12 guard failed on 7 pre-existing missing dependencies that are not this task's. Tests: targeted + Signals + Finance 4,782 pass, ArchTests 1,056, jest 83. Publish +1.5 KB. Known limits: invoice two-root parity (question for uac-r2); the TS preview does not apply the single-root rule (unreachable); model-driven re-file reaches Signal/DR only through the report-only reconciler. ontology-r1 and uac-r2 reviews requested (diff 73e912d22..56e296754), pending.
+Rework: none.
   </notes>
 
   <execution>
