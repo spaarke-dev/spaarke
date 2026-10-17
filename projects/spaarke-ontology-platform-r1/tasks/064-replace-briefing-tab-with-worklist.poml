@@ -4,7 +4,7 @@
     <title>Replace the Daily Briefing tab with the worklist</title>
     <phase>6 Do lane and Briefing fold-in</phase>
     <gate>062, 063, 055, 059, 065 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Replaces a shipped user surface; premature replacement leaves users worse off.</rigor-reason>
     <model-tier>sonnet</model-tier>
