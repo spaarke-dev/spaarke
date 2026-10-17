@@ -2058,13 +2058,39 @@ public class RecordOwnerAssignmentCensusTests
     /// Secure Record Owner role set (<c>config/secure-record-owner-role.json</c>) — otherwise Dataverse refuses the owner
     /// ("Read Privilege Check For Owner failed"). The tables are the resolver's child set
     /// (<c>RecordOwnershipResolver.IsReparentableChild</c>: the chat tools and every re-file) and every Routed or Seam create
-    /// in the census (content rows owned like their secure parent).
+    /// in the census (content rows owned like their secure parent), and the external-access grant table (UAC task 099b, D-11:
+    /// a grant on a secure root is created owned by the Secure team, and <c>SecureChildReconciler</c> moves a root's grant
+    /// rows to it on Make Secure — review round 3, F4).
     /// </summary>
     [Fact(DisplayName = "Task 146 b2: the codified Secure Record Owner role set covers every table the server can hand the Secure team")]
     public void CodifiedSecureOwnerRoleSet_CoversEveryTableTheServerCanHandTheSecureTeam()
     {
-        var configPath = Path.Combine(SourceScan.RepoRoot, "config", "secure-record-owner-role.json");
-        using var config = System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath));
+        var missing = MissingFromCodifiedSecureOwnerRoleSet(File.ReadAllText(SecureOwnerRoleConfigPath));
+        Assert.True(
+            missing.Count == 0,
+            "Tables the server can make the Secure Record team own, missing from config/secure-record-owner-role.json — "
+            + "add each through the file's howToExtend procedure (refusal first), then the live role per task 145's "
+            + "procedure: " + string.Join(", ", missing));
+    }
+
+    [Fact(DisplayName = "UAC 099b r3 F4: negative control — removing the grant table from the role config fails the guard")]
+    public void RemovingTheGrantTableFromTheRoleConfig_FailsTheGuard()
+    {
+        var config = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(SecureOwnerRoleConfigPath))!;
+        var tables = config["tables"]!.AsArray();
+        tables.Remove(tables.Single(t => (string?)t!["logicalName"] == Sprk.Bff.Api.Services.Access.SecureChildReconciler.GrantTable));
+
+        Assert.Equal(
+            new[] { Sprk.Bff.Api.Services.Access.SecureChildReconciler.GrantTable },
+            MissingFromCodifiedSecureOwnerRoleSet(config.ToJsonString()));
+    }
+
+    private static string SecureOwnerRoleConfigPath => Path.Combine(SourceScan.RepoRoot, "config", "secure-record-owner-role.json");
+
+    /// <summary>Every table the server can hand the Secure team that the role config <paramref name="json"/> does not list.</summary>
+    private static List<string> MissingFromCodifiedSecureOwnerRoleSet(string json)
+    {
+        using var config = System.Text.Json.JsonDocument.Parse(json);
         var codified = config.RootElement.GetProperty("tables").EnumerateArray()
             .Select(t => t.GetProperty("logicalName").GetString()!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -2072,14 +2098,10 @@ public class RecordOwnerAssignmentCensusTests
         var required = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.OwnershipParentEntities
             .Where(Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild)
             .Concat(Census.Where(e => e.Disposition is Disposition.Routed or Disposition.Seam).Select(e => e.Table))
+            .Append(Sprk.Bff.Api.Services.Access.SecureChildReconciler.GrantTable)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var missing = required.Where(t => !codified.Contains(t)).OrderBy(t => t, StringComparer.Ordinal).ToList();
-        Assert.True(
-            missing.Count == 0,
-            "Tables the server can make the Secure Record team own, missing from config/secure-record-owner-role.json — "
-            + "add each through the file's howToExtend procedure (refusal first), then the live role per task 145's "
-            + "procedure: " + string.Join(", ", missing));
+        return required.Where(t => !codified.Contains(t)).OrderBy(t => t, StringComparer.Ordinal).ToList();
     }
 
     // =============================================================================================
