@@ -69,16 +69,19 @@ public class AuthorableColumnsTests
         result.Validation.IsValid.Should().BeTrue($"{code} is live; the allow-list must not refuse it: {string.Join("; ", result.Validation.Errors)}");
     }
 
-    [Fact]
-    public void EveryDoLaneDefinition_PassesValidateForAuthoring()
+    [Theory]
+    [InlineData("do-lane.policies.json", 4)]
+    [InlineData("know-promotion.policies.json", 1)]
+    public void EveryPolicyDefinition_PassesValidateForAuthoring(string file, int count)
     {
-        // config/do-lane.policies.json is what scripts/Apply-DoLanePolicies.ps1 writes; its current versions must stay authorable.
+        // config/*.policies.json is what scripts/Apply-DoLanePolicies.ps1 writes; their current versions must stay authorable.
+        // know-promotion.policies.json holds POL-MATTER-NOBUDGET (task 063), whose 'when' reads sprk_matter.createdon.
         var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, "config", "do-lane.policies.json"))) root = root.Parent;
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "config", file))) root = root.Parent;
         root.Should().NotBeNull();
-        var policies = JsonNode.Parse(File.ReadAllText(Path.Combine(root!.FullName, "config", "do-lane.policies.json")))!["policies"]!.AsArray();
+        var policies = JsonNode.Parse(File.ReadAllText(Path.Combine(root!.FullName, "config", file)))!["policies"]!.AsArray();
 
-        policies.Should().HaveCount(4);
+        policies.Should().HaveCount(count);
         foreach (var policy in policies.Select(p => p!.AsObject()))
         {
             var current = policy["versions"]!.AsArray().Select(v => v!.AsObject()).Single(v => (int)v["versionNumber"]! == (int)policy["currentVersion"]!);

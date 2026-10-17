@@ -136,11 +136,14 @@ public sealed class PolicyVersionValidator
     /// <para><b>Residual (open, pending the owner's decision on the signed ADR-028 tension, D-151(c)).</b> An <c>exists</c> or
     /// <c>notExists</c> filter on an allow-listed column of a joinable related table still lets a policy-version author learn that
     /// column's value on a related row they cannot read, one bit per dry run. Today those columns are <c>sprk_communication</c>:
-    /// <c>sprk_triagecategory</c>, <c>sprk_reviewoutcome</c>, <c>sprk_receiveddate</c>, <c>statecode</c>; and
-    /// <c>sprk_budgetrevision</c>: <c>sprk_revisedon</c>, <c>statecode</c>. Membership of this list is the owner's call.</para>
+    /// <c>sprk_triagecategory</c>, <c>sprk_reviewoutcome</c>, <c>sprk_receiveddate</c>, <c>statecode</c>;
+    /// <c>sprk_budgetrevision</c>: <c>sprk_revisedon</c>, <c>statecode</c>; and, since task 063's join, <c>sprk_budget</c>:
+    /// <c>statecode</c>, <c>sprk_budgetstartdate</c>, <c>sprk_budgetenddate</c>. Membership of the related-table filter columns is
+    /// the owner's call.</para>
     /// <para><b>Seed (2026-10-16), and nothing else.</b>
     /// <list type="bullet">
-    /// <item>The columns the five live Ontology policies' current versions read on spaarkedev1.</item>
+    /// <item>The columns the six live Ontology policies' current versions read on spaarkedev1 (POL-MATTER-NOBUDGET added
+    /// 2026-10-17).</item>
     /// <item>The columns the authoring tests read: <c>statecode</c> on every table in
     /// <see cref="PredicateCompiler.EvaluatorGlobalReadableEntities"/>, and <c>sprk_matter.sprk_matterid</c>.</item>
     /// <item>The compiler's typed comparables: <see cref="PredicateCompiler.DateOnlyColumns"/> and
@@ -155,7 +158,8 @@ public sealed class PolicyVersionValidator
     public static readonly FrozenSet<(string Entity, string Column)> AuthorableColumns =
         new (string Entity, string Column)[]
         {
-            // The five live Ontology policies (POL-COMMIT-BUDGET v2, POL-TASK-OVERDUE, POL-TASK-DUESOON, POL-WA-RESPONSE, POL-TODO-OVERDUE).
+            // The six live Ontology policies (POL-COMMIT-BUDGET v2, POL-TASK-OVERDUE, POL-TASK-DUESOON, POL-WA-RESPONSE, POL-TODO-OVERDUE,
+            // and POL-MATTER-NOBUDGET, seeded Off by task 063 on 2026-10-17).
             ("sprk_communication", "sprk_triagecategory"),
             ("sprk_communication", "sprk_receiveddate"),
             ("sprk_communication", "sprk_reviewoutcome"),
@@ -164,6 +168,7 @@ public sealed class PolicyVersionValidator
             ("sprk_event", "statuscode"),
             ("sprk_todo", "statuscode"),
             ("sprk_workassignment", "statecode"),
+            ("sprk_matter", "createdon"), // POL-MATTER-NOBUDGET (task 063), a subject 'when' column
             // The authoring tests (OntologyAdminAuthoringEndpointTests, OntologyAdminAuthoringLiveTests).
             ("sprk_matter", "statecode"),
             ("sprk_matter", "sprk_matterid"),

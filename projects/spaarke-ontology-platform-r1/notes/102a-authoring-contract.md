@@ -44,8 +44,9 @@ joinable related table** from answering about a related row the author cannot re
 |---|---|
 | `sprk_communication` (`sprk_regardingmatter`) | `sprk_triagecategory`, `sprk_reviewoutcome`, `sprk_receiveddate`, `statecode` |
 | `sprk_budgetrevision` (`sprk_matter`) | `sprk_revisedon`, `statecode` |
+| `sprk_budget` (`sprk_matter`, task 063's join, merged in fix round 1) | `statecode`, `sprk_budgetstartdate`, `sprk_budgetenddate` |
 
-Allow-list membership is the owner's call; this task does not change it.
+Membership of the related-table filter columns is the owner's call; this task does not change it.
 
 ## Known limits (wizard concerns, not defects in this contract)
 
@@ -59,13 +60,15 @@ Allow-list membership is the owner's call; this task does not change it.
 ## Evidence
 
 - **Live, read-only (spaarkedev1, 2026-10-16/17):**
-  - **48** allow-listed columns. The set has 48 entries; an earlier draft of this note said 51, which was wrong. All 48 exist, and
-    every one has `IsSecured == false`. Output of the re-run on 2026-10-17
-    (`AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema`: Passed; 48 of 48 lines say `IsSecured=False`):
+  - **50** allow-listed columns after the docs merge in fix round 1: the 48 of the first run, plus `sprk_matter.createdon` (the
+    POL-MATTER-NOBUDGET seed) and `sprk_budget.sprk_matter` (task 063's join path). An earlier draft of this note said 51, which
+    was wrong. All 50 exist, and every one has `IsSecured == false`. Output of the read-only re-run on 2026-10-17, after the merge
+    (`AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema`: Passed; 50 of 50 lines say `IsSecured=False`):
 
     ```
     sprk_budget.sprk_budgetenddate: DateTimeAttributeMetadata, IsSecured=False
     sprk_budget.sprk_budgetstartdate: DateTimeAttributeMetadata, IsSecured=False
+    sprk_budget.sprk_matter: LookupAttributeMetadata, IsSecured=False
     sprk_budget.statecode: StateAttributeMetadata, IsSecured=False
     sprk_budgetrevision.sprk_matter: LookupAttributeMetadata, IsSecured=False
     sprk_budgetrevision.sprk_revisedon: DateTimeAttributeMetadata, IsSecured=False
@@ -88,6 +91,7 @@ Allow-list membership is the owner's call; this task does not change it.
     sprk_invoice.sprk_invoicedate: DateTimeAttributeMetadata, IsSecured=False
     sprk_invoice.sprk_invoiceduedate: DateTimeAttributeMetadata, IsSecured=False
     sprk_invoice.statecode: StateAttributeMetadata, IsSecured=False
+    sprk_matter.createdon: DateTimeAttributeMetadata, IsSecured=False
     sprk_matter.sprk_budgetutilizationpercent: DecimalAttributeMetadata, IsSecured=False
     sprk_matter.sprk_closeddate: DateTimeAttributeMetadata, IsSecured=False
     sprk_matter.sprk_lastreviewdate: DateTimeAttributeMetadata, IsSecured=False
@@ -114,9 +118,17 @@ Allow-list membership is the owner's call; this task does not change it.
     sprk_workassignment.statecode: StateAttributeMetadata, IsSecured=False
     ```
 
-  - Live policies: on 2026-10-16 all 5 live Ontology policies' current versions passed `ValidateForAuthoring` (POL-COMMIT-BUDGET v2,
-    POL-TASK-OVERDUE, POL-TASK-DUESOON, POL-WA-RESPONSE, POL-TODO-OVERDUE). **The 2026-10-17 re-run FAILED** on a sixth policy,
-    `POL-MATTER-NOBUDGET`, which task 063 seeded (Off) after this branch was cut. See "Open escalation" below.
+  - Live policies: all 6 live Ontology policies' current versions pass `ValidateForAuthoring`.
+    `EveryLiveOntologyPolicysCurrentVersion_PassesValidateForAuthoring` passed on the same re-run:
+
+    ```
+    POL-TASK-OVERDUE: valid=True
+    POL-TASK-DUESOON: valid=True
+    POL-WA-RESPONSE: valid=True
+    POL-TODO-OVERDUE: valid=True
+    POL-MATTER-NOBUDGET: valid=True
+    POL-COMMIT-BUDGET: valid=True
+    ```
   - Tests: `SignalPredicateTests.AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema` and `EveryLiveOntologyPolicysCurrentVersion_PassesValidateForAuthoring`.
 - **Seeding proofs** (each change was made, the suite run, and the change restored):
 
@@ -135,7 +147,7 @@ Allow-list membership is the owner's call; this task does not change it.
 
   The delta is **+16,172 B zip (+0.02 MB)**. No package was added.
 
-## Open escalation (fix round 1): POL-MATTER-NOBUDGET
+## Escalation resolved (fix round 1): POL-MATTER-NOBUDGET
 
 The 2026-10-17 live re-run of `EveryLiveOntologyPolicysCurrentVersion_PassesValidateForAuthoring` printed:
 
@@ -165,3 +177,14 @@ membership is the owner's call.
 2. Add `("sprk_matter", "createdon")` to the seed. It is a system column; check `IsSecured` with the live test.
 3. Add the policy to `AuthorableColumnsTests.LivePolicies`.
 4. Re-run both live tests.
+
+**Resolution (coordinator, 2026-10-17).** The seed rule is "exactly the columns the live policies read". POL-MATTER-NOBUDGET is
+now a live policy (Off). `sprk_matter.createdon` is a subject `when` column, and subject columns carry no exposure beyond field
+security (adversarial pass 1). So adding it is within D-151(b), not an owner call. Done:
+1. `origin/docs/ontology-platform-design` was merged into this branch. That brought in the `(sprk_matter, sprk_budget)` join and
+   `config/know-promotion.policies.json`.
+2. `("sprk_matter", "createdon")` was added to the seed.
+3. `AuthorableColumnsTests.EveryPolicyDefinition_PassesValidateForAuthoring` now reads both `config/do-lane.policies.json` and
+   `config/know-promotion.policies.json`.
+4. Both live tests were re-run read-only: both passed, with 50 of 50 columns `IsSecured=False` and all 6 policies `valid=True`
+   (output under "Evidence").
