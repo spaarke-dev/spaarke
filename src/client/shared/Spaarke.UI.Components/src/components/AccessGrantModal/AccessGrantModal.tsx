@@ -184,6 +184,8 @@ import {
   MessageBarBody,
   MessageBarTitle,
   Badge,
+  Field,
+  Input,
   makeStyles,
   tokens,
   shorthands,
@@ -263,6 +265,23 @@ const useStyles = makeStyles({
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalS,
     flexShrink: 0,
+  },
+  // Task 099c: the record-wide "Expiration" on the "Add Access Permissions" toolbar row (Fluent `Input type="date"`, the
+  // library's date idiom — RecordHeader/fields/DateField.tsx).
+  shareExpiryField: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+  },
+  shareExpiryInput: {
+    width: '150px',
+  },
+  shareExpiryHint: {
+    display: 'block',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    marginTop: tokens.spacingVerticalXS,
   },
   // Padding below the "Add Access Permissions" header row, before the list
   // (task 073 UAT v1.0.24 #3).
@@ -403,6 +422,65 @@ function formatGrantDate(iso: string | undefined): string {
  */
 export const CURRENT_ACCESS_READ_FAILED_MESSAGE =
   'Current Access could not be loaded, so who has access to this record is not shown here. Close and reopen to try again.';
+
+/**
+ * Task 099c (FR-33): `POST /api/v1/external-access/set-record-share-expiry` — one expiry on every active external share
+ * of the record, all-or-nothing. Its body is `{ recordType, recordId, expiryDate }` and nothing else: the Expiration
+ * changes the date only, never the access level (ISS-023).
+ */
+const SET_RECORD_SHARE_EXPIRY_PATH = '/api/v1/external-access/set-record-share-expiry';
+
+/** The route's 500 when the transaction was attempted and its outcome is unknown (it may have applied). */
+const SHARE_EXPIRY_UNCONFIRMED_REASON_CODE = 'sdap.access.share_expiry.write_failed';
+
+/** The server's expiry for a share added without one (`ExternalGrantLifecycle.DefaultExpiryDays`). Display only. */
+const DEFAULT_SHARE_EXPIRY_DAYS = 90;
+
+/**
+ * The UTC calendar date `days` from today, `yyyy-MM-dd` — the server's "today" for every expiry decision
+ * (`ExternalGrantLifecycle.TodayUtc`). The picker's minimum mirrors the route's rule: a date before UTC today is
+ * refused (400), today itself is valid, and there is no maximum. The server stays the authority.
+ */
+function utcDateOnly(days = 0): string {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days))
+    .toISOString()
+    .slice(0, 10);
+}
+
+/** What the Expiration shows for the record's shares (task 099c). */
+type ShareExpirySummary =
+  /** The grants read failed (or has not answered): the date is not known, so it cannot be shown or changed. */
+  | { kind: 'unknown' }
+  /** The record has no external share: the server gives a new share today + 90 days. */
+  | { kind: 'noShares' }
+  | {
+      kind: 'shares';
+      /** The earliest expiry among the shares (it governs the soonest lapse); null when none carries a date. */
+      earliest: string | null;
+      /** The shares do not all end on the same date — stated, never silently resolved to one. */
+      diverges: boolean;
+      /** A share has lapsed: applying a date renews it (the route's "renew them too", owner 2026-09-11). */
+      anyLapsed: boolean;
+    };
+
+/**
+ * Summarizes the record's external shares — the rows the host's grants read returned (each with an `accessRecordId`;
+ * standing members and user shares are not shares the route dates) — for the Expiration (task 099c).
+ */
+function summarizeShareExpiry(grants: IAccessGrantRecord[] | null): ShareExpirySummary {
+  if (grants === null) return { kind: 'unknown' };
+  const shares = grants.filter(g => !!g.accessRecordId);
+  if (shares.length === 0) return { kind: 'noShares' };
+  const dates = shares.map(g => (g.expiresDate ? g.expiresDate.slice(0, 10) : null));
+  const dated = dates.filter((d): d is string => d !== null).sort();
+  return {
+    kind: 'shares',
+    earliest: dated[0] ?? null,
+    diverges: new Set(dates.map(d => d ?? '')).size > 1,
+    anyLapsed: shares.some(g => g.isExpired === true),
+  };
+}
 
 /** Mirrors the BFF's `SpeContainerRevokeOutcome` enum (camelCase-serialized
  * PascalCase member names via `JsonStringEnumConverter`, no naming policy).
@@ -1010,6 +1088,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // Task 099a (verifier F2): the host's source listed only part of the record's grants (its cap) — stated, never silent.
   // Holds how many it listed; null when the list is whole.
   const [grantsTruncatedAt, setGrantsTruncatedAt] = React.useState<number | null>(null);
+  // Task 099c: the record's external shares as the grants read returned them (null: not read, or the read failed) —
+  // the source of the toolbar Expiration — and the date the user has picked but not yet applied (null: none).
+  const [recordShares, setRecordShares] = React.useState<IAccessGrantRecord[] | null>(null);
+  const [expiryDraft, setExpiryDraft] = React.useState<string | null>(null);
+  const [expiryApplying, setExpiryApplying] = React.useState(false);
   // Items (contacts OR organizations) checked to grant, keyed by contactId/orgId.
   const [selectedCandidateIds, setSelectedCandidateIds] = React.useState<Set<string>>(new Set());
   const [approving, setApproving] = React.useState(false);
@@ -1292,6 +1375,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       // with the server's ProblemDetails `detail` verbatim (rendered as text) or the generic sentence.
       const currentAccess = grantsSettled.failed ? [] : [...grantList, ...standingOnly, ...userShareList];
       setExistingGrants(currentAccess);
+      // Task 099c: the Expiration reads the shares themselves; a failed read leaves it unknown, never "no shares".
+      setRecordShares(grantsSettled.failed ? null : grantList);
       if (grantsSettled.failed) {
         const grantsErr = grantsSettled.failed.err;
         const grantsDeny = splitAccessFailure(AccessGrantModalApiError.fromThrown(grantsErr) ?? grantsErr).deny;
@@ -1373,6 +1458,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setNotice({ intent: 'error', text: 'Failed to load access data. Close and reopen to retry.' });
       setCurrentAccessError({ kind: 'notShown' });
       setGrantsTruncatedAt(null);
+      setRecordShares(null);
       // Never leave the No Access List spinning, or showing the previous load's rows as current.
       setNoAccessState({ kind: 'error' });
       setServerAccess(null);
@@ -1405,6 +1491,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       // gets a fresh chance to load and write (server truth only; no
       // client-side memory of "you were denied last time").
       setAccessDenyState(null);
+      // Task 099c: nor the previous record's shares or an unapplied Expiration.
+      setRecordShares(null);
+      setExpiryDraft(null);
       // Task 067: a fresh open never shows the previous record's or session's No Access answer.
       setNoAccessState({ kind: 'loading' });
       // Task 174: nor the previous record's effective access.
@@ -1917,6 +2006,59 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     [postJson, recordType, recordId, loadData, setNoticeIfCurrent, setDenyIfCurrent]
   );
 
+  /**
+   * Task 099c (FR-33, #961): applies the toolbar Expiration to every external share of the record — ONE call to
+   * `/set-record-share-expiry`, the date only. Success refreshes Current Access from the grants read. A failure says
+   * what did not happen (the server's own sentence when it gave one) and puts the picker back on the shares' date; a
+   * delegation/sign-in refusal is the deny banner. When the server could not confirm the outcome (it may have applied),
+   * the list is re-read so it shows which, beside the server's sentence.
+   */
+  const applyShareExpiry = React.useCallback(
+    async (expiryDate: string) => {
+      setExpiryApplying(true);
+      try {
+        const data = await postJson<{ updatedCount?: number }>(SET_RECORD_SHARE_EXPIRY_PATH, {
+          recordType,
+          recordId,
+          expiryDate,
+        });
+        setExpiryDraft(null);
+        await loadData();
+        setNoticeIfCurrent(
+          data.updatedCount === 0
+            ? {
+                intent: 'warning',
+                text: 'This record has no external shares now, so no expiration date was changed.',
+              }
+            : {
+                intent: 'success',
+                text: `Every external share on this record now ends on ${formatGrantDate(expiryDate)}.`,
+              }
+        );
+      } catch (err) {
+        // The picker returns to the shares' own date: nothing here may suggest the new date took.
+        setExpiryDraft(null);
+        const { deny, parentRefusal } = splitAccessFailure(err);
+        if (deny) {
+          setDenyIfCurrent(deny);
+          return;
+        }
+        const apiErr = err instanceof AccessGrantModalApiError ? err : null;
+        if (apiErr?.reasonCode === SHARE_EXPIRY_UNCONFIRMED_REASON_CODE) await loadData();
+        setNoticeIfCurrent({
+          intent: 'error',
+          text:
+            parentRefusal ??
+            apiErr?.problemDetail ??
+            `The expiration date was not changed to ${formatGrantDate(expiryDate)}. Please try again.`,
+        });
+      } finally {
+        setExpiryApplying(false);
+      }
+    },
+    [postJson, recordType, recordId, loadData, setNoticeIfCurrent, setDenyIfCurrent]
+  );
+
   /** Confirms the pending revoke (task 065 extends this to branch on
    * {@link PendingRevoke}'s `kind`: a contact/organization grant goes through
    * `/revoke`; an internal system-user share goes through `/unshare-user` —
@@ -2028,6 +2170,28 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // their level dropdowns and Add must stay usable, because Restricted never
   // limits internal access.
   const actionsBlocked = accessDenyState !== null;
+
+  // Task 099c (FR-33, #961): the toolbar Expiration. It shows the shares' earliest date (or, with no share, the date
+  // the server would give a new one) and can be changed only when the record has shares and nothing blocks writes.
+  // The minimum mirrors the route (UTC today, no maximum); the server stays the authority.
+  const shareExpiry = summarizeShareExpiry(recordShares);
+  const expiryMin = utcDateOnly();
+  const expiryShown =
+    shareExpiry.kind === 'shares'
+      ? (shareExpiry.earliest ?? '')
+      : shareExpiry.kind === 'noShares'
+        ? utcDateOnly(DEFAULT_SHARE_EXPIRY_DAYS)
+        : '';
+  const expiryEditable = shareExpiry.kind === 'shares' && !actionsBlocked && !expiryApplying;
+  const expiryDraftBeforeMin = expiryDraft !== null && expiryDraft !== '' && expiryDraft < expiryMin;
+  const expiryCanApply =
+    expiryEditable &&
+    expiryDraft !== null &&
+    /^\d{4}-\d{2}-\d{2}$/.test(expiryDraft) &&
+    !expiryDraftBeforeMin &&
+    (expiryDraft !== expiryShown || (shareExpiry.kind === 'shares' && shareExpiry.diverges));
+  // With no share and no contact-based access offered (Restricted), there is nothing for the Expiration to govern.
+  const showShareExpiry = shareExpiry.kind !== 'noShares' || contactGrantsOffered;
 
   // Task 142: suggestions the server is waiting on (secure records) — contact suggestions only where contacts may be
   // granted (never on Restricted); a linked internal user's suggestion is a share, which Restricted never limits.
@@ -2253,6 +2417,48 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   <div className={styles.sectionHeaderRow}>
                     <Text className={styles.sectionTitle}>Add Access Permissions</Text>
                     <div className={styles.sectionHeaderActions}>
+                      {/* Task 099c (FR-33, #961; owner 2026-09-10): ONE Expiration for every external share of the
+                          record. Picking a date stages it; Apply (or Enter) sends it once. The date only — never a
+                          level (ISS-023). */}
+                      {showShareExpiry && (
+                        <div className={styles.shareExpiryField}>
+                          <Field
+                            label="Expiration"
+                            orientation="horizontal"
+                            size="small"
+                            validationState={expiryDraftBeforeMin ? 'error' : 'none'}
+                            validationMessage={expiryDraftBeforeMin ? 'Choose today or a later date.' : undefined}
+                          >
+                            <Input
+                              type="date"
+                              size="small"
+                              className={styles.shareExpiryInput}
+                              value={expiryDraft ?? expiryShown}
+                              min={expiryMin}
+                              disabled={!expiryEditable}
+                              onChange={(_, d) => setExpiryDraft(d.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' && expiryCanApply && expiryDraft !== null) {
+                                  e.preventDefault();
+                                  void applyShareExpiry(expiryDraft);
+                                }
+                              }}
+                              data-testid="share-expiry-input"
+                            />
+                          </Field>
+                          {expiryDraft !== null && shareExpiry.kind === 'shares' && (
+                            <Button
+                              appearance="primary"
+                              size="small"
+                              disabled={!expiryCanApply}
+                              onClick={() => void applyShareExpiry(expiryDraft)}
+                              data-testid="share-expiry-apply"
+                            >
+                              {expiryApplying ? 'Applying…' : 'Apply'}
+                            </Button>
+                          )}
+                        </div>
+                      )}
                       {/* Icon-only "+" triggers (task 073 UAT v1.0.24 #4; task 065 adds "+ User") —
                           open the native advanced-lookup pane (pickContact/pickOrganization/pickUser). */}
                       {pickContact && contactGrantsOffered && (
@@ -2299,6 +2505,25 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       )}
                     </div>
                   </div>
+
+                  {/* Task 099c: what the Expiration shows and what applying it does. Different dates are stated,
+                      never silently resolved to one (owner 2026-09-10). */}
+                  {showShareExpiry && shareExpiry.kind === 'noShares' && (
+                    <Text className={styles.shareExpiryHint} data-testid="share-expiry-default">
+                      A new external share ends {DEFAULT_SHARE_EXPIRY_DAYS} days after it is granted.
+                    </Text>
+                  )}
+                  {shareExpiry.kind === 'shares' && shareExpiry.diverges && (
+                    <Text className={styles.shareExpiryHint} data-testid="share-expiry-divergence">
+                      The external shares on this record end on different dates. The earliest is shown; applying a date
+                      sets it on every share.
+                    </Text>
+                  )}
+                  {shareExpiry.kind === 'shares' && shareExpiry.anyLapsed && (
+                    <Text className={styles.shareExpiryHint} data-testid="share-expiry-lapsed">
+                      Shares marked Expired are renewed to the date you apply.
+                    </Text>
+                  )}
 
                   {/* Padding below the header row, before the list (task 073 UAT v1.0.24 #3). */}
                   <div className={styles.listArea}>
