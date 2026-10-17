@@ -87,29 +87,31 @@ internal sealed class WorkforceCeilingFilterAttached
 }
 
 /// <summary>Declares an endpoint's workforce ceiling (review round 1 F1, CLAUDE.md §16: declarative, checked by one filter).</summary>
+/// <remarks>
+/// <b>Per route only (review round 2).</b> The four declarations extend <see cref="RouteHandlerBuilder"/>, the builder a
+/// single <c>Map*</c> call returns, never <see cref="RouteGroupBuilder"/>: a group-wide declaration would satisfy the
+/// coverage guard for every route the group maps, including one added later that needs a different set. Enforced by: the
+/// type (a declaration on a group does not compile).
+/// </remarks>
 internal static class WorkforceCeilingEndpointExtensions
 {
     /// <summary>The route needs every privilege in <paramref name="requirements"/> on the Workforce role.</summary>
-    public static TBuilder RequireWorkforceCeiling<TBuilder>(
-        this TBuilder builder, IReadOnlyList<WorkforceCeilingRequirement> requirements)
-        where TBuilder : IEndpointConventionBuilder =>
+    public static RouteHandlerBuilder RequireWorkforceCeiling(
+        this RouteHandlerBuilder builder, IReadOnlyList<WorkforceCeilingRequirement> requirements) =>
         builder.WithMetadata(WorkforceCeilingMetadata.ForRoute(requirements));
 
     /// <summary>The route's privileges depend on the request; <paramref name="resolve"/> derives them before the handler.</summary>
-    public static TBuilder RequireWorkforceCeiling<TBuilder>(
-        this TBuilder builder,
-        Func<EndpointFilterInvocationContext, IReadOnlyList<WorkforceCeilingRequirement>?> resolve)
-        where TBuilder : IEndpointConventionBuilder =>
+    public static RouteHandlerBuilder RequireWorkforceCeiling(
+        this RouteHandlerBuilder builder,
+        Func<EndpointFilterInvocationContext, IReadOnlyList<WorkforceCeilingRequirement>?> resolve) =>
         builder.WithMetadata(WorkforceCeilingMetadata.ForRequest(resolve));
 
     /// <summary>The handler applies the ceiling through <see cref="WorkforceRoleCeilingGate"/>; <paramref name="reason"/> says how.</summary>
-    public static TBuilder WorkforceCeilingInHandler<TBuilder>(this TBuilder builder, string reason)
-        where TBuilder : IEndpointConventionBuilder =>
+    public static RouteHandlerBuilder WorkforceCeilingInHandler(this RouteHandlerBuilder builder, string reason) =>
         builder.WithMetadata(WorkforceCeilingMetadata.Declared(WorkforceCeilingCoverage.InHandler, reason));
 
     /// <summary>Not a record operation; <paramref name="reason"/> says why the ceiling does not apply.</summary>
-    public static TBuilder ExemptFromWorkforceCeiling<TBuilder>(this TBuilder builder, string reason)
-        where TBuilder : IEndpointConventionBuilder =>
+    public static RouteHandlerBuilder ExemptFromWorkforceCeiling(this RouteHandlerBuilder builder, string reason) =>
         builder.WithMetadata(WorkforceCeilingMetadata.Declared(WorkforceCeilingCoverage.Exempt, reason));
 
     /// <summary>

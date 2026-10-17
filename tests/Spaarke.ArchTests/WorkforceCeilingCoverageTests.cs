@@ -16,8 +16,9 @@ namespace Spaarke.ArchTests;
 /// build here instead of skipping the ceiling silently.
 /// </summary>
 /// <remarks>
-/// Enforced by: this guard (build) and the filter's fail-closed default (run time: an undeclared endpoint denies a
-/// workforce contact). Limit, stated exactly: presence is not correctness. An InHandler declaration is trusted to be
+/// Enforced by: this guard (build), the type (the declarations extend only a single route's
+/// <c>RouteHandlerBuilder</c>, so a group-wide declaration does not compile), and the filter's fail-closed default (run
+/// time: an undeclared endpoint denies a workforce contact). Limit, stated exactly: presence is not correctness. An InHandler declaration is trusted to be
 /// implemented; the route tests (WorkforceCeilingRouteTests) prove each one, and a wrong requirement set passes here.
 /// </remarks>
 [Collection(BootedBffCollection.Name)]
@@ -106,6 +107,25 @@ public sealed class WorkforceCeilingCoverageTests
         Assert.Contains(violations, v => v.Contains("api/v1/external/slashless", StringComparison.Ordinal) && v.Contains("no declaration", StringComparison.Ordinal));
         Assert.Contains(violations, v => v.Contains("* api/v1/external ", StringComparison.Ordinal));
         Assert.Contains(violations, v => v.Contains("API/V1/EXTERNAL/upper", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Task 186 review round 2: the four declarations take a single route's builder, never a group's (enforced by the type)")]
+    public void TheDeclarations_ExtendOnlyARouteHandlerBuilder()
+    {
+        var names = new[] { "RequireWorkforceCeiling", "WorkforceCeilingInHandler", "ExemptFromWorkforceCeiling" };
+        var declarations = typeof(WorkforceCeilingEndpointExtensions)
+            .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(m => names.Contains(m.Name))
+            .ToList();
+
+        Assert.Equal(4, declarations.Count);
+        foreach (var method in declarations)
+        {
+            Assert.False(method.IsGenericMethodDefinition, $"{method}: a generic builder would accept a RouteGroupBuilder.");
+            var builder = method.GetParameters()[0].ParameterType;
+            Assert.Equal(typeof(Microsoft.AspNetCore.Builder.RouteHandlerBuilder), builder);
+            Assert.False(builder.IsAssignableFrom(typeof(RouteGroupBuilder)), $"{method}: a group-wide declaration must not compile.");
+        }
     }
 
     private static bool IsExternal(RouteEndpoint endpoint)
