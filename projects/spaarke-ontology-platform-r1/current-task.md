@@ -10,8 +10,8 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No lane running. Sync #2073 merged to master `88b3ecb1f` (#2048, #2050, #2053, 102a, 064, 102); Console deploy from master running |
-| **Next Action** | Confirm the Console deploy, notify word-add-in/R3/uac-r2 after. R3 prepares the dev BFF deploy (063 join + 102a routes); it needs a FRESH owner approval (owner Q7). Then 105 UAT, DI-83 #1882 re-run, 090 wrap-up |
+| **Task** | No lane running. Sync #2073 on master `88b3ecb1f`; Console deployed from it (run 39013766555, 07:32:56Z) |
+| **Next Action** | R3 candidate BFF build `4dea4e296` (R3 + master 88b3ecb1f) under test; deploy needs a FRESH owner approval (owner Q7). Then 105 UAT, DI-83 #1882 re-run, 090 wrap-up |
 
 ## Lanes in flight
 
