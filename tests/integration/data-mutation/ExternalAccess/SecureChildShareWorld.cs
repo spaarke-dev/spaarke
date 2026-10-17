@@ -96,6 +96,10 @@ internal sealed class SecureChildShareWorld
     public SecureChildShareWorld User(Guid id, Guid businessUnit) =>
         Add("systemuser", id, ("businessunitid", new EntityReference("businessunit", businessUnit)));
 
+    /// <summary>#2072: a DISABLED systemuser — Dataverse keeps its oid and business unit, and the BFF must never resolve it (#1576).</summary>
+    public SecureChildShareWorld DisabledUser(Guid id, Guid businessUnit) =>
+        Add("systemuser", id, ("businessunitid", new EntityReference("businessunit", businessUnit)), ("isdisabled", true));
+
     /// <summary>An environment with no Secure Record BU at all.</summary>
     public static SecureChildShareWorld WithoutSecureBusinessUnit()
     {
@@ -441,6 +445,11 @@ internal sealed class SecureChildShareWorld
             row["modifiedon"] = RecordsLastModified;
         foreach (var (column, value) in columns)
             row[column] = value;
+        // #2072: Dataverse ALWAYS returns isdisabled on a systemuser, and the BFF's user queries filter isdisabled = false
+        // (#1576). A seeded user that carries no value for it would never match that condition (Matches treats an absent
+        // column as no match), so the user must say "enabled" unless the test marked it disabled.
+        if (table == "systemuser" && !row.Attributes.ContainsKey("isdisabled"))
+            row["isdisabled"] = false;
         _rows[(table, id)] = row;
         return this;
     }
