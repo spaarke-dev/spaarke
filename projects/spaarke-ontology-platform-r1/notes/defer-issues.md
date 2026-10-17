@@ -542,7 +542,7 @@ Full evidence: [`iss-018-fetchxml-list-rendering-investigation.md`](iss-018-fetc
 | DI-54 | [#1675](https://github.com/spaarke-dev/spaarke/issues/1675) | Two copies of the Dataverse "access denied" classifier (SignalWriter and DecisionRecordWriter) must be consolidated |
 | DI-58 | [#1624](https://github.com/spaarke-dev/spaarke/issues/1624) | A long association-provenance document makes email triage silently never run for that communication |
 | DI-59 | [#1625](https://github.com/spaarke-dev/spaarke/issues/1625) | Budget-commitment policy only fires for emails with a regarding matter, so real yield can be below the 89% classifier recall |
-| DI-62 | [#1647](https://github.com/spaarke-dev/spaarke/issues/1647) | Nightly Signal re-evaluation never evaluates tenant- or matter-scoped policies and reports the run as unhealthy every night once one exists |
+| DI-62 | [#1647](https://github.com/spaarke-dev/spaarke/issues/1647) | Nightly Signal re-evaluation never evaluates tenant- or matter-scoped policies and reports the run as unhealthy every night once one exists **Pulled into R1: task 102b (D-165).** |
 | DI-63 | [#1648](https://github.com/spaarke-dev/spaarke/issues/1648) | Signals about an email show no record name or number because `sprk_communication` has no record-type catalog row |
 | DI-65 | [#1658](https://github.com/spaarke-dev/spaarke/issues/1658) | A budget revision created outside the BFF raises no Signal trigger (and the BFF-side trigger is not yet wired on the project branch) |
 | DI-66 | [#1659](https://github.com/spaarke-dev/spaarke/issues/1659) | The "association confirmed" Signal trigger exists but nothing calls it, so an email filed after classification waits for the nightly pass |
@@ -655,7 +655,7 @@ Full evidence: [`iss-018-fetchxml-list-rendering-investigation.md`](iss-018-fetc
 | DI-109 | [#2058](https://github.com/spaarke-dev/spaarke/issues/2058) | Repoint the Assistant "Daily Briefing" card (`surfaceLaunchRegistry.ts`, dev GUID) to the Worklist after the Briefing is removed |
 | DI-110 | [#2057](https://github.com/spaarke-dev/spaarke/issues/2057) | Remove the Daily Briefing section, registry entry and layout row after the 064 revert window (keep `/api/ai/daily-briefing/narrate`) |
 | DI-111 | [#2059](https://github.com/spaarke-dev/spaarke/issues/2059) | Know awareness (Briefing TL;DR Know counts, Monitored records) has no Console surface once the Briefing is retired |
-| DI-112 | [#2069](https://github.com/spaarke-dev/spaarke/issues/2069) | Rule dry run ignores tenant/matter scope while re-evaluation skips scoped policies, so publish counts overstate a scoped rule |
+| DI-112 | [#2069](https://github.com/spaarke-dev/spaarke/issues/2069) | Rule dry run ignores tenant/matter scope while re-evaluation skips scoped policies, so publish counts overstate a scoped rule **Pulled into R1: task 102b (D-165).** |
 | DI-113 | [#2070](https://github.com/spaarke-dev/spaarke/issues/2070) | Authoring catalog lacks a per-lane quiet-window flag and the clause kinds, so the wizard holds `Decide`, `exists`/`notExists`, `Threshold` |
 | 034 test gaps | [#1729](https://github.com/spaarke-dev/spaarke/issues/1729) | Dismissal-count tests do not pin the window cutoff or a walled-but-known caller (uac-r2 NIT-b/NIT-c on #1654) |
 
