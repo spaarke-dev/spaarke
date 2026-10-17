@@ -28,7 +28,7 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 ## Open owner questions
 
 1. **Ontology Administrator still holds `prvDeletesprk_Signal` and `prvAssignsprk_Signal` (Deep)** (uac-r2 flag). No shipped flow deletes or assigns a Signal as the caller; Console User holds neither; no human role holds Write/Delete/Assign on DRs. Recommend removing both (same pattern as 049; guard extended). security-roles §17.
-2. **111 row 4** needs the external SPA on dev: task 122 (deferred; `deploy-external-spa.yml` dispatch needs owner approval + ship list; R3 owns the SPA). Ask: approve 122's dispatch, or move row 4 into R3's external-access UAT.
+2. **111 row 4** needs the external SPA on dev. R3 (2026-10-17) is asking the owner to approve a redeploy from the R3 branch head (has master e702c3401) and will tell us when live; then the owner checks row 4. **Never dispatch `deploy-external-spa.yml` from master** (task 122) while R3's SPA work (050–057, 061, 066, UAC 185) is off master: it would strip it from dev.
 
 ## Next, in order
 
