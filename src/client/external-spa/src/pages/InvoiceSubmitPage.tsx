@@ -29,6 +29,7 @@ import type { InvoiceSubmissionAccepted } from '@spaarke/ui-components/component
 import {
   getInvoiceSubmission,
   listInvoiceCoreRecords,
+  listInvoiceFirms,
   probeInvoiceSubmission,
   submitInvoice,
 } from '../api/web-api-client';
@@ -203,6 +204,7 @@ export const InvoiceSubmitPage: React.FC = () => {
           onClose={goHome}
           doneLabel="Back to workspace"
           loadRecords={listInvoiceCoreRecords}
+          loadFirms={listInvoiceFirms}
           submit={submitInvoice}
           getStatus={getInvoiceSubmission}
           onSubmitted={handleSubmitted}

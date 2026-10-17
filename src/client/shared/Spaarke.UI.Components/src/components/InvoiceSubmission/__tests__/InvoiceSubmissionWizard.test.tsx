@@ -334,6 +334,98 @@ describe('InvoiceSubmissionWizard — refusals do not advance the flow', () => {
   });
 });
 
+describe('InvoiceSubmissionWizard — Choose firm step (owner, 2026-10-17: add a firm step)', () => {
+  const ALPHA = { firmId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Alpha LLP' };
+  const BETA = { firmId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Beta & Co' };
+
+  /** From the (already visible) Firm step to the Details step. */
+  async function firmThenDetails(utils: ReturnType<typeof mount>, firm: RegExp) {
+    fireEvent.click(await screen.findByRole('radio', { name: firm }));
+    fireEvent.click(next());
+    await toDetails(utils);
+  }
+
+  it('shows the step first when the caller has more than one firm, listing exactly those firms', async () => {
+    mount({ loadFirms: jest.fn().mockResolvedValue([ALPHA, BETA]) });
+    expect(await screen.findByRole('radio', { name: 'Alpha LLP' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Beta & Co' })).toBeInTheDocument();
+    expect(screen.getByText('Choose the firm this invoice is from')).toBeInTheDocument();
+    expect(screen.getByText('Step 1 of 4')).toBeInTheDocument();
+    // The Record step has not been reached.
+    expect(screen.queryByRole('radio', { name: /Acme/ })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['no loadFirms callback', undefined],
+    ['no firm', jest.fn().mockResolvedValue([])],
+    ['one firm', jest.fn().mockResolvedValue([ALPHA])],
+    ['a failed firm load', jest.fn().mockRejectedValue(new Error('offline'))],
+  ])('has no firm step for %s: it starts at Record and sends no firmId', async (_name, loadFirms) => {
+    const utils = mount({ loadFirms });
+    expect(await screen.findByRole('radio', { name: /Acme v\. Roadrunner/ })).toBeInTheDocument();
+    expect(screen.queryByText('Choose the firm this invoice is from')).not.toBeInTheDocument();
+    expect(screen.getByText('Step 1 of 3')).toBeInTheDocument();
+    await toDetails(utils);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    await screen.findByText('Invoice received');
+    expect(utils.submit.mock.calls[0][0]).not.toHaveProperty('firmId');
+  });
+
+  it('cannot move past the Firm step until a firm is picked', async () => {
+    mount({ loadFirms: jest.fn().mockResolvedValue([ALPHA, BETA]) });
+    await screen.findByRole('radio', { name: 'Alpha LLP' });
+    expect(next()).toBeDisabled();
+    fireEvent.click(screen.getByRole('radio', { name: 'Beta & Co' }));
+    expect(next()).toBeEnabled();
+  });
+
+  it('does not submit without a firm, and sends the chosen firm as firmId once picked', async () => {
+    const utils = mount({ loadFirms: jest.fn().mockResolvedValue([ALPHA, BETA]) });
+    await firmThenDetails(utils, /Beta & Co/);
+    // Details shows which firm was chosen; the numbering counts the Firm step.
+    expect(screen.getByText('Firm: Beta & Co')).toBeInTheDocument();
+    expect(screen.getByText('Step 4 of 4')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+
+    expect(await screen.findByText('Invoice received')).toBeInTheDocument();
+    expect(utils.submit).toHaveBeenCalledTimes(1);
+    expect(utils.submit.mock.calls[0][0].firmId).toBe(BETA.firmId);
+  });
+
+  it('going back and changing the firm sends the last choice', async () => {
+    const utils = mount({ loadFirms: jest.fn().mockResolvedValue([ALPHA, BETA]) });
+    await firmThenDetails(utils, /Alpha LLP/);
+    // Back to the Firm step (three Back clicks: Details, File, Record).
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Beta & Co' }));
+    expect(screen.getByRole('radio', { name: 'Beta & Co' })).toBeChecked();
+    fireEvent.click(next());
+    fireEvent.click(next());
+    await waitFor(() => expect(next()).toBeEnabled());
+    fireEvent.click(next());
+    fireEvent.change(await screen.findByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    await screen.findByText('Invoice received');
+    expect(utils.submit.mock.calls[0][0].firmId).toBe(BETA.firmId);
+  });
+
+  it('a refused firm (403 firm_forbidden) is shown and the wizard stays on Details', async () => {
+    const submit = jest
+      .fn()
+      .mockRejectedValue(
+        new InvoiceSubmissionError({ statusCode: 403, errorCode: 'ebilling.submission.firm_forbidden' })
+      );
+    const utils = mount({ loadFirms: jest.fn().mockResolvedValue([ALPHA, BETA]) }, { submit });
+    await firmThenDetails(utils, /Alpha LLP/);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    expect(await screen.findByText(/not allowed to submit invoices for this firm/i)).toBeInTheDocument();
+    expect(screen.queryByText('Invoice received')).not.toBeInTheDocument();
+  });
+});
+
 describe('InvoiceSubmissionWizard — phone width', () => {
   it('hides the fixed-width step list under 600px, inside the wizard wrapper only (each step carries its own caption)', async () => {
     const { container } = mount();

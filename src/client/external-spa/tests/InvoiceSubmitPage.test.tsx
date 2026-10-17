@@ -61,7 +61,14 @@ interface Script {
   submit: () => Response;
   /** GET .../invoice-submissions/{id}, one answer per read (the last repeats). */
   status: Array<() => Response>;
+  /** GET /api/v1/external/me (the caller's firms are `firms`). */
+  me: () => Response;
 }
+
+const FIRM_ALPHA = { firmId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Alpha LLP' };
+const FIRM_BETA = { firmId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Beta & Co' };
+const meWith = (firms: unknown) => () =>
+  json(200, { contactId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', email: 'ann@firm.example', projects: [], firms });
 
 let calls: Call[];
 let script: Script;
@@ -94,6 +101,7 @@ beforeEach(() => {
     probe: () => json(200, []),
     submit: ACCEPTED_202,
     status: [() => json(200, statusView({ status: 'Accepted' }))],
+    me: meWith([FIRM_ALPHA]),
   };
   localStorage.clear();
   sessionStorage.clear();
@@ -123,6 +131,7 @@ beforeEach(() => {
 
       const p = new URL(url).pathname;
       if (method === 'GET' && p === '/api/v1/external/invoice-submissions') return script.probe();
+      if (method === 'GET' && p === '/api/v1/external/me') return script.me();
       if (method === 'GET' && p === '/api/v1/external/projects') {
         return json(200, {
           value: [{ sprk_projectid: PROJECT_ID, sprk_name: 'Patent portfolio', sprk_referencenumber: 'P-77' }],
@@ -223,8 +232,14 @@ describe('InvoiceSubmitPage — submit', () => {
 
       // The picker offers the caller's projects, matters and work assignments (three reads), nothing else.
       const firmInvoiceNumber = await toDetails();
-      expect(calls.filter(c => c.method === 'GET').map(c => new URL(c.url).pathname)).toEqual([
+      expect(
+        calls
+          .filter(c => c.method === 'GET')
+          .map(c => new URL(c.url).pathname)
+          .sort()
+      ).toEqual([
         '/api/v1/external/invoice-submissions', // the availability probe
+        '/api/v1/external/me', // the caller's firms (one here: no firm step)
         '/api/v1/external/projects',
       ]);
       // Matters and work assignments: one Tier-2-scoped module read each.
@@ -328,7 +343,7 @@ describe('InvoiceSubmitPage — submit', () => {
   );
 
   it(
-    'the only requests are the probe, the record reads and the invoice-submissions routes; nothing targets an invoice line',
+    'the only requests are the probe, /me (the firms), the record reads and the invoice-submissions routes; nothing targets an invoice line',
     async () => {
       const { InvoiceSubmitPage } = await load();
       renderPage(InvoiceSubmitPage, '/invoices/submit');
@@ -339,7 +354,7 @@ describe('InvoiceSubmitPage — submit', () => {
       for (const c of calls) {
         const p = new URL(c.url).pathname;
         expect(p).toMatch(
-          /^\/api\/v1\/external\/(invoice-submissions(\/[^/]+)?|projects|api\/dataverse\/fetch|matters\/[^/]+\/invoice-submissions)$/
+          /^\/api\/v1\/external\/(invoice-submissions(\/[^/]+)?|me|projects|api\/dataverse\/fetch|matters\/[^/]+\/invoice-submissions)$/
         );
         expect(c.url).not.toMatch(/billingevent|invoiceline/i);
         expect(c.json ?? '').not.toMatch(/sprk_billingevent|sprk_invoice\b|sprk_invoicesubmission/i);
@@ -354,6 +369,100 @@ describe('InvoiceSubmitPage — submit', () => {
         'sprk_mattername',
         'sprk_matternumber',
       ]);
+    },
+    SLOW
+  );
+});
+
+describe('InvoiceSubmitPage — Choose firm (owner, 2026-10-17: add a firm step)', () => {
+  const firmRadio = (name: string) => screen.findByRole('radio', { name }, SLOW);
+
+  it(
+    'a caller with several firms must choose one first, and the choice goes over the wire as the firmId query parameter',
+    async () => {
+      script.me = meWith([FIRM_ALPHA, FIRM_BETA]);
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, '/invoices/submit');
+
+      // The Firm step is first, lists exactly the firms /me returned, and blocks Next until one is picked.
+      await firmRadio('Alpha LLP');
+      expect(isEnabled(await next())).toBe(false);
+      fireEvent.click(screen.getByRole('radio', { name: 'Beta & Co' }));
+      expect(isEnabled(await next())).toBe(true);
+      fireEvent.click(await next());
+
+      const firmInvoiceNumber = await toDetails();
+      fireEvent.change(firmInvoiceNumber, { target: { value: 'INV-9' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Submit invoice' }));
+
+      expect(await screen.findByText('Invoice received', {}, SLOW)).toBeTruthy();
+      const posts = submitCalls();
+      expect(posts).toHaveLength(1);
+      expect(posts[0].url).toBe(
+        `https://contoso-bff.test/api/v1/external/matters/${MATTER_ID}/invoice-submissions?firmId=${FIRM_BETA.firmId}`
+      );
+      // firmId is a QUERY parameter (task 044 reads it there); it is not also a form field.
+      expect(Object.keys(posts[0].form ?? {})).not.toContain('firmId');
+    },
+    SLOW
+  );
+
+  it(
+    'cannot leave the Firm step without a choice',
+    async () => {
+      script.me = meWith([FIRM_ALPHA, FIRM_BETA]);
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, '/invoices/submit');
+
+      await firmRadio('Alpha LLP');
+      expect(isEnabled(await next())).toBe(false);
+      expect(screen.queryByRole('radio', { name: /Acme v\. Roadrunner/ })).toBeNull();
+      expect(submitCalls()).toHaveLength(0);
+    },
+    SLOW
+  );
+
+  it.each([
+    ['one firm', meWith([FIRM_ALPHA])],
+    ['no firm', meWith([])],
+    ['firms unknown (null: eBilling off or a failed read)', meWith(null)],
+    ['a /me that fails', () => problem(500, 'boom')],
+  ])(
+    'with %s there is no firm step and no firmId is sent',
+    async (_name, me) => {
+      script.me = me;
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, '/invoices/submit');
+
+      const firmInvoiceNumber = await toDetails();
+      expect(screen.queryByText('Choose the firm this invoice is from')).toBeNull();
+      fireEvent.change(firmInvoiceNumber, { target: { value: 'INV-9' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Submit invoice' }));
+
+      expect(await screen.findByText('Invoice received', {}, SLOW)).toBeTruthy();
+      const posts = submitCalls();
+      expect(posts).toHaveLength(1);
+      expect(posts[0].url).not.toContain('firmId');
+    },
+    SLOW
+  );
+
+  it(
+    'shows the server refusal when the chosen firm is refused, and does not advance',
+    async () => {
+      script.me = meWith([FIRM_ALPHA, FIRM_BETA]);
+      script.submit = () => problem(403, undefined, 'ebilling.submission.firm_forbidden');
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, '/invoices/submit');
+
+      fireEvent.click(await firmRadio('Alpha LLP'));
+      fireEvent.click(await next());
+      const firmInvoiceNumber = await toDetails();
+      fireEvent.change(firmInvoiceNumber, { target: { value: 'INV-9' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Submit invoice' }));
+
+      expect(await screen.findByText(/not allowed to submit invoices for this firm/i, {}, SLOW)).toBeTruthy();
+      expect(screen.queryByText('Invoice received')).toBeNull();
     },
     SLOW
   );

@@ -27,7 +27,18 @@ export interface InvoiceCoreRecordList {
   truncated?: boolean;
 }
 
-/** What the wizard hands the host's `submit` callback. The firm is the server's to decide, so none is named here. */
+/** One firm the user can submit for (a row of the "Choose firm" step). */
+export interface InvoiceFirmOption {
+  /** The firm's organization GUID: the value a host sends as `firmId`. */
+  firmId: string;
+  /** Display name. */
+  name: string;
+}
+
+/**
+ * What the wizard hands the host's `submit` callback. The server decides authorization and, for a single-firm caller,
+ * the firm itself (so none is named); `firmId` is set only when the user chose one in the "Choose firm" step.
+ */
 export interface InvoiceSubmissionInput {
   record: InvoiceCoreRecordOption;
   file: File;
@@ -35,6 +46,11 @@ export interface InvoiceSubmissionInput {
   firmInvoiceNumber: string;
   /** Optional; trimmed, undefined when blank. */
   poNumber?: string;
+  /**
+   * The firm the user picked in the "Choose firm" step, which exists only for a caller with more than one firm. Absent
+   * for everyone else. The server still checks it is one of the caller's own firms (403 otherwise).
+   */
+  firmId?: string;
 }
 
 /** The 202 body of the submit route. */
@@ -62,10 +78,16 @@ export interface InvoiceSubmissionStatusView {
   receivedOn?: string | null;
 }
 
-/** The three data callbacks a host provides. */
+/** The data callbacks a host provides (`loadFirms` is optional). */
 export interface InvoiceSubmissionCallbacks {
   /** The accessible core records the user may choose from. */
   loadRecords: () => Promise<InvoiceCoreRecordList>;
+  /**
+   * The firms the signed-in user belongs to. The wizard adds a required "Choose firm" step only when this resolves with
+   * MORE THAN ONE firm; with none, one, or a rejection there is no step and no `firmId` is sent (the server picks a
+   * single firm itself, and answers `firm_required` when it cannot). A host with no firm concept omits it.
+   */
+  loadFirms?: () => Promise<InvoiceFirmOption[]>;
   /** Submits the invoice. Rejects with {@link InvoiceSubmissionError} (or any Error) on a refusal. */
   submit: (input: InvoiceSubmissionInput) => Promise<InvoiceSubmissionAccepted>;
   /** Reads one submission's current status from the server. */

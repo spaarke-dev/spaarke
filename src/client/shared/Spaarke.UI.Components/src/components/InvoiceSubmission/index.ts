@@ -17,6 +17,7 @@ export type {
   InvoiceCoreRecordKind,
   InvoiceCoreRecordOption,
   InvoiceCoreRecordList,
+  InvoiceFirmOption,
   InvoiceSubmissionInput,
   InvoiceSubmissionAccepted,
   InvoiceSubmissionStatusName,

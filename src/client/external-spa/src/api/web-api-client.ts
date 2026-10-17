@@ -31,7 +31,7 @@
  * See: docs/architecture/external-access-architecture.md
  */
 
-import { bffApiCall } from '../auth/bff-client';
+import { bffApiCall, getExternalUserContext } from '../auth/bff-client';
 import { ApiError } from '../types';
 import { gridDataverseClient } from '../services/gridDataverseClient';
 import { InvoiceSubmissionError, isEbillingDisabledError } from '@spaarke/ui-components/components/InvoiceSubmission';
@@ -39,6 +39,7 @@ import type {
   InvoiceCoreRecordKind,
   InvoiceCoreRecordList,
   InvoiceCoreRecordOption,
+  InvoiceFirmOption,
   InvoiceSubmissionAccepted,
   InvoiceSubmissionInput,
   InvoiceSubmissionStatusView,
@@ -839,8 +840,10 @@ export async function deleteOwnEvent(eventId: string): Promise<void> {
 //   GET  /api/v1/external/invoice-submissions/{id}                          -> the status view
 //   GET  /api/v1/external/invoice-submissions                               -> the caller's firms' submissions (flag probe)
 //
-// The server decides who may submit and for which firm (ADR-002 / FR-17): this client names no firm (the server takes
-// the caller's only firm), creates nothing in Dataverse and shows the server's refusals by code. A refusal is an
+// The server decides who may submit and for which firm (ADR-002 / FR-17). A caller with one firm names none (the server
+// takes it); a caller with several picks one in the wizard's "Choose firm" step (owner, 2026-10-17) and it goes as the
+// `firmId` QUERY parameter task 044 reads, which the server still checks against the caller's own firms. The list of
+// firms is `firms` on GET /api/v1/external/me. This client creates nothing in Dataverse and shows the server's refusals by code. A refusal is an
 // ApiError whose message is the ProblemDetails body; `toInvoiceSubmissionError` adapts it to the shared wizard's error.
 
 /** The external route segment of each core record kind an invoice can be submitted against. */
@@ -874,19 +877,34 @@ export async function submitInvoice(input: InvoiceSubmissionInput): Promise<Invo
   if (!GUID_RE.test(input.record.recordId)) {
     throw new InvoiceSubmissionError({ message: 'Invalid record id.' });
   }
+  if (input.firmId !== undefined && !GUID_RE.test(input.firmId)) {
+    throw new InvoiceSubmissionError({ message: 'Invalid firm id.' });
+  }
   const form = new FormData();
   form.append('file', input.file);
   form.append('firmInvoiceNumber', input.firmInvoiceNumber);
   if (input.poNumber) form.append('poNumber', input.poNumber);
+  // Only a firm the user chose is named (a several-firm caller); a single-firm caller sends nothing and the server uses it.
+  const query = input.firmId ? `?firmId=${encodeURIComponent(input.firmId)}` : '';
   try {
     // No Content-Type: the browser sets multipart/form-data with its boundary (executeFetch drops the JSON default).
     return await bffApiCall<InvoiceSubmissionAccepted>(
-      `/api/v1/external/${INVOICE_SUBMISSION_SEGMENT[input.record.kind]}/${input.record.recordId}/invoice-submissions`,
+      `/api/v1/external/${INVOICE_SUBMISSION_SEGMENT[input.record.kind]}/${input.record.recordId}/invoice-submissions${query}`,
       { method: 'POST', body: form, headers: {} }
     );
   } catch (err) {
     throw toInvoiceSubmissionError(err);
   }
+}
+
+/**
+ * The firms the signed-in user can submit invoices for: `firms` on GET /api/v1/external/me (only the caller's own).
+ * Unknown (an older BFF, eBilling off, a failed read) is `[]` here, so the wizard shows no firm step and the server
+ * answers `firm_required` if a several-firm caller still needs to choose.
+ */
+export async function listInvoiceFirms(): Promise<InvoiceFirmOption[]> {
+  const me = await getExternalUserContext();
+  return (me.firms ?? []).filter(f => GUID_RE.test(f.firmId)).map(f => ({ firmId: f.firmId, name: f.name }));
 }
 
 /** Reads one submission's current status. Rejects with an {@link InvoiceSubmissionError}. */

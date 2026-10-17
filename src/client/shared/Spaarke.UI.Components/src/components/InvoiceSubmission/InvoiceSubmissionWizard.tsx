@@ -6,6 +6,9 @@
  * `FileUploadZone` / `UploadedFileList` and `StatusBadge`; it holds no SPA auth, Xrm or BFF URL (ADR-012).
  *
  * Steps:
+ *   0. Firm    — ONLY when `loadFirms` resolves with more than one firm: a required choice of which firm the invoice is
+ *                from; the choice goes to `submit` as `firmId`. With one firm (or none, or no `loadFirms`) there is no
+ *                step and no `firmId` is sent: the server uses the caller's single firm itself.
  *   1. Record  — choose an accessible core record (matter / project / work assignment), from `loadRecords`.
  *   2. File    — one PDF. Type and size are checked here only as a convenience; the server is the authority.
  *   3. Details — the firm invoice number (REQUIRED, D-91) and an optional PO number. Finish submits.
@@ -16,7 +19,7 @@
  * refusal from `submit` is shown by its error code and the wizard stays where it is.
  *
  * Phone width: `WizardShell` draws a fixed-width step list beside the content. The `compact` styles below hide it
- * under 600px (each step carries its own "Step n of 3" caption), so a host should mount with `embedded` there.
+ * under 600px (each step carries its own "Step n of N" caption), so a host should mount with `embedded` there.
  *
  * ADR-021: Fluent v9 tokens only, no hard-coded colour. Dark mode follows the host's FluentProvider.
  */
@@ -44,6 +47,7 @@ import { invoiceSubmissionErrorMessage } from './messages';
 import type {
   InvoiceCoreRecordKind,
   InvoiceCoreRecordOption,
+  InvoiceFirmOption,
   InvoiceSubmissionAccepted,
   InvoiceSubmissionCallbacks,
   InvoiceSubmissionStatusView,
@@ -177,10 +181,43 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   pollIntervalMs,
   doneLabel = 'Done',
   loadRecords,
+  loadFirms,
   submit,
   getStatus,
 }) => {
   const styles = useStyles();
+
+  // ── Firm step (only for a caller with more than one firm) ───────────────
+  // WizardShell fixes its step list when it mounts, so the shell is not mounted until the firm list is known: the step
+  // either exists from the first frame or never does. A failed load means "no step" (the server answers `firm_required`
+  // for a multi-firm caller it cannot resolve, and that message is shown on submit).
+  const [firms, setFirms] = React.useState<InvoiceFirmOption[] | null>(loadFirms ? null : []);
+  const [firmId, setFirmId] = React.useState('');
+
+  const loadFirmsRef = React.useRef(loadFirms);
+  loadFirmsRef.current = loadFirms;
+  const hasLoadFirms = loadFirms !== undefined;
+
+  React.useEffect(() => {
+    const load = loadFirmsRef.current;
+    if (!open || !load) return;
+    let cancelled = false;
+    load()
+      .then(result => {
+        if (!cancelled) setFirms(result);
+      })
+      .catch(() => {
+        if (!cancelled) setFirms([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, hasLoadFirms]);
+
+  const needsFirmStep = (firms?.length ?? 0) > 1;
+  const chosenFirm = needsFirmStep ? (firms?.find(f => f.firmId === firmId) ?? null) : null;
+  const totalSteps = needsFirmStep ? 4 : 3;
+  const stepCaption = (n: number): string => `Step ${needsFirmStep ? n + 1 : n} of ${totalSteps}`;
 
   // ── Record step ─────────────────────────────────────────────────────────
   const [records, setRecords] = React.useState<InvoiceCoreRecordOption[] | null>(null);
@@ -251,6 +288,8 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   // ── Finish: submit, then mount the Processing / Result screen ───────────
   const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig | void> => {
     if (!selected || !file || !firmInvoiceNumberTrimmed) return;
+    // A caller with several firms must have chosen one: never submit without it (the server would answer firm_required).
+    if (needsFirmStep && !chosenFirm) return;
 
     let accepted: InvoiceSubmissionAccepted;
     try {
@@ -259,6 +298,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
         file: file.file,
         firmInvoiceNumber: firmInvoiceNumberTrimmed,
         poNumber: poNumber.trim() || undefined,
+        ...(chosenFirm ? { firmId: chosenFirm.firmId } : {}),
       });
     } catch (err) {
       // WizardShell shows a thrown message above the step and stays on it: the flow does not advance.
@@ -289,6 +329,8 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     file,
     firmInvoiceNumberTrimmed,
     poNumber,
+    needsFirmStep,
+    chosenFirm,
     submit,
     onSubmitted,
     styles.successIcon,
@@ -300,14 +342,43 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   ]);
 
   // ── Steps ───────────────────────────────────────────────────────────────
+  const firmStep: IWizardStepConfig = {
+    id: 'firm',
+    label: 'Firm',
+    renderContent: () => (
+      <div className={styles.stepContent}>
+        <Text size={200} className={styles.caption}>
+          {`Step 1 of ${totalSteps}`}
+        </Text>
+        <Text size={400} weight="semibold">
+          Choose the firm this invoice is from
+        </Text>
+        <Text size={300}>Your account belongs to more than one firm. Pick the one that issued this invoice.</Text>
+        <div className={styles.recordList}>
+          <RadioGroup aria-label="Firms" value={firmId} onChange={(_e, data) => setFirmId(data.value)}>
+            {(firms ?? []).map(firm => (
+              <Radio
+                key={firm.firmId}
+                value={firm.firmId}
+                label={<span className={styles.recordLabel}>{firm.name}</span>}
+              />
+            ))}
+          </RadioGroup>
+        </div>
+      </div>
+    ),
+    canAdvance: () => chosenFirm !== null,
+  };
+
   const steps: IWizardStepConfig[] = [
+    ...(needsFirmStep ? [firmStep] : []),
     {
       id: 'record',
       label: 'Record',
       renderContent: () => (
         <div className={styles.stepContent}>
           <Text size={200} className={styles.caption}>
-            Step 1 of 3
+            {stepCaption(1)}
           </Text>
           <Text size={400} weight="semibold">
             Choose the record this invoice is for
@@ -366,7 +437,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
       renderContent: () => (
         <div className={styles.stepContent}>
           <Text size={200} className={styles.caption}>
-            Step 2 of 3
+            {stepCaption(2)}
           </Text>
           <Text size={400} weight="semibold">
             Upload the invoice PDF
@@ -395,7 +466,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
       renderContent: () => (
         <div className={styles.stepContent}>
           <Text size={200} className={styles.caption}>
-            Step 3 of 3
+            {stepCaption(3)}
           </Text>
           <Text size={400} weight="semibold">
             Invoice details
@@ -414,14 +485,28 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
             <Text size={200} weight="semibold">
               Summary
             </Text>
+            {chosenFirm && <Text size={200}>Firm: {chosenFirm.name}</Text>}
             <Text size={200}>Record: {selected ? `${recordLabel(selected)} (${KIND_LABEL[selected.kind]})` : '-'}</Text>
             <Text size={200}>File: {file ? `${file.name} (${formatBytes(file.sizeBytes)})` : '-'}</Text>
           </div>
         </div>
       ),
-      canAdvance: () => selected !== null && file !== null && firmInvoiceNumberTrimmed.length > 0,
+      canAdvance: () =>
+        selected !== null &&
+        file !== null &&
+        firmInvoiceNumberTrimmed.length > 0 &&
+        (!needsFirmStep || chosenFirm !== null),
     },
   ];
+
+  // The shell fixes its steps at mount: wait for the firm list (see above).
+  if (firms === null) {
+    return open ? (
+      <div className={styles.compact}>
+        <Spinner size="small" label="Loading" />
+      </div>
+    ) : null;
+  }
 
   return (
     <div className={styles.compact}>
