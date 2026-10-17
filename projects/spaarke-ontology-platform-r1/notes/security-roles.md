@@ -915,7 +915,7 @@ rows.** Both tables hold 0 rows in total after the run.
 Status: repo role XML and the live-apply script are in the task 049 PR; **nothing has been changed on spaarkedev1**. The main
 session applies after uac-r2's check on the PR and appends the dated result below this section.
 
-**The three removals (and nothing else):** Console User `prvWritesprk_Signal` (D-17), Console User
+**The three removals (and nothing else; a fourth, Ontology Administrator Signal Write, was added by owner Q6 on 2026-10-17, see below):** Console User `prvWritesprk_Signal` (D-17), Console User
 `prvCreatesprk_DecisionRecord` (D-62), Ontology Administrator `prvCreatesprk_DecisionRecord` (D-147), each on the **ROOT copy
 of the role only: 3 `RemovePrivilegeRole` calls** (uac-r2 review F2/Q2, 2026-10-16). The five child-BU copies of each role are
 inherited and read-only (Dataverse rejects an edit with `0x80044152` "Inherited roles cannot be modified",
@@ -960,25 +960,19 @@ copies are inherited and cannot be edited, so the script plans and applies on th
 other five copies of each role by read-back. That `DIVERGENT` check is therefore defence in depth, not independent evidence (the
 call reads through to the root); the live union check (A1 to A5) is the real guard. Union:
 
-| Privilege | Holders now | After the three removals |
+| Privilege | Holders at preparation | After the removals (incl. Q6) |
 |---|---|---|
 | Write on `sprk_decisionrecord` | System Administrator, System Customizer, Service Writer | unchanged |
 | Delete on `sprk_decisionrecord` | System Administrator, System Customizer, Service Deleter | unchanged |
 | Create on `sprk_decisionrecord` | System Administrator, System Customizer, Service Writer, **Console User (Deep)**, **Ontology Administrator (Deep)**, Ontology Service | System Administrator, System Customizer, Service Writer, Ontology Service |
-| Write on `sprk_signal` | System Administrator, System Customizer, Service Writer, **Console User (Deep)**, **Ontology Administrator (Deep)**, Ontology Service | System Administrator, System Customizer, Service Writer, **Ontology Administrator (Deep)**, Ontology Service |
+| Write on `sprk_signal` | System Administrator, System Customizer, Service Writer, **Console User (Deep)**, **Ontology Administrator (Deep)**, Ontology Service | System Administrator, System Customizer, Service Writer, Ontology Service |
 
-🔴 **Finding for the owner (open question).** The task goal says "no human role writes `sprk_signal`", but D-17 names only
-Console User. **Spaarke Ontology Administrator still holds Write (Deep) on `sprk_signal`** after the three removals (its only
-member is Ralph Schroeder; §3's matrix gives the admin Write, Delete and Assign on Signals). It was **not** removed here: it is
-outside the owner's scope. uac-r2 (review of PR #2022) notes no code path needs it: every BFF `sprk_signal` write goes through
-`OntologyWriterDataverseClient` and no client writes it, while the forms ship in SpaarkeMaster, so an admin could edit a Signal by
-direct form URL or the Web API outside the writer's invariants; uac-r2 leans toward removal on least privilege. Decide whether to
-remove it as well, or accept it as the admin's override.
-
-**Union assertion A5 (added in the fix round).** Only platform roles, admin roles (System Administrator, System Customizer) and
-Spaarke Ontology Service may hold Write on `sprk_signal`. ONE named waiver covers Ontology Administrator and is printed as
-`WAIVED (owner question open: Ontology Administrator Signal Write)`; any other holder fails the run. If the owner decides to
-remove the admin's Signal Write, set `$A5Waiver = $null` in the script (one line) so the assertion then rejects it.
+**Ontology Administrator Signal Write: removed live 2026-10-17 (owner Q6), see §17.** The owner approved removing
+`prvWritesprk_Signal` (Deep) from Spaarke Ontology Administrator; it was removed from the ROOT role by a one-off
+`RemovePrivilegeRole` (privilege `8df17c8f-8796-4e7c-9d32-3c0d7c9cd082`), and the script now carries it as a fourth closed-list
+removal (decision `Q6`, K-A gated on that role's Decision Record Create being read back absent). Union assertion A5 therefore has
+no waiver (`$A5Waiver = $null`): only platform roles, admin roles (System Administrator, System Customizer) and Spaarke Ontology
+Service may hold Write on `sprk_signal`, and any other holder fails the run.
 
 **Evidence and commands.** `049-role-removal-evidence-whatif-*.md` (plan, projected union) and `-verify-*.md` (live before
 picture) in this folder carry the full `RetrieveRolePrivilegesRole` listing per copy. Script:
@@ -991,6 +985,7 @@ depth (Deep, `privilegedepthmask` 4), taking the ids from the 2026-10-16 live re
 | D-17 | Console User `51c924e2-bdbe-f111-a05b-3833c5e9614d` | `prvWritesprk_Signal` | `8df17c8f-8796-4e7c-9d32-3c0d7c9cd082` | Deep |
 | D-62 | Console User `51c924e2-bdbe-f111-a05b-3833c5e9614d` | `prvCreatesprk_DecisionRecord` | `38366142-e133-4978-9a46-e6d1d598ce1f` | Deep |
 | D-147 | Ontology Administrator `2f2b2137-bfbe-f111-aaaf-0022482913fc` | `prvCreatesprk_DecisionRecord` | `38366142-e133-4978-9a46-e6d1d598ce1f` | Deep |
+| Q6 | Ontology Administrator `2f2b2137-bfbe-f111-aaaf-0022482913fc` | `prvWritesprk_Signal` | `8df17c8f-8796-4e7c-9d32-3c0d7c9cd082` | Deep |
 
 ```powershell
 $base = 'https://spaarkedev1.crm.dynamics.com'
@@ -1005,6 +1000,7 @@ function Restore($roleId, $privName, $privId) {
 Restore '51c924e2-bdbe-f111-a05b-3833c5e9614d' 'prvWritesprk_Signal'            '8df17c8f-8796-4e7c-9d32-3c0d7c9cd082'   # D-17
 Restore '51c924e2-bdbe-f111-a05b-3833c5e9614d' 'prvCreatesprk_DecisionRecord'   '38366142-e133-4978-9a46-e6d1d598ce1f'   # D-62
 Restore '2f2b2137-bfbe-f111-aaaf-0022482913fc' 'prvCreatesprk_DecisionRecord'   '38366142-e133-4978-9a46-e6d1d598ce1f'   # D-147
+Restore '2f2b2137-bfbe-f111-aaaf-0022482913fc' 'prvWritesprk_Signal'            '8df17c8f-8796-4e7c-9d32-3c0d7c9cd082'   # Q6 (after D-147, so K-A holds)
 ```
 
 After restoring:
