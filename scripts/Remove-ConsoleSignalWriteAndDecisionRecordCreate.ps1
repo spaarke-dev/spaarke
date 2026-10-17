@@ -103,7 +103,7 @@ $PlatformRoles = @('Service Writer', 'Service Deleter', 'Service Reader')   # he
 $AdminRoles = @('System Administrator', 'System Customizer')
 # A5 waiver: the ONE role allowed to hold Write on sprk_signal besides platform, admin and the writer, while the owner question
 # "Ontology Administrator Signal Write" is open (uac-r2 Q1, review 2026-10-16). Set to $null to remove the waiver (one line).
-$A5Waiver = [pscustomobject]@{ Role = 'Spaarke Ontology Administrator'; Label = 'Ontology Administrator Signal Write' }
+$A5Waiver = $null   # owner Q6 (2026-10-17): the Ontology Administrator's Signal Write was removed; no waiver
 $DepthNames = @{ 1 = 'Basic'; 2 = 'Local'; 4 = 'Deep'; 8 = 'Global' }
 
 # ── Output: console and evidence together ────────────────────────────────────────────────────────────────────
