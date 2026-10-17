@@ -687,6 +687,24 @@ public class CoreAncestorResolverTests
         result.RefusalKind.Should().BeNull();
     }
 
+    [Fact(DisplayName = "ebilling-r1 task 026 fix-round-2 (uac-r2 K4): a permanent error with no kind is never labelled Transient")]
+    public void StampFailureOf_APermanentErrorWithNoKind_IsNeverTransient_ATransientOneIs_AKindIsKept()
+    {
+        // Built with the public constructor: no RefusalKind. Permanent means a retry does not change it.
+        var permanent = CoreAncestorResolver.StampFailureOf(
+            new CoreAncestorResult(CoreAncestorStatus.Error, [], "gone") { IsPermanent = true });
+        var transient = CoreAncestorResolver.StampFailureOf(new CoreAncestorResult(CoreAncestorStatus.Error, [], "timeout"));
+        var kinded = CoreAncestorResolver.StampFailureOf(CoreAncestorResult.Refused("two roots", CoreAncestorRefusalKind.MultipleRoots));
+
+        permanent.IsPermanent.Should().BeTrue();
+        permanent.RefusalKind.Should().BeNull("a permanent failure is not a transient fault; its kind is unknown");
+        permanent.Error.Should().Be("gone");
+        transient.IsPermanent.Should().BeFalse();
+        transient.RefusalKind.Should().Be(CoreAncestorRefusalKind.Transient);
+        kinded.RefusalKind.Should().Be(CoreAncestorRefusalKind.MultipleRoots);
+        kinded.IsPermanent.Should().BeTrue();
+    }
+
     [Fact(DisplayName = "ebilling-r1 task 026 fix-round-1: StampAsync carries the refusal kind and permanence through to the writer")]
     public async Task StampAsync_CarriesTheRefusalKind()
     {

@@ -1267,6 +1267,18 @@ public sealed class CoreAncestorResolver
         }
     }
 
+    /// <summary>
+    /// A failed derivation as a stamping outcome: its message, permanence and refusal kind. A failure that carries no kind is
+    /// <see cref="CoreAncestorRefusalKind.Transient"/> only when it is not permanent (ebilling-r1 task 026 fix-round-2, uac-r2
+    /// K4): a permanent error built with the public constructor is never labelled a transient fault.
+    /// </summary>
+    internal static CoreAncestorStampOutcome StampFailureOf(CoreAncestorResult result) =>
+        CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed.") with
+        {
+            IsPermanent = result.IsPermanent,
+            RefusalKind = result.RefusalKind ?? (result.IsPermanent ? null : CoreAncestorRefusalKind.Transient),
+        };
+
     private async Task<(CoreAncestorResult? Result, IReadOnlySet<string>? HostColumns, CoreAncestorStampOutcome? Failure)>
         DeriveAndProbeAsync(
             string hostEntityLogicalName,
@@ -1286,11 +1298,7 @@ public sealed class CoreAncestorResolver
             : await ResolveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
         if (!result.Succeeded)
         {
-            return (null, null, CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed.") with
-            {
-                IsPermanent = result.IsPermanent,
-                RefusalKind = result.RefusalKind ?? CoreAncestorRefusalKind.Transient,
-            });
+            return (null, null, StampFailureOf(result));
         }
 
         if (result.Stamps.Count == 0)
