@@ -369,7 +369,7 @@ const INVOICE_COLUMNS = [
   'sprk_name',
   'sprk_invoicenumber',
   'sprk_invoicedate',
-  'sprk_invoicestatus',
+  'statuscode',
   'sprk_totalamount',
 ] as const;
 const INVOICE_ORDER = { attribute: 'sprk_invoicedate', descending: true };
@@ -483,7 +483,7 @@ const InvoicesSection: React.FC<{ parentAttribute: string; parentId: string }> =
       }}
       meta={row =>
         [
-          formatDetailValue(row, { attribute: 'sprk_invoicestatus' }),
+          formatDetailValue(row, { attribute: 'statuscode' }),
           formatDetailValue(row, { attribute: 'sprk_totalamount', kind: 'money' }),
         ].join(' · ')
       }

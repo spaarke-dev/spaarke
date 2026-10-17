@@ -455,6 +455,10 @@ public static class ExternalAccessModule
             {
                 "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
                 "sprk_totalamount", "sprk_project", "sprk_matter",
+                // spaarke-SPA-external-access-platform-r3 (owner Partner UAT 2026-10-17, ebilling-r1 task 015 / D-41): NOT
+                // grid-derived. The invoice status is statuscode; the SPA record detail reads it. Transitional:
+                // sprk_invoicestatus stays until ebilling removes it from grid 3ff4102c and from dev.
+                "statuscode",
             },
         });
 
