@@ -39,11 +39,13 @@ Shared brief: scratchpad `lane-brief.md` (no live writes/deploys; PR into docs b
 
 **ebilling 026 reviewed 2026-10-16** (ef3efce73..b5f4a4c78; Opus, writers + secure family; uac-r2 reviews resolvers): NOT READY. F1 writer lacks prvAppendTosprk_BillingEvent (Spaarke Ontology Service) - role change needs OWNER approval; told ebilling not to apply until I confirm. K1-K6 sent (K2 sprk_firmreason not write-protected; K4 import before BFF). DI-107 #2046 filed (writer AppendTo on core tables only via root team Basic User). Temp worktree C:\wts-eb026 (detached).
 
+**Done 2026-10-17:** 062 prompt sync applied (TLDR + CHANNEL PATCHED 02:32:34Z, topAction gone); "Decision Records" system layout seeded `92539002-d3c9-f111-a05c-0022482913fc` (sortorder 14); Ontology Service +8 AppendTo live (security-roles.md 15; owner-approved; uac-r2 notified). Repo XML + guard PR: implementer running in `C:\wts-di107` (task/ontology-di107); merge it, then close #2046. ebilling 026 fix round running (K1-K5).
+
 **Endpoint census at docs->master:** uac-r2 #2035 (099a) sets master ExpectedEndpointFileCount 127 (104 = 125->126, 099a = 126->127). Each ontology admin file (100 merged, 101, 103) adds one: expect a conflict and recompute from the census when the next docs->master PR merges after #2035.
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- BFF `1.0.0+eb5ba4011844…` (R3's line; read the version via Kudu VFS, project CLAUDE.md §6).
+- BFF `1.0.0+d5401cf2df7e…` (R3, 2026-10-17 02:29:47Z; contains master e702c3401 = 100/101/103 + #2020/#2031). healthz 200, Writer MI unchanged.
 - Console from master `a8c3182ec`; Worklist reachable via the workspace dropdown.
 - Grid config row `…5010` in sync. Five policies on; 87 Signals. 144/148 writes on and converged; uac-r2 post-enable check CLEAN.
 
@@ -66,7 +68,7 @@ Open https://spaarkedev1.crm.dynamics.com/WebResources/sprk_spaarkeai → worksp
 
 ## Open owner questions
 
-- None.
+Owner asked (2026-10-17) for details/options/recommendation on each: 102 A/B; Ontology Administrator Append; 101 (b)/(c); 103 name key; ebilling D-92 confirm; 055; 111; 063; 073; 045; 049.
 
 ## Peers (current session names)
 
