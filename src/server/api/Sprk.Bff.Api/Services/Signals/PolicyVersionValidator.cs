@@ -133,14 +133,14 @@ public sealed class PolicyVersionValidator
     /// columns; it does not close it.
     /// <c>SignalPredicateTests.AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema</c> checks each entry against live metadata
     /// (one run, one environment: field security enabled on a listed column later reopens the oracle for that column).</para>
-    /// <para><b>Residual (open, pending the owner's decision on the signed ADR-028 tension, D-151(c)).</b> An <c>exists</c> or
+    /// <para><b>Residual (accepted: the owner re-signed the ADR-028 tension D-151(c) at this scope, option A, D-161).</b> An <c>exists</c> or
     /// <c>notExists</c> filter on an allow-listed column of a joinable related table still lets a policy-version author learn that
     /// column's value on a related row they cannot read, one bit per readable subject row per dry run. Today those columns are <c>sprk_communication</c>:
     /// <c>sprk_triagecategory</c>, <c>sprk_reviewoutcome</c>, <c>sprk_receiveddate</c>, <c>statecode</c>;
     /// <c>sprk_budgetrevision</c>: <c>sprk_revisedon</c>, <c>statecode</c>; and, since task 063's join, <c>sprk_budget</c>:
-    /// <c>statecode</c>, <c>sprk_budgetstartdate</c>, <c>sprk_budgetenddate</c>. Membership of the related-table filter columns is
-    /// the owner's call.</para>
-    /// <para><b>Residual, derived Thresholds (same decision).</b> A Threshold on <c>sprk_totalspendtodate</c>,
+    /// <c>statecode</c>, <c>sprk_budgetstartdate</c>, <c>sprk_budgetenddate</c>. The allow-list stays as it is (D-161); membership of
+    /// the related-table filter columns remains the owner's call.</para>
+    /// <para><b>Residual, derived Thresholds (accepted by the same re-signing, D-161).</b> A Threshold on <c>sprk_totalspendtodate</c>,
     /// <c>sprk_totalbudget</c> or <c>sprk_budgetutilizationpercent</c> records only the stored subject column in
     /// <see cref="CompiledPredicate.ReadColumns"/>, but the evaluator decides it from org-wide grouped sums
     /// (<c>FinanceBaseValues.BuildGroupedSumFetchXml</c>) over <c>sprk_invoice.sprk_totalamount</c>,

@@ -62,16 +62,23 @@ public sealed record OntologyRuleDraft(
 
 /// <summary>A dry run (#39). <paramref name="PolicyId"/> names an existing Ontology policy (its lane and its open Signals are read as
 /// the caller); without it, <paramref name="Lane"/> ("Decide" or "Do") is required and every row is new.</summary>
+/// <param name="MatterId">Task 102b (D-165): the matter the rule is limited to, or null for all matters. Allowed only on a rule about
+/// <c>sprk_matter</c>; the matter is read as the caller (absent and unreadable are the same refusal). The dry run evaluates within it.</param>
+/// <param name="Tenant">Task 102b (D-165): never read. Present only so a request that carries a tenant is refused: the tenant scope stays
+/// blank (every environment is single-tenant).</param>
 public sealed record OntologyDryRunRequest(
     Guid? PolicyId,
     string? Lane,
     string? RuleType,
     string? RuleBody,
-    string? MessageTemplate);
+    string? MessageTemplate,
+    Guid? MatterId = null,
+    string? Tenant = null);
 
 /// <summary>A new rule (FR-10: it saves Off). <paramref name="Severity"/> and <paramref name="WorkType"/> are the option values of
 /// <c>sprk_severity</c> / <c>sprk_worktype</c>; <paramref name="Priority"/> defaults to 500 and
-/// <paramref name="CountsTowardSuppression"/> to true.</summary>
+/// <paramref name="CountsTowardSuppression"/> to true. <paramref name="MatterId"/> and <paramref name="Tenant"/> are the scope, as on
+/// <see cref="OntologyDryRunRequest"/> (task 102b): the matter is written to <c>sprk_matter</c>; <c>sprk_tenant</c> is never written.</summary>
 public sealed record OntologyNewPolicyRequest(
     string? PolicyCode,
     string? Name,
@@ -81,20 +88,25 @@ public sealed record OntologyNewPolicyRequest(
     int? WorkType,
     int? Priority,
     bool? CountsTowardSuppression,
-    OntologyRuleDraft? Draft);
+    OntologyRuleDraft? Draft,
+    Guid? MatterId = null,
+    string? Tenant = null);
 
-/// <summary>A new version of an existing Ontology policy, published.</summary>
-public sealed record OntologyPublishRequest(OntologyRuleDraft? Draft);
+/// <summary>A new version of an existing Ontology policy, published. <paramref name="MatterId"/> is the policy's scope from this version
+/// on (null: all matters), as on <see cref="OntologyDryRunRequest"/> (task 102b); a change is written with the pointer move, and the
+/// policy's open Signals outside the new scope close Superseded in the same publish. <paramref name="Tenant"/> is refused when set.</summary>
+public sealed record OntologyPublishRequest(OntologyRuleDraft? Draft, Guid? MatterId = null, string? Tenant = null);
 
 /// <summary>A compile-only check of a draft (task 102a). With <paramref name="PolicyId"/> it is checked as a new version of that Ontology
 /// policy would be on publish (its lane, read as the caller). Without one, <paramref name="Lane"/> is required and it is checked as a new
-/// rule would be on save.</summary>
-public sealed record OntologyValidateRequest(Guid? PolicyId, string? Lane, OntologyRuleDraft? Draft);
+/// rule would be on save. <paramref name="MatterId"/> and <paramref name="Tenant"/> are checked as save and publish check them (task 102b).</summary>
+public sealed record OntologyValidateRequest(Guid? PolicyId, string? Lane, OntologyRuleDraft? Draft, Guid? MatterId = null, string? Tenant = null);
 
 /// <summary>The answer of the validate route. Nothing was written or evaluated.</summary>
 /// <param name="Valid">True when save or publish would accept the draft, apart from the dry-run proof and the policy's own fields.</param>
 /// <param name="Errors">The field errors save and publish would return, one per message, ordered by field.</param>
-/// <param name="ReasonCode">A stable code for a refusal that has one (<c>ontology.admin.column_not_authorable</c>); otherwise null.</param>
+/// <param name="ReasonCode">A stable code for a refusal that has one (<c>ontology.admin.column_not_authorable</c>,
+/// <c>ontology.admin.duplicate_action</c>, <c>ontology.admin.scope_subject_mismatch</c>); otherwise null.</param>
 /// <param name="TemplateEligibleFields">The fields the message template may name: the compiled predicate's TemplateEligibleFields that
 /// are on the authorable-column allow-list (section 0.3). Empty when the body does not compile.</param>
 public sealed record OntologyRuleValidation(

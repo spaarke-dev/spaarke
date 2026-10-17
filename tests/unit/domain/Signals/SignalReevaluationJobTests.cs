@@ -2938,6 +2938,13 @@ public partial class SignalReevaluationJobTests
             return versionId;
         }
 
+        /// <summary>Task 102b: the policy's matter scope (<c>sprk_matter</c>), as a publish sets it; null for all matters.</summary>
+        public void SetMatterScope(string code, Guid? matter)
+        {
+            var policy = _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code);
+            if (matter is { } m) policy["sprk_matter"] = new EntityReference("sprk_matter", m); else policy.Attributes.Remove("sprk_matter");
+        }
+
         /// <summary>Off (<c>sprk_enabled</c> No) or Retired (<c>statecode</c> Inactive).</summary>
         public void SetPolicyState(string code, bool enabled, int statecode = 0)
         {
@@ -3225,6 +3232,15 @@ public partial class SignalReevaluationJobTests
                 return (string)c.Attribute("operator")! == "null" ? !hasValue : hasValue;
             });
 
+        /// <summary>
+        /// Task 102b: the subject-scoped evaluation's root condition (<c>{subject}id eq id</c>, PredicateCompiler; an event trigger's
+        /// subject or a policy's matter scope), as Dataverse answers it: only that row. Before 102b every scoped test had one subject.
+        /// </summary>
+        private static bool HoldsSubjectId(Entity row, XElement entity, string subject) =>
+            (entity.Element("filter")?.Elements("condition") ?? Enumerable.Empty<XElement>())
+            .Where(c => c.Attribute("entityname") is null && (string?)c.Attribute("attribute") == subject + "id" && (string?)c.Attribute("operator") == "eq")
+            .All(c => Guid.Parse((string)c.Attribute("value")!) == row.Id);
+
         private static bool Matches(Entity row, string attribute, object expected) => row.Attributes.TryGetValue(attribute, out var actual) && actual switch
         {
             OptionSetValue o => Equals(o.Value, expected),
@@ -3273,7 +3289,8 @@ public partial class SignalReevaluationJobTests
             var result = new EntityCollection();
             if (SubjectRows.TryGetValue(name, out var subjects))
             {
-                foreach (var row in subjects.Where(r => HoldsNumericConditions(r, entity) && HoldsNullTests(r, entity) && InnerLinksSatisfied(entity, r))) result.Entities.Add(row);
+                foreach (var row in subjects.Where(r => HoldsNumericConditions(r, entity) && HoldsNullTests(r, entity) && HoldsSubjectId(r, entity, name)
+                             && InnerLinksSatisfied(entity, r))) result.Entities.Add(row);
             }
             else if (WitnessRows.TryGetValue(name, out var witnesses))
             {

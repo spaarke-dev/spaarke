@@ -28,6 +28,11 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// Superseded and PolicyRetired closures are task 033's (<see cref="SignalClosureService"/>, run from this job); the planner
 /// re-raises their episodes.</para>
 /// <para><b>Re-raise rule (D-13, D-32, FR-03, FR-17a).</b> See <see cref="SignalEpisodePlanner"/>.</para>
+/// <para><b>Scope (task 102b, D-165; DI-62).</b> A policy limited to a matter (<c>sprk_matter</c>, rule subject <c>sprk_matter</c>) is
+/// evaluated within that matter by the subject-scoped evaluation of task 032; the planner sees only its Signals, so nothing is raised
+/// or closed as ConditionCleared for another matter. Its Signals outside the scope that cite a superseded version close Superseded
+/// (a publish that changes the scope). A tenant scope, or a matter scope on a rule about another table, is not evaluated
+/// (<c>scopedNotEvaluated</c>: the run is not successful).</para>
 /// <para><b>No silent failure (owner 2026-10-04).</b> A heartbeat per attempt (<see cref="OntologyWriterEvents.EvaluatorHeartbeat"/>);
 /// <c>ontology.evaluator.runs</c> by outcome plus per-action counts; any refusal, unreadable policy or unparseable key makes
 /// the run <c>failed</c>, never a successful run with zero Signals; the last SUCCESSFUL run time is kept in the distributed
@@ -124,8 +129,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
         }
 
         // Task 145 (uac-r2 review F1 on #1874): an in-force policy that stopped before its redaction (invalid rule, no current
-        // version or lane, a version not in force, a partition skip, a fault, or a scoped policy the nightly pass does not
-        // evaluate) still has its stored evidence checked.
+        // version or lane, a version not in force, a partition skip, a fault, or a tenant-scoped or mis-scoped policy the nightly
+        // pass does not evaluate) still has its stored evidence checked.
         await SweepStoredEvidenceAsync(
             policies.Select(p => p.Code), "is in force but was not evaluated to the end this run", counts, cancellationToken).ConfigureAwait(false);
 
@@ -171,15 +176,21 @@ public sealed class SignalReevaluationJob : IScheduledJob
         return new PolicyReevaluationResult(counts.IsSuccess, counts.SupersededClosed, counts.Written + counts.Reraised, counts.FailureSummary());
     }
 
+    /// <summary>The one subject a matter scope is allowed on (task 102b, D-165).</summary>
+    internal const string MatterScopeSubject = "sprk_matter";
+
+    /// <param name="scope">An event trigger's one subject (task 032), or null for the whole policy. A policy's OWN matter scope (task
+    /// 102b) is read from <paramref name="policy"/>, never from here.</param>
     private async Task EvaluatePolicyAsync(PolicyRow policy, RunCounts counts, CancellationToken ct, SubjectScope? scope = null)
     {
-        if (policy.IsScoped)
+        if (policy.TenantScoped)
         {
-            // A tenant- or matter-scoped policy needs a scope the nightly pass does not have (defer-issues row, task 031).
+            // D-165: the tenant scope stays blank (every environment is single-tenant, CommunicationRuleGate), so a policy carrying one was
+            // written outside the BFF and cannot be evaluated: refused visibly, never evaluated as if it were unscoped.
             counts.ScopedNotEvaluated++;
             _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
-                "Policy {PolicyCode} is tenant- or matter-scoped; the nightly pass evaluates unscoped policies only, so it was " +
-                "NOT evaluated.", policy.Code);
+                "Policy {PolicyCode} carries a tenant scope; a tenant scope is not evaluated (every environment is single-tenant), so it " +
+                "was NOT evaluated. Clear sprk_tenant.", policy.Code);
             return;
         }
 
@@ -218,6 +229,30 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 version.GetAttributeValue<string>("sprk_rulebody"),
                 version.GetAttributeValue<string>("sprk_messagetemplate"));
 
+            // Task 102b (D-165, DI-62): a matter-scoped policy is evaluated within its matter, by the same subject-scoped evaluation an
+            // event trigger uses. Its rule must be about matters; one that is not (only possible when written outside the BFF) is refused
+            // visibly, never evaluated as if it were unscoped.
+            SubjectScope? matterScope = null;
+            if (policy.MatterId is { } matterId)
+            {
+                if (!string.Equals(RuleSubjectEntity(spec.RuleBody), MatterScopeSubject, StringComparison.Ordinal))
+                {
+                    counts.ScopedNotEvaluated++;
+                    _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                        "Policy {PolicyCode} is limited to a matter but its rule is not about matters, so it was NOT evaluated. Publish a " +
+                        "version about sprk_matter, or clear sprk_matter.", policy.Code);
+                    return;
+                }
+
+                matterScope = new SubjectScope(MatterScopeSubject, matterId);
+                if (scope is { } trigger && trigger != matterScope)
+                {
+                    // An event trigger on any other subject cannot hold or clear for a policy limited to this matter.
+                    counts.NotApplicable++;
+                    return;
+                }
+            }
+
             if (scope is { } only && RuleSubjectEntity(spec.RuleBody) is { } ruleSubject
                 && !string.Equals(ruleSubject, only.Entity, StringComparison.Ordinal))
             {
@@ -226,15 +261,30 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 return;
             }
 
+            // The subject the evaluation is confined to: the trigger's, else the policy's own matter scope, else none (every subject).
+            var confinedTo = scope ?? matterScope;
+
             counts.PoliciesEvaluated++;
             if (lane == SignalWriter.LaneDo) counts.DoLanePolicies++;
             else counts.DecideLanePolicies++;
 
-            var evaluation = await _evaluator.EvaluateAsync(spec, scope?.Id, ct).ConfigureAwait(false);
+            var evaluation = await _evaluator.EvaluateAsync(spec, confinedTo?.Id, ct).ConfigureAwait(false);
             if (!evaluation.PolicyValid)
             {
                 // Logged and metered by the validator gate (50301). Nothing is closed on an unknown truth value.
                 counts.InvalidPolicies++;
+                return;
+            }
+
+            if (confinedTo is { } confined
+                && evaluation.Hits.Any(h => !string.Equals(h.SubjectEntity, confined.Entity, StringComparison.Ordinal) || h.SubjectId != confined.Id))
+            {
+                // Task 102b: the scoped query cannot return another subject. If it ever does, nothing is read, closed or written for the
+                // policy this pass (fail closed): a Signal outside the scope is never raised.
+                counts.PolicyFailures++;
+                _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "Policy {PolicyCode}: the evaluation confined to {SubjectEntity} {SubjectId} returned another subject; nothing was " +
+                    "raised, closed or reconciled for it this run.", policy.Code, confined.Entity, confined.Id);
                 return;
             }
 
@@ -247,14 +297,37 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }
 
             counts.MissingInputs += unjudged.Count;
+            // A trigger reads only its subject's episodes (task 032). A matter-scoped policy's own pass reads EVERY Signal of the policy
+            // (the unscoped policy's read) so that the supersede below, which is version-based, also closes its Signals outside the
+            // scope; the planner and everything after it see only the in-scope ones (task 102b, closure on scope change).
             var read = await ReadPolicySignalsAsync(policy.Code, counts, ct, scope).ConfigureAwait(false);
             // Task 033 (FR-16, D-13): Signals citing an older version close Superseded first, so the planner below re-raises
-            // the subjects the current version still holds as new episodes in this same pass.
+            // the subjects the current version still holds as new episodes in this same pass. Task 102b: a publish that changes the
+            // matter scope makes every open Signal cite the old version, so those outside the new scope close Superseded here and,
+            // never reaching the planner, are not re-raised.
             var superseded = await _closure.SupersedeInPassAsync(policy.Code, versionId, read, ct).ConfigureAwait(false);
             counts.AddClosure(superseded.Outcome, retired: false);
+            // Task 145 (D-123): the stored-evidence redaction only ever removes detail, so it covers every Signal read, in and out of
+            // the scope, as it does for an unscoped policy (nothing else would ever redact the out-of-scope ones again).
+            IReadOnlyList<ExistingSignal> inScope = superseded.Existing;
+            IReadOnlyList<ExistingSignal> outOfScope = Array.Empty<ExistingSignal>();
+            if (scope is null && matterScope is { } own)
+            {
+                bool Within(ExistingSignal s) => string.Equals(s.SubjectEntity, own.Entity, StringComparison.Ordinal) && s.SubjectId == own.Id;
+                inScope = superseded.Existing.Where(Within).ToList();
+                outOfScope = superseded.Existing.Where(s => !Within(s)).ToList();
+                if (outOfScope.Count(s => s.IsOpen && !superseded.NotClosed.Contains(s.Id)) is > 0 and var stranded)
+                {
+                    // Only a scope changed without a publish (outside the BFF) leaves an open Signal outside the scope that cites the
+                    // CURRENT version. The scoped pass never closes a Signal outside its scope on its own judgement: it is named here.
+                    _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                        "Policy {PolicyCode}: {Count} open Signal(s) outside its matter scope cite the current version and were left open " +
+                        "(the scope changed without a publish). Publish a version to close them.", policy.Code, stranded);
+                }
+            }
             // Task 034 (FR-17) and #1661: place every stamped or countable Signal in its secure-family partition, stamp a partition
             // found at the threshold and withdraw a stamp its partition no longer justifies, so the planner below sees the result.
-            var reconciled = await _suppression.ReconcileAsync(policy.Id, policy.Code, policy.CountsTowardSuppression, superseded.Existing, ct,
+            var reconciled = await _suppression.ReconcileAsync(policy.Id, policy.Code, policy.CountsTowardSuppression, inScope, ct,
                 doLane: lane == SignalWriter.LaneDo).ConfigureAwait(false);
             counts.PolicyFailures += reconciled.Failures;
             if (reconciled.PartitionsUnavailable)
@@ -329,7 +402,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
             var closedNow = await ApplyAsync(policy, spec, plan, counts, ct).ConfigureAwait(false);
             // Last, so its conditional writes never invalidate the version this pass's own closes and reconciles were planned on.
-            await RedactStoredEvidenceAsync(policy.Code, existing, counts, ct).ConfigureAwait(false);
+            await RedactStoredEvidenceAsync(policy.Code, outOfScope.Count == 0 ? existing : existing.Concat(outOfScope).ToList(), counts, ct)
+                .ConfigureAwait(false);
             if (lane == SignalWriter.LaneDo)
             {
                 // Task 153 (D-145b): after the redaction, whose conditional writes are planned on the versions read; each link below reads
@@ -976,8 +1050,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// Task 032 (D-12, D-48): the event-triggered pass. Evaluates every enabled <b>Decide-lane</b> policy about
     /// <paramref name="subjectEntity"/> for the ONE subject, through <see cref="EvaluatePolicyAsync"/> - the SAME evaluation,
     /// episode planner and writer path as the nightly pass (a second path is how the two come to disagree). Do-lane policies
-    /// are not evaluated here (nightly only, cadence from <c>sprk_lane</c>). A tenant- or matter-scoped policy is skipped with the
-    /// nightly Warning (F-62) and does not fail the trigger. A Signal already Resolved is never closed again (FR-16), so a
+    /// are not evaluated here (nightly only, cadence from <c>sprk_lane</c>). A policy limited to a matter (task 102b) is evaluated only
+    /// when the trigger's subject is that matter (otherwise it is not applicable); a tenant-scoped or mis-scoped policy is skipped with
+    /// the nightly Warning and does not fail the trigger. A Signal already Resolved is never closed again (FR-16), so a
     /// revision recorded through a decision leaves its Acted Signal Acted.
     /// </summary>
     /// <exception cref="InvalidOperationException">The enabled policies could not be read; the caller must retry.</exception>
@@ -1032,8 +1107,11 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
     // ── Reads ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
+    /// <param name="TenantScoped">A non-blank <c>sprk_tenant</c>: never evaluated (D-165, every environment is single-tenant).</param>
+    /// <param name="MatterId">Task 102b: the policy's matter scope (<c>sprk_matter</c>), evaluated within that matter; null for all.</param>
     internal sealed record PolicyRow(
-        Guid Id, string Code, int? Lane, int? Severity, string Headline, Guid? CurrentVersionId, bool IsScoped, bool CountsTowardSuppression = true);
+        Guid Id, string Code, int? Lane, int? Severity, string Headline, Guid? CurrentVersionId, bool TenantScoped,
+        bool CountsTowardSuppression = true, Guid? MatterId = null);
 
     /// <summary>Every enabled, active policy (the same filter as <see cref="PolicyScopeResolver"/>: <c>sprk_enabled</c> and
     /// <c>statecode</c> Active, so a disabled or Retired policy is not evaluated at all), with its lane, severity and headline.</summary>
@@ -1071,9 +1149,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
             row.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
             headline.Length > 200 ? headline[..200] : headline,
             version is { Id: var id } && id != Guid.Empty ? id : null,
-            !string.IsNullOrWhiteSpace(row.GetAttributeValue<string>("sprk_tenant"))
-                || row.GetAttributeValue<EntityReference>("sprk_matter") is { Id: var m } && m != Guid.Empty,
-            row.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true);
+            !string.IsNullOrWhiteSpace(row.GetAttributeValue<string>("sprk_tenant")),
+            row.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true,
+            row.GetAttributeValue<EntityReference>("sprk_matter") is { Id: var m } && m != Guid.Empty ? m : null);
     }
 
     /// <summary>Every Signal of the policy, by the begins-with query D-13 names, keyed exactly by the parsed key. A key that
@@ -1315,8 +1393,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
         /// also a policy failure).</summary>
         public List<(Guid PolicyId, string PolicyCode, int Failures)> PartitionSkips { get; } = new();
 
-        /// <summary>A scoped policy that is silently skipped, a Signal left untouched as an anomaly, or a policy skipped because its
-        /// secure-family partitions are unknown (#1661, counted in <see cref="PolicyFailures"/>), is not a healthy run.</summary>
+        /// <summary>A policy whose scope cannot be evaluated (a tenant scope, or a matter scope on a rule not about matters: task 102b),
+        /// a Signal left untouched as an anomaly, or a policy skipped because its secure-family partitions are unknown (#1661, counted in
+        /// <see cref="PolicyFailures"/>), is not a healthy run. A matter-scoped matter rule is evaluated and does not count here.</summary>
         public bool IsSuccess =>
             Refused == 0 && InvalidPolicies == 0 && PolicyFailures == 0 && UnparseableKeys == 0 && Anomalies == 0 && ScopedNotEvaluated == 0
             && PartitionSkips.Count == 0;

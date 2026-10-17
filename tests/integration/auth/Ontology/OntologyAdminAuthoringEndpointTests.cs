@@ -38,7 +38,7 @@ namespace Sprk.Bff.Api.Tests.AccessControl.Ontology;
 /// <remarks>Placement: <c>tests/integration/auth/**</c> (the security-auth KEEP path). "Admin" is a caller whose writes Dataverse accepts;
 /// "Console User" one whose every write Dataverse refuses with 403 (the Spaarke Console User role holds no Create or Write on the policy
 /// tables, notes/security-roles.md).</remarks>
-public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAuthoringTestFixture>
+public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAuthoringTestFixture>
 {
     private const string Root = "/api/v1/ontology/admin/authoring";
 
@@ -1542,6 +1542,12 @@ public sealed class RecordingEngine : IOntologyAdminAuthoringSignalEngine
 
     public ConcurrentQueue<SignalEvaluationPolicy> Evaluated { get; } = new();
 
+    /// <summary>Task 102b: the matter scope each evaluation was asked for (null: all matters), in call order.</summary>
+    public ConcurrentQueue<Guid?> Scopes { get; } = new();
+
+    /// <summary>Task 102b: when set, the engine returns every hit whatever the scope (an evaluator that failed to confine it).</summary>
+    public bool IgnoreScope { get; set; }
+
     /// <summary>Each call with the policy's current version AT THE TIME OF THE CALL (proves the pointer moved first).</summary>
     public ConcurrentQueue<(Guid PolicyId, Guid? CurrentAtCall)> ReevaluateCalls { get; } = new();
 
@@ -1550,13 +1556,18 @@ public sealed class RecordingEngine : IOntologyAdminAuthoringSignalEngine
         Hits = new();
         Result = new(true, 0, 0, string.Empty);
         Evaluated.Clear();
+        Scopes.Clear();
+        IgnoreScope = false;
         ReevaluateCalls.Clear();
     }
 
-    public Task<SignalEvaluation> EvaluateAsync(SignalEvaluationPolicy policy, CancellationToken ct)
+    /// <summary>As the shipped evaluator: a matter scope returns only that matter's hits (its compiled query carries the subject id).</summary>
+    public Task<SignalEvaluation> EvaluateAsync(SignalEvaluationPolicy policy, Guid? matterScope, CancellationToken ct)
     {
         Evaluated.Enqueue(policy);
-        return Task.FromResult(new SignalEvaluation(true, "sprk_matter", DateTimeOffset.UtcNow, 14, Hits));
+        Scopes.Enqueue(matterScope);
+        var hits = matterScope is { } m && !IgnoreScope ? Hits.Where(h => h.SubjectId == m).ToList() : Hits;
+        return Task.FromResult(new SignalEvaluation(true, "sprk_matter", DateTimeOffset.UtcNow, 14, hits));
     }
 
     public Task<PolicyReevaluationResult> ReevaluateAsync(Guid policyId, CancellationToken ct)
@@ -1589,6 +1600,9 @@ public sealed class AuthoringWorld : IDataverseUserClient
         public int? Domain { get; init; }
         public Guid? Current { get; set; }
         public long RowVersion { get; set; } = 100;
+
+        /// <summary>Task 102b: the policy's matter scope (<c>sprk_matter</c>); null for all matters.</summary>
+        public Guid? Matter { get; set; }
     }
 
     public sealed class VersionState
@@ -1641,6 +1655,9 @@ public sealed class AuthoringWorld : IDataverseUserClient
     public Dictionary<Guid, VersionState> Versions { get; } = new();
     public List<SignalState> Signals { get; } = new();
     public HashSet<(string Table, Guid Id)> Unreadable { get; } = new();
+
+    /// <summary>Task 102b: rows that do not exist at all (a read of them returns nothing, exactly as for an unreadable row).</summary>
+    public HashSet<(string Table, Guid Id)> Missing { get; } = new();
     public List<string> Requests { get; } = new();
     public List<Write> Writes { get; } = new();
 
@@ -1662,12 +1679,13 @@ public sealed class AuthoringWorld : IDataverseUserClient
         Versions.Clear();
         Signals.Clear();
         Unreadable.Clear();
+        Missing.Clear();
         Requests.Clear();
         Writes.Clear();
     }
 
-    public void AddPolicy(Guid id, string code, int lane, bool enabled, int? domain, Guid? current) =>
-        Policies[id] = new PolicyState { Code = code, Lane = lane, Enabled = enabled, Domain = domain, Current = current };
+    public void AddPolicy(Guid id, string code, int lane, bool enabled, int? domain, Guid? current, Guid? matter = null) =>
+        Policies[id] = new PolicyState { Code = code, Lane = lane, Enabled = enabled, Domain = domain, Current = current, Matter = matter };
 
     public void AddVersion(Guid id, Guid policyId, int number, string? inForceTo) =>
         Versions[id] = new VersionState { PolicyId = policyId, Number = number, InForceTo = inForceTo };
@@ -1792,6 +1810,7 @@ public sealed class AuthoringWorld : IDataverseUserClient
                         ["sprk_enabled"] = p.Value.Enabled,
                         ["statecode"] = p.Value.State,
                         ["_sprk_currentversion_value"] = p.Value.Current?.ToString("D"),
+                        ["_sprk_matter_value"] = p.Value.Matter?.ToString("D"),
                         ["versionnumber"] = p.Value.RowVersion,
                         ["sprk_domain"] = p.Value.Domain,
                     })
@@ -1855,7 +1874,7 @@ public sealed class AuthoringWorld : IDataverseUserClient
                 var ids = Regex.Matches(table.Groups[3].Value, "[0-9a-f-]{36}").Select(m => Guid.Parse(m.Value));
                 return Ok(new
                 {
-                    value = ids.Where(id => !Unreadable.Contains((logical, id)))
+                    value = ids.Where(id => !Unreadable.Contains((logical, id)) && !Missing.Contains((logical, id)))
                         .Select(id => new Dictionary<string, object?> { [logical + "id"] = id.ToString("D") })
                         .ToArray(),
                 });
@@ -1900,7 +1919,8 @@ public sealed class AuthoringWorld : IDataverseUserClient
                 {
                     var id = Guid.Parse(json.GetProperty("sprk_policyid").GetString()!);
                     AddPolicy(id, json.GetProperty("sprk_policycode").GetString()!, json.GetProperty("sprk_lane").GetInt32(),
-                        json.GetProperty("sprk_enabled").GetBoolean(), json.GetProperty("sprk_domain").GetInt32(), current: null);
+                        json.GetProperty("sprk_enabled").GetBoolean(), json.GetProperty("sprk_domain").GetInt32(), current: null,
+                        matter: MatterOf(json));
                     foreach (var v in json.GetProperty("sprk_policyversion_policy").EnumerateArray())
                     {
                         AddVersion(Guid.Parse(v.GetProperty("sprk_policyversionid").GetString()!), id, v.GetProperty("sprk_versionnumber").GetInt32(), null);
@@ -1974,6 +1994,11 @@ public sealed class AuthoringWorld : IDataverseUserClient
                 var policy = Policies[id];
                 if (expected is { } e && e != policy.RowVersion) return Precondition();
                 policy.Current = Guid.Parse(Regex.Match(json.GetProperty("sprk_CurrentVersion@odata.bind").GetString()!, "[0-9a-f-]{36}").Value);
+                if (json.TryGetProperty(MatterBind, out _))
+                {
+                    policy.Matter = MatterOf(json); // a null bind clears the lookup
+                }
+
                 policy.RowVersion++;
             }
             else if (relativePath.StartsWith("sprk_policyversions(", StringComparison.Ordinal))
@@ -1995,4 +2020,18 @@ public sealed class AuthoringWorld : IDataverseUserClient
 
     public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) =>
         throw new InvalidOperationException("The authoring routes never delete.");
+
+    public const string MatterBind = "sprk_Matter@odata.bind";
+
+    /// <summary>The matter a write binds (<c>/sprk_matters(id)</c>), or null when it binds none or clears it.</summary>
+    private static Guid? MatterOf(JsonElement json)
+    {
+        if (!json.TryGetProperty(MatterBind, out var bind) || bind.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        var reference = Regex.Match(bind.GetString()!, @"^/sprk_matters\(([0-9a-f-]{36})\)$");
+        return reference.Success ? Guid.Parse(reference.Groups[1].Value) : throw new InvalidOperationException($"Unexpected matter bind: {bind}");
+    }
 }
