@@ -4,7 +4,7 @@
     <title>Rule scope in R1: author a matter scope in the wizard, evaluate matter-scoped rules, and make the dry run count within the scope</title>
     <phase>10 Ontology admin (D-22)</phase>
     <gate>102, 102a complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tenant-isolation and record-scope sensitive: a scoped rule must never raise or close a Signal outside its scope. Changes the evaluator, the authoring routes and the wizard.</rigor-reason>
     <model-tier>opus</model-tier>
