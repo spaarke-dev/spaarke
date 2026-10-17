@@ -60,8 +60,9 @@ public static class GrantExternalAccessEndpoint
             // (would_lower_existing); or expired_not_restored (task 023) — since owner round 80 only a fail-closed
             // backstop, because a dateless re-add over a lapsed grant is now restored, and nothing is written (task 113).
             .ProducesProblem(StatusCodes.Status409Conflict)
-            // 500 / 503 (task 099b, D-11): no team could be resolved to own the new grant row (owner_unresolved), or it could
-            // not be read (owner_unreadable); nothing is written in either case.
+            // 500 / 503 (task 099b, D-11): no team could be resolved to own the new grant row (owner_unresolved), it could
+            // not be read (owner_unreadable), or Dataverse refused the owner on a privilege check (owner_privilege_missing,
+            // review round 1); nothing is written in any case.
             // 422: the record's access policy refuses this grantee (task 138 — record_restricted /
             // org_grant_direct_only_record), or the grantee is on the record's No Access list (task 139 —
             // grantee_denied). 503: the policy could not be read (policy_unreadable), or whether the grantee is on the
@@ -661,7 +662,25 @@ public static class GrantExternalAccessEndpoint
             : request;
         var payload = BuildGrantPayload(
             createRequest, rootType, rootId, owner.TeamId!.Value, grantedBySystemUserId, today, contactIssuer?.ContactId);
-        var accessRecordId = await dataverseClient.CreateAsync(EntitySet, payload, ct);
+        Guid accessRecordId;
+        try
+        {
+            accessRecordId = await dataverseClient.CreateAsync(EntitySet, payload, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && Sprk.Bff.Api.Services.Signals.SignalWriter.IsDataverseAccessDenied(ex))
+        {
+            // Task 099b review round 1: Dataverse refused the create on a privilege check. The new factor in this payload is
+            // its owner team, so this is the owner's security role lacking Read on the table ("Read Privilege Check For Owner
+            // failed", 0x80040299 — e.g. the Secure Record Owner role before it holds prvReadsprk_ExternalRecordAccess). The
+            // create failed, so nothing was written. Classified with the codebase's ONE privilege-refusal test
+            // (SignalWriter.IsDataverseAccessDenied: the fault code, a 403 from this Web API client, or the message).
+            logger.LogError(ex,
+                "[EXT-GRANT] REFUSED grant {Key} on {RootType} {RootId}: Dataverse refused to create the row owned by team " +
+                "{OwnerTeamId} on a privilege check — that team's security role is most likely missing Read on " +
+                "sprk_externalrecordaccess. Nothing was granted.",
+                key, rootType, rootId, owner.TeamId);
+            return GrantUpsertOutcome.Refused(GrantPolicyDecision.OwnerPrivilegeMissing);
+        }
 
         logger.LogInformation(
             "[EXT-GRANT] Created access record {AccessRecordId} for Contact {ContactId} / {RootType} {RootId}",
@@ -986,7 +1005,7 @@ public static class GrantExternalAccessEndpoint
                 StatusCodes.Status503ServiceUnavailable => "Access settings unavailable",
                 StatusCodes.Status409Conflict => "Existing access is higher",
                 StatusCodes.Status403Forbidden => "Access not granted",
-                StatusCodes.Status500InternalServerError => "Access not granted", // task 099b: owner_unresolved
+                StatusCodes.Status500InternalServerError => "Access not granted", // task 099b: owner_unresolved, owner_privilege_missing
                 _ => "Grant not allowed on this record",
             },
             detail: refusal.Detail,

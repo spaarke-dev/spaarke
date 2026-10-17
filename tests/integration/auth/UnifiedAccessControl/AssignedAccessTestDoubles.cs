@@ -686,6 +686,12 @@ internal static class AssignedAccessTestDoubles
         /// <summary>Task 099b review round 1 (F2): every <c>contacts</c> payload created (with <see cref="AcceptContactCreates"/>).</summary>
         public List<string> ContactCreates { get; } = new();
 
+        /// <summary>
+        /// Task 099b review round 1: when set, every GRANT-row create throws this — as the Web API client throws a bare
+        /// <see cref="HttpRequestException"/> on Dataverse's 403 "Read Privilege Check For Owner failed".
+        /// </summary>
+        public Exception? GrantCreateFailure { get; set; }
+
         public override Task<Guid> CreateAsync(string entitySetName, object entity, CancellationToken cancellationToken = default)
         {
             if (entitySetName == "contacts" && AcceptContactCreates)
@@ -697,6 +703,9 @@ internal static class AssignedAccessTestDoubles
 
             if (entitySetName != GrantSet)
                 throw new InvalidOperationException($"Unexpected create in {entitySetName}.");
+
+            if (GrantCreateFailure is { } createFailure)
+                throw createFailure;
 
             var payload = (IDictionary<string, object?>)entity;
             var row = new ExternalGrantRow

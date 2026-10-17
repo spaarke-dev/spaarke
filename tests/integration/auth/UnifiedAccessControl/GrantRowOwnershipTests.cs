@@ -321,6 +321,56 @@ public class GrantRowOwnershipTests
     }
 
     // =========================================================================================================
+    // Review round 1: Dataverse refuses the owner on a privilege check (the owner team's role lacks Read on the table)
+    // =========================================================================================================
+
+    [Fact]
+    public async Task Grant_WhenDataverseRefusesTheOwnerOnAPrivilegeCheck_Is500OwnerPrivilegeMissing_NotTheGenericFailure()
+    {
+        SecureMatter();
+        _h.Grants.GrantCreateFailure = OwnerPrivilegeRefusal();
+
+        var result = await Grant(_h.Contact());
+
+        Problem(result).Should().Be((StatusCodes.Status500InternalServerError, ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode));
+        result.As<ProblemHttpResult>().ProblemDetails.Detail.Should().Contain("Read on External Record Access",
+            "the detail tells an administrator what to fix, not the generic 'Failed to create external access record'");
+        _h.Grants.Creates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Grant_WhenTheCreateFailsForAnotherReason_IsStillTheGeneric500()
+    {
+        // The twin: a fault that is not a privilege refusal is not classified as the owner's privilege.
+        ChildBuMatter();
+        _h.Grants.GrantCreateFailure = new HttpRequestException("Simulated 500.", null, System.Net.HttpStatusCode.InternalServerError);
+
+        var result = await Grant(_h.Contact());
+
+        Problem(result).Should().Be((StatusCodes.Status500InternalServerError, null));
+        result.As<ProblemHttpResult>().ProblemDetails.Detail.Should().Be("Failed to create external access record in Dataverse.");
+    }
+
+    [Fact]
+    public async Task AssignedToGrant_WhenDataverseRefusesTheOwnerOnAPrivilegeCheck_IsAFailure_AndIsNotRecordedGranted()
+    {
+        ChildBuMatter();
+        _h.Grants.GrantCreateFailure = OwnerPrivilegeRefusal();
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        var outcome = await Sync();
+
+        outcome.Failures.Should().ContainSingle().Which.Kind.Should().Be("subject-failed");
+        _h.Store.RowsOf(_matter, contact).Should().NotContain(r => r.State == AssignedAccessState.Granted);
+    }
+
+    /// <summary>What <c>DataverseWebApiClient.CreateAsync</c> throws on Dataverse's 403 "Read Privilege Check For Owner failed"
+    /// (0x80040299): <c>EnsureSuccessStatusCode</c>'s bare exception, status only.</summary>
+    private static HttpRequestException OwnerPrivilegeRefusal() =>
+        new("Response status code does not indicate success: 403 (Forbidden).", null, System.Net.HttpStatusCode.Forbidden);
+
+    // =========================================================================================================
     // The Assigned-To materializer (a background writer — no exception for the rule's own grants)
     // =========================================================================================================
 

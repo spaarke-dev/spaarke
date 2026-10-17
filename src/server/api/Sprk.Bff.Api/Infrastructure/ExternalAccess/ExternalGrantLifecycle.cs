@@ -667,6 +667,14 @@ internal static class ExternalGrantLifecycle
     internal const string GrantOwnerUnresolvedReasonCode = "sdap.access.grant.owner_unresolved";
 
     /// <summary>
+    /// Stable reason code (500; task 099b review round 1): Dataverse refused to CREATE the grant row owned by its resolved
+    /// team on a privilege check — the owner team's security role is missing Read on <c>sprk_externalrecordaccess</c>
+    /// ("Read Privilege Check For Owner failed"). Nothing was granted; an administrator must add the privilege to the role
+    /// (for a secure record, the Secure Record Owner role). Replaces the generic "Failed to create external access record".
+    /// </summary>
+    internal const string GrantOwnerPrivilegeMissingReasonCode = "sdap.access.grant.owner_privilege_missing";
+
+    /// <summary>
     /// The lower of the requested level and the ceiling — levels are ordered by their option-set values
     /// (View Only 100000000 &lt; Collaborate 100000001 &lt; Full Access 100000002).
     /// </summary>
@@ -1114,8 +1122,25 @@ internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, i
     };
 
     /// <summary>
-    /// The refusal is about the new grant row's OWNER (<see cref="OwnerUnreadable"/>, <see cref="OwnerUnresolved"/>), not the
-    /// record's policy or the grantee. In-process only, like <see cref="IsDenyListReadFault"/>.
+    /// Task 099b review round 1: Dataverse refused to create the grant row owned by its resolved team on a privilege check
+    /// (the owner team's role lacks Read on <c>sprk_externalrecordaccess</c>). 500; nothing was written. Not retryable until an
+    /// administrator adds the privilege. An owner refusal, so the materializer reports it as a failure.
+    /// </summary>
+    public static GrantPolicyDecision OwnerPrivilegeMissing { get; } = new(
+        false,
+        ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode,
+        StatusCodes.Status500InternalServerError,
+        "Access could not be granted because the team that owns this record's access entries is not permitted to own them: " +
+        "its security role is missing Read on External Record Access (for a secure record, the Secure Record Owner role). " +
+        "Nothing was granted; an administrator must add that privilege to the role.")
+    {
+        IsOwnerRefusal = true,
+    };
+
+    /// <summary>
+    /// The refusal is about the new grant row's OWNER (<see cref="OwnerUnreadable"/>, <see cref="OwnerUnresolved"/>,
+    /// <see cref="OwnerPrivilegeMissing"/>), not the record's policy or the grantee. In-process only, like
+    /// <see cref="IsDenyListReadFault"/>.
     /// </summary>
     public bool IsOwnerRefusal { get; init; }
 
