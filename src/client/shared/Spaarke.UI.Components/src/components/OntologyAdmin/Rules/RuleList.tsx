@@ -49,6 +49,8 @@ export interface RuleListProps {
   service: OntologyRulesService;
   /** Open the rule page. */
   onOpen: (policyId: string) => void;
+  /** Open the rule wizard on a new rule. When omitted the list offers no New rule control. */
+  onNewRule?: () => void;
 }
 
 // Column widths as flex ratios (the Fluent Table lays its rows out as flex rows): rule, lane, on/off, version, open items, last fired, action rate.
@@ -60,6 +62,13 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     rowGap: tokens.spacingVerticalM,
     minWidth: 0,
+  },
+  toolbar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: tokens.spacingHorizontalM,
+    flexWrap: 'wrap',
   },
   row: {
     cursor: 'pointer',
@@ -94,7 +103,7 @@ const useStyles = makeStyles({
   },
 });
 
-export const RuleList: React.FC<RuleListProps> = ({ service, onOpen }) => {
+export const RuleList: React.FC<RuleListProps> = ({ service, onOpen, onNewRule }) => {
   const styles = useStyles();
   const [filter, setFilter] = React.useState<RuleFilter>('all');
   const [list, setList] = React.useState<RuleListResponse | undefined>(undefined);
@@ -126,13 +135,20 @@ export const RuleList: React.FC<RuleListProps> = ({ service, onOpen }) => {
 
   return (
     <div className={styles.root} data-testid="ontology-rules-list">
-      <TabList size="small" selectedValue={filter} onTabSelect={onFilter} aria-label="Filter rules">
-        {RULE_FILTERS.map(f => (
-          <Tab key={f.id} value={f.id} data-testid={`rules-filter-${f.id}`}>
-            {f.label}
-          </Tab>
-        ))}
-      </TabList>
+      <div className={styles.toolbar}>
+        <TabList size="small" selectedValue={filter} onTabSelect={onFilter} aria-label="Filter rules">
+          {RULE_FILTERS.map(f => (
+            <Tab key={f.id} value={f.id} data-testid={`rules-filter-${f.id}`}>
+              {f.label}
+            </Tab>
+          ))}
+        </TabList>
+        {onNewRule === undefined ? null : (
+          <Button appearance="primary" onClick={onNewRule} data-testid="rules-new-rule">
+            New rule
+          </Button>
+        )}
+      </div>
 
       {loading ? (
         <div className={styles.centered}>

@@ -14,7 +14,14 @@
 
 import * as React from 'react';
 import { makeStyles } from '@fluentui/react-components';
-import { ClassificationArea, OntologyAdminTab, RulesArea, createClassificationService, createOntologyRulesService } from '@spaarke/ui-components';
+import {
+  ClassificationArea,
+  OntologyAdminTab,
+  RulesArea,
+  createClassificationService,
+  createOntologyAuthoringService,
+  createOntologyRulesService,
+} from '@spaarke/ui-components';
 import { useAiSession } from '../../providers/useAiSession';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 
@@ -37,6 +44,12 @@ export const OntologyAdminWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () =
     [authenticatedFetch, bffBaseUrl]
   );
 
+  // Task 102: the rule wizard (New rule, New version) writes through the authoring routes as the caller.
+  const authoringService = React.useMemo(
+    () => createOntologyAuthoringService({ fetch: authenticatedFetch, baseUrl: bffBaseUrl }),
+    [authenticatedFetch, bffBaseUrl]
+  );
+
   // Task 103: the Classification area reads and writes through the BFF as the caller.
   const classificationService = React.useMemo(
     () => createClassificationService({ fetch: authenticatedFetch, baseUrl: bffBaseUrl }),
@@ -45,7 +58,9 @@ export const OntologyAdminWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () =
 
   return (
     <div className={styles.host} data-testid="ontology-admin-workspace-widget">
-      <OntologyAdminTab rules={<RulesArea service={rulesService} />} classification={<ClassificationArea service={classificationService} />} />
+      <OntologyAdminTab
+        rules={<RulesArea service={rulesService} authoringService={authoringService} />}
+        classification={<ClassificationArea service={classificationService} />} />
     </div>
   );
 };
