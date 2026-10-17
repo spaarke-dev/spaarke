@@ -70,7 +70,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
 | 070 | 🟡 [wip] | Billing rule-type catalogue: schemas, describer, validation, fail-closed refusal | FULL | opus / high | none | 019, 029 |
-| 071 | 🔲 [open] | Rule handlers for the 11 billing rule types | FULL | sonnet / xhigh | P3-B | 070 |
+| 071 | 🟡 [wip] | Rule handlers for the 11 billing rule types | FULL | sonnet / xhigh | P3-B | 070 |
 | 072 | 🔲 [open] | `InvoiceComplianceEvaluator` | FULL | opus / high | P3-C | 071, 017, 018 |
 | 073 | 🔲 [open] | Rejection rule and reject-eligibility at publish | FULL | sonnet / xhigh | none | 072, 025 |
 | 074 | 🔲 [open] | Billing actions in `DecisionActionCatalog` | FULL | opus / high | P3-B | 070 |
