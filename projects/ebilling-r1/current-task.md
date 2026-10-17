@@ -11,22 +11,21 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. Done (39/79): 001-005, 010-014, 016-025, 027-029, 040-048, 054, 078, 106, 107, 108, 109. WIP: 026 (BLOCKED at step 0: sprk_billingevent not an intermediate in ResolveStampsAsync; option A asked of uac-r2), 070 (held for ontology-r1 review). Adversarial review of 054 running; its fix round adds D1 bounded-parallel AI calls + most-similar examples. ADR-010 ceiling 165; route ledger 131 |
-| **Step** | Running: 054 fix-round-1 (review findings + D1 parallel + similar examples + profile cache), 026 (uac-r2 approved option A = D-94; uac-r2 and ontology-r1 review its diff before merge). Ontology approved 070 (notes) on condition of the paired change. NEXT after both land: merge origin/master (>= e702c3401; conflicts in ADR010_DITests, Route ledger (master 129), SignalReevaluationJobTests), then 070 fix-round-2 = ontology paired change (OntologyAdminAuthoringService/RulesService use RuleDomains + dry-run test), send to ontology-r1; then 070 done. Then 015 (owner OK) |
+| **Task** | Parallel mode. Done (40/79): 001-005, 010-014, 016-025, 027-029, 040-048, 054, 078, 106, 107, 108, 109. WIP: 026 (fix-round-1 running, agent a89b3b0fa808c1b23), 070 (waits for the master merge + ontology paired change). ADR-010 ceiling 165; route ledger 131 |
+| **Step** | 026 fix-round-1 running. It merges three reviews: ours, ontology-r1 K1-K5 and uac-r2 (no fix-now; condition 4 accepted as met, with the deviation carried in #2047). Items: refusal kinds (MultipleRoots → CoreRecordAmbiguous); sprk_firmreason field security per D-95; line core = derived core guards; deploy-order step (SpaarkeMaster import before the BFF) in 053 + DEF-021; RemoveLink doc; notes corrections; order-sensitive lockstep; project CLAUDE.md line "no line upload/storage route before #2047" |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | As each agent reports: cherry-pick its commits onto work/ebilling-r1 (conflicts on FinanceModule.cs / ADR010_DITests.cs: keep both sides, sum the ceiling), amend trailers to Opus 5.5 with hooks, mark ✅ in TASK-INDEX, run the build + targeted Finance tests + ArchTests. Then 107 and 026 (serial, opus), then 015 (needs owner OK, destructive) |
+| **Next Action** | When 026 reports: cherry-pick (trailer rewrite, background, 600 s), build + Signals/Finance filter + ArchTests. Send the range to ontology-r1 (all) and uac-r2 (only the CoreAncestorResolver commits; check existing callers are unchanged). After both OK, mark 026 ✅. Then merge origin/master (>= e702c3401; conflicts expected in ADR010_DITests, the route ledger (master 129 vs ours 131), SignalReevaluationJobTests), then 070 fix-round-2 = ontology paired change (OntologyAdminAuthoringService:1226 passes RuleDomain.Ontology + RuleTypeWrongDomain → "ruleType"; OntologyDomain + OntologyAdminRulesService :48/:142 use RuleDomains; dry-run 400 test), send to ontology-r1, then 070 ✅. Then 015 (owner OK, destructive) |
 
 ### Files Modified This Session
-- All committed (last: 9db5d265e "start tasks 044, 048, 070, 106").
+- All committed (last: 794dd173c D-95a).
 
 ### Critical Context
-- Decisions this session: D-87 (tracking number allocated when the submission row is first created, via ITrackingNumberAllocator.CreateSubmissionAsync), D-88 (duplicate firm invoice number = configurable rule, Reject or finding), D-89 (ApprovedTimekeeper holds only), D-90 (role privileges mirror invoice access; applied by scripts/ebilling/Deploy-EbillingRolePrivileges.ps1), D-91 (firm invoice number required at upload; PDF mismatch = hold finding).
-- 011 done: sprk_InvoiceLineItem removed (owner removed it from the Spaarke Platform app by hand; RemoveAppComponents is a no-op there — gotcha in project CLAUDE.md).
-- Task 100 constraint: line writes stay server-side; widening roles to sprk_billingevent Create/Delete is an owner decision.
-- 053 deploy: 047 seeding order (Ensure-ActionRow → Deploy-ActionMirrors → BFF deploy + Seed-PlaybookConsumers -DiffOnly) and ancestor-check the live BFF build (live dev BFF = 1.0.0+a6d30891a, deployed by R3 2026-10-16 14:41 UTC).
-- 029: Activate/Deactivate hide is source-only until a release import; secure_child_ribbon.js needs a SpaarkeMaster redeploy. pac in pwsh: prepend %LOCALAPPDATA%/Microsoft/PowerAppsCLI to PATH.
+- Decisions: D-87…D-91 (earlier); D-92 schema on ontology policy tables approved as built; D-93 code-set matching tuning (task 054, done); D-94 sprk_billingevent as an intermediate (uac-r2); D-95 Ontology Service AppendTo on billing event + invoice, firm reason under field security; D-95a ontology-r1 applied the grants live and owns Roles/Spaarke Ontology Service.xml + its guard test (026 must not touch them).
+- Standing: no line (sprk_billingevent) upload/storage route before uac-r2 #2047.
+- 053 deploy: 047 seeding order (Ensure-ActionRow → Deploy-ActionMirrors → BFF deploy + Seed-PlaybookConsumers -DiffOnly), 054 rerun Deploy-ActionMirrors -Filter invoice-codeset-match + tuning seed; SpaarkeMaster import before the BFF (026).
+- 029: Activate/Deactivate hide is source-only until a release import; pac in pwsh: prepend %LOCALAPPDATA%/Microsoft/PowerAppsCLI to PATH.
 - Owner action pending: add the 7 new tables to the Matter Management and Spaarke Administration apps in the app designer (save + publish).
-- Open: 015 owner OK; DEF-015 Procedure Library design discussion; uac-r2 review on #1973 (reverse supersedes, supersedes-as-filing); ontology-r1 review of 109; ISS-009 CU endpoint merge gate; #2010 (DEF-019), #2011 (DEF-020); approver contacts readable by approvers (029 notes); 046 K8 residual and A7 precedence ack; write-path registry row for the tracking number not yet in DATAVERSE-WRITE-PATH-ARCHITECTURE.md; stale locked worktree dirs under C:/code_files/spaarke/.claude/worktrees.
+- Open: 015 owner OK; optional owner question on 106 rate history (whole section vs firm-wide cards when the core read is refused); DEF-015 Procedure Library; ISS-009; #2010, #2011, #2045 (DEF-021); write-path registry row for the tracking number not yet in DATAVERSE-WRITE-PATH-ARCHITECTURE.md.
 
 ---
 
@@ -34,7 +33,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 044, 048, 070, 106 (agents) |
+| **Task ID** | 026 (agent fix-round-1); 070 queued behind the master merge |
 
 ## Next Action
 
