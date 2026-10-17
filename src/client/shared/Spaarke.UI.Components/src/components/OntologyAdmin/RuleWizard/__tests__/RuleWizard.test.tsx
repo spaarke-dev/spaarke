@@ -496,7 +496,7 @@ describe('RuleWizard - a new rule', () => {
     click('rule-wizard-next');
     await find('rule-wizard-save');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save rule' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule', hidden: true }));
     expect(await find('rule-wizard-saved')).toHaveTextContent('It is Off');
 
     expect(service.savePolicy).toHaveBeenCalledTimes(1);
@@ -518,7 +518,7 @@ describe('RuleWizard - a new rule', () => {
     expect(dry.lane).toBe('Decide');
     expect(validated.draft).toEqual(sent.draft);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Done', hidden: true }));
     expect(onClose).toHaveBeenCalledWith({ kind: 'saved', policyId: saved.policyId, versionNumber: 1 });
   });
 
@@ -538,7 +538,7 @@ describe('RuleWizard - a new rule', () => {
     click('rule-wizard-next');
     await find('rule-wizard-save');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save rule' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule', hidden: true }));
     const banner = await find('rule-wizard-problems');
     expect(banner).toHaveTextContent(message);
 
@@ -558,7 +558,7 @@ describe('RuleWizard - a new rule', () => {
     click('rule-wizard-next');
     await find('rule-wizard-save');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save rule' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule', hidden: true }));
     await find('rule-wizard-problems');
     click('rule-wizard-problem-policyCode');
     expect(await find('rule-wizard-basics')).toBeInTheDocument();
@@ -575,9 +575,9 @@ describe('RuleWizard - a new rule', () => {
     click('rule-wizard-next');
     await find('rule-wizard-save');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save rule' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule', hidden: true }));
     expect(await find('rule-wizard-write-lock')).toHaveTextContent('may not have been saved');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save rule' })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save rule', hidden: true })).toBeDisabled());
     expect(savePolicy).toHaveBeenCalledTimes(1);
   });
 });
@@ -628,7 +628,7 @@ describe('RuleWizard - Test gates the end', () => {
     expect(maybe('rule-wizard-test-result')).toBeNull();
     expect(byId('rule-wizard-next')).toBeDisabled();
     // There is no Save button to reach: it lives on the step after Test.
-    expect(screen.queryByRole('button', { name: 'Save rule' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save rule', hidden: true })).toBeNull();
 
     await runTest();
     expect(byId('rule-wizard-next')).toBeEnabled();
@@ -704,7 +704,7 @@ describe('RuleWizard - a new version', () => {
     click('rule-wizard-next');
     await find('rule-wizard-save');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Publish', hidden: true }));
     const confirm = await find('rule-wizard-publish-confirm');
     expect(confirm).toHaveTextContent('3 open items');
     expect(confirm).toHaveTextContent('2 items will be raised again');
@@ -724,7 +724,7 @@ describe('RuleWizard - a new version', () => {
     click('rule-wizard-next');
     await find('rule-wizard-save');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Publish', hidden: true }));
     const confirm = await find('rule-wizard-publish-confirm');
     const dialog = confirm.closest('[role="alertdialog"]') as HTMLElement;
     fireEvent.click(within(dialog).getByRole('button', { name: 'Publish', hidden: true }));
@@ -744,7 +744,8 @@ describe('RuleWizard - a new version', () => {
     expect(JSON.parse(request.draft.ruleBody)).toMatchObject({ quietWindowDays: 30 });
     expect(service.validate.mock.calls[0][0]).toMatchObject({ policyId: 'policy-1' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    // Fluent's focus manager can leave the dialog marked aria-hidden in jsdom after a nested confirmation closes; it is still the button.
+    fireEvent.click(screen.getByRole('button', { name: 'Done', hidden: true }));
     expect(onClose).toHaveBeenCalledWith({ kind: 'published', policyId: published.policyId, versionNumber: 3 });
   });
 
@@ -759,7 +760,7 @@ describe('RuleWizard - a new version', () => {
     click('rule-wizard-next');
     await find('rule-wizard-save');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Publish', hidden: true }));
     const confirm = await find('rule-wizard-publish-confirm');
     fireEvent.click(
       within(confirm.closest('[role="alertdialog"]') as HTMLElement).getByRole('button', { name: 'Publish', hidden: true })
@@ -779,7 +780,7 @@ describe('RuleWizard - closing', () => {
     const { onClose } = setup();
     await find('rule-wizard-basics');
 
-    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape', code: 'Escape' });
+    fireEvent.keyDown(screen.getByRole('dialog', { hidden: true }), { key: 'Escape', code: 'Escape' });
     const backdrop = document.querySelector('.fui-DialogSurface__backdrop, [class*="backdrop"]');
     if (backdrop) {
       fireEvent.click(backdrop);
@@ -787,7 +788,7 @@ describe('RuleWizard - closing', () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(byId('rule-wizard-basics')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel', hidden: true }));
     expect(onClose).toHaveBeenCalledWith(null);
   });
 
@@ -796,7 +797,7 @@ describe('RuleWizard - closing', () => {
     await find('rule-wizard-basics');
     change('rule-wizard-name', 'Half done');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel', hidden: true }));
     const check = await screen.findByRole('alertdialog', undefined, WAIT);
     expect(check).toHaveTextContent('Discard this rule?');
     expect(onClose).not.toHaveBeenCalled();
@@ -805,7 +806,7 @@ describe('RuleWizard - closing', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
     expect(valueOf('rule-wizard-name')).toBe('Half done');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel', hidden: true }));
     const again = await screen.findByRole('alertdialog', undefined, WAIT);
     fireEvent.click(within(again).getByRole('button', { name: 'Discard', hidden: true }));
     expect(onClose).toHaveBeenCalledWith(null);
