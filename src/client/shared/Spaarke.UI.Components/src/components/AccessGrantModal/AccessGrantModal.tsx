@@ -436,9 +436,6 @@ const SHARE_EXPIRY_UNCONFIRMED_REASON_CODE = 'sdap.access.share_expiry.write_fai
 /** The server's expiry for a share added without one (`ExternalGrantLifecycle.DefaultExpiryDays`). Display only. */
 const DEFAULT_SHARE_EXPIRY_DAYS = 90;
 
-/** An add while the Expiration holds no usable date (task 099c): nothing is sent until it is corrected. */
-const ADD_EXPIRY_INVALID_MESSAGE = 'Choose an Expiration of today or later before adding people.';
-
 /**
  * The UTC calendar date `days` from today, `yyyy-MM-dd` — the server's "today" for every expiry decision
  * (`ExternalGrantLifecycle.TodayUtc`). The picker's minimum mirrors the route's rule: a date before UTC today is
@@ -449,6 +446,12 @@ function utcDateOnly(days = 0): string {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days))
     .toISOString()
     .slice(0, 10);
+}
+
+/** An add while the Expiration holds no usable date (task 099c): nothing is sent until it is corrected. It names the
+ * UTC minimum the same way the field's own error does. */
+function addExpiryInvalidMessage(): string {
+  return `Choose ${formatGrantDate(utcDateOnly())} or later before adding people.`;
 }
 
 /** What the Expiration shows for the record's shares (task 099c). */
@@ -1783,7 +1786,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     if (selected.length === 0) return true;
     // Task 099c: contacts and organizations carry the record's Expiration; an unusable one is corrected first.
     if (addExpiryInvalid && selected.some(it => it.kind !== 'user')) {
-      setNoticeIfCurrent({ intent: 'warning', text: ADD_EXPIRY_INVALID_MESSAGE });
+      setNoticeIfCurrent({ intent: 'warning', text: addExpiryInvalidMessage() });
       return false;
     }
     // Every selected row must have a level (no default) before it can be granted.
@@ -1985,7 +1988,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     async (entry: IAssignedAccessEntry) => {
       // Task 099c: an external grant carries the record's Expiration; an unusable one is corrected first.
       if (!entry.systemUserId && addExpiryInvalid) {
-        setNoticeIfCurrent({ intent: 'warning', text: ADD_EXPIRY_INVALID_MESSAGE });
+        setNoticeIfCurrent({ intent: 'warning', text: addExpiryInvalidMessage() });
         return;
       }
       setSuggestionBusy(entry.entryId);
@@ -2268,7 +2271,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // not). Apply sends the edit, or — when the shares end on different dates — the shown date, which aligns them
   // (review F1-b: the divergence line offers Apply, so it is there with no edit).
   const expiryPending = shareExpiry.kind === 'shares' && expiryDraft !== null && expiryDraft !== expiryShown;
-  const expiryApplyOffered = shareExpiry.kind === 'shares' && (expiryPending || shareExpiry.diverges);
+  // Review round 2 (F4): Apply with no edit is offered only while the shown (earliest) date is still usable — when it
+  // has lapsed there is nothing valid to apply, so the user is told to choose a date instead.
+  const expiryShownLapsed = expiryShown !== '' && expiryShown < expiryMin;
+  const expiryApplyOffered =
+    shareExpiry.kind === 'shares' && (expiryPending || (shareExpiry.diverges && expiryShown >= expiryMin));
   const expiryApplyValue = expiryDraft ?? expiryShown;
   const expiryCanApply =
     expiryEditable &&
@@ -2608,8 +2615,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   )}
                   {shareExpiry.kind === 'shares' && shareExpiry.diverges && (
                     <Text className={styles.shareExpiryHint} data-testid="share-expiry-divergence">
-                      Shares on this record end on different dates; the earliest is shown. Apply, or adding a person,
-                      sets them to this date.
+                      {expiryShownLapsed && !(expiryPending && expiryDraftValid)
+                        ? `Shares on this record end on different dates, and the earliest has passed. Choose ${formatGrantDate(expiryMin)} or later.`
+                        : 'Shares on this record end on different dates; the earliest is shown. Apply, or adding a person, sets them to this date.'}
                     </Text>
                   )}
                   {expiryPending && (

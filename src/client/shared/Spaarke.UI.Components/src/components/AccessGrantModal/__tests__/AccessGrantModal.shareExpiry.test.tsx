@@ -18,6 +18,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
+import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
 import { AccessGrantModal } from '../AccessGrantModal';
 import type { IAssignedAccessEntry } from '../AccessGrantModal';
 import type {
@@ -450,7 +451,9 @@ describe('AccessGrantModal — every add sends the record Expiration (task 099c)
 
     await addContactAndOrganization();
 
-    expect(await screen.findByText('Choose an Expiration of today or later before adding people.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(`Choose ${displayDate(utcDate())} or later before adding people.`)
+    ).toBeInTheDocument();
     expect(bodiesFor(fetchMock, GRANT_PATH)).toHaveLength(0);
   });
 
@@ -798,7 +801,9 @@ describe('AccessGrantModal — Expiration review round 1 (task 099c, PR #2062)',
     fireEvent.change(input, { target: { value: '2000-01-01' } });
     fireEvent.click(await screen.findByRole('button', { name: 'Grant Pat Paralegal' }));
 
-    expect(await screen.findByText('Choose an Expiration of today or later before adding people.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(`Choose ${displayDate(utcDate())} or later before adding people.`)
+    ).toBeInTheDocument();
     expect(bodiesFor(fetchMock, GRANT_PATH)).toHaveLength(0);
   });
 
@@ -875,5 +880,100 @@ describe('AccessGrantModal — Expiration theming (task 099c, ADR-021)', () => {
     const block = src.slice(start, end);
     expect(block).toMatch(/tokens\.colorNeutralForeground3/);
     expect(block).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/);
+  });
+});
+
+// ── Review round 2 (PR #2062, scoped re-check) ───────────────────────────────────────────────────────────────────────
+
+describe('AccessGrantModal — Expiration review round 2 (task 099c, PR #2062)', () => {
+  it('F4: divergent shares that have ALL lapsed offer no (disabled) Apply — the user is told to choose a date', async () => {
+    const fetchMock = fetchDouble(async () => jsonResponse({ updatedCount: 2, expiresDate: utcDate(30) }));
+    renderModal(
+      props(
+        jest.fn(async () => [
+          share('a', 'Lee Lapsed', '2026-01-01', true),
+          share('b', 'Mo Missed', '2026-02-01', true),
+        ]),
+        fetchMock
+      )
+    );
+    const input = await expiryInput();
+    await waitFor(() => expect(input.value).toBe('2026-01-01'));
+
+    // No Apply to disable, and the line says what to do instead of promising a past date.
+    expect(screen.queryByTestId('share-expiry-apply')).not.toBeInTheDocument();
+    const line = screen.getByTestId('share-expiry-divergence');
+    expect(line).toHaveTextContent(`Choose ${displayDate(utcDate())} or later.`);
+    expect(line).not.toHaveTextContent('sets them to this date');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(expiryCalls(fetchMock)).toHaveLength(0);
+
+    // Picking a valid date offers Apply, enabled, and it sends that date.
+    fireEvent.change(input, { target: { value: utcDate(30) } });
+    const apply = screen.getByTestId('share-expiry-apply');
+    expect(apply).not.toBeDisabled();
+    fireEvent.click(apply);
+    await waitFor(() => expect(expiryCalls(fetchMock)).toHaveLength(1));
+    expect(JSON.parse(String(expiryCalls(fetchMock)[0][1].body))).toMatchObject({ expiryDate: utcDate(30) });
+  });
+
+  it('draft clearing: after an add applies the edited date, a later share change does not bring back "Not applied yet"', async () => {
+    const fetchMock = fetchDouble(async () => jsonResponse({}));
+    const fetchExistingGrants = jest
+      .fn()
+      // 1: no share. 2: after the add, the edited date is the earliest (the draft was applied and is cleared).
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([share('nia', 'Nia New', '2099-12-31'), share('bo', 'Bo Baker', '2100-01-31')])
+      // 3: Nia is revoked, so the earliest — the shown date — moves on.
+      .mockResolvedValue([share('bo', 'Bo Baker', '2100-01-31')]);
+    renderModal(addProps(fetchExistingGrants, fetchMock));
+    const input = await expiryInput();
+    await screen.findByTestId('share-expiry-default');
+    fireEvent.change(input, { target: { value: '2099-12-31' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    await screen.findByRole('checkbox', { name: 'Select Nia New' });
+    await pickLevelFor('Nia New', 'Collaborate');
+    fireEvent.click(addButton());
+    await waitFor(() => expect(fetchExistingGrants).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByTestId('share-expiry-default')).not.toBeInTheDocument());
+    await waitFor(() => expect(input.value).toBe('2099-12-31'));
+    expect(screen.queryByTestId('share-expiry-unapplied')).not.toBeInTheDocument();
+
+    // Revoke the earliest share: the shown date changes to Bo's, and no stale edit comes back.
+    const revokeIn = (el: HTMLElement | null) =>
+      Array.from(el?.querySelectorAll('button') ?? []).find(b => /^Revoke$/.test(b.textContent ?? ''));
+    let row: HTMLElement | null = (await screen.findAllByText('Nia New')).pop() as HTMLElement;
+    while (row && !revokeIn(row)) row = row.parentElement;
+    expect(row?.textContent).not.toContain('Bo Baker');
+    fireEvent.click(revokeIn(row) as HTMLElement);
+    await screen.findByText('Revoke access?');
+    await confirmRevoke();
+
+    await waitFor(() => expect(input.value).toBe('2100-01-31'));
+    expect(screen.queryByTestId('share-expiry-unapplied')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('share-expiry-apply')).not.toBeInTheDocument();
+  });
+
+  it('Enter on divergent shares with no edit applies once, with the shown (earliest) date', async () => {
+    const fetchMock = fetchDouble(async () => jsonResponse({ updatedCount: 2, expiresDate: '2099-03-01' }));
+    renderModal(
+      props(
+        jest.fn(async () => [share('a', 'Ann Able', '2099-03-01'), share('b', 'Bo Baker', '2099-08-01')]),
+        fetchMock
+      )
+    );
+    const input = await expiryInput();
+    await waitFor(() => expect(input.value).toBe('2099-03-01'));
+    expect(screen.getByTestId('share-expiry-divergence')).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(expiryCalls(fetchMock)).toHaveLength(1));
+    expect(JSON.parse(String(expiryCalls(fetchMock)[0][1].body))).toEqual({
+      recordType: 'matter',
+      recordId: RECORD_ID,
+      expiryDate: '2099-03-01',
+    });
   });
 });
