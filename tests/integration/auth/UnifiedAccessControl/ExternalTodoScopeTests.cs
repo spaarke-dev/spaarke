@@ -1233,6 +1233,56 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Probe.Calls.Should().BeEmpty();
     }
 
+    [Theory(DisplayName = "Task 036 fix round 2 (F2): a confirmation that names no child privilege (PATCH to-do, delete-own) logs no warning and adds no Create")]
+    [InlineData(AccessRights.Read | AccessRights.Write | AccessRights.AppendTo)]
+    [InlineData(AccessRights.Read | AccessRights.Write | AccessRights.AppendTo | AccessRights.Delete)]
+    public async Task Fr20_AConfirmationThatCreatesNothing_LogsNoWarning_AndAddsNoCreate(AccessRights dataverse)
+    {
+        // As UpdateTodo and delete-own (2b) call it: no child privilege and no privilege reader. Before fix round 2 every
+        // such call where Dataverse answered AppendTo logged "[WF-AUTHZ] No child-table Create privilege ... fail closed".
+        var log = new CapturingLogger();
+        var principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+
+        var rights = await Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.WithDataverseRightsAsync(
+            principal, AccessRights.Read, "sprk_todos", TodoId,
+            (_, _, _) => Task.FromResult(dataverse), log, CancellationToken.None);
+
+        rights.Should().Be(dataverse & (AccessRights.Read | AccessRights.Write | AccessRights.Delete));
+        log.Levels.Should().NotContain(Microsoft.Extensions.Logging.LogLevel.Warning,
+            "a route that creates nothing is not refused anything — the warning is for a real Create refusal");
+        log.Levels.Should().NotContain(Microsoft.Extensions.Logging.LogLevel.Error);
+    }
+
+    [Fact(DisplayName = "Task 036 fix round 2 (F2) twin: a child create whose privilege cannot be confirmed still warns")]
+    public async Task Fr20_AChildCreateWithNoPrivilegeReader_StillWarns_AndAddsNoCreate()
+    {
+        var log = new CapturingLogger();
+        var principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+
+        var rights = await Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.WithDataverseRightsAsync(
+            principal, AccessRights.Read, "sprk_projects", InScopeProject,
+            (_, _, _) => Task.FromResult(AccessRights.Read | AccessRights.AppendTo), log, CancellationToken.None,
+            childCreatePrivilege: "prvCreatesprk_Todo", readCallerPrivilege: null);
+
+        rights.Should().Be(AccessRights.Read);
+        log.Levels.Should().Contain(Microsoft.Extensions.Logging.LogLevel.Warning);
+    }
+
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public List<Microsoft.Extensions.Logging.LogLevel> Levels { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter) => Levels.Add(logLevel);
+    }
+
     [Theory(DisplayName = "Task 036: flag ON, create event — needs AppendTo on the project AND (F1) prvCreatesprk_Event")]
     [InlineData(AccessRights.Read | AccessRights.Write, true, HttpStatusCode.Forbidden, 0)]
     [InlineData(AccessRights.Read | AccessRights.AppendTo, true, HttpStatusCode.Created, 1)]

@@ -875,8 +875,9 @@ public static class ExternalProjectDataEndpoints
     /// holds <paramref name="childCreatePrivilege"/> (<see cref="CallerRecordAccessProbe.CallerHoldsPrivilegeAsync"/>, OBO,
     /// uncached — the task 166 / G5 pairing of <c>TodoSourceAccessFilter</c> and
     /// <c>CommunicationRecordAuthorizationFilter</c>). The privilege is asked only when it can change the answer: Dataverse
-    /// answered AppendTo and <paramref name="composed"/> does not already carry Create. No privilege named, no reader, a
-    /// false answer or a fault: Dataverse adds no Create (NFR-01). Read, Write and Delete are unaffected, so the PATCH and
+    /// answered AppendTo and <paramref name="composed"/> does not already carry Create. No privilege named (a route that
+    /// creates nothing — not a refusal, so nothing is logged), no reader, a false answer or a fault: Dataverse adds no
+    /// Create (NFR-01). Read, Write and Delete are unaffected, so the PATCH and
     /// delete-own confirmations (which name no child table) are unchanged.</para>
     /// <para>One Dataverse round trip per confirmed write (NFR-02), for the single record in hand; a child create that
     /// Dataverse answers with AppendTo adds the privilege read (WhoAmI + <c>RetrieveUserSetOfPrivilegesByNames</c>).</para>
@@ -933,10 +934,14 @@ public static class ExternalProjectDataEndpoints
         }
 
         var surface = SurfaceRightsFromDataverse(dataverse);
-        if (surface.HasFlag(Spaarke.Dataverse.AccessRights.Create) && !composed.HasFlag(Spaarke.Dataverse.AccessRights.Create)
-            && !await CallerHoldsChildCreateAsync(caller, childCreatePrivilege, readCallerPrivilege, logger, ct).ConfigureAwait(false))
+        if (surface.HasFlag(Spaarke.Dataverse.AccessRights.Create) && !composed.HasFlag(Spaarke.Dataverse.AccessRights.Create))
         {
-            surface &= ~Spaarke.Dataverse.AccessRights.Create;
+            // A route that creates nothing (PATCH to-do, delete-own) names no child privilege: Dataverse's AppendTo simply
+            // adds no Create there, and that is not a refusal worth a warning (fix round 2, F2).
+            if (childCreatePrivilege is null)
+                surface &= ~Spaarke.Dataverse.AccessRights.Create;
+            else if (!await CallerHoldsChildCreateAsync(caller, childCreatePrivilege, readCallerPrivilege, logger, ct).ConfigureAwait(false))
+                surface &= ~Spaarke.Dataverse.AccessRights.Create;
         }
 
         logger.LogInformation(
@@ -948,12 +953,12 @@ public static class ExternalProjectDataEndpoints
 
     /// <summary>
     /// Whether the caller holds the child table's Create privilege (task 036 fix round 1, F1), for
-    /// <see cref="WithDataverseRightsAsync"/>. Fail closed: no privilege named, no reader, a false answer or a fault is
-    /// <c>false</c>; only the caller's own cancellation is rethrown.
+    /// <see cref="WithDataverseRightsAsync"/>, on a route that names one. Fail closed: a blank name, no reader, a false
+    /// answer or a fault is <c>false</c>; only the caller's own cancellation is rethrown.
     /// </summary>
     private static async Task<bool> CallerHoldsChildCreateAsync(
         CallerPrincipal caller,
-        string? childCreatePrivilege,
+        string childCreatePrivilege,
         Func<string, CancellationToken, Task<bool>>? readCallerPrivilege,
         ILogger logger,
         CancellationToken ct)
@@ -961,9 +966,9 @@ public static class ExternalProjectDataEndpoints
         if (string.IsNullOrWhiteSpace(childCreatePrivilege) || readCallerPrivilege is null)
         {
             logger.LogWarning(
-                "[WF-AUTHZ] No child-table Create privilege to confirm for systemuser {SystemUserId}: Dataverse's AppendTo adds " +
-                "no Create (fail closed, task 036 F1).",
-                caller.SystemUserId);
+                "[WF-AUTHZ] The child-table Create privilege {Privilege} cannot be confirmed for systemuser {SystemUserId} " +
+                "(blank name or no privilege reader): Dataverse's AppendTo adds no Create (fail closed, task 036 F1).",
+                childCreatePrivilege, caller.SystemUserId);
             return false;
         }
 
