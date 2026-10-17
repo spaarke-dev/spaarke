@@ -256,6 +256,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 - Python needs `PYTHONIOENCODING=utf-8`; scratchpad PowerShell stays ASCII under `pwsh`.
 - Count TASK-INDEX by its ASCII tokens (`[open]` `[wip]` `[done]` `[cancelled]` `[deferred]`); every row carries one.
 - Azure.Identity needs `AZURE_TOKEN_CREDENTIALS=dev`; the 034 canary needs `AzureCliCredential` + `SPAARKE_TESTS_ALLOW_OUTBOUND=1`.
+- **Import every PCF/solution with `scripts/Import-SolutionScoped.ps1`, never a bare `pac solution import`.** A bare import leaves the `cc_…/bundle.js` web resources unpublished, so users keep getting the old bundle (2026-10-17: TrackingFieldTrio 1.0.50 stayed on 1.0.47 until a `-PublishOnly` run). Verify by the SERVED bundle's sha256 (`/WebResources/cc_<ns>.<control>/bundle.js`), not `customcontrols.version`.
 
 ## 7. Key documents
 
