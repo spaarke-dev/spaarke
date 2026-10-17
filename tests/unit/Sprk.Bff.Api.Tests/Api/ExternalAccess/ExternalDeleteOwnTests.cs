@@ -343,6 +343,87 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     }
 
     // =====================================================================
+    // Task 036 (FR-20, owner round 59 item 2): a caller whose access Dataverse decided ALSO needs Delete on the row in
+    // Dataverse, asked as the caller. The creator stamp and the parent Read stay required.
+    // =====================================================================
+
+    [Theory]
+    [MemberData(nameof(AllKinds))]
+    public async Task Fr20_TheCreator_WithoutDeleteInDataverse_Is403_AndNothingIsDeleted(string segment)
+    {
+        var id = _fixture.Seed(KindOf(segment), contact: CallerContact, parents: Project(RecordA));
+        _fixture.Principal = DataverseDecidedSystemUserOn(RecordA, linkedContact: CallerContact);
+        // Everything but Delete: Write and AppendTo on the row admit no delete.
+        _fixture.Probe.Answer(DeletableSetOf(segment), id, AccessRights.Read | AccessRights.Write | AccessRights.AppendTo);
+
+        using var response = await Delete(segment, id);
+
+        await ShouldBeTheUniformDenial(response);
+        _fixture.Exists(KindOf(segment), id).Should().BeTrue("nothing is deleted without Dataverse's Delete");
+        _fixture.Probe.Calls.Should().ContainSingle().Which.Should().Match<(string? Token, string EntitySet, Guid RecordId)>(
+            c => c.EntitySet == DeletableSetOf(segment) && c.RecordId == id, "Dataverse is asked about the ROW, not its parent");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllKinds))]
+    public async Task Fr20_TheCreator_WithDeleteInDataverse_Deletes(string segment)
+    {
+        var id = _fixture.Seed(KindOf(segment), contact: CallerContact, parents: Project(RecordA));
+        _fixture.Principal = DataverseDecidedSystemUserOn(RecordA, linkedContact: CallerContact);
+        _fixture.Probe.Answer(DeletableSetOf(segment), id, AccessRights.Read | AccessRights.Delete);
+
+        using var response = await Delete(segment, id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        _fixture.Exists(KindOf(segment), id).Should().BeFalse();
+        _fixture.Probe.Calls.Should().ContainSingle();
+    }
+
+    [Theory]
+    [MemberData(nameof(AllKinds))]
+    public async Task Fr20_DeleteInDataverse_NeverStandsInForTheCreatorStamp(string segment)
+    {
+        var id = _fixture.Seed(KindOf(segment), contact: OtherContact, parents: Project(RecordA));
+        _fixture.Principal = DataverseDecidedSystemUserOn(RecordA, linkedContact: CallerContact);
+        _fixture.Probe.Answer(DeletableSetOf(segment), id, AccessRights.Read | AccessRights.Delete);
+
+        using var response = await Delete(segment, id);
+
+        await ShouldBeTheUniformDenial(response);
+        _fixture.Exists(KindOf(segment), id).Should().BeTrue();
+        _fixture.Probe.Calls.Should().BeEmpty("the stamp is checked first, and a row that is not the caller's asks nothing");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllKinds))]
+    public async Task Fr20_AProbeThatFaults_Is403_AndNothingIsDeleted(string segment)
+    {
+        var id = _fixture.Seed(KindOf(segment), contact: CallerContact, parents: Project(RecordA));
+        _fixture.Principal = DataverseDecidedSystemUserOn(RecordA, linkedContact: CallerContact);
+        _fixture.Probe.Answer(DeletableSetOf(segment), id, AccessRights.Read | AccessRights.Delete);
+        _fixture.Probe.Fault = new HttpRequestException("Dataverse unreachable");
+
+        using var response = await Delete(segment, id);
+
+        await ShouldBeTheUniformDenial(response);
+        _fixture.Exists(KindOf(segment), id).Should().BeTrue("a failed confirmation adds no rights (NFR-01)");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllKinds))]
+    public async Task Fr20_FlagOff_TheSystemUserCreatorDeletes_AndDataverseIsNeverAsked(string segment)
+    {
+        var id = _fixture.Seed(KindOf(segment), contact: CallerContact, parents: Project(RecordA));
+        _fixture.Principal = SystemUserOn(RecordA, linkedContact: CallerContact);
+
+        using var response = await Delete(segment, id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        _fixture.Exists(KindOf(segment), id).Should().BeFalse();
+        _fixture.Probe.Calls.Should().BeEmpty("a caller whose access Dataverse did not decide is decided exactly as before");
+    }
+
+    // =====================================================================
     // No existence oracle: absent and not-yours answer identically
     // =====================================================================
 
@@ -795,6 +876,19 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         ProjectAccess = new[] { CallerProjectAccess.FromLevel(project, ExternalAccessLevel.Collaborate) },
     };
 
+    /// <summary>Task 036: a systemuser composed with the FR-20 flag on — Dataverse decided its access, at Read only.</summary>
+    private static CallerPrincipal DataverseDecidedSystemUserOn(Guid project, Guid linkedContact) => new()
+    {
+        Plane = CallerPrincipalPlane.Workforce,
+        SystemUserId = CallerUser,
+        ContactId = linkedContact,
+        Email = "licensed@customer.test",
+        ProjectAccess = new[] { CallerProjectAccess.FromLevel(project, ExternalAccessLevel.ViewOnly) },
+        DataverseConfirmsWrites = true,
+    };
+
+    private static string DeletableSetOf(string segment) => ExternalDataService.GetDeletableBinding(KindOf(segment)).EntitySet;
+
     private static ExternalDataService NewService(HttpMessageHandler transport) => new(
         new HttpClient(transport),
         new ConfigurationBuilder()
@@ -857,10 +951,14 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             set => _principals.Principal = value;
         }
 
+        /// <summary>Task 036: the caller's own Dataverse rights, as delete-own asks a Dataverse-decided caller for them.</summary>
+        public CallerRecordAccessProbeDouble Probe { get; } = new();
+
         public void Reset()
         {
             Data.Reset();
             Dataverse.Reset();
+            Probe.Reset();
             Steps.Clear();
             Principal = null;
             FileFault = null;
@@ -898,6 +996,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             {
                 services.AddScoped<ICallerPrincipalResolver>(_ => _principals);
                 services.AddScoped(_ => (ExternalDataService)Data);
+                services.AddScoped<CallerRecordAccessProbe>(_ => Probe); // task 036 (overrides the typed client)
 
                 Dataverse.Steps = Steps;
                 services.RemoveAll<SpeFileStore>();

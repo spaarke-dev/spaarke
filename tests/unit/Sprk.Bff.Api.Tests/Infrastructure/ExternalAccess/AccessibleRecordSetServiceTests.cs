@@ -2435,6 +2435,404 @@ public class AccessibleRecordSetServiceTests
             .Select(id => new ExternalParticipation { ProjectId = id, AccessLevel = ExternalAccessLevel.ViewOnly })
             .ToList());
 
+    // ═════════════════════════════════════════════════════════════════════════════
+    // Task 036 / FR-20 — ExternalAccess:ImpersonatedRootSets:Enabled (owner rounds 59 + 75)
+    //
+    // Flag on, Dataverse's own answer (the impersonated read, substituted here) REPLACES the ADR-034 membership walk
+    // for the systemuser's ACCESS, at Read only; the contact-grants union, the deny list and the Restricted veto stay.
+    // Every flag-on test pairs with a flag-off twin, so a test that would pass with the flag ignored cannot pass here.
+    // The membership mock is STRICT on the flag-on side: consulting it at all fails the test (no fallback, no BU match).
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid SharedRecord = Guid.Parse("d0360000-0000-4000-8000-000000000001");
+    private static readonly Guid BusinessUnitOnlyRecord = Guid.Parse("d0360000-0000-4000-8000-000000000002");
+    private static readonly Guid DefaultTeamOwnedRecord = Guid.Parse("d0360000-0000-4000-8000-000000000003");
+    private static readonly Guid RoleDepthRecord = Guid.Parse("d0360000-0000-4000-8000-000000000004");
+    private static readonly Guid RecordX = Guid.Parse("d0360000-0000-4000-8000-00000000000a");
+    private static readonly Guid RecordY = Guid.Parse("d0360000-0000-4000-8000-00000000000b");
+    private static readonly Guid RecordZ = Guid.Parse("d0360000-0000-4000-8000-00000000000c");
+
+    private const string WorkAssignmentEntity = "sprk_workassignment";
+
+    private static readonly AccessRights CollaborateRights =
+        ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate);
+
+    /// <summary>The impersonated read, substituted: one answer per entity type, or a fault. Records every call.</summary>
+    private sealed class FakeImpersonatedRootSetSource : IImpersonatedRootSetSource
+    {
+        public Dictionary<string, RootIdSet> Answers { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Exception? Fault { get; set; }
+        public List<(Guid SystemUserId, string EntityType)> Calls { get; } = new();
+
+        public Task<RootIdSet> GetAsync(Guid systemUserId, string entityType, CancellationToken ct = default)
+        {
+            Calls.Add((systemUserId, entityType));
+            if (Fault is not null)
+            {
+                return Task.FromException<RootIdSet>(Fault);
+            }
+
+            return Task.FromResult(Answers.TryGetValue(entityType, out var answer) ? answer : RootIdSet.Empty);
+        }
+
+        public FakeImpersonatedRootSetSource Answer(string entityType, params Guid[] ids) =>
+            AnswerWith(entityType, truncated: false, ids);
+
+        public FakeImpersonatedRootSetSource AnswerWith(string entityType, bool truncated, params Guid[] ids)
+        {
+            Answers[entityType] = new RootIdSet(ids.ToHashSet(), truncated);
+            return this;
+        }
+    }
+
+    private static AccessibleRecordSetService CreateFr20Sut(
+        IMembershipResolverService membership,
+        ExternalParticipationService participations,
+        IImpersonatedRootSetSource? source,
+        bool enabled)
+        => new(membership, participations, NeverStanding(), NeverDeniesReader(),
+               UnlinkedIdentityStore(), InternalSystemUsers(),
+               Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
+               NullLogger<AccessibleRecordSetService>.Instance,
+               source,
+               Microsoft.Extensions.Options.Options.Create(new ExternalAccessOptions
+               {
+                   ImpersonatedRootSets = new ImpersonatedRootSetsOptions { Enabled = enabled },
+               }));
+
+    /// <summary>A membership resolver that answers <paramref name="ids"/> for <paramref name="entityType"/>.</summary>
+    private static Mock<IMembershipResolverService> MembershipAnswering(string entityType, params Guid[] ids)
+    {
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, entityType, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(entityType, ids));
+        return membership;
+    }
+
+    /// <summary><see cref="SystemUserPrincipal"/> with the two fields these tests vary.</summary>
+    private static WorkforcePrincipal SystemUserPrincipalWith(Guid? systemUserId, bool contactUnreadable = false) => new()
+    {
+        Kind = WorkforcePrincipalKind.SystemUser,
+        SystemUserId = systemUserId,
+        ContactId = ContactId,
+        ContactUnreadable = contactUnreadable,
+        Oid = Oid.ToString("D"),
+        TenantId = Tenant,
+    };
+
+    private static void AssertMembershipNeverConsulted(Mock<IMembershipResolverService> membership) =>
+        membership.Verify(
+            m => m.ResolveAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never,
+            "flag on, Dataverse's answer replaces the membership walk for access — consulting it is the fallback NFR-01 forbids");
+
+    [Fact(DisplayName = "Task 036: flag OFF (explicit) is the membership walk, unchanged, and never asks the impersonated source")]
+    public async Task Fr20_FlagOff_IsTheMembershipWalk_AndNeverAsksTheSource()
+    {
+        var membership = MembershipAnswering(MatterEntity, MemberRecordA, BusinessUnitOnlyRecord);
+        var source = new FakeImpersonatedRootSetSource().Answer(MatterEntity, SharedRecord);
+        var sut = CreateFr20Sut(membership.Object, NoParticipations(), source, enabled: false);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().BeEquivalentTo(new Dictionary<Guid, AccessRights>
+        {
+            [MemberRecordA] = AccessibleRecordSetService.MembershipTermRights,
+            [BusinessUnitOnlyRecord] = AccessibleRecordSetService.MembershipTermRights,
+        });
+        set.Sources.SystemUserMembership.Should().BeTrue();
+        set.Sources.ImpersonatedRootSet.Should().BeFalse();
+        set.CapLimit.Should().Be(MembershipResolveOptions.MaxLimit);
+        source.Calls.Should().BeEmpty("flag off, nothing reads Dataverse's answer");
+    }
+
+    [Fact(DisplayName = "Task 036: flag ON, a record SHARED with the caller (absent from membership) appears at exactly Read")]
+    public async Task Fr20_FlagOn_ASharedRecord_Appears_AtExactlyRead()
+    {
+        var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        var source = new FakeImpersonatedRootSetSource().Answer(MatterEntity, SharedRecord);
+        var sut = CreateFr20Sut(membership.Object, NoParticipations(), source, enabled: true);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().BeEquivalentTo(new Dictionary<Guid, AccessRights> { [SharedRecord] = AccessRights.Read },
+            "the impersonated set confers Read (round 59 item 1); writes are confirmed at the route");
+        set.Sources.ImpersonatedRootSet.Should().BeTrue();
+        set.Sources.SystemUserMembership.Should().BeFalse();
+        source.Calls.Should().ContainSingle().Which.Should().Be((SystemUserId, MatterEntity));
+        AssertMembershipNeverConsulted(membership);
+    }
+
+    [Fact(DisplayName = "Task 036 twin: flag OFF, the same shared record is ABSENT (the under-grant FR-20 fixes)")]
+    public async Task Fr20_FlagOff_ASharedRecord_IsAbsent()
+    {
+        var membership = MembershipAnswering(MatterEntity);
+        var source = new FakeImpersonatedRootSetSource().Answer(MatterEntity, SharedRecord);
+        var sut = CreateFr20Sut(membership.Object, NoParticipations(), source, enabled: false);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Contains(SharedRecord).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "Task 036: flag ON, a record membership matches only by owningbusinessunit, absent from Dataverse's answer, is ABSENT")]
+    public async Task Fr20_FlagOn_ABusinessUnitOnlyMatch_IsAbsent()
+    {
+        var membership = MembershipAnswering(ProjectEntity, BusinessUnitOnlyRecord);
+        var source = new FakeImpersonatedRootSetSource().Answer(ProjectEntity, SharedRecord);
+        var sut = CreateFr20Sut(membership.Object, NoParticipations(), source, enabled: true);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(BusinessUnitOnlyRecord).Should().BeFalse("the BU pattern match is not consulted for access flag-on");
+        set.Contains(SharedRecord).Should().BeTrue();
+        AssertMembershipNeverConsulted(membership);
+    }
+
+    [Fact(DisplayName = "Task 036 twin: flag OFF, the BU-only match is PRESENT at the membership term (flag-off is unchanged — no under-grant)")]
+    public async Task Fr20_FlagOff_ABusinessUnitOnlyMatch_IsPresent()
+    {
+        var membership = MembershipAnswering(ProjectEntity, BusinessUnitOnlyRecord);
+        var source = new FakeImpersonatedRootSetSource().Answer(ProjectEntity, SharedRecord);
+        var sut = CreateFr20Sut(membership.Object, NoParticipations(), source, enabled: false);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(BusinessUnitOnlyRecord).Should().Be(AccessibleRecordSetService.MembershipTermRights);
+    }
+
+    [Theory(DisplayName = "Task 036: a record owned by the caller's BU DEFAULT TEAM that Dataverse does not admit — absent flag ON, present flag OFF")]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Fr20_ADefaultTeamOwnedRecordDataverseDoesNotAdmit_FollowsTheFlag(bool enabled, bool expectedPresent)
+    {
+        // The membership walk matches it through owningteam (the BU default team the caller belongs to); Dataverse's
+        // answer, read as the caller, does not include it.
+        var membership = MembershipAnswering(WorkAssignmentEntity, DefaultTeamOwnedRecord);
+        var source = new FakeImpersonatedRootSetSource().Answer(WorkAssignmentEntity, RoleDepthRecord);
+        var sut = CreateFr20Sut(membership.Object, NoParticipations(), source, enabled);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), WorkAssignmentEntity, CancellationToken.None);
+
+        set.Contains(DefaultTeamOwnedRecord).Should().Be(expectedPresent);
+    }
+
+    [Fact(DisplayName = "Task 036 (owner D1): flag ON, a record reached in Dataverse ONLY through BU/role depth appears at exactly Read")]
+    public async Task Fr20_FlagOn_ARoleDepthRecord_Appears()
+    {
+        var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        var source = new FakeImpersonatedRootSetSource().Answer(WorkAssignmentEntity, RoleDepthRecord);
+        var sut = CreateFr20Sut(membership.Object, NoParticipations(), source, enabled: true);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), WorkAssignmentEntity, CancellationToken.None);
+
+        set.RightsFor(RoleDepthRecord).Should().Be(AccessRights.Read);
+    }
+
+    [Theory(DisplayName = "Task 036 (B-17): a systemuser who is also a granted contact keeps the grant in BOTH flag states")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Fr20_TheContactGrantsUnion_SurvivesInBothStates(bool enabled)
+    {
+        var membership = enabled
+            ? new Mock<IMembershipResolverService>(MockBehavior.Strict)
+            : MembershipAnswering(ProjectEntity, MemberRecordA);
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.Collaborate },
+        });
+        var source = new FakeImpersonatedRootSetSource().Answer(ProjectEntity, SharedRecord);
+        var sut = CreateFr20Sut(membership.Object, participations, source, enabled);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(GrantedProject).Should().Be(CollaborateRights,
+            "the linked contact's grant is a term of its own; the flag changes only the systemuser's own term");
+        set.Sources.ContactGrants.Should().BeTrue();
+        set.Contains(enabled ? SharedRecord : MemberRecordA).Should().BeTrue();
+    }
+
+    public static TheoryData<string, Exception> SourceFaults => new()
+    {
+        { "a non-2xx impersonated read", new HttpRequestException("403 prvActOnBehalfOfAnotherUser missing") },
+        { "an unsupported entity type", new ArgumentException("entityType is not a root type") },
+        { "an empty systemuserid refused by the primitive", new ArgumentException("systemUserId must not be Guid.Empty") },
+    };
+
+    [Theory(DisplayName = "Task 036 (NFR-01): flag ON, a source throw FAILS the composition — no fallback to membership")]
+    [MemberData(nameof(SourceFaults))]
+    public async Task Fr20_FlagOn_ASourceThrow_FailsTheComposition_AndNeverFallsBackToMembership(string _, Exception fault)
+    {
+        var membership = MembershipAnswering(ProjectEntity, MemberRecordA);
+        var source = new FakeImpersonatedRootSetSource { Fault = fault };
+        var sut = CreateFr20Sut(membership.Object, ParticipationsFor(GrantedProject), source, enabled: true);
+
+        var act = () => sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<Exception>()).Which.Should().BeSameAs(fault,
+            "the fault propagates, so the caller-principal filter refuses the request — nothing composes around it");
+        AssertMembershipNeverConsulted(membership);
+    }
+
+    [Fact(DisplayName = "Task 036 (NFR-01): flag ON, an EMPTY SystemUserId fails before anything is read")]
+    public async Task Fr20_FlagOn_AnEmptySystemUserId_FailsBeforeAnyRead()
+    {
+        var membership = MembershipAnswering(ProjectEntity, MemberRecordA);
+        var source = new FakeImpersonatedRootSetSource().Answer(ProjectEntity, SharedRecord);
+        var sut = CreateFr20Sut(membership.Object, NoParticipations(), source, enabled: true);
+        var principal = SystemUserPrincipalWith(systemUserId: Guid.Empty);
+
+        var act = () => sut.ComposeAsync(principal, ProjectEntity, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        source.Calls.Should().BeEmpty("Guid.Empty is never impersonated");
+        AssertMembershipNeverConsulted(membership);
+    }
+
+    [Fact(DisplayName = "Task 036 (NFR-01): flag ON, a MISSING SystemUserId fails — no fallback")]
+    public async Task Fr20_FlagOn_AMissingSystemUserId_Fails()
+    {
+        var membership = MembershipAnswering(ProjectEntity, MemberRecordA);
+        var source = new FakeImpersonatedRootSetSource().Answer(ProjectEntity, SharedRecord);
+        var sut = CreateFr20Sut(membership.Object, NoParticipations(), source, enabled: true);
+        var principal = SystemUserPrincipalWith(systemUserId: null);
+
+        var act = () => sut.ComposeAsync(principal, ProjectEntity, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        source.Calls.Should().BeEmpty();
+        AssertMembershipNeverConsulted(membership);
+    }
+
+    [Fact(DisplayName = "Task 036 (NFR-01): flag ON with no source registered fails closed — never the membership walk")]
+    public async Task Fr20_FlagOn_WithNoSource_FailsClosed()
+    {
+        var membership = MembershipAnswering(ProjectEntity, MemberRecordA);
+        var sut = CreateFr20Sut(membership.Object, NoParticipations(), source: null, enabled: true);
+
+        var act = () => sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        AssertMembershipNeverConsulted(membership);
+    }
+
+    [Theory(DisplayName = "Task 036: a Restricted record keeps exactly the systemuser's own term and loses the contact grant")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Fr20_ARestrictedRecord_KeepsTheOwnTermAsItsSurvivor_AndLosesTheContactGrant(bool enabled)
+    {
+        var membership = enabled
+            ? new Mock<IMembershipResolverService>(MockBehavior.Strict)
+            : MembershipAnswering(ProjectEntity, GrantedProject);
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation
+            {
+                ProjectId = GrantedProject,
+                AccessLevel = ExternalAccessLevel.FullAccess,
+                DirectAccessLevel = ExternalAccessLevel.FullAccess,
+            },
+        });
+        participations.Flags[GrantedProject] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        var source = new FakeImpersonatedRootSetSource().Answer(ProjectEntity, GrantedProject);
+        var sut = CreateFr20Sut(membership.Object, participations, source, enabled);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        // Flag on, the survivor is the DATAVERSE term at Read — not MembershipTermRights (amendment 3 of 2026-09-30:
+        // otherwise the constant creeps back through the Restricted path). Flag off, it is the membership term, as before.
+        set.RightsFor(GrantedProject).Should().Be(
+            enabled ? AccessRights.Read : AccessibleRecordSetService.MembershipTermRights,
+            "the FullAccess contact grant is vetoed on a Restricted record; Delete absent proves it did not survive");
+    }
+
+    [Theory(DisplayName = "Task 036: the deny-veto pipeline stays in force — an unreadable veto subject removes every candidate, both states")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Fr20_TheDenyVeto_StaysInForce(bool enabled)
+    {
+        var membership = enabled
+            ? new Mock<IMembershipResolverService>(MockBehavior.Strict)
+            : MembershipAnswering(ProjectEntity, SharedRecord);
+        var source = new FakeImpersonatedRootSetSource().Answer(ProjectEntity, SharedRecord);
+        var sut = CreateFr20Sut(membership.Object, NoParticipations(), source, enabled);
+        var principal = SystemUserPrincipalWith(SystemUserId, contactUnreadable: true);
+
+        var set = await sut.ComposeAsync(principal, ProjectEntity, CancellationToken.None);
+
+        set.Rights.Should().BeEmpty("task 132: an unknown veto subject denies every candidate, whichever term found it");
+    }
+
+    [Fact(DisplayName = "Task 036 (no constant): flag ON, three records with three different Dataverse answers compose and confirm to exactly those answers")]
+    public async Task Fr20_FlagOn_NoConstant_ThreeRecordsThreeDataverseAnswers()
+    {
+        var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        var source = new FakeImpersonatedRootSetSource().Answer(MatterEntity, RecordX, RecordY, RecordZ);
+        var sut = CreateFr20Sut(membership.Object, NoParticipations(), source, enabled: true);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        // (1) The composition carries NO constant: every Dataverse-term record is exactly Read. Reintroducing
+        //     MembershipTermRights for the Dataverse term turns each of these into Read|Write|Create.
+        set.Rights.Should().BeEquivalentTo(new Dictionary<Guid, AccessRights>
+        {
+            [RecordX] = AccessRights.Read,
+            [RecordY] = AccessRights.Read,
+            [RecordZ] = AccessRights.Read,
+        });
+
+        // (2) A write route's rights then equal Dataverse's own per-record answer — three different answers, three
+        //     different results. A constant anywhere on the path makes at least two of them equal.
+        var principal = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = Guid.Empty,
+            SystemUserId = SystemUserId,
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = CallerPrincipal.FromReadBearing(set.Rights),
+            DataverseConfirmsWrites = true,
+        };
+        var dataverse = new Dictionary<Guid, AccessRights>
+        {
+            [RecordX] = AccessRights.Read,
+            [RecordY] = AccessRights.Read | AccessRights.Write,
+            [RecordZ] = AccessRights.Read | AccessRights.Write | AccessRights.AppendTo | AccessRights.Delete,
+        };
+        Task<AccessRights> Read(string entitySet, Guid id, CancellationToken _) => Task.FromResult(dataverse[id]);
+
+        var confirmed = new Dictionary<Guid, AccessRights>();
+        foreach (var id in new[] { RecordX, RecordY, RecordZ })
+        {
+            confirmed[id] = await Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.WithDataverseRightsAsync(
+                principal, principal.GetMatterRights(id), "sprk_matters", id, Read,
+                NullLogger.Instance, CancellationToken.None);
+        }
+
+        confirmed.Should().BeEquivalentTo(new Dictionary<Guid, AccessRights>
+        {
+            [RecordX] = AccessRights.Read,
+            [RecordY] = AccessRights.Read | AccessRights.Write,
+            [RecordZ] = AccessRights.Read | AccessRights.Write | AccessRights.Create | AccessRights.Delete,
+        });
+    }
+
+    [Theory(DisplayName = "Task 036 (NFR-03): flag ON, the source's Truncated becomes Capped at the source's row cap")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Fr20_FlagOn_TruncatedBecomesCapped(bool truncated)
+    {
+        var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        var source = new FakeImpersonatedRootSetSource().AnswerWith(ProjectEntity, truncated, SharedRecord);
+        var sut = CreateFr20Sut(membership.Object, NoParticipations(), source, enabled: true);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Capped.Should().Be(truncated, "a truncated Dataverse answer is never presented as complete (NFR-03)");
+        set.CapLimit.Should().Be(ImpersonatedRootSetSource.RowCap);
+    }
+
     /// <summary>
     /// Thin test double overriding only the virtual grant loader (<see cref="ExternalParticipationService.GetGrantSetAsync"/>,
     /// task 028 — the base <c>GetParticipationsAsync</c> delegates to it) — avoids driving the real

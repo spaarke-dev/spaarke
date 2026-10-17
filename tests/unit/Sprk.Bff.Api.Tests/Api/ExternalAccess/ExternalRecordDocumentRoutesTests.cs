@@ -158,6 +158,92 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     }
 
     // =====================================================================
+    // Task 036 (FR-20, owner round 59 item 2): a caller whose access Dataverse decided (Read only on its own term) uploads
+    // only where Dataverse, asked as the caller, lets it attach — AppendTo on the record; for an invoice, on the invoice
+    // itself, before the secure-roots gate.
+    // =====================================================================
+
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_Upload_ReadAndWriteButNoAppendToInDataverse_Is403_AndWritesNothing(string segment)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.Answer(EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.Write);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Uploads.Should().BeEmpty("nothing reaches SPE unless Dataverse confirms the write");
+        _fixture.Data.Documents.Should().BeEmpty();
+        _fixture.Probe.Calls.Should().ContainSingle().Which.Should().Match<(string? Token, string EntitySet, Guid RecordId)>(
+            c => c.EntitySet == EntitySetOf(segment) && c.RecordId == RecordA, "Dataverse is asked about the target record");
+    }
+
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_Upload_AppendToInDataverse_Is201(string segment)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.Answer(EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle();
+        _fixture.Data.Documents.Should().ContainSingle();
+    }
+
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_Upload_AProbeThatFaults_Is403_AndWritesNothing(string segment)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.Answer(EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo);
+        _fixture.Probe.Fault = new HttpRequestException("Dataverse unreachable");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden, "a failed confirmation adds no rights (NFR-01)");
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.Documents.Should().BeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_Upload_FlagOff_TheComposedRightsDecide_AndDataverseIsNeverAsked(string segment)
+    {
+        // The same Read-only caller with the flag off: Dataverse would say AppendTo, but nobody asks — still 403.
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: false);
+        _fixture.Probe.Answer(EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Probe.Calls.Should().BeEmpty("flag off is byte-equivalent: no Dataverse confirmation");
+    }
+
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_List_AsksDataverseNothing_AndReportsCanCreateFromTheComposedRights(string segment)
+    {
+        // Known limit (task 036 notes, open question g): the read routes ask nothing, so a Dataverse-decided caller's
+        // list reports canCreate=false although the upload route would admit a write Dataverse confirms.
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.Answer(EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var list = await client.GetFromJsonAsync<ExternalDocumentListResponse>($"/api/v1/external/{segment}/{RecordA}/documents");
+
+        list!.CanCreate.Should().BeFalse();
+        _fixture.Probe.Calls.Should().BeEmpty("a read route never asks Dataverse for write rights");
+    }
+
+    // =====================================================================
     // Task 054 review: the list says whether the caller can upload (so the SPA offers Upload only to one who can)
     // =====================================================================
 
@@ -1252,6 +1338,26 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         };
     }
 
+    private static readonly Guid CallerUser = Guid.Parse("77777777-7777-7777-7777-777777777031");
+
+    /// <summary>Task 036: a licensed systemuser holding Read only on <paramref name="record"/> (for an invoice, on its
+    /// parent matter) — the own term a flag-on composition gives. <paramref name="dataverseDecides"/> is the flag.</summary>
+    private CallerPrincipal SystemUserReading(string segment, Guid record, bool dataverseDecides)
+    {
+        var reads = Principal(segment, record, ExternalAccessLevel.ViewOnly);
+        return new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            SystemUserId = CallerUser,
+            ContactId = CallerContact,
+            Email = "licensed@customer.test",
+            ProjectAccess = reads.ProjectAccess,
+            MatterAccess = reads.MatterAccess,
+            WorkAssignmentAccess = reads.WorkAssignmentAccess,
+            DataverseConfirmsWrites = dataverseDecides,
+        };
+    }
+
     /// <summary>A workforce contact principal (a customer staff member with no Dataverse licence): a requester.</summary>
     private static CallerPrincipal WorkforceContact() => new()
     {
@@ -1362,9 +1468,13 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             set => _principals.Principal = value;
         }
 
+        /// <summary>Task 036: the caller's own Dataverse rights, as the upload route asks a Dataverse-decided caller for them.</summary>
+        public CallerRecordAccessProbeDouble Probe { get; } = new();
+
         public void Reset()
         {
             Data.Reset();
+            Probe.Reset();
             Principal = null;
             Ownership.TeamId = RecordOwnershipResolverDouble.DefaultTeamId;
             Ownership.Requests.Clear();
@@ -1434,6 +1544,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             {
                 services.AddScoped<ICallerPrincipalResolver>(_ => _principals);
                 services.AddScoped(_ => (ExternalDataService)Data);
+                services.AddScoped<CallerRecordAccessProbe>(_ => Probe); // task 036 (overrides the typed client)
                 services.RemoveAll<IRecordOwnershipResolver>();
                 services.AddSingleton<IRecordOwnershipResolver>(Ownership);
 

@@ -263,6 +263,46 @@ public class CallerPrincipalResolverTests
             It.IsAny<WorkforcePrincipal>(), "sprk_project", It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Theory(DisplayName = "Task 036: the strategy marks a Dataverse-decided systemuser for write confirmation and carries a truncated set (NFR-03)")]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task WorkforceStrategy_CarriesTheDataverseDecisionAndTheTruncation(bool impersonated, bool matterCapped)
+    {
+        var project = Guid.NewGuid();
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.ForSystemUser(
+                Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid().ToString(), WorkforceTenantId));
+
+        var accessible = new Mock<IAccessibleRecordSetService>();
+        accessible.Setup(s => s.ComposeAsync(It.IsAny<WorkforcePrincipal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((WorkforcePrincipal _, string entity, CancellationToken _) => new AccessibleRecordSet
+            {
+                PrincipalKind = WorkforcePrincipalKind.SystemUser,
+                EntityType = entity,
+                Rights = entity == "sprk_project" ? RightsOf(project) : RightsOf(),
+                Capped = matterCapped && entity == "sprk_matter",
+                Sources = new AccessibleRecordSetSources(
+                    SystemUserMembership: !impersonated, ContactGrants: false, StandingGrantMembership: false,
+                    ImpersonatedRootSet: impersonated),
+            });
+
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, accessible.Object, Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
+
+        var result = await strategy.ResolveAsync(
+            new DefaultHttpContext { User = Principal(("email", "staff@contoso.com")) }, CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue();
+        result.Principal!.DataverseConfirmsWrites.Should().Be(impersonated,
+            "only a principal whose own access Dataverse decided has its writes confirmed against Dataverse");
+        result.Principal.TruncatedRootEntityTypes.Should().BeEquivalentTo(
+            matterCapped ? new[] { "sprk_matter" } : Array.Empty<string>(),
+            "a capped set is carried to the responses that list through it, never dropped (NFR-03)");
+    }
+
     [Fact]
     public async Task WorkforceStrategy_Contact_ScopesToGrantSet()
     {

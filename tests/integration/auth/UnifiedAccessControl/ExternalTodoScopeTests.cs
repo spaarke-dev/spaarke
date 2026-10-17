@@ -1011,6 +1011,220 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     [InlineData(ExternalDataService.TodoRootKind.Ambiguous)]
     public void TryGetRootBinding_ForADenyState_ReturnsNull(ExternalDataService.TodoRootKind kind) =>
         ExternalDataService.TryGetRootBinding(kind).Should().BeNull();
+
+    // =====================================================================
+    // Task 036 / FR-20 (owner round 59 item 2): with ExternalAccess:ImpersonatedRootSets:Enabled on, a systemuser's own
+    // term is Read only, and EVERY write route confirms the write against Dataverse, as the caller, on the TARGET record
+    // (CallerRecordAccessProbe, substituted). The load-bearing assertions are the write counters and the probe's calls.
+    // Each flag-on case has a flag-off twin that asks Dataverse nothing (flag off is byte-equivalent).
+    // =====================================================================
+
+    private static readonly Guid Fr20SystemUser = Guid.Parse("0e036000-0000-4000-8000-000000000001");
+
+    /// <summary>The Dataverse entity set of each root, as the probe needs it.</summary>
+    private static string EntitySetOf(ExternalDataService.TodoRootKind kind) => kind switch
+    {
+        ExternalDataService.TodoRootKind.Project => "sprk_projects",
+        ExternalDataService.TodoRootKind.Matter => "sprk_matters",
+        _ => "sprk_workassignments",
+    };
+
+    /// <summary>
+    /// A workforce systemuser holding <paramref name="rootId"/> at <paramref name="rights"/>. With
+    /// <paramref name="dataverseDecides"/> it is the flag-on principal (its own term is Dataverse's Read; anything more came
+    /// from the contact-grants union); without it, the flag-off principal.
+    /// </summary>
+    private static CallerPrincipal SystemUserHolding(
+        ExternalDataService.TodoRootKind kind, Guid rootId, AccessRights rights, bool dataverseDecides) => new()
+    {
+        Plane = CallerPrincipalPlane.Workforce,
+        ContactId = Guid.Parse("99999999-9999-9999-9999-999999999999"),
+        SystemUserId = Fr20SystemUser,
+        Email = "staff@customer.test",
+        ProjectAccess = kind == ExternalDataService.TodoRootKind.Project
+            ? new[] { new CallerProjectAccess { ProjectId = rootId, Rights = rights } }
+            : Array.Empty<CallerProjectAccess>(),
+        MatterAccess = kind == ExternalDataService.TodoRootKind.Matter
+            ? new Dictionary<Guid, AccessRights> { [rootId] = rights }
+            : new Dictionary<Guid, AccessRights>(),
+        WorkAssignmentAccess = kind == ExternalDataService.TodoRootKind.WorkAssignment
+            ? new Dictionary<Guid, AccessRights> { [rootId] = rights }
+            : new Dictionary<Guid, AccessRights>(),
+        DataverseConfirmsWrites = dataverseDecides,
+    };
+
+    [Theory(DisplayName = "Task 036: flag ON, Dataverse grants Read only on the root — to-do create is 403 and nothing is written")]
+    [MemberData(nameof(InScopeRoots))]
+    public async Task Fr20_CreateTodo_ReadOnlyInDataverse_Is403_AndWritesNothing(
+        string segment, ExternalDataService.TodoRootKind kind, Guid rootId)
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(kind, rootId, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.Answer(EntitySetOf(kind), rootId, AccessRights.Read);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.CreateCallCount.Should().Be(0, "a Read-only Dataverse answer must never reach the write");
+        _fixture.Probe.Calls.Should().ContainSingle().Which.Should().Match<(string?, string EntitySet, Guid RecordId)>(
+            c => c.EntitySet == EntitySetOf(kind) && c.RecordId == rootId, "the TARGET root is asked about, as the caller");
+    }
+
+    [Theory(DisplayName = "Task 036: flag ON, Dataverse grants AppendTo on the root — to-do create is allowed")]
+    [MemberData(nameof(InScopeRoots))]
+    public async Task Fr20_CreateTodo_AppendToInDataverse_IsCreated(
+        string segment, ExternalDataService.TodoRootKind kind, Guid rootId)
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(kind, rootId, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.Answer(EntitySetOf(kind), rootId, AccessRights.Read | AccessRights.AppendTo);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        _fixture.Data.CreateCallCount.Should().Be(1);
+        _fixture.Data.LastCreateArgs.Should().Be((kind, rootId));
+    }
+
+    [Theory(DisplayName = "Task 036 twin: flag OFF, the route decides exactly as before and asks Dataverse NOTHING")]
+    [InlineData(false, HttpStatusCode.Forbidden, 0)]
+    [InlineData(true, HttpStatusCode.Created, 1)]
+    public async Task Fr20_CreateTodo_FlagOff_NeverAsksDataverse(bool collaborate, HttpStatusCode expected, int creates)
+    {
+        _fixture.Reset();
+        var rights = collaborate ? ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate) : AccessRights.Read;
+        _fixture.Principal = SystemUserHolding(ExternalDataService.TodoRootKind.Project, InScopeProject, rights, dataverseDecides: false);
+        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(expected);
+        _fixture.Data.CreateCallCount.Should().Be(creates);
+        _fixture.Probe.Calls.Should().BeEmpty("flag off, no write consults Dataverse — the routes are unchanged");
+    }
+
+    [Fact(DisplayName = "Task 036 (NFR-01): flag ON, a probe that FAILS denies the write — no fallback to a constant")]
+    public async Task Fr20_CreateTodo_ProbeFault_Is403_AndWritesNothing()
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.Fault = new HttpRequestException("RetrievePrincipalAccess failed");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.CreateCallCount.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 036 (B-17): flag ON, a contact-grant Collaborate on the root still allows the create when Dataverse grants nothing more")]
+    public async Task Fr20_CreateTodo_ContactGrantUnion_StillAllows()
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(ExternalDataService.TodoRootKind.Project, InScopeProject,
+            ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate), dataverseDecides: true);
+        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created,
+            "the linked contact's grant is its own term (B-17): Dataverse widens the rights, it never narrows them");
+        _fixture.Data.CreateCallCount.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 036: flag ON, a root outside the composed set (or vetoed off it) is 403 WITHOUT a Dataverse call")]
+    public async Task Fr20_CreateTodo_RootOutsideTheSet_Is403_AndAsksNothing()
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.Answer("sprk_projects", OtherProject, AccessRights.Read | AccessRights.AppendTo);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{OtherProject}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.CreateCallCount.Should().Be(0);
+        _fixture.Probe.Calls.Should().BeEmpty("the deny list and the Restricted veto act on the composed set — Read comes first");
+    }
+
+    [Theory(DisplayName = "Task 036: flag ON, PATCH a to-do — confirmed on the TO-DO itself: Read-only is 403, Write is 204")]
+    [InlineData(AccessRights.Read, HttpStatusCode.Forbidden, 0)]
+    [InlineData(AccessRights.Read | AccessRights.Write, HttpStatusCode.NoContent, 1)]
+    public async Task Fr20_PatchTodo_IsConfirmedOnTheTodo(AccessRights dataverse, HttpStatusCode expected, int updates)
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
+        _fixture.Probe.Answer("sprk_todos", TodoId, dataverse);
+        // A Write on the ROOT must not stand in for Write on the to-do.
+        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.Write | AccessRights.AppendTo);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(expected);
+        _fixture.Data.UpdateCallCount.Should().Be(updates);
+        _fixture.Probe.Calls.Select(c => (c.EntitySet, c.RecordId)).Should().Equal(new[] { ("sprk_todos", TodoId) });
+    }
+
+    [Fact(DisplayName = "Task 036 twin: flag OFF, a Read-only PATCH is 403 and Dataverse is never asked")]
+    public async Task Fr20_PatchTodo_FlagOff_NeverAsksDataverse()
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: false);
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
+        _fixture.Probe.Answer("sprk_todos", TodoId, AccessRights.Read | AccessRights.Write);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.UpdateCallCount.Should().Be(0);
+        _fixture.Probe.Calls.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "Task 036: flag ON, create event — Write without AppendTo on the project is 403, AppendTo is 201")]
+    [InlineData(AccessRights.Read | AccessRights.Write, HttpStatusCode.Forbidden, 0)]
+    [InlineData(AccessRights.Read | AccessRights.AppendTo, HttpStatusCode.Created, 1)]
+    public async Task Fr20_CreateEvent_IsConfirmedOnTheProject(AccessRights dataverse, HttpStatusCode expected, int creates)
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.Answer("sprk_projects", InScopeProject, dataverse);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/external/projects/{InScopeProject}/events", new { sprk_name = "Kickoff" });
+
+        response.StatusCode.Should().Be(expected);
+        _fixture.Data.CreateEventCallCount.Should().Be(creates);
+    }
+
+    [Fact(DisplayName = "Task 036 twin: flag OFF, a Read-only event create is 403 and Dataverse is never asked")]
+    public async Task Fr20_CreateEvent_FlagOff_NeverAsksDataverse()
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: false);
+        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/external/projects/{InScopeProject}/events", new { sprk_name = "Kickoff" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.CreateEventCallCount.Should().Be(0);
+        _fixture.Probe.Calls.Should().BeEmpty();
+    }
 }
 
 /// <summary>
@@ -1045,6 +1259,9 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
 
     private readonly StubCallerPrincipalResolver _resolver = new();
 
+    /// <summary>Task 036: the caller's own Dataverse rights, as the write routes ask a Dataverse-decided caller for them.</summary>
+    public Sprk.Bff.Api.Tests.TestInfrastructure.CallerRecordAccessProbeDouble Probe { get; } = new();
+
     public CallerPrincipal? Principal
     {
         get => _resolver.Principal;
@@ -1055,6 +1272,7 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
     public void Reset()
     {
         Data.Reset();
+        Probe.Reset();
         Principal = null;
         Ownership.TeamId = Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId;
         Ownership.Fault = null;
@@ -1073,6 +1291,8 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             // Overrides the AddHttpClient<ExternalDataService> typed-client registration
             // (ExternalAccessModule.cs:59) — last registration wins for GetRequiredService.
             services.AddScoped(_ => (ExternalDataService)Data);
+            // Task 036: the same for the typed-client CallerRecordAccessProbe.
+            services.AddScoped<CallerRecordAccessProbe>(_ => Probe);
         });
     }
 
@@ -1127,6 +1347,9 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
         public (ExternalDataService.TodoRootKind Kind, Guid RootId)? LastCreateArgs { get; private set; }
         public CreateExternalTodoRequest? LastCreateRequest { get; private set; }
 
+        /// <summary>Task 036: event creates reaching Dataverse (the load-bearing assertion on the event write gate).</summary>
+        public int CreateEventCallCount { get; private set; }
+
         /// <summary>Task 146: the owning team the route handed to the create.</summary>
         public Guid? LastCreateOwningTeamId { get; private set; }
 
@@ -1147,6 +1370,15 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             LastCreateOwningTeamId = null;
             LastCreateCallerContactId = null;
             LastCreateCreator = null;
+            CreateEventCallCount = 0;
+        }
+
+        public override Task<ExternalEventDto> CreateEventAsync(
+            Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
+            CancellationToken ct = default)
+        {
+            CreateEventCallCount++;
+            return Task.FromResult(new ExternalEventDto { SprkEventid = Guid.NewGuid().ToString(), SprkName = request.SprkName });
         }
 
         /// <summary>Task 030 review: the creator principal the route handed the create (FR-25 stamp source).</summary>

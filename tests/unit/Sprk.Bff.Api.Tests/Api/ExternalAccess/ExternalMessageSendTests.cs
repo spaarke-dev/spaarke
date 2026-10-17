@@ -212,6 +212,18 @@ public class ExternalMessageSendTests
             CancellationToken.None, data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync);
     }
 
+    /// <summary>Task 036: a post with the Dataverse rights reader the route passes (the probe, as the caller).</summary>
+    private Task<IResult> Post(
+        string root, Guid id, CallerPrincipal caller,
+        Func<string, Guid, CancellationToken, Task<AccessRights>>? readCallerRights)
+    {
+        var data = _roots.NewService();
+        return ExternalMessageEndpoints.PostMessageCoreAsync(
+            root, id, new PostExternalMessageRequest { SprkBody = "Can you confirm the filing date?" }, caller,
+            ProductionRegistry(), ReadRecord, Service(), NullLogger.Instance, CancellationToken.None,
+            data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync, readCallerRights);
+    }
+
     /// <summary>A request body bound exactly as the route binds it (System.Text.Json, web defaults).</summary>
     private static PostExternalMessageRequest Bind(string json) =>
         JsonSerializer.Deserialize<PostExternalMessageRequest>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
@@ -610,6 +622,153 @@ public class ExternalMessageSendTests
         ShouldBeForbidden(result, ExternalMessageEndpoints.DenyInsufficientRights);
         ShouldHaveWrittenNothing();
     }
+
+    // ── Task 036 (FR-20, owner round 59 item 2): a caller whose access Dataverse decided posts only where Dataverse, asked
+    //    as the caller, lets it attach to the record (AppendTo) ─────────────────────────────────────────────────────────
+
+    public static TheoryData<string> DataverseConfirmedRoots => new() { "projects", "matters", "workassignments", "invoices" };
+
+    [Theory]
+    [MemberData(nameof(DataverseConfirmedRoots))]
+    public async Task Fr20_ReadAndWriteButNoAppendToInDataverse_Is403InsufficientRights_AndCreatesNoRow(string root)
+    {
+        var (caller, record) = SystemUserReading(root, dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        var result = await Post(root, record, caller, Dataverse(AccessRights.Read | AccessRights.Write, asked));
+
+        ShouldBeForbidden(result, ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldHaveWrittenNothing();
+        asked.Should().ContainSingle().Which.Should().Be((ConfirmedSetOf(root), record),
+            "Dataverse is asked about the record the message is posted on");
+    }
+
+    [Theory]
+    [MemberData(nameof(DataverseConfirmedRoots))]
+    public async Task Fr20_AppendToInDataverse_Is201(string root)
+    {
+        var (caller, record) = SystemUserReading(root, dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        Created(await Post(root, record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked)));
+
+        TheRow();
+        asked.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Fr20_AReaderThatThrows_OrNoReader_Is403_AndCreatesNoRow()
+    {
+        var (caller, record) = SystemUserReading("projects", dataverseDecides: true);
+
+        ShouldBeForbidden(
+            await Post("projects", record, caller, (_, _, _) => throw new HttpRequestException("Dataverse unreachable")),
+            ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldBeForbidden(await Post("projects", record, caller, readCallerRights: null),
+            ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    public async Task Fr20_ARecordOutsideTheSet_IsNotAccessible_AndAsksDataverseNothing()
+    {
+        var (caller, _) = SystemUserReading("projects", dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        var result = await Post("projects", Guid.NewGuid(), caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked));
+
+        ShouldBeForbidden(result, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ShouldHaveWrittenNothing();
+        asked.Should().BeEmpty("the scope check runs first; Dataverse never widens a record outside the set");
+    }
+
+    [Theory]
+    [MemberData(nameof(DataverseConfirmedRoots))]
+    public async Task Fr20_FlagOff_TheComposedRightsDecide_AndDataverseIsNeverAsked(string root)
+    {
+        // The same Read-only systemuser with the flag off: Dataverse would say AppendTo, but nobody asks.
+        var (caller, record) = SystemUserReading(root, dataverseDecides: false);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        var result = await Post(root, record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked));
+
+        ShouldBeForbidden(result, ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldHaveWrittenNothing();
+        asked.Should().BeEmpty("flag off is byte-equivalent: no Dataverse confirmation");
+    }
+
+    [Fact]
+    public async Task Fr20_FlagOff_AFullAccessSystemUserPosts_AndDataverseIsNeverAsked()
+    {
+        var project = Guid.NewGuid();
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        Created(await Post("projects", project, SystemUser(Guid.NewGuid(), project),
+            Dataverse(AccessRights.None, asked)));
+
+        asked.Should().BeEmpty();
+    }
+
+    /// <summary>Task 036: a systemuser holding Read only on a fresh record of <paramref name="root"/> (for an invoice, on
+    /// its matter) — the own term a flag-on composition gives — and that record. <paramref name="dataverseDecides"/> is the
+    /// flag.</summary>
+    private (CallerPrincipal Caller, Guid Record) SystemUserReading(string root, bool dataverseDecides)
+    {
+        var record = Guid.NewGuid();
+        IReadOnlyList<CallerProjectAccess> projects = Array.Empty<CallerProjectAccess>();
+        var matters = new Dictionary<Guid, AccessRights>();
+        var workAssignments = new Dictionary<Guid, AccessRights>();
+        switch (root)
+        {
+            case "projects":
+                projects = new[] { CallerProjectAccess.FromLevel(record, ExternalAccessLevel.ViewOnly) };
+                break;
+            case "matters":
+                matters[record] = AccessRights.Read;
+                break;
+            case "workassignments":
+                workAssignments[record] = AccessRights.Read;
+                break;
+            default:
+                var matter = Guid.NewGuid();
+                _records[("sprk_invoice", record)] = new Dictionary<string, object?>
+                {
+                    ["id"] = record,
+                    ["sprk_matter"] = Lookup(matter, "sprk_matter"),
+                };
+                matters[matter] = AccessRights.Read;
+                break;
+        }
+
+        return (new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = Guid.NewGuid(),
+            SystemUserId = Guid.NewGuid(),
+            Email = "lawyer@spaarke.test",
+            ProjectAccess = projects,
+            MatterAccess = matters,
+            WorkAssignmentAccess = workAssignments,
+            DataverseConfirmsWrites = dataverseDecides,
+        }, record);
+    }
+
+    private static string ConfirmedSetOf(string root) => root switch
+    {
+        "projects" => "sprk_projects",
+        "matters" => "sprk_matters",
+        "workassignments" => "sprk_workassignments",
+        _ => "sprk_invoices",
+    };
+
+    /// <summary>Dataverse's answer for the caller, recording every question.</summary>
+    private static Func<string, Guid, CancellationToken, Task<AccessRights>> Dataverse(
+        AccessRights answer, List<(string EntitySet, Guid RecordId)> asked) =>
+        (entitySet, recordId, _) =>
+        {
+            asked.Add((entitySet, recordId));
+            return Task.FromResult(answer);
+        };
 
     // ── AC 3: the stored sender is the caller, whatever the request names ────────────────────────────────────────
 
