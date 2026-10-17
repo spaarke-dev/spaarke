@@ -576,6 +576,101 @@ public class CoreAncestorResolverTests
         }
     }
 
+    // ── ebilling-r1 task 026 fix-round-1: the refusal kind (additive; every existing caller's result is unchanged) ──
+
+    private static Mock<IGenericEntityService> EntityServiceThrowing(Exception ex)
+    {
+        var mock = new Mock<IGenericEntityService>(MockBehavior.Loose);
+        mock.Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(ex);
+        return mock;
+    }
+
+    private static Exception NotFoundFault() =>
+        new System.ServiceModel.FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217) }, "Does Not Exist");
+
+    [Fact(DisplayName = "ebilling-r1 task 026 fix-round-1: each refusal names its kind — MultipleRoots / NotFound permanent, Transient not")]
+    public async Task Refusals_CarryTheirKind_AndTheSamePermanenceAsBefore()
+    {
+        var lineTwoRoots = new Entity("sprk_billingevent", LineId)
+        {
+            ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_project"] = new EntityReference("sprk_project", ProjectId),
+        };
+        var documentTwoMatters = new Entity("sprk_document", CommId)
+        {
+            ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_relatedmatter"] = new EntityReference("sprk_matter", Guid.NewGuid()),
+        };
+
+        var cases = new (string Name, CoreAncestorResult Result, CoreAncestorRefusalKind Kind, bool Permanent)[]
+        {
+            ("line two roots", await Build(EntityServiceReturning(lineTwoRoots), Probe(LineColumns)).ResolveStampsAsync("sprk_billingevent", LineId),
+                CoreAncestorRefusalKind.MultipleRoots, true),
+            ("document two matters", await Build(EntityServiceReturning(documentTwoMatters), Probe("sprk_matter", "sprk_relatedmatter"))
+                .ResolveStampsAsync("sprk_document", CommId), CoreAncestorRefusalKind.MultipleRoots, true),
+            ("not found", await Build(EntityServiceThrowing(NotFoundFault()), Probe(CommunicationColumns)).ResolveStampsAsync("sprk_communication", CommId),
+                CoreAncestorRefusalKind.NotFound, true),
+            ("null row", await Build(EntityServiceReturning(null), Probe(CommunicationColumns)).ResolveStampsAsync("sprk_communication", CommId),
+                CoreAncestorRefusalKind.NotFound, true),
+            ("read fault", await Build(EntityServiceThrowing(new InvalidOperationException("Dataverse 503")), Probe(CommunicationColumns))
+                .ResolveStampsAsync("sprk_communication", CommId), CoreAncestorRefusalKind.Transient, false),
+            ("metadata fault", await Build(EntityServiceReturning(null), ThrowingProbe()).ResolveStampsAsync("sprk_communication", CommId),
+                CoreAncestorRefusalKind.Transient, false),
+            ("empty id", await Build(EntityServiceReturning(null), Probe(CommunicationColumns)).ResolveStampsAsync("sprk_communication", Guid.Empty),
+                CoreAncestorRefusalKind.Transient, false),
+        };
+
+        foreach (var (name, result, kind, permanent) in cases)
+        {
+            result.Status.Should().Be(CoreAncestorStatus.Error, name);
+            result.Stamps.Should().BeEmpty(name);
+            result.IsPermanent.Should().Be(permanent, name);
+            result.RefusalKind.Should().Be(kind, name);
+        }
+    }
+
+    [Theory(DisplayName = "ebilling-r1 task 026 fix-round-1: a successful derivation carries no refusal kind (core, intermediate, no-ancestor, unclassified)")]
+    [InlineData("sprk_matter", CoreAncestorStatus.CoreTarget)]
+    [InlineData("sprk_project", CoreAncestorStatus.CoreTarget)]
+    [InlineData("sprk_workassignment", CoreAncestorStatus.CoreTarget)]
+    [InlineData("sprk_communication", CoreAncestorStatus.Derived)]
+    [InlineData("sprk_todo", CoreAncestorStatus.NoAncestor)]
+    [InlineData("contact", CoreAncestorStatus.Unclassified)]
+    public async Task Successes_CarryNoRefusalKind(string target, CoreAncestorStatus status)
+    {
+        var row = new Entity(target, CommId);
+        if (status == CoreAncestorStatus.Derived) row["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId);
+
+        var result = await Build(EntityServiceReturning(row), Probe(CommunicationColumns)).ResolveStampsAsync(target, CommId);
+
+        result.Status.Should().Be(status);
+        result.IsPermanent.Should().BeFalse();
+        result.RefusalKind.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 026 fix-round-1: StampAsync carries the refusal kind and permanence through to the writer")]
+    public async Task StampAsync_CarriesTheRefusalKind()
+    {
+        var lineTwoRoots = new Entity("sprk_billingevent", LineId)
+        {
+            ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", Guid.NewGuid()),
+        };
+
+        var outcome = await Build(EntityServiceReturning(lineTwoRoots), Probe(LineColumns))
+            .StampAsync(new Entity("sprk_signal"), "sprk_billingevent", LineId, default);
+        var fault = await Build(EntityServiceThrowing(new InvalidOperationException("503")), Probe(LineColumns))
+            .StampAsync(new Entity("sprk_signal"), "sprk_billingevent", LineId, default);
+
+        outcome.Succeeded.Should().BeFalse();
+        outcome.IsPermanent.Should().BeTrue();
+        outcome.RefusalKind.Should().Be(CoreAncestorRefusalKind.MultipleRoots);
+        fault.IsPermanent.Should().BeFalse();
+        fault.RefusalKind.Should().Be(CoreAncestorRefusalKind.Transient);
+    }
+
     [Theory(DisplayName = "Task 156: agreement and report card derive from their own sprk_regardingmatter / sprk_regardingproject (they were Unclassified)")]
     [InlineData("sprk_agreement")]
     [InlineData("sprk_reportcard")]

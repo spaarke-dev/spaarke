@@ -1144,8 +1144,14 @@ public sealed partial class SignalWriter
     /// ebilling-r1 task 026 (FR-05, FR-15, D-75): an invoice or invoice-line subject (a table of
     /// <see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/>) is filed under exactly ONE core record, its own. The
     /// resolver's answer for it is used only when it names one: no core record is refused here, never written as a no-core Do
-    /// item (D-35), and more than one is refused, never picked by D-37's matter-over-project rule. (A line naming more than one
-    /// is already a derivation error in the resolver; an invoice is checked here.) Other subjects are untouched.
+    /// item (D-35), and more than one is refused, never picked by D-37's matter-over-project rule. "More than one" arrives two
+    /// ways, and both give <see cref="OntologyWriterFailureReason.CoreRecordAmbiguous"/>: an invoice naming several core
+    /// records is <see cref="CoreAncestorStatus.Derived"/> with several stamps; a line naming several is a permanent
+    /// <see cref="CoreAncestorStatus.Error"/> with <see cref="CoreAncestorRefusalKind.MultipleRoots"/> (the resolver refuses a
+    /// line, <see cref="CoreAncestorResolver.SingleRootIntermediates"/>), as is either one naming two records of one table. A
+    /// subject that no longer exists (<see cref="CoreAncestorRefusalKind.NotFound"/>) or a fault
+    /// (<see cref="CoreAncestorRefusalKind.Transient"/>) is left to the caller's Error case
+    /// (<see cref="OntologyWriterFailureReason.CoreRecordUnresolved"/>), as before. Other subjects are untouched.
     /// </summary>
     /// <exception cref="SignalWriterEscalationException">The invoice-family subject names no core record
     /// (<see cref="OntologyWriterFailureReason.CoreRecordUnresolved"/>) or more than one
@@ -1171,6 +1177,15 @@ public sealed partial class SignalWriter
             throw new SignalWriterEscalationException(
                 $"{subjectEntity} {subjectId:D} names {result.Stamps.Count} core records " +
                 $"({string.Join(", ", result.Stamps.Select(s => s.EntityType))}); FR-05 allows exactly one, so none is picked.",
+                OntologyWriterFailureReason.CoreRecordAmbiguous);
+        }
+
+        if (result.Status == CoreAncestorStatus.Error && result.IsPermanent
+            && result.RefusalKind == CoreAncestorRefusalKind.MultipleRoots)
+        {
+            throw new SignalWriterEscalationException(
+                $"{subjectEntity} {subjectId:D} names more than one core record ({result.Error}); FR-05 allows exactly one, so " +
+                "none is picked.",
                 OntologyWriterFailureReason.CoreRecordAmbiguous);
         }
     }

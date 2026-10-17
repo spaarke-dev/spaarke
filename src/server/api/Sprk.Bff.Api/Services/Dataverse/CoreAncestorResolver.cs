@@ -667,13 +667,16 @@ public sealed class CoreAncestorResolver
                 targetEntityLogicalName, targetRecordId);
             var failure = $"Failed to read core-ancestor lookups from {targetEntityLogicalName}({targetRecordId}): {ex.Message}";
             // Ontology task 142: a target that does not exist is a data condition, not a fault (still Error, still no write).
-            return IsRecordNotFound(ex) ? CoreAncestorResult.Refused(failure) : CoreAncestorResult.Failed(failure);
+            return IsRecordNotFound(ex)
+                ? CoreAncestorResult.Refused(failure, CoreAncestorRefusalKind.NotFound)
+                : CoreAncestorResult.Failed(failure);
         }
 
         if (row is null)
         {
             return CoreAncestorResult.Refused(
-                $"Core-ancestor read returned no row for {targetEntityLogicalName}({targetRecordId}).");
+                $"Core-ancestor read returned no row for {targetEntityLogicalName}({targetRecordId}).",
+                CoreAncestorRefusalKind.NotFound);
         }
 
         var stamps = new List<CoreAncestorStamp>();
@@ -698,7 +701,8 @@ public sealed class CoreAncestorResolver
                         targetEntityLogicalName, targetRecordId, rootEntity, already.RecordId, reference.Id);
                     return CoreAncestorResult.Refused(
                         $"{targetEntityLogicalName}({targetRecordId}) names two different {rootEntity} records, so its "
-                        + "root cannot be determined.");
+                        + "root cannot be determined.",
+                        CoreAncestorRefusalKind.MultipleRoots);
                 }
 
                 continue;
@@ -722,7 +726,8 @@ public sealed class CoreAncestorResolver
                 "{Entity}({Id}) names {Count} core records ({Roots}); FR-05 allows one, so no stamp is derived.",
                 targetEntityLogicalName, targetRecordId, stamps.Count, string.Join(", ", stamps.Select(s => s.EntityType)));
             return CoreAncestorResult.Refused(
-                $"{targetEntityLogicalName}({targetRecordId}) names more than one core record, so its root cannot be determined.");
+                $"{targetEntityLogicalName}({targetRecordId}) names more than one core record, so its root cannot be determined.",
+                CoreAncestorRefusalKind.MultipleRoots);
         }
 
         return new CoreAncestorResult(CoreAncestorStatus.Derived, stamps, null);
@@ -1269,6 +1274,7 @@ public sealed class CoreAncestorResolver
             return (null, null, CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed.") with
             {
                 IsPermanent = result.IsPermanent,
+                RefusalKind = result.RefusalKind ?? CoreAncestorRefusalKind.Transient,
             });
         }
 
@@ -1384,12 +1390,38 @@ public sealed record CoreAncestorResult(
     /// no target (built with the public constructor) is never reused by <c>StampAsync(..., alreadyDerived)</c> (ontology task 042).</summary>
     internal (string Entity, Guid Id)? For { get; init; }
 
+    /// <summary>
+    /// ebilling-r1 task 026 fix-round-1: on an <see cref="CoreAncestorStatus.Error"/>, WHY the derivation failed, so a writer can say
+    /// "ambiguous" for a target that names more than one root without reading the message. <see langword="null"/> on success.
+    /// Additive: <see cref="Status"/>, <see cref="Stamps"/>, <see cref="Error"/> and <see cref="IsPermanent"/> are unchanged for every
+    /// caller (<see cref="CoreAncestorRefusalKind.Transient"/> exactly when <see cref="IsPermanent"/> is false).
+    /// </summary>
+    public CoreAncestorRefusalKind? RefusalKind { get; init; }
+
     internal static CoreAncestorResult Failed(string error) =>
-        new(CoreAncestorStatus.Error, [], error);
+        new(CoreAncestorStatus.Error, [], error) { RefusalKind = CoreAncestorRefusalKind.Transient };
 
-    internal static CoreAncestorResult Refused(string error) =>
-        Failed(error) with { IsPermanent = true };
+    internal static CoreAncestorResult Refused(string error, CoreAncestorRefusalKind kind) =>
+        Failed(error) with { IsPermanent = true, RefusalKind = kind };
 
+}
+
+/// <summary>
+/// ebilling-r1 task 026 fix-round-1: why a core-ancestor derivation failed (<see cref="CoreAncestorResult.RefusalKind"/>).
+/// </summary>
+public enum CoreAncestorRefusalKind
+{
+    /// <summary>A fault (a read or metadata failure, a throttle, a caller error): a retry may succeed. Not permanent.</summary>
+    Transient,
+
+    /// <summary>The target row does not exist. Permanent.</summary>
+    NotFound,
+
+    /// <summary>
+    /// The target names more than one root: two different records of one root table, or, for a
+    /// <see cref="CoreAncestorResolver.SingleRootIntermediates"/> table, more than one core record. Permanent.
+    /// </summary>
+    MultipleRoots,
 }
 
 /// <summary>
@@ -1423,6 +1455,9 @@ public sealed record CoreAncestorStampOutcome(
     /// <summary>On a failure, true when it is a data condition, not a fault (<see cref="CoreAncestorResult.IsPermanent"/>).</summary>
     public bool IsPermanent { get; init; }
 
+    /// <summary>On a failure, why (<see cref="CoreAncestorResult.RefusalKind"/>); <see langword="null"/> on success.</summary>
+    public CoreAncestorRefusalKind? RefusalKind { get; init; }
+
     internal static CoreAncestorStampOutcome Failed(string error) =>
-        new(CoreAncestorStatus.Error, [], [], error);
+        new(CoreAncestorStatus.Error, [], [], error) { RefusalKind = CoreAncestorRefusalKind.Transient };
 }

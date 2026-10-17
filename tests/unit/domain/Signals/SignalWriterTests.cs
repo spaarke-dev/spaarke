@@ -1229,9 +1229,41 @@ public class SignalWriterTests
 
         var act = async () => await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun)).WriteAsync(DoRequest("sprk_billingevent", LineId));
 
+        // Fix-round-1 (ontology K1): the same reason as a two-core invoice — the resolver's MultipleRoots refusal is "ambiguous".
+        (await act.Should().ThrowAsync<SignalWriterEscalationException>())
+            .Which.Reason.Should().Be(OntologyWriterFailureReason.CoreRecordAmbiguous);
+        writerOrg.CreatedPayloads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WriteAsync_InvoiceLineWhoseReadFaults_IsStillUnresolved_NeverAmbiguous()
+    {
+        // A Transient refusal keeps its reason: only MultipleRoots maps to CoreRecordAmbiguous.
+        var sysadmin = new FakeSysadminClient { ThrowOnRetrieveOf = "sprk_billingevent" };
+        var writerOrg = new FakeOrganizationService();
+
+        var act = async () => await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun)).WriteAsync(DoRequest("sprk_billingevent", LineId));
+
         (await act.Should().ThrowAsync<SignalWriterEscalationException>())
             .Which.Reason.Should().Be(OntologyWriterFailureReason.CoreRecordUnresolved);
         writerOrg.CreatedPayloads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void RequireSingleInvoiceFamilyCore_MapsOnlyAPermanentMultipleRootsRefusal_ToAmbiguous()
+    {
+        var multiple = new Ownership.CoreAncestorResult(Ownership.CoreAncestorStatus.Error, [], "two roots")
+        { IsPermanent = true, RefusalKind = Ownership.CoreAncestorRefusalKind.MultipleRoots };
+        var notFound = multiple with { RefusalKind = Ownership.CoreAncestorRefusalKind.NotFound };
+        var transient = multiple with { IsPermanent = false, RefusalKind = Ownership.CoreAncestorRefusalKind.Transient };
+
+        FluentActions.Invoking(() => SignalWriter.RequireSingleInvoiceFamilyCore("sprk_invoice", InvoiceId, multiple))
+            .Should().Throw<SignalWriterEscalationException>().Which.Reason.Should().Be(OntologyWriterFailureReason.CoreRecordAmbiguous);
+        FluentActions.Invoking(() => SignalWriter.RequireSingleInvoiceFamilyCore("sprk_invoice", InvoiceId, notFound)).Should().NotThrow(
+            "NotFound is the caller's Error case (CoreRecordUnresolved), unchanged");
+        FluentActions.Invoking(() => SignalWriter.RequireSingleInvoiceFamilyCore("sprk_invoice", InvoiceId, transient)).Should().NotThrow();
+        FluentActions.Invoking(() => SignalWriter.RequireSingleInvoiceFamilyCore("sprk_document", InvoiceId, multiple)).Should().NotThrow(
+            "a subject outside the invoice family is untouched");
     }
 
     [Fact]
