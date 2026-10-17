@@ -11,22 +11,39 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. Done 40/79. Running (4 agents, base 16c76e7d8): 070 fix-round-2 (ontology paired change), 026 fix-round-2 + DEF-022 (D-96 invoice-side line check, app identity; guard on three generic update paths; uac K4; 053/130 doc items), 015 (retire sprk_invoicestatus, owner D-97 incl. live delete), 051 (SPA submission UI). ADR-010 ceiling 166; route ledger 136 (after the master merge) |
-| **Step** | origin/master 1df4ee12d merged as 49acd2f78. Conflicts: ADR010 166, ledger 136, SignalReevaluationJobTests fake, PolicyVersionValidator (ValidateForAuthoring passes RuleDomain.Ontology). The full unit suite is running on 49acd2f78 with TRX, results in scratchpad/full-49acd2f78. The earlier 25 failures came from a pre-#2074 master regression (#2072); clean master 1df4ee12d passes TodoAssigneeOwnerReconciliationJobTests 34/34 |
+| **Task** | Parallel mode. 41/79 complete (070 included). On the branch, awaiting review: 015, 051, 071, 076, and 074 part 1. Agents running from base 62a1ec56b+: 074 (finishing the D-100 writer entry), adversarial review of 071 (1 pass), adversarial review of 076 (pass 1 of 2, auth), 075 (rule drafting Action) |
+| **Step** | Cherry-picked 015 (e0df77339..d4e555e38), 071 (6b99e980f..d22c8e26d), 051 (bdcc8ee35..d35563abd), 076 (194aada77..351704736) and 074 part 1 (0c2f8590f, 5455d3977). ADR-010 ceiling 166; route ledger 137 (076). Build, ArchTests and targeted tests are running on 62a1ec56b. external-spa uses vitest, not jest |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | As each agent reports: cherry-pick (trailer rewrite, background, 600 s), build, targeted tests and ArchTests. 070 → send its range to ontology-r1, including the merge-time ValidateForAuthoring change; on approval mark 070 ✅, then start 071/074/075/076 (≤4 at a time). 026 fr2 → send to uac-r2 (resolver K4, OwnedChildWrite D-96, the three DEF-022 paths) and ontology-r1 (053/130 docs); on OK mark 026 ✅ and close #2056 via the PR. 015 → apply the ACT-004.json edit in the main session (.claude), send ontology-r1 the notice the agent wrote, review the live delete evidence, mark ✅. 051 → review, then mark ✅ (052 also needs 105) |
+| **Next Action** | As each agent reports: 074 → cherry-pick, then send the range to ontology-r1 (7-point plan + re-check). 071 / 076 review findings → fix agent; then 076 pass 2. 075 → review, cherry-pick. Wait for: uac-r2 (026 fr2 re-check → mark 026 ✅, close #2056; 015 shared files; 051 /me), SPA-r3 (015 / 051 notices), ontology-r1 (015 files). Mark 015 / 051 / 071 / 076 ✅ after their reviews. Next launches: 072 (needs 071 ✅), 077 (needs 076 ✅), then 049 (needs 072, 073) |
 
 ### Files Modified This Session
-- All committed (last: D-97 16c76e7d8, plus this checkpoint).
+- All committed (last: 049 two-path constraint e5a0e42c9, plus this checkpoint).
 
 ### Critical Context
-- Decisions: D-92 (= ontology D-153); D-93 tuning (054 done); D-94 billingevent intermediate; D-95/D-95a AppendTo (ontology #2048) + firm reason FLS (applied live; profile "Spaarke Ontology Writer Firm Reason Writers", accepted by ontology); D-96 invoice re-file refused when lines name another core (app identity); D-97 owner OK for 015 incl. delete.
-- 015 code check (owner asked to cover ontology code): indirect readers via the FinanceBaseValues constants (FinanceRollupService); live-only aiskillconfig a32ae5a7 (Copilot form-fill opt-out) blocks the attribute delete; 3 live rows (ToReview, statuscode 1); stale ontology branches carry the old FinanceRollupService. All of this is in the 015 POML constraints.
-- DEF-022 (#2056): FR-05 guard missing on UpdateRecordActionCore, DataverseUpdateHandler and the FieldMappingEndpoints push; uac-r2 direction is to guard each path (fix in 026 fr2).
-- Standing: no line (sprk_billingevent) upload/storage route before uac-r2 #2047. The 053 deploy needs the SpaarkeMaster import (or schema) before the BFF, then the firm-reason script.
-- The full Sprk.Bff.Api.Tests run takes ~45 min (24.5k tests); agents run filtered sets only.
-- Owner action pending: add the 7 new tables to the Matter Management and Spaarke Administration apps (app designer).
-- Open: 106 rate-history question (optional); DEF-015; ISS-009; #2010, #2011, #2045; write-path registry row for the tracking number.
+- Decisions this session:
+  - D-96: invoice re-file line check runs as the app identity.
+  - D-97: 015 approved, including the delete.
+  - D-98: counted spend = In Review, Approved, Sent to AP, Paid.
+  - D-99: firm step for multi-firm callers.
+  - D-100: path B, `WriteBillingDecisionAsync`.
+  - D-101: every submission that is read creates its invoice. Rejected → created Rejected; blocked → In Review, held; no submission lookup on DR.
+  - D-102: held invoices are excluded from spend on BOTH sum paths (FinanceRollupService and FinanceBaseValues.BuildGroupedSumFetchXml). One predicate, in FinanceBaseValues. Ships with 049.
+- ontology-r1 conditions:
+  - 074's 7-point plan is in the 074 agent prompt and D-100.
+  - **PR #1911 must not merge to master until ontology's owner confirms Q24 (CountedInvoiceStatuses).**
+  - 049 goes to ontology-r1 for an adversarial pass.
+- 015 live delete sequence: deploy the BFF containing e0df77339 → `Remove-EbillingInvoiceStatus.ps1 -GridConfig` (WhatIf first) → `-Delete -OwnerApproval 'D-97 2026-10-17 owner'`. Blocked by grid config 3ff4102c and live aiskillconfig a32ae5a7. Runs at the 053 / 079 deploy. SpaarkeMaster source is ahead of dev: no full import before the delete.
+- Filed #2077: WorkspaceAiService and ProjectLiveFactResolver read columns that don't exist (pre-existing, outside scope).
+- Standing:
+  - no line (sprk_billingevent) upload or storage route before uac-r2 #2047;
+  - 026 must not edit `Roles/Spaarke Ontology Service.xml` (#2048);
+  - remove worktrees with `scripts/worktree/Remove-WorktreeSafe.ps1`;
+  - the full Sprk.Bff.Api.Tests run takes ~50 min; agents run filtered sets only.
+- Owner awareness:
+  - 071 judgment calls 1–4 were accepted as recommended.
+  - 076 billing admin = Write on sprk_ruleset, which no role carries yet (owner decision before 079).
+  - The owner must add the 7 new tables to the Matter Management and Spaarke Administration apps.
+- Open: lint-staged shared-stash risk (G-18), not yet filed; DEF-015; ISS-009; #2010, #2011, #2045.
 
 ---
 
@@ -34,7 +51,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 070 fr2, 026 fr2, 015, 051 (agents) |
+| **Task ID** | 074, 075 (implementers); 071, 076 (reviews) |
 
 ## Next Action
 
