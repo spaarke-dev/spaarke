@@ -3,10 +3,12 @@ using System.Text.RegularExpressions;
 using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using Microsoft.Graph;
 using Moq;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -21,7 +23,7 @@ using static Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.IdentityBindingTes
 namespace Sprk.Bff.Api.Tests.Services.Registration;
 
 /// <summary>
-/// customer-provisioning-orchestration-r1 (found at T186): <see cref="DemoExpirationService"/> removes an expired demo
+/// customer-provisioning-orchestration-r1 (found at T186): <see cref="DemoExpirationJob"/> removes an expired demo
 /// user from the team and revokes the SPE container of the environment THE REQUEST WAS PROVISIONED INTO (its own
 /// "Target Environment" lookup, as the approve path reads it) - never of a registry-wide "default" or "first active" row.
 /// </summary>
@@ -30,13 +32,13 @@ namespace Sprk.Bff.Api.Tests.Services.Registration;
 /// row flagged default, else the first active row by name, so a new row that sorted first (e.g. "ACME Corporation")
 /// silently redirected every expiry to it: the row had no TeamName / SpeContainerId, Steps 2 and 4 threw and were logged,
 /// and the record was still marked Expired with the user's access intact.</para>
-/// <para>The real <see cref="DemoExpirationService"/> pass runs over the real <see cref="RegistrationDataverseService"/>
+/// <para>The real <see cref="DemoExpirationJob"/> pass runs over the real <see cref="RegistrationDataverseService"/>
 /// against a recording HTTP stub of the admin Dataverse; the registry is doubled at its virtual reads (the
 /// <c>IdentityLinkReconciliationTests</c> convention), and the ownership guard at its virtual <c>IsOwnedAsync</c>
 /// (<see cref="TestSpeOwnership"/> convention) so the container the revoke asks about is recorded. What each test pins is
 /// the team name queried and the container asked about; the Graph steps are not reachable here and are only counted.</para>
 /// </remarks>
-public class DemoExpirationServiceTargetEnvironmentTests
+public class DemoExpirationJobTargetEnvironmentTests
 {
     private const string AdminDataverse = "https://admin.crm.dynamics.com";
     private const string TargetDataverse = "https://zeta-demo.crm.dynamics.com";
@@ -69,10 +71,10 @@ public class DemoExpirationServiceTargetEnvironmentTests
 
     private readonly RecordingDataverse _dataverse = new();
     private readonly Mock<IGraphClientFactory> _graph = new();
-    private readonly CapturingLogger<DemoExpirationService> _log = new();
+    private readonly CapturingLogger<DemoExpirationJob> _log = new();
     private readonly RecordingGuard _guard;
 
-    public DemoExpirationServiceTargetEnvironmentTests()
+    public DemoExpirationJobTargetEnvironmentTests()
     {
         // Steps 1 and 3 (Entra) are not reachable without a Graph; the factory refuses so each logs and moves on.
         _graph.Setup(f => f.ForApp()).Throws(new InvalidOperationException("Graph is not reachable in this test."));
@@ -98,44 +100,70 @@ public class DemoExpirationServiceTargetEnvironmentTests
         registry.ReadIds.Should().Equal(new[] { TargetEnvironmentId }, "the environment is read once per record and reused by Steps 2 and 4");
         registry.ActiveListReads.Should().Be(0, "no registry-wide pick is made");
         _dataverse.TeamRemovals.Should().Be(1);
-        _dataverse.ExpiredStatusWrites.Should().Be(1);
+        _dataverse.ExpiredStatusWrites.Should().Be(0,
+            "Steps 1 and 3 cannot reach Graph in this fixture, so the request stays Provisioned for the next run (#1363)");
     }
 
     /// <summary>
     /// MUTATION: falling back to the registry's default / first active row when the request has no target environment
-    /// queries a team and asks about a container; the error log naming the request is also gone.
+    /// queries a team and asks about a container; the warning naming the request is also gone. An absent environment
+    /// holds nothing to clean, so once Steps 1 and 3 succeed the request is expired (the outcome T186 pinned; #1363).
     /// </summary>
     [Fact]
-    public async Task ExpiredRecord_WithoutTargetEnvironment_SkipsTeamRemovalAndSpeRevoke_LogsAnError_AndStillExpires()
+    public async Task ExpiredRecord_WithoutTargetEnvironment_SkipsTeamRemovalAndSpeRevoke_LogsAWarning_AndExpires()
     {
+        EntraReachable();
         _dataverse.Provisioned = ExpiredRequest(environmentId: null);
         var registry = Registry(byId: _ => Target, active: [FirstByName, Target]);
 
         await Sut(registry).ProcessExpirationsAsync(CancellationToken.None);
 
-        AssertSteps2And4Skipped(registry);
-        ErrorsNaming(RequestId).Should().ContainSingle(m => m.Contains("no target environment"));
+        AssertSteps2And4Skipped(registry, expiredStatusWrites: 1, "an absent environment holds nothing to clean");
+        WarningsNaming(RequestId).Should().ContainSingle(m => m.Contains("no target environment"));
+        ErrorsNaming(RequestId).Should().BeEmpty();
         registry.ReadIds.Should().BeEmpty();
     }
 
-    /// <summary>MUTATION: as above, when the lookup row no longer exists.</summary>
+    /// <summary>MUTATION: as above, when a successful registry read finds that the lookup row no longer exists.</summary>
     [Fact]
-    public async Task ExpiredRecord_WhoseTargetEnvironmentIsNotFound_SkipsTeamRemovalAndSpeRevoke_LogsAnError_AndStillExpires()
+    public async Task ExpiredRecord_WhoseTargetEnvironmentIsNotFound_SkipsTeamRemovalAndSpeRevoke_LogsAWarning_AndExpires()
+    {
+        EntraReachable();
+        _dataverse.Provisioned = ExpiredRequest(TargetEnvironmentId);
+        var registry = Registry(byId: _ => null, active: [FirstByName, Target]);
+
+        await Sut(registry).ProcessExpirationsAsync(CancellationToken.None);
+
+        AssertSteps2And4Skipped(registry, expiredStatusWrites: 1, "an absent environment holds nothing to clean");
+        WarningsNaming(RequestId).Should().ContainSingle(m => m.Contains("does not exist") && m.Contains(TargetEnvironmentId.ToString()));
+        ErrorsNaming(RequestId).Should().BeEmpty();
+        registry.ReadIds.Should().Equal(new[] { TargetEnvironmentId });
+    }
+
+    /// <summary>
+    /// MUTATION: letting an absent environment stand in for the tenant-side steps. The environment is gone, but the
+    /// Entra disable and group removal still failed, so the request is not expired.
+    /// </summary>
+    [Fact]
+    public async Task ExpiredRecord_WhoseTargetEnvironmentIsNotFound_ButEntraIsUnreachable_IsNotExpired()
     {
         _dataverse.Provisioned = ExpiredRequest(TargetEnvironmentId);
         var registry = Registry(byId: _ => null, active: [FirstByName, Target]);
 
         await Sut(registry).ProcessExpirationsAsync(CancellationToken.None);
 
-        AssertSteps2And4Skipped(registry);
-        ErrorsNaming(RequestId).Should().ContainSingle(m => m.Contains("was not found") && m.Contains(TargetEnvironmentId.ToString()));
-        registry.ReadIds.Should().Equal(new[] { TargetEnvironmentId });
+        AssertSteps2And4Skipped(registry, expiredStatusWrites: 0, "Steps 1 and 3 failed");
     }
 
-    /// <summary>MUTATION: a registry read that throws escapes the per-step handling and the record is never marked Expired.</summary>
+    /// <summary>
+    /// MUTATION: treating a faulted registry read as "the environment is gone" expires the request with its team
+    /// membership and SPE grant possibly intact. A fault is transient: the request stays Provisioned for the next run.
+    /// Entra is reachable here, so the unreadable environment alone keeps it Provisioned.
+    /// </summary>
     [Fact]
-    public async Task ExpiredRecord_WhoseTargetEnvironmentCannotBeRead_SkipsTeamRemovalAndSpeRevoke_LogsAnError_AndStillExpires()
+    public async Task ExpiredRecord_WhoseTargetEnvironmentCannotBeRead_SkipsTeamRemovalAndSpeRevoke_LogsAnError_AndIsNotExpired()
     {
+        EntraReachable();
         _dataverse.Provisioned = ExpiredRequest(TargetEnvironmentId);
         var registry = Registry(
             byId: _ => throw new HttpRequestException("registry unavailable"),
@@ -143,8 +171,10 @@ public class DemoExpirationServiceTargetEnvironmentTests
 
         await Sut(registry).ProcessExpirationsAsync(CancellationToken.None);
 
-        AssertSteps2And4Skipped(registry);
+        AssertSteps2And4Skipped(registry, expiredStatusWrites: 0, "an unreadable environment is retried on the next run (#1363)");
         ErrorsNaming(RequestId).Should().Contain(m => m.Contains("Failed to read target environment"));
+        // The fixture's request is 15 days overdue, so the retry line is at Error (K3); within 7 days it is a Warning.
+        ErrorsNaming(RequestId).Should().ContainSingle(m => m.Contains("NOT expired") && m.Contains("read target environment"));
     }
 
     /// <summary>An environment deactivated after the demo was provisioned still holds the user's access; expiry removes it.</summary>
@@ -206,21 +236,29 @@ public class DemoExpirationServiceTargetEnvironmentTests
         _dataverse.TeamLookupHosts.Should().BeEmpty();
         _dataverse.TeamRemovals.Should().Be(0);
         ErrorsNaming(RequestId).Should().Contain(m => m.Contains("Failed to remove from Demo Team"));
-        _dataverse.ExpiredStatusWrites.Should().Be(1);
+        _dataverse.ExpiredStatusWrites.Should().Be(0, "the team removal failed, so the request is not expired (#1363)");
     }
 
-    private void AssertSteps2And4Skipped(RegistryDouble registry)
+    private void AssertSteps2And4Skipped(RegistryDouble registry, int expiredStatusWrites, string because)
     {
         _dataverse.TeamNamesQueried.Should().BeEmpty("Step 2 is skipped");
         _dataverse.TeamRemovals.Should().Be(0);
         _guard.ContainersAsked.Should().BeEmpty("Step 4 is skipped");
         registry.ActiveListReads.Should().Be(0, "no registry-wide pick is made");
         _graph.Verify(f => f.ForApp(), Times.Exactly(2)); // Steps 1 and 3 still run
-        _dataverse.ExpiredStatusWrites.Should().Be(1, "the record is still marked Expired");
+        _dataverse.ExpiredStatusWrites.Should().Be(expiredStatusWrites, because);
     }
 
-    private List<string> ErrorsNaming(Guid requestId) => _log.Entries
-        .Where(e => e.Level == LogLevel.Error && e.Message.Contains(requestId.ToString()))
+    /// <summary>Steps 1 and 3 succeed: Entra answers through an in-memory Graph (the retry tests' double).</summary>
+    private void EntraReachable()
+        => _graph.Setup(f => f.ForApp()).Returns(() => new GraphServiceClient(new DemoExpirationJobRetryTests.StatefulGraph()));
+
+    private List<string> ErrorsNaming(Guid requestId) => LogsNaming(LogLevel.Error, requestId);
+
+    private List<string> WarningsNaming(Guid requestId) => LogsNaming(LogLevel.Warning, requestId);
+
+    private List<string> LogsNaming(LogLevel level, Guid requestId) => _log.Entries
+        .Where(e => e.Level == level && e.Message.Contains(requestId.ToString()))
         .Select(e => e.Message)
         .ToList();
 
@@ -241,7 +279,7 @@ public class DemoExpirationServiceTargetEnvironmentTests
             byId,
             active);
 
-    private DemoExpirationService Sut(DataverseEnvironmentService registry)
+    private DemoExpirationJob Sut(DataverseEnvironmentService registry)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["DATAVERSE_URL"] = AdminDataverse })
@@ -260,20 +298,31 @@ public class DemoExpirationServiceTargetEnvironmentTests
             new NullMembershipCacheInvalidator(NullLogger<NullMembershipCacheInvalidator>.Instance));
 
         var options = Options.Create(new DemoProvisioningOptions { DemoUsersGroupId = "group-1" });
-        return new DemoExpirationService(
+        var scopes = new ServiceCollection()
+            .AddSingleton(Mock.Of<Sprk.Bff.Api.Services.Jobs.IIdempotencyService>())
+            .BuildServiceProvider()
+            .GetRequiredService<IServiceScopeFactory>();
+        return new DemoExpirationJob(
             new GraphUserService(_graph.Object, new PasswordGenerator(), options, NullLogger<GraphUserService>.Instance),
             dataverse,
             new RegistrationEmailService(null!, Options.Create(new CommunicationOptions()), NullLogger<RegistrationEmailService>.Instance),
             _guard,
             registry,
+            scopes,
+            new FakeTimeProvider(DateTimeOffset.Parse("2026-10-16T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture)),
             options,
-            _log);
+            _log,
+            NullLoggerFactory.Instance);
     }
 
     /// <summary>The environment registry at its virtual reads (no HTTP double); records what was asked of it.</summary>
     private sealed class RegistryDouble(
         IConfiguration configuration, Func<Guid, DataverseEnvironmentRecord?> byId, List<DataverseEnvironmentRecord> active)
-        : DataverseEnvironmentService(configuration, new StaticTokenCredential(), NullLogger<DataverseEnvironmentService>.Instance)
+        : DataverseEnvironmentService(
+            configuration,
+            new StaticTokenCredential(),
+            Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
+            NullLogger<DataverseEnvironmentService>.Instance)
     {
         public List<Guid> ReadIds { get; } = [];
         public int ActiveListReads { get; private set; }
@@ -331,6 +380,12 @@ public class DemoExpirationServiceTargetEnvironmentTests
             if (request.Method == HttpMethod.Get && path.EndsWith("/systemusers", StringComparison.Ordinal))
             {
                 SystemUserLookupHosts.Add(request.RequestUri.Host);
+                return Json("{\"value\":[{\"systemuserid\":\"99999999-0000-0000-0000-000000000001\"}]}");
+            }
+
+            if (request.Method == HttpMethod.Get && path.EndsWith("/teammembership_association", StringComparison.Ordinal))
+            {
+                // The idempotency read before a removal (#1363): the user is a member.
                 return Json("{\"value\":[{\"systemuserid\":\"99999999-0000-0000-0000-000000000001\"}]}");
             }
 

@@ -4,7 +4,7 @@
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
 > D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6 gotchas.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-148). Deferred work: one self-contained GitHub issue per item,
-> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-105**).
+> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-107**).
 > Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
@@ -21,15 +21,18 @@ Shared brief: scratchpad `lane-brief.md` (no live writes/deploys; PR into docs b
 
 | Task | Worktree / branch | Model | State |
 |---|---|---|---|
-| 062 Know narrative, retire Critical Today | `C:\wts-062` `task/ontology-062` | sonnet/high | PR #2018 in Opus review; after BFF deploy run `Sync-BriefNarrateOutputSchemas.ps1 -IncludeSystemPrompt` (-DryRun first) |
+| 062 Know narrative, retire Critical Today | `C:\wts-062` | sonnet/high | ✅ merged #2018 `33a98774`. To master in next batch; after the dev BFF has it run `Sync-BriefNarrateOutputSchemas.ps1 -IncludeSystemPrompt` (-DryRun first; row ce299eb4-…) |
 | 063 first Know-promotion rule | `C:\wts-063` `task/ontology-063` | sonnet/medium | ESCALATED: needs (sprk_matter, sprk_budget) VerifiedJoin; owner asked (recommend inside 063) |
 | 045 Decision Record tab [uac] | `C:\wts-045` | sonnet/medium | ✅ merged #2014 `1931b405c`; after Console deploys from master run `scripts/seed-decision-records-workspace-layout.ps1` (-WhatIf first) |
-| 104 admin probe + tab [uac] | `C:\wts-104` `task/ontology-104` | opus/high | PR #2019 in Opus review; uac-r2 OK on ledger row. 100/101 routes each need their own ledger classification (uac-r2) |
+| 104 admin probe + tab [uac] | `C:\wts-104` | opus/high | ✅ merged #2019 `b187253a`; to master in next batch |
 | 126 AppendTo depth [uac] | `C:\wts-126` | opus/high | ✅ merged #2012 `c7e0f8106`; to master in next batch (uac-r2 OK) |
 | 073 memo source #2 | `C:\wts-073` | sonnet/high | ESCALATED: owner decisions (trigger, sprk_memo schema add, separate policy, coverage); consumer diff can be empty |
-| 049 revoke Signal Write + DR Create | `C:\wts-049` `task/ontology-049` | sonnet/high | preparing PR (no live change; uac-r2 checks PR; main session applies after 055) |
+| 049 revoke Signal Write + DR Create [uac] | `C:\wts-049` | sonnet/high | PR #2022 MERGED into docs (2 adversarial passes + uac-r2 OK + re-check). LIVE APPLY PENDING owner: after the 055 check and the Ontology Administrator answer (Q6; `$A5Waiver = $null` if removed). Run from a checkout of the docs branch: `pwsh -File scripts/Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1 -Apply` then `-Verify` (expect exit 0). Notify uac-r2 before/after. Rollback: security-roles.md §14 |
+| 101 admin authoring BFF [auth] | - | - | ✅ merged #2039 `e153d225e` (live 2/2). PENDING OWNER: Append privileges on Ontology Administrator (prvAppendsprk_Policy + prvAppendsprk_PolicyVersion, Deep; change ROOT role 2f2b2137-… only, then read a child-BU copy + a team member's RetrieveUserPrivilegeByPrivilegeName; notify uac-r2 before/after; then add a row to notes/security-roles.md) |
 
-Next wave as slots free: 111 (wizard regression + deploy). 049 after the 055 check. Then 064 (after 062+063), 100/101/103 (after 104), 102 (after 101), 114 (after 111).
+111: code + deploys done (dev SemanticSearchControl 1.1.85 = master, 2026-10-16 check); only the owner browser rows 1-5 remain (row 4 external SPA DocumentUploadPage never deployed; it rides the external SPA deploy). Docs->master #2031 (062+049+104) MERGED 9381e6f62 (2026-10-16; after an ArchTest false-positive fix 58e810405). Tell R3 when its session is back so 9381e6f62 goes into the next dev BFF line; then run the 062 prompt sync. Earlier: #2020 (126+045) MERGED 93850f961 (2026-10-16). R3 session not running: tell R3 when it is back so 93850f961 goes into its next BFF line; then seed the decisionRecords layout row. 049 PR #2022 (head cf6e09a39) re-sent to uac-r2 (session `spaarke-wt-unified-access-control-r2-e1`). Next wave as slots free: 049 after the 055 check. Then 064 (after 062+063), 100/101/103 (after 104), 102 (after 101), 114 (after 111).
+
+**Endpoint census at docs->master:** uac-r2 #2035 (099a) sets master ExpectedEndpointFileCount 127 (104 = 125->126, 099a = 126->127). Each ontology admin file (100 merged, 101, 103) adds one: expect a conflict and recompute from the census when the next docs->master PR merges after #2035.
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 

@@ -466,7 +466,8 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
 
                 if (!roots.TryGetValue((intermediate, intermediateId), out var root))
                 {
-                    root = await _coreAncestors.ResolveStampsAsync(intermediate, intermediateId, ct).ConfigureAwait(false);
+                    // Read-only (GitHub #2002, #2049): the root is only compared with the children's copies; nothing is written against the intermediate.
+                    root = await _coreAncestors.ResolveStampsAsync(intermediate, intermediateId, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);
                     roots[(intermediate, intermediateId)] = root;
                 }
 
