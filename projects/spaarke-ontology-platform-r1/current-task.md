@@ -10,8 +10,8 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No lane running. Sync #2073 on master `88b3ecb1f`; Console deployed from it (run 39013766555, 07:32:56Z) |
-| **Next Action** | R3 candidate BFF build `9721819ed` (R3 + master 88b3ecb1f + UAC #2074 test fix; BFF source identical to 4dea4e296; ArchTests 1121/1121, full unit re-run pending) under test; deploy needs a FRESH owner approval (owner Q7). Then 105 UAT, DI-83 #1882 re-run, 090 wrap-up |
+| **Task** | No lane running. Master `88b3ecb1f` (sync #2073) is on dev: Console 07:32Z, BFF `9721819ed` 14:32Z (R3) |
+| **Next Action** | Owner questions 1-6 below. Then 105 UAT (rule wizard live now; browser UI tests from 102; Next step To Do from 055), DI-83 #1882 re-run, 114 after 111, 090 wrap-up |
 
 ## Lanes in flight
 
@@ -28,7 +28,6 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 4. **POL-MATTER-NOBUDGET** enable (~58 Signals)?
 5. **064 switch**: §6.1 non-admin checks done or waived, then approve the switch.
 6. **Rule scope in R1** (102 review): the save route takes no tenant/matter, so the wizard shows scope read-only. Accept for R1, or add scope to the BFF?
-7. **Dev BFF deploy (R3) of master with #2073**: needs a fresh owner approval (R3: earlier approvals covered only the named deploys). Without it the wizard cannot validate/save on dev and POL-MATTER-NOBUDGET cannot run.
 
 ## Next, in order
 
@@ -42,7 +41,7 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- BFF `1.0.0+28720f9976c0…` (R3, 2026-10-17 06:03:49Z; master 1d435e695, contains e702c3401 = 100/101/103; NOT 063 join or 102a routes, which await the next docs→master sync). healthz 200, writer MI assigned.
+- BFF `1.0.0+9721819edc15…` (R3, 2026-10-17 14:32:19Z; master 88b3ecb1f = 063 join, 102a routes + allow-list; UAC #2074). healthz 200, writer MI assigned, no app-setting change.
 - Console from master `a8c3182ec`; Worklist + Decision Records layouts seeded. Five policies on.
 - Roles: Ontology Service 58 (§15); Ontology Administrator 38 (§16 +2 Append, §17 −DR Create −Signal Write); Console User 21 (§17).
 
