@@ -198,6 +198,11 @@ public static class ExternalAccessModule
         // AI-internal types are injected (broker-only, NFR-02).
         services.AddSingleton<IWorkforcePrincipalResolver, WorkforcePrincipalResolver>();
 
+        // ADR-028 A9 link proof (r3 task 048): validates the link route's body (guest) token with the DEFAULT scheme's own
+        // TokenValidationParameters and signing metadata, read through IOptionsMonitor<JwtBearerOptions> and never changed.
+        // Concrete (ADR-010); singleton (stateless; the options monitor and configuration are singletons).
+        services.AddSingleton<SpaarkeGuestTokenValidator>();
+
         // Standing-grant flag reader (teams-app-r1 task 022 — the task-051 composition seam). Reads the
         // FLS-secured contact.sprk_standinggrant boolean app-only via the already-registered
         // IDataverseService; gates a contact principal's standing-grant runtime membership term.

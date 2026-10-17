@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>External document upload is queued for AI Search indexing and document profile (check-2 issue 5)</title>
+    <phase>5b Owner check-2 fixes</phase>
+    <gate>startable: owner decided 2026-10-13 "yes files should be indexed and document profile"</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api, ai; adds a call on an external write path</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>App-only AI processing of partner-uploaded content; constraint interpretation (auth.md vs interface contract)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ExternalProjectDataEndpoints.cs (shared with other external document work)</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, ai, auth, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>After an external upload creates the SPE file and the document record, queue the same app-only indexing (and, if the owner approves, the document profile) that MI-written files get, so partner and contact uploads are searchable and profiled.</prompt>
+  <role>SPAARKE platform developer. BFF document pipeline and AI indexing. Follow ADRs strictly.</role>
+  <goal>A document uploaded through the external SPA is indexed in AI Search (and profiled, if approved) like an MDA upload; failures of the enqueue never fail the upload.</goal>
+
+  <context>
+    <background>Owner check 2: SPA upload creates the record and the SPE file, but no profile or index. Root cause (code map): UploadDocumentForParent (ExternalProjectDataEndpoints.cs:1239-1389) uploads app-only (UploadSmallAsync :1345), creates the document (:1367) and returns 201 with no enqueue. App-only callers use IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync (UploadFinalizationWorker.cs:1403 and others). .claude/constraints/auth.md:78 allows the app-only enqueuer for MI-written files and notes app-only jobs can read user-uploaded files since task 171; IPostUploadIndexingEnqueuer.cs:85-90 still says "ONLY MI-written". The external upload IS MI-written. How the document profile is queued server-side was not traced.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/IPostUploadIndexingEnqueuer.cs</file>
+      <file role="canonical-reference">the UploadFinalizationWorker.cs:1403 call site</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §17">Read docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md before changing the pipeline.</constraint>
+    <constraint source="CLAUDE.md §11">New surface in an existing file: one-line justification (existing: the enqueuer; extension: call it; cost: external uploads never searchable or profiled).</constraint>
+    <constraint source="project">The enqueue runs after the document row exists; its failure is logged and does not change the 201.</constraint>
+    <constraint source="ADR-013/ADR-015">No document content is logged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Record the owner decision (2026-10-13: index AND profile external uploads) in notes/task-063-notes.md; load knowledge; declare rigor/tier.</step>
+    <step order="1">Trace how the profile job is queued server-side; record it.</step>
+    <step order="2">Tests first; implement; build + test; publish-size delta; adversarial pass; status + drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If queuing the profile requires a user token (OBO), STOP: the external plane has no OBO; propose app-only or index-only to the owner.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A successful external upload calls EnqueueAppOnlyIfApplicableAsync once with the new document id and its drive/item pointers.</criterion>
+    <criterion testable="true">An enqueue exception is logged and the response is still 201 with the document.</criterion>
+    <criterion testable="true">A failed upload (SPE or document create failure) enqueues nothing.</criterion>
+    <criterion testable="true">The document profile job is queued app-only once per successful upload (owner decision 2026-10-13); a profile-enqueue failure is logged and does not change the 201.</criterion>
+    <criterion testable="true">IPostUploadIndexingEnqueuer.cs:85-90 comment is updated to match auth.md:78 (MI-written files, including external uploads written app-only by the BFF).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner check 2 issue 5. Owner decision 2026-10-13: external uploads are indexed AND profiled. auth.md:78 already allows the app-only enqueuer for MI-written files; the interface comment is brought in line (no .claude/ edit needed).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1112,8 +1112,11 @@ internal static class AssignedAccessTestDoubles
         /// (<see cref="GrantTable.SystemUsers"/>), cache and child synchronizer.
         /// </summary>
         public RestrictedExternalShareRemover RestrictedRemover => new(
-            Participations, SharesOverride ?? Shares, Grants, Cache.Mock.Object, Children, Lease,
+            Participations, SharesOverride ?? Shares, Grants, Cache.Mock.Object, Children, Lease, WorkforceIdentity,
             NullLogger<RestrictedExternalShareRemover>.Instance);
+
+        /// <summary>r3 task 048: the customer home directories the remover also clears root sets under (none by default).</summary>
+        public IOptionsMonitor<WorkforceIdentityOptions> WorkforceIdentity { get; set; } = IdentityBindingTestKit.Tenants();
 
         /// <summary>Task 114: the per-record removal lease the remover shares with task 143's enforcer and /unshare-user.</summary>
         public Spaarke.Scheduling.IScheduledJobLease Lease { get; set; } = new Spaarke.Scheduling.ProcessLocalScheduledJobLease();

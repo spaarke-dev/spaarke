@@ -181,6 +181,14 @@ public class ModuleEntitlementResolver
             return _options.PartnerServiceRequestsEnabled ? PartnerServiceRequestModules : OutsideCounselModules;
         }
 
+        // ADR-028 A9 (task 046, finding (e)): a home principal's roles claim was issued by the CUSTOMER directory for its
+        // own app registration — never Spaarke's App-Role assignment. It is ignored: the defaults only, and no map read.
+        if (WorkforcePrincipalResolver.IsWorkforceHomePrincipal(user))
+        {
+            _logger.LogInformation("[EXT-ENTITLE] Workforce home principal — roles claim ignored, default modules only.");
+            return WorkforceDefaultModules;
+        }
+
         // Workforce plane (systemuser or workforce contact) → the default set; no map row is needed for it (A8).
         var roles = ExtractAppRoles(user);
         if (roles.Count == 0)

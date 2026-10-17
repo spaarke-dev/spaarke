@@ -121,13 +121,18 @@ public sealed class SecureRecordSetupProcedure
     public const string IdentityLinkWriterProfileName = "Spaarke Identity Link Writers";
 
     /// <summary>
-    /// S18: the field-secured binding columns, as (table, column). The uniqueness mirror
-    /// <c>contact.sprk_externalobjectidkey</c> is deliberately NOT secured (Dataverse cannot key a secured column).
+    /// S18: the field-secured binding columns, as (table, column). The uniqueness mirrors
+    /// <c>contact.sprk_externalobjectidkey</c>, <c>systemuser.sprk_hometenantidkey</c> and
+    /// <c>systemuser.sprk_homeobjectidkey</c> are deliberately NOT secured (Dataverse cannot key a secured column).
+    /// The last three entries are the ADR-028 A9 home-identity columns (spaarke-SPA-external-access-platform-r3 task 044).
     /// </summary>
     public static readonly IReadOnlyList<(string Table, string Column)> IdentityLinkColumns =
     [
         ("contact", "sprk_externalobjectid"),
         ("systemuser", "sprk_primarycontact"),
+        ("contact", "sprk_externaltenantid"),
+        ("systemuser", "sprk_hometenantid"),
+        ("systemuser", "sprk_homeobjectid"),
     ];
 
     /// <summary>

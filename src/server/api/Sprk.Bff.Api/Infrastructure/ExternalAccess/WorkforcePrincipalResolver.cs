@@ -25,6 +25,11 @@
 //                               resolves only through an existing oid binding. Collisions are refused AND flagged.
 //   (c) neither                : explicit DENY with the binding decision's own deny code — never a silent fallback
 //                               to an unscoped/anonymous principal.
+//   (H) home principal         : external-access-platform-r3 task 046 (ADR-028 A9). An identity authenticated by the
+//                               WorkforceHome scheme (chosen by scheme, never by iss) is resolved by ResolveHomeAsync
+//                               on (tid, oid) ONLY — stored link on the secured systemuser pair, else the WorkforceHome
+//                               contact, else 403 registration_required. It never reaches (a) or (b): a home oid is
+//                               never compared with systemuser.azureactivedirectoryobjectid. Read-only.
 //
 // Broker-only (ADR-028 A2 NFR-02): this resolver reads CLAIMS from the already-validated workforce
 // token and queries Dataverse APP-ONLY. It MUST NOT exchange the caller token downstream (no OBO) and MUST NOT
@@ -34,6 +39,7 @@ using System.Security.Claims;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Api.Membership;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Spaarke.Dataverse;
@@ -68,6 +74,13 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
     // Deny codes (auth.md format: {domain}.{area}.{action}.{reason}).
     internal const string DenyMissingIdentityClaims = "sdap.access.deny.missing_identity_claims";
     internal const string DenyPrincipalNotResolved = "sdap.access.deny.principal_not_resolved";
+
+    /// <summary>
+    /// ADR-028 A9 (task 046, design §3 step 4): a home principal with no stored link and no WorkforceHome contact for its
+    /// (tid, oid). Not an error — the SPA shows the registration form, prefilled from the token
+    /// (<see cref="WorkforcePrincipalStrategy"/> adds <c>givenName</c>, <c>familyName</c>, <c>email</c>). Nothing is created.
+    /// </summary>
+    internal const string DenyRegistrationRequired = "sdap.access.registration_required";
 
     /// <summary>
     /// The oid names a systemuser that is DISABLED. Such a user is "no longer a valid principal"
@@ -127,6 +140,13 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
     {
         ArgumentNullException.ThrowIfNull(user);
         ct.ThrowIfCancellationRequested();
+
+        // ── ADR-028 A9 home principal (task 046): chosen by the AUTHENTICATING SCHEME, never by parsing iss. Its oid is the
+        //    CUSTOMER directory's, so it never reaches the oid → systemuser lookup or the binder below (finding (d)).
+        if (WorkforceHomeIdentity(user) is { } homeIdentity)
+        {
+            return await ResolveHomeAsync(new ClaimsPrincipal(homeIdentity), ct).ConfigureAwait(false);
+        }
 
         // ── Identity from claims (reuse MembershipEndpoints extraction, per ADR-028) ──
         var oid = MembershipEndpoints.ExtractAadObjectId(user);
@@ -286,6 +306,184 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
         LogGuestCandidateDeny(user, binding.DenyCode ?? DenyPrincipalNotResolved);
         return WorkforcePrincipalResolution.Denied(
             WorkforceDenyReason.PrincipalNotResolved, binding.DenyCode ?? DenyPrincipalNotResolved);
+    }
+
+    /// <summary>
+    /// The identity authenticated by the <see cref="AuthSchemes.WorkforceHome"/> scheme (ADR-028 A9), or null. Its
+    /// <see cref="ClaimsIdentity.AuthenticationType"/> is set by the JwtBearer handler from its
+    /// <c>TokenValidationParameters</c> (task 045), so no token content can forge it — this is the ONE test for "home
+    /// principal", used by plane selection, this resolver and the entitlement resolver. Never inferred from <c>iss</c>.
+    /// </summary>
+    internal static ClaimsIdentity? WorkforceHomeIdentity(ClaimsPrincipal user)
+        => user.Identities.FirstOrDefault(i =>
+            i.IsAuthenticated && string.Equals(i.AuthenticationType, AuthSchemes.WorkforceHome, StringComparison.Ordinal));
+
+    /// <summary>True when <paramref name="user"/> carries an identity authenticated by the WorkforceHome scheme.</summary>
+    internal static bool IsWorkforceHomePrincipal(ClaimsPrincipal user) => WorkforceHomeIdentity(user) is not null;
+
+    /// <summary>
+    /// ADR-028 A9 home resolution (task 046; design notes/a9-bff-design.md §3, §4). Read-only: nothing is created, updated,
+    /// bound, linked or invalidated here (048 registers, 047 links).
+    /// <list type="number">
+    ///   <item>No usable <c>oid</c>, or a <c>tid</c> that is not a non-zero GUID → 401 MissingIdentityClaims. The identity
+    ///   key is the pair (tid, oid).</item>
+    ///   <item>A non-user token → the shared not-user deny, before any read.</item>
+    ///   <item>The stored link — <c>systemuser.sprk_hometenantid</c> + <c>sprk_homeobjectid</c>, the SECURED pair, never
+    ///   their key mirrors and never <c>azureactivedirectoryobjectid</c>: enabled → that systemuser (with its derived
+    ///   contact, read through <see cref="IIdentityNormalizationService"/>); disabled → <see cref="DenySystemUserDisabled"/>.</item>
+    ///   <item>Else the contact on plane WorkforceHome with <c>sprk_externaltenantid</c> = tid and
+    ///   <c>sprk_externalobjectid</c> = oid → that contact.</item>
+    ///   <item>Else <see cref="DenyRegistrationRequired"/>.</item>
+    /// </list>
+    /// A read that fails denies with its own code — never registration_required, which would send a registered user to the
+    /// form. <paramref name="home"/> carries the home identity only.
+    /// </summary>
+    private async Task<WorkforcePrincipalResolution> ResolveHomeAsync(ClaimsPrincipal home, CancellationToken ct)
+    {
+        var oid = MembershipEndpoints.ExtractAadObjectId(home);
+        var rawTid = home.FindFirst("tid")?.Value
+                     ?? home.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+        if (oid is null || !Guid.TryParse(rawTid?.Trim(), out var homeTenant) || homeTenant == Guid.Empty)
+        {
+            _logger.LogWarning(
+                "[WF-AUTH] {Scheme} caller missing a usable oid or tid claim — denying ({DenyCode})",
+                AuthSchemes.WorkforceHome, DenyMissingIdentityClaims);
+            return WorkforcePrincipalResolution.Denied(WorkforceDenyReason.MissingIdentityClaims, DenyMissingIdentityClaims);
+        }
+
+        var homeOid = oid.Value;
+        var oidText = homeOid.ToString("D");
+        var tidText = homeTenant.ToString("D");
+
+        // The scheme already requires a user token (task 045); this keeps the resolver's own (0) rule on this branch too.
+        var callerKind = CallerIdentity.FromPrincipal(home).Kind;
+        if (callerKind != CallerKind.UserDelegated)
+        {
+            _logger.LogWarning(
+                "[WF-AUTH] {Scheme} caller is not a user-delegated token (kind: {Kind}) — denying ({DenyCode})",
+                AuthSchemes.WorkforceHome, callerKind, WorkforceMembershipTest.DenyNotUserToken);
+            return WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, WorkforceMembershipTest.DenyNotUserToken);
+        }
+
+        // ── design §3 step 2: the stored link, by the secured pair ──
+        HomeLinkDecision link;
+        try
+        {
+            var lookup = await _binder.Store.FindHomeLinkedSystemUsersAsync(homeTenant, homeOid, ct).ConfigureAwait(false);
+            link = ContactBindingDecision.DecideHomeLink(lookup, homeTenant, homeOid);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[WF-AUTH] Home link lookup threw for home tid={HomeTenant} oid={HomeOid} — denying ({DenyCode})",
+                tidText, oidText, DenyPrincipalNotResolved);
+            return WorkforcePrincipalResolution.Denied(WorkforceDenyReason.PrincipalNotResolved, DenyPrincipalNotResolved);
+        }
+
+        switch (link.Outcome)
+        {
+            case HomeLinkOutcome.Enabled:
+                return await ResolveLinkedHomeSystemUserAsync(link.SystemUserId!.Value, home, oidText, tidText, ct)
+                    .ConfigureAwait(false);
+
+            case HomeLinkOutcome.Disabled:
+                _logger.LogWarning(
+                    "[WF-AUTH] Home tid={HomeTenant} oid={HomeOid} is linked to a DISABLED systemuser — denying ({DenyCode})",
+                    tidText, oidText, DenySystemUserDisabled);
+                return WorkforcePrincipalResolution.Denied(WorkforceDenyReason.PrincipalNotResolved, DenySystemUserDisabled);
+
+            case HomeLinkOutcome.Denied:
+                var linkDeny = link.DenyCode ?? DenyPrincipalNotResolved;
+                _logger.LogWarning(
+                    "[WF-AUTH] Home link for tid={HomeTenant} oid={HomeOid} could not be decided — denying ({DenyCode})",
+                    tidText, oidText, linkDeny);
+                return WorkforcePrincipalResolution.Denied(WorkforceDenyReason.PrincipalNotResolved, linkDeny);
+        }
+
+        // ── design §3 step 3: the WorkforceHome contact for (tid, oid) ──
+        BindingDecision? contact;
+        try
+        {
+            var lookup = await _binder.Store.FindHomeContactsAsync(homeTenant, homeOid, ct).ConfigureAwait(false);
+            contact = ContactBindingDecision.DecideHomeContact(lookup, homeTenant, homeOid);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[WF-AUTH] Home contact lookup threw for home tid={HomeTenant} oid={HomeOid} — denying ({DenyCode})",
+                tidText, oidText, DenyPrincipalNotResolved);
+            return WorkforcePrincipalResolution.Denied(WorkforceDenyReason.PrincipalNotResolved, DenyPrincipalNotResolved);
+        }
+
+        if (contact is { Action: BindingAction.ResolveByOid, ContactId: { } contactId })
+        {
+            _logger.LogInformation(
+                "[WF-AUTH] Resolved home tid={HomeTenant} oid={HomeOid} to WorkforceHome contact {ContactId}",
+                tidText, oidText, contactId);
+            return WorkforcePrincipalResolution.ForContact(contactId, oidText, tidText);
+        }
+
+        if (contact is not null)
+        {
+            var contactDeny = contact.DenyCode ?? DenyPrincipalNotResolved;
+            _logger.LogWarning(
+                "[WF-AUTH] Home contact for tid={HomeTenant} oid={HomeOid} refused — denying ({DenyCode})",
+                tidText, oidText, contactDeny);
+            return WorkforcePrincipalResolution.Denied(WorkforceDenyReason.PrincipalNotResolved, contactDeny);
+        }
+
+        // ── design §3 step 4: not registered. Nothing is created here. ──
+        _logger.LogInformation(
+            "[WF-AUTH] Home tid={HomeTenant} oid={HomeOid} has no stored link and no WorkforceHome contact ({DenyCode})",
+            tidText, oidText, DenyRegistrationRequired);
+        return WorkforcePrincipalResolution.Denied(WorkforceDenyReason.PrincipalNotResolved, DenyRegistrationRequired);
+    }
+
+    /// <summary>
+    /// A home principal's enabled linked systemuser: its derived contact is read exactly as on the Spaarke-tenant branch
+    /// (an unreadable contact is flagged, task 132), but the inline link (<see cref="TryLinkSystemUserAsync"/>) and the
+    /// <c>membership-currentuser</c> cache are NOT used — both are keyed by the Spaarke-tenant oid and the inline link writes.
+    /// </summary>
+    private async Task<WorkforcePrincipalResolution> ResolveLinkedHomeSystemUserAsync(
+        Guid systemUserId, ClaimsPrincipal home, string oidText, string tidText, CancellationToken ct)
+    {
+        Guid? derivedContactId = null;
+        var contactUnreadable = false;
+        try
+        {
+            var identity = await _identity.ResolveAsync(systemUserId, ct).ConfigureAwait(false);
+            derivedContactId = identity.ContactId;
+            contactUnreadable = identity.ContactUnreadable;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            contactUnreadable = true;
+            _logger.LogWarning(ex,
+                "[WF-AUTH] Failed to derive contactId for home-linked systemuser {SystemUserId}; " +
+                "proceeding with an UNREADABLE derived contact",
+                systemUserId);
+        }
+
+        _logger.LogInformation(
+            "[WF-AUTH] Resolved home tid={HomeTenant} oid={HomeOid} to linked systemuser {SystemUserId} " +
+            "(derivedContact: {HasContact}, contactUnreadable: {ContactUnreadable})",
+            tidText, oidText, systemUserId, derivedContactId is not null, contactUnreadable);
+
+        return WorkforcePrincipalResolution.ForSystemUser(
+            systemUserId, derivedContactId, oidText, tidText, ExtractTokenEmail(home), contactUnreadable: contactUnreadable);
     }
 
     private enum SystemUserLookupKind { None, Enabled, Disabled }

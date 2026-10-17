@@ -56,6 +56,7 @@ public sealed class CommunicationAttachmentTextService
 {
     private readonly IImpersonatedCommunicationQuery _query;
     private readonly ICallerSystemUserResolver _callerResolver;
+    private readonly CommunicationThreadReadService _threadReadService;
     private readonly ISpeFileOperations _speFileStore;
     private readonly Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver _containerResolver;
     private readonly ITextExtractor _textExtractor;
@@ -79,6 +80,7 @@ public sealed class CommunicationAttachmentTextService
     public CommunicationAttachmentTextService(
         IImpersonatedCommunicationQuery query,
         ICallerSystemUserResolver callerResolver,
+        CommunicationThreadReadService threadReadService,
         ISpeFileOperations speFileStore,
         Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
         ITextExtractor textExtractor,
@@ -86,6 +88,7 @@ public sealed class CommunicationAttachmentTextService
     {
         _query = query;
         _callerResolver = callerResolver;
+        _threadReadService = threadReadService ?? throw new ArgumentNullException(nameof(threadReadService));
         _speFileStore = speFileStore;
         _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
         _textExtractor = textExtractor;
@@ -104,6 +107,13 @@ public sealed class CommunicationAttachmentTextService
         CancellationToken cancellationToken)
     {
         var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, cancellationToken).ConfigureAwait(false);
+
+        // 0) Task 065 fix round 6 (F1): the communication itself must be visible to this caller before any of its
+        //    attachments are listed. ReadVisibleCommunicationAsync is the one visibility decision (the shared flag rule,
+        //    and for an external caller D7: an internal-only email, or one whose thread is not explicitly Open, is
+        //    invisible). A row the caller may not see answers exactly like one with no attachments, so nothing leaks.
+        if (await _threadReadService.ReadVisibleCommunicationAsync(communicationId, caller, null, cancellationToken).ConfigureAwait(false) is null)
+            return Empty();
 
         // 1) IMPERSONATED attachment read — Dataverse returns only attachments this caller may see (NFR-06).
         var attachments = await QueryAttachmentsAsync(communicationId, callerSystemUserId, cancellationToken).ConfigureAwait(false);

@@ -50,6 +50,26 @@ public class RestrictedExternalShareRemoverTests
             "the removed user's impersonated root-set cache is cleared under the deployment tenant, never 'anonymous'");
     }
 
+    /// <summary>
+    /// r3 task 048 (046 review K1): a licensed user with a stored home link reads under their CUSTOMER tenant's tid when they
+    /// sign in with their company account, so a removal also clears the root sets under every configured customer directory.
+    /// </summary>
+    [Fact]
+    public async Task OnARestrictedRecord_TheRemovedUsersCache_IsAlsoClearedUnderEveryCustomerHomeTenant()
+    {
+        var customerA = Guid.Parse("4a8b0c3e-7d21-4f5a-9e6b-0480480480c1");
+        var customerB = Guid.Parse("4a8b0c3e-7d21-4f5a-9e6b-0480480480c2");
+        _h.WorkforceIdentity = Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.IdentityBindingTestKit.Tenants(customerA, customerB);
+        Restricted();
+        var external = _h.SystemUser(isExternal: true);
+        Share(external);
+
+        await RunAsync();
+
+        _h.Cache.Removed.Where(r => r.Id.Contains(external.ToString("D"))).Select(r => r.Tenant).Distinct()
+            .Should().BeEquivalentTo(new[] { TestTenant, customerA.ToString("D"), customerB.ToString("D") });
+    }
+
     /// <summary>Owner round 67 item 4: no other share is removed — an internal user, a BLANK flag, a team.</summary>
     [Fact]
     public async Task OnARestrictedRecord_OnlyAStoredTrueIsRemoved_ABlankFlagAnInternalUserAndATeamKeepTheirShares()

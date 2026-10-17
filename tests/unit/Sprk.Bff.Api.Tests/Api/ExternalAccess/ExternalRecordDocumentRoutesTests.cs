@@ -2,22 +2,30 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
 using Azure.Core;
+using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
@@ -848,6 +856,153 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     }
 
     // =====================================================================
+    // Task 063 (owner decision 2026-10-13): an external upload is queued for app-only indexing AND the document profile
+    // =====================================================================
+
+    [Theory]
+    [MemberData(nameof(AllParents))]
+    public async Task Upload_QueuesAppOnlyIndexing_AndTheDocumentProfile_OnceEach_ForTheNewDocument(string segment)
+    {
+        _fixture.Principal = CollaborateOn(segment, RecordA);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+        var created = await upload.Content.ReadFromJsonAsync<ExternalDocumentDto>();
+        var row = _fixture.Data.Documents.Should().ContainSingle().Subject;
+
+        // Indexing: the app-only seam, with the pointers the row was written with (not a second derivation of them).
+        var index = _fixture.IndexRequests.Should().ContainSingle().Subject;
+        index.DocumentId.Should().Be(created!.SprkDocumentid);
+        index.DriveId.Should().Be(row.DriveId);
+        index.ItemId.Should().Be(row.ItemId);
+        index.FileName.Should().Be("brief.pdf");
+        index.FileSizeBytes.Should().Be(3);
+        index.TenantId.Should().Be("test-tenant-id", "the Spaarke tenant from configuration, never the caller token's tid");
+        index.Source.Should().Be("ExternalUpload");
+
+        // Profile: one AppOnlyDocumentAnalysis job for the new document, under its document key.
+        var documentId = Guid.Parse(created.SprkDocumentid!);
+        var job = _fixture.SubmittedJobs.Should().ContainSingle().Subject;
+        job.JobType.Should().Be(AppOnlyDocumentAnalysisJobHandler.JobTypeName);
+        job.SubjectId.Should().Be(documentId.ToString());
+        job.IdempotencyKey.Should().Be(AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId));
+        job.Payload!.RootElement.GetProperty("DocumentId").GetGuid().Should().Be(documentId);
+        job.Payload.RootElement.GetProperty("Source").GetString().Should().Be("ExternalUpload");
+
+        // Both queues run under a bounded token of their own: a hung Service Bus must not hold the 201 (was None).
+        // And that token is NOT the request's own: HttpContext.RequestAborted is also cancellable and not yet cancelled, so
+        // the check above alone would pass a route that still queued under the caller's token (cancelled on disconnect).
+        var calls = _fixture.QueueTokens.ToList();
+        calls.Should().HaveCount(2);
+        calls.Should().OnlyContain(c => c.Queue.CanBeCanceled && !c.Queue.IsCancellationRequested);
+        calls.Should().OnlyContain(c => c.Request.HasValue && c.Request.Value.CanBeCanceled,
+            "the double must have seen the request's RequestAborted token for the comparison to mean anything");
+        calls.Should().OnlyContain(c => c.Queue != c.Request!.Value, "the queues must not run under HttpContext.RequestAborted");
+    }
+
+    // The production enqueuer returns Failed (it catches its own failures); the route logs that and still answers 201.
+    [Fact]
+    public async Task Upload_WhenTheIndexEnqueueReturnsFailed_IsLoggedWithTheDocumentAndParent_AndStill201()
+    {
+        _fixture.Principal = CollaborateOn("matters", RecordA);
+        _fixture.IndexReturnsFailed = true;
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/matters/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+        var created = await upload.Content.ReadFromJsonAsync<ExternalDocumentDto>();
+        _fixture.SubmittedJobs.Should().ContainSingle("a failed index enqueue does not stop the profile");
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Warning && e.Message.Contains("[EXT-UPLOAD]") && e.Message.Contains("indexing")
+            && e.Message.Contains(created!.SprkDocumentid!) && e.Message.Contains(RecordA.ToString()));
+    }
+
+    // The production enqueuer catches and logs its own failures; this pins the route's defensive catch, so that no
+    // enqueuer (or a future one) that throws can turn a stored upload into a 500.
+    [Fact]
+    public async Task Upload_WhenTheIndexEnqueueThrows_IsLogged_AndStill201_AndTheProfileIsStillQueued()
+    {
+        _fixture.Principal = CollaborateOn("matters", RecordA);
+        _fixture.IndexFault = new InvalidOperationException("service bus down");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/matters/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+        var created = await upload.Content.ReadFromJsonAsync<ExternalDocumentDto>();
+        created!.SprkDocumentid.Should().Be(_fixture.Data.Documents.Should().ContainSingle().Subject.Id.ToString());
+        _fixture.IndexRequests.Should().ContainSingle();
+        _fixture.SubmittedJobs.Should().ContainSingle("an indexing failure does not stop the profile");
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Warning && e.Message.Contains("[EXT-UPLOAD]") && e.Message.Contains("indexing")
+            && e.Message.Contains(created.SprkDocumentid!));
+    }
+
+    [Fact]
+    public async Task Upload_WhenTheProfileSubmitThrows_IsLogged_AndStill201_AndIndexingIsStillQueued()
+    {
+        _fixture.Principal = CollaborateOn("projects", RecordA);
+        _fixture.JobFault = new InvalidOperationException("service bus down");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/projects/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+        var created = await upload.Content.ReadFromJsonAsync<ExternalDocumentDto>();
+        created!.SprkDocumentid.Should().Be(_fixture.Data.Documents.Should().ContainSingle().Subject.Id.ToString());
+        _fixture.IndexRequests.Should().ContainSingle();
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Warning && e.Message.Contains("[EXT-UPLOAD]") && e.Message.Contains("profile")
+            && e.Message.Contains(created.SprkDocumentid!));
+    }
+
+    [Fact]
+    public async Task Upload_ANameCollision_EnqueuesNothing()
+    {
+        _fixture.Principal = CollaborateOn("projects", RecordA);
+        _fixture.UploadFault = new SpaarkeStorageException("exists", statusCode: 409);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/projects/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        _fixture.IndexRequests.Should().BeEmpty();
+        _fixture.SubmittedJobs.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Upload_WithNoUploadHandle_EnqueuesNothing()
+    {
+        _fixture.Principal = CollaborateOn("projects", RecordA);
+        _fixture.UploadReturnsNoHandle = true;
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/projects/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.BadGateway);
+        _fixture.IndexRequests.Should().BeEmpty();
+        _fixture.SubmittedJobs.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Upload_WhenTheDocumentCreateFails_EnqueuesNothing()
+    {
+        _fixture.Principal = CollaborateOn("projects", RecordA);
+        _fixture.Data.CreateFault = new HttpRequestException("dataverse down");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/projects/{RecordA}/documents", FileForm());
+
+        ((int)upload.StatusCode).Should().BeGreaterThanOrEqualTo(500);
+        _fixture.Uploads.Should().ContainSingle("the bytes landed before the row create failed");
+        _fixture.IndexRequests.Should().BeEmpty();
+        _fixture.SubmittedJobs.Should().BeEmpty();
+    }
+
+    // =====================================================================
     // The list query and the create bind per parent (pure)
     // =====================================================================
 
@@ -1170,6 +1325,37 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         /// <summary>Every SPE download, as (drive, item).</summary>
         public ConcurrentQueue<(string Drive, string Item)> Downloads { get; } = new();
 
+        /// <summary>Task 063: every app-only index request the upload route made.</summary>
+        public ConcurrentQueue<PostUploadIndexingRequest> IndexRequests { get; } = new();
+
+        /// <summary>Task 063: every job submitted to the job queue (the document profile).</summary>
+        public ConcurrentQueue<JobContract> SubmittedJobs { get; } = new();
+
+        /// <summary>
+        /// Task 063: for each post-upload queue call, the token it received and the token of the request being served
+        /// (<c>HttpContext.RequestAborted</c>, read through <see cref="IHttpContextAccessor"/> inside the double). A queue
+        /// token that equals the request's would be cancelled with the caller's disconnect.
+        /// </summary>
+        public ConcurrentQueue<(CancellationToken Queue, CancellationToken? Request)> QueueTokens { get; } = new();
+
+        /// <summary>Set to make the index enqueue throw (after recording the request).</summary>
+        public Exception? IndexFault { get; set; }
+
+        /// <summary>Set to make the index enqueue return <see cref="PostUploadIndexingResult.Failed"/> (the production enqueuer's failure shape).</summary>
+        public bool IndexReturnsFailed { get; set; }
+
+        /// <summary>Set to make the job submit throw (nothing is recorded).</summary>
+        public Exception? JobFault { get; set; }
+
+        /// <summary>Set to make the SPE upload throw.</summary>
+        public Exception? UploadFault { get; set; }
+
+        /// <summary>Set to make the SPE upload return no handle.</summary>
+        public bool UploadReturnsNoHandle { get; set; }
+
+        /// <summary>Every log entry the host wrote.</summary>
+        public CapturingLoggerProvider Logs { get; } = new();
+
         public CallerPrincipal? Principal
         {
             get => _principals.Principal;
@@ -1184,12 +1370,25 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             Ownership.Requests.Clear();
             Uploads.Clear();
             Downloads.Clear();
+            IndexRequests.Clear();
+            SubmittedJobs.Clear();
+            QueueTokens.Clear();
+            IndexFault = null;
+            IndexReturnsFailed = false;
+            JobFault = null;
+            UploadFault = null;
+            UploadReturnsNoHandle = false;
+            Logs.Clear();
             _spe.Clear();
             _itemDrives.Clear();
             Rows.Clear();
             RowFaults.Clear();
             VerifyPointers = false;
         }
+
+        /// <summary>The served request's <c>RequestAborted</c> token, or null when no request is in flight on this flow.</summary>
+        private CancellationToken? RequestAbortedToken() =>
+            Services.GetRequiredService<IHttpContextAccessor>().HttpContext?.RequestAborted;
 
         /// <summary>The row the container resolver reads for (<paramref name="entity"/>, <paramref name="id"/>).</summary>
         private Entity RecordRow(string entity, Guid id)
@@ -1275,6 +1474,11 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                         It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<ConflictBehavior>(), It.IsAny<CancellationToken>()))
                     .Returns((string container, string path, Stream content, ConflictBehavior _, CancellationToken _) =>
                     {
+                        if (UploadFault is { } uploadFault)
+                            throw uploadFault;
+                        if (UploadReturnsNoHandle)
+                            return Task.FromResult<FileHandleDto?>(null);
+
                         Uploads.Enqueue((container, path));
                         using var buffer = new MemoryStream();
                         content.CopyTo(buffer);
@@ -1306,9 +1510,84 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                     });
                 services.RemoveAll<IDocumentStorageResolver>();
                 services.AddSingleton(pointers.Object);
+
+                // Task 063: the two post-upload queues, recorded. The index enqueue records the request, then throws when
+                // IndexFault is set; the job submit throws when JobFault is set.
+                services.AddHttpContextAccessor();
+                var indexing = new Mock<IPostUploadIndexingEnqueuer>();
+                indexing.Setup(i => i.EnqueueAppOnlyIfApplicableAsync(It.IsAny<PostUploadIndexingRequest>(), It.IsAny<CancellationToken>()))
+                    .Returns((PostUploadIndexingRequest request, CancellationToken token) =>
+                    {
+                        IndexRequests.Enqueue(request);
+                        QueueTokens.Enqueue((token, RequestAbortedToken()));
+                        if (IndexFault is { } fault)
+                            return Task.FromException<PostUploadIndexingResult>(fault);
+                        return Task.FromResult(IndexReturnsFailed
+                            ? PostUploadIndexingResult.Failed("ServiceBusException")
+                            : PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+                    });
+                services.RemoveAll<IPostUploadIndexingEnqueuer>();
+                services.AddSingleton(indexing.Object);
+
+                var serviceBusOptions = new Mock<IOptions<ServiceBusOptions>>();
+                serviceBusOptions.Setup(o => o.Value).Returns(new ServiceBusOptions { QueueName = "test-jobs" });
+                var jobs = new Mock<JobSubmissionService>(
+                    MockBehavior.Loose,
+                    serviceBusOptions.Object,
+                    NullLogger<JobSubmissionService>.Instance,
+                    new Mock<ServiceBusClient>().Object);
+                jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+                    .Returns((JobContract job, CancellationToken token) =>
+                    {
+                        if (JobFault is { } fault)
+                            return Task.FromException(fault);
+                        SubmittedJobs.Enqueue(job);
+                        QueueTokens.Enqueue((token, RequestAbortedToken()));
+                        return Task.CompletedTask;
+                    });
+                services.RemoveAll<JobSubmissionService>();
+                services.AddSingleton(jobs.Object);
+
+                services.AddSingleton<ILoggerProvider>(Logs);
             });
         }
     }
+
+    /// <summary>Captures every log entry (task 063: the post-upload queue failures are logged).</summary>
+    public sealed class CapturingLoggerProvider : ILoggerProvider
+    {
+        private readonly List<LogEntry> _entries = new();
+
+        public IReadOnlyList<LogEntry> Entries
+        {
+            get { lock (_entries) return _entries.ToList(); }
+        }
+
+        public void Clear()
+        {
+            lock (_entries) _entries.Clear();
+        }
+
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(this);
+
+        public void Dispose() { }
+
+        private sealed class CapturingLogger(CapturingLoggerProvider owner) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                lock (owner._entries) owner._entries.Add(new LogEntry(logLevel, formatter(state, exception)));
+            }
+        }
+    }
+
+    /// <summary>One captured log entry.</summary>
+    public sealed record LogEntry(LogLevel Level, string Message);
 
     /// <summary>One stored document row: the payload the real builder produced and the creator it was stamped from.</summary>
     public sealed record StoredDocument(Guid Id, string Name, string DriveId, string ItemId,
@@ -1355,6 +1634,9 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         /// <summary>How many times an invoice's parents were read.</summary>
         public int InvoiceReads;
 
+        /// <summary>Task 063: set to make the document create fail the way an unreachable Dataverse does.</summary>
+        public Exception? CreateFault { get; set; }
+
         // ---- Task 187 fix round 2 (F1): the invoice gate's reads (GetInvoiceLookupsAsync, the flags, the live parents) ----
 
         /// <summary>Invoice id → the agreement it regards (<c>sprk_regardingagreement</c>). Absent = none.</summary>
@@ -1377,6 +1659,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
 
         public void Reset()
         {
+            CreateFault = null;
             lock (_documents) _documents.Clear();
             Requesters.Clear();
             DocumentReads.Clear();
@@ -1528,6 +1811,9 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             DocumentParentKind parentKind, Guid parentId, ExternalUploadedFilePointers pointers, Guid owningTeamId,
             CallerPrincipal creator, CancellationToken ct = default)
         {
+            if (CreateFault is { } fault)
+                throw fault;
+
             var payload = BuildDocumentCreatePayload(parentKind, parentId, pointers, owningTeamId);
             StampCreator(payload, creator);
             var id = Guid.NewGuid();

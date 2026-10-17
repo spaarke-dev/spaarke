@@ -16,6 +16,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///                             Tier-2 record scope. Serves the standalone external SPA (CIAM) AND the
 ///                             Teams workforce host through ONE endpoint set. CIAM behavior is
 ///                             unchanged (FR-15 — the CIAM strategy reproduces the old filter exactly).
+///                             ADR-028 A9 (r3 task 045): the policy also accepts the WorkforceHome scheme (a
+///                             workforce contact's customer home-directory token); every route here is pinned by
+///                             AuthenticationSchemeCensusTests.
 ///   /api/v1/external-access — internal management endpoints. Workforce default scheme (Azure AD JWT).
 ///
 /// The transitional /api/v1/collab workforce group (ADR-028 A2 · teams-app-r1 task 020/030) was
@@ -36,6 +39,15 @@ public static class ExternalAccessEndpoints
     {
         MapExternalUserEndpoints(app);
         MapInternalManagementEndpoints(app);
+
+        // POST /api/v1/external/registration — ADR-028 A9 (r3 task 047). Its OWN group: the ExternalCollaboration policy
+        // WITHOUT CallerPrincipalAuthorizationFilter (the caller is by definition not yet resolved); the handler admits the
+        // WorkforceHome scheme only.
+        app.MapExternalRegistrationEndpoints();
+
+        // POST /api/v1/external/workforce/link — ADR-028 A9 (r3 task 048). Its OWN group, as registration: a licensed user
+        // signed in with their home account is not resolvable until the link exists. WorkforceHome scheme only.
+        app.MapExternalWorkforceLinkEndpoints();
 
         // GET /api/v1/records/{sprk_project|sprk_matter|sprk_workassignment}/{recordId}/no-access — the per-record No Access
         // read (task 064, owner round 59 item 3). NOT on the management group: its DelegationRuleFilter demands Write for
