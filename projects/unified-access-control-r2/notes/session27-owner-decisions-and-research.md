@@ -1589,3 +1589,12 @@ The full record is in `notes/185-invite-code-design.md` §11.
    - **The owner edits the role. UAC does not.** Until the owner adds these, the ceiling denies every workforce-contact operation on those routes, as designed.
    - UAC builds task 186 now.
 3. **Ontology Administrator `prvAssignsprk_Signal` and `prvDeletesprk_Signal` (Deep): KEEP.** The owner said: "not a risk (we can remove later)". Raised by UAC in the review of ontology PR #2050 (task 049). Relayed to ontology-r1, who record it in their decisions and in security-roles.md. The guard is not extended to cover them.
+
+## Main-session decision, 2026-10-17: 099c add rule (option A)
+- **Context.** In default (non-issuer) mode, `/grant` and `/invite-and-grant` write an explicit `expiryDate` as given (`GrantExternalAccessEndpoint.cs` ~:422-427). Only the contact-issuer mode refuses to shorten.
+- **Decision.** Every add from Manage Access sends the record's *applied* date (POML constraint 43, owner 2026-09-10).
+- **Consequence.** Re-adding someone whose live grant ends later moves them to the record date. This happens only when the shares already diverge, which the dialog shows.
+- **Rationale.** The owner's model is one date for all sharing, and `/set-record-share-expiry` already moves every row, shortening included.
+- **Rejected.**
+  - (B) Skip the date for existing live grants: it keeps the divergence the owner wants corrected.
+  - (C) Server never shortens in default mode: out of scope, and against the model.
