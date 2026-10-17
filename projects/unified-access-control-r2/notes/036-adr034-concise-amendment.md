@@ -56,7 +56,7 @@ Append to **❌ MUST NOT**:
 - **MUST NOT** (A2) narrow A1.1 or edit `PlatformOwnershipColumns` for the flag-off path (owner D1: flag-off never under-grants), and **MUST NOT** turn the flag on in an environment before tasks 142 and 143 are complete there and the task 034 canary passes there **strictly smaller** (equal sets are a failure). The checked-in value stays `false` (enforced by `ImpersonationNegativeCanaryTests`' config tripwire).
 ```
 
-## Fix round 1 (2026-10-17) — suggested Edit 4, for the main session
+## Fix round 1 (2026-10-17) — Edit 4 (applied in `dcf1bdb21`)
 
 Edits 1–3 are applied (`1e8cf1e27`; the applied A2 MUST bullet already says "adding a child needs AppendTo on the
 parent record AND the caller's Create privilege on the child table"). The full text (`docs/adr/ADR-034-…` § Amendment
@@ -79,4 +79,52 @@ Enforced by: `ExternalProjectDataEndpoints.WithDataverseRightsAsync` at each wri
 
 ```markdown
 - **MUST** (A2, task 036 fix round 1) answer a Dataverse-decided caller's write affordances for ONE record from the same confirmation the record's create route makes (the list's `canCreate`), never from the `/me` level, which then says only what the caller may see; `/me` says `writeAccessPerRecord: true` for such a caller. Every other caller's responses stay byte-identical.
+```
+
+## Fix round 2 (2026-10-17) — Edit 5, for the main session
+
+Edit 4 is applied (`dcf1bdb21`). The full text (`docs/adr/ADR-034-…` § Amendment A2) now also names the service-request
+exemptions (decision e), the read-only and toggle affordances, the corrected role facts and the WorkforceHome residual.
+Three exact edits in `.claude/adr/ADR-034-user-record-membership.md`; each `old` occurs once.
+
+**5a — the A2 MUST bullet (line 93): replace its last sentence**
+
+Old:
+
+```markdown
+Known limit: the child table's Append privilege is not checked (the SpaarkeMaster roles that grant Create on those tables grant Append too).
+```
+
+New:
+
+```markdown
+Exempt (each listed with its reason in the guard): a service request's writes keep the requester rule in both flag states (task 036 decision e, owner-accepted — explicit access Dataverse cannot see, like B-17), and writes that touch no core record (filing a new request, self identity and self state) or that a systemuser cannot reach (the contact-grant routes). Known limit: the child table's Append privilege is not checked (each SpaarkeMaster role grants Append on every one of these tables it grants Create on). Internal SPA/Teams writers need Spaarke Core User: Spaarke Basic User grants Create/Write/Delete on `sprk_communication` only and Spaarke Office Add In User Create/Write on `sprk_event` only, so their other writes are refused under the flag, as in MDA.
+```
+
+**5b — the A2 affordances MUST bullet (line 95): replace its last sentence**
+
+Old:
+
+```markdown
+`/me` says `writeAccessPerRecord: true` for such a caller. Every other caller's responses stay byte-identical.
+```
+
+New:
+
+```markdown
+`/me` says `writeAccessPerRecord: true` for such a caller. The client offers read-only actions (download, version history) wherever such a record's list rendered, and offers the to-do status toggle on a project's to-dos with the edit route's own confirmation deciding (a refusal reverts it). Every other caller's responses and controls stay byte-identical.
+```
+
+**5c — the second A2 MUST NOT bullet (line 116): replace**
+
+Old:
+
+```markdown
+before tasks 142 and 143 are complete there and the task 034 canary passes there **strictly smaller** (equal sets are a failure).
+```
+
+New:
+
+```markdown
+before tasks 142 and 143 are complete there and the task 034 canary passes there **strictly smaller** (equal sets are a failure), nor — in a tenant whose internal users sign in through WorkforceHome (ADR-028 A9) — before task 036 open question (a) is settled (their customer-directory tokens cannot be exchanged for Dataverse, so every write of theirs is refused under the flag).
 ```

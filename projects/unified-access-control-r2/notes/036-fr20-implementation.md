@@ -28,7 +28,9 @@ response as `"truncated": true`.
 | WorkforceHome-linked systemuser (ADR-028 A9) | `Workforce` (scheme decides first — the WorkforceHome guard in `DeterminePlane` is untouched) | as systemuser | as systemuser for the read set; **the probe cannot exchange a customer-directory token**, so its writes deny unless grants allow (open question a) |
 
 `WorkforcePrincipalStrategy` sets `CallerPrincipal.DataverseConfirmsWrites` from `Sources.ImpersonatedRootSet` (any of
-the three root types; the flag is read per composition, so any = all, and "any" is the fail-closed reading) and
+the three root types; the flag is read once per composition, so the three sets agree — if flags ever become per type,
+decide this per entity type: the confirmation only ADDS rights, never removes them, so "any" is not a fail-closed
+reading; fix round 2 corrected the code comment, `CallerPrincipalResolver.cs:771-772`) and
 `CallerPrincipal.TruncatedRootEntityTypes` from `AccessibleRecordSet.Capped`.
 
 ### 2.2 Composition (`AccessibleRecordSetService.ComposeForSystemUserAsync`)
@@ -57,23 +59,25 @@ readCallerPrivilege = null)`:
 - a probe exception (other than the caller's own cancellation) or a null reader adds `None` (NFR-01). The real probe
   already answers `None` on a missing token, a failed exchange or a non-2xx.
 - **Fix round 1 (F1).** When Dataverse answers AppendTo and `composed` lacks Create, the Create it surfaces is kept only
-  if the caller also holds the child table's Create privilege (`:935-940`, `CallerHoldsChildCreateAsync` `:954`):
+  if the caller also holds the child table's Create privilege (`:937-945`, `CallerHoldsChildCreateAsync` `:959`):
   `prvCreatesprk_Todo` (`TodoSourceAccessFilter.CreateTodoPrivilege`), `prvCreatesprk_Document`
   (`CommunicationRecordAuthorizationFilter.CreateDocumentPrivilege`), `prvCreatesprk_Event`
   (`EventEndpoints.CreateEventPrivilege`), `prvCreatesprk_Communication` (`ExternalMessageEndpoints.CreateMessagePrivilege`,
   `:167`, new). A null privilege name, a null reader, a `false` answer or a fault (other than the caller's own
-  cancellation) strips Create — fail closed, logged `[WF-AUTHZ]`. A Create the contact grants already put in `composed`
+  cancellation) strips Create — fail closed. **Fix round 2 (F2):** a null name is a route that creates nothing (PATCH
+  to-do, delete-own), so it strips Create silently (`:941`); only a real refusal (blank name, no reader, `false`, fault)
+  is logged `[WF-AUTHZ]`. A Create the contact grants already put in `composed`
   is not asked about (B-17 is unchanged). The BFF writes the child app-only, so without this Dataverse never checked the
   caller's Create privilege on the child table.
 
-`SurfaceRightsFromDataverse` (`:1005`): Read, Write and Delete as Dataverse answers them; **AppendTo → Create** ("may add a
+`SurfaceRightsFromDataverse` (`:1010`): Read, Write and Delete as Dataverse answers them; **AppendTo → Create** ("may add a
 child under this record", subject to the Create-privilege half above). Dataverse's own `CreateAccess` from
 RetrievePrincipalAccess is table-level (the caller's create privilege on the record's table), not "may attach to this
 record", so it carries nothing. Precedent: `OperationAccessPolicy` `entity.associate_document` /
 `event.attach_regarding` = AppendTo.
 
 `CallerRightsReader(probe, httpContext)` binds the probe to this request's bearer token
-(`TokenHelper.ExtractBearerTokenOrNull`); `CallerPrivilegeReader(probe, httpContext)` (`:1028`, fix round 1) binds
+(`TokenHelper.ExtractBearerTokenOrNull`); `CallerPrivilegeReader(probe, httpContext)` (`:1033`, fix round 1) binds
 `CallerRecordAccessProbe.CallerHoldsPrivilegeAsync` the same way.
 
 **Why that checker (CLAUDE.md §11).** Existing: `CallerRecordAccessProbe.CallerHoldsPrivilegeAsync` (WhoAmI +
@@ -147,7 +151,7 @@ mutation of `CreateEvent` (confirmation removed) fired the guard; the file was r
 |---|---|---|
 | D1 | Round 59 shape: the impersonated set confers Read; writes confirmed per route, per record. No batched RPA over the set | Owner round 59 item 2 (the review's cheaper shape replaces the 2026-09-30 per-root rights map) |
 | D2 | Widen (`composed | Dataverse`), not replace | Keeps the B-17 contact-grants union on writes; under the flag no constant can reach `composed` |
-| D3 | **Revised in fix round 1 (F1 option b):** Create = AppendTo on the parent **AND** the caller's `prvCreate<child>` privilege; Dataverse `CreateAccess` ignored. Append (`prvAppend<child>`) not checked — known limit | RPA's CreateAccess is table-level; AppendTo is "attach to this record" everywhere else in the BFF. The child is written app-only, so Dataverse never asked the caller's Create privilege on the child table; the task 166 / G5 precedent (AppendTo on the source + `prvCreatesprk_Todo` / `_Document`) closes that. Append would cost another privilege round trip (the checker answers one name per call); every SpaarkeMaster role granting Create on the four tables (Spaarke Basic User, Spaarke Core User, Spaarke Office Add In User) grants Append too (role XML) |
+| D3 | **Revised in fix round 1 (F1 option b):** Create = AppendTo on the parent **AND** the caller's `prvCreate<child>` privilege; Dataverse `CreateAccess` ignored. Append (`prvAppend<child>`) not checked — known limit | RPA's CreateAccess is table-level; AppendTo is "attach to this record" everywhere else in the BFF. The child is written app-only, so Dataverse never asked the caller's Create privilege on the child table; the task 166 / G5 precedent (AppendTo on the source + `prvCreatesprk_Todo` / `_Document`) closes that. Append would cost another privilege round trip (the checker answers one name per call); each SpaarkeMaster role grants Append on every one of these tables it grants Create on (role XML). **Corrected in fix round 2:** only Spaarke Core User grants Create (and Write, Delete) on all four (`sprk_todo`, `sprk_document`, `sprk_event`, `sprk_communication`); Spaarke Basic User grants them on `sprk_communication` only (Basic depth), Spaarke Office Add In User only Create/Write on `sprk_event`. Internal SPA/Teams writers need Core User; Basic- or Office-only users lose the other writes under the flag, as in MDA (deployment guide §12.8 precondition 4) |
 | D4 | PATCH to-do confirms on the to-do (Write), not its root | The target record is the to-do; the root's Read stays the scope check |
 | D5 | Delete-own adds Dataverse Delete on the row; the creator stamp stays required | FR-26 stamp unchanged; Dataverse adds its own answer, never stands in for the stamp |
 | D6 | Invoice upload confirms on the invoice, before the secure-roots gate | The invoice is the target record; a Dataverse-confirmed Create meets the same gate as a grant-derived one |
@@ -206,9 +210,33 @@ Test files: `AccessibleRecordSetServiceTests` (ARS), `CallerPrincipalResolverTes
 | F1: the asked privilege names are the live ones | MSG `Fr20_TheMessageCreatePrivilege_IsTheLiveName`; TODO / DOC assert the exact name in `PrivilegeCalls` | — |
 | F4: flag-on systemuser with Write/AppendTo → `canCreate: true` on X's list; Read only → `false`; probe fault → `false` | DOC `Fr20_List_CanCreate_IsTheUploadRoutesDataverseAnswer` (12 rows: 4 parents × Read\|Write\|AppendTo with the privilege → true / without it → false / Read only → false; one probe, for the record in hand), `Fr20_List_AProbeThatFaults_ReportsCanCreateFalse_AndStillLists`; TODO `Fr20_TodoList_CanCreate_IsTheCreateRoutesDataverseAnswer` (9 rows), `Fr20_TodoList_AProbeThatFaults_ReportsCanCreateFalse`, `Fr20_ProjectEventList_CanCreate_IsTheCreateRoutesDataverseAnswer` | DOC `Fr20_List_FlagOff_ReportsCanCreateFromTheComposedRights_AndAsksDataverseNothing`; TODO `Fr20_TodoList_FlagOff_IsUnchanged_AndAsksNothing` (no `canCreate` key), `Fr20_EventList_WithoutACreateRoute_OrFlagOff_IsUnchanged` |
 | F4: `/me` truthful without a per-record call | ME `Me_DataverseDecidedSystemUser_SaysWriteAccessIsPerRecord_AndKeepsItsLevels` | ME `Me_EveryOtherCaller_OmitsWriteAccessPerRecord_SoTheWireIsUnchanged` (no key on the wire) |
-| F4: the SPA takes create/upload from the record's list for a per-record caller | SPA: SmartTodo "Add Task" (ViewOnly level + `canCreate: true` → offered; Collaborate + `false` → hidden; missing → hidden), EventsCalendar "Create Event" (same two), project DocumentLibrary "Upload Document" (same two) | SPA: the three "every other caller keeps the level rule" cases |
+| F4: the SPA takes create/upload from the record's list for a per-record caller | SPA: SmartTodo "Add Task" (ViewOnly level + `canCreate: true` → offered; Collaborate + `false` → hidden; missing → hidden), EventsCalendar "Create Event" (the same three since fix round 2), project DocumentLibrary "Upload Document" (the same three since fix round 2) | SPA: the three "every other caller keeps the level rule" cases |
 | Guard: every external write route reaches the confirmation or is an exemption with a reason | ARCH `EveryExternalWriteRoute_ReachesTheDataverseConfirmation_OrIsAnExemptionWithAReason`, `ExternalWriteExemptions_EachNameALiveWriteRoute_AndCarryAReason` | ARCH `ExternalWriteGuard_FiresOnAWriteRouteWithoutTheConfirmation_AndNotOnOneThatReachesIt` (must-fire and must-not-fire fixtures) |
 | Flag-off byte-identical; existing tests untouched except the F1 allow cases above | `ExternalAccessContractTests`, `ExternalDeleteOwnTests` unchanged and green; every flag-off twin above | — |
+
+**Fix round 2 additions.** New SPA test file `src/client/external-spa/tests/ProjectPage.perRecordWrite.test.tsx` (PAGE);
+`DetailDocumentsDelete.test.tsx` (DETAIL) and `PerRecordWriteAccess.test.tsx` (SPA) gained cases.
+
+| Item | Test(s) | Twin (must-not-fire) |
+|---|---|---|
+| 1. No constant (the red test) | ARS `Fr20_FlagOn_NoConstant_ThreeRecordsThreeDataverseAnswers`, now a theory: privilege held → Z = Read\|Write\|Create\|Delete | the not-held row → Z = Read\|Write\|Delete |
+| 2. Download / version history for a per-record caller | SPA "a ViewOnly-level per-record caller may download from a project list that rendered", "the same holds on a matter list"; PAGE "a per-record caller … is offered Upload … and Download" | SPA "a ViewOnly contact is not offered download (unchanged)", "a Collaborate contact is offered download (unchanged)", "a host that says canDownload=false still wins"; PAGE "every other ViewOnly caller is offered neither" |
+| 3. To-do status toggle | SPA "a ViewOnly-level per-record caller is offered the toggle on a project to-do, and PATCH decides", "a 403 reverts the toggle and says so plainly, never the server body" | SPA "a ViewOnly contact is not offered the toggle (unchanged)", "a matter to-do list stays read-only for a per-record caller (task 057)" |
+| 5. A late `/me` cannot hide Upload | SPA "a /me answer that arrives after the list does not leave Upload hidden" (every list read held, answered oldest last) | — |
+| 6. No false `[WF-AUTHZ]` warning | TODO `Fr20_AConfirmationThatCreatesNothing_LogsNoWarning_AndAddsNoCreate` (2 rows, called as PATCH and delete-own call it) | TODO `Fr20_AChildCreateWithNoPrivilegeReader_StillWarns_AndAddsNoCreate` |
+| 7. `/me` wiring reaches the components | PAGE (above; fails with the ProjectPage prop removed); DETAIL "Project, per-record caller (task 036 fix round 2, F3): the list canCreate=true decides Upload" (fails with `uploadOverride`'s per-record line removed); SPA "a missing canCreate is cannot" for the project DocumentLibrary and EventsCalendar | DETAIL `canCreate=false` row |
+| 10. The config tripwire covers the templates | CAN `Fr20ImpersonatedRootSetFlagScan_CoversThePerEnvironmentTemplates` (`appsettings*.json*` now takes `appsettings.{Development,Production}.json.template`) | CAN `Fr20ImpersonatedRootSetFlagScan_FiresOnAnythingNotLiterallyFalse` (5 rows: `true`, a token, a flattened `"true"` fire; `false` and absent do not) |
+
+**Fix round 2 fail-before.** BFF: HEAD's `ExternalProjectDataEndpoints.cs` and the old `appsettings*.json` scan pattern
+put back under the new tests, the full §6 filter below: **3 failed / 887 passed of 890** (the two F2 rows and the
+template-coverage test). HEAD's version of the no-constant test: **1 failed of 1** (the red test; its new two rows pass
+against both HEAD's and this round's code, because item 1 was a test defect, not a code one). SPA: HEAD's
+`DocumentLibrary.tsx` and `SmartTodo.tsx` put back, `PerRecordWriteAccess.test.tsx` + `ProjectPage.perRecordWrite.test.tsx`:
+**6 failed / 18 passed of 24** (download ×2, toggle ×2, the late `/me`, the PAGE per-record row; the passes are the
+level-rule twins and the fix-round-1 cases, including the new "missing canCreate" rows, which cover existing behaviour).
+The host wiring (item 7) was proven by mutation: removing `writeAccessPerRecord` from `ProjectPage.tsx`'s components and
+the per-record line from `RecordDetailModal.tsx`'s `uploadOverride` failed the PAGE and DETAIL per-record rows (2
+failed); both files were restored with `git checkout`. Everything restored: `cmp` identical.
 
 ### Fail-before evidence
 
@@ -221,10 +249,15 @@ must-not-fire twins and deny-direction cases a deny-everything base also satisfi
 paired with an allow case that fails before. After: **98 / 98 pass**.
 
 **Fix round 1.** BFF: the four behaviours were neutered in place (the Create-privilege strip disabled; the list
-confirmation removed; list `canCreate` never written; `/me` `writeAccessPerRecord` forced false), then the filter
+confirmation removed; list `canCreate` never written; `/me` `writeAccessPerRecord` forced false). The figure first
+recorded here, "55 failed / 278 passed of 333", came from a run that omitted `ExternalAccessContractTests` and
+`ExternalDeleteOwnTests` from the filter it names. **Re-run honestly in fix round 2** (the same four neuterings,
+re-applied in place on the fix-round-2 code, then restored, `cmp` identical) with the full named filter
 `CallerPrincipalTests | ExternalAccessContractTests | ExternalTodoScopeTests | ExternalRecordDocumentRoutesTests |
-ExternalMessageSendTests | ExternalDeleteOwnTests` run: **55 failed / 278 passed** of 333 (the passes are the flag-off
-twins, the deny-direction cases and the pre-existing tests). Restored (`cmp` identical): **504 / 504**. ArchTests: the
+ExternalMessageSendTests | ExternalDeleteOwnTests`: **58 failed / 449 passed of 507**. 507 = the 504 round-1 cases + 3
+new round-2 cases in `ExternalTodoScopeTests` (the F2 theory's 2 rows and its twin), which also fail under the disabled
+strip; so the round-1 cases alone are **55 failed / 449 passed of 504** (the passes are the flag-off twins, the
+deny-direction cases and the pre-existing tests). After: **504 / 504** (round 1), **507 / 507** (now). ArchTests: the
 guard fired on a mutated `CreateEvent` (confirmation removed); restored. SPA: the HEAD versions of the eight changed
 sources put back → `PerRecordWriteAccess.test.tsx` **7 failed / 3 passed** (the three level-rule twins pass by design);
 after: **10 / 10**.
@@ -290,6 +323,28 @@ after: **10 / 10**.
 - **CVE**: `dotnet list src/server/api/Sprk.Bff.Api package --vulnerable --include-transitive` — no vulnerable packages;
   no package or csproj change.
 
+**Fix round 2 (2026-10-17).**
+
+- **Build**: `Sprk.Bff.Api` (`--no-incremental`) 0 warnings, 0 errors; `Sprk.Bff.Api.Tests` and `Spaarke.ArchTests` 0
+  warnings, 0 errors.
+- **Filtered tests (Sprk.Bff.Api.Tests)** — the §6 classes plus the fix-round-1 classes: `AccessibleRecordSetServiceTests |
+  CallerPrincipalResolverTests | ExternalTodoScopeTests | ExternalRecordDocumentRoutesTests | ExternalDeleteOwnTests |
+  ExternalMessageSendTests | ExternalModuleColumnAllowListTests | MembershipResolverServiceTests | ImpersonatedRootSetSource* |
+  CallerRecordAccessProbe* | ImpersonationNegativeCanaryTests | ExternalAccessContractTests | CallerPrincipalTests`:
+  **890 passed, 0 failed** (fail-before §4). The full unfiltered suite was not run (brief).
+- **ArchTests** (same filter as above): **179 passed**. `RouteAuthorizationGuardTests.Ledger.cs` reasons cite
+  `ExternalProjectDataEndpoints.cs` line numbers in prose; this round shifts the lines after `:937` by 5, and many of those
+  citations already predate fix round 1 — not asserted by any test, not rewritten here (known limit below).
+- **SPA** (`src/client/external-spa`): `vitest run` **1056 / 1056** (39 files) on a quiet machine. A first full run
+  concurrent with client-lint timed out 12 tests in 6 untouched files (`App.*`, `DocumentUploadPage.externalUpload`,
+  `main-bootstrap`, `no-mock-identity`); those 6 files alone: 73 / 73; the full re-run alone: 1056 / 1056. `tsc --noEmit`
+  0 errors; ESLint 0 on the changed files; prettier clean. `client-lint.mjs check`: **exit 0, all 10 packages ok**.
+- **Publish** (`dotnet publish -c Release -r linux-x64 --self-contained false`; both trees zipped with PowerShell
+  `Compress-Archive -CompressionLevel Optimal`, so like for like): base `5b2375f6f` 39,194,164 → fix round 2
+  **39,200,411** bytes: **+6,247 bytes**; uncompressed 130,852,084 → 130,874,248 (+22,164; fix round 1 was 130,874,252,
+  so this round is −4 bytes). Total ≈ 37.4 MiB zipped, under 55 / 60 MB.
+- **CVE**: no package or csproj change.
+
 ## 7. The NFR-04 canary (manual gate — not run here)
 
 `tests/integration/auth/UnifiedAccessControl/ImpersonationNegativeCanaryTests.cs`; environment contract in
@@ -346,9 +401,14 @@ settled; **(a) and (f) are open with the owner.**
   default order (no extra sort; arbitrary but stable enough for a flagged cap); (2) `$orderby=modifiedon desc` (the most
   recently active records survive a cap — matches what a user expects to see; one index-backed sort per read); (3)
   `$orderby=createdon desc`. Not chosen here (escalation trigger in the POML).
-- **(g) Settled (option g, fix round 1).** Single-record views answer write affordances from Dataverse for a
-  Dataverse-decided caller (D8); `/me` says `writeAccessPerRecord: true`; the SPA takes Add Task / Create Event / Upload
-  Document from the record's list `canCreate` for such a caller and keeps the level rule for everyone else (§10).
+- **(g) Settled (option g, fix round 1; widened in fix round 2).** Single-record views answer write affordances from
+  Dataverse for a Dataverse-decided caller (D8); `/me` says `writeAccessPerRecord: true`; the SPA takes Add Task / Create
+  Event / Upload Document from the record's list `canCreate` for such a caller and keeps the level rule for everyone else
+  (§10). Fix round 2 (§11): download and version history are offered wherever the list rendered, and the project to-do
+  status toggle is offered with PATCH deciding.
+- **(a) is now an enabling precondition** in the deployment guide (§12.8 precondition 3), the template comment and ADR-034
+  A2's residuals: in a tenant with WorkforceHome-linked systemusers, every write of theirs is refused under the flag until
+  (a) is settled.
 - **(h) Pre-existing, fixed in scope:** flag-off membership `Capped` was silently dropped (D11).
 - **Rollout:** default off; enabled on dev only after the canary passes strictly smaller and 142 and 143 are done, and
   (a) is decided. No date can be named yet. Flag-off is transitional and does **not** close the flag-off BU over-grant.
@@ -356,12 +416,11 @@ settled; **(a) and (f) are open with the owner.**
 
 ### Known limits (fix round 1)
 
-- **Append not checked** (D3). `prvAppend<child>` is not asked; the SpaarkeMaster roles that grant Create on the four
-  child tables grant Append too.
-- **Per-record affordances cover create/upload only.** For a flag-on caller whose `/me` level is ViewOnly, the to-do
-  status toggle, document download/version history, the AI actions and invite still follow the level, so they stay
-  hidden although a route may admit them (PATCH to-do is confirmed per record). Widening those needs a per-record answer
-  for each — not in the brief.
+- **Append not checked** (D3). `prvAppend<child>` is not asked; each SpaarkeMaster role grants Append on every child
+  table it grants Create on (only Spaarke Core User grants Create on all four — D3, corrected in fix round 2).
+- ~~**Per-record affordances cover create/upload only.**~~ Superseded by fix round 2 (§11): download / version history
+  and the project to-do status toggle now follow the per-record rule; invite and the issued-grants list stay hidden
+  (correct: the contact-grant routes refuse a systemuser); the AI actions are not level-gated at all.
 - **To-do / event create is offered only on `ProjectPage`**, as before; matter and work-assignment to-do lists carry
   `canCreate` on the wire, but the SPA has no create control there.
 - **The invoice document list may now hit the invoice gate read** for a Dataverse-decided caller (it shares the upload
@@ -373,7 +432,8 @@ settled; **(a) and (f) are open with the owner.**
 - `docs/guides/auth-deployment-setup.md` is a retired stub with no §6. The privilege and Org-scope note was added there as
   a short "§6" section (the brief names it) that points to `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.7 (the App Users) and
   §12.8 (the runbook), where the content lives.
-- `ExternalAccessModule.cs` is listed as modified in the POML; no change was needed (D9).
+- `ExternalAccessModule.cs` is listed as modified in the POML; no code change was needed (D9). Fix round 2 corrected its
+  stale comment ("NOT consumed by AccessibleRecordSetService yet") at `:314`.
 - `TASK-INDEX.md` was not updated: this branch is cut from R3's tip, and the task closes on merge + deploy + the live gate.
 - The `.claude/adr` concise amendment is a draft (`036-adr034-concise-amendment.md`) for the main session.
 
@@ -395,3 +455,47 @@ these notes, the concise-ADR draft).
 `src/hooks/useAccessLevel.ts`, `src/pages/ProjectPage.tsx`, `src/components/DocumentLibrary.tsx`,
 `src/components/SmartTodo.tsx`, `src/components/EventsCalendar.tsx`, `src/components/detail/RecordDetailModal.tsx`; new
 test `tests/PerRecordWriteAccess.test.tsx`.
+
+## 11. Fix round 2 (2026-10-17) — before → after
+
+From adversarial passes A and B. Tests and fail-before: §4 "Fix round 2 additions"; verification: §6 "Fix round 2".
+
+| # | Item | Before | After |
+|---|---|---|---|
+| 1 | F4 red test | ARS `Fr20_FlagOn_NoConstant_ThreeRecordsThreeDataverseAnswers` (`AccessibleRecordSetServiceTests.cs:2808`) named no child privilege, so round 1's rule stripped Z's Create: deterministic failure | A theory (`:2771`) passing `childCreatePrivilege` and a privilege reader: held → Z = Read\|Write\|Create\|Delete; not held → Read\|Write\|Delete |
+| 2 | F1 download / version history | `DocumentLibrary.tsx:752` `canDownload ?? canUploadOrDownload(accessLevel)`: a flag-on systemuser's ViewOnly level hid both, though the routes need only Read (`ExternalProjectDataEndpoints.cs:616-618`, versions `:1892-1895`) | `DocumentLibrary.tsx:766` `canDownload ?? (writeAccessPerRecord \|\| canUploadOrDownload(accessLevel))`: offered wherever the list rendered (the list read already passed Read). Contacts unchanged (`writeAccessPerRecord` false → the same expression) |
+| 3 | F1 to-do status toggle | `SmartTodo.tsx:339` / `:647` from the `/me` level only | `SmartTodo.tsx:659` `allowToggle = allowEdit \|\| (writeAccessPerRecord && root === 'projects')`, passed to `TaskItem` (`:338`, `:882`, `:903`); PATCH confirms Write per to-do. A 403 reverts the optimistic state and shows `TOGGLE_DENIED` (`:264`, "You do not have permission to change this task.") in the existing warning `MessageBar`; any other failure shows the ProblemDetails `detail` or a fixed fallback (`problemMessage`, the SPA's idiom), never the raw body |
+| 4 | F4 docs, config, comments | Guide: AppendTo alone admits a child; (a) not a precondition; (g) open; roles unnamed. Template comment without (a). ADR "Residual" says under-offers until (g). No service-request exemption in the ADR. `ExternalAccessModule.cs:314` "NOT consumed … yet" | Guide §12.8 row `:2186` (AppendTo + `prvCreate<child>`), preconditions 3 (WorkforceHome / (a)) and 4 (Spaarke Core User; Basic / Office Add In facts) at `:2201`, `:2207`, settled (g) at `:2234`. `appsettings.template.json:82` names (a). ADR-034 full A2: service-request exemptions (`:412`), read-only/toggle affordances, corrected role facts, residuals rewritten (`:472`, `:476`). Concise ADR: **Edit 5** drafted in `036-adr034-concise-amendment.md` (main session applies). Module comment `:314` corrected |
+| 5 | F1 (low) late `/me` hides Upload | The fetch stored an already-interpreted `canCreate` and depended on `writeAccessPerRecord`; a list read started before `/me` answered could land last and leave Upload on the level rule | `DocumentLibrary.tsx:797`, `:802` store the raw `canCreate`; `:762` interprets it at render; the fetch no longer depends on `writeAccessPerRecord` (`:810`) — the race is gone by construction |
+| 6 | F2 (low) false `[WF-AUTHZ]` warning | Every flag-on PATCH to-do and delete-own where Dataverse answered AppendTo logged "No child-table Create privilege … fail closed" | `ExternalProjectDataEndpoints.cs:941`: a null privilege strips Create silently; the helper (`:959`) is asked only when a privilege is named and logs only a real refusal |
+| 7 | F3 SPA wiring untested | Nothing failed if ProjectPage or RecordDetailModal dropped `writeAccessPerRecord`; no "missing canCreate" rows for project DocumentLibrary / EventsCalendar | `tests/ProjectPage.perRecordWrite.test.tsx` (new), `DetailDocumentsDelete.test.tsx` per-record theory, the two "missing canCreate" rows; mutation-proven |
+| 8 | F2 comment contradicts code | `CallerPrincipalResolver.cs:771-772` "ANY is the fail-closed reading" | Reworded: the sets agree because the flag is read once per composition; decide per type if flags ever differ — the confirmation only adds rights |
+| 9 | Notes accuracy | Round-1 fail-before "55 / 278 of 333" did not match its named filter; D3 role claim wrong | §4 re-run honestly (55 failed / 449 passed of 504 round-1 cases); D3 corrected; §4 / §6 / §8 updated |
+| 10 | Known limit made cheap | The config tripwire scanned `appsettings*.json`, missing `appsettings.{Development,Production}.json.template` | `ImpersonationNegativeCanaryTests.cs:468` `appsettings*.json*`, with a coverage test and must-fire / must-not-fire rows |
+
+### Affordance inventory — where the `/me` level gates a write for a per-record caller
+
+| Affordance | File:line | Route confirms per record? | Done |
+|---|---|---|---|
+| Add Task | `SmartTodo.tsx:655` | yes (create to-do, AppendTo + privilege) | fix round 1: the list's `canCreate` |
+| To-do status toggle | `SmartTodo.tsx:659` | yes (PATCH `/todos/{id}`, Write on the to-do) | fix round 2: offered on a project's to-dos; PATCH decides; 403 reverts with a plain message |
+| To-do / event toggles in the record detail view | `RecordDetailModal.tsx:520-521` | — | unchanged: read-only for every caller by design (task 054 / 057), no `writeAccessPerRecord` passed |
+| Create Event | `EventsCalendar.tsx:588-592` | yes | fix round 1: the list's `canCreate` |
+| Upload Document | `DocumentLibrary.tsx:762-763`, `RecordDetailModal.tsx:390` | yes | fix round 1, made race-free in fix round 2 |
+| Download / version history | `DocumentLibrary.tsx:766` | Read only (`ExternalProjectDataEndpoints.cs:616-618`, `:1892-1895`) | fix round 2: offered wherever the list rendered |
+| Delete own | `DocumentLibrary.tsx` / `SmartTodo.tsx` / `EventsCalendar.tsx` (`isCreatedByCaller`) | yes (stamp + Delete) | not level-gated; unchanged |
+| Invite User, issued-grants list | `ProjectPage.tsx:295` (`canInvite`) | **no** — contact-grant routes; `ContactGrantorAuthorizationFilter.cs:339` refuses a systemuser | kept hidden (correct) |
+| AI actions | `useAccessLevel.ts:159` (`canUseAi`) has no consumer; the header "AI Assistant" button (`ProjectPage.tsx:555`) and `AssistantPane` are not level-gated | — | nothing to change |
+| Event status / edit | none — the event-as-to-do toggle was removed (R3 task 007) | — | nothing to change |
+
+### Known limits (fix round 2)
+
+- **A probe fault answers 403, not 503.** A RetrievePrincipalAccess or privilege-read fault adds no rights, so the route
+  refuses with 403 (fail closed) rather than signalling a transient upstream fault the client could retry.
+- **No WhoAmI-vs-`SystemUserId` identity assertion.** The probe asks as the bearer of the token; nothing asserts that
+  Dataverse's WhoAmI for that token equals the principal's resolved `SystemUserId`. No path was found where they differ.
+- **An impersonated-read (source) fault returns a generic 500** (fails closed; the request never falls back to membership).
+- **Ledger line citations drift.** `RouteAuthorizationGuardTests.Ledger.cs` reasons cite `ExternalProjectDataEndpoints.cs`
+  lines in prose; they are not asserted and were already stale before this round.
+- Carried from fix round 1: Append not checked; to-do / event create offered only on `ProjectPage`; the invoice document
+  list may 503 like upload; +1 probe per single-record view; (a) and (f) open with the owner.

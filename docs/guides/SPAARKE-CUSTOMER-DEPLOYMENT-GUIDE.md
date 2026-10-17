@@ -2183,7 +2183,7 @@ contacts and workforce contacts are decided exactly as before in both states.
 | | Off (the default; transitional) | On (the end state) |
 |---|---|---|
 | Records an internal user sees | The BFF's membership rules (ownership, owning team, owning business unit, the "Assigned *" contacts), each at Read / Write / Create | Dataverse's own answer, read AS the user — one id-only read per root type (project, matter, work assignment), cached 2 minutes — each at Read |
-| A write (create to-do, upload, create event, edit to-do, post a message, delete own) | Decided by the rights above | The BFF also asks Dataverse, as the user, for the user's rights on the target record (one call per write). AppendTo admits a child (to-do, document, event, message), Write an edit, Delete a delete-own. A service request's writes stay the requester rule in both states |
+| A write (create to-do, upload, create event, edit to-do, post a message, delete own) | Decided by the rights above | The BFF also asks Dataverse, as the user, for the user's rights on the target record (one call per write). A child (to-do, document, event, message) needs AppendTo on the parent **and** the user's Create privilege on the child table (`prvCreatesprk_Todo`, `prvCreatesprk_Document`, `prvCreatesprk_Event`, `prvCreatesprk_Communication`; a second call); an edit needs Write on the to-do; a delete-own needs Delete on the row as well as the creator stamp. A service request's writes stay the requester rule in both states (accepted, decision e) |
 | Contact grants of a user who is also a granted contact | Kept | Kept — Dataverse cannot see them |
 | No Access list, Restricted veto | In force | In force |
 | A root set over 5,000 records | Module data responses carry `"truncated": true` | Same |
@@ -2198,7 +2198,20 @@ state.
    users in Dataverse) are complete and deployed to the environment. Without them, turning it on removes internal users'
    "Assigned To *" access and the internal half of the No Access list.
 2. Both Dataverse App Users hold `prvActOnBehalfOfAnotherUser` and are not narrowed (§7.7).
-3. **The task 034 negative canary passes against the environment, in this rollout** (`tests/integration/auth/README.md`
+3. **No internal user signs in through WorkforceHome (ADR-028 A9), or the owner has settled open question (a)** in the
+   task 036 notes. A write is confirmed by asking Dataverse with the user's own token (on-behalf-of), and a token issued by
+   the customer's directory cannot be exchanged for a Dataverse token in Spaarke's tenant. So in a tenant with
+   WorkforceHome-linked systemusers, those users still read under "on", but **every write of theirs is refused** unless a
+   contact grant allows it, and their lists offer no create/upload. Until (a) is settled, keep the setting off in such a
+   tenant.
+4. **Internal users who write in the SPA or Teams hold Spaarke Core User** (or a role with the same privileges). Under
+   "on", Dataverse decides writes from the user's own roles, as the model-driven app does. Spaarke Core User grants
+   Create, Write and Delete on `sprk_todo`, `sprk_document`, `sprk_event` and `sprk_communication`. **Spaarke Basic User**
+   grants them on `sprk_communication` only (Basic depth), and **Spaarke Office Add In User** grants only Create and Write
+   on `sprk_event`. A user whose only role is one of these two keeps reading, and can post messages (Basic User), but
+   loses the to-do, document and event writes (and Office Add In users lose delete-own on events), exactly as in the
+   model-driven app. Check the roles of SPA/Teams writers before turning it on.
+5. **The task 034 negative canary passes against the environment, in this rollout** (`tests/integration/auth/README.md`
    § Provisioning the canary user, then § Running it):
 
    ```bash
@@ -2218,9 +2231,14 @@ state.
    impersonation is inert and the read is returning every row the App User can read, which looks exactly like success.
    A NOT RUN is not a pass. Record both set sizes, the user's roles and how the expected set was derived in
    `projects/unified-access-control-r2/notes/task-034-negative-canary.md`. On a failure, stop: do not turn it on.
-4. The SPA offers create and upload only where the user's listed rights include Create, and a Dataverse-decided user is
-   listed at Read. Under "on", the SPA therefore hides create/upload on records Dataverse would let the user write to
-   until the open question in the task 036 notes (g) is settled; the routes themselves are correct.
+6. **SPA affordances under "on" (settled, task 036 decision g).** `/me` reports such a user's levels at Read (the set
+   confers Read) and adds `writeAccessPerRecord: true`. The SPA then takes a record's create and upload controls from
+   that record's own list, which asks Dataverse once for the record in hand (`canCreate`: Add Task and Create Event on a
+   project, Upload Document on a project, matter, work assignment or invoice). Download and version history are offered
+   wherever a document list rendered (they need only Read), and a project to-do's status toggle is offered and decided by
+   the edit route itself (a refusal reverts it and says so). Remaining limits: Invite User and the issued-grants list stay
+   hidden for such a user (contact grants are a contact's action; the route refuses a systemuser); to-do and event create
+   is offered only on a project page, as before; each single-record list costs one extra Dataverse call for such a user.
 
 **Turn it on:**
 

@@ -409,11 +409,19 @@ group) while **`ExternalAccess:ImpersonatedRootSets:Enabled` is `true`**:
   child app-only: Dataverse would otherwise never check the user's Create privilege, and a user MDA refuses could create
   the row here (task 036 fix round 1). `Write` admits an edit; `Delete` admits a delete-own, which also still requires
   the creator stamp.
+- **Exempt — a service request's writes** (upload to it, a message on it, deleting one's own request) keep the
+  requester rule in both flag states and are not confirmed (task 036 decision e, accepted by the owner). The requester's
+  access is explicit access Dataverse cannot see, like the B-17 contact grants: widening could add nothing, and replacing
+  would refuse requesters whose request is owned by another unit's team. The other exemptions are writes that touch no
+  core record (filing a new request, self identity and self state) and the contact-grant routes, which refuse a
+  systemuser; `RouteAuthorizationGuardTests.ExternalWrites` lists each with its reason.
 - **Write affordances come from the same answer, for the record in hand.** A view scoped to ONE record reports what its
   create route would admit: the document list's `canCreate`, and — for a Dataverse-decided user only — the to-do list's and
   a project event list's `canCreate` (one confirmation per view; no per-row reads). `/me` carries
   `writeAccessPerRecord: true` for such a user, because its per-project level then says only what they may see; the
-  client takes create/upload controls from the record's list instead.
+  client takes create/upload controls from the record's list instead. Read-only actions (download, version history) are
+  offered wherever the list rendered, and the to-do status toggle is offered on a project's to-dos and decided by the
+  edit route's own confirmation (a refusal reverts it).
 - **The membership walk is not consulted** for that user's access: not the A1 registry terms, not A1.1's ownership
   columns, not `MembershipTermRights`.
 - **Unchanged:** the contact-grants union (`sprk_externalrecordaccess` — Dataverse cannot see it, register B-17) on both
@@ -437,8 +445,10 @@ Dataverse Read reaches a record through their unit's depth (owner D1).
   group reaches the confirmation or is an exemption with a reason.)
 - **Known limit:** the child table's **Append** privilege (`prvAppend<child>`, which Dataverse also asks of a user setting
   the child's parent lookup) is not checked. The existing checker answers one privilege per round trip; Create plus
-  AppendTo on the parent is the material gate, and every SpaarkeMaster role that grants Create on these four tables
-  (Spaarke Basic User, Spaarke Core User, Spaarke Office Add In User) grants Append on them too.
+  AppendTo on the parent is the material gate, and every SpaarkeMaster role grants Append on each of these tables it
+  grants Create on (Spaarke Core User: all four; Spaarke Basic User: `sprk_communication` only; Spaarke Office Add In
+  User: `sprk_event` only). Internal users who write on the SPA/Teams plane therefore need Spaarke Core User (or
+  equivalent privileges), exactly as in the model-driven app.
 - **MUST** fail closed: a failed impersonated read (a fault, a missing or empty `SystemUserId`, no source) fails the
   composition; a failed, refused or absent rights answer adds no rights. **MUST NOT** fall back to the membership walk, an
   app-only read or a constant.
@@ -459,9 +469,14 @@ Dataverse Read reaches a record through their unit's depth (owner D1).
 
 - **Off does not close the over-grant.** Until the flag is on, the systemuser plane keeps A1.1's business-unit
   over-grant. This amendment does not claim otherwise.
-- **Listed rights are Read under the flag**, so a surface that offers write actions from listed rights (the SPA's
-  `canCreate` and access level) under-offers until the task 036 open question on write affordances is settled; the
-  routes themselves decide correctly.
+- **Listed rights are Read under the flag.** Settled (task 036 decision g): single-record views report their create
+  route's own Dataverse answer and `/me` says `writeAccessPerRecord`, so the SPA offers create/upload, download and the
+  to-do status toggle where the routes admit them. Still level-gated for such a user: Invite User and the issued-grants
+  list (contact-grant routes refuse a systemuser, so hiding them is correct).
+- **WorkforceHome-linked users (ADR-028 A9) cannot be confirmed.** A customer-directory token cannot be exchanged for a
+  Dataverse token in Spaarke's tenant, so under the flag such a user's writes are refused unless a contact grant allows
+  them (task 036 open question a, with the owner). Turning the flag on in a tenant with such users waits for that
+  decision.
 - **The 5,000 cap has no ordering** (register item C-1): a capped set is flagged, but which records it keeps is an owner
   decision, escalated by task 036.
 
