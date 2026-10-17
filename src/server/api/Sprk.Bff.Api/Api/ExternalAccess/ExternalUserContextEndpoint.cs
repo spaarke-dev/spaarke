@@ -93,4 +93,52 @@ public static class ExternalUserContextEndpoint
 
         return Results.Ok(response);
     }
+
+    /// <summary>
+    /// The handler mapped to GET /api/v1/external/me: <see cref="Handle"/> unchanged, plus the additive
+    /// <see cref="ExternalUserContextResponse.Firms"/> list (ebilling-r1 task 051, owner decision 2026-10-17: the SPA's invoice
+    /// submission has a "Choose firm" step when the caller belongs to several firms).
+    /// </summary>
+    /// <remarks>
+    /// <para>The firms are the caller contact's CONFERRING organization memberships, read through
+    /// <see cref="ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync"/> — the one definition the submission routes validate
+    /// <c>firmId</c> against — so the SPA is never offered a firm the submission would refuse as foreign. Only the caller's own ids are ever
+    /// looked up, and only id and name leave.</para>
+    /// <para>Skipped (<c>Firms = null</c>) while eBilling is off: no read, no extra cost for a deployment without the feature. A fault in
+    /// the membership or name read also leaves <c>null</c> — an additive field never fails /me, and "unknown" is not "no firm".</para>
+    /// </remarks>
+    public static async Task<IResult> HandleAsync(
+        HttpContext httpContext,
+        ILogger<Program> logger,
+        Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Configuration.EbillingOptions> ebilling,
+        ExternalParticipationService participations,
+        Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionService submissions,
+        CancellationToken ct)
+    {
+        // Fully qualified: a `using` here would shift the line numbers the route ledger cites (:45, :74).
+        var result = Handle(httpContext, logger);
+        if (result is not Microsoft.AspNetCore.Http.HttpResults.Ok<ExternalUserContextResponse> { Value: { } response }
+            || !ebilling.CurrentValue.Enabled
+            || httpContext.Items[CallerPrincipal.HttpContextItemsKey] is not CallerPrincipal caller)
+        {
+            return result;
+        }
+
+        IReadOnlyList<ExternalFirmEntry>? firms = null;
+        try
+        {
+            var (firmIds, unreadable) = await ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync(caller, participations, logger, ct);
+            if (!unreadable)
+            {
+                var named = firmIds.Count == 0 ? Array.Empty<(Guid FirmId, string Name)>() : await submissions.ReadActiveFirmNamesAsync(firmIds, ct);
+                firms = named?.Select(f => new ExternalFirmEntry(f.FirmId, f.Name)).ToList();
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "[EXT-ME] Firm list unavailable. TraceId={TraceId}", httpContext.TraceIdentifier);
+        }
+
+        return Results.Ok(response with { Firms = firms });
+    }
 }

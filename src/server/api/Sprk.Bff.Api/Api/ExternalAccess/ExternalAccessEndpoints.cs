@@ -63,7 +63,7 @@ public static class ExternalAccessEndpoints
             .AddCallerPrincipalAuthorizationFilter();
 
         // GET /api/v1/external/me — Returns the caller's project access context (either plane)
-        externalGroup.MapGet("/me", ExternalUserContextEndpoint.Handle)
+        externalGroup.MapGet("/me", ExternalUserContextEndpoint.HandleAsync)
             .WithName("GetExternalUserContext")
             .WithSummary("Get the authenticated collaboration caller's project access context")
             .WithDescription(

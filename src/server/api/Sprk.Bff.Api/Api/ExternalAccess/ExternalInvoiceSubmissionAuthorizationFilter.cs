@@ -254,20 +254,32 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
     /// <summary>The caller's conferring firms; empty for a caller with no contact; a 503 when they cannot be read.</summary>
     private async Task<(IReadOnlyList<Guid> Firms, IResult? Denial)> ReadFirmsAsync(CallerPrincipal principal, CancellationToken ct)
     {
+        var (firms, unreadable) = await ReadCallerFirmsAsync(principal, _participations, _logger, ct);
+        return unreadable ? (firms, Unverifiable()) : (firms, null);
+    }
+
+    /// <summary>
+    /// The ONE definition of "the caller's firms": the contact's CONFERRING organization memberships. Shared by this filter and by
+    /// <c>GET /api/v1/external/me</c> (ebilling-r1 task 051, which lists them for the firm step), so the list the SPA offers is exactly the set
+    /// <c>firmId</c> is validated against. <c>Unreadable</c> is true when the contact or the memberships could not be read (never "no firm").
+    /// </summary>
+    internal static async Task<(IReadOnlyList<Guid> Firms, bool Unreadable)> ReadCallerFirmsAsync(
+        CallerPrincipal principal, ExternalParticipationService participations, ILogger logger, CancellationToken ct)
+    {
         if (principal.ContactUnreadable)
         {
-            return (Array.Empty<Guid>(), Unverifiable());
+            return (Array.Empty<Guid>(), true);
         }
 
         if (principal.ContactId == Guid.Empty)
         {
-            return (Array.Empty<Guid>(), null);
+            return (Array.Empty<Guid>(), false);
         }
 
-        var memberships = await ContactGrantorAuthorizationFilter.ReadMembershipsAsync(_participations, principal.ContactId, _logger, ct);
+        var memberships = await ContactGrantorAuthorizationFilter.ReadMembershipsAsync(participations, principal.ContactId, logger, ct);
         return memberships.Unreadable
-            ? (Array.Empty<Guid>(), Unverifiable())
-            : (memberships.ConferringOrganizationIds.Distinct().ToList(), null);
+            ? (Array.Empty<Guid>(), true)
+            : (memberships.ConferringOrganizationIds.Distinct().ToList(), false);
     }
 
     private static IResult Unverifiable() =>

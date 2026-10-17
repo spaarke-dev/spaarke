@@ -14,11 +14,24 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// (<c>ExternalDataService.IsCreatedByCaller</c>) stays the authority. It is the caller's own id only, so it
 /// discloses nothing new.
 /// </param>
+/// <param name="Firms">
+/// ebilling-r1 task 051 (additive; the fields above are unchanged). The firms the caller can submit invoices for: the
+/// caller contact's CONFERRING organization memberships, id and name only, the same set the invoice submission routes
+/// resolve <c>firmId</c> from. Empty when the caller belongs to no firm. <see langword="null"/> when it is not known:
+/// eBilling is off (the list is not read at all), or the memberships or names could not be read. A reader treats null as
+/// "ask the server", never as "no firm". Only the caller's own firms are ever listed.
+/// </param>
 public record ExternalUserContextResponse(
     Guid ContactId,
     string Email,
     IReadOnlyList<ProjectAccessEntry> Projects,
-    Guid? SystemUserId = null);
+    Guid? SystemUserId = null,
+    IReadOnlyList<ExternalFirmEntry>? Firms = null);
+
+/// <summary>One firm the caller belongs to (see <see cref="ExternalUserContextResponse.Firms"/>).</summary>
+/// <param name="FirmId">The Dataverse <c>sprk_organizationid</c>; the value to send as <c>firmId</c> when submitting.</param>
+/// <param name="Name">The organization's display name.</param>
+public record ExternalFirmEntry(Guid FirmId, string Name);
 
 /// <summary>
 /// A single project access entry in the external user context response.

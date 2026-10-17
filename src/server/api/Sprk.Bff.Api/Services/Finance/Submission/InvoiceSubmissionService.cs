@@ -284,6 +284,40 @@ public class InvoiceSubmissionService
         }
     }
 
+    /// <summary>
+    /// The id and display name of each ACTIVE firm among <paramref name="firmIds"/>, in the order given (ebilling-r1 task 051: the firm step's
+    /// list on <c>GET /api/v1/external/me</c>). A missing or inactive firm is left out (a submission for it is refused anyway, see
+    /// <see cref="IsActiveFirmAsync"/>); a firm with no name is listed under its id. Returns <see langword="null"/> when any read faulted (a
+    /// fault is never "no firm"). Reads only the ids it is given, so the caller's own firms are the only ones that can come back.
+    /// </summary>
+    public async Task<IReadOnlyList<(Guid FirmId, string Name)>?> ReadActiveFirmNamesAsync(IReadOnlyCollection<Guid> firmIds, CancellationToken ct)
+    {
+        var firms = new List<(Guid FirmId, string Name)>(firmIds.Count);
+        foreach (var firmId in firmIds)
+        {
+            try
+            {
+                var firm = await _entities.RetrieveAsync(OrganizationEntity, firmId, new[] { "statecode", "sprk_name" }, ct);
+                if (firm is not null && firm.GetAttributeValue<OptionSetValue>("statecode")?.Value == 0)
+                {
+                    var name = firm.GetAttributeValue<string>("sprk_name");
+                    firms.Add((firmId, string.IsNullOrWhiteSpace(name) ? firmId.ToString() : name));
+                }
+            }
+            catch (Exception ex) when (IsNotFound(ex))
+            {
+                // Not a firm any more: not offered.
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                _logger.LogWarning(ex, "Firm list unavailable: firm {FirmId} could not be read", firmId);
+                return null;
+            }
+        }
+
+        return firms;
+    }
+
     // ── Writes, in order, each compensated on a later failure ──
 
     private async Task<InvoiceSubmissionOutcome> WriteAsync(
