@@ -15,7 +15,7 @@ POML ("keep the old widget behind a flag") is that one Boolean on two system row
 | Worklist | `202bcde0-13c9-f111-a05c-0022482913fc` | `worklist` | no (sortOrder 13; seeded by task 156) |
 
 The `worklist` section (task 156 shim over task 059's `WorklistWidget`) is already in the deployed Console bundle (built from master `a8c3182ec`), so
-**the cutover needs no code deploy**: it is one data switch, `scripts/Set-DefaultWorkspaceLayout.ps1` (new in this task):
+**the cutover needs no code deploy**: it is one data switch, `scripts/Set-DefaultWorkspaceLayout.ps1` (new in this task). **Run it only after the non-admin gate in section 6.1 passes or the owner waives it in writing.**
 
 ```powershell
 # cutover (reads only with -WhatIf)
@@ -36,10 +36,12 @@ What stays installed for the one-release revert window: the `daily-briefing` sec
 task, after the release. The Daily Briefing row is **still selectable from the Workspaces dropdown** during that window (deliberately: hiding it would break
 the Assistant's "Open Daily Briefing" card, which opens that row by id, and would make the revert two steps).
 
-Repo side: `scripts/system-layouts.json` (what `Deploy-SystemWorkspaceLayouts.ps1` seeds into a fresh environment, and what `-Force` re-applies) now has the
-Worklist as the one default and the Daily Briefing as not default, so a re-seed reproduces the cutover instead of undoing it. Guard:
-`Spaarke.DailyBriefing.Components/test/briefingCutoverLayouts.test.ts`. If the revert is run on dev, `-Force` on that seeder would re-apply the Worklist default;
-the revert is a data state, not a repo state.
+Repo side: `scripts/system-layouts.json` is **not edited by this task** (fix round 1, coordinator decision). That file is embedded into customer provisioning
+(`Sprk.Provisioning.ControlPlane.Core.csproj`, `DataverseWebApiWorkspaceLayoutSeeder`): changing its default would change every new customer's landing tab, and a re-run on an
+existing environment would create a second system default. Whether the Worklist should be the default for new customers is an owner scope decision (DI-103 / #2006). The
+cutover is therefore a **dev-only data switch** through `Set-DefaultWorkspaceLayout.ps1`; the file still seeds the Daily Briefing as default. Guard (the sections both stay
+registered, the seed still points at `daily-briefing`, the script's safety properties): `Spaarke.DailyBriefing.Components/test/briefingCutoverLayouts.test.ts`. Provisioning
+seeder tests re-run: `DataverseWebApiWorkspaceLayoutSeederTests` 9/9 pass.
 
 ## 2. Gate check (escalation trigger: "if either lane is not rendering real data, STOP") - not fired
 
@@ -63,7 +65,7 @@ Read-only, spaarkedev1 and `spaarke-bff-dev`, 2026-10-17 ~04:00Z, as the owner's
 | Console Workspace opens on the worklist with the narrative on | After the switch the BFF default is the `Worklist` row (script read-back). Narrative is on by default: `WorklistWidget` asks `service.narrate` when the host passes none (`narrative === undefined && !anyFilter`), and `worklist.registration.ts` builds the service. Live `/narrate` returns 200 (section 2). **Browser check after the switch: pending, section 6.** |
 | Decide above Do | `WorklistWidget.test.tsx` "renders Decide above Do ..." (existing) + the live route (2 Decide cards before 18 Do cards) |
 | Many Do, few Decide: Decide stays visible | New test "keeps every Decide line above a long Do lane: 49 overdue Do items ..." (49 Do + 2 Decide: both Decide lines render, no "Showing n of m", the Decide lane precedes the Do lane in the document, the first two lines are the decisions). Mutation proof: reversing the lane order failed it (received 0), restored |
-| Negative: old widget reachable behind a flag | The flag is `sprk_isdefault`; `Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing'` reverts with no deploy. `briefingCutoverLayouts.test.ts` (5 tests) fails if the Daily Briefing row, its `daily-briefing` section or the registry entry goes: 2 of 5 failed against the pre-change `system-layouts.json`, all pass now |
+| Negative: old widget reachable behind a flag | The flag is `sprk_isdefault`; `Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing'` reverts with no deploy. `briefingCutoverLayouts.test.ts` (4 tests) fails if either section leaves the registry, the provisioning seed stops pointing at `daily-briefing`, or the script loses its `If-Match` / cancelled handling (that test fails against the previous script) |
 | Client builds, cutover documented | `vite build` of `src/solutions/SpaarkeAi` (includes LegalWorkspace): exit 0, `index.html` 6,215.98 kB (gzip 1,736.06 kB); this note |
 | Non-admin reader sees only own Do work, nothing on an unreadable matter | **NOT verified on dev as a non-admin by this lane** (only an admin identity is available). Server rules are unit-tested in `SignalReadRouteTests` (`EventDoRows_OwnerAssigneeAndCreatorSeeThem_AColleagueDoesNot`, `TodoDoRows_OwnerOrAssigneeSeeThem_AnyoneElseDoesNot`, `SameBuColleagueWhoCannotReadTheMatter_GetsNothing_AndNothingRevealsIt`, `DoRow_OnACoreTheCallerCannotRead_IsAbsentEvenWhenTheSubjectIsTheirOwn`, `WorkAssignment_AssignerAndAssigneeSeeIt_AThirdColleagueDoesNot`) and live in `SignalReadRouteLiveTests.LiveMode_SyntheticSignalsOverRealRecords_RealUsersSeeOnlyWhatTheyMayRead`. The re-run as the non-Console user is DI-83 / #1882 (open). Steps for the owner/main session: section 6 |
 | Every HANDOFF 1.4 rule has a pass or a recorded refinement | Section 4 |
@@ -144,19 +146,34 @@ Why Do volume is higher: not the 5-day to 1-day change (it adds 0 on today's dev
 work assignments past response (19) were never in the Briefing**. Per reader, the owner's Do lane is 49 items (10 overdue tasks, 39 overdue To Dos) and the Decide
 lane 2. Draft text for the cutover note to users: "The Workspace now opens on your Worklist: judgements that need you (Decide) above work Spaarke already holds
 that has slipped (Do). Do now includes overdue To Dos and work assignments past their response date, and starts at one day overdue, so the Do list is longer than
-the old Briefing's task list. The Briefing is unchanged for now and can be opened from the Workspaces menu."
+the old Briefing's task list. The Briefing is unchanged for now and can be opened from the Workspaces menu. If you already had a Briefing tab open or pinned it stays open next to the Worklist, which opens as well; after the change, the first reload of a browser tab may still show the Briefing, and the next reload opens the Worklist."
 
-## 6. Not done by this lane, and what is left
+## 6. Runbook: gate first, then the switch (not done by this lane)
 
-1. **The switch itself is not run** (live write; this lane may not). The main session runs the two commands in section 1 after the PR merges, and tells
-   word-add-in (Console change notice) first/after. No deploy is involved. Browsers with the Console open keep the old default until reopened (the layout list is
-   cached in `sessionStorage` and revalidated on load); a user's own default or a restored Daily Briefing tab (NFR-09) still wins for that person.
-2. **UI tests listed in the POML are pending the switch** (nothing to click until the default changes): Workspace opens on the Worklist with the narrative; Decide above
-   Do with seeded overdue tasks and a decision; revert with the script and see the Briefing; dark mode. Suggested: do these in task 105 UAT with the owner.
-3. **Non-admin reader checks (criteria "own work only", "Not filed only for the owner")** need a second identity: sign in as (a) a non-admin who owns a Not filed
-   To Do and (b) one who does not, call `GET /api/v1/signals/worklist?set=lanes` or open the Worklist, and compare against the owner's list (49 Do; 1 Not filed card
-   of 13). This is the DI-83 / #1882 re-run already open.
-4. Work-assignment and service-request cards were not seen live (no WA Signal in the owner's list); verify with the assigner or assignee of one of the 19 WA Signals.
+### 6.1 Gate - the switch runs ONLY after these pass, or the owner waives them in writing
+
+The POML (line 39, D-15/D-26) requires the non-admin reader check *before* the swap; this lane had only an admin identity, so it is not done. Sign in as non-admin readers
+(no Dataverse admin role), open the Worklist (or call `GET /api/v1/signals/worklist?set=lanes`) and compare with the owner's list (Decide 2, Do 49, 1 Not filed card of 13):
+1. **Non-admin reader on both lanes (D-15/D-26):** the Do lane shows only that reader's own work and no Signal on a matter they cannot read; Decide shows only Signals on matters they
+   can read; a decision opens in the in-app wizard. (This is the DI-83 / #1882 re-run, still open.)
+2. **Not filed and project cards (D-34/D-35):** project-grouped items appear under their project; Not filed appears only for its owner. Use two readers: one who owns a Not filed To Do and one who does not.
+3. **Work-assignment and service-request cards (D-36):** not seen live (no WA Signal in the owner's list; 19 exist org-wide). Check as the assigner or assignee of one of them.
+
+If the owner waives any of 1-3, record the waiver (who, when, which check) in this file before running 6.2.
+
+### 6.2 The switch (main session, after the PR merges and 6.1 is done or waived)
+
+Run the commands in section 1 (`-WhatIf` first). Tell word-add-in (Console change notice) before and after. No deploy is involved. What users see afterwards:
+- The first reload in the same browser tab still opens the **cached** Daily Briefing (the layout list is cached in `sessionStorage`; `useWorkspaceLayouts.ts` hydrates from it and
+  `WorkspacePane` installs the default once per mount, before the revalidation lands). The next reload opens the Worklist.
+- A restored (NFR-09) or pinned Daily Briefing tab does **not** stop the Worklist being added and activated: the install skips only when the new default itself is already open or
+  pinned (`WorkspacePane.tsx` default-install effect; `ManageWorkspacesPane.tsx` treats the first pinned workspace as the default). The Briefing tab stays open beside it.
+- A person's own default (BFF step 1) still wins for that person.
+
+### 6.3 After the switch
+
+The POML's UI tests have nothing to click until the default changes: Workspace opens on the Worklist with the narrative; Decide above Do with seeded overdue tasks and a decision;
+revert with the script and see the Briefing; dark mode. Suggested: do these in task 105 UAT with the owner.
 
 ## 7. Deviations from the POML (D-106: reported, not fixed)
 
@@ -175,7 +192,9 @@ the old Briefing's task list. The Briefing is unchanged for now and can be opene
   DecisionWizard + ConsoleKit + WorkspaceShell: 211 pass, 1 fails: `DecisionWizard.test.tsx` "Escape and the backdrop do nothing ..." (`Unable to find role="textbox"
   and name /^To/`). It is untouched by this task and fails the same when the file runs alone here (059 notes call it a folder-run flake that passes alone; issue #1961).
 - `Spaarke.DailyBriefing.Components` jest: 20 suites / 153 tests pass; 6 suites do not compile in a package-only install (pre-existing, 062 P-2/P-3); the new
-  `briefingCutoverLayouts.test.ts` (5 tests) passes, and 2 of its 5 fail against the pre-change `system-layouts.json`.
+  `briefingCutoverLayouts.test.ts` (4 tests) passes; the script-safety test fails against the previous script.
+- `Sprk.Provisioning.ControlPlane.Tests` filtered to `DataverseWebApiWorkspaceLayoutSeederTests`: 9/9 pass (the seed file is unchanged by this task).
+- `Set-DefaultWorkspaceLayout.ps1`: a declined `-Confirm` prints "Cancelled, nothing written." and writes nothing (custom PSHost that answers No); PATCH carries `If-Match: *`.
 - Client lint ratchet (`node scripts/quality/client-lint/client-lint.mjs check`): `ui-components` ok, `daily-briefing-components` ok. `legal-workspace-app` not run locally
   (comment-only change there; needs its own install).
 - `tsc --noEmit` in `Spaarke.UI.Components`: 9 errors, the same 9 as the 059 notes (unresolved `@spaarke/auth` / `@spaarke/sdap-client`, `FileUploadService.ts`), none in a file this task touched.

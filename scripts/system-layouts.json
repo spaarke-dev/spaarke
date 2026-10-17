@@ -7,8 +7,8 @@
       "sectionId": "daily-briefing",
       "layoutTemplateId": "single-column",
       "sortOrder": 0,
-      "isDefault": false,
-      "description": "Wave 2b auto-installed this as the default landing workspace. Ontology R1 task 064 (2026-10-17) replaced it with the Worklist as the default; the row and the daily-briefing section stay for one release so the cutover can be reverted with scripts/Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing' (no deploy)."
+      "isDefault": true,
+      "description": "Wave 2b will auto-install this as the default landing workspace. Replaces hard-coded WorkspaceHomeTab."
     },
     {
       "name": "Smart To Do List",
@@ -89,14 +89,6 @@
       "sortOrder": 11,
       "isDefault": false,
       "description": "ai-advanced-capabilities-analysis-hub-r1 (front door, 2026-07-29). Analysis platform home/launcher — create-by-type cards (Agreement Review live) + a DataGrid of sprk_analysis records with view-by-type. Pattern D dual-use with the `analysis-hub` direct widget in @spaarke/ai-widgets/register-workspace-widgets.ts; the AnalysisHubWidget reads its PaneEventBus + AI session context optionally so the section is safe in any host."
-    },
-    {
-      "name": "Worklist",
-      "sectionId": "worklist",
-      "layoutTemplateId": "single-column",
-      "sortOrder": 13,
-      "isDefault": true,
-      "description": "spaarke-ontology-platform-r1 tasks 156 + 064. The Decide and Do lanes (Signals read through the BFF route, decisions in the in-app wizard) with the Assistant narrative on. The default landing workspace since the Daily Briefing cutover (task 064); sortOrder 13 matches scripts/seed-worklist-workspace-layout.ps1. Reverting the default is scripts/Set-DefaultWorkspaceLayout.ps1, not an edit here."
     }
   ]
 }

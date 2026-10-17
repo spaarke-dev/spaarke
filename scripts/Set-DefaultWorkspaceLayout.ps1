@@ -18,8 +18,13 @@
   two writes the Daily Briefing, sortOrder 0, still wins the BFF's ordering until the second write lands). It reads the result back and
   fails unless exactly one system row is default and it is the target. Idempotent: running it twice is a no-change.
 
-  User-owned defaults (a person's own "make this my default", BFF step 1) are not touched and still win for that person. A browser
-  tab already open keeps what it has until the Console is reopened (the layout list is cached in sessionStorage, revalidated on load).
+  User-owned defaults (a person's own "make this my default", BFF step 1) are not touched and still win for that person.
+
+  What a user sees after the switch (WorkspacePane default-install effect, useWorkspaceLayouts cache):
+    - The first reload in the same browser tab still opens the cached Daily Briefing (the layout list is cached in sessionStorage and
+      the default is installed once per mount, before the revalidation lands); the next reload opens the Worklist.
+    - A restored or pinned Daily Briefing tab does NOT stop the Worklist being opened: the install only skips when the new default
+      itself is already open or pinned. The Briefing tab stays open beside it until the user closes it.
 
   -WhatIf performs the reads and prints every write it would make. Nothing is written.
 
@@ -70,21 +75,34 @@ foreach ($o in $others) { Write-Host "Currently also default: '$($o.sprk_name)' 
 $changes = @()
 if (-not $target.sprk_isdefault) { $changes += [pscustomobject]@{ Id = $target.sprk_workspacelayoutid; Name = $target.sprk_name; Value = $true } }
 foreach ($o in $others) { $changes += [pscustomobject]@{ Id = $o.sprk_workspacelayoutid; Name = $o.sprk_name; Value = $false } }
-foreach ($c in $changes) {
-  if ($PSCmdlet.ShouldProcess("$DataverseUrl sprk_workspacelayouts($($c.Id))", "Set sprk_isdefault = $($c.Value) on '$($c.Name)'")) {
-    Invoke-RestMethod -Method Patch -Headers $headers -Uri "$api/sprk_workspacelayouts($($c.Id))" -Body (@{ sprk_isdefault = $c.Value } | ConvertTo-Json) | Out-Null
-    Write-Host "PATCHED: '$($c.Name)' sprk_isdefault = $($c.Value)"
-  }
-  else {
-    Write-Host "WHATIF (would PATCH): '$($c.Name)' sprk_isdefault = $($c.Value)"
-  }
-}
-
 if ($target.sprk_isdefault -and $others.Count -eq 0) {
   Write-Host "NO CHANGE: '$To' is already the only system default."
   return
 }
+
+$written = 0
+foreach ($c in $changes) {
+  if ($PSCmdlet.ShouldProcess("$DataverseUrl sprk_workspacelayouts($($c.Id))", "Set sprk_isdefault = $($c.Value) on '$($c.Name)'")) {
+    # If-Match '*' makes the PATCH update-only: a row that vanished between the read and the write is an error, never an upsert.
+    $patchHeaders = $headers + @{ 'If-Match' = '*' }
+    Invoke-RestMethod -Method Patch -Headers $patchHeaders -Uri "$api/sprk_workspacelayouts($($c.Id))" -Body (@{ sprk_isdefault = $c.Value } | ConvertTo-Json) | Out-Null
+    $written++
+    Write-Host "PATCHED: '$($c.Name)' sprk_isdefault = $($c.Value)"
+  }
+  elseif ($WhatIfPreference) {
+    Write-Host "WHATIF (would PATCH): '$($c.Name)' sprk_isdefault = $($c.Value)"
+  }
+}
+
 if ($WhatIfPreference) { return }
+if ($written -eq 0) {
+  Write-Host 'Cancelled, nothing written.'
+  return
+}
+if ($written -lt $changes.Count) {
+  Write-Host "Cancelled part-way: $written of $($changes.Count) writes were made. Run the script again to finish; until then both rows may be default and the one with the lower sortOrder wins."
+  return
+}
 
 $after = @(Read-SystemLayout | Where-Object { $_.sprk_isdefault })
 if ($after.Count -ne 1 -or $after[0].sprk_name -ne $To) {
