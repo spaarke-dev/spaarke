@@ -39,18 +39,18 @@ In the BFF beside 047/048 (`Services/Finance/Coding/`, the AI `PublicContracts` 
 
 **Usable set** (unchanged from 048): active, with at least one active Task code. So "UTBMS Activity" and "UTBMS Expense" are never ranked, never candidates, never confirmable.
 
-**Set profile** (embedded once per service instance): `"{name} ({body})\n{description}\nFits: {matchHints}\nTask codes: L110 Fact Investigation/Development; ..."`. Reference rows are embedded by name.
+**Set profile** (embedded once per service instance, and cached across requests in `IEmbeddingCache` when it is registered; fix-round-1): `"{name} ({body})\n{description}\nFits: {matchHints}\nTask codes: L110 Fact Investigation/Development; ..."`. Reference rows are embedded by name (also cached, keyed by the name).
 
 **Matching one row** (`MatchAsync`, used by GET proposals and by the 047 hook):
 1. A nameless row, or no usable set at all: `NoneFits`, unreviewed, with a rationale (never omitted).
 2. Rank every usable set by cosine. Candidates: all when there are at most 6 (dev has 6), else the top 4.
-3. Examples: confirmed mappings of this environment (active rows of both tables mapped to a usable set), matter types first, by name, at most 10.
+3. Examples: the confirmed mappings of this environment (active rows of both tables mapped to a usable set) whose names are most similar to the row's, at most 10 (fix-round-1; was the first 10 by name). Their name embeddings are computed once per scope; if they cannot be embedded, name order is used.
 4. `IInvoiceAi.MatchCodeSetAsync` -> the Action answers `{ codeSetId, confidence, reason }`.
 5. `codeSetId == "none"` -> `NoneFits`: `proposed` and `runnerUp` are null (nothing to confirm by mistake), `closest` names the most similar set as context only, rationale "No code set fits: {reason} Map this row by hand or add a code set (closest by similarity: '...')".
 6. A Guid that is one of THIS request's candidates -> `Proposed`, `reviewed: true`, the model's confidence and reason; runner-up = the best other ranked set.
 7. Anything else (an id outside the candidates, the Activity set's id, a set name, an empty string) is **refused** and, like a failed or unavailable Action (`binding_missing`, completion failure, linear consumers off), falls back to the embedding top as `Proposed`, `reviewed: false`, `confidence: null`, rationale "Not reviewed by AI (...); low confidence, check before confirming. ...". A failure never becomes a none-fits and never fails the list.
 
-**GET proposals** returns every unmapped active row (proposed or none-fits) plus `coverage.matterTypes` / `coverage.practiceAreas` = `{ active, mapped, proposed, noneFits, unreviewed }`. `outcome` serialises as the string `Proposed` / `NoneFits`.
+**GET proposals** returns every unmapped active row (proposed, none-fits or failed) plus `coverage.matterTypes` / `coverage.practiceAreas` = `{ active, mapped, proposed, noneFits, unreviewed, failed }`. `outcome` serialises as the string `Proposed` / `NoneFits` / `Failed`. Since fix-round-1 the rows are matched 4 at a time (order = row order); a row whose matching throws (e.g. its name cannot be embedded) is `Failed` with no proposal and does not affect the others; the AI being off still answers 503. The first row that reaches the Action is matched alone, and if the Action is unavailable (`binding_missing`, switched off) the rest skip it; the request logs one warning per distinct review issue, not one per row.
 
 **047 hook (FR-22 step 4).** Unchanged gate (only when neither lookup is mapped). It matches the matter type; if that is none-fits it tries the practice area; the first `Proposed` set id is returned (the resolver flags it `AiSuggestion` / `NeedsReview`). Both none-fits -> no suggestion -> the resolver's settings default. Nothing is persisted (seam tests assert no write and no conditional write).
 
@@ -103,7 +103,9 @@ Model: Azure OpenAI `spaarke-openai-dev`, Fast tier deployment `gpt-4o-mini` (th
 | Commercial Transactions (PA) | UTBMS Project | UTBMS Project | 0.90 / 0.90 |
 | Office Catering (negative) | none | none (closest: Counseling) | 0.90 / 0.90 |
 
-**11/11 + negative control, both runs, all reviewed.** No tuning iteration was needed after the first draft of the descriptions, hints and prompt. Rerun: `$env:CODESET_MATCH_LIVE_OPENAI_ENDPOINT='https://spaarke-openai-dev.cognitiveservices.azure.com/'; $env:AZURE_TOKEN_CREDENTIALS='AzureCliCredential'; dotnet test tests/unit/Sprk.Bff.Api.Tests --filter FullyQualifiedName~CodeSetMatchingLiveTests` (optional `CODESET_MATCH_LIVE_REPORT=<path>`). About 25-30 s for 12 rows.
+**11/11 + negative control, both runs, all reviewed.** No tuning iteration was needed after the first draft of the descriptions, hints and prompt. Rerun: `$env:CODESET_MATCH_LIVE_OPENAI_ENDPOINT='https://spaarke-openai-dev.cognitiveservices.azure.com/'; $env:AZURE_TOKEN_CREDENTIALS='AzureCliCredential'; dotnet test tests/unit/Sprk.Bff.Api.Tests --filter FullyQualifiedName~CodeSetMatchingLiveTests` (optional `CODESET_MATCH_LIVE_REPORT=<path>`). About 25-30 s for 12 rows before fix-round-1; 10 s with parallel matching.
+
+**Fix-round-1 rerun (2026-10-17 00:58Z, same deployments):** 12/12 again (11/11 + negative control), all reviewed, confidences 0.90-0.95. The none rationale for Office Catering now names only the similarity-closest set: "No code set fits: Office Catering is not a legal matter type ... so none of the candidate code sets ... applies. Map this row by hand or add a code set (closest by similarity: 'UTBMS Counseling')."
 
 ## 5. Live changes (spaarkedev1, 2026-10-16) and seeding
 
@@ -115,7 +117,7 @@ Model: Azure OpenAI `spaarke-openai-dev`, Fast tier deployment `gpt-4o-mini` (th
 
 ## 6. Fix: 048 confirm lost update (coordinator fix-now item)
 
-Found by the 048 adversarial review: `ConfirmAsync` re-read the row, then wrote unconditionally, so a mapping another admin confirmed between the re-read and the write was silently replaced and both admins got 200. Fix: the re-read selects `versionnumber`; the write goes through `IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync` (Web API PATCH with `If-Match`, `@odata.bind` to `/sprk_billingcodesets({id})`); `DBConcurrencyException` (412) re-reads and decides again, up to 3 attempts; the second attempt sees the other admin's mapping and answers `AlreadyMapped` (409); exhausted attempts also answer 409 without writing; a missing version refuses rather than writing blind; `KeyNotFoundException` (row deleted) answers 404. Test `Confirm_WhenAnotherAdminMapsTheRowBetweenTheReReadAndTheWrite_Returns409Outcome_AndKeepsTheOtherMapping` lands the other admin's mapping after the re-read (`FakeCodingReferenceData.AfterQuery`). Mutation proof: with the old unconditional `UpdateAsync` swapped back in, it fails ("Expected outcome to be AlreadyMapped, but found Confirmed"); with the fix it passes. 048 notes L1 corrected.
+Found by the 048 adversarial review: `ConfirmAsync` re-read the row, then wrote unconditionally, so a mapping another admin confirmed between the re-read and the write was silently replaced and both admins got 200. Fix: the re-read selects `versionnumber`; the write goes through `IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync` (Web API PATCH with `If-Match`, `@odata.bind` to `/sprk_billingcodesets({id})`); `DBConcurrencyException` (412) re-reads and decides again, up to 3 attempts; the second attempt sees the other admin's mapping and answers `AlreadyMapped` (409); exhausted attempts on a row that is still unmapped answer `ConcurrentChange` (409 `ebilling.codeset.concurrent_change`, its own detail; fix-round-1 K4) without writing; a missing version refuses rather than writing blind; `KeyNotFoundException` (row deleted) answers 404. Test `Confirm_WhenAnotherAdminMapsTheRowBetweenTheReReadAndTheWrite_Returns409Outcome_AndKeepsTheOtherMapping` lands the other admin's mapping after the re-read (`FakeCodingReferenceData.AfterQuery`). Mutation proof: with the old unconditional `UpdateAsync` swapped back in, it fails ("Expected outcome to be AlreadyMapped, but found Confirmed"); with the fix it passes. 048 notes L1 corrected.
 
 ## 7. Verification
 
@@ -131,13 +133,34 @@ Found by the 048 adversarial review: `ConfirmAsync` re-read the row, then wrote 
 
 ## 8. Known limits (K-class)
 
-- K1 (latency): GET proposals makes one Fast completion per unmapped row, sequentially, after the embeddings: about 2-2.5 s per row on dev (12 rows: 21-31 s). Only unmapped rows are matched, so after the first mapping pass the list is short. See D1 for the large-tenant case.
-- K2: examples are the first 10 confirmed mappings (matter types first, by name), not the 10 most similar. With up to ~10 mappings this is all of them.
+- K1 (latency): GET proposals makes one Fast completion per unmapped row, 4 at a time since fix-round-1 (12 rows on dev: 10 s, was 21-31 s). ~100 unmapped rows now take about 60 s, inside the 230 s front-end timeout; several hundred unmapped rows would need paging (not needed for any known tenant).
+- K2: resolved in fix-round-1 (examples are chosen by similarity).
 - K3: a row mapped to a set that has since become unusable counts as `mapped` in coverage and is not proposed again (048 behaviour); the resolver skips such a mapping at coding time and the hook, by design, does not second-guess it.
 - K4: the seed refills a tuning column an admin deliberately cleared (an empty column cannot be told apart from never-seeded). Edited text is never replaced.
 - K5: `confidence` is the model's self-report, not a calibrated probability; the UI should show it as a hint only.
 - K6: coverage is returned by the API only; no admin screen shows it yet (an admin UI is out of scope, escalation trigger 2 not fired).
+- K7 (seed text updates; coordinator "K5"): the tuning seed fills a column only when it is empty, so it cannot tell outdated seed text from an admin's edit. If the seed text in `utbms-codeset-tuning.json` is improved later, environments already seeded keep the old text until an admin clears or edits the column. Scenario: a release improves the Counseling hints; spaarkedev1 keeps the 2026-10-16 hints and matches with them.
+- K8 (hook cost once 049 wires a production consumer of `ILineCodingService`): each invoice coding job that reaches FR-22 step 4 (neither lookup mapped) builds a fresh scope that reads all usable sets, their Task codes and the confirmed mappings from Dataverse, embeds what the cache does not hold, and makes one or two Fast completions. With `IEmbeddingCache` registered the embeddings are cache hits after the first job; without it (no AI Search configured) every job embeds every set profile and every confirmed mapping name. Revisit with 049 (e.g. a short-lived cache of the loaded sets) if the volume of unmapped-reference invoices is high.
+- K9 (embedding cache keys): the cache keys (`sprk-code-set-profile:v1`, `sprk-code-set-reference-name:v1`) do not include the embedding deployment, because `IInvoiceAi` does not expose it. If the embedding model behind `IInvoiceAi.GenerateEmbeddingAsync` changes, bump the key versions; otherwise cached vectors from the old model are compared with new ones until the 7-day TTL expires.
+- K10 (probe): only the first row that reaches the Action decides whether the Action is "unavailable" for the request. A Binding added in the middle of a request is seen by the next request.
 
-## 9. Deferred defect (reported, not fixed here)
+## 9. Deferred defect
 
-- D1 (scale): a first run on an environment with many unmapped rows can exceed the App Service front-end request timeout (230 s). Scenario: a customer imports ~100 practice areas and matter types with no mappings; GET proposals runs ~100 sequential completions at ~2.3 s each (~230 s) and the request is cut off with no list. Fix options for the owner: bounded parallel matching (profiles and examples are already loaded once per request; match the rows with a small concurrency limit), or paging the list. Not done here because it changes the request's concurrency model and the shared test fake is not thread-safe; dev (11 rows) and typical tenants are well within the limit.
+- D1 (scale): **fixed in fix-round-1** (bounded parallel matching, see K1).
+
+## 10. Fix-round-1 (coordinator review of 054)
+
+| Item | Change | Test (fails before, passes after) | Mutation proof |
+|---|---|---|---|
+| F1 | Action constraint, none example and output-schema `reason` description no longer ask for / show a closest set; the constraint says the application reports it. `$version` stays 1 (all versioned mirrors are 1, no bump-on-text convention, not yet seeded). | `InvoiceCodeSetMatchActionContractTests.NoneAnswer_NeverNamesAClosestSet_...` failed on the old text | - |
+| F3 guard | (test only) | Theory case `fifth-ranked`: the Action answers the 5th-ranked (usable, non-candidate) set, Trademark -> `Reviewed == false` | `candidates.FirstOrDefault` -> `ranked.FirstOrDefault`: that case turns red |
+| F3 profile | (test only) | `Propose_EmbedsEachSetsProfile_...`: the Project profile holds the description, `Fits: ` + hints and `Task codes: P100 Project Administration; P210 Corporate Review`, and not the inactive P900 | name-only profile: red |
+| D1 | Rows matched 4 at a time (`MatchParallelism`), results in row order, cancellation propagates, a throwing row is `Failed`; coverage gains `failed`; the test fake is thread-safe | in-flight (exactly 4), order, isolation, cancellation tests | `MatchParallelism = 1`, single-slot gate, unbounded gate: in-flight red; completion-order results: order red; no per-row catch: isolation red |
+| Examples | The 10 most similar confirmed mappings, name embeddings once per scope | `Propose_SendsTheConfirmedMappingsMostSimilarToTheRow_...` ("Zz Corporate Deals" beats A00-A09) | ordering removed: red |
+| K6 | Set profiles cached across requests in the existing `IEmbeddingCache` (optional ctor dependency; registered only with AI Search), key = set id + `modifiedon` + full profile text (includes the Task-code text); names cached by name | cache hit (second scope embeds nothing) and invalidation (an edited code re-embeds only its set; a newer `modifiedon` re-embeds only its set) | cache ignored, name cache removed, key without profile text, key without `modifiedon`: each red |
+| K4 | Exhausted confirm on a still-unmapped row -> `ConcurrentChange` -> 409 `ebilling.codeset.concurrent_change`, own detail | seam + contract tests | exhausted -> `AlreadyMapped`: both red |
+| K logging | Probe first row; the rest skip an unavailable Action; per-row logs Debug; one warning per issue per request | `Propose_WhenTheBindingIsMissing_ResolvesItOnce_AndLogsOneWarning...` (3 rows: 1 resolver call, 1 warning) | probe result ignored: red |
+
+Beyond the brief (reported): row and example **names** also go through the cache, because similarity examples would otherwise add one embedding per confirmed mapping to every hook job (K8). The live test maps a `Failed` row to "failed" in its report.
+
+Verification: BFF and test builds clean; CodeSet + LineCoding 175 passed, 1 skipped (live); eval/catalog (`P2LoopInjectionEvalSuiteTests`, `CatalogInputSchemaContractTests`, `ConsumerTypes`, `Contract.Catalog`) 136 passed; Finance filter 1001 passed, 3 skipped; ArchTests 1056 passed. No new interface (ADR-010 delta 0); no package. Publish size (same method as section 7): base `73e912d22` 37.41 MB, fix-round-1 37.41 MB, delta 0.00 MB, 192 files each. Live: Azure OpenAI calls for the evaluation rerun only; no Dataverse write.

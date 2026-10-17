@@ -109,5 +109,5 @@
 - Fix-now from the 048 review: confirm write is conditional on versionnumber (If-Match); a concurrent mapping answers 409 AlreadyMapped; race test fails with the old write, passes with the fix; 048 notes L1 corrected.
 - ADR-010 delta 0; publish size task delta +0.01 MB (37.38 -> 37.39 MB; master 37.17 MB); no package added; no vulnerable package.
 - Deferred D1 (reported to owner): sequential per-row completions can exceed the 230 s front-end timeout with ~100 unmapped rows.
-rework: none task 054</notes>
+rework: fix-round-1 task 054</notes>
 </task>
