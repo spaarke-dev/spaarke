@@ -3,7 +3,7 @@
   <metadata>
     <title>Model 1 workforce contacts: baseline access. How the BFF applies the role "Spaarke Internal Contact User (Workforce)" to workforce-contact callers (ADR-028 A9; sign-in and registration are owned by SPA-r3)</title>
     <phase>Session 28 — UAC (owner round 97, rescoped by ADR-028 A9 on 2026-10-13)</phase>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Access decisions for callers who are not Dataverse systemusers. A wrong ceiling over-shares a customer's matters with every self-registered employee.</rigor-reason>
     <model-tier>opus</model-tier>
