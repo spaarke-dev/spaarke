@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
     Creates or verifies the four Do-lane policies (sprk_policy + sprk_policyversion) of ontology task 061: overdue task,
-    task coming due, work assignment past its response date, overdue To Do.
+    task coming due, work assignment past its response date, overdue To Do. With -DefinitionPath config/know-promotion.policies.json
+    it applies the Know-promotion policy of ontology task 063 (a Decide-lane rule) the same way.
 
 .DESCRIPTION
     Source of truth: config/do-lane.policies.json. Each policy and each version has a FIXED id, so the script is an upsert:
@@ -20,7 +21,8 @@
     Before anything else (also in -WhatIf and -Verify) the definition is linted: it parses, ids and codes are unique, every
     option label exists on the live column, each rule body is JSON, each decision plan names only Do-lane codes, text fits its column.
     The authoritative rule-body, template and plan validation (the compiler, ValidateForSave, DecisionPlanService) is the unit test
-    DoLanePolicyDefinitionTests, which reads this same definition file.
+    DoLanePolicyDefinitionTests (config/do-lane.policies.json) or KnowPromotionPolicyDefinitionTests (config/know-promotion.policies.json),
+    which read the same definition file. The definition's kind fixes the lane and the plan codes the lint accepts (see $KindRules).
 
     This script is a dev data change when it writes. Run -WhatIf first; -Verify never writes.
 
@@ -28,7 +30,7 @@
     Target environment, e.g. https://spaarkedev1.crm.dynamics.com. Defaults to $env:DATAVERSE_URL. Required.
 
 .PARAMETER DefinitionPath
-    The definition JSON. Default: config/do-lane.policies.json beside the repo root.
+    The definition JSON. Default: config/do-lane.policies.json beside the repo root. For task 063 pass config/know-promotion.policies.json.
 
 .PARAMETER Verify
     READ-ONLY. Reports each policy and version as ABSENT, IN SYNC or DRIFT. Exit 1 on a lint failure or DRIFT; ABSENT is exit 0
@@ -41,6 +43,7 @@
     pwsh scripts/Apply-DoLanePolicies.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -WhatIf
     pwsh scripts/Apply-DoLanePolicies.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com
     pwsh scripts/Apply-DoLanePolicies.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -Verify -RequireRows
+    pwsh scripts/Apply-DoLanePolicies.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -DefinitionPath config/know-promotion.policies.json -WhatIf
 #>
 #Requires -Version 7.0
 [CmdletBinding(SupportsShouldProcess)]
@@ -59,9 +62,13 @@ if (-not $DataverseUrl) { throw 'DataverseUrl is required (parameter or $env:DAT
 $DataverseUrl = $DataverseUrl.TrimEnd('/')
 $ApiBase = "$DataverseUrl/api/data/v9.2"
 
-# The Do-lane codes of the closed action catalog (DecisionActionCatalog.cs, PlanLane = Do). A plan naming anything else is refused
-# by DecisionPlanService at read time, so it is refused here first.
-$DoLaneCodes = @('mark-complete', 'reschedule', 'reassign', 'send-reminder', 'extend-response-date', 'record-the-response')
+# Per definition kind: the lane the policies must be in and the plan codes of the closed action catalog for that lane
+# (DecisionActionCatalog.cs, PlanLane). A plan naming anything else is refused by DecisionPlanService at read time, so it is
+# refused here first.
+$KindRules = @{
+    'do-lane-policies'        = @{ Lane = 'Do'; Codes = @('mark-complete', 'reschedule', 'reassign', 'send-reminder', 'extend-response-date', 'record-the-response') }
+    'know-promotion-policies' = @{ Lane = 'Decide'; Codes = @('send-budget-inquiry', 'revise-budget', 'approve-variance', 'assign-work') }
+}
 $MaxHeadline = 200; $MaxProposedAction = 400; $MaxShortName = 100
 
 $definition = Get-Content -LiteralPath $DefinitionPath -Raw -Encoding utf8 | ConvertFrom-Json -Depth 32
@@ -108,14 +115,15 @@ function Get-Instant($value) {
 # ---- lint ---------------------------------------------------------------------------------------------------------
 function Test-Definition($def) {
     $problems = [System.Collections.Generic.List[string]]::new()
-    if ($def._version -ne '1.0' -or $def.kind -ne 'do-lane-policies') { $problems.Add('definition must have _version 1.0 and kind do-lane-policies') }
+    if ($def._version -ne '1.0' -or -not $KindRules.ContainsKey([string]$def.kind)) { $problems.Add("definition must have _version 1.0 and kind one of: $($KindRules.Keys -join ', ')"); return $problems }
+    $rules = $KindRules[[string]$def.kind]
     $ids = @(); $codes = @()
     foreach ($p in $def.policies) {
         $at = $p.code
         if ($p.policyId -notmatch '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$') { $problems.Add("${at}: policyId is not a GUID") }
         $ids += $p.policyId; $codes += $p.code
         if ($p.shortName.Length -gt $MaxShortName) { $problems.Add("${at}: shortName exceeds $MaxShortName characters") }
-        if ($p.lane -ne 'Do' -or -not $laneMap.ContainsKey($p.lane)) { $problems.Add("${at}: lane must be Do and exist on the live column") }
+        if ($p.lane -ne $rules.Lane -or -not $laneMap.ContainsKey($p.lane)) { $problems.Add("${at}: lane must be $($rules.Lane) (kind $($def.kind)) and exist on the live column") }
         if (-not $subjectMap.ContainsKey($p.subjectType)) { $problems.Add("${at}: subjectType '$($p.subjectType)' is not on the live column") }
         if (-not $workMap.ContainsKey($p.workType)) { $problems.Add("${at}: workType '$($p.workType)' is not on the live column") }
         if (-not $severityMap.ContainsKey($p.severity)) { $problems.Add("${at}: severity '$($p.severity)' is not on the live column") }
@@ -133,7 +141,7 @@ function Test-Definition($def) {
             if ($v.proposedAction.Length -gt $MaxProposedAction) { $problems.Add("${va}: proposedAction exceeds $MaxProposedAction characters") }
             if ($v.messageTemplate -match '\{\{') { $problems.Add("${va}: messageTemplate must be literal (no tokens)") }
             if ((Get-Instant $v.inForceFrom) -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$') { $problems.Add("${va}: inForceFrom must be an ISO UTC instant") }
-            foreach ($code in @($v.decisionPlan.actions)) { if ($DoLaneCodes -notcontains $code) { $problems.Add("${va}: decision plan names '$code', not a Do-lane catalog code") } }
+            foreach ($code in @($v.decisionPlan.actions)) { if ($rules.Codes -notcontains $code) { $problems.Add("${va}: decision plan names '$code', not a $($rules.Lane)-lane catalog code") } }
             if (@($v.decisionPlan.actions).Count -eq 0) { $problems.Add("${va}: decision plan has no actions") }
         }
     }
