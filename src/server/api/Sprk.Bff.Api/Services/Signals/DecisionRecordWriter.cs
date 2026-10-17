@@ -838,6 +838,8 @@ public sealed class DecisionRecordWriter
                 subject, entity.Attributes.ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal), derivedCores);
         }
 
+        RequireCoreIsTheInvoiceFamilySubjectsOwn(request, subject, filing.DerivedCores);
+
         // D-33/D-34/D-39 as amended by D-129 (records are owned by TEAMS), uac-r2 F1 and contract C3: the owner is uac-r2's resolver
         // asked with EVERY parent the record sits under, exactly as returned (secure-if-any). owningbusinessunit is never set here (it
         // derives from the owner); a refusal writes nothing; KeepCreator is not requested, so an Unchanged answer is refused.
@@ -937,6 +939,34 @@ public sealed class DecisionRecordWriter
         }
 
         return stamp.Stamps;
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 026 fix-round-1 (FR-05, D-75; ontology K3): for an invoice or invoice-line subject the decision context
+    /// (<see cref="DecisionRecordRequest.Core"/>, written as <c>sprk_corerecordtype</c> / <c>sprk_corerecordid</c> and the typed
+    /// lineage lookup) must BE the one core record the subject is filed under, the single stamp its filing derived. A request naming
+    /// another core (a line's invoice's matter, say), or none, would record a decision against a record the subject does not belong to:
+    /// refused as <see cref="DecisionRecordRefusalReason.SubjectUnfileable"/>, a data condition a retry does not change. Applies to a
+    /// handed filing too (its derived cores are the ones it was computed with). Other subjects are untouched.
+    /// </summary>
+    internal static void RequireCoreIsTheInvoiceFamilySubjectsOwn(
+        DecisionRecordRequest request, DecisionRecordRef subject, IReadOnlyList<CoreAncestorStamp> derivedCores)
+    {
+        if (!InvoiceFamilyCoreRecordGuard.CoreRecordLookups.ContainsKey(subject.Entity))
+        {
+            return;
+        }
+
+        if (derivedCores is [var own] && request.Core is { } core
+            && string.Equals(core.EntityLogicalName, own.EntityType, StringComparison.OrdinalIgnoreCase)
+            && core.RecordId == own.RecordId)
+        {
+            return;
+        }
+
+        throw new DecisionRecordRefusedException(
+            DecisionRecordRefusalReason.SubjectUnfileable,
+            "The decision's core record is not the one core record its invoice or invoice-line subject is filed under; nothing was written.");
     }
 
     /// <summary>Fix round 2 (K1): a handed filing that does not answer the request. Logged at Error (a caller bug, not a data

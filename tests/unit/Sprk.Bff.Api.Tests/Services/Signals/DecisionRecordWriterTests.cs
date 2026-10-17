@@ -1355,6 +1355,49 @@ public sealed partial class DecisionRecordWriterTests
         h.OwnerAsks.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("other-matter")]
+    [InlineData("other-type")]
+    [InlineData("no-core")]
+    public async Task E026_ADecisionContextThatIsNotTheLinesOwnCore_IsUnfileable_AndNothingIsWritten(string condition)
+    {
+        // Fix-round-1 (ontology K3): the line is filed under a project; the request names its invoice's matter, another project's
+        // record type, or no core at all. sprk_corerecordid would name a record the line does not belong to.
+        var line = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var h = new Harness();
+        h.Rows[("sprk_billingevent", line)] = new Entity("sprk_billingevent", line)
+        {
+            ["sprk_project"] = new EntityReference("sprk_project", project),
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid()),
+        };
+        var subject = new DecisionRecordRef("sprk_billingevent", line);
+        var request = condition switch
+        {
+            "other-matter" => Request(core: Core("sprk_matter", MatterId), subject: subject),
+            "other-type" => Request(core: Core("sprk_matter", project), subject: subject),
+            _ => Request(noCore: true, subject: subject),
+        };
+
+        (await h.Writer.Invoking(w => w.ResolveOwnerAsync(request)).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.SubjectUnfileable);
+        (await h.Writer.Invoking(w => w.WriteAsync(request)).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.SubjectUnfileable);
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void E026_TheCoreCheck_LeavesEverySubjectOutsideTheInvoiceFamilyAlone()
+    {
+        var request = Request(core: Core("sprk_matter", MatterId));
+        var act = () => DecisionRecordWriter.RequireCoreIsTheInvoiceFamilySubjectsOwn(
+            request, new DecisionRecordRef("sprk_communication", CommunicationId),
+            [new CoreAncestorStamp("sprk_project", "sprk_regardingproject", Guid.NewGuid())]);
+
+        act.Should().NotThrow("a communication's decision context may differ from its filing (task 142, unchanged)");
+    }
+
     [Fact]
     public async Task E026_ALineOfAProject_IsFiledUnderTheLine_AndStampedWithItsOwnProject_NotItsInvoicesMatter()
     {
