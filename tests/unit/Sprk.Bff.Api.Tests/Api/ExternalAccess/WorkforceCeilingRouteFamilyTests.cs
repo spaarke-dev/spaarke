@@ -94,6 +94,7 @@ public sealed class WorkforceCeilingRouteFamilyTests : IClassFixture<ExternalDel
         // Contact-side grants (the record from the body)
         { "POST", "/contact-grants", "grant", "sprk_externalrecordaccess", AccessRights.Create },
         { "POST", "/contact-grants", "grant", "sprk_project", AccessRights.AppendTo },
+        { "POST", "/contact-grants", "grant", "contact", AccessRights.Read },
         { "GET", $"/contact-grants?recordType=project&recordId={Project}", None, "sprk_externalrecordaccess", AccessRights.Read },
         { "GET", $"/contact-grants?recordType=project&recordId={Project}", None, "contact", AccessRights.Read },
         { "POST", "/contact-grants/revoke", "revoke", "sprk_externalrecordaccess", AccessRights.Write },

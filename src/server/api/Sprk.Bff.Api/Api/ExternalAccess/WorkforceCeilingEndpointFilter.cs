@@ -91,7 +91,11 @@ internal sealed class WorkforceCeilingFilterAttached
 /// <b>Per route only (review round 2).</b> The four declarations extend <see cref="RouteHandlerBuilder"/>, the builder a
 /// single <c>Map*</c> call returns, never <see cref="RouteGroupBuilder"/>: a group-wide declaration would satisfy the
 /// coverage guard for every route the group maps, including one added later that needs a different set. Enforced by: the
-/// type (a declaration on a group does not compile).
+/// type (these four extensions do not compile on a group) and the source-scan guard
+/// <c>WorkforceCeilingMetadataConstructionGuardTests</c> (ArchTests), which fails the build when server code outside this
+/// file calls a <see cref="WorkforceCeilingMetadata"/> factory, so <c>group.WithMetadata(WorkforceCeilingMetadata.Declared(…))</c>
+/// cannot be written around the extensions. The factories stay <see langword="internal"/> because the unit and arch tests
+/// build declarations to prove the filter and the coverage guard.
 /// </remarks>
 internal static class WorkforceCeilingEndpointExtensions
 {

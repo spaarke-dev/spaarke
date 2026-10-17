@@ -147,12 +147,17 @@ internal static class WorkforceRoleCeilingGate
     /// <summary>
     /// <c>POST /contact-grants</c>: the grant row is created, or the colleague's existing row is renewed in place
     /// (<c>GrantExternalAccessEndpoint.CreateGrantAsync</c>), and it is filed under the record, so AppendTo on the record's
-    /// table (<paramref name="recordType"/>, from the request). An unparseable record type yields <see langword="null"/>:
-    /// the handler refuses it with its own 400 before anything is read or written.
+    /// table (<paramref name="recordType"/>, from the request). The handler also reads the colleague's <c>contact</c> row (by
+    /// id or by email) and names the colleague by that row's email in its response label and its <c>managed_elsewhere</c> 409
+    /// detail, so the set carries Read on <c>contact</c> (review round 3 F1). An unparseable record type yields
+    /// <see langword="null"/>: the handler refuses it with its own 400 before anything is read or written.
     /// </summary>
     internal static IReadOnlyList<WorkforceCeilingRequirement>? GrantAsContact(string? recordType) =>
         ExternalGrantRoot.TryParse(recordType, out var root)
-            ? Set((GrantTable, AccessRights.Create | AccessRights.Write), (ExternalGrantRoot.LogicalNameFor(root), AccessRights.AppendTo))
+            ? Set(
+                (GrantTable, AccessRights.Create | AccessRights.Write),
+                (ExternalGrantRoot.LogicalNameFor(root), AccessRights.AppendTo),
+                (ContactTable, AccessRights.Read))
             : null;
 
     /// <summary><c>GET /{root}/{id}/messages</c>: the root record and the messages (<c>sprk_communication</c>) regarding it.</summary>

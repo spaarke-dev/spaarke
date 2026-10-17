@@ -17,7 +17,9 @@ namespace Spaarke.ArchTests;
 /// </summary>
 /// <remarks>
 /// Enforced by: this guard (build), the type (the declarations extend only a single route's
-/// <c>RouteHandlerBuilder</c>, so a group-wide declaration does not compile), and the filter's fail-closed default (run
+/// <c>RouteHandlerBuilder</c>, so a group-wide declaration through them does not compile), the source-scan guard
+/// <c>WorkforceCeilingMetadataConstructionGuardTests</c> (nothing else creates the metadata, so
+/// <c>group.WithMetadata(WorkforceCeilingMetadata.…)</c> is a build failure), and the filter's fail-closed default (run
 /// time: an undeclared endpoint denies a workforce contact). Limit, stated exactly: presence is not correctness. An InHandler declaration is trusted to be
 /// implemented; the route tests (WorkforceCeilingRouteTests) prove each one, and a wrong requirement set passes here.
 /// </remarks>
@@ -109,18 +111,59 @@ public sealed class WorkforceCeilingCoverageTests
         Assert.Contains(violations, v => v.Contains("API/V1/EXTERNAL/upper", StringComparison.Ordinal));
     }
 
-    [Fact(DisplayName = "Task 186 review round 2: the four declarations take a single route's builder, never a group's (enforced by the type)")]
+    [Fact(DisplayName = "Task 186 review round 3 must-fire: an undeclared endpoint whose pattern begins ~/ is reported")]
+    public void TheGuardFires_OnATildeSlashExternalPattern()
+    {
+        var endpoints = new[]
+        {
+            Endpoint("~/api/v1/external/x"),
+            Endpoint("~/api/v1/external"),
+            Endpoint("~/API/V1/EXTERNAL/upper"),
+        };
+
+        var violations = Violations(endpoints);
+
+        Assert.Equal(3, violations.Count);
+        Assert.Contains(violations, v => v.Contains("~/api/v1/external/x", StringComparison.Ordinal) && v.Contains("no declaration", StringComparison.Ordinal));
+        Assert.Contains(violations, v => v.Contains("* ~/api/v1/external ", StringComparison.Ordinal));
+        Assert.Contains(violations, v => v.Contains("~/API/V1/EXTERNAL/upper", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Task 186 review round 3 must-not-fire: ~/ routes outside the prefix are not reported")]
+    public void TheGuardDoesNotFire_OnATildeSlashPatternOutsideThePrefix()
+    {
+        Assert.Empty(Violations(new[]
+        {
+            Endpoint("~/api/v1/external-access/grant"),
+            Endpoint("~/api/v1/externalthing"),
+            Endpoint("~/api/v1/other/external"),
+        }));
+    }
+
+    [Fact(DisplayName = "Task 186 review round 3: ANY public extension that adds a WorkforceCeilingMetadata takes a single route's builder, never a group's")]
     public void TheDeclarations_ExtendOnlyARouteHandlerBuilder()
     {
-        var names = new[] { "RequireWorkforceCeiling", "WorkforceCeilingInHandler", "ExemptFromWorkforceCeiling" };
-        var declarations = typeof(WorkforceCeilingEndpointExtensions)
-            .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
-            .Where(m => names.Contains(m.Name))
+        // Found by the compiled IL, not by name: a fifth declaration added later (or a renamed one) is judged too.
+        var adders = IlCallScan.MethodReferences(IlCallScan.WithNested(typeof(WorkforceCeilingEndpointExtensions)))
+            .Where(r => r.Target.DeclaringType == typeof(WorkforceCeilingMetadata))
+            .Select(r => IlCallScan.SourceMethod(r.Caller, r.CallerMethod)
+                         ?? throw new Xunit.Sdk.XunitException(
+                             $"{IlCallScan.Describe(r.CallerMethod)} creates a WorkforceCeilingMetadata inside a lambda or closure; "
+                             + "declare it in the extension method itself so the builder type is judged."))
+            .Cast<System.Reflection.MethodInfo>()
+            .Distinct()
             .ToList();
 
-        Assert.Equal(4, declarations.Count);
-        foreach (var method in declarations)
+        // Not vacuous: the four known declarations are among them.
+        var names = adders.Select(m => m.Name).ToHashSet();
+        Assert.Contains("RequireWorkforceCeiling", names);
+        Assert.Contains("WorkforceCeilingInHandler", names);
+        Assert.Contains("ExemptFromWorkforceCeiling", names);
+        Assert.True(adders.Count >= 4, $"expected at least the four known declarations, found {adders.Count}.");
+
+        foreach (var method in adders)
         {
+            Assert.True(method.IsPublic && method.IsStatic, $"{method}: a declaration is a public static extension.");
             Assert.False(method.IsGenericMethodDefinition, $"{method}: a generic builder would accept a RouteGroupBuilder.");
             var builder = method.GetParameters()[0].ParameterType;
             Assert.Equal(typeof(Microsoft.AspNetCore.Builder.RouteHandlerBuilder), builder);
@@ -131,9 +174,11 @@ public sealed class WorkforceCeilingCoverageTests
     private static bool IsExternal(RouteEndpoint endpoint)
     {
         // Path-segment boundary: "api/v1/external" itself or "api/v1/external/…", never "api/v1/external-access".
-        var raw = (endpoint.RoutePattern.RawText ?? string.Empty).TrimStart('/');
-        return raw.Equals(Prefix, StringComparison.OrdinalIgnoreCase)
-               || raw.StartsWith(Prefix + "/", StringComparison.OrdinalIgnoreCase);
+        // Built from the parsed segments, not RawText: a pattern may begin "/", "~/" or nothing, and all three route alike.
+        var path = string.Join("/", endpoint.RoutePattern.PathSegments.Select(segment =>
+            string.Concat(segment.Parts.Select(part => part is RoutePatternLiteralPart literal ? literal.Content : "{}"))));
+        return path.Equals(Prefix, StringComparison.OrdinalIgnoreCase)
+               || path.StartsWith(Prefix + "/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static List<string> Violations(IEnumerable<RouteEndpoint> endpoints)
