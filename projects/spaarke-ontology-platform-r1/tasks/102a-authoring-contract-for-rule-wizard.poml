@@ -6,7 +6,7 @@
     <gate>101 complete</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Security-relevant: closes a column-value oracle on the dry run (owner option 101(b)) and adds an authoring route; treated as auth-tagged.</rigor-reason>
+    <rigor-reason>Security-relevant: narrows a column-value oracle on the dry run (owner option 101(b)) and adds an authoring route; treated as auth-tagged.</rigor-reason>
     <model-tier>opus</model-tier>
     <model-tier-reason>Shared validation path across four admin routes plus a new security allow-list; the authorization must equal the existing routes exactly.</model-tier-reason>
     <effort>high</effort>
@@ -18,12 +18,12 @@
     <estimated-effort>1 day</estimated-effort>
   </metadata>
 
-  <prompt>Give the rule wizard (task 102) what task 101's contract lacks. The catalog gains a per-lane block: actions, next steps, dismissal reasons, severities and work types, plus the authorable fields per subject and join. A compile-only POST /authoring/validate route returns valid, errors and templateEligibleFields. A closed (entity, column) allow-list, enforced on every authoring path, closes the dry run's column-value oracle.</prompt>
+  <prompt>Give the rule wizard (task 102) what task 101's contract lacks. The catalog gains a per-lane block: actions, next steps, dismissal reasons, severities and work types, plus the authorable fields per subject and join. A compile-only POST /authoring/validate route returns valid, errors and templateEligibleFields. A closed (entity, column) allow-list, enforced on every authoring path, narrows the dry run's column-value oracle to the listed columns.</prompt>
   <role>SPAARKE backend developer. The server supplies every value the wizard offers; nothing is hand-copied to the client.</role>
   <goal>The wizard can build every step from server data, check a draft without running it, and cannot reference a column outside the allow-list. A refusal is the same on validate, dry run, save and publish, because one validation path serves all four.</goal>
 
   <context>
-    <background>Task 102 escalated: 101's catalog has no action, next-step, dismissal-reason, severity or work-type lists, and no way to check a draft or get its TemplateEligibleFields without a dry run. OWNER DECISION 2026-10-17, option A: the server provides them. Owner option 101(b): an authorable-column allow-list. The dry run evaluates as the evaluator (org-wide read), so a clause on any column was a one-bit oracle over values the caller cannot read; the allow-list closes it. 101(c), the related-records gap, is a signed ADR-028 tension recorded by the main session (no code here). The raw rule body for "New version" is out of scope: the wizard rebuilds the condition. Coordinator 2026-10-16 (in this lane): nextSteps[] and authorableFields[] are approved additions; work types and severities have no lane mapping on the server, so each lane returns the full list.</background>
+    <background>Task 102 escalated: 101's catalog has no action, next-step, dismissal-reason, severity or work-type lists, and no way to check a draft or get its TemplateEligibleFields without a dry run. OWNER DECISION 2026-10-17, option A: the server provides them. Owner option 101(b): an authorable-column allow-list. The dry run evaluates as the evaluator (org-wide read), so a clause on any column was a one-bit oracle over values the caller cannot read; the allow-list narrows it to the listed columns (residual on joinable related tables: notes/102a-authoring-contract.md). 101(c), the related-records gap, is a signed ADR-028 tension recorded by the main session (no code here). The raw rule body for "New version" is out of scope: the wizard rebuilds the condition. Coordinator 2026-10-16 (in this lane): nextSteps[] and authorableFields[] are approved additions; work types and severities have no lane mapping on the server, so each lane returns the full list.</background>
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ontology/OntologyAdminAuthoringEndpoints.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringService.cs</file>
