@@ -301,28 +301,35 @@ public sealed class SignalReevaluationJob : IScheduledJob
             // (the unscoped policy's read) so that the supersede below, which is version-based, also closes its Signals outside the
             // scope; the planner and everything after it see only the in-scope ones (task 102b, closure on scope change).
             var read = await ReadPolicySignalsAsync(policy.Code, counts, ct, scope).ConfigureAwait(false);
+            // Task 102b: on the policy's own pass (not a trigger's), a Signal outside its matter scope.
+            Func<ExistingSignal, bool>? outside = null;
+            if (scope is null && matterScope is { } own)
+            {
+                outside = s => !(string.Equals(s.SubjectEntity, own.Entity, StringComparison.Ordinal) && s.SubjectId == own.Id);
+            }
+
             // Task 033 (FR-16, D-13): Signals citing an older version close Superseded first, so the planner below re-raises
-            // the subjects the current version still holds as new episodes in this same pass. Task 102b: a publish that changes the
-            // matter scope makes every open Signal cite the old version, so those outside the new scope close Superseded here and,
-            // never reaching the planner, are not re-raised.
-            var superseded = await _closure.SupersedeInPassAsync(policy.Code, versionId, read, ct).ConfigureAwait(false);
+            // the subjects the current version still holds as new episodes in this same pass. Task 102b: every open Signal outside the
+            // matter scope closes Superseded here too, whatever version it cites (fix round 1, uac-r2 F2): after a publish that changed
+            // the scope it cites the old version (or none), and after a scope changed in Dataverse without a publish it cites the
+            // current one. The policy's scope supersedes it either way, and, never reaching the planner, it is not re-raised.
+            var superseded = await _closure.SupersedeInPassAsync(policy.Code, versionId, read, ct, outside).ConfigureAwait(false);
             counts.AddClosure(superseded.Outcome, retired: false);
             // Task 145 (D-123): the stored-evidence redaction only ever removes detail, so it covers every Signal read, in and out of
             // the scope, as it does for an unscoped policy (nothing else would ever redact the out-of-scope ones again).
             IReadOnlyList<ExistingSignal> inScope = superseded.Existing;
             IReadOnlyList<ExistingSignal> outOfScope = Array.Empty<ExistingSignal>();
-            if (scope is null && matterScope is { } own)
+            if (outside is not null)
             {
-                bool Within(ExistingSignal s) => string.Equals(s.SubjectEntity, own.Entity, StringComparison.Ordinal) && s.SubjectId == own.Id;
-                inScope = superseded.Existing.Where(Within).ToList();
-                outOfScope = superseded.Existing.Where(s => !Within(s)).ToList();
-                if (outOfScope.Count(s => s.IsOpen && !superseded.NotClosed.Contains(s.Id)) is > 0 and var stranded)
+                inScope = superseded.Existing.Where(s => !outside(s)).ToList();
+                outOfScope = superseded.Existing.Where(outside).ToList();
+                var closedOutside = read.Where(s => s.IsOpen && outside(s) && !superseded.NotClosed.Contains(s.Id)).Select(s => s.Id).ToList();
+                if (closedOutside.Count > 0)
                 {
-                    // Only a scope changed without a publish (outside the BFF) leaves an open Signal outside the scope that cites the
-                    // CURRENT version. The scoped pass never closes a Signal outside its scope on its own judgement: it is named here.
-                    _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
-                        "Policy {PolicyCode}: {Count} open Signal(s) outside its matter scope cite the current version and were left open " +
-                        "(the scope changed without a publish). Publish a version to close them.", policy.Code, stranded);
+                    counts.OutOfScopeSuperseded += closedOutside.Count;
+                    _logger.LogInformation(
+                        "Policy {PolicyCode}: {Count} open Signal(s) outside its matter scope were closed Superseded (the policy's scope " +
+                        "supersedes them): {SignalIds}.", policy.Code, closedOutside.Count, string.Join(",", closedOutside));
                 }
             }
             // Task 034 (FR-17) and #1661: place every stamped or countable Signal in its secure-family partition, stamp a partition
@@ -1372,6 +1379,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
         /// <summary>K1: the part of <see cref="Refused"/> that is a Dataverse privilege refusal (deterministic, so not retried by a trigger).</summary>
         public int AccessDenied;
         public int SupersededClosed, RetiredClosed;
+        /// <summary>Task 102b (fix round 1, uac-r2 F2): the part of <see cref="SupersededClosed"/> that is an open Signal outside its policy's
+        /// matter scope, closed because the scope supersedes it.</summary>
+        public int OutOfScopeSuperseded;
         /// <summary>Task 145 (review F1): Signals whose stored evidence lost detail outside their secure family this pass.</summary>
         public int EvidenceRedacted;
 
@@ -1453,6 +1463,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             updated = Updated,
             closed = Closed,
             supersededClosed = SupersededClosed,
+            outOfScopeSuperseded = OutOfScopeSuperseded,
             policyRetiredClosed = RetiredClosed,
             reassigned = Reassigned,
             refused = Refused,

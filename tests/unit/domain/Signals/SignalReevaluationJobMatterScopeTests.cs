@@ -99,8 +99,9 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
-    public async Task Run_AMatterScopedRule_ClosesOnlyInsideItsMatter_AndNamesAnOpenSignalOutsideItInsteadOfClosingIt()
+    public async Task Run_AMatterScopedRule_ClosesConditionClearedOnlyInsideItsMatter_AndClosesAnOpenSignalOutsideIt_Superseded()
     {
+        // Fix round 1 (uac-r2 F2): an open Signal outside the scope is closed Superseded (the scope supersedes it), never left open.
         var h = ScopedHarness(MatterId); // no matter qualifies any more
         var inside = SeedOpenSignal(h, MatterId);
         var outside = SeedOpenSignal(h, OtherMatterId); // e.g. the scope was changed outside the BFF, without a publish
@@ -109,9 +110,76 @@ public partial class SignalReevaluationJobTests
 
         result.Success.Should().BeTrue(result.ErrorMessage);
         AssertSystemClosure(h.Org.Rows[inside], SignalWriter.ResolutionConditionCleared);
-        StatusOf(h, outside).Should().Be(SignalWriter.SignalStatusOpen, "the scoped pass never closes a Signal outside its matter");
-        h.Org.ConditionalUpdates.Select(u => u.Id).Should().NotContain(outside, "nothing is written to a Signal outside the scope");
-        h.Log.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("outside its matter scope", StringComparison.Ordinal));
+        AssertSystemClosure(h.Org.Rows[outside], SignalWriter.ResolutionSuperseded);
+        result.ResultJson.Should().Contain("\"outOfScopeSuperseded\":1").And.Contain("\"supersededClosed\":1");
+        h.Log.Should().Contain(e => e.Level == LogLevel.Information && e.Message.Contains("outside its matter scope", StringComparison.Ordinal)
+            && e.Message.Contains(outside.ToString("D"), StringComparison.Ordinal), "the closure names the Signal it closed");
+        h.Log.Should().NotContain(e => e.Level >= LogLevel.Warning && e.Message.Contains("outside its matter scope", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Run_AScopeChangedInDataverseFromMToN_WithoutAPublish_ClosesMsOpenSignal_Superseded_AndRaisesN()
+    {
+        // Fix round 1 (uac-r2 F2), route (a): sprk_matter edited from M to N directly in Dataverse, so M's open Signal cites the CURRENT
+        // version and the version-based supersede alone would leave it open.
+        var h = ScopedHarness(MatterId);
+        QualifyingMatter(h, MatterId, "M");
+        QualifyingMatter(h, OtherMatterId, "N");
+        var onM = SeedOpenSignal(h, MatterId);
+        h.Sysadmin.SetMatterScope(ScopedPolicyCode, OtherMatterId);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        AssertSystemClosure(h.Org.Rows[onM], SignalWriter.ResolutionSuperseded);
+        CreatedKeys(h).Should().Equal(Key(ScopedPolicyCode, "sprk_matter", OtherMatterId, 1));
+        result.ResultJson.Should().Contain("\"outOfScopeSuperseded\":1");
+        h.Log.Should().Contain(e => e.Level == LogLevel.Information
+            && e.Message.Contains("outside its matter scope", StringComparison.Ordinal) && e.Message.Contains(onM.ToString("D"), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Publish_Narrowing_ClosesANoVersionOpenSignalOutsideTheNewScope_Superseded()
+    {
+        // Fix round 1 (uac-r2 F2), route (b): a Signal citing no version is not superseded by the version rule, but outside the new scope
+        // the scope supersedes it.
+        var h = ScopedHarness(null);
+        QualifyingMatter(h, MatterId, "M");
+        QualifyingMatter(h, OtherMatterId, "N");
+        var onM = SeedOpenSignal(h, MatterId);
+        var noVersionOnN = h.Org.SeedSignal(Key(ScopedPolicyCode, "sprk_matter", OtherMatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: OtherMatterId, policyId: h.Sysadmin.PolicyIdOf(ScopedPolicyCode));
+        h.Sysadmin.PublishNewVersion(ScopedPolicyCode, AnyMatterBody, AnyMatterTemplate);
+        h.Sysadmin.SetMatterScope(ScopedPolicyCode, MatterId);
+
+        var result = await h.Job.ReevaluatePolicyAsync(h.Sysadmin.PolicyIdOf(ScopedPolicyCode));
+
+        result.Success.Should().BeTrue(result.FailureSummary);
+        AssertSystemClosure(h.Org.Rows[noVersionOnN], SignalWriter.ResolutionSuperseded);
+        AssertSystemClosure(h.Org.Rows[onM], SignalWriter.ResolutionSuperseded);
+        result.SupersededClosed.Should().Be(2);
+        CreatedKeys(h).Should().Equal(Key(ScopedPolicyCode, "sprk_matter", MatterId, 2));
+    }
+
+    [Fact]
+    public async Task Run_AScopedEvaluationThatReturnsAnotherSubject_FailsThePolicy_AndWritesNothing()
+    {
+        // Fix round 1 (uac-r2 F3): the fail-closed hit guard's must-fire. Dataverse is made to ignore the scoped root condition, so the
+        // evaluation returns N as well; the must-not-fire control is Run_AMatterScopedRule_IsEvaluatedWithinItsMatter_...
+        var h = ScopedHarness(MatterId);
+        QualifyingMatter(h, MatterId, "M");
+        QualifyingMatter(h, OtherMatterId, "N");
+        SeedOpenSignal(h, OtherMatterId);
+        h.Sysadmin.IgnoreSubjectIdCondition = true;
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeFalse("a hit outside the scope fails the policy for this pass");
+        result.ResultJson.Should().Contain("\"policyFailures\":1").And.Contain("\"written\":0").And.Contain("\"closed\":0");
+        h.Org.CreateCalls.Should().Be(0);
+        h.Org.WriteCalls.Should().Be(0, "nothing is raised, closed, reconciled or redacted for the policy");
+        h.Log.Should().Contain(e => e.Level == LogLevel.Error && e.EventId.Id == OntologyWriterEvents.EvaluatorPolicyFailed.Id
+            && e.Message.Contains("returned another subject", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -190,8 +258,11 @@ public partial class SignalReevaluationJobTests
         AssertSystemClosure(h.Org.Rows[onM], SignalWriter.ResolutionSuperseded);
         result.SupersededClosed.Should().Be(1);
         CreatedKeys(h).Should().Equal(Key(ScopedPolicyCode, "sprk_matter", OtherMatterId, 1));
-        h.Log.Should().NotContain(e => e.Message.Contains("outside its matter scope", StringComparison.Ordinal),
+        h.Log.Should().NotContain(e => e.Level >= LogLevel.Warning && e.Message.Contains("outside its matter scope", StringComparison.Ordinal),
             "nothing outside the new scope is left open");
+        h.Log.Should().Contain(e => e.Level == LogLevel.Information
+            && e.Message.Contains("outside its matter scope", StringComparison.Ordinal) && e.Message.Contains(onM.ToString("D"), StringComparison.Ordinal),
+            "the closure of M's Signal, now outside the scope, is named");
     }
 
     [Fact]

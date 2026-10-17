@@ -2860,6 +2860,10 @@ public partial class SignalReevaluationJobTests
         /// <summary>Task 145 F1: a witness communication read by id (the evidence family read) faults.</summary>
         public bool FailWitnessReads { get; set; }
 
+        /// <summary>Task 102b fix round 1 (uac-r2 F3): Dataverse ignores the subject-scoped root condition (<see cref="HoldsSubjectId"/>),
+        /// so a scoped evaluation returns every subject: the job's fail-closed hit guard must fire.</summary>
+        public bool IgnoreSubjectIdCondition { get; set; }
+
         private static readonly Guid SecureBusinessUnitId = Guid.Parse("5ec0be00-0000-4000-8000-0000000000b1");
 
         /// <summary>Task 143: this World's Secure Record business unit (answered once <see cref="SecureTeamId"/> exists).</summary>
@@ -3289,7 +3293,7 @@ public partial class SignalReevaluationJobTests
             var result = new EntityCollection();
             if (SubjectRows.TryGetValue(name, out var subjects))
             {
-                foreach (var row in subjects.Where(r => HoldsNumericConditions(r, entity) && HoldsNullTests(r, entity) && HoldsSubjectId(r, entity, name)
+                foreach (var row in subjects.Where(r => HoldsNumericConditions(r, entity) && HoldsNullTests(r, entity) && (IgnoreSubjectIdCondition || HoldsSubjectId(r, entity, name))
                              && InnerLinksSatisfied(entity, r))) result.Entities.Add(row);
             }
             else if (WitnessRows.TryGetValue(name, out var witnesses))

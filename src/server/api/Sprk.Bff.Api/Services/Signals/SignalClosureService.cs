@@ -95,10 +95,16 @@ public sealed class SignalClosureService
     /// <paramref name="currentVersionId"/> and returns the list with each closed Signal shown as Resolved/Superseded, so the same
     /// pass's planner re-raises the subjects the current version still holds.
     /// </summary>
+    /// <param name="outsideScope">Task 102b (fix round 1, uac-r2 F2): for a policy limited to one matter, the Signals outside that scope.
+    /// An open one closes <c>Superseded</c> as well, whatever version it cites (the current one, when the scope changed without a
+    /// publish, or none): the policy's scope supersedes it. Null for an unscoped policy (only the version rule applies).</param>
     internal async Task<(IReadOnlyList<ExistingSignal> Existing, SignalClosureOutcome Outcome, IReadOnlySet<Guid> NotClosed)> SupersedeInPassAsync(
-        string policyCode, Guid currentVersionId, IReadOnlyList<ExistingSignal> existing, CancellationToken ct)
+        string policyCode, Guid currentVersionId, IReadOnlyList<ExistingSignal> existing, CancellationToken ct,
+        Func<ExistingSignal, bool>? outsideScope = null)
     {
-        var superseded = existing.Where(s => IsSuperseded(s, currentVersionId)).ToList();
+        var superseded = existing
+            .Where(s => IsSuperseded(s, currentVersionId) || (outsideScope is not null && s.IsOpen && outsideScope(s)))
+            .ToList();
         if (superseded.Count == 0) return (existing, SignalClosureOutcome.None, new HashSet<Guid>());
 
         var closedIds = new HashSet<Guid>();
