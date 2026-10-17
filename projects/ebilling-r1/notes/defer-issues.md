@@ -805,7 +805,7 @@ Measured on 120 lines: 55.0% task top-1 on gpt-4.1-mini and 63.3% on gpt-5.4-min
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Resolved 2026-10-17 (task 026 fix-round-2, commit 553bc6f41; the PR can close #2056) |
 | **Urgency** | before any playbook or field-mapping rule targets `sprk_invoice` / `sprk_billingevent` core lookups (none configured today) |
 | **Filed** | 2026-10-17 |
 | **Source** | ebilling-r1 task 026 fix-round-1 (K7) |
@@ -829,6 +829,13 @@ Each restamps afterwards, but none refuses any of these:
 - Fix it before any customer uses playbooks or field mapping on invoices. Until then the reconciler and the 409s fail closed, so this is a data-quality gap, not an access leak.
 
 **Estimated effort**: 0.5 day. **Related**: FR-05, D-75, ISS-010 (#1973), task 026.
+
+**Resolution (2026-10-17, task 026 fix-round-2 item 2, commit 553bc6f41)**: as unified-access-control-r2 directed, each path calls `InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync` before its write. It runs when the target is `sprk_invoice` or `sprk_billingevent` and the patch touches a guarded lookup. The stored lookups are read as the app and overlaid with the patch. The check includes D-96's line check.
+- The playbook update and the output orchestrator throw `RecordOwnerUnresolvedException` with the guard's stable code.
+- The push records a code-only error.
+- Write mechanics are unchanged; there are no new DI registrations.
+- Tests: `InvoiceFamilyGenericUpdatePathTests` (a refusal test and an unaffected test per path). With the three guard calls disabled, the three refusal tests fail.
+- The PR that carries this can close #2056.
 
 ---
 

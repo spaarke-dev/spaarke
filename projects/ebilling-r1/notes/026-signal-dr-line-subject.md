@@ -125,6 +125,67 @@ The coordinator merged three reviews into six items.
    - Task 053 now has a binding step 5 (schema verified before the BFF; elsewhere the SpaarkeMaster import comes first, then the firm reason script), and DEF-021 has the same line.
 6. **Lockstep order.** `IntermediateRootColumns_MatchTheTypeScriptSide` uses `WithStrictOrdering`. Swapping two TS rows fails it.
 
+## Fix-round-2
+
+Source: the ontology-r1 and uac-r2 re-checks of fix-round-1, plus DEF-022.
+
+1. **D-96: an invoice re-file keeps its lines** (owner; uac-r2 F1). Commit 553bc6f41.
+   - An update that writes an invoice's core lookup (`sprk_matter`, `sprk_project`, `sprk_regardingworkassignment`) is refused with `invoice_family_line_invoice_core_record_mismatch` when any of its lines names another core record, or none.
+   - The check is one bounded query run as the app, through the existing `IGenericEntityService`: `sprk_billingevent`, `sprk_invoice` = id, own column ≠ new core or empty, or another core column set; top 1; id only. A line the caller cannot see blocks too. The refusal names no line.
+   - A read fault, or a path with no app-only reader, fails closed with `read_failed`. A create has no lines, so it is not checked. A supersedes-only update does not count lines.
+   - Where it is wired:
+     - `InvoiceFamilyCoreRecordGuard.CheckWriteAsync` takes the line check as an optional argument. The guard owns `LinesOfAnotherCoreRecord`, its query and `WritesCoreLookup`.
+     - `OwnedChildWrite.CheckInvoiceFamilyAsync` and `RefileAsync` take an optional `IGenericEntityService`.
+     - `PATCH /api/v1/child-records/{table}/{id}` and the chat update tool pass it.
+     - The event and communication filing routes write no invoice, so they pass none.
+   - D-75 holds: lines are never restamped from their invoice.
+   - The ChildRefile matter → project test now has one line already on the project.
+2. **DEF-022 (#2056).** Commit 553bc6f41.
+   - `InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync` runs BEFORE the write on three paths:
+     - `UpdateRecordActionCore`: the `IGenericEntityService` comes from its scope factory.
+     - `DataverseUpdateHandler`: its own `IGenericEntityService`.
+     - the field-mapping push: the endpoint's `IGenericEntityService`, passed to `ApplyMappingsToChildRecordsAsync`.
+   - It runs when the target is `sprk_invoice` or `sprk_billingevent` and the patch sets or clears a guarded lookup.
+   - The stored lookups are read as the app and overlaid with the patch. A patch value can be an `EntityReference`, a null, or a `{nav}@odata.bind` → `/{set}({id})`; anything else is `lookup_not_a_core_record`. The D-96 line check is included.
+   - Refusals carry the guard's code:
+     - The two throwing paths throw `RecordOwnerUnresolvedException` with the guard's code, which ActionSeam and the node executor already handle.
+     - The push records a code-only error: the guard's reason can name records the caller has not read.
+   - Write mechanics are unchanged. No DI registration was added (ADR-010 ceiling untouched; ArchTests green).
+3. **uac-r2 K4.** Commit 6951d67ee.
+   - `CoreAncestorResolver.StampFailureOf` was extracted from `DeriveAndProbeAsync`. It now reads `result.RefusalKind ?? (result.IsPermanent ? null : Transient)`.
+   - A permanent error built with the public constructor is no longer labelled Transient.
+4. **053 step 5 (ontology-r1 K3 / K1).** Commit 5734d5ca9.
+   - The step now reads "write run, then -Verify". On a fresh environment, -Verify passes only after the write run.
+   - -Verify's existing (p2) check must show "Spaarke BFF-Managed Field Readers" on every business unit's default team. The script already runs (p2) in every mode and fails on a missing team, so the script is unchanged.
+5. **Task 130 constraint.** Commit 5734d5ca9. The firm-reason projection reads `sprk_signal.sprk_firmreason` as the BFF / app identity. A caller-identity read without the reader profile silently returns null.
+
+**Mutation proofs.** Each mutation was applied to the source, then the targeted classes were run, then the source was restored.
+
+| Mutation | Tests failing |
+|---|---|
+| Line check skipped in the guard | 9: 3 guard unit tests, 6 route / tool tests |
+| Line check not passed by `OwnedChildWrite` | 6 route / tool tests |
+| Guard call skipped on all three DEF-022 paths | 3: one refusal test per path |
+| K4 expression reverted | 1 |
+
+**Counts.**
+
+| Check | Result |
+|---|---|
+| Targeted classes (new and touched) | 339 / 339 |
+| Brief filter (Invoice, OwnedChild, CoreAncestor, RecordOwnership, FieldMapping, UpdateRecord, DataverseUpdate, ChildRecord, Signal) | 4,290 passed, 6 skipped, 0 failed |
+| Spaarke.ArchTests | 1,126 / 1,126 |
+| BFF build (-m:1) | green; no warnings in changed files |
+| Publish size (linux-x64, Compress-Archive, 192 files each side) | 16c76e7d8 → 553bc6f41: 39,462,110 → 39,467,379 B (+5,269 B); total 39.5 MB |
+
+**Re-check verdicts (on fix-round-1).**
+- ontology-r1: CLEAN. The separate firm-reason writer profile is confirmed.
+- uac-r2: no F-class finding in the changed code. F1 is item 1 here. K1 is accepted. K4 is item 3 here.
+
+**Known limits added.**
+- The DEF-022 guard covers `sprk_invoice` and `sprk_billingevent`, as briefed. The other four family tables (submission, approval, external identifier, correction) are not checked on those three paths. No playbook or mapping targets them today.
+- On the two throwing paths, the refusal's exception message starts "No owner could be resolved" (the reused `RecordOwnerUnresolvedException`). The stable code is the guard's.
+
 ## Files
 
 **Ontology-owned (ontology-r1 review requested):**
@@ -143,16 +204,27 @@ The coordinator merged three reviews into six items.
 - `src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts`: INTERMEDIATE_ROOT_COLUMNS.
 - `src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs`: KindByEntity, ByEntity, and the single-root 409.
 - `src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs`: the Signal/DR line parent.
-- `src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs` (fix-round-1 item 3b: the other invoice's entity set).
+- `src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs` (fix-round-1 item 3b: the other invoice's entity set; fix-round-2 item 1: the optional app-only line reader).
+- `src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs` (fix-round-2 item 3: `StampFailureOf`, K4).
+- `src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs` (fix-round-2 item 1: the re-file route passes `IGenericEntityService`).
+
+**AI platform owned (fix-round-2, review requested):**
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/UpdateRecordActionCore.cs` (DEF-022: guard before the PATCH).
+- `src/server/api/Sprk.Bff.Api/Services/Dataverse/DataverseUpdateHandler.cs` (DEF-022: guard before the write).
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseUpdateRecordHandler.cs` (D-96: optional `IGenericEntityService` ctor parameter, passed to the re-file core).
+- `src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs` (DEF-022: guard before the push write).
 
 **Other:**
 - Scripts: the schema script and `scripts/ebilling/Set-EbillingFirmReasonFieldSecurity.ps1`.
-- `src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs` (ours, task 013).
+- `src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs` (ours, task 013; fix-round-2: D-96 line check, `CheckGenericUpdateAsync`).
 - SpaarkeMaster: `Other/Relationships/sprk_BillingEvent.xml`, `Other/Relationships.xml`, `Other/FieldSecurityProfiles.xml`, `Other/Solution.xml`.
 - Tests:
   - `tests/unit/domain/Access/SecureChildLineageTests.cs`
   - `tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/CoreAncestorResolverTests.cs`
   - `tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/InvoiceFamilyCoreRecordGuardTests.cs`
+  - `tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/InvoiceFamilyCoreRecordGuardLineSplitTests.cs` (fix-round-2)
+  - `tests/integration/data-mutation/RecordOwnership/InvoiceFamilyGenericUpdatePathTests.cs` (fix-round-2)
+  - `tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests{.cs,.ChildRecordRoutes.cs,.CommunicationFilingSignal.cs}` (fix-round-2: the app-only reader)
   - `tests/unit/Sprk.Bff.Api.Tests/TestInfrastructure/RecordTypeCatalogStub.cs`
   - `tests/integration/data-mutation/CoreAncestorStamping/StampWorld.cs`
   - `tests/integration/data-mutation/CoreAncestorStamping/CoreAncestorStampReconciliationJobTests.cs`
@@ -223,7 +295,7 @@ Fail-before proofs:
 - K4: resolved in fix-round-1 item 1.
 - K5, RemoveLink on append-only DRs: deleting or archiving a line clears `sprk_regardinginvoiceline` on its Decision Records, which are append-only, while their pair text (`sprk_regardingrecordid`, name, URL) survives. The DR still says which line it was about, but the lookup is gone. This is the same cascade as `sprk_decisionrecord_reginvoice`.
 - K6, a no-root line in storage: a line with no core lookup would resolve storage through the business-unit fallback rather than refusing. This is unreachable, because every BFF create and update path refuses a no-core line (FR-05) and no storage route takes a line as parent.
-- K7, FR-05 coverage: the playbook update, the output orchestrator and the field-mapping push can write a line's core lookups without the invoice-family guard (pre-existing; see condition 2). This is reported to the coordinator.
+- K7, FR-05 coverage: resolved in fix-round-2 item 2 (DEF-022). The three generic update paths now run the guard before their write.
 
 ## Reviews
 
@@ -231,6 +303,8 @@ Fail-before proofs:
 |---|---|---|
 | ours (code-review) | the whole task | fix-now items; folded into fix-round-1 items 1, 3, 4 and 6 |
 | ontology-r1 | the ontology-owned files | F1: the Ontology Service role lacked AppendTo on the invoice line and invoice. ontology-r1 applied that live and carries the XML and guard in its own PR (D-95, D-95a). Its condition 2 reading (`:298/:546`) is corrected above. Other items folded into fix-round-1. |
+| ontology-r1 re-check | fix-round-1 | CLEAN; the separate firm-reason writer profile is confirmed. K3 / K1 (053 step 5) and the task 130 note are fix-round-2 items 4 and 5. |
+| uac-r2 re-check | fix-round-1 | No F-class finding in the changed code. F1 (an invoice re-file splits it from its lines) is fix-round-2 item 1 (owner D-96). K1 is accepted. K4 is fix-round-2 item 3. |
 | uac-r2 | `ef3efce73..b5f4a4c78`: the three tables, restamp coverage, tests and the K1 question | No fix-now. All five D-94 conditions met (condition 4 with the deviation above). MultipleRoots → CoreRecordAmbiguous accepted. Single-root invoices are uac-r2's under #2047. uac-r2 will re-check only the CoreAncestorResolver refusal-kind change. |
 
 Owner decision D-95(2) (field security on the firm reason) came from the task 026 review.
