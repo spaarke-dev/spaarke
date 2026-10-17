@@ -11,8 +11,8 @@
 | Field | Value |
 |---|---|
 | **Task** | Lane 102a running; 063 PR #2053 in Opus review |
-| **Status** | 055 done, 073 deferred (#2051), admin Append live (§16), 049 live (§17), #2048 merged `adc213d9b` (#2046 closed) |
-| **Next Action** | On each lane notification: independent review → fix round → re-check → merge into docs. Merge #2050 after its Opus pass (uac-r2 already OK) and mark 049 done |
+| **Status** | 055 done, 073 deferred (#2051), admin Append live (§16), 049 done (§17, #2050 `32a923ca4`), #2048 merged `adc213d9b` (#2046 closed) |
+| **Next Action** | On each lane notification: independent review → fix round → re-check → merge into docs. 063: merge #2053 after review, then run its prepared policy seed (dry run first) |
 
 ## Lanes in flight
 
