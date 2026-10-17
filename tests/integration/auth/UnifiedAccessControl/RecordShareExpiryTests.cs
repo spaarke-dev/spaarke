@@ -486,7 +486,7 @@ public class RecordShareExpiryTests
         fields.Keys.Should().BeEquivalentTo(new[] { "sprk_expiresdate", "sprk_grantedbycontact", "sprk_grantedbycontactid" });
         fields["sprk_grantedbycontact"].Should().BeSameAs(DBNull.Value);
         fields["sprk_grantedbycontactid"].Should().BeSameAs(DBNull.Value);
-        _table.SystemUserReads.Should().Equal(new[] { $"azureactivedirectoryobjectid eq {CallerOid}" },
+        _table.SystemUserReads.Should().Equal(new[] { $"azureactivedirectoryobjectid eq {CallerOid} and isdisabled eq false" },
             "the caller's systemuser was looked up — by its Entra object id — and found nothing");
     }
 
@@ -747,7 +747,7 @@ public class RecordShareExpiryTests
                 .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) =>
                 {
                     SystemUserReads.Add(filter ?? string.Empty);
-                    var oid = Regex.Match(filter ?? string.Empty, @"^azureactivedirectoryobjectid eq ([0-9a-fA-F-]{36})$");
+                    var oid = Regex.Match(filter ?? string.Empty, @"^azureactivedirectoryobjectid eq ([0-9a-fA-F-]{36}) and isdisabled eq false$");
                     if (!oid.Success)
                         throw UnknownClause(filter ?? string.Empty);
 

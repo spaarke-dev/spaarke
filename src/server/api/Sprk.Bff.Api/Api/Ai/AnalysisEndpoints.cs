@@ -718,7 +718,9 @@ public static class AnalysisEndpoints
             {
                 Conditions =
                 {
-                    new ConditionExpression("azureactivedirectoryobjectid", ConditionOperator.Equal, azureAdOid)
+                    new ConditionExpression("azureactivedirectoryobjectid", ConditionOperator.Equal, azureAdOid),
+                    // Issue #1576: a disabled systemuser keeps its oid and must not resolve.
+                    new ConditionExpression("isdisabled", ConditionOperator.Equal, false)
                 }
             }
         };
@@ -726,7 +728,7 @@ public static class AnalysisEndpoints
         var result = await entityService.RetrieveMultipleAsync(query, CancellationToken.None);
         if (result.Entities.Count == 0)
         {
-            logger.LogWarning("No Dataverse systemuser found for Azure AD OID {AzureAdOid}", azureAdOid);
+            logger.LogWarning("No active Dataverse systemuser found for Azure AD OID {AzureAdOid}", azureAdOid);
             return null;
         }
 

@@ -13,6 +13,9 @@
 //       ICallerContactResolver. This resolver mirrors ICallerContactResolver's one-hop QueryExpression
 //       pattern (same IDataverseService facade, same oid-claim extraction, same fail-honestly posture) —
 //       additive, no second Dataverse client.
+//       Issue #1576: the Dataverse query itself is now DELEGATED to the shared, cached
+//       ISystemUserIdentityResolver.ResolveSystemUserIdAsync, which excludes disabled systemusers. The private
+//       query this class carried had no isdisabled filter, so a disabled caller still resolved.
 //   (3) Cost-of-doing-nothing — without a systemuserid for the caller, F-2 user-scope memory has NO recall
 //       key: an AI-captured user preference (memory.write scope=user) is persisted but never read back into
 //       any prompt (the exact capture-only gap this task closes).
@@ -22,8 +25,7 @@
 // (runs inside ContextBinder.BindAsync), so it belongs in the BFF, not a separate service.
 
 using System.Security.Claims;
-using Microsoft.Xrm.Sdk.Query;
-using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Services.Ai.Context;
 
@@ -33,13 +35,22 @@ namespace Sprk.Bff.Api.Services.Ai.Context;
 /// <c>systemuser.azureactivedirectoryobjectid</c>, ADR-028), never a value from client Args or an LLM
 /// completion. Consumed by <see cref="ContextBinder"/> to key the User slice's user-memory fragment.
 /// </summary>
+/// <remarks>
+/// <b>Known limit (issue #1576): a newly disabled user still resolves for up to 10 minutes.</b> The lookup is delegated
+/// to <see cref="ISystemUserIdentityResolver.ResolveSystemUserIdAsync"/>, which excludes disabled systemusers but caches
+/// each oid → systemuserid mapping for 10 minutes. A user disabled at time T therefore still resolves until about
+/// T + 10 min on every caller of this resolver — including the authorization checks in
+/// <c>CommunicationRecordAuthorizationFilter</c> (caller resolution) and <c>DecisionRouteCores</c>, not only memory
+/// recall. The same limit is stated on <see cref="ISystemUserIdentityResolver"/>.
+/// </remarks>
 public interface ICallerSystemUserResolver
 {
     /// <summary>
     /// Resolves <paramref name="caller"/>'s Dataverse <c>systemuserid</c> deterministically via the AAD
     /// oid claim → <c>systemuser.azureactivedirectoryobjectid</c> cross-reference (ADR-028). Returns an
     /// explicit <see cref="CallerSystemUserResolution.Unresolved"/> result — never a guess — when the
-    /// caller has no resolvable claims, no oid claim, or no matching systemuser row.
+    /// caller has no resolvable claims, no oid claim, or no matching ACTIVE systemuser row (a disabled
+    /// systemuser does not resolve, issue #1576).
     /// </summary>
     Task<CallerSystemUserResolution> ResolveAsync(ClaimsPrincipal? caller, CancellationToken ct);
 }
@@ -69,12 +80,17 @@ public sealed record CallerSystemUserResolution
 /// <summary>Default <see cref="ICallerSystemUserResolver"/> — see file header for Component/Placement Justification.</summary>
 public sealed class CallerSystemUserResolver : ICallerSystemUserResolver
 {
-    private readonly IDataverseService _dataverse;
+    private readonly ISystemUserIdentityResolver _identity;
     private readonly ILogger<CallerSystemUserResolver> _logger;
 
-    public CallerSystemUserResolver(IDataverseService dataverse, ILogger<CallerSystemUserResolver> logger)
+    /// <param name="identity">
+    /// The shared, cached oid ⇄ systemuserid resolver (singleton, registered unconditionally by
+    /// <c>NotificationsModule</c>). Issue #1576: the Dataverse query is delegated to it so disabled systemusers are
+    /// excluded in ONE place; this class keeps only the claims extraction and the honest-outcome mapping.
+    /// </param>
+    public CallerSystemUserResolver(ISystemUserIdentityResolver identity, ILogger<CallerSystemUserResolver> logger)
     {
-        _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
+        _identity = identity ?? throw new ArgumentNullException(nameof(identity));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -98,25 +114,19 @@ public sealed class CallerSystemUserResolver : ICallerSystemUserResolver
 
         try
         {
-            var query = new QueryExpression("systemuser")
-            {
-                ColumnSet = new ColumnSet("systemuserid"),
-                TopCount = 1,
-                NoLock = true,
-            };
-            query.Criteria.AddCondition("azureactivedirectoryobjectid", ConditionOperator.Equal, oid.Value);
-
-            var results = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            if (results.Entities.Count == 0 || results.Entities[0].Id == Guid.Empty)
+            var systemUserId = await _identity
+                .ResolveSystemUserIdAsync(oid.Value.ToString("D"), ct)
+                .ConfigureAwait(false);
+            if (systemUserId is null || systemUserId.Value == Guid.Empty)
             {
                 _logger.LogInformation(
-                    "CallerSystemUserResolver: no systemuser cross-reference for caller oid={CallerOid} — " +
+                    "CallerSystemUserResolver: no active systemuser cross-reference for caller oid={CallerOid} — " +
                     "honest no-systemuser result (fail-honestly; never guesses).",
                     oid);
                 return CallerSystemUserResolution.Unresolved("no-matching-systemuser");
             }
 
-            return CallerSystemUserResolution.Resolved(results.Entities[0].Id.ToString("D"));
+            return CallerSystemUserResolution.Resolved(systemUserId.Value.ToString("D"));
         }
         catch (OperationCanceledException)
         {

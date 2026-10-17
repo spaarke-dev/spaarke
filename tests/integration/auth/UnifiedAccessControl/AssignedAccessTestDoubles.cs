@@ -550,6 +550,10 @@ internal static class AssignedAccessTestDoubles
         /// </summary>
         public ConcurrentDictionary<Guid, Guid> SystemUserIdsByOid { get; } = new();
 
+        /// <summary>Oids in <see cref="SystemUserIdsByOid"/> whose systemuser is DISABLED (issue #1576): returned with
+        /// <c>isdisabled = true</c>, and not at all by a filter that excludes disabled users.</summary>
+        public ConcurrentDictionary<Guid, bool> DisabledSystemUserOids { get; } = new();
+
         /// <summary>Task 181: a root record's display name, answered to the grant notification's app-only read by id.</summary>
         public ConcurrentDictionary<Guid, string> RootNames { get; } = new();
 
@@ -630,7 +634,13 @@ internal static class AssignedAccessTestDoubles
                 "systemusers" when filter is not null && filter.StartsWith("azureactivedirectoryobjectid eq ", StringComparison.Ordinal) =>
                     SystemUserIdsByOid
                         .Where(kv => filter.Contains(kv.Key.ToString(), StringComparison.OrdinalIgnoreCase))
-                        .Select(kv => new Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow { Id = kv.Value })
+                        .Where(kv => !(DisabledSystemUserOids.ContainsKey(kv.Key)
+                                       && filter.Contains("isdisabled eq false", StringComparison.OrdinalIgnoreCase)))
+                        .Select(kv => new Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow
+                        {
+                            Id = kv.Value,
+                            IsDisabled = DisabledSystemUserOids.ContainsKey(kv.Key),
+                        })
                         .ToList(),
                 "systemusers" => SystemUsers.Values
                     .Where(u => filter is not null && filter.Contains($"systemuserid eq {u.Id}", StringComparison.OrdinalIgnoreCase))
