@@ -2,8 +2,8 @@
  * RulePage - the read-only Ontology rule page (task 100; spec FR-57; #43, #44).
  *
  * Shows one rule as the owner listed it: the condition in words and in its formal form, the wording, the decision plan, the scope,
- * the noise settings, how it behaves, its versions and its change history. The ONLY controls are On / Off and Retire: editing a rule
- * is the authoring wizard's job (task 102), not this page. Both controls call routes that run as the caller, so Dataverse refuses a
+ * the noise settings, how it behaves, its versions and its change history. The controls are On / Off, Retire and, when the host offers
+ * the rule wizard (task 102), New version: editing a rule is the wizard's job, not this page's. Both controls call routes that run as the caller, so Dataverse refuses a
  * user without the Spaarke Ontology Administrator role; a refusal is shown here and the rule is left as it was.
  *
  * Off stops the rule from being evaluated and leaves its open items for the next pass; Retire closes them at once and needs a reason.
@@ -42,6 +42,8 @@ export interface RulePageProps {
   policyId: string;
   /** Back to the list. */
   onBack: () => void;
+  /** Open the rule wizard on a new version of this rule. When omitted the page offers no New version control. */
+  onNewVersion?: (detail: RuleDetail) => void;
 }
 
 const useStyles = makeStyles({
@@ -139,7 +141,7 @@ const Facts: React.FC<{ rows: ReadonlyArray<readonly [string, React.ReactNode]> 
   );
 };
 
-export const RulePage: React.FC<RulePageProps> = ({ service, policyId, onBack }) => {
+export const RulePage: React.FC<RulePageProps> = ({ service, policyId, onBack, onNewVersion }) => {
   const styles = useStyles();
   const [detail, setDetail] = React.useState<RuleDetail | undefined>(undefined);
   const [error, setError] = React.useState<string | undefined>(undefined);
@@ -246,6 +248,11 @@ export const RulePage: React.FC<RulePageProps> = ({ service, policyId, onBack })
         </div>
         {inactive ? null : (
           <div className={styles.controls}>
+            {onNewVersion === undefined ? null : (
+              <Button appearance="primary" onClick={() => onNewVersion(detail)} disabled={saving} data-testid="rule-new-version-button">
+                New version
+              </Button>
+            )}
             <Switch
               label={summary.enabled ? 'On' : 'Off'}
               checked={summary.enabled}
