@@ -800,3 +800,21 @@ Measured on 120 lines: 55.0% task top-1 on gpt-4.1-mini and 63.3% on gpt-5.4-min
 **Estimated effort**: 1–2 days (platform). **Blockers**: AI platform ownership. **Related**: tasks 047, 162; D-51.
 
 ---
+
+### DEF-021 — SpaarkeMaster export blocked by the F12 dependency guard (pre-existing)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owning projects; not ebilling) |
+| **Urgency** | before the next full SpaarkeMaster export/commit (any project) |
+| **Filed** | 2026-10-16 |
+| **Source** | ebilling-r1 task 026 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2045 |
+
+**Description**: exporting the live SpaarkeMaster solution stops at its F12 guard on 7 missing dependencies: `sprk_externaltenantid`, `sprk_homeobjectid`, `sprk_hometenantid` (each twice, type 70) and the `sprk_SpaarkePlatform` app module. The live solution also differs from source in ~238 files owned by other projects. Task 026 synced only its own 4 files.
+
+**Suggested fix**: bring the components into scope (or move dependants out) with their owning projects, then re-baseline drift per project.
+
+**Estimated effort**: 0.5–1 day (owning projects). **Related**: task 026, 053.
+
+---
