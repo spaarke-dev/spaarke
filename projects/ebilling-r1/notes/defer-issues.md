@@ -823,7 +823,10 @@ Each restamps afterwards, but none refuses any of these:
 - a line with no core;
 - a line whose invoice has another core record.
 
-**Suggested fix**: on each path, call `CheckWriteAsync` for tables in `GuardedLookups` before the write. Alternatively, route the paths through `OwnedChildWrite`; unified-access-control-r2 was asked which.
+**Suggested fix**: on each path, call `CheckWriteAsync` for tables in `GuardedLookups` before the write. unified-access-control-r2 direction (2026-10-17):
+- Do not route these paths through `OwnedChildWrite`. Instead, each path calls `InvoiceFamilyCoreRecordGuard` before the write when the target is `sprk_invoice` or `sprk_billingevent` and the patch touches a core lookup.
+- Keep the same refusal codes and leave the paths' write mechanics unchanged. Add one test per path.
+- Fix it before any customer uses playbooks or field mapping on invoices. Until then the reconciler and the 409s fail closed, so this is a data-quality gap, not an access leak.
 
 **Estimated effort**: 0.5 day. **Related**: FR-05, D-75, ISS-010 (#1973), task 026.
 
