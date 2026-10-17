@@ -153,7 +153,7 @@ For full entity metadata dumps, see the individual `sprk_*.md` files in this dir
 | `sprk_document` | Source Document | Lookup | -> `sprk_document` |
 | `sprk_vendororg` | Vendor Organization | Lookup | -> `sprk_organization` |
 | `sprk_regardingrecordtype` | Regarding Record Type | Lookup | -> `sprk_recordtype_ref` |
-| `sprk_invoicestatus` | Invoice Status | Choice | 100000000: ToReview, 100000001: Reviewed |
+| `statuscode` | Status Reason | Status | 1 In Review, 659490000 Approved, 659490001 Sent to AP (Active); 659490002 Paid, 659490003 Rejected, 659490004 Returned to Firm, 2 Cancelled (Inactive). D-41; see `sprk_invoice.md` |
 | `sprk_extractionstatus` | Extraction Status | Choice | 100000000: NotRun, 100000001: Extracted, 100000002: Failed |
 | `sprk_extractedjson` | Extracted JSON | Multiline Text | 20000 (JSON) |
 | `sprk_aisummary` | AI Summary | Multiline Text | 5000 |

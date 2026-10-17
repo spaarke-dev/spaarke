@@ -23,7 +23,7 @@ Columns and statuscode values below were added to dev by `scripts/ebilling/Deplo
 | `sprk_billingperiodend` | Date only | Billing Period End | FR-21 header. |
 | `sprk_billingexport` | Lookup -> `sprk_billingexport` (relationship `sprk_invoice_billingexport_billingexport`, delete RemoveLink, no other cascade; not required) | Export Batch | FR-13 / FR-41 (task 023). The AP export batch the invoice was sent in. Single-valued, so an invoice is in at most one batch; the batch writer (task 150) sets it and moves the invoice to Sent to AP. Columns of the batch: `docs/data-model/sprk_billingexport.md`. |
 
-`sprk_totalamount` (existing, money) stays the **billed total**. Each new money column also gets a system `_base` companion (base-currency value) from Dataverse. `sprk_invoicestatus` is unchanged here (task 015 retires it).
+`sprk_totalamount` (existing, money) stays the **billed total**. Each new money column also gets a system `_base` companion (base-currency value) from Dataverse. The old invoice-status choice column and its global option set were retired by task 015 (D-41): the status lives only on `statecode` / `statuscode` (below).
 
 ### Totals calculation (FR-07, I-1, D-42; task 016)
 
@@ -51,3 +51,5 @@ The five totals and every Adjustment line's `sprk_amount` are written only by `I
 | 2 | Cancelled | 1 (Inactive) | Existing value 2, relabelled from "Inactive" (dev held zero invoices at statecode 1 when relabelled). The default status of statecode 1. |
 
 Values are in the publisher option-value range (prefix 65949), as for `sprk_todo`. The statecode labels stay "Active" / "Inactive". Allowed transitions (FR-06): In Review -> Approved | Rejected | Returned to Firm | Cancelled; Approved -> Sent to AP | Cancelled; Sent to AP -> Paid. They are enforced by the lifecycle service (task 014), not by metadata.
+
+**Spend (D-98).** `FinanceBaseValues.CountedInvoiceStatuses` = In Review, Approved, Sent to AP and Paid, filtered on `statuscode` (never `statecode`: Paid is Inactive and still counts). Rejected, Returned to Firm and Cancelled are not counted. The matter / project rollup, the Signal evaluator's Threshold sums and the FinancialCalculation tool all use this set. A new invoice is created without a status value and takes the `statuscode` default, In Review.

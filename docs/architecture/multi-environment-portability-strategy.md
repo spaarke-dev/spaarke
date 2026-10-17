@@ -138,7 +138,7 @@ Dataverse Environment Variables store **business configuration** that varies by 
 |------|---------|---------|---------------|------------------|------------|
 | **Alternate Keys** | `sprk_playbookcode = "PB-013"` | Dataverse field | No | No | Solution export/import |
 | **Primary Keys** | `sprk_playbookid = GUID` | Dataverse (auto) | Yes (regenerates) | No | Auto-generated on import |
-| **Option Set Values** | `InvoiceStatus = 100000001` | Dataverse metadata | No | No | Solution export/import |
+| **Option Set Values** | invoice `statuscode` Approved = `659490000` | Dataverse metadata | No | No | Solution export/import |
 | **Client Auth Config** | `sprk_BffApiBaseUrl`, `sprk_MsalClientId` | Dataverse env var | Yes | Yes | Set per environment |
 | **Server Env Variables** | `DATAVERSE_URL`, `REDIS_CONNECTION_STRING` | App Service config | Yes | No | Set per environment |
 | **Secrets** | `API_CLIENT_SECRET` | Azure Key Vault | Yes | No | Set per environment |
