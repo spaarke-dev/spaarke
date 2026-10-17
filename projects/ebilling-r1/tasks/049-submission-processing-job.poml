@@ -48,7 +48,14 @@
   </context>
 
   <constraints>
-    <constraint source="owner D-102 (2026-10-17)">A held invoice (blocked submission, awaiting Override / Return) must not count toward spend. The FinanceRollupService counted-spend sum excludes it, which also covers POL-COMMIT-BUDGET and the ontology spend Thresholds that read sprk_totalspendtodate. It starts counting when Override releases it. Represent the hold with the state the Override / Return flow already needs (the originating submission's blocked status). Only if the rollup cannot read that cheaply, use a held flag on the invoice that only the lifecycle service sets and clears (§11 answers required). Required tests: a must-fire test that a held In Review invoice is excluded from the spend total and from the threshold input, and a must-not-fire test that a released invoice is counted. Ship this with 049, not later.</constraint>
+    <constraint source="owner D-102 (2026-10-17)">A held invoice (blocked submission, awaiting Override / Return) must not count toward spend. The FinanceRollupService counted-spend sum excludes it, which also covers POL-COMMIT-BUDGET and the ontology spend Thresholds that read sprk_totalspendtodate. It starts counting when Override releases it. Represent the hold with the state the Override / Return flow already needs (the originating submission's blocked status). Only if the rollup cannot read that cheaply, use a held flag on the invoice that only the lifecycle service sets and clears (§11 answers required). Required tests: a must-fire test that a held In Review invoice is excluded from the spend total and from the threshold input, and a must-not-fire test that a released invoice is counted. Ship this with 049, not later. There are TWO spend-sum paths and the exclusion covers both:
+- (a) FinanceRollupService (~235-248), which writes the stored sprk_totalspendtodate;
+- (b) FinanceBaseValues.ReadAsync → BuildGroupedSumFetchXml (~130-175), the live sum the ontology Threshold evaluator uses (SignalEvaluator.cs:233) for derived columns such as budget utilisation.
+Rules for the predicate and its tests:
+- Define the "held" predicate once in FinanceBaseValues, next to CountedInvoiceStatuses, and use it from both.
+- Run the must-fire and must-not-fire tests on BOTH paths, including through FinanceBaseValues.ReadAsync.
+- A submission link-entity in the FetchXML is acceptable. It must keep the fail-closed reader contract (~180: an unreadable shape throws, never reads as zero).
+- ontology-r1 reviews this part (their hot path); include it in the range sent to them.</constraint>
     <constraint source="owner D-101 (2026-10-17)">Every submission that was read creates its invoice and lines in step 6 (all-or-nothing):
 - accepted → In Review;
 - automatically rejected → created with status Rejected through the lifecycle service (task 014), with findings and the report linked to both the submission and the invoice;
