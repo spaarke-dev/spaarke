@@ -1,4 +1,6 @@
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Authentication;
@@ -287,7 +289,8 @@ public static class InternalShareEndpoints
         GrantAccessNotifier accessNotifier,
         HttpContext httpContext,
         ILogger<Program> logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromServices] IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity = null)
     {
         // ── Validation — nothing reaches Dataverse until the request is well-formed ──
         // The delegation filter resolved this root already and denies an unresolvable one. Checked again anyway: a
@@ -538,7 +541,8 @@ public static class InternalShareEndpoints
             // Cleared whether or not the write is confirmed: a write that threw, or was cancelled, may still have
             // applied, and a stale cached set is exactly what this clean-up exists to prevent.
             await ImpersonatedRootSetSource.InvalidateAsync(
-                cache, httpContext.User, systemUserId, ExternalGrantRoot.LogicalNameFor(root.Type), logger);
+                cache, httpContext.User, systemUserId, ExternalGrantRoot.LogicalNameFor(root.Type),
+                ImpersonatedRootSetSource.CustomerTenantIdsOrNone(workforceIdentity, logger), logger);
         }
 
         if (failure is not null || stored != granted.AccessRightsMask)
@@ -606,7 +610,8 @@ public static class InternalShareEndpoints
         Spaarke.Scheduling.IScheduledJobLease recordLock,
         HttpContext httpContext,
         ILogger<Program> logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromServices] IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity = null)
     {
         var root = GrantExternalAccessEndpoint.ResolveExplicitRoot(request.RecordType, request.RecordId);
         if (!root.Ok)
@@ -693,7 +698,7 @@ public static class InternalShareEndpoints
         {
             return await UnshareUnderLockAsync(
                 root, systemUserId, current, recordShare, dataverseClient, participations, cache, assignedAccess,
-                secureChildShares, relatedRoots, httpContext, logger, callerOid, ct);
+                secureChildShares, relatedRoots, httpContext, logger, callerOid, workforceIdentity, ct);
         }
         finally
         {
@@ -725,6 +730,7 @@ public static class InternalShareEndpoints
         HttpContext httpContext,
         ILogger logger,
         string? callerOid,
+        IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity,
         CancellationToken ct)
     {
         // ── S5 (owner round 3, task 139 amendment R3): a secure record always keeps someone who can see it ──
@@ -785,7 +791,8 @@ public static class InternalShareEndpoints
         finally
         {
             await ImpersonatedRootSetSource.InvalidateAsync(
-                cache, httpContext.User, systemUserId, ExternalGrantRoot.LogicalNameFor(root.Type), logger);
+                cache, httpContext.User, systemUserId, ExternalGrantRoot.LogicalNameFor(root.Type),
+                ImpersonatedRootSetSource.CustomerTenantIdsOrNone(workforceIdentity, logger), logger);
             if (!confirmed)
                 await assignedAccess.RevertShareRemovedAsync(root.Type, root.Id, marked, CancellationToken.None);
         }

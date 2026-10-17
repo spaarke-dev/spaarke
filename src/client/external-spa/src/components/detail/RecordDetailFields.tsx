@@ -225,6 +225,57 @@ export function formatDetailValue(record: DetailRecord, def: Pick<DetailFieldDef
   return EMPTY_VALUE;
 }
 
+// ---------------------------------------------------------------------------
+// Document -> parent (R3 task 066)
+// ---------------------------------------------------------------------------
+
+/** A record a document is filed to, as the content route names it: `/api/v1/external/{root}/{id}/documents/...`. */
+export interface DocumentParentCandidate {
+  root: DocumentRoot;
+  id: string;
+}
+
+/**
+ * The typed parent links of a `sprk_document`, in the order the BFF reads them: project, matter, work assignment
+ * (`DocumentRootLinks.Links`, ExternalDataService.cs:482-490; the documents module's scope dimensions in
+ * ExternalAccessModule.cs:401-406 are in the same order). The content route accepts only the TYPED lookup (not the
+ * `sprk_related*` twin: `DocumentScopeRead.IsUnder` reads the route's own lookup), so only these three are candidates.
+ */
+const DOCUMENT_PARENT_LINKS: ReadonlyArray<{ attribute: string; root: DocumentRoot }> = [
+  { attribute: 'sprk_project', root: 'projects' },
+  { attribute: 'sprk_matter', root: 'matters' },
+  { attribute: 'sprk_workassignment', root: 'workassignments' },
+];
+
+const LINK_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EMPTY_LINK_GUID = '00000000-0000-0000-0000-000000000000';
+
+/** The id out of a lookup value: an entity reference (`{ id }`, as the module fetch serialises it) or a bare id string. */
+function lookupId(raw: unknown): string | null {
+  let id: unknown = raw;
+  if (raw && typeof raw === 'object') {
+    const reference = raw as { id?: unknown; Id?: unknown };
+    id = reference.id ?? reference.Id;
+  }
+  if (typeof id !== 'string') return null;
+  const trimmed = id.trim();
+  return LINK_GUID.test(trimmed) && trimmed !== EMPTY_LINK_GUID ? trimmed : null;
+}
+
+/**
+ * The parents a document row can be downloaded through, in the BFF's order. Empty = the row names no usable parent, so no
+ * Download is offered. The client cannot tell which parent the caller may READ (a document can be filed to several), so
+ * the download tries these in order and moves on only on a 403 (`downloadDocumentFromParents`); the server decides.
+ */
+export function documentParentCandidates(record: DetailRecord): DocumentParentCandidate[] {
+  const candidates: DocumentParentCandidate[] = [];
+  for (const { attribute, root } of DOCUMENT_PARENT_LINKS) {
+    const id = lookupId(record[attribute] ?? record[`_${attribute}_value`]);
+    if (id) candidates.push({ root, id });
+  }
+  return candidates;
+}
+
 /** The modal title for a read row: the first non-empty title column, else the entity label. */
 export function recordDetailTitle(cfg: RecordDetailEntity, record: DetailRecord | null): string {
   if (record) {

@@ -74,6 +74,9 @@ export type { IAttachmentListProps } from './subcomponents/AttachmentList';
 export { SendModeRadio } from './subcomponents/SendModeRadio';
 export type { ISendModeRadioProps } from './subcomponents/SendModeRadio';
 
+export { InternalOnlySwitch, INTERNAL_ONLY_LABEL, INTERNAL_ONLY_HINT } from './subcomponents/InternalOnlySwitch';
+export type { IInternalOnlySwitchProps } from './subcomponents/InternalOnlySwitch';
+
 export { AssociationChips } from './subcomponents/AssociationChips';
 export type { IAssociationChipsProps } from './subcomponents/AssociationChips';
 
@@ -84,6 +87,7 @@ export type { IComposerActionBarProps } from './subcomponents/ComposerActionBar'
 export {
   emailComposerReducer,
   initialState,
+  initialInternalOnly,
   validateState,
   dedupSubjectPrefix,
   deriveReplyState,

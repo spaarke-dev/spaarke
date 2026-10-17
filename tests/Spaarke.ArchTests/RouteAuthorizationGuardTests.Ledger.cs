@@ -422,6 +422,18 @@ public partial class RouteAuthorizationGuardTests
             + "(ModuleEntitlementResolver.IsEntitledAsync — the /me/entitlements set, partner switch included) and has a "
             + "contact; the one row it writes app-only names that contact as sprk_requestedby, so it lands only in the "
             + "caller's own Service Requests set. Takes no record id."),
+        new GovernedFile("Api/ExternalAccess/ExternalRegistrationEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/v1/external/registration (spaarke-SPA-external-access-platform-r3 task 047, ADR-028 A9) on its OWN "
+            + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (the caller is "
+            + "not yet resolved). The handler admits a WorkforceHome identity only (:114) and registers only the caller "
+            + "itself, keyed by its own token tid/oid/email; it takes no record id."),
+        new GovernedFile("Api/ExternalAccess/ExternalWorkforceLinkEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/v1/external/workforce/link (spaarke-SPA-external-access-platform-r3 task 048, ADR-028 A9) on its OWN "
+            + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (a licensed "
+            + "user's home identity is not yet linked). The handler admits a WorkforceHome identity only (:107); the body's "
+            + "Spaarke-tenant guest token is validated with the default scheme's own parameters plus the A9 conditions (:133), "
+            + "and the link is written once onto THAT guest's enabled systemuser, keyed by the bearer's own tid/oid (:147). "
+            + "It takes no record or systemuser id."),
         new GovernedFile("Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs", Scope.GroupGated,
             "GET /api/v1/external/notifications and POST /api/v1/external/notifications/seen "
             + "(spaarke-SPA-external-access-platform-r3 task 037, FR-08) on the COLLABORATION group. Neither takes an id: the "
@@ -829,9 +841,30 @@ public partial class RouteAuthorizationGuardTests
     // 124 -> 125 (2026-10-14, spaarke-ontology-platform-r1 task 038). Net +1: Api/Signals/SignalReadEndpoints.cs ADDED --
     // GET /api/v1/signals/worklist. Classified by GovernedFiles (RouteLevelGate) and HandlerDecisions below.
     //
+    // 125 -> 126 (2026-10-15, spaarke-SPA-external-access-platform-r3 task 047, ADR-028 A9):
+    //
+    //   047  +1  Api/ExternalAccess/ExternalRegistrationEndpoints.cs ADDED — POST /api/v1/external/registration, a
+    //            WorkforceHome caller's one-time registration, on its OWN /api/v1/external group (ExternalCollaboration,
+    //            no CallerPrincipalAuthorizationFilter). Governed RouteLevelGate; Permanent CallerScopedOnly (it registers
+    //            only the caller, from its own token). Pinned by
+    //            tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalRegistrationEndpointsTests.cs and by
+    //            AuthenticationSchemeCensusTests (the route pin and the only-caller rule).
+    //
+    // 126 -> 127 (2026-10-16, spaarke-SPA-external-access-platform-r3 task 048, ADR-028 A9):
+    //
+    //   048  +1  Api/ExternalAccess/ExternalWorkforceLinkEndpoints.cs ADDED — POST /api/v1/external/workforce/link, a
+    //            licensed user's stored home link (dual-token proof), on its OWN /api/v1/external group
+    //            (ExternalCollaboration, no CallerPrincipalAuthorizationFilter). Governed RouteLevelGate; Permanent
+    //            CallerScopedOnly (it links only the caller's own two identities, from its own two tokens). Pinned by
+    //            tests/integration/auth/ExternalAccess/ExternalWorkforceLinkEndpointsTests.cs and by
+    //            AuthenticationSchemeCensusTests (the route pin and the only-caller rule).
+    //
     // 125 -> 126 (2026-10-16, spaarke-ontology-platform-r1 task 104). Net +1: Api/Ontology/OntologyAdminEndpoints.cs ADDED --
     // GET /api/v1/ontology/admin/capabilities. Classified by GovernedFiles (RouteLevelGate) and a Permanent CallerScopedOnly waiver.
     // The main session reconciles the count with the other ontology routes at integration.
+    //
+    // 126 + 127 -> 128 (2026-10-16, merge of master into work/spaarke-SPA-external-access-platform-r3): the union of the
+    // two 125 -> sequences above (external-access-r3 047/048 + ontology 104). No route added or removed here.
     //
     // 126 -> 127 (2026-10-16, spaarke-ontology-platform-r1 task 100). Net +1: Api/Ontology/OntologyAdminRulesEndpoints.cs ADDED --
     // GET /api/v1/ontology/admin/rules, GET /rules/{policyId}, PUT /rules/{policyId}/enabled, POST /rules/{policyId}/retire. Bound by the
@@ -848,6 +881,9 @@ public partial class RouteAuthorizationGuardTests
     //
     // Integration (2026-10-16): the 126 of task 104 + 100 + 101 + 103 = 129 (one file each; verified by the census pin test).
     //
+    // 128 + 129 -> 131 (2026-10-16, merge of master e702c3401 into work/spaarke-SPA-external-access-platform-r3): master's 129
+    // (ontology 104/100/101/103 on 125) plus external-access-r3's two (047 registration, 048 workforce link). No route added or removed here.
+    //
     // 129 -> 130 (2026-10-16, unified-access-control-r2 task 099a, after ontology #2044 merged, #1010(a)):
     //
     //   099a +1  Api/ExternalAccess/RecordGrantsEndpoint.cs ADDED — GET /record-grants, the record's active
@@ -857,7 +893,10 @@ public partial class RouteAuthorizationGuardTests
     //            gained the matching RecordGrantsQuery case in the same change (the /can-manage-access rule — Write and
     //            Share on the RECORD; an unknown id and an unmanageable one are the same 403). Pinned through the real
     //            pipeline by tests/integration/auth/UnifiedAccessControl/RecordGrantsEndpointTests.cs.
-    private const int ExpectedEndpointFileCount = 130;
+    //
+    // 131 + 130 -> 132 (2026-10-17, merge of master 1d435e695 into work/spaarke-SPA-external-access-platform-r3): master's 130
+    // (129 + UAC 099a) plus external-access-r3's two (047 registration, 048 workforce link). No route added or removed here.
+    private const int ExpectedEndpointFileCount = 132;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1645,21 +1684,22 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/todos", "GetTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot, which requires Read from RightsForRoot on the route project "
             + "(ExternalProjectDataEndpoints.cs:688-689)."),
-        new HandlerDecision("POST /api/v1/external/projects/{id:guid}/todos", "CreateTodo", "RightsForRoot", Array.Empty<string>(),
-            "Delegates to CreateTodoForRoot, which requires Create from RightsForRoot before any write "
-            + "(ExternalProjectDataEndpoints.cs:722-723)."),
+        new HandlerDecision("POST /api/v1/external/projects/{id:guid}/todos", "CreateTodo", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForRootWriteAsync" },
+            "Delegates to CreateTodoForRoot, which requires Create from RightsForRoot before any write — through "
+            + "RightsForRootWriteAsync, which (task 036, FR-20) also confirms it against Dataverse for a Dataverse-decided "
+            + "caller (ExternalProjectDataEndpoints.cs:729-730, :930)."),
         new HandlerDecision("GET /api/v1/external/matters/{id:guid}/todos", "GetMatterTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot: Read from RightsForRoot on the route matter "
             + "(ExternalProjectDataEndpoints.cs:688-689)."),
-        new HandlerDecision("POST /api/v1/external/matters/{id:guid}/todos", "CreateMatterTodo", "RightsForRoot", Array.Empty<string>(),
-            "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route matter "
-            + "(ExternalProjectDataEndpoints.cs:722-723)."),
+        new HandlerDecision("POST /api/v1/external/matters/{id:guid}/todos", "CreateMatterTodo", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForRootWriteAsync" },
+            "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route matter, through "
+            + "RightsForRootWriteAsync (ExternalProjectDataEndpoints.cs:729-730, :930)."),
         new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/todos", "GetWorkAssignmentTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot: Read from RightsForRoot on the route work assignment "
             + "(ExternalProjectDataEndpoints.cs:688-689)."),
-        new HandlerDecision("POST /api/v1/external/workassignments/{id:guid}/todos", "CreateWorkAssignmentTodo", "RightsForRoot", Array.Empty<string>(),
-            "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route work assignment "
-            + "(ExternalProjectDataEndpoints.cs:722-723)."),
+        new HandlerDecision("POST /api/v1/external/workassignments/{id:guid}/todos", "CreateWorkAssignmentTodo", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForRootWriteAsync" },
+            "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route work assignment, through "
+            + "RightsForRootWriteAsync (ExternalProjectDataEndpoints.cs:729-730, :930)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/documents", "UploadDocument", "AccessRights", Array.Empty<string>(),
             "Delegates to UploadDocumentForParent: requires Create on the route project from the caller principal's "
             + "rights before the upload (rights.HasFlag(AccessRights.Create), ExternalProjectDataEndpoints.cs:1269)."),
@@ -1735,7 +1775,8 @@ public partial class RouteAuthorizationGuardTests
             + "(ExternalProjectDataEndpoints.cs:1524) before any Dataverse read; an event also filed to a SECURE linked root the "
             + "caller cannot read is withheld, by effective status (ExternalDataService.ReadableEventsAsync, ExternalMultiRootRule; unknown counts as secure)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/events", "CreateEvent", "AccessRights", Array.Empty<string>(),
-            "Requires Create on the route project (ExternalProjectDataEndpoints.cs:1570) before the write."),
+            "Requires Create on the route project (RightsForRootWriteAsync, ExternalProjectDataEndpoints.cs:1895-1897; "
+            + "task 036 confirms it against Dataverse for a Dataverse-decided caller) before the write."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/contacts", "GetContacts", "HoldsReadOnProject", Array.Empty<string>(),
             "Read on the route project (ExternalProjectDataEndpoints.cs:1612)."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/organizations", "GetOrganizations", "HoldsReadOnProject", Array.Empty<string>(),
@@ -2917,6 +2958,16 @@ public partial class RouteAuthorizationGuardTests
             + "(CallerPrincipal.RightsOn, ExternalNotificationFeedEndpoints.cs:277), and messages read only for its accessible "
             + "set (:288) and its own service requests (the module's ScopeRows, :313), under the external read rules (:328). "
             + "Takes no id."),
+        Permanent("POST /api/v1/external/registration", PermanentBasis.CallerScopedOnly, "r3-047",
+            "Registers ONLY the caller: a WorkforceHome identity (ExternalRegistrationEndpoints.cs:114), keyed by its own "
+            + "token tid/oid and email claim (:172), through ContactIdentityBinder.RegisterHomeContactAsync (:184). The "
+            + "closed body carries names only; it takes no record, owner or contact id."),
+        Permanent("POST /api/v1/external/workforce/link", PermanentBasis.CallerScopedOnly, "r3-048",
+            "Links ONLY the caller's own two identities: a WorkforceHome bearer (ExternalWorkforceLinkEndpoints.cs:107), keyed "
+            + "by its own token tid/oid (:121), and the same person's Spaarke-tenant guest token from the closed body, "
+            + "validated with the default scheme's parameters (:133, SpaarkeGuestTokenValidator). The write targets that "
+            + "guest token's own enabled systemuser, once, never re-pointed (ContactIdentityBinder.LinkHomeSystemUserAsync, "
+            + ":147). It takes no record, systemuser or contact id."),
         Permanent("POST /api/v1/external/notifications/seen", PermanentBasis.CallerScopedOnly, "r3-037",
             "Writes the caller principal's own last-seen marker, keyed by its own systemuser or contact id "
             + "(ExternalNotificationFeedEndpoints.cs:192, :218). Takes no id and no body."),

@@ -43,6 +43,11 @@ export interface ISendEmailPageProps {
   initialAttachments?: IAttachmentItem[];
   associations?: ICommunicationAssociation[];
   /**
+   * The source communication of a reply/forward is known internal-only (task 068): the "Internal Only"
+   * switch starts on. Forwarded verbatim to the engine; ignored for compose.
+   */
+  sourceIsInternalOnly?: boolean;
+  /**
    * Recipient directory lookup, forwarded verbatim to the engine's `RecipientField`
    * (To/Cc/Bcc typeahead). Mirrors `searchUsersAndContacts(dataService, query)`;
    * hosts pre-bind it to a host-context `Xrm.WebApi` contact/user search. Optional —

@@ -198,6 +198,11 @@ public static class ExternalAccessModule
         // AI-internal types are injected (broker-only, NFR-02).
         services.AddSingleton<IWorkforcePrincipalResolver, WorkforcePrincipalResolver>();
 
+        // ADR-028 A9 link proof (r3 task 048): validates the link route's body (guest) token with the DEFAULT scheme's own
+        // TokenValidationParameters and signing metadata, read through IOptionsMonitor<JwtBearerOptions> and never changed.
+        // Concrete (ADR-010); singleton (stateless; the options monitor and configuration are singletons).
+        services.AddSingleton<SpaarkeGuestTokenValidator>();
+
         // Standing-grant flag reader (teams-app-r1 task 022 — the task-051 composition seam). Reads the
         // FLS-secured contact.sprk_standinggrant boolean app-only via the already-registered
         // IDataverseService; gates a contact principal's standing-grant runtime membership term.
@@ -306,8 +311,9 @@ public static class ExternalAccessModule
         // contract — communication-specific in NAME only. Declaring an identical second interface is
         // the duplication CLAUDE.md §11 exists to prevent.
         //
-        // ⚠️ NOT consumed by AccessibleRecordSetService yet — that swap is task 036's obligation, and
-        // it is gated on the NFR-04 negative canary (task 034). Registering it here is inert until then.
+        // Consumed by AccessibleRecordSetService (task 036) only while ExternalAccess:ImpersonatedRootSets:Enabled
+        // is true (default false; enabling it is gated on the NFR-04 negative canary, task 034). Flag off, it is
+        // registered but never asked.
         // Scoped: it reads the caller's tenant claim off IHttpContextAccessor for the cache key.
         services.AddScoped<IImpersonatedRootSetSource, ImpersonatedRootSetSource>();
 

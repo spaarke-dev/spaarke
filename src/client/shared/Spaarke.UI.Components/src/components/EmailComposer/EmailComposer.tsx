@@ -106,6 +106,7 @@ import { RecipientField } from './subcomponents/RecipientField';
 import { BodyEditor } from './subcomponents/BodyEditor';
 import { AttachmentList } from './subcomponents/AttachmentList';
 import { AssociationChips } from './subcomponents/AssociationChips';
+import { InternalOnlySwitch } from './subcomponents/InternalOnlySwitch';
 import { ComposerActionBar } from './subcomponents/ComposerActionBar';
 import { ComposerSendButton } from './subcomponents/ComposerSendButton';
 
@@ -1145,7 +1146,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         refusedInline = true;
         throw new Error(message);
       }
-      const request = mapStateToSendRequest({ ...stateRef.current, attachments: resolvedAttachments }, props.threadId);
+      const request = mapStateToSendRequest(
+        { ...stateRef.current, attachments: resolvedAttachments },
+        props.threadId,
+        props.threadIsPrivate
+      );
       response = await sendCommunication(request, {
         authenticatedFetch: props.authenticatedFetch,
         bffBaseUrl: props.bffBaseUrl,
@@ -1173,7 +1178,14 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     }
     return response;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.authenticatedFetch, props.bffBaseUrl, props.allowEmptyBody, props.maxRecipients, props.threadId]);
+  }, [
+    props.authenticatedFetch,
+    props.bffBaseUrl,
+    props.allowEmptyBody,
+    props.maxRecipients,
+    props.threadId,
+    props.threadIsPrivate,
+  ]);
 
   const saveDraft = React.useCallback(async (): Promise<{ communicationId: string }> => {
     if (!props.onSaveDraftRequest) {
@@ -1309,6 +1321,19 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             )}
           </div>
         </div>
+      )}
+
+      {/* "External" | "Internal Only" tags (task 068; owner 2026-10-14) — External by default; Internal Only for a
+          reply/forward of an internal source, and Internal Only locked when the host knows the target thread is
+          Private. Hidden in read-only (view) mode — there is nothing to send. */}
+      {!state.readOnly && (
+        <InternalOnlySwitch
+          variant="tags"
+          checked={state.isInternalOnly}
+          locked={props.threadIsPrivate === true}
+          disabled={state.isSending}
+          onChange={value => dispatch({ type: 'SET_INTERNAL_ONLY', value })}
+        />
       )}
 
       <div className={styles.section} role="region" aria-label="Recipients">

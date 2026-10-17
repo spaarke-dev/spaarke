@@ -141,11 +141,20 @@ public sealed class CommunicationQueueFeedService
 
         // 1) Impersonated candidate read — Dataverse row-level security decides which communications the caller
         // may see. Optional regarding facet narrows the scope; omitted, every visible communication is a candidate.
-        var select = string.Join(',', new[]
+        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct).ConfigureAwait(false);
+        var columns = new List<string>
         {
             PkField, SubjectField, FromField, SentAtField, CreatedOnField,
             AssociationStatusField, TriagePriorityField, RiConfidenceField, InternalOnlyField, PrivilegeField,
-        });
+        };
+        // D7 (task 065 fix round 5): an external caller sees a row only when its thread is explicitly Open, so the thread
+        // lookup is selected for them only; an internal caller's query is unchanged.
+        if (isExternal)
+        {
+            columns.Add(CommunicationOpenThreadGate.MessageThreadLookupValue);
+        }
+
+        var select = string.Join(',', columns);
         var filterPart = string.IsNullOrWhiteSpace(regarding) ? string.Empty : $"&$filter={BuildRegardingClause(regarding)}";
         var odata = $"$select={select}{filterPart}&$orderby={CreatedOnField} desc&$top={MaxCandidateScan}";
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct).ConfigureAwait(false);
@@ -154,11 +163,25 @@ public sealed class CommunicationQueueFeedService
 
         // 2) SAME shared access filter as every other communication read (internal-only + privilege) — no second
         // filter, no over-disclosure (NFR-03/NFR-06).
-        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct).ConfigureAwait(false);
         var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: !isExternal);
         var filtered = _accessFilter.FilterMessages(context, parsed.Select(p => p.Entity).ToList());
 
         var visibleIds = new HashSet<Guid>(filtered.Decisions.Where(d => d.Decision.IsVisible).Select(d => d.Message.Id));
+
+        // D7 (task 065 fix round 5, ISS-009): an external caller sees a row only when its thread is EXPLICITLY Open at read
+        // time. One batched read of the distinct threads of the visible rows (impersonated, like the rows themselves).
+        if (isExternal && visibleIds.Count > 0)
+        {
+            var threadByRow = parsed.Where(p => visibleIds.Contains(p.CommunicationId))
+                .GroupBy(p => p.CommunicationId)
+                .ToDictionary(g => g.Key, g => g.First().ThreadId);
+            var open = await CommunicationOpenThreadGate.ReadOpenThreadIdsAsync(
+                threadByRow.Values,
+                (odata, c) => _query.QueryAsync(CommunicationOpenThreadGate.ThreadSet, odata, callerSystemUserId, c),
+                ct).ConfigureAwait(false);
+            visibleIds.RemoveWhere(id => !open.Contains(threadByRow[id]));
+        }
+
         var visibleById = parsed.Where(p => visibleIds.Contains(p.CommunicationId)).ToDictionary(p => p.CommunicationId);
 
         // 3) Association-exception items — visible communications whose ladder status still needs a human
@@ -445,6 +468,7 @@ public sealed class CommunicationQueueFeedService
             AssociationStatus: TryInt(row, AssociationStatusField),
             TriagePriority: TryInt(row, TriagePriorityField),
             RiConfidence: TryDouble(row, RiConfidenceField),
+            ThreadId: TryGuid(row, CommunicationOpenThreadGate.MessageThreadLookupValue) ?? Guid.Empty,
             Entity: entity);
     }
 
@@ -456,6 +480,7 @@ public sealed class CommunicationQueueFeedService
         int? AssociationStatus,
         int? TriagePriority,
         double? RiConfidence,
+        Guid ThreadId,
         Entity Entity);
 
     // ── caller resolution (fail-closed — mirrors CommunicationThreadReadService.ResolveCallerOrThrowAsync) ──────

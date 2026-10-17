@@ -138,6 +138,7 @@ public static class ExternalMessageEndpoints
         RecordService recordService,
         CommunicationService communicationService,
         ExternalDataService dataService,
+        CallerRecordAccessProbe probe,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -150,10 +151,36 @@ public static class ExternalMessageEndpoints
         }
 
         // Task 187 D4: the post gate is the read gate, so it takes the same secure-flag and live-parent readers.
+        // Task 036 (FR-20): and the Dataverse rights reader, for a caller whose access Dataverse decided.
         return PostMessageCoreAsync(
             root, id, request, principal, registry, recordService.GetRecordAsync, communicationService, logger, ct,
-            dataService.GetNonSecureRootsAsync, dataService.GetLiveParentRootsAsync);
+            dataService.GetNonSecureRootsAsync, dataService.GetLiveParentRootsAsync,
+            ExternalProjectDataEndpoints.CallerRightsReader(probe, httpContext),
+            ExternalProjectDataEndpoints.CallerPrivilegeReader(probe, httpContext));
     }
+
+    /// <summary>
+    /// The Dataverse Create privilege on <c>sprk_communication</c>, the table a post writes (app-only), by its live name
+    /// as the SpaarkeMaster role definitions carry it (<c>Spaarke Basic User.xml</c>, <c>Spaarke Core User.xml</c>). Task 036
+    /// fix round 1 (F1): a Dataverse-decided caller's post needs it besides AppendTo on the record. Pinned by a test.
+    /// </summary>
+    internal const string CreateMessagePrivilege = "prvCreatesprk_Communication";
+
+    /// <summary>
+    /// The entity set a post on <paramref name="root"/> is confirmed against Dataverse on (task 036, FR-20): the record
+    /// itself for a project, matter, work assignment or invoice. <c>null</c> for a service request: its rights are the
+    /// requester scope (the caller's own request), not an access grant and not the membership constant, so it is not
+    /// confirmed (an open question for the owner, recorded in the task 036 notes).
+    /// </summary>
+    private static string? DataverseConfirmedEntitySet(MessageRoot root) => root.EntityLogicalName switch
+    {
+        "sprk_project" => ExternalDataService.GetDocumentParentBinding(ExternalDataService.DocumentParentKind.Project).EntitySet,
+        "sprk_matter" => ExternalDataService.GetDocumentParentBinding(ExternalDataService.DocumentParentKind.Matter).EntitySet,
+        "sprk_workassignment" =>
+            ExternalDataService.GetDocumentParentBinding(ExternalDataService.DocumentParentKind.WorkAssignment).EntitySet,
+        "sprk_invoice" => ExternalDataService.GetDocumentParentBinding(ExternalDataService.DocumentParentKind.Invoice).EntitySet,
+        _ => null,
+    };
 
     /// <summary>
     /// The message post pipeline (task 034, FR-11): root lookup → request validation → attributable sender → record gate
@@ -173,7 +200,9 @@ public static class ExternalMessageEndpoints
         ILogger logger,
         CancellationToken ct,
         NonSecureRootReader? readNonSecureRoots = null,
-        LiveParentRootReader? readLiveParents = null)
+        LiveParentRootReader? readLiveParents = null,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>>? readCallerRights = null,
+        Func<string, CancellationToken, Task<bool>>? readCallerPrivilege = null)
     {
         if (string.IsNullOrWhiteSpace(root) || !Roots.TryGetValue(root, out var messageRoot))
         {
@@ -224,6 +253,17 @@ public static class ExternalMessageEndpoints
                     "the caller's accessible set (or absent).",
                     messageRoot.EntityLogicalName, id, principal.ContactId, principal.SystemUserId);
                 return ProblemDetailsHelper.Forbidden(DenyRecordNotAccessible);
+            }
+
+            // Task 036 (FR-20, owner round 59 item 2): a caller whose access Dataverse decided is confirmed against Dataverse
+            // on the record (AppendTo, read as Create) AND, since fix round 1 (F1), on their own Create privilege on
+            // sprk_communication — the message row is written app-only. No reader (a test drive of the core) adds nothing:
+            // fail closed.
+            if (DataverseConfirmedEntitySet(messageRoot) is { } entitySet)
+            {
+                rights = await ExternalProjectDataEndpoints.WithDataverseRightsAsync(
+                    principal, rights, entitySet, id, readCallerRights, logger, ct,
+                    CreateMessagePrivilege, readCallerPrivilege).ConfigureAwait(false);
             }
 
             if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))

@@ -1817,11 +1817,13 @@ public sealed class AssignedAccessMaterializer
 
     /// <summary>
     /// Clears the shared user's impersonated root-set cache under the tenant key <c>ImpersonatedRootSetSource.GetAsync</c>
-    /// reads for that user — the request's tenants (the deployment's, for the job) — never "anonymous" (task 143's rule).
+    /// reads for that user — the request's tenants (the deployment's, for the job) — never "anonymous" (task 143's rule) —
+    /// and, r3 task 048 (046 review K1), every customer home directory a linked user's home sign-in reads under.
     /// </summary>
     private async Task InvalidateRootSetAsync(Run run, Guid user)
     {
-        foreach (var tenant in run.Request.CacheTenants.Where(t => !string.IsNullOrWhiteSpace(t) && t != "anonymous").Distinct())
+        foreach (var tenant in ImpersonatedRootSetSource.EvictionTenants(
+                     run.Request.CacheTenants, ImpersonatedRootSetSource.CustomerTenantIdsOrNone(_configuration)))
         {
             await ImpersonatedRootSetSource.InvalidateForTenantAsync(_cache, tenant, user, run.Logical, _logger).ConfigureAwait(false);
         }

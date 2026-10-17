@@ -128,6 +128,8 @@ flowchart LR
 
 > **Office "Generate Profile" (FR-08) takes this queue too, since `spaarkeai-word-add-in-r1` task 068 (#1086).** It used to call Path B in a `Task.Run` behind its 202, which a restart lost. It now queues the same `AppOnlyDocumentAnalysis` job (`Services/Office/OfficeProfileQueue.cs`), keyed with the request's own id (`AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey`, task 029's discriminator) so every click runs. Since `f5c7687d8` (#919 Fix 2), `AppOnlyAnalysisService` routes the "Document Profile" consumer onto the direct-Action spine, so this job runs ACT-011 and `DocumentProfileOutputMapper`, not the node graph above. The Path C description above, and the "Know which spine you're on" line in Part 5, predate that fix.
 
+> **The external upload route queues the same job too (`spaarke-SPA-external-access-platform-r3` task 063).** `ExternalProjectDataEndpoints.UploadDocumentForParent` queues one `AppOnlyDocumentAnalysis` profile job (`Source` `ExternalUpload`, keyed `ProfileIdempotencyKey(documentId)`) after the app-only SPE write and the row create, best-effort and bounded, so an external upload is profiled like an MDA upload.
+
 ### The "Document Profile" playbook graph (live, `18cf3cc8-02ec-f011-8406-7c1e520aa4df`)
 
 | Order | Node | ExecutorType | Output var | Result |
@@ -171,6 +173,7 @@ flowchart TD
 - **Trigger**: `OfficeJobQueue.QueueUploadFinalizationAsync` sets `TriggerAiProcessing` and `AiProcessingOptions{ProfileSummary, RagIndex, DeepAnalysis}` on the payload.
 - **Hand-off**: `UploadFinalizationWorker.QueueNextStageAsync` (gated on `TriggerAiProcessing`, :313) enqueues an `AppOnlyDocumentAnalysis` job to `sdap-jobs` with idempotency key `analysis-{documentId}-documentprofile`. It does **not** run AI inline.
 - **Profile**: `AppOnlyDocumentAnalysisJobHandler` → `AppOnlyAnalysisService.AnalyzeDocumentAsync(documentId, "Document Profile")` → node-based playbook (Path C).
+- **Other producers of the same job**: the external upload route (`ExternalProjectDataEndpoints.UploadDocumentForParent`, task 063) enqueues the same `AppOnlyDocumentAnalysis` profile job, plus app-only RAG indexing through `IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync`; it does not go through `UploadFinalizationWorker`.
 
 > **Design note**: this path chose the **node playbook** for profiling while the interactive paths chose the **direct Action**. That divergence is the root architectural smell behind Part 4. There is no functional reason the app-only path could not also use the direct Action (see Fix Option 3).
 

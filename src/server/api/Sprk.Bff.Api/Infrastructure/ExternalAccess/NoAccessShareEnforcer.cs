@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.Cache;
@@ -204,6 +205,7 @@ public sealed class NoAccessShareEnforcer
     private readonly IScheduledJobLease _recordLock;
     private readonly SecureChildShareSynchronizer _secureChildShares;
     private readonly IGenericEntityService _dataverse;
+    private readonly IOptionsMonitor<WorkforceIdentityOptions> _workforceIdentity;
     private readonly ILogger<NoAccessShareEnforcer> _logger;
 
     /// <param name="store">The enforcer's Dataverse reads.</param>
@@ -231,8 +233,10 @@ public sealed class NoAccessShareEnforcer
         IScheduledJobLease recordLock,
         SecureChildShareSynchronizer secureChildShares,
         IGenericEntityService dataverse,
+        IOptionsMonitor<WorkforceIdentityOptions> workforceIdentity,
         ILogger<NoAccessShareEnforcer> logger)
     {
+        _workforceIdentity = workforceIdentity ?? throw new ArgumentNullException(nameof(workforceIdentity));
         _store = store;
         _participations = participations;
         _identityStore = identityStore;
@@ -1171,7 +1175,10 @@ public sealed class NoAccessShareEnforcer
         }
         finally
         {
-            foreach (var tenant in cacheTenants)
+            // A9 (r3 task 048, 046 review K1): also every customer home directory — a linked user's home sign-in reads
+            // under its tid.
+            foreach (var tenant in ImpersonatedRootSetSource.EvictionTenants(
+                         cacheTenants, ImpersonatedRootSetSource.CustomerTenantIdsOrNone(_workforceIdentity, _logger)))
             {
                 await ImpersonatedRootSetSource.InvalidateForTenantAsync(_cache, tenant, userId, logicalName, _logger)
                     .ConfigureAwait(false);

@@ -77,6 +77,7 @@ import type { TimelineMessage } from '../CommunicationTimeline/CommunicationTime
 import { deactivateMessage, sendTimelineMessage } from '../../services/communicationTimelineApi';
 import { renameThread } from '../../services/communicationThreadListApi';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import { InternalOnlySwitch } from '../EmailComposer/subcomponents/InternalOnlySwitch';
 import { MessageBubble } from './subcomponents/MessageBubble';
 import { EmailInFlowBlock } from './subcomponents/EmailInFlowBlock';
 import type { ConversationRenderItem, ConversationViewHandle, ConversationViewProps } from './ConversationView.types';
@@ -305,6 +306,10 @@ const useComposeStyles = makeStyles({
     borderTopColor: tokens.colorNeutralStroke2,
     backgroundColor: tokens.colorNeutralBackground1,
   },
+  visibilityRow: {
+    display: 'flex',
+    alignItems: 'center',
+  },
   inputRow: {
     display: 'flex',
     alignItems: 'flex-end',
@@ -318,6 +323,13 @@ const useComposeStyles = makeStyles({
     minHeight: '16px',
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+  },
+  feedbackText: {
+    display: 'flex',
+    alignItems: 'center',
+    flexGrow: 1,
   },
   sentText: {
     color: tokens.colorNeutralForeground3,
@@ -456,6 +468,10 @@ const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
   const [draft, setDraft] = React.useState('');
   const [status, setStatus] = React.useState<ComposeStatus>('idle');
   const [errorMessage, setErrorMessage] = React.useState<string | undefined>();
+  // "Internal Only" (task 068; owner 2026-10-14): off for every new message, sent as an explicit boolean. This
+  // bar does not know the thread's privacy, so it never locks - the BFF floor (task 065) raises a Private
+  // thread's message to internal-only whatever this says.
+  const [internalOnly, setInternalOnly] = React.useState(false);
 
   // Concurrency guard, independent of the DISPLAY `status`. The textarea stays
   // enabled during a send (Teams-style — the user can start their next line),
@@ -482,11 +498,12 @@ const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
     setErrorMessage(undefined);
     try {
       await sendTimelineMessage(
-        { communicationType: 'message', threadId, body: text, bodyFormat: 'text' },
+        { communicationType: 'message', threadId, body: text, bodyFormat: 'text', isInternalOnly: internalOnly },
         { authenticatedFetch, bffBaseUrl }
       );
       if (!mountedRef.current) return;
       setDraft('');
+      setInternalOnly(false);
       setStatus('sent');
       onRefresh(); // optimistic refresh — see onRefresh doc
     } catch (err) {
@@ -497,7 +514,7 @@ const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
     } finally {
       inFlightRef.current = false;
     }
-  }, [draft, threadId, authenticatedFetch, bffBaseUrl, onRefresh]);
+  }, [draft, internalOnly, threadId, authenticatedFetch, bffBaseUrl, onRefresh]);
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -512,6 +529,16 @@ const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
 
   return (
     <div className={styles.wrapper} role="region" aria-label="Compose message">
+      {/* Who can see the message (owner 2026-10-14): "External" | "Internal Only" tags above the input, so the
+          choice is in view before typing. */}
+      <div className={styles.visibilityRow}>
+        <InternalOnlySwitch
+          variant="tags"
+          checked={internalOnly}
+          onChange={setInternalOnly}
+          disabled={status === 'sending'}
+        />
+      </div>
       <div className={styles.inputRow}>
         <Textarea
           className={styles.input}
@@ -544,21 +571,23 @@ const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
           (role=status → polite, role=alert → assertive) to avoid nested-live-
           region double announcements (NFR-05). */}
       <div className={styles.feedbackRow}>
-        {status === 'sending' && (
-          <div role="status">
-            <Spinner size="tiny" label="Sending…" />
-          </div>
-        )}
-        {status === 'sent' && (
-          <Text role="status" size={200} className={styles.sentText}>
-            Sent
-          </Text>
-        )}
-        {status === 'failed' && (
-          <Text role="alert" size={200} className={styles.failedText}>
-            {errorMessage ?? 'Failed to send message.'}
-          </Text>
-        )}
+        <div className={styles.feedbackText}>
+          {status === 'sending' && (
+            <div role="status">
+              <Spinner size="tiny" label="Sending…" />
+            </div>
+          )}
+          {status === 'sent' && (
+            <Text role="status" size={200} className={styles.sentText}>
+              Sent
+            </Text>
+          )}
+          {status === 'failed' && (
+            <Text role="alert" size={200} className={styles.failedText}>
+              {errorMessage ?? 'Failed to send message.'}
+            </Text>
+          )}
+        </div>
       </div>
     </div>
   );
