@@ -634,6 +634,7 @@
   <EntityRelationship Name="sprk_decisionrecord_regdocument" />
   <EntityRelationship Name="sprk_decisionrecord_regevent" />
   <EntityRelationship Name="sprk_decisionrecord_reginvoice" />
+  <EntityRelationship Name="sprk_decisionrecord_reginvoiceline" />
   <EntityRelationship Name="sprk_decisionrecord_regmatter" />
   <EntityRelationship Name="sprk_decisionrecord_regproject" />
   <EntityRelationship Name="sprk_decisionrecord_regrecordtype_recordtype_ref" />
@@ -883,6 +884,7 @@
   <EntityRelationship Name="sprk_signal_regdocument" />
   <EntityRelationship Name="sprk_signal_regevent" />
   <EntityRelationship Name="sprk_signal_reginvoice" />
+  <EntityRelationship Name="sprk_signal_reginvoiceline" />
   <EntityRelationship Name="sprk_signal_regmatter" />
   <EntityRelationship Name="sprk_signal_regproject" />
   <EntityRelationship Name="sprk_signal_regrecordtype_recordtype_ref" />
