@@ -135,8 +135,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
             policies.Select(p => p.Code), "is in force but was not evaluated to the end this run", counts, cancellationToken).ConfigureAwait(false);
 
         await ClosePoliciesNotInForceAsync(counts, cancellationToken).ConfigureAwait(false);
-        await CloseSignalsOfDeletedPoliciesAsync(counts, cancellationToken).ConfigureAwait(false);
+        var existingCodes = await CloseSignalsOfDeletedPoliciesAsync(counts, cancellationToken).ConfigureAwait(false);
         await RedactPoliciesNotInForceAsync(counts, cancellationToken).ConfigureAwait(false);
+        await RedactSignalsOfDeletedPoliciesAsync(existingCodes, counts, cancellationToken).ConfigureAwait(false);
 
         var success = counts.IsSuccess;
         var duration = Finish(context, counts, started, success);
@@ -454,28 +455,39 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
     /// <summary>Task 102b fix round 3: open Signals of a policy that no longer exists (a matter's delete cascades to a rule limited to it,
     /// or an administrator deleted the rule) close PolicyRetired (<see cref="SignalClosureService.CloseSignalsOfDeletedPoliciesAsync"/>). A
-    /// read fault closes nothing: it is logged, the run is failed (visible) and continues; the next run retries.</summary>
-    private async Task CloseSignalsOfDeletedPoliciesAsync(RunCounts counts, CancellationToken ct)
+    /// read fault closes nothing: it is logged, the run is failed (visible) and continues; the next run retries.
+    /// Fix round 4: returns the existing policy codes it read (null when that read failed), so the deleted-policy redaction
+    /// (<see cref="RedactSignalsOfDeletedPoliciesAsync"/>) decides by the same list without reading it again.</summary>
+    private async Task<ExistingPolicyCodes?> CloseSignalsOfDeletedPoliciesAsync(RunCounts counts, CancellationToken ct)
     {
+        ExistingPolicyCodes? existing = null;
         try
         {
-            var sweep = await _closure.CloseSignalsOfDeletedPoliciesAsync(ct).ConfigureAwait(false);
+            existing = await _closure.ExistingPolicyCodesAsync(ct).ConfigureAwait(false);
+            var sweep = await _closure.CloseSignalsOfDeletedPoliciesAsync(existing, ct).ConfigureAwait(false);
             counts.AddClosure(sweep.Outcome, retired: true);
             counts.DeletedPolicyRetired += sweep.ClosedIds.Count;
             if (sweep.ClosedIds.Count > 0)
             {
                 // The K4 pattern (fix round 2): the exact count, and at most the first MaxLoggedOutOfScopeIds ids, in one bounded line.
+                // Fix round 4 (K a): and the deleted policies' codes, capped the same way.
                 _logger.LogInformation(
-                    "{Count} open Signal(s) of a deleted policy were closed PolicyRetired (their policy no longer exists): {SignalIds}{More}.",
+                    "{Count} open Signal(s) of a deleted policy were closed PolicyRetired (their policy no longer exists): {SignalIds}{More}; " +
+                    "policy code(s) {PolicyCodes}{MoreCodes}.",
                     sweep.ClosedIds.Count, string.Join(",", sweep.ClosedIds.Take(MaxLoggedOutOfScopeIds)),
-                    sweep.ClosedIds.Count > MaxLoggedOutOfScopeIds ? $" and {sweep.ClosedIds.Count - MaxLoggedOutOfScopeIds} more" : string.Empty);
+                    sweep.ClosedIds.Count > MaxLoggedOutOfScopeIds ? $" and {sweep.ClosedIds.Count - MaxLoggedOutOfScopeIds} more" : string.Empty,
+                    string.Join(",", sweep.ClosedCodes.Take(MaxLoggedOutOfScopeIds)),
+                    sweep.ClosedCodes.Count > MaxLoggedOutOfScopeIds ? $" and {sweep.ClosedCodes.Count - MaxLoggedOutOfScopeIds} more" : string.Empty);
             }
 
             if (sweep.Unparseable > 0)
             {
+                // Fix round 4 (K b): at most MaxLoggedOutOfScopeIds ids, as above.
                 _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
                     "{Count} open Signal(s) with no policy lookup have a dedupe key that is not {{code}}|{{type}}|{{id}}|{{episode}}; their policy " +
-                    "cannot be named, so they were left open.", sweep.Unparseable);
+                    "cannot be named, so they were left open: {SignalIds}{More}.", sweep.Unparseable,
+                    string.Join(",", sweep.UnparseableIds.Take(MaxLoggedOutOfScopeIds)),
+                    sweep.UnparseableIds.Count > MaxLoggedOutOfScopeIds ? $" and {sweep.UnparseableIds.Count - MaxLoggedOutOfScopeIds} more" : string.Empty);
             }
 
             if (sweep.PolicyStillExists > 0)
@@ -495,6 +507,44 @@ public sealed class SignalReevaluationJob : IScheduledJob
             counts.PolicyFailures++;
             _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
                 "Open Signals of deleted policies could not be read ({ExceptionType}); none was closed this run.", ex.GetType().Name);
+        }
+
+        return existing;
+    }
+
+    /// <summary>
+    /// Task 102b fix round 4 (item 1, D-123): a deleted policy's code is neither in force nor Off/Retired, so the two task 145 sweeps never
+    /// reach its Signals, Resolved ones included, and a witness later filed under a Secure record would keep its detail in their stored
+    /// evidence forever. This sweeps the codes <see cref="SignalClosureService.DeletedPolicyCodesWithSignalsAsync"/> finds by the same rule
+    /// as the other sweeps (<see cref="SweepStoredEvidenceAsync"/>, which reads by prefix across every status and skips a code this run
+    /// already attempted). Fail closed: no policy list (<paramref name="existing"/> null, already counted and logged) or a read fault
+    /// redacts nothing extra; a fault fails the run (visible) and the run continues. A bound reached is a failed run too, after the codes
+    /// read are swept: the remaining codes' evidence was not checked.
+    /// </summary>
+    private async Task RedactSignalsOfDeletedPoliciesAsync(ExistingPolicyCodes? existing, RunCounts counts, CancellationToken ct)
+    {
+        if (existing is null) return;
+
+        DeletedPolicyCodes deleted;
+        try
+        {
+            deleted = await _closure.DeletedPolicyCodesWithSignalsAsync(existing, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            counts.PolicyFailures++;
+            _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                "Signals of deleted policies could not be read ({ExceptionType}); their stored evidence was not checked this run.", ex.GetType().Name);
+            return;
+        }
+
+        await SweepStoredEvidenceAsync(deleted.Codes, "was deleted", counts, ct).ConfigureAwait(false);
+        if (deleted.MoreRemain)
+        {
+            counts.PolicyFailures++;
+            _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                "More Signals with no policy lookup exist than one run reads ({MaxPages} pages); the stored evidence of the deleted policies " +
+                "beyond them was not checked this run.", SignalEvaluator.MaxPages);
         }
     }
 

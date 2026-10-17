@@ -3041,6 +3041,51 @@ public partial class SignalReevaluationJobTests
         /// <summary>#1661 round 2: a read that faults (a Dataverse timeout), chosen per query.</summary>
         public Func<QueryExpression, Exception?>? FaultOn { get; set; }
 
+        /// <summary>Task 102b fix round 4 (K c): a smaller page than the query asks for, so a test can reach a second page or the per-run
+        /// bound without seeding thousands of rows. Null: the query's own <c>PageInfo.Count</c>.</summary>
+        public int? PageSizeCap { get; set; }
+
+        /// <summary>Task 102b fix round 4 (K c): each paged read answered, as (table, page number).</summary>
+        public List<(string Table, int Page)> PagedReads { get; } = new();
+
+        /// <summary>A query with <c>PageInfo.Count</c> set is answered one page at a time, ordered by id (every paged read here orders by
+        /// its primary key), with <c>MoreRecords</c> and a paging cookie as Dataverse sets them; any other query gets every row.</summary>
+        private EntityCollection Paged(QueryExpression query, IEnumerable<Entity> rows)
+        {
+            var ordered = rows.OrderBy(r => r.Id).ToList();
+            var result = new EntityCollection();
+            if (query.PageInfo is not { Count: > 0 } paging)
+            {
+                result.Entities.AddRange(ordered);
+                return result;
+            }
+
+            var size = PageSizeCap is { } cap ? Math.Min(cap, paging.Count) : paging.Count;
+            var page = Math.Max(paging.PageNumber, 1);
+            PagedReads.Add((query.EntityName, page));
+            result.Entities.AddRange(ordered.Skip((page - 1) * size).Take(size));
+            result.MoreRecords = ordered.Count > page * size;
+            result.PagingCookie = result.MoreRecords ? $"<cookie page=\"{page}\" />" : null;
+            return result;
+        }
+
+        /// <summary>Task 102b fix round 4: the policy row's <c>createdon</c>, as Dataverse stamps it on create.</summary>
+        public void SetPolicyCreatedOn(string code, DateTime createdOn) =>
+            _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code)["createdon"] = createdOn;
+
+        /// <summary>Task 102b fix rounds 3-4: an administrator's hard delete of the rule, or a matter delete cascading to it. The row is gone,
+        /// and <c>sprk_signal_policy</c> (RemoveLink) empties the policy lookup on every one of its Signals; their rows stay.</summary>
+        public void DeletePolicy(string code)
+        {
+            var policy = _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code);
+            _policies.Remove(policy);
+            _rows.Remove(("sprk_policy", policy.Id));
+            foreach (var signal in Org.Rows.Values.Where(r => r.GetAttributeValue<EntityReference>("sprk_policy")?.Id == policy.Id))
+            {
+                signal.Attributes.Remove("sprk_policy");
+            }
+        }
+
         public Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default)
         {
             if (FaultOn?.Invoke(query) is { } fault) throw fault;
@@ -3098,24 +3143,22 @@ public partial class SignalReevaluationJobTests
                     });
                     break;
                 case "sprk_policy":
-                    foreach (var p in _policies.Where(p => query.Criteria.Conditions.All(c =>
-                                 c.Operator == ConditionOperator.Equal && Matches(p, c.AttributeName, c.Values[0]))))
-                    {
-                        result.Entities.Add(p);
-                    }
-
+                    // Fix round 4 (K c): a paged read (the existence read) is answered page by page, as Dataverse answers it.
+                    result = Paged(query, _policies.Where(p => query.Criteria.Conditions.All(c =>
+                                 c.Operator == ConditionOperator.Equal && Matches(p, c.AttributeName, c.Values[0]))));
                     break;
                 // Task 102b fix round 3: the deleted-policy sweep's read (sprk_policy is null, Open or Acknowledged), as Dataverse answers it.
+                // Fix round 4: and the redaction's read of the codes (sprk_policy is null, ANY status: no status condition); both paged.
                 case "sprk_signal" when query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_policy" && c.Operator == ConditionOperator.Null):
-                    var sweepStatuses = query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_signalstatus").Values.Cast<int>().ToHashSet();
-                    foreach (var row in Org.Rows.Values.Where(r => r.GetAttributeValue<EntityReference>("sprk_policy") is null
-                                 && sweepStatuses.Contains(r.GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value)))
-                    {
-                        var copy = new Entity("sprk_signal", row.Id) { RowVersion = Org.VersionOf(row.Id) };
-                        foreach (var attribute in row.Attributes) copy[attribute.Key] = attribute.Value;
-                        result.Entities.Add(copy);
-                    }
-
+                    var sweepStatuses = query.Criteria.Conditions.SingleOrDefault(c => c.AttributeName == "sprk_signalstatus")?.Values.Cast<int>().ToHashSet();
+                    result = Paged(query, Org.Rows.Values.Where(r => r.GetAttributeValue<EntityReference>("sprk_policy") is null
+                                 && (sweepStatuses is null || sweepStatuses.Contains(r.GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value)))
+                        .Select(row =>
+                        {
+                            var copy = new Entity("sprk_signal", row.Id) { RowVersion = Org.VersionOf(row.Id) };
+                            foreach (var attribute in row.Attributes) copy[attribute.Key] = attribute.Value;
+                            return copy;
+                        }));
                     break;
                 case "sprk_signal" when Value("sprk_policy") is Guid policyId:
                     var openStatuses = query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_signalstatus").Values.Cast<int>().ToHashSet();

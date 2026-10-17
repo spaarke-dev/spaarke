@@ -172,35 +172,39 @@ public sealed class SignalClosureService
     /// CascadeDelete=Cascade). A deleted policy's Signals keep their rows with <c>sprk_policy</c> nulled (<c>sprk_signal_policy</c> is
     /// RemoveLink), so neither the policy loop (by dedupe-key prefix of an EXISTING policy) nor the Off/Retired close (by the lookup)
     /// ever reaches them again, and an open one would stay in the worklist forever. This closes every Open or Acknowledged Signal whose
-    /// <c>sprk_policy</c> is empty AND whose dedupe key names a policy code that no <c>sprk_policy</c> row carries (any state), as
-    /// <c>PolicyRetired</c>: the same write as <see cref="ClosePolicyRetiredNowAsync"/> (status, resolution, resolvedon, lastevaluated; no
-    /// Decision Record).
+    /// <c>sprk_policy</c> is empty AND that <paramref name="existing"/> calls an orphan (<see cref="ExistingPolicyCodes.IsOrphan"/>: its
+    /// dedupe key names a code no <c>sprk_policy</c> row carries, in any state, or (fix round 4, F1) the policy now holding that code was
+    /// created after the Signal), as <c>PolicyRetired</c>: the same write as <see cref="ClosePolicyRetiredNowAsync"/> (status, resolution,
+    /// resolvedon, lastevaluated; no Decision Record).
     /// </summary>
     /// <remarks>
-    /// <para><b>Never fires on a live policy.</b> A Signal whose key's code matches an existing policy (compared ignoring case, so a doubt
-    /// counts as "exists") is left alone, whatever that policy's state or scope; so is a Signal whose key cannot be parsed, and a row read
-    /// back with a <c>sprk_policy</c> despite the condition.</para>
-    /// <para><b>Fail closed.</b> The policy codes and the candidate Signals are both read in full before anything is closed; either read
-    /// faulting throws and nothing is closed. A policy list longer than <see cref="SignalEvaluator.MaxPages"/> pages throws (an incomplete
-    /// list could make a live policy look deleted). The Signals read is bounded to <see cref="SignalEvaluator.MaxPages"/> pages per run:
-    /// the rest are reported (<see cref="DeletedPolicySweep.MoreRemain"/>) and closed by the next run, since a closed one drops out.</para>
+    /// <para><b>Never fires on a live policy's Signal.</b> A Signal whose key's code matches an existing policy (compared ignoring case, so
+    /// a doubt counts as "exists") is left alone, whatever that policy's state or scope, unless it was created BEFORE that policy (a reused
+    /// code: the Signal was another, deleted policy's). A Signal created at or after it, or with either date unknown, is left alone even
+    /// with an empty lookup (a hand edit). So is a Signal whose key cannot be parsed, and a row read back with a <c>sprk_policy</c> despite
+    /// the condition.</para>
+    /// <para><b>Fail closed.</b> <paramref name="existing"/> is read in full (<see cref="ExistingPolicyCodesAsync"/>) and the candidate
+    /// Signals are read before anything is closed; either read faulting throws and nothing is closed. The Signals read is bounded to
+    /// <see cref="SignalEvaluator.MaxPages"/> pages per run: the rest are reported (<see cref="DeletedPolicySweep.MoreRemain"/>) and closed
+    /// by the next run, since a closed one drops out.</para>
     /// </remarks>
-    internal async Task<DeletedPolicySweep> CloseSignalsOfDeletedPoliciesAsync(CancellationToken ct)
+    internal async Task<DeletedPolicySweep> CloseSignalsOfDeletedPoliciesAsync(ExistingPolicyCodes existing, CancellationToken ct)
     {
-        var existingCodes = await AllPolicyCodesAsync(ct).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(existing);
         var (candidates, moreRemain) = await ReadOpenSignalsWithoutPolicyAsync(ct).ConfigureAwait(false);
 
         var orphans = new Dictionary<string, List<ExistingSignal>>(StringComparer.Ordinal);
-        int stillExists = 0, unparseable = 0;
-        foreach (var (signal, key) in candidates)
+        var unparseableIds = new List<Guid>();
+        var stillExists = 0;
+        foreach (var (signal, key, createdOn) in candidates)
         {
             if (!SignalWriter.TryParseDedupeKey(key, out var code, out _, out _, out _))
             {
-                unparseable++;
+                unparseableIds.Add(signal.Id);
                 continue;
             }
 
-            if (existingCodes.Contains(code))
+            if (!existing.IsOrphan(code, createdOn))
             {
                 stillExists++;
                 continue;
@@ -219,21 +223,68 @@ public sealed class SignalClosureService
         }
 
         var closedInOrder = candidates.Select(c => c.Signal.Id).Where(closedIds.Contains).ToList();
-        return new DeletedPolicySweep(total, closedInOrder, stillExists, unparseable, moreRemain);
+        var closedCodes = orphans.Where(o => o.Value.Any(s => closedIds.Contains(s.Id))).Select(o => o.Key)
+            .Order(StringComparer.Ordinal).ToList();
+        return new DeletedPolicySweep(total, closedInOrder, stillExists, unparseableIds.Count, moreRemain)
+        {
+            ClosedCodes = closedCodes,
+            UnparseableIds = unparseableIds,
+        };
     }
 
-    /// <summary>Every <c>sprk_policy</c> row's code, whatever its state (Off and Retired included), paged; throws past
-    /// <see cref="SignalEvaluator.MaxPages"/> pages rather than return a partial list.</summary>
-    private async Task<HashSet<string>> AllPolicyCodesAsync(CancellationToken ct)
+    /// <summary>
+    /// Task 102b fix round 4 (item 1, D-123): the codes of deleted policies that still have Signals, in ANY status (Resolved included),
+    /// for the stored-evidence redaction sweep. Reads the dedupe key and <c>createdon</c> of every Signal whose <c>sprk_policy</c> is empty,
+    /// and keeps each parseable code that <paramref name="existing"/> calls an orphan for at least one of them (the same rule as
+    /// <see cref="CloseSignalsOfDeletedPoliciesAsync"/>, so a reused code's older Signals are included). A read fault throws: the caller
+    /// redacts nothing extra and fails the run. Bounded to <see cref="SignalEvaluator.MaxPages"/> pages: past it the codes read so far are
+    /// returned with <see cref="DeletedPolicyCodes.MoreRemain"/> set (a partial list redacts less than the whole, never something else).
+    /// </summary>
+    internal async Task<DeletedPolicyCodes> DeletedPolicyCodesWithSignalsAsync(ExistingPolicyCodes existing, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(existing);
+        var query = new QueryExpression("sprk_signal")
+        {
+            ColumnSet = new ColumnSet("sprk_dedupekey", "createdon"),
+            PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
+        };
+        query.Criteria.AddCondition("sprk_policy", ConditionOperator.Null);
+        query.AddOrder("sprk_signalid", OrderType.Ascending);
+
+        var codes = new SortedSet<string>(StringComparer.Ordinal);
+        for (var page = 1; ; page++)
+        {
+            var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            foreach (var row in result.Entities)
+            {
+                if (row.GetAttributeValue<EntityReference>("sprk_policy") is not null) continue; // defence in depth, as above
+                if (SignalWriter.TryParseDedupeKey(row.GetAttributeValue<string>("sprk_dedupekey"), out var code, out _, out _, out _)
+                    && existing.IsOrphan(code, row.GetAttributeValue<DateTime?>("createdon")))
+                {
+                    codes.Add(code);
+                }
+            }
+
+            if (!result.MoreRecords) return new DeletedPolicyCodes(codes.ToList(), false);
+            if (page >= SignalEvaluator.MaxPages) return new DeletedPolicyCodes(codes.ToList(), true);
+            query.PageInfo.PageNumber = page + 1;
+            query.PageInfo.PagingCookie = result.PagingCookie;
+        }
+    }
+
+    /// <summary>Every <c>sprk_policy</c> row's code, whatever its state (Off and Retired included), with its <c>createdon</c>, paged; throws
+    /// past <see cref="SignalEvaluator.MaxPages"/> pages rather than return a partial list (an incomplete list could make a live policy look
+    /// deleted). One read serves both deleted-policy steps of a run, the close and the redaction (fix round 4).</summary>
+    internal async Task<ExistingPolicyCodes> ExistingPolicyCodesAsync(CancellationToken ct)
     {
         var query = new QueryExpression("sprk_policy")
         {
-            ColumnSet = new ColumnSet("sprk_policycode"),
+            ColumnSet = new ColumnSet("sprk_policycode", "createdon"),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
         query.AddOrder("sprk_policyid", OrderType.Ascending);
 
-        var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var codes = new ExistingPolicyCodes();
         for (var page = 1; ; page++)
         {
             if (page > SignalEvaluator.MaxPages)
@@ -244,7 +295,7 @@ public sealed class SignalClosureService
             var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             foreach (var row in result.Entities)
             {
-                if (row.GetAttributeValue<string>("sprk_policycode") is { Length: > 0 } code) codes.Add(code);
+                if (row.GetAttributeValue<string>("sprk_policycode") is { Length: > 0 } code) codes.Add(code, row.GetAttributeValue<DateTime?>("createdon"));
             }
 
             if (!result.MoreRecords) return codes;
@@ -253,13 +304,13 @@ public sealed class SignalClosureService
         }
     }
 
-    /// <summary>Open or Acknowledged Signals whose <c>sprk_policy</c> is empty, with the row version the conditional close needs and their
-    /// dedupe key; at most <see cref="SignalEvaluator.MaxPages"/> pages (MoreRemain when Dataverse has more).</summary>
-    private async Task<(IReadOnlyList<(ExistingSignal Signal, string? Key)> Signals, bool MoreRemain)> ReadOpenSignalsWithoutPolicyAsync(CancellationToken ct)
+    /// <summary>Open or Acknowledged Signals whose <c>sprk_policy</c> is empty, with the row version the conditional close needs, their
+    /// dedupe key and <c>createdon</c>; at most <see cref="SignalEvaluator.MaxPages"/> pages (MoreRemain when Dataverse has more).</summary>
+    private async Task<(IReadOnlyList<(ExistingSignal Signal, string? Key, DateTime? CreatedOn)> Signals, bool MoreRemain)> ReadOpenSignalsWithoutPolicyAsync(CancellationToken ct)
     {
         var query = new QueryExpression("sprk_signal")
         {
-            ColumnSet = new ColumnSet("sprk_signalstatus", "sprk_policy", "sprk_policyversion", "sprk_dedupekey", "versionnumber"),
+            ColumnSet = new ColumnSet("sprk_signalstatus", "sprk_policy", "sprk_policyversion", "sprk_dedupekey", "versionnumber", "createdon"),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Null);
@@ -267,7 +318,7 @@ public sealed class SignalClosureService
             new object[] { SignalWriter.SignalStatusOpen, SignalWriter.SignalStatusAcknowledged });
         query.AddOrder("sprk_signalid", OrderType.Ascending);
 
-        var signals = new List<(ExistingSignal, string?)>();
+        var signals = new List<(ExistingSignal, string?, DateTime?)>();
         for (var page = 1; ; page++)
         {
             var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
@@ -275,7 +326,7 @@ public sealed class SignalClosureService
             {
                 // Defence in depth: a row that carries a policy is never this sweep's, whatever the query returned.
                 if (row.GetAttributeValue<EntityReference>("sprk_policy") is not null) continue;
-                signals.Add((ToOpenSignal(row), row.GetAttributeValue<string>("sprk_dedupekey")));
+                signals.Add((ToOpenSignal(row), row.GetAttributeValue<string>("sprk_dedupekey"), row.GetAttributeValue<DateTime?>("createdon")));
             }
 
             if (!result.MoreRecords) return (signals, false);
@@ -386,8 +437,55 @@ public sealed class SignalClosureService
 /// <summary>What <see cref="SignalClosureService.CloseSignalsOfDeletedPoliciesAsync"/> did (task 102b fix round 3).</summary>
 /// <param name="Outcome">The closes, as for every system closure (callers add it to the run's counts).</param>
 /// <param name="ClosedIds">The Signals closed <c>PolicyRetired</c>, in read order.</param>
-/// <param name="PolicyStillExists">Signals with no policy lookup whose key names a policy that exists: left alone.</param>
+/// <param name="PolicyStillExists">Signals with no policy lookup whose key names a policy that exists and is not younger than them: left alone.</param>
 /// <param name="Unparseable">Signals with no policy lookup whose dedupe key cannot be parsed: left alone.</param>
 /// <param name="MoreRemain">The per-run bound was reached; the next run continues.</param>
 internal sealed record DeletedPolicySweep(
-    SignalClosureOutcome Outcome, IReadOnlyList<Guid> ClosedIds, int PolicyStillExists, int Unparseable, bool MoreRemain);
+    SignalClosureOutcome Outcome, IReadOnlyList<Guid> ClosedIds, int PolicyStillExists, int Unparseable, bool MoreRemain)
+{
+    /// <summary>Fix round 4 (K a): the deleted policies' codes at least one Signal was closed for, in ordinal order.</summary>
+    public IReadOnlyList<string> ClosedCodes { get; init; } = [];
+
+    /// <summary>Fix round 4 (K b): the Signals counted in <see cref="Unparseable"/>, in read order.</summary>
+    public IReadOnlyList<Guid> UnparseableIds { get; init; } = [];
+}
+
+/// <summary>What <see cref="SignalClosureService.DeletedPolicyCodesWithSignalsAsync"/> found (task 102b fix round 4).</summary>
+/// <param name="Codes">The deleted policies' codes that still have Signals, in ordinal order.</param>
+/// <param name="MoreRemain">The per-run bound was reached: more Signals with no policy lookup were not read this run.</param>
+internal sealed record DeletedPolicyCodes(IReadOnlyList<string> Codes, bool MoreRemain);
+
+/// <summary>
+/// Every existing <c>sprk_policy</c> code (any state), compared ignoring case, with the <c>createdon</c> of the policy holding it (task 102b
+/// fix rounds 3 and 4). When two rows hold the same code ignoring case, the EARLIEST date is kept, and an unknown date wins over any date:
+/// both count more Signals as "still exists", the direction that never closes a live policy's Signal.
+/// </summary>
+internal sealed class ExistingPolicyCodes
+{
+    private readonly Dictionary<string, DateTime?> _createdOn = new(StringComparer.OrdinalIgnoreCase);
+
+    internal void Add(string code, DateTime? createdOn)
+    {
+        if (!_createdOn.TryGetValue(code, out var known))
+        {
+            _createdOn[code] = createdOn;
+        }
+        else if (known is { } k)
+        {
+            _createdOn[code] = createdOn is { } c ? (c < k ? c : k) : null;
+        }
+    }
+
+    /// <summary>True when a policy row (any state) holds the code.</summary>
+    public bool Contains(string code) => _createdOn.ContainsKey(code);
+
+    /// <summary>
+    /// True when a Signal of <paramref name="code"/>, created at <paramref name="signalCreatedOn"/>, with an EMPTY <c>sprk_policy</c>
+    /// belongs to a policy that no longer exists: no policy holds the code; or (fix round 4, F1) the policy holding it was created after
+    /// the Signal, so the code was reused after the Signal's own policy was deleted. False when either date is unknown, and for a Signal
+    /// created at or after the policy (a hand-edited lookup on a live policy's Signal is never an orphan).
+    /// </summary>
+    public bool IsOrphan(string code, DateTime? signalCreatedOn) =>
+        !_createdOn.TryGetValue(code, out var policyCreatedOn)
+        || (policyCreatedOn is { } policy && signalCreatedOn is { } signal && signal < policy);
+}
