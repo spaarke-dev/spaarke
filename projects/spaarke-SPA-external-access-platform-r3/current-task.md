@@ -47,6 +47,8 @@ Messages and feed give no "incomplete" signal; `Truncated` may over-report; a pr
 2. 070/071/072; then the R3 PR to master after `/conflict-check`.
 
 ## Dependencies tracked elsewhere
+- **UAC 186 (draft PR #2061): workforce ceiling.** R3 reviewed the diff 2026-10-17: two `.ExemptFromWorkforceCeiling` lines on the 047/048 routes, OK, with a wording fix asked for on registration. Once 186 is on master, every new R3 `/api/v1/external` route declares exactly one of a requirement, a handler check or an exemption (`Api/ExternalAccess/WorkforceCeilingEndpointFilter.cs`). Otherwise the coverage ArchTest fails, and the route is denied to workforce contacts at runtime. For UAT afterwards, the owner adds the missing Workforce-role privileges on dev (all four on sprk_servicerequest).
+
 - UAC task 185 = PR #1827 (head `df4ce6825`, one fix pending). Changes `ContactBindingDecision`, `ContactIdentityStore` (`BindOidAndConsumeInviteAsync`), `ContactIdentityBinder`, `CallerPrincipalResolver` (CIAM invite-code header), `CorsModule`; SPA `invite-code.ts`, `bff-client.ts`, `BffAccessState`, `WorkspaceHomePage`, `App.tsx`. Merge master into R3 when it lands, BEFORE 046/047/058 start. UAC will notify.
 - Provisioning PR #1823 (`ef24853ec`) adds `sprk_decisionrecord` / `sprk_decisionrecords` / `sprk_regardingservicerequest` to `ExternalDataService.ServiceRequestRelations` (SpaarkeMaster 1.2.2.0 1:N `sprk_decisionrecord_regsvcreq`; pinned test counts 8 -> 9). Merge master into R3 after #1823 merges; re-run `ExternalDeleteServiceRequestTests` and the relationship pin test.
 - ISS-001 (#1623), ISS-002 (#1633), ISS-003 (#1636), ISS-004, ISS-005 (#1673).
