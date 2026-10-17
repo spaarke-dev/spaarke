@@ -442,13 +442,15 @@ public static class ChildRecordEndpoints
         [FromServices] IRecordOwnershipResolver ownership,
         [FromServices] CoreAncestorRestamper restamper,
         [FromServices] SecureChildReconciler children,
+        [FromServices] IGenericEntityService appOnlyEntities,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
     {
         var entity = (table ?? string.Empty).Trim().ToLowerInvariant();
         return RefileTables.Contains(entity)
-            ? UpdateAsync(entity, id, body, user, ownership, restamper, children, httpContext, logger, ct)
+            ? UpdateAsync(entity, id, body, user, ownership, restamper, children, httpContext, logger, ct,
+                appOnlyEntities: appOnlyEntities)
             : Task.FromResult(Problem(StatusCodes.Status400BadRequest, UnsupportedTableCode,
                 $"'{table}' records are not re-filed here."));
     }
@@ -463,6 +465,9 @@ public static class ChildRecordEndpoints
     /// (<c>sprk_RegardingMatter</c> → <c>sprk_regardingmatter</c>, live metadata, task 159 note §0.2(b)), so naming only
     /// <c>sprk_regarding…</c> properties writes only <c>sprk_regarding…</c> columns; an unknown navigation property is the
     /// mapper's 400.</param>
+    /// <param name="appOnlyEntities">ebilling-r1 D-96: the app-only reader an invoice's lines are counted with when an update
+    /// moves the invoice to another core record. Null on the event and communication filing routes, which write no invoice;
+    /// an invoice core-lookup change without it fails closed.</param>
     internal static async Task<IResult> UpdateAsync(
         string entity,
         Guid id,
@@ -474,7 +479,8 @@ public static class ChildRecordEndpoints
         HttpContext httpContext,
         ILogger logger,
         CancellationToken ct,
-        bool filingOnly = false)
+        bool filingOnly = false,
+        IGenericEntityService? appOnlyEntities = null)
     {
         if (filingOnly && FilingShapeProblem(body, entity) is { } shape)
             return shape;
@@ -513,7 +519,7 @@ public static class ChildRecordEndpoints
         }
 
         var outcome = await OwnedChildWrite.RefileAsync(
-            user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct)
+            user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct, appOnlyEntities)
             .ConfigureAwait(false);
 
         if (outcome.NotARefile)

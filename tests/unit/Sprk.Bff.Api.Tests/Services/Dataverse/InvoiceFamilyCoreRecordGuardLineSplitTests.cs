@@ -1,0 +1,273 @@
+using FluentAssertions;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
+using Xunit;
+
+namespace Sprk.Bff.Api.Tests.Services.Dataverse;
+
+/// <summary>
+/// ebilling-r1 task 026 fix-round-2. D-96 (owner, on uac-r2's 026 re-check F1): an update that moves an invoice to another
+/// core record is refused while any of its lines names another one (or none), counted with the APP-only reader, failing
+/// closed. DEF-022 (#2056): <see cref="InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync"/>, the same rule for the generic
+/// update paths that do not write through <c>OwnedChildWrite</c>.
+/// </summary>
+public class InvoiceFamilyCoreRecordGuardLineSplitTests
+{
+    private static readonly Guid MatterId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid OtherMatterId = Guid.Parse("11111111-1111-1111-1111-1111111111ff");
+    private static readonly Guid ProjectId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid InvoiceId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+    private static readonly Guid OtherInvoiceId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+    private static readonly Guid LineId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+
+    private static Func<string, object?> Reads(params (string Column, object? Value)[] values) =>
+        column => values.FirstOrDefault(v => v.Column == column).Value;
+
+    private static readonly Func<EntityReference, CancellationToken, Task<InvoiceFamilyCoreRecord>> NeverRead =
+        (_, _) => throw new InvalidOperationException("must not be read");
+
+    private static Entity Line(Guid invoice, params (string Column, string Core, Guid Id)[] cores)
+    {
+        var line = new Entity("sprk_billingevent", Guid.NewGuid()) { ["sprk_invoice"] = new EntityReference("sprk_invoice", invoice) };
+        foreach (var (column, core, id) in cores)
+            line[column] = new EntityReference(core, id);
+        return line;
+    }
+
+    /// <summary>An app-only reader whose RetrieveMultiple evaluates the query over <paramref name="lines"/>.</summary>
+    internal static Mock<IGenericEntityService> AppOnlyOver(IEnumerable<Entity> lines, List<QueryExpression>? asked = null)
+    {
+        var app = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        app.Setup(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+            {
+                asked?.Add(q);
+                return new EntityCollection(QueryEvaluator.Run(q, lines).ToList());
+            });
+        return app;
+    }
+
+    // ── D-96 in CheckWriteAsync ────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CheckWrite_AnInvoiceMovedWhileALineNamesAnotherCoreRecord_IsRefusedLineMismatch_NamingNoLine()
+    {
+        EntityReference? askedFor = null;
+        var result = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_project", new EntityReference("sprk_project", ProjectId))), NeverRead, default,
+            (core, _) => { askedFor = core; return Task.FromResult(true); });
+
+        result.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        result.Reason.Should().NotContain(LineId.ToString("D"));
+        askedFor.Should().BeEquivalentTo(new EntityReference("sprk_project", ProjectId), "the invoice's NEW single core record");
+    }
+
+    [Fact]
+    public async Task CheckWrite_AnInvoiceMovedWhoseLinesAllMatch_OrThatHasNoLines_IsDecided()
+    {
+        var result = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_project", new EntityReference("sprk_project", ProjectId))), NeverRead, default,
+            (_, _) => Task.FromResult(false));
+
+        result.IsRefused.Should().BeFalse(result.Reason);
+        result.Regarding.Should().BeEquivalentTo(new EntityReference("sprk_project", ProjectId));
+    }
+
+    [Fact]
+    public async Task CheckWrite_WhenTheLinesCannotBeRead_FailsClosedReadFailed_WithoutTheFaultsText()
+    {
+        var thrown = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId))), NeverRead, default,
+            (_, _) => throw new HttpRequestException("socket 10.0.0.7"));
+        var noReader = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId))), NeverRead, default,
+            InvoiceFamilyCoreRecordGuard.LinesOfAnotherCoreRecord(null, InvoiceId));
+
+        thrown.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        thrown.Reason.Should().NotContain("10.0.0.7");
+        noReader.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode, "no app-only reader is never \"no lines\"");
+    }
+
+    [Fact]
+    public async Task CheckWrite_TheLineCheck_IsNeverAskedForARefusedInvoice_OrForAnyOtherTable()
+    {
+        Func<EntityReference, CancellationToken, Task<bool>> never = (_, _) => throw new InvalidOperationException("must not be asked");
+
+        var twoCores = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)), ("sprk_project", new EntityReference("sprk_project", ProjectId))),
+            NeverRead, default, never);
+        var line = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_billingevent",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId))), NeverRead, default, never);
+
+        twoCores.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        line.IsRefused.Should().BeFalse(line.Reason);
+    }
+
+    // ── D-96: the one bounded app-only query ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task LinesOfAnotherCoreRecord_FindsOnlyThisInvoicesLinesThatAreNotExactlyTheNewCore_WithOneBoundedQuery()
+    {
+        var matching = Line(InvoiceId, ("sprk_project", "sprk_project", ProjectId));
+        var otherInvoicesStrayLine = Line(OtherInvoiceId, ("sprk_matter", "sprk_matter", MatterId));
+        var asked = new List<QueryExpression>();
+
+        var clean = await InvoiceFamilyCoreRecordGuard.LinesOfAnotherCoreRecord(
+            AppOnlyOver([matching, otherInvoicesStrayLine], asked).Object, InvoiceId)(new EntityReference("sprk_project", ProjectId), default);
+
+        clean.Should().BeFalse("a matching line and another invoice's line are not this invoice's split");
+        var query = asked.Should().ContainSingle().Subject;
+        query.EntityName.Should().Be("sprk_billingevent");
+        query.TopCount.Should().Be(1);
+        query.ColumnSet.Columns.Should().Equal("sprk_billingeventid");
+
+        foreach (var split in new[]
+                 {
+                     Line(InvoiceId, ("sprk_matter", "sprk_matter", MatterId)), // the old matter
+                     Line(InvoiceId, ("sprk_project", "sprk_project", Guid.NewGuid())), // another project
+                     Line(InvoiceId), // no core record
+                     Line(InvoiceId, ("sprk_project", "sprk_project", ProjectId), ("sprk_matter", "sprk_matter", OtherMatterId)), // two
+                     Line(InvoiceId, ("sprk_regardingworkassignment", "sprk_workassignment", ProjectId)), // same id, another table
+                 })
+        {
+            var found = await InvoiceFamilyCoreRecordGuard.LinesOfAnotherCoreRecord(
+                AppOnlyOver([matching, split]).Object, InvoiceId)(new EntityReference("sprk_project", ProjectId), default);
+            found.Should().BeTrue();
+        }
+    }
+
+    [Fact]
+    public void WritesCoreLookup_IsTrueForACoreColumnOrItsBind_NeverForSupersedesOrText()
+    {
+        InvoiceFamilyCoreRecordGuard.WritesCoreLookup("sprk_invoice", ["sprk_Project@odata.bind"]).Should().BeTrue();
+        InvoiceFamilyCoreRecordGuard.WritesCoreLookup("sprk_invoice", ["sprk_matter"]).Should().BeTrue();
+        InvoiceFamilyCoreRecordGuard.WritesCoreLookup("sprk_invoice", ["sprk_SupersedesInvoice@odata.bind", "sprk_name"]).Should().BeFalse();
+        InvoiceFamilyCoreRecordGuard.WritesCoreLookup("sprk_todo", ["sprk_matter"]).Should().BeFalse();
+    }
+
+    // ── DEF-022: the generic update paths ────────────────────────────────────────────────────────────────────────
+
+    private static Mock<IGenericEntityService> StoredInvoiceUnderMatter(IEnumerable<Entity>? lines = null)
+    {
+        var app = AppOnlyOver(lines ?? []);
+        app.Setup(a => a.RetrieveAsync("sprk_invoice", InvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_invoice", InvoiceId) { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
+        return app;
+    }
+
+    private static Dictionary<string, object?> MoveToProject() => new()
+    {
+        ["sprk_Matter@odata.bind"] = null,
+        ["sprk_Project@odata.bind"] = $"/sprk_projects({ProjectId:D})",
+    };
+
+    [Fact]
+    public async Task GenericUpdate_ATableOutsideTheTwo_OrAPatchTouchingNoGuardedLookup_IsNotChecked_AndReadsNothing()
+    {
+        var strict = new Mock<IGenericEntityService>(MockBehavior.Strict);
+
+        (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_todo", InvoiceId,
+            new Dictionary<string, object?> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) }, strict.Object))
+            .Should().BeNull();
+        (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId,
+            new Dictionary<string, object?> { ["sprk_name"] = "Renamed", ["sprk_totalamount"] = 1m }, strict.Object))
+            .Should().BeNull();
+        (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId,
+            new Dictionary<string, object?> { ["sprk_name"] = "Renamed" }, appOnly: null))
+            .Should().BeNull("nothing guarded is written, so no reader is needed");
+    }
+
+    [Fact]
+    public async Task GenericUpdate_AnInvoiceUnderAMatterGivenAProjectToo_IsRefusedMultiple()
+    {
+        var result = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId,
+            new Dictionary<string, object?> { ["sprk_project"] = new EntityReference("sprk_project", ProjectId) },
+            StoredInvoiceUnderMatter().Object);
+
+        result!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode, "the stored matter stays");
+    }
+
+    [Fact]
+    public async Task GenericUpdate_AnInvoiceMovedToAProject_IsRefusedWhileALineStaysOnTheMatter_AndAllowedWithNoSuchLine()
+    {
+        var split = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId, MoveToProject(),
+            StoredInvoiceUnderMatter([Line(InvoiceId, ("sprk_matter", "sprk_matter", MatterId))]).Object);
+        var matching = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId, MoveToProject(),
+            StoredInvoiceUnderMatter([Line(InvoiceId, ("sprk_project", "sprk_project", ProjectId))]).Object);
+        var noLines = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId, MoveToProject(),
+            StoredInvoiceUnderMatter().Object);
+
+        split!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        matching.Should().BeNull();
+        noLines.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GenericUpdate_WhenAReadIsNotPossible_FailsClosed()
+    {
+        var faulting = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        faulting.Setup(a => a.RetrieveAsync("sprk_invoice", InvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("socket 10.0.0.7"));
+
+        var noReader = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId, MoveToProject(), null);
+        var thrown = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId, MoveToProject(), faulting.Object);
+
+        noReader!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        thrown!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        thrown.Reason.Should().NotContain("10.0.0.7");
+    }
+
+    [Fact]
+    public async Task GenericUpdate_ALineMovedToAnInvoiceOfAnotherMatter_IsRefusedLineMismatch_AndAPlainValueIsNeverALookup()
+    {
+        var app = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        app.Setup(a => a.RetrieveAsync("sprk_billingevent", LineId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_billingevent", LineId) { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
+        app.Setup(a => a.RetrieveAsync("sprk_invoice", OtherInvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_invoice", OtherInvoiceId) { ["sprk_matter"] = new EntityReference("sprk_matter", OtherMatterId) });
+
+        var moved = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_billingevent", LineId,
+            new Dictionary<string, object?> { ["sprk_Invoice@odata.bind"] = $"/sprk_invoices({OtherInvoiceId:D})" }, app.Object);
+        var plain = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_billingevent", LineId,
+            new Dictionary<string, object?> { ["sprk_project"] = ProjectId.ToString("D") }, app.Object);
+
+        moved!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        plain!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.LookupNotACoreRecordCode);
+    }
+}
+
+/// <summary>
+/// Evaluates the subset of <see cref="QueryExpression"/> the D-96 line query uses (Equal, NotEqual, Null, NotNull on lookup
+/// columns; nested And / Or filters; TopCount) over in-memory rows, with Dataverse's SQL semantics: NotEqual never matches
+/// an empty column.
+/// </summary>
+internal static class QueryEvaluator
+{
+    public static IEnumerable<Entity> Run(QueryExpression query, IEnumerable<Entity> rows) =>
+        rows.Where(r => string.Equals(r.LogicalName, query.EntityName, StringComparison.OrdinalIgnoreCase) && Matches(query.Criteria, r))
+            .Take(query.TopCount ?? int.MaxValue);
+
+    private static bool Matches(FilterExpression filter, Entity row)
+    {
+        var results = filter.Conditions.Select(c => Matches(c, row)).Concat(filter.Filters.Select(f => Matches(f, row))).ToList();
+        return filter.FilterOperator == LogicalOperator.Or ? results.Any(x => x) : results.All(x => x);
+    }
+
+    private static bool Matches(ConditionExpression condition, Entity row)
+    {
+        Guid? value = row.Attributes.TryGetValue(condition.AttributeName, out var raw) && raw is EntityReference r && r.Id != Guid.Empty
+            ? r.Id
+            : null;
+        return condition.Operator switch
+        {
+            ConditionOperator.Null => value is null,
+            ConditionOperator.NotNull => value is not null,
+            ConditionOperator.Equal => value is { } v && v == (Guid)condition.Values[0],
+            ConditionOperator.NotEqual => value is { } v && v != (Guid)condition.Values[0],
+            _ => throw new NotSupportedException(condition.Operator.ToString()),
+        };
+    }
+}

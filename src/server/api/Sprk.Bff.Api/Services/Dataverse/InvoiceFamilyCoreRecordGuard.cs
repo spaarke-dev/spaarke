@@ -13,9 +13,12 @@
 //       every invoice-family writer (tasks 044, 049, 100, 104) re-implements the resolver fields.
 //
 // Placement (bff-extensions.md): Services/Dataverse beside CoreAncestorResolver, the shared write-path owner. A static
-// class: no package, no endpoint, no DI registration (ADR-010); its one read helper takes the services its caller holds.
+// class: no package, no endpoint, no DI registration (ADR-010); its read helpers take the services their caller holds.
+// Task 026 fix-round-2: D-96 (an invoice re-file must not split it from its lines; the count is app-only) and DEF-022
+// (#2056: CheckGenericUpdateAsync for the three generic update paths that do not write through OwnedChildWrite).
 
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Dataverse;
@@ -36,6 +39,10 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// call <see cref="CheckWriteAsync"/> for every write of a family table, keyed by table: on an update, on the stored
 /// lookups read as the caller and overlaid with the change (<see cref="GuardedLookups"/>). This class owns the rule; the
 /// core only assembles the row and reads what the rule needs.</para>
+/// <para><b>The generic update paths (DEF-022, #2056).</b> The playbook update, the output orchestrator and the
+/// field-mapping push call <see cref="CheckGenericUpdateAsync"/> before their own write, with their app-only reader.</para>
+/// <para><b>An invoice re-file keeps its lines (D-96).</b> An update that writes an invoice's core lookup is refused with
+/// <see cref="LineInvoiceCoreRecordMismatchCode"/> when any of its lines names another core record, counted as the app.</para>
 /// <para><b>Supersedes.</b> <c>sprk_invoice.sprk_supersedesinvoice</c> is a peer reference, not a lineage parent: the
 /// superseding and the superseded invoice must regard the same core record (<see cref="SupersedesCoreRecordMismatchCode"/>).</para>
 /// <para><b>Refuses, never picks.</b> Two or three lookups set is <see cref="MultipleCoreRecordsCode"/>; none is
@@ -204,14 +211,226 @@ public static class InvoiceFamilyCoreRecordGuard
     /// <param name="resolveSuperseded">Decides the other invoice's core record (the superseded invoice, or a line's
     /// invoice) from its stored row — read by the writer, as its caller; its refusal (a read fault included) is taken as
     /// given.</param>
+    /// <param name="anyLineOfAnotherCoreRecord">D-96: for an UPDATE of a stored invoice that writes one of its core lookups
+    /// (<see cref="WritesCoreLookup"/>), whether any line of that invoice names a core record other than the one given (or
+    /// none) — <see cref="LinesOfAnotherCoreRecord"/>, read as the APP. True is
+    /// <see cref="LineInvoiceCoreRecordMismatchCode"/>; a fault is <see cref="ReadFailedCode"/>. Null for every other write
+    /// (a create has no lines yet). Lines are never re-filed from their invoice (D-75).</param>
     public static async Task<InvoiceFamilyCoreRecord> CheckWriteAsync(
         string entityLogicalName,
         Func<string, object?> read,
         Func<EntityReference, CancellationToken, Task<InvoiceFamilyCoreRecord>> resolveSuperseded,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Func<EntityReference, CancellationToken, Task<bool>>? anyLineOfAnotherCoreRecord = null)
     {
         ArgumentNullException.ThrowIfNull(read);
         ArgumentNullException.ThrowIfNull(resolveSuperseded);
+        var decided = await CheckWriteAgainstOtherInvoiceAsync(entityLogicalName, read, resolveSuperseded, ct).ConfigureAwait(false);
+        if (decided.IsRefused || anyLineOfAnotherCoreRecord is null || !IsInvoice(decided.EntityLogicalName))
+            return decided;
+
+        // D-96 (owner, on uac-r2's 026 re-check F1): an invoice re-filed to another core record must not leave its lines
+        // behind. The count is the APP's, so a line the caller cannot see blocks too; the refusal is uniform and names no line.
+        bool split;
+        try
+        {
+            split = await anyLineOfAnotherCoreRecord(decided.Regarding!, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return decided.Refuse(ReadFailedCode,
+                $"The invoice's lines could not be read ({ex.GetType().Name}); nothing was written.");
+        }
+
+        return split
+            ? decided.Refuse(LineInvoiceCoreRecordMismatchCode,
+                $"{decided.EntityLogicalName} would regard {decided.Regarding!.LogicalName}({decided.Regarding.Id:D}) but at least "
+                + "one of its lines names another core record, or none; a line belongs only to an invoice of its own matter, "
+                + "project or work assignment, and lines are never re-filed from their invoice (D-75). Nothing was written.")
+            : decided;
+    }
+
+    /// <summary>
+    /// D-96: true when a write of <paramref name="entityLogicalName"/> sets or clears one of its core-record lookups
+    /// (<see cref="CoreRecordLookups"/>; a <c>@odata.bind</c> key counts as its column).
+    /// </summary>
+    public static bool WritesCoreLookup(string entityLogicalName, IEnumerable<string> writtenColumns)
+    {
+        ArgumentNullException.ThrowIfNull(writtenColumns);
+        if (string.IsNullOrWhiteSpace(entityLogicalName)
+            || !CoreRecordLookups.TryGetValue(entityLogicalName.Trim(), out var lookups))
+        {
+            return false;
+        }
+
+        return writtenColumns.Select(ColumnOfKey)
+            .Any(c => lookups.Any(l => string.Equals(l.Column, c, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>
+    /// D-96: the line check for an update of invoice <paramref name="invoiceId"/>, read with the APP-only
+    /// <paramref name="appOnly"/> (owner: count lines the caller cannot see). With no reader it fails closed: the check
+    /// throws, which <see cref="CheckWriteAsync"/> refuses as <see cref="ReadFailedCode"/>.
+    /// </summary>
+    public static Func<EntityReference, CancellationToken, Task<bool>> LinesOfAnotherCoreRecord(
+        IGenericEntityService? appOnly, Guid invoiceId) =>
+        appOnly is null
+            ? (_, _) => throw new InvalidOperationException("No app-only reader for the invoice's lines.")
+            : async (core, ct) =>
+                (await appOnly.RetrieveMultipleAsync(LinesOfAnotherCoreRecordQuery(invoiceId, core), ct).ConfigureAwait(false))
+                    .Entities.Count > 0;
+
+    /// <summary>
+    /// D-96: one bounded query — the first line of <paramref name="invoiceId"/> whose own core lookups are not exactly
+    /// <paramref name="core"/>: its column for that core type is another record or empty, or one of its other core lookups
+    /// is set. Never selects more than the line's id.
+    /// </summary>
+    internal static QueryExpression LinesOfAnotherCoreRecordQuery(Guid invoiceId, EntityReference core)
+    {
+        ArgumentNullException.ThrowIfNull(core);
+        var lookups = CoreRecordLookups[LineEntity];
+        var own = lookups.FirstOrDefault(l => string.Equals(l.CoreEntity, core.LogicalName, StringComparison.OrdinalIgnoreCase));
+        if (own.Column is null)
+            throw new ArgumentException($"'{core.LogicalName}' is not a core record a line can name.", nameof(core));
+
+        var differs = new FilterExpression(LogicalOperator.Or);
+        differs.AddCondition(own.Column, ConditionOperator.NotEqual, core.Id);
+        differs.AddCondition(own.Column, ConditionOperator.Null);
+        foreach (var other in lookups.Where(l => !string.Equals(l.Column, own.Column, StringComparison.OrdinalIgnoreCase)))
+            differs.AddCondition(other.Column, ConditionOperator.NotNull);
+
+        var query = new QueryExpression(LineEntity) { ColumnSet = new ColumnSet(LineEntity + "id"), TopCount = 1 };
+        query.Criteria.AddCondition(LineInvoiceColumn, ConditionOperator.Equal, invoiceId);
+        query.Criteria.AddFilter(differs);
+        return query;
+    }
+
+    /// <summary>
+    /// DEF-022 (#2056; unified-access-control-r2 direction): the guard for the generic update paths that do not write
+    /// through <c>OwnedChildWrite</c> — the playbook update (<c>UpdateRecordActionCore</c>), the output orchestrator
+    /// (<c>DataverseUpdateHandler</c>) and the field-mapping push. For an update of <c>sprk_invoice</c> or
+    /// <c>sprk_billingevent</c> whose patch sets or clears a guarded lookup (<see cref="GuardedLookups"/>), the stored
+    /// lookups are read with <paramref name="appOnly"/>, overlaid with the patch, and decided by
+    /// <see cref="CheckWriteAsync"/> — including D-96's line check when an invoice's core lookup is written. The other
+    /// invoice (superseded, or a line's) is read the same way. Null when the write may proceed (or is not checked here).
+    /// </summary>
+    /// <param name="patch">The update payload as the path writes it: a column → <see cref="EntityReference"/> or null, or a
+    /// <c>{navigation}@odata.bind</c> → <c>/{set}({id})</c> or null. Any other value of a guarded column is
+    /// <see cref="LookupNotACoreRecordCode"/>.</param>
+    /// <param name="appOnly">The path's app-only reader; null fails closed (<see cref="ReadFailedCode"/>) when a check is due.</param>
+    public static async Task<InvoiceFamilyCoreRecord?> CheckGenericUpdateAsync(
+        string entityLogicalName,
+        Guid recordId,
+        IEnumerable<KeyValuePair<string, object?>> patch,
+        IGenericEntityService? appOnly,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(patch);
+        var entity = entityLogicalName?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (!IsInvoice(entity) && !IsLine(entity))
+            return null;
+
+        var guarded = GuardedLookups(entity)!;
+        var change = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in patch)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+            var column = ColumnOfKey(key);
+            var target = guarded.FirstOrDefault(g => string.Equals(g.Column, column, StringComparison.OrdinalIgnoreCase));
+            if (target.Column is null)
+                continue;
+
+            change[target.Column] = value is string bind && IsBindKey(key) && TryParseBind(bind, out var id)
+                ? new EntityReference(target.Table, id)
+                : value; // null clears; an EntityReference is checked against the column's table; anything else is refused
+        }
+
+        if (change.Count == 0)
+            return null;
+
+        if (appOnly is null)
+        {
+            return InvoiceFamilyCoreRecord.Refused(entity, ReadFailedCode,
+                $"What this {entity} is filed under cannot be read here; nothing was written.");
+        }
+
+        Entity stored;
+        try
+        {
+            stored = await appOnly.RetrieveAsync(entity, recordId, guarded.Select(g => g.Column).ToArray(), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return IsRecordNotFound(ex)
+                ? InvoiceFamilyCoreRecord.Refused(entity, RecordNotFoundCode, $"{entity}({recordId:D}) does not exist; nothing was written.")
+                : InvoiceFamilyCoreRecord.Refused(entity, ReadFailedCode,
+                    $"What this {entity} is filed under could not be read ({ex.GetType().Name}); nothing was written.");
+        }
+
+        if (stored is null)
+            return InvoiceFamilyCoreRecord.Refused(entity, RecordNotFoundCode, $"{entity}({recordId:D}) does not exist; nothing was written.");
+
+        object? Effective(string column) =>
+            change.TryGetValue(column, out var changed) ? changed
+            : stored.Attributes.TryGetValue(column, out var kept) ? kept
+            : null;
+
+        var decided = await CheckWriteAsync(
+            entity,
+            Effective,
+            async (invoice, token) =>
+            {
+                Entity other;
+                try
+                {
+                    other = await appOnly.RetrieveAsync(invoice.LogicalName, invoice.Id,
+                        CoreRecordLookups[invoice.LogicalName].Select(l => l.Column).ToArray(), token).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (IsRecordNotFound(ex))
+                {
+                    return InvoiceFamilyCoreRecord.Refused(invoice.LogicalName, RecordNotFoundCode,
+                        "The other invoice was not found; nothing was written.");
+                }
+
+                return other is null
+                    ? InvoiceFamilyCoreRecord.Refused(invoice.LogicalName, RecordNotFoundCode, "The other invoice was not found; nothing was written.")
+                    : Check(invoice.LogicalName, column => other.Attributes.TryGetValue(column, out var value) ? value : null);
+            },
+            ct,
+            IsInvoice(entity) && WritesCoreLookup(entity, change.Keys) ? LinesOfAnotherCoreRecord(appOnly, recordId) : null)
+            .ConfigureAwait(false);
+
+        return decided.IsRefused ? decided : null;
+    }
+
+    private const string BindSuffix = "@odata.bind";
+
+    private static bool IsBindKey(string key) => key.EndsWith(BindSuffix, StringComparison.OrdinalIgnoreCase);
+
+    private static string ColumnOfKey(string key) =>
+        (IsBindKey(key) ? key[..^BindSuffix.Length] : key).Trim().ToLowerInvariant();
+
+    /// <summary>The id in a Web API bind (<c>/sprk_matters(…)</c> or <c>sprk_matters(…)</c>).</summary>
+    private static bool TryParseBind(string bind, out Guid id)
+    {
+        id = Guid.Empty;
+        var open = bind.LastIndexOf('(');
+        var close = bind.LastIndexOf(')');
+        return open >= 0 && close == bind.Length - 1 && close > open + 1
+               && Guid.TryParse(bind.AsSpan(open + 1, close - open - 1), out id);
+    }
+
+    /// <summary>
+    /// <see cref="Check(string, Func{string, object?})"/>, then the comparison with the one other invoice a write names:
+    /// the invoice an invoice supersedes, or the invoice a line belongs to.
+    /// </summary>
+    private static async Task<InvoiceFamilyCoreRecord> CheckWriteAgainstOtherInvoiceAsync(
+        string entityLogicalName,
+        Func<string, object?> read,
+        Func<EntityReference, CancellationToken, Task<InvoiceFamilyCoreRecord>> resolveSuperseded,
+        CancellationToken ct)
+    {
         var decided = Check(entityLogicalName, read);
         if (decided.IsRefused)
             return decided;

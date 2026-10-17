@@ -140,6 +140,22 @@ internal sealed class UpdateRecordActionCore
             ct,
             input.ImpersonateSystemUserId);
 
+        // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
+        // and an invoice re-file keeps its lines (D-96) — decided BEFORE the PATCH on the stored lookups (read as the app)
+        // overlaid with this payload. A refusal writes nothing and throws the guard's stable code (as an owner refusal does).
+        if (InvoiceFamilyCoreRecordGuard.GuardedLookups(input.EntityLogicalName) is not null)
+        {
+            using var familyScope = _scopeFactory.CreateScope();
+            if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
+                    input.EntityLogicalName, input.RecordId, updatePayload,
+                    familyScope.ServiceProvider.GetService<IGenericEntityService>(), cancellationToken).ConfigureAwait(false)
+                is { RefusalCode: { } familyCode } family)
+            {
+                throw new RecordOwnerUnresolvedException(
+                    input.EntityLogicalName, RecordOwnerResolution.Refused(familyCode, family.Reason ?? familyCode));
+            }
+        }
+
         // Task 146: a lookup that FILES a child table under a record (a document onto a matter, an event onto a
         // secure project) is a reparent — the child's owner is re-derived over every parent it will have
         // (secure-if-any) BEFORE the PATCH, and reassigned when it moves. A refusal writes nothing and throws

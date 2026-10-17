@@ -1527,12 +1527,14 @@ internal static class OwnedChildWrite
         string? primaryIdAttribute,
         DataverseWriteItemMapper.MappedItem item,
         Guid? callerObjectId,
-        CancellationToken ct)
+        CancellationToken ct,
+        IGenericEntityService? appOnlyEntities = null)
     {
         // ebilling-r1 FR-05 (ISS-010, #1973; unified-access-control-r2): BEFORE anything else — re-file or ordinary update —
         // an update that sets or clears an invoice-family row's guarded lookups is decided on the stored lookups overlaid
-        // with the change (read as the caller, once). A refusal writes nothing.
-        if (await CheckInvoiceFamilyAsync(user, table, item, (entitySetName, recordId), ct).ConfigureAwait(false) is { } family)
+        // with the change (read as the caller, once). A refusal writes nothing. D-96: an invoice's lines are counted with
+        // appOnlyEntities (the app); without it an invoice core-lookup change fails closed.
+        if (await CheckInvoiceFamilyAsync(user, table, item, (entitySetName, recordId), ct, appOnlyEntities).ConfigureAwait(false) is { } family)
         {
             return new RefileOutcome
             {
@@ -1687,10 +1689,12 @@ internal static class OwnedChildWrite
     /// <see cref="InvoiceFamilyCoreRecordGuard.ReadFailedCode"/> — never "not set". A guarded column written as anything but
     /// a lookup bind or a clear is <see cref="InvoiceFamilyCoreRecordGuard.LookupNotACoreRecordCode"/>.
     /// </summary>
+    /// <param name="appOnlyEntities">D-96: on an update that writes an invoice's core lookup, the APP-only reader its lines
+    /// are counted with (<see cref="InvoiceFamilyCoreRecordGuard.LinesOfAnotherCoreRecord"/>); null then fails closed.</param>
     /// <returns><c>null</c> when the write may proceed (or the table is not in the family); otherwise the refusal.</returns>
     internal static async Task<InvoiceFamilyStep?> CheckInvoiceFamilyAsync(
         IDataverseUserClient user, string table, DataverseWriteItemMapper.MappedItem item,
-        (string EntitySetName, Guid RecordId)? stored, CancellationToken ct)
+        (string EntitySetName, Guid RecordId)? stored, CancellationToken ct, IGenericEntityService? appOnlyEntities = null)
     {
         var guarded = InvoiceFamilyCoreRecordGuard.GuardedLookups(table);
         if (guarded is null)
@@ -1784,7 +1788,11 @@ internal static class OwnedChildWrite
                     : InvoiceFamilyCoreRecord.Refused(invoice.LogicalName, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
                         $"The other invoice could not be read ({other.Problem}); nothing was written.");
             },
-            ct).ConfigureAwait(false);
+            ct,
+            // D-96: an update that moves an invoice to another core record must not leave its lines behind (counted as the app).
+            stored is { } invoiceRow && InvoiceFamilyCoreRecordGuard.WritesCoreLookup(table, written)
+                ? InvoiceFamilyCoreRecordGuard.LinesOfAnotherCoreRecord(appOnlyEntities, invoiceRow.RecordId)
+                : null).ConfigureAwait(false);
 
         if (supersededUnavailable)
             return new InvoiceFamilyStep(null, null, true);

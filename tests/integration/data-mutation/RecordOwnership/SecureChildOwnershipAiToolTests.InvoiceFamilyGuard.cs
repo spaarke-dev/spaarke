@@ -2,6 +2,8 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -264,18 +266,154 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public async Task ChildRefile_AnInvoiceMovedFromItsMatterToAProject_ClearingTheMatter_IsWritten()
     {
+        // D-96 (task 026 fix-round-2): the invoice's one line is already on the project, so the move splits nothing.
         StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
         _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
         ShareWorld.OrdinaryChild("sprk_invoice", GuardInvoice, ("sprk_matter", "sprk_matter", OrdinaryMatter));
+        AppLine(GuardInvoice, "sprk_project", "sprk_project", OrdinaryProject);
 
-        var result = await RefileChild("sprk_invoice", GuardInvoice, new()
-        {
-            ["sprk_Matter@odata.bind"] = null,
-            ["sprk_Project@odata.bind"] = $"/sprk_projects({OrdinaryProject:D})",
-        });
+        var result = await RefileChild("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheProject());
 
         Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
         _user.Patches.Should().ContainSingle("the clear and the bind overlay the stored matter: one core record");
+        _appLineQueries.Should().ContainSingle("the lines are counted once, as the app");
+    }
+
+    // ── D-96 (task 026 fix-round-2; uac-r2 re-check F1): an invoice re-file must not split it from its lines ────────
+
+    private readonly List<Entity> _appLines = new();
+    private readonly List<QueryExpression> _appLineQueries = new();
+    private Exception? _appLinesFault;
+
+    /// <summary>The app-only reader (<see cref="IGenericEntityService"/>): its RetrieveMultiple evaluates the line query over
+    /// <see cref="_appLines"/>, the rows the APP sees, whatever the caller can read.</summary>
+    private IGenericEntityService AppEntities()
+    {
+        var app = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        app.Setup(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression q, CancellationToken _) =>
+            {
+                _appLineQueries.Add(q);
+                return _appLinesFault is { } fault
+                    ? Task.FromException<EntityCollection>(fault)
+                    : Task.FromResult(new EntityCollection(
+                        Sprk.Bff.Api.Tests.Services.Dataverse.QueryEvaluator.Run(q, _appLines).ToList()));
+            });
+        return app.Object;
+    }
+
+    /// <summary>A stored line of <paramref name="invoice"/> as the APP reads it (one core lookup, or none).</summary>
+    private Guid AppLine(Guid invoice, string? column, string? core, Guid coreId)
+    {
+        var line = new Entity("sprk_billingevent", Guid.NewGuid()) { ["sprk_invoice"] = new EntityReference("sprk_invoice", invoice) };
+        if (column is not null && core is not null)
+            line[column] = new EntityReference(core, coreId);
+        _appLines.Add(line);
+        return line.Id;
+    }
+
+    private static Dictionary<string, object?> MoveGuardInvoiceToTheProject() => new()
+    {
+        ["sprk_Matter@odata.bind"] = null,
+        ["sprk_Project@odata.bind"] = $"/sprk_projects({OrdinaryProject:D})",
+    };
+
+    [Theory]
+    [InlineData("sprk_matter", "sprk_matter")] // left on the old matter
+    [InlineData(null, null)] // a line that names no core record
+    public async Task ChildRefile_AnInvoiceMovedToAProject_WhileALineIsNotOnIt_IsRefusedLineMismatch_AndNothingIsWritten(
+        string? column, string? core)
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        AppLine(GuardInvoice, "sprk_project", "sprk_project", OrdinaryProject);
+        var stray = AppLine(GuardInvoice, column, core, OrdinaryMatter);
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheProject());
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        Detail(result).Should().NotContain(stray.ToString("D"), "the refusal names no line");
+        _user.Patches.Should().BeEmpty("D-75: the line is never re-filed from its invoice, and the invoice is not moved");
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildRefile_AnInvoiceWithNoLines_MovedToAProject_IsWritten()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.OrdinaryChild("sprk_invoice", GuardInvoice, ("sprk_matter", "sprk_matter", OrdinaryMatter));
+        AppLine(SupersededInvoice, "sprk_matter", "sprk_matter", OrdinaryMatter); // another invoice's line is not this one's
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheProject());
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _user.Patches.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task ChildRefile_AnInvoiceMoved_WhenItsLinesCannotBeRead_FailsClosedReadFailed_AndNothingIsWritten()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        _appLinesFault = new TimeoutException("socket 10.0.0.7 timed out");
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheProject());
+
+        Status(result).Should().Be(StatusCodes.Status500InternalServerError, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode, "a fault is never \"no lines\"");
+        Detail(result).Should().NotContain("10.0.0.7");
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildRefile_AnInvoiceMoved_WhileALineTheCallerCannotReadStaysBehind_IsStillRefused_TheAppCounts()
+    {
+        // D-96 (owner: "App identity"): the line check counts every line, including one the caller cannot see; the
+        // refusal is the same uniform code and names no line.
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        var hidden = AppLine(GuardInvoice, "sprk_matter", "sprk_matter", OrdinaryMatter);
+        _user.UnreadableRows.Add(hidden);
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheProject());
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        Detail(result).Should().NotContain(hidden.ToString("D"));
+        _user.Patches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildRefile_AnInvoiceUpdateThatMovesNoCoreRecord_NeverCountsItsLines()
+    {
+        // Only a core-lookup write is a re-file: a supersedes-only change leaves stray lines (pre-existing data) alone.
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        StoredInvoice(SupersededInvoice, "sprk_matter", OrdinaryMatter);
+        AppLine(GuardInvoice, "sprk_project", "sprk_project", OrdinaryProject);
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice,
+            new() { ["sprk_SupersedesInvoice@odata.bind"] = $"/sprk_invoices({SupersededInvoice:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _appLineQueries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateRecordTool_AnInvoiceMovedToAProject_WhileALineStaysOnTheMatter_IsRefusedLineMismatch()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        AppLine(GuardInvoice, "sprk_matter", "sprk_matter", OrdinaryMatter);
+
+        var result = await UpdateRecord("sprk_invoice", GuardInvoice,
+            ("sprk_matter", JsonSerializer.SerializeToElement<object?>(null)), Lookup("sprk_project", "sprk_project", OrdinaryProject));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        _user.Patches.Should().BeEmpty();
     }
 
     [Fact]

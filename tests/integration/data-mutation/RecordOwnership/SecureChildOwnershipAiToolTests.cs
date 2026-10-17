@@ -652,7 +652,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     private Task<ToolResult> UpdateRecord(string table, Guid id, params (string Column, JsonElement Value)[] item) =>
         new DataverseUpdateRecordHandler(
                 _user, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
-                CreateLogger<DataverseUpdateRecordHandler>(), _world.Resolver(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure())
+                CreateLogger<DataverseUpdateRecordHandler>(), _world.Resolver(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
+                appOnlyEntities: AppEntities())
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
                 {

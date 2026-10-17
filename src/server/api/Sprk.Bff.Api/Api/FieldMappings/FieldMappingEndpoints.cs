@@ -630,7 +630,8 @@ public static class FieldMappingEndpoints
                 ct,
                 scopes,
                 rootFiling,
-                lookupBinds);
+                lookupBinds,
+                entityService);
 
             var success = updatedCount > 0 || (failedCount == 0 && childRecords.RecordIds.Length > 0);
 
@@ -1005,7 +1006,8 @@ public static class FieldMappingEndpoints
         CancellationToken ct,
         IServiceScopeFactory? scopes = null,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null,
-        IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null)
+        IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null,
+        IGenericEntityService? appOnlyEntities = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -1053,6 +1055,22 @@ public static class FieldMappingEndpoints
                             });
                             continue;
                         }
+                    }
+
+                    // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its
+                    // invoice's, and an invoice re-file keeps its lines (D-96) — decided before the write on the stored lookups
+                    // (read as the app) overlaid with this payload. Reported by code only: the reason can name records the
+                    // caller has not read.
+                    if (await Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
+                            targetEntity, childRecordId, updatePayload, appOnlyEntities, ct) is { RefusalCode: { } familyCode })
+                    {
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = $"Not written: the invoice-family rule refused it ({familyCode})."
+                        });
+                        continue;
                     }
 
                     // Task 166: written AS THE CALLER (MSCRMCallerID) — Dataverse applies their Write on the child,

@@ -49,6 +49,14 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         int maxRetries,
         CancellationToken ct)
     {
+        // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
+        // and an invoice re-file keeps its lines (D-96). Decided on the stored lookups overlaid with this write, before it.
+        if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(entityLogicalName, recordId, fields, _genericEntityService, ct)
+                .ConfigureAwait(false) is { RefusalCode: { } familyCode } family)
+        {
+            throw new RecordOwnerUnresolvedException(entityLogicalName, RecordOwnerResolution.Refused(familyCode, family.Reason ?? familyCode));
+        }
+
         // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether
         // the record this write files it under is secure must be readable, or nothing is written (fail closed).
         if (await _rootFiling.CheckAsync(entityLogicalName, recordId, fields, ct).ConfigureAwait(false) is { } rootRefusal)
