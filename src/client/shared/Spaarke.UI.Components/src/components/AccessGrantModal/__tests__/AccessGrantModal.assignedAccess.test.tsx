@@ -128,12 +128,18 @@ describe('AccessGrantModal — Assigned-To suggestions on a secure record (task 
 
     fireEvent.click(await screen.findByRole('button', { name: 'Grant Pat Paralegal' }));
 
+    // Task 099c: an external grant carries the record's Expiration — with no share yet, the default UTC today + 90.
+    const now = new Date();
+    const defaultExpiry = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 90))
+      .toISOString()
+      .slice(0, 10);
     await waitFor(() =>
       expect(bodyOf(fetchMock, '/api/v1/external-access/grant')).toEqual({
         contactId: 'contact-1',
         accessLevel: 100000001,
         recordType: 'matter',
         recordId: 'matter-1',
+        expiryDate: defaultExpiry,
       })
     );
     expect(await screen.findByText(/suggested from Assigned Paralegal 1/)).toBeInTheDocument();

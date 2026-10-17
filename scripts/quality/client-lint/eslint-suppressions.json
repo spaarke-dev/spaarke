@@ -590,11 +590,6 @@
       "count": 7
     }
   },
-  "src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 13
-    }
-  },
   "src/client/shared/Spaarke.UI.Components/src/components/AppErrorBoundary/AppErrorBoundary.tsx": {
     "no-restricted-syntax": {
       "count": 1
