@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -99,6 +100,7 @@ public static class ContactGrantEndpoints
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
+        IRecordOwnershipResolver ownership,
         IContactIdentityStore identities,
         ExternalInviteService invites,
         GrantAccessNotifier accessNotifier,
@@ -164,7 +166,7 @@ public static class ContactGrantEndpoints
         {
             outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 coreRequest, g.RootType, g.RootId, today, ceiling, callerOid: null,
-                dataverseClient, participations, accessibleRecords, logger, ct, issuer);
+                dataverseClient, participations, accessibleRecords, ownership, logger, ct, issuer);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {

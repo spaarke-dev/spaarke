@@ -459,6 +459,10 @@ public class RecordOwnerAssignmentCensusTests
             "ForChild over the mirrored analysis row."),
         new OwnerWriteEntry("InvoiceReviewService.cs", "BuildInvoiceCreateFields", 1, OwnerWriteKind.Routed,
             "The invoice owned by the matter's team (task 130 / G5), resolved by the caller of the builder."),
+        new OwnerWriteEntry("GrantExternalAccessEndpoint.cs", "BuildGrantPayload", 1, OwnerWriteKind.Routed,
+            "UAC task 099b (D-11, #1010): a new sprk_externalrecordaccess row owned record-first from its grant root, resolved by "
+            + "CreateGrantAsync (ResolveGrantOwnerAsync) — the one grant core every grant route and the Assigned-To rule call; the "
+            + "builder throws on an empty team and the core refuses (503/500) rather than write an application-owned row."),
         new OwnerWriteEntry("ComposeCreateOnSavePromoter.cs", "PromoteIfEphemeralAsync", 1, OwnerWriteKind.Routed,
             "Owned from the inherited filing links or the caller."),
         new OwnerWriteEntry("OfficeService.cs", "QuickCreateAsync", 1, OwnerWriteKind.Routed,

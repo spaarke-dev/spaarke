@@ -1036,9 +1036,17 @@ internal static class AssignedAccessTestDoubles
         public Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer Children =>
             Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(() => ChildWorld, Shares, Guard);
 
+        /// <summary>
+        /// Task 099b (D-11): the ownership resolver the grant core asks for a new grant row's owner team — a double that answers
+        /// <see cref="TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId"/> unless a test replaces it (the REAL
+        /// resolver over an <see cref="TestInfrastructure.OwnershipDirectory"/>, a fault, a refusal).
+        /// </summary>
+        public Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver Ownership { get; set; } =
+            new TestInfrastructure.RecordOwnershipResolverDouble();
+
         public AssignedAccessMaterializer Materializer => new(
             Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, SharesOverride ?? Shares,
-            Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Invites, Notifier, Scopes);
+            Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Invites, Notifier, Ownership, Scopes);
 
         /// <summary>Task 181: every <c>appnotification</c> the grant notifier wrote through task 100's NotificationService.</summary>
         public ConcurrentQueue<Microsoft.Xrm.Sdk.Entity> SentNotifications { get; } = new();

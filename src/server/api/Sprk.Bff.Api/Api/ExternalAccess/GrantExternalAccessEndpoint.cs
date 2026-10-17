@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -59,6 +60,8 @@ public static class GrantExternalAccessEndpoint
             // (would_lower_existing); or expired_not_restored (task 023) — since owner round 80 only a fail-closed
             // backstop, because a dateless re-add over a lapsed grant is now restored, and nothing is written (task 113).
             .ProducesProblem(StatusCodes.Status409Conflict)
+            // 500 / 503 (task 099b, D-11): no team could be resolved to own the new grant row (owner_unresolved), or it could
+            // not be read (owner_unreadable); nothing is written in either case.
             // 422: the record's access policy refuses this grantee (task 138 — record_restricted /
             // org_grant_direct_only_record), or the grantee is on the record's No Access list (task 139 —
             // grantee_denied). 503: the policy could not be read (policy_unreadable), or whether the grantee is on the
@@ -80,6 +83,7 @@ public static class GrantExternalAccessEndpoint
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
+        IRecordOwnershipResolver ownership,
         CallerRecordAccessProbe callerAccessProbe,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         GrantAccessNotifier accessNotifier,
@@ -148,7 +152,7 @@ public static class GrantExternalAccessEndpoint
             // call this route with no date, so a re-add over a lapsed grant is a SET — restored at the picked level.
             outcome = await CreateGrantAsync(
                 request, root.Type, root.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, logger, ct, reAddRestoresLapsed: true);
+                dataverseClient, participations, accessibleRecords, ownership, logger, ct, reAddRestoresLapsed: true);
         }
         catch (Exception ex)
         {
@@ -342,6 +346,7 @@ public static class GrantExternalAccessEndpoint
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
+        IRecordOwnershipResolver ownership,
         ILogger logger,
         CancellationToken ct,
         ContactGrantIssuer? contactIssuer = null,
@@ -349,6 +354,8 @@ public static class GrantExternalAccessEndpoint
     {
         // A missing ceiling is a caller bug, never "uncapped" (WP-1). Thrown, so it surfaces as the caller's 500.
         ArgumentNullException.ThrowIfNull(ceiling);
+        // Task 099b (D-11): no grant row is ever created without its owner team, so the resolver is not optional either.
+        ArgumentNullException.ThrowIfNull(ownership);
 
         var key = ResolveGrantKey(request, rootType, rootId);
 
@@ -616,6 +623,15 @@ public static class GrantExternalAccessEndpoint
             };
         }
 
+        // ── Task 099b (D-11, #1010): the new row's OWNER — a team, record-first, never the application identity ──
+        // Decided before anything is written, through the ONE resolver every app-written row uses. A read fault refuses 503,
+        // an unresolved team refuses 500 (the ExternalIntakeEndpoints idiom); both are returned as values, like every other
+        // refusal of this core. Only a CREATE needs it: the match path above changes an existing row's level or date and
+        // never its owner (rows written before 099b are re-owned by scripts/Backfill-RecordOwnership.ps1).
+        var owner = await ResolveGrantOwnerAsync(ownership, rootType, rootId, key, logger, ct);
+        if (owner.Refusal is { } ownerRefusal)
+            return GrantUpsertOutcome.Refused(ownerRefusal);
+
         // sprk_grantedby is a systemuser lookup — its target is a Dataverse systemuserid, which is
         // DISTINCT from the caller's Azure AD object id (oid). Resolve the systemuserid from the oid;
         // if the caller has no matching systemuser, omit grantedby (an audit field must never 400 the grant).
@@ -633,7 +649,7 @@ public static class GrantExternalAccessEndpoint
             ? request with { ExpiryDate = ExternalGrantLifecycle.DefaultExpiry(today) }
             : request;
         var payload = BuildGrantPayload(
-            createRequest, rootType, rootId, grantedBySystemUserId, today, contactIssuer?.ContactId);
+            createRequest, rootType, rootId, owner.TeamId!.Value, grantedBySystemUserId, today, contactIssuer?.ContactId);
         var accessRecordId = await dataverseClient.CreateAsync(EntitySet, payload, ct);
 
         logger.LogInformation(
@@ -959,6 +975,7 @@ public static class GrantExternalAccessEndpoint
                 StatusCodes.Status503ServiceUnavailable => "Access settings unavailable",
                 StatusCodes.Status409Conflict => "Existing access is higher",
                 StatusCodes.Status403Forbidden => "Access not granted",
+                StatusCodes.Status500InternalServerError => "Access not granted", // task 099b: owner_unresolved
                 _ => "Grant not allowed on this record",
             },
             detail: refusal.Detail,
@@ -1124,6 +1141,55 @@ public static class GrantExternalAccessEndpoint
         }
     }
 
+    /// <summary>The owner of a new grant row (task 099b): the team, or the refusal the core returns instead of writing.</summary>
+    internal readonly record struct GrantOwner(Guid? TeamId, GrantPolicyDecision? Refusal);
+
+    /// <summary>
+    /// Task 099b (D-11, #1010): the team that owns a NEW <c>sprk_externalrecordaccess</c> row, through
+    /// <see cref="IRecordOwnershipResolver"/> — the grant is filed under its root record, so the answer is record-first: a
+    /// secure root (owned in the Secure Record business unit) gives the named "Secure Record Owners" team; any other root gives
+    /// its business unit's default Owner team; a root flagged secure but not isolated refuses. Never the application identity.
+    /// </summary>
+    /// <remarks>
+    /// <para>The acting user is deliberately NOT passed: a grant always names its root, and the resolver never falls back to
+    /// the acting user's business unit when a named parent cannot be resolved (it refuses — the owner's rule for a named
+    /// parent). There is no second team lookup here.</para>
+    /// <para>The <see cref="ExternalIntakeEndpoints"/> step 4 idiom: a Dataverse fault (the resolver propagates it) is
+    /// <see cref="GrantPolicyDecision.OwnerUnreadable"/> (503); no team is <see cref="GrantPolicyDecision.OwnerUnresolved"/>
+    /// (500). The caller's own cancellation propagates.</para>
+    /// </remarks>
+    internal static async Task<GrantOwner> ResolveGrantOwnerAsync(
+        IRecordOwnershipResolver ownership, ExternalGrantRootType rootType, Guid rootId, ExternalGrantKey key,
+        ILogger logger, CancellationToken ct)
+    {
+        RecordOwnerResolution resolution;
+        try
+        {
+            resolution = await ownership.ResolveOwnerAsync(
+                RecordOwnershipContext.ForParents(
+                    new[] { new RecordOwnershipParent(ExternalGrantRoot.LogicalNameFor(rootType), rootId) }),
+                ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex,
+                "[EXT-GRANT] The owner team for a new grant {Key} on {RootType} {RootId} could not be read; nothing was granted.",
+                key, rootType, rootId);
+            return new GrantOwner(null, GrantPolicyDecision.OwnerUnreadable);
+        }
+
+        if (!resolution.IsOwned)
+        {
+            logger.LogError(
+                "[EXT-GRANT] REFUSED grant {Key} on {RootType} {RootId}: no owner team could be resolved ({Outcome} {RefusalCode}: " +
+                "{Reason}). Nothing was granted; a grant row is never left application-owned (D-11).",
+                key, rootType, rootId, resolution.Outcome, resolution.RefusalCode, resolution.Reason);
+            return new GrantOwner(null, GrantPolicyDecision.OwnerUnresolved);
+        }
+
+        return new GrantOwner(resolution.OwningTeamId, null);
+    }
+
     /// <summary>The <c>systemusers</c> projection of <see cref="ResolveGrantedBySystemUserIdAsync"/>. Internal so a test can
     /// answer that read at the <see cref="DataverseWebApiClient"/> seam (no HTTP double, ADR-038 B1).</summary>
     internal sealed class SystemUserRow
@@ -1214,10 +1280,19 @@ public static class GrantExternalAccessEndpoint
     /// Task 140: the CONTACT who issued the grant through the contact-side routes, bound to <c>sprk_grantedbycontact</c>.
     /// Null for every other writer — a contact-issued grant never carries <c>sprk_grantedby</c> as well.
     /// </param>
+    /// <param name="owningTeamId">
+    /// Task 099b (D-11): the team that owns the row (<see cref="ResolveGrantOwnerAsync"/>), bound to <c>ownerid</c>. REQUIRED:
+    /// a payload without it would leave the row owned by the application identity in the root business unit, where no
+    /// child-business-unit user reads it.
+    /// </param>
+    /// <exception cref="ArgumentException"><paramref name="owningTeamId"/> is <see cref="Guid.Empty"/>.</exception>
     internal static object BuildGrantPayload(
-        GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId, string? grantedBySystemUserId,
-        DateOnly? today = null, Guid? grantedByContactId = null)
+        GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId, Guid owningTeamId,
+        string? grantedBySystemUserId, DateOnly? today = null, Guid? grantedByContactId = null)
     {
+        if (owningTeamId == Guid.Empty)
+            throw new ArgumentException("A grant row is never created without its owner team (D-11).", nameof(owningTeamId));
+
         // Bind exactly ONE typed root lookup per record type (never two). Nav property is PascalCase
         // (sprk_Project / sprk_Matter / sprk_WorkAssignment), verified live — see ExternalGrantRoot.
         var (navigationProperty, entitySet) = ExternalGrantRoot.BindFor(rootType);
@@ -1230,7 +1305,9 @@ public static class GrantExternalAccessEndpoint
             [$"{navigationProperty}@odata.bind"] = $"/{entitySet}({rootId})",
             ["sprk_accesslevel"] = (int)request.AccessLevel,
             // DATE ONLY column (live metadata) — a full timestamp was the recorded LOW finding; task 023.
-            ["sprk_granteddate"] = FormatDateOnly(today ?? DateOnly.FromDateTime(DateTime.UtcNow))
+            ["sprk_granteddate"] = FormatDateOnly(today ?? DateOnly.FromDateTime(DateTime.UtcNow)),
+            // Task 099b (D-11): team-owned, record-first — never the application identity.
+            ["ownerid@odata.bind"] = $"/teams({owningTeamId:D})",
         };
 
         // Grantee: bind the Contact for a per-contact grant; OMIT it for an ORGANIZATION grant (task 073

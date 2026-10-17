@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.ExternalAccess;
 
@@ -225,6 +226,10 @@ public sealed class AssignedAccessMaterializer
     /// <summary>Task 185 (§12 I-9, I-4/I-7): a partner contact's assignment tells an internal user the colleague needs an invite.</summary>
     private readonly GrantAccessNotifier _notifier;
 
+    /// <summary>Task 099b (D-11, #1010): the ONE ownership resolver, handed to the grant core so an Assigned-To grant row is
+    /// team-owned like every other grant — there is no exception for the rule's own grants.</summary>
+    private readonly IRecordOwnershipResolver _ownership;
+
     /// <param name="scopes">Task 158 r1c-v2 (main-session round 47 item 1 (3)): reaches the secure-root inheritance's
     /// sharee-only pass after an assignment ended on a work assignment or project — through a scope, because the inheritance
     /// depends on this class (round 47 item 1 (2)) and a constructor dependency back would be a cycle. Always provided by the
@@ -247,9 +252,12 @@ public sealed class AssignedAccessMaterializer
         ILogger<AssignedAccessMaterializer> logger,
         ExternalInviteService invites,
         GrantAccessNotifier notifier,
+        IRecordOwnershipResolver ownership,
         IServiceScopeFactory? scopes = null)
     {
         _scopes = scopes;
+        // A singleton, registered unconditionally (MetadataServiceExtensions); it depends on nothing here.
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         // Both Scoped and unconditionally registered beside this class (ExternalAccessModule); neither depends on it.
         _invites = invites ?? throw new ArgumentNullException(nameof(invites));
         _notifier = notifier ?? throw new ArgumentNullException(nameof(notifier));
@@ -1113,6 +1121,19 @@ public sealed class AssignedAccessMaterializer
                 return;
             }
 
+            if (refusal.IsOwnerRefusal)
+            {
+                // Task 099b (D-11): the grant row's owner team could not be read or resolved, so the core wrote NOTHING — never
+                // an application-owned row. Handled exactly as a failed grant create (the per-subject catch above): reported
+                // as a failure, the ledger left as it was, and decided again from fresh reads on the next pass.
+                _logger.LogError(
+                    "[ASSIGNED-ACCESS] {Type} {RootId}: the grant for {Subject} was not written — its owner team could not be " +
+                    "resolved ({Reason}).", run.Logical, run.RootId, subject, refusal.ReasonCode);
+                run.Fail(subject, "subject-failed",
+                    $"Access for {subject} on this record could not be updated: {refusal.Detail}");
+                return;
+            }
+
             await SkipAsync(refusal.ReasonCode == ExternalGrantLifecycle.GranteeDeniedReasonCode
                     ? AssignedAccessReason.NoAccess
                     : AssignedAccessReason.GrantRefusedPrefix + refusal.ReasonCode)
@@ -1701,7 +1722,7 @@ public sealed class AssignedAccessMaterializer
         // The ONE grant core (task 139, WP-1): policy, never-lower, No Access, expiry default, dedupe, invalidation.
         return GrantExternalAccessEndpoint.CreateGrantAsync(
             request, run.Request.RootType, run.RootId, run.Today, GrantCeiling.AssignedToRule, run.Request.GrantorOid,
-            _dataverse, _participations, _accessibleRecords, _logger, ct);
+            _dataverse, _participations, _accessibleRecords, _ownership, _logger, ct);
     }
 
     /// <summary>
