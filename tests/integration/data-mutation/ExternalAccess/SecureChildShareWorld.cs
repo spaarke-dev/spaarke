@@ -511,7 +511,8 @@ internal sealed class SecureChildShareWorld
         Func<SecureChildShareWorld> current, IDataverseRecordShareService shares,
         Spaarke.Dataverse.DataverseWebApiClient webApi, SecureShareNoAccessGuard? noAccessGuard = null,
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
-        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null)
+        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
+        Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null)
     {
         var entities = EntitiesOver(current).Object;
         var configuration = Configuration();
@@ -521,7 +522,7 @@ internal sealed class SecureChildShareWorld
             entities, shares, noAccessGuard ?? NobodyWalled(), configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
         return new SecureChildReconciler(
             entities, resolver, synchronizer, webApi, configuration, NullLogger<SecureChildReconciler>.Instance,
-            accessCacheInvalidator, threads);
+            accessCacheInvalidator, threads, ownerPrivileges);
     }
 
     /// <summary>

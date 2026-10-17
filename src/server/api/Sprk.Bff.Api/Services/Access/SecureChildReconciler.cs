@@ -325,6 +325,19 @@ public sealed class SecureChildReconciler
     private const string CommunicationTable = "sprk_communication";
     private const string ThreadLookupOnCommunication = "sprk_communicationthread";
 
+    /// <summary>
+    /// UAC task 099b review round 2: the grant table. Its ACTIVE rows of the root are owned by the root's team (D-11), so they
+    /// follow the root across the isolation boundary in this pass. Not a lineage child (no row is filed under a grant, and the
+    /// share mirror never covers it); loaded beside the descendants, decided and written by the same rule and sequence.
+    /// </summary>
+    internal const string GrantTable = "sprk_externalrecordaccess";
+
+    /// <summary>The grant table's entity set (the owner-change eviction names it).</summary>
+    private const string GrantEntitySet = "sprk_externalrecordaccesses";
+
+    /// <summary>A grant row's <c>statecode</c> when active.</summary>
+    private const int GrantActiveState = 0;
+
     private readonly IGenericEntityService _dataverse;
     private readonly IRecordOwnershipResolver _ownership;
     private readonly SecureChildShareSynchronizer _shares;
@@ -333,6 +346,7 @@ public sealed class SecureChildReconciler
     private readonly ILogger<SecureChildReconciler> _logger;
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator _accessCacheInvalidator;
     private readonly Sprk.Bff.Api.Services.Communication.IThreadResolver? _threads;
+    private readonly Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? _ownerPrivileges;
 
     /// <param name="accessCacheInvalidator">Batch-4 integration, 148 × 132. Every child OWNER change this pass makes
     /// (provisioning's child pass, the unsecure's Step 3.5 and completion branch, a re-file, <c>SecureChildReconciliationJob</c>)
@@ -342,6 +356,11 @@ public sealed class SecureChildReconciler
     /// (<see cref="Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync"/>) — here, the one step
     /// every re-file writer runs, so it runs once per filing. Optional so the test compositions keep compiling; the host
     /// registers it unconditionally.</param>
+    /// <param name="ownerPrivileges">UAC task 099b review round 2: before a grant row is assigned to a team, whether that team's
+    /// roles hold Read on the grant table (<c>GrantExternalAccessEndpoint.CheckGrantOwnerPrivilegeAsync</c>, the ONE helper the
+    /// grant routes use). Optional so the test compositions keep compiling; the host registers it unconditionally
+    /// (<c>AddDataverseSavedQueryServices</c>). Without it, Dataverse's own owner check on the write still refuses such an
+    /// assignment, and the row is reported Failed the same way.</param>
     public SecureChildReconciler(
         IGenericEntityService dataverse,
         IRecordOwnershipResolver ownership,
@@ -350,9 +369,11 @@ public sealed class SecureChildReconciler
         IConfiguration configuration,
         ILogger<SecureChildReconciler> logger,
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
-        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null)
+        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
+        Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null)
     {
         _threads = threads;
+        _ownerPrivileges = ownerPrivileges;
         _dataverse = dataverse;
         _ownership = ownership;
         _shares = shares;
@@ -673,7 +694,9 @@ public sealed class SecureChildReconciler
     private async Task EvictOwnerChangeAsync(string table, Guid id, string? entitySet, string reason)
     {
         var set = entitySet
-            ?? (SecureChildLineage.Children.TryGetValue(table, out var lineage) ? lineage.EntitySet : null);
+            ?? (SecureChildLineage.Children.TryGetValue(table, out var lineage) ? lineage.EntitySet : null)
+            // UAC task 099b review round 2: the pass also re-owns the root's grant rows, which are not lineage children.
+            ?? (string.Equals(table, GrantTable, StringComparison.OrdinalIgnoreCase) ? GrantEntitySet : null);
         if (set is null)
         {
             _logger.LogError("[SECURE-CHILD-RECONCILE] {Table} {Id} was re-owned, but its entity set is not known, so its cached " +
@@ -989,6 +1012,71 @@ public sealed class SecureChildReconciler
 
                 frontier = next;
             }
+
+            await LoadGrantRowsAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// UAC task 099b review round 2 (F1, Make Secure): the root's ACTIVE <c>sprk_externalrecordaccess</c> rows, as rows of
+        /// this pass at level 1. A grant row is owned by its root's team (D-11, 099b), so a transition that moves the root
+        /// across the isolation boundary moves them too — otherwise a grant created on an ordinary root stays on that business
+        /// unit's default team after Make Secure, readable by every user of the unit (the secure record's name, the contact,
+        /// the level), and one on a secure root stays on the memberless Secure team after Unsecure. Only a ROOT pass (a grant
+        /// is filed under a root, never a child) and only the three grant roots. Paged like every other read here; an
+        /// incomplete read throws, so the pass writes nothing.
+        /// </summary>
+        private async Task LoadGrantRowsAsync()
+        {
+            if (!_anchorIsRoot)
+                return;
+            var rootType = Enum.GetValues<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRootType>()
+                .Where(t => string.Equals(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRoot.LogicalNameFor(t),
+                    _root.EntityLogicalName, StringComparison.OrdinalIgnoreCase))
+                .Select(t => (Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRootType?)t)
+                .FirstOrDefault();
+            if (rootType is null)
+                return;
+
+            var query = new QueryExpression(GrantTable) { ColumnSet = new ColumnSet(true), NoLock = true };
+            // The grant's root lookup is the root table's own logical name (sprk_project / sprk_matter / sprk_workassignment).
+            query.Criteria.AddCondition(_root.EntityLogicalName, ConditionOperator.Equal, _root.RecordId);
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, GrantActiveState);
+
+            foreach (var entity in await ReadAllPagesAsync(GrantTable, query).ConfigureAwait(false))
+            {
+                var key = (GrantTable, entity.Id);
+                if (_byRef.ContainsKey(key))
+                    continue;
+                _descendants.Add((1, entity));
+                _byRef[key] = entity;
+            }
+        }
+
+        /// <summary>A grant row of this pass (<see cref="LoadGrantRowsAsync"/>).</summary>
+        private static bool IsGrant(string table) => string.Equals(table, GrantTable, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// UAC task 099b review round 2: before a grant row is assigned to <paramref name="target"/>, whether that team may own
+        /// one — the grant routes' ONE helper (<c>GrantExternalAccessEndpoint.CheckGrantOwnerPrivilegeAsync</c>). <c>null</c>
+        /// when it may (or no reader was given — Dataverse's own owner check then decides at the write); otherwise why not, so
+        /// the row is reported Failed WITHOUT a write and the pass is incomplete (children_incomplete), like any row this pass
+        /// could not move.
+        /// </summary>
+        private async Task<string?> GrantOwnerRefusalAsync(Guid target)
+        {
+            if (_owner._ownerPrivileges is not { } privileges)
+                return null;
+            var rootType = Enum.GetValues<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRootType>()
+                .First(t => string.Equals(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRoot.LogicalNameFor(t),
+                    _root.EntityLogicalName, StringComparison.OrdinalIgnoreCase));
+            var refusal = await Sprk.Bff.Api.Api.ExternalAccess.GrantExternalAccessEndpoint.CheckGrantOwnerPrivilegeAsync(
+                privileges, target, rootType, _root.RecordId, key: null, Log, _ct).ConfigureAwait(false);
+            return refusal is null
+                ? null
+                : refusal.ReasonCode == Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode
+                    ? $"{refusal.ReasonCode}: team {target} may not own an access grant (its security roles lack Read on " +
+                      "sprk_externalrecordaccess); it is left as it is until an administrator adds that privilege"
+                    : $"{refusal.ReasonCode}: whether team {target} may own an access grant could not be read; it is left as it is";
         }
 
         private async Task<IReadOnlyList<Entity>> ReadAllPagesAsync(string table, QueryExpression query)
@@ -1126,6 +1214,14 @@ public sealed class SecureChildReconciler
 
                     if (_mode == SecureChildReconcileMode.Apply)
                     {
+                        // UAC task 099b review round 2: a grant row goes only to a team allowed to own one — asked first, so a
+                        // missing privilege is reported with its reason and no write is attempted.
+                        if (IsGrant(key.Table) && await GrantOwnerRefusalAsync(target).ConfigureAwait(false) is { } refused)
+                        {
+                            failures[key] = refused;
+                            continue;
+                        }
+
                         // Reversal evidence BEFORE the write (constraint "every assign").
                         Log.LogInformation("[SECURE-CHILD-RECONCILE] reassign: {Table} {Id} owner {Previous} -> team {Target}.",
                             key.Table, key.Id, Describe(current[key]), target);
@@ -1177,6 +1273,10 @@ public sealed class SecureChildReconciler
                 {
                     var key = (row.LogicalName, row.Id);
                     if (results[key] is not { LeftIsolation: true } left)
+                        continue;
+                    // UAC task 099b review round 2: a grant row never carries the mirror (task 149 mirrors lineage children
+                    // only), so there is nothing to take off it.
+                    if (IsGrant(row.LogicalName))
                         continue;
 
                     var removal = await _owner._shares.RemoveMirrorAsync(row.LogicalName, row.Id, _ct).ConfigureAwait(false);
