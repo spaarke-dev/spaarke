@@ -222,3 +222,42 @@ release import (no import, no version bump here).
 - **Paired change (ontology F3), carried in this PR, to be applied after merging origin/master:** OntologyAdminAuthoringService.cs:1226 passes `RuleDomain.Ontology` and maps `RuleTypeWrongDomain => "ruleType"` (fix the :1239 comment); `OntologyDomain` (:167-181) takes Value/Column from `RuleDomains`; OntologyAdminRulesService.cs:48 and :142 build the filter from `RuleDomains` and drop the "swap" comments; test: a billing ruleType to 101's dry run gives 400 on `ruleType` (`rule_type_wrong_domain`) and nothing is evaluated. Without it, a billing draft passes ValidateRule and the engine refuses it later with a generic `ruleBody` error (fail-closed but wrong).
 - **Expected conflicts merging master:** ADR010_DITests.cs, RouteAuthorizationGuardTests.Ledger.cs (master count 129), SignalReevaluationJobTests.cs; src/ merges cleanly.
 - **Known limits from ontology:** K1 (cosmetic) 100's version label uses Enum.IsDefined, so a mis-seeded null-domain policy with a billing type shows the billing name (needs privileged mis-seeding). K2 open Signals stranded if a policy's domain moves off Ontology (already recorded).
+
+## fix-round-2 (paired change), 2026-10-17
+
+ontology-r1's paired change (ontology F3), applied on top of the origin/master merge 49acd2f78. Commit 27ca05e0f.
+
+**Merge-resolution detail.** Master's task 102a replaced the single `ValidateForSave` call the review cited (OntologyAdminAuthoringService
+~:1226) with `PolicyVersionValidator.ValidateForAuthoring`, the one validation that validate, dry run, save and publish all reach
+through `ValidateRule`. In the merge, `ValidateForAuthoring` passes `RuleDomain.Ontology` to `ValidateInternal`, so a billing type is
+refused there as `RuleTypeWrongDomain` before any length, schema or compile step. No `ValidateForSave` call remains in the service to
+change; `PolicyVersionValidator` is unchanged by this round.
+
+**What changed**
+- `OntologyAdminAuthoringService.ValidateRule` (the shared reason-to-field map; no per-route code): `RuleTypeWrongDomain => "ruleType"`,
+  and the refusal's reason code is `rule_type_wrong_domain` (the `OntologyWriterFailureReason` value itself; before this it fell to the
+  `ruleBody` default arm with no code). The "type is Existence or Threshold" comment now says billing types are refused before that point.
+- `OntologyAdminAuthoringService.OntologyDomain` takes `Value` / `Column` from `RuleDomains.PolicyDomainOntology` /
+  `PolicyDomainColumn`; `OntologyAdminRulesService.OntologyDomain` and `OntologyOnly()` likewise; both "swap to RuleDomains" comments
+  removed. A grep of `Services/Ontology` and `Api/Ontology` finds no other local spelling of `sprk_domain` or the Ontology value (the
+  remaining `100000001` literals there are other choices: lane, severity, direction, signal status).
+
+**Refusal shape (billing ruleType, e.g. ApprovedTimekeeper, 100000003, AiObservation)**
+- validate: 200, `valid: false`, `errors: [{field: "ruleType", ...}]` only, `reasonCode: "rule_type_wrong_domain"`, `templateEligibleFields: []`.
+- dry run (existing policy and new rule), save, publish: 400 validation problem, `errors` has only `ruleType` (same message as validate),
+  `reasonCode: "rule_type_wrong_domain"`. The engine records no evaluation and Dataverse records no write.
+
+**Tests**
+- `OntologyAdminAuthoringEndpointTests.ABillingRuleType_IsRefusedOnRuleType_WithTheWrongDomainCode_ByValidateDryRunSaveAndPublish` (3 rows).
+- `BillingRuleCatalogueTests.ValidateForAuthoring_RefusesEveryBillingType_WrongDomain_WithNoTemplateFields` (11 rows, by name and option
+  value, plus an Ontology control).
+- (c) `ValidateForSave` with expected Billing refusing an Ontology type was already covered by
+  `ValidateForSave_ExpectingBilling_RefusesEveryOntologyType_WrongDomain` (fix-round-1); no new test.
+
+**Mutation proofs**
+- Whole pre-change `OntologyAdminAuthoringService.cs` restored: integration test red 3 / 3 (`reasonCode` null); unit test unaffected (11 pass).
+- Only the `RuleTypeWrongDomain => "ruleType"` arm removed: integration test red 3 / 3 (`errors` keyed `ruleBody`).
+- `ValidateForAuthoring` passing `expectedDomain: null`: 14 / 14 red (11 unit: billing body validated as valid; 3 integration). All restored.
+
+**Verification:** BFF build 0 warnings / 0 errors; unit filter `Ontology|PolicyVersion|RuleType|Signal` 2623 passed / 3 skipped / 0 failed
+(2626); `tests/Spaarke.ArchTests` 1126 / 1126.
