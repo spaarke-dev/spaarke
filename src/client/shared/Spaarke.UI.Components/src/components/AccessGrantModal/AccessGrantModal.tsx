@@ -490,7 +490,8 @@ function summarizeShareExpiry(grants: IAccessGrantRecord[] | null): ShareExpiryS
     .sort();
   return {
     kind: 'shares',
-    earliest: liveDated[0] ?? dated[0] ?? null,
+    // `noUncheckedIndexedAccess` is off, so `[0]` is typed `string` although it is `undefined` on an empty array.
+    earliest: liveDated.length > 0 ? liveDated[0] : dated.length > 0 ? dated[0] : null,
     diverges: new Set(dates.map(d => d ?? '')).size > 1,
     anyLapsed: shares.some(g => g.isExpired === true),
   };
@@ -606,17 +607,17 @@ class AccessGrantModalApiError extends Error {
       // Task 181: an extension of `/share-user`'s related-records-pending 500.
       notificationFailed?: unknown;
     };
-    const reasonCode = typeof body?.reasonCode === 'string' ? body.reasonCode : undefined;
-    const detail = body?.detail ?? body?.title ?? `HTTP ${status}`;
-    const deactivatedCount = typeof body?.deactivatedCount === 'number' ? body.deactivatedCount : undefined;
+    const reasonCode = typeof body.reasonCode === 'string' ? body.reasonCode : undefined;
+    const detail = body.detail ?? body.title ?? `HTTP ${status}`;
+    const deactivatedCount = typeof body.deactivatedCount === 'number' ? body.deactivatedCount : undefined;
     const speContainerOutcome =
-      typeof body?.speContainerOutcome === 'string'
+      typeof body.speContainerOutcome === 'string'
         ? (body.speContainerOutcome as SpeContainerRevokeOutcome)
         : undefined;
-    const problemDetail = typeof body?.detail === 'string' && body.detail.trim() ? body.detail : undefined;
+    const problemDetail = typeof body.detail === 'string' && body.detail.trim() ? body.detail : undefined;
     return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome, {
       problemDetail,
-      parentRecordType: typeof body?.parentRecordType === 'string' ? body.parentRecordType : undefined,
+      parentRecordType: typeof body.parentRecordType === 'string' ? body.parentRecordType : undefined,
       notificationFailed: body.notificationFailed === true,
     });
   }
@@ -1163,7 +1164,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
   // Per-row access level (task 073 v1.0.23) — keyed by item id (contactId/orgId/systemUserId).
   // NO default: a row is not grantable until the admin picks its level ("Pick access level").
-  const [rowLevels, setRowLevels] = React.useState<Record<string, number>>({});
+  const [rowLevels, setRowLevels] = React.useState<Record<string, number | undefined>>({});
   // Contacts + organizations + users staged via the native "+ Contact" /
   // "+ Organization" / "+ User" advanced lookup — appended into the "Add
   // Access Permissions" list as selectable rows.
@@ -1292,7 +1293,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const fetchUserShares = React.useCallback(async (): Promise<IAccessGrantRecord[]> => {
     const query = `recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}`;
     const data = await getJson<{
-      shares: Array<{
+      // Untrusted server JSON: a response without `shares` reads as an empty list (see the `?? []` below).
+      shares?: Array<{
         systemUserId: string;
         fullName?: string | null;
         accessLevel?: number | null;
@@ -1336,9 +1338,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * still visible in Current Access. */
   const fetchAssignedAccess = React.useCallback(async (): Promise<IAssignedAccessEntry[]> => {
     const query = `recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}`;
-    const data = await getJson<{ entries?: IAssignedAccessEntry[] }>(
-      `/api/v1/external-access/assigned-access?${query}`
-    );
+    const data = await getJson<{
+      entries?: Array<Omit<IAssignedAccessEntry, 'residualAccessTerms'> & { residualAccessTerms?: string[] | null }>;
+    }>(`/api/v1/external-access/assigned-access?${query}`);
     return (data.entries ?? []).map(e => ({ ...e, residualAccessTerms: e.residualAccessTerms ?? [] }));
   }, [getJson, recordType, recordId]);
 
@@ -1743,7 +1745,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * active member of the organization then inherits access at check time (server Term-3 union). */
   const grantOrganization = React.useCallback(
     async (org: IOrganizationPick, level: number): Promise<{ narrowed: boolean }> => {
-      const data = await postJson<IGrantWriteResponseBody>('/api/v1/external-access/grant', {
+      const data = await postJson<IGrantWriteResponseBody | null>('/api/v1/external-access/grant', {
         recordType,
         recordId,
         accessLevel: level,
@@ -1808,6 +1810,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     const relatedRecordsPending: string[] = [];
     for (const it of selected) {
       const level = rowLevels[it.id];
+      // Unreachable: the missing-level guard above returned before any write. Narrows `level` for the writes below.
+      if (level === undefined) continue;
       try {
         if (it.kind === 'contact' && it.contact) {
           const outcome = await grantContact(it.contact, { level });
