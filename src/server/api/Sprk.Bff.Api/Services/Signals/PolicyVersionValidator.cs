@@ -128,18 +128,25 @@ public sealed class PolicyVersionValidator
     /// </summary>
     /// <remarks>
     /// <para><b>Why.</b> The dry run evaluates a draft AS THE EVALUATOR, which reads these tables org-wide (#39). A clause on any column
-    /// would make each dry run a one-bit question about values the author may not be able to read, including a field-secured column.
+    /// would make each dry run a one-bit-per-shown-row question about values the author may not be able to read, including a field-secured column.
     /// Only the shown rows are filtered by the caller. A closed list of plain, non-secured columns NARROWS that oracle to the listed
     /// columns; it does not close it.
     /// <c>SignalPredicateTests.AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema</c> checks each entry against live metadata
     /// (one run, one environment: field security enabled on a listed column later reopens the oracle for that column).</para>
     /// <para><b>Residual (open, pending the owner's decision on the signed ADR-028 tension, D-151(c)).</b> An <c>exists</c> or
     /// <c>notExists</c> filter on an allow-listed column of a joinable related table still lets a policy-version author learn that
-    /// column's value on a related row they cannot read, one bit per dry run. Today those columns are <c>sprk_communication</c>:
+    /// column's value on a related row they cannot read, one bit per readable subject row per dry run. Today those columns are <c>sprk_communication</c>:
     /// <c>sprk_triagecategory</c>, <c>sprk_reviewoutcome</c>, <c>sprk_receiveddate</c>, <c>statecode</c>;
     /// <c>sprk_budgetrevision</c>: <c>sprk_revisedon</c>, <c>statecode</c>; and, since task 063's join, <c>sprk_budget</c>:
     /// <c>statecode</c>, <c>sprk_budgetstartdate</c>, <c>sprk_budgetenddate</c>. Membership of the related-table filter columns is
     /// the owner's call.</para>
+    /// <para><b>Residual, derived Thresholds (same decision).</b> A Threshold on <c>sprk_totalspendtodate</c>,
+    /// <c>sprk_totalbudget</c> or <c>sprk_budgetutilizationpercent</c> records only the stored subject column in
+    /// <see cref="CompiledPredicate.ReadColumns"/>, but the evaluator decides it from org-wide grouped sums
+    /// (<c>FinanceBaseValues.BuildGroupedSumFetchXml</c>) over <c>sprk_invoice.sprk_totalamount</c>,
+    /// <c>sprk_invoice.sprk_invoicestatus</c> and <c>sprk_budget.sprk_totalbudget</c>. Those base columns are not on this list and
+    /// not covered by the live <c>IsSecured</c> test. Repeated dry runs with a moving threshold reveal the current sum, including
+    /// invoices the author cannot read (the stored roll-up on the subject already shows a possibly stale copy).</para>
     /// <para><b>Seed (2026-10-16), and nothing else.</b>
     /// <list type="bullet">
     /// <item>The columns the six live Ontology policies' current versions read on spaarkedev1 (POL-MATTER-NOBUDGET added

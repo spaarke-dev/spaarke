@@ -38,19 +38,23 @@ It builds on task 101 ([`101-ontology-admin-authoring.md`](101-ontology-admin-au
 The dry run evaluates as the evaluator, which reads org-wide; only the rows it shows are filtered by the caller. The allow-list
 limits which columns a body may name. It does not stop an `exists` or `notExists` filter on an **allow-listed column of a
 joinable related table** from answering about a related row the author cannot read. A policy-version author (a holder of
-`prvCreatesprk_PolicyVersion`) can still learn that column's value on such a row, one bit per dry run. Today those columns are:
+`prvCreatesprk_PolicyVersion`) can still learn that column's value on such a row, one bit per readable subject row per dry run
+(every shown matter answers in the same run). Today those columns are:
 
 | Related table (join path) | Allow-listed filter columns |
 |---|---|
 | `sprk_communication` (`sprk_regardingmatter`) | `sprk_triagecategory`, `sprk_reviewoutcome`, `sprk_receiveddate`, `statecode` |
 | `sprk_budgetrevision` (`sprk_matter`) | `sprk_revisedon`, `statecode` |
 | `sprk_budget` (`sprk_matter`, task 063's join, merged in fix round 1) | `statecode`, `sprk_budgetstartdate`, `sprk_budgetenddate` |
+| Derived Threshold base reads (no join; adversarial pass 2) | A Threshold on `sprk_totalspendtodate`, `sprk_totalbudget` or `sprk_budgetutilizationpercent` records only the stored subject column, but is decided from org-wide grouped sums (`FinanceBaseValues.BuildGroupedSumFetchXml`, `SignalEvaluator.cs:233`) over `sprk_invoice.sprk_totalamount`, `sprk_invoice.sprk_invoicestatus`, `sprk_budget.sprk_totalbudget`. Not on the allow-list and not in the live `IsSecured` test. A moving threshold reveals the current sum including unreadable invoices (the stored roll-up already shows a possibly stale copy) |
 
 Membership of the related-table filter columns is the owner's call; this task does not change it.
 
 ## Known limits (wizard concerns, not defects in this contract)
 
 - **`assign-work` appears in both lists.** It is in the Decide lane's `actions` and in `nextSteps`. The plan resolver refuses a code that appears in both a plan's actions and its next steps. The wizard must not offer one code in both places.
+- **Validate does not run the dry run's `ProofScope` (tenant id) check** (adversarial pass 2, K2). It records no proof and reads
+  nothing tenant-scoped, and Entra tokens always carry `tid`, so the difference is not reachable.
 - **Validate on a retired policy still validates the body.** Publish then refuses the retired policy for its own reason, as it does today.
 - **The live `IsSecured` check is one run on one environment** (spaarkedev1, 2026-10-17). If field-level security is enabled on a
   listed column later, or another environment secures one, the oracle reopens for that column until the live test is re-run there.
