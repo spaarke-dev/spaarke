@@ -43,7 +43,7 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- BFF `1.0.0+d5401cf2df7e…` (R3, 2026-10-17 02:29:47Z; contains master e702c3401 = 100/101/103). healthz 200.
+- BFF `1.0.0+28720f9976c0…` (R3, 2026-10-17 06:03:49Z; master 1d435e695, contains e702c3401 = 100/101/103; NOT 063 join or 102a routes, which await the next docs→master sync). healthz 200, writer MI assigned.
 - Console from master `a8c3182ec`; Worklist + Decision Records layouts seeded. Five policies on.
 - Roles: Ontology Service 58 (§15); Ontology Administrator 38 (§16 +2 Append, §17 −DR Create −Signal Write); Console User 21 (§17).
 
