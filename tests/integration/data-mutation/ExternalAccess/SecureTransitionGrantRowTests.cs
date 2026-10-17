@@ -278,6 +278,8 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
         var problem = await JsonOf(response);
         problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonChildrenIncomplete);
         problem.TryGetProperty(SecureChildPassSummary.ChildrenBlockedByKey, out _).Should().BeFalse();
+        // Review round 6 (K3): the generic failure must come from the FRESH read faulting, not from the remembered YES.
+        _fixture.OwnerPrivileges.TeamQuestions.Should().Contain(q => q.TeamId == SecureTeam && q.Fresh);
         OwnerOf(grants.TeamOwned).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
     }
 
