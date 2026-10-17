@@ -29,9 +29,11 @@
 - #2016 `2e4ffc654` (#1620 owner-aware unshare; R3 told). The post-save web resource 1.1.2 is **deployed to dev** (16:37Z, verified).
 - Tasks 012, 023 and 183 closed; 20 done-task issues closed with evidence.
 
-## Next dev BFF build (via R3 only; R3 session `spaarke-wt-spa-external-access-platform-*`)
-- Must include master ≥ 2e4ffc654: #994, #2016, #2021, ontology #2020, then #2017, #2024, #2025, #2029 and 099 as they merge.
-- Run the ancestry check (≥ 77cd69a03), then the server gates: #1620, #994, #2002, #2021, #1755 (secure project on dev → container `active`); later #1576, #1363 and 099a.
+## Dev BFF = R3 build d5401cf2d (deployed 2026-10-17 02:27–02:29Z; contains master e702c3401)
+- **Batch 6 gates** (`notes/batch6-live-gates-2026-10-17.md`): #2021, #1620, #994 and #1755 PASS. The #1755 fixture is the secure project `a9e04977-…`, kept with its container.
+- #1363: registration PASS. **First run PENDING: after 2026-10-18 00:15Z**, run the KQL in the batch6 notes and `GET /api/admin/jobs/demo-expiration/status`.
+- #2002: **FAIL** → #2049. The reconciliation job still resolves with Write intent. Fix in progress in C:/wt2049 `fix/uac-2049-reconciliation-readonly-intent`. Then PR → merge → next R3 deploy → re-gate (0 Warnings in 1 h).
+- Still to gate on later builds: #1576 (after #2025), 099a (after #2035).
 
 ## Waiting on others
 - **Ontology:** #2039: UAC sent the shape and code-level findings (F1 orphan message, F3 mapping tests, and the Ontology Administrator role missing Append on the policy tables, confirmed live). Their fix round has them; the live role change waits on the owner. PR #2022 (task 049) is UAC-OK at 2dd6a67ad; no live -Apply until their second pass and the owner's go. PR #2019 (task 104): UAC has no objection. Q1 (Ontology Administrator Signal Write) and the #2039 option (b)/(c) decision and the role Append change is with the owner, through ontology.
