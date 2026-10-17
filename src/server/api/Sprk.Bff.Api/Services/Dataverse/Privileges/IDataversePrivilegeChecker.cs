@@ -65,12 +65,20 @@ public interface IDataversePrivilegeChecker
     /// team without it cannot own a row of that table.
     /// </summary>
     /// <returns><c>true</c> when one of the team's roles grants Read on the table; <c>false</c> when none does.</returns>
+    /// <param name="teamId">The team asked about.</param>
+    /// <param name="entityLogicalName">The table.</param>
+    /// <param name="fresh">
+    /// <c>true</c> reads Dataverse even when a remembered YES exists — for a caller that must not act on a privilege an
+    /// administrator has since removed (the grant core's classification of a refused create, review round 3, K2).
+    /// <c>false</c> may be answered YES from a short-lived per-team cache; a NO is never answered from it.
+    /// </param>
+    /// <param name="ct">Cancellation.</param>
     /// <exception cref="Exception">
     /// UNLIKE the user methods, a Dataverse fault is NOT answered <c>false</c>: it propagates, so a caller can tell "the team
-    /// lacks the privilege" from "it could not be read" (503) — and a fault is never cached. Only an answer is cached, per
-    /// team, for a short time.
+    /// lacks the privilege" from "it could not be read" (503) — and a fault is never cached. Only a YES is cached, per team,
+    /// for a short time, so an administrator's fix is seen on the next question.
     /// </exception>
     /// <remarks>App-only: <c>RetrieveTeamPrivileges</c> through the same application <c>ServiceClient</c> the ownership
     /// resolver reads through; no impersonation.</remarks>
-    Task<bool> TeamHasReadPrivilegeAsync(Guid teamId, string entityLogicalName, CancellationToken ct);
+    Task<bool> TeamHasReadPrivilegeAsync(Guid teamId, string entityLogicalName, bool fresh, CancellationToken ct);
 }

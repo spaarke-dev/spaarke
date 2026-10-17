@@ -326,7 +326,8 @@ public class GrantRowOwnershipTests
         Problem(result).Should().Be((StatusCodes.Status500InternalServerError, ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode));
         AssertNothingOnboardedOrGranted();
         _h.OwnerPrivileges.TeamQuestions.Should().ContainSingle().Which.Should().Be(
-            (OwnershipDirectory.SecureNamedTeam, "sprk_externalrecordaccess"), "the resolved owner team is asked, read-only");
+            (OwnershipDirectory.SecureNamedTeam, "sprk_externalrecordaccess", false),
+            "the resolved owner team is asked, read-only, before any write (a cached YES may answer it)");
     }
 
     [Fact]
@@ -384,6 +385,8 @@ public class GrantRowOwnershipTests
         Problem(result).Should().Be((StatusCodes.Status500InternalServerError, ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode));
         result.As<ProblemHttpResult>().ProblemDetails.Detail.Should().Contain("Read on External Record Access",
             "the detail tells an administrator what to fix, not the generic 'Failed to create external access record'");
+        _h.OwnerPrivileges.TeamQuestions.Should().ContainSingle().Which.Fresh.Should().BeTrue(
+            "the classifier reads the team's privileges fresh (review round 3, K2)");
         _h.Grants.Creates.Should().BeEmpty();
     }
 
@@ -400,8 +403,9 @@ public class GrantRowOwnershipTests
 
         Problem(result).Should().Be((StatusCodes.Status500InternalServerError, null));
         result.As<ProblemHttpResult>().ProblemDetails.Detail.Should().Be("Failed to create external access record in Dataverse.");
-        _h.OwnerPrivileges.TeamQuestions.Should().ContainSingle().Which.TeamId.Should().Be(OwnershipDirectory.SecureNamedTeam,
-            "the 403 is confirmed by asking the owner team");
+        _h.OwnerPrivileges.TeamQuestions.Should().ContainSingle().Which.Should().Be(
+            (OwnershipDirectory.SecureNamedTeam, "sprk_externalrecordaccess", true),
+            "the 403 is confirmed by asking the owner team FRESH (review round 3, K2): a cached YES is not a confirmation");
         _h.Grants.Creates.Should().BeEmpty();
     }
 

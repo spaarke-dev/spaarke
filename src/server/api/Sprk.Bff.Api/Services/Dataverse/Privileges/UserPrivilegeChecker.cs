@@ -42,13 +42,15 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
 
     /// <summary>
     /// Task 099b review round 2: the per-TEAM cache resource. On-wire key: <c>tenant:{tenantId}:team-privileges:{teamId:D}:v1</c>.
-    /// Value: the team's Read-allowed entity logical names. Only an ANSWER is stored; a fault is never cached.
+    /// Value: the team's Read-allowed entity logical names, stored only when it answered YES (review round 3, K2); a fault is
+    /// never cached, and a NO is never answered from it.
     /// </summary>
     internal const string TeamCacheResource = "team-privileges";
 
     /// <summary>
-    /// Task 099b review round 2: short, because the answer gates a write the moment an administrator fixes the role (the
-    /// Secure Record Owner role gaining <c>prvReadsprk_ExternalRecordAccess</c> is seen within this window).
+    /// Task 099b review round 2: how long a YES is remembered. A NO is never remembered (review round 3, K2), so an
+    /// administrator's fix is seen on the next question; this bounds how long a privilege an administrator REMOVES keeps being
+    /// answered as held to the callers that may accept that (a fresh question, the 403 classifier's, never is).
     /// </summary>
     internal static readonly TimeSpan TeamPrivilegeTtl = TimeSpan.FromMinutes(5);
 
@@ -144,7 +146,7 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
     }
 
     /// <inheritdoc />
-    public async Task<bool> TeamHasReadPrivilegeAsync(Guid teamId, string entityLogicalName, CancellationToken ct)
+    public async Task<bool> TeamHasReadPrivilegeAsync(Guid teamId, string entityLogicalName, bool fresh, CancellationToken ct)
     {
         if (teamId == Guid.Empty)
             throw new ArgumentException("A team id is required.", nameof(teamId));
@@ -153,35 +155,45 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
         var tenantId = GetTenantId();
         var cacheId = teamId.ToString("D");
 
-        IReadOnlySet<string>? readable = null;
-        try
+        // Review round 3 (K2): only a YES is answered from the cache. A cached set that lacks the table is not an answer — the
+        // team may have gained the privilege since — so Dataverse is read again, and a fresh question never reads the cache.
+        if (!fresh)
         {
-            var cached = await _cache.GetAsync<HashSet<string>>(tenantId, TeamCacheResource, cacheId, CacheVersion, ct: ct);
-            if (cached is not null)
-                readable = new HashSet<string>(cached, StringComparer.OrdinalIgnoreCase);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "Failed to read the team privilege cache for team {TeamId}; reading Dataverse", teamId);
+            try
+            {
+                var cached = await _cache.GetAsync<HashSet<string>>(tenantId, TeamCacheResource, cacheId, CacheVersion, ct: ct);
+                if (cached is not null && cached.Contains(entityLogicalName, StringComparer.OrdinalIgnoreCase))
+                    return true;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Failed to read the team privilege cache for team {TeamId}; reading Dataverse", teamId);
+            }
         }
 
-        if (readable is null)
+        // A fault propagates from here: never answered false, never cached. The caller refuses 503.
+        var readable = await _fetchTeamReadable(teamId, ct);
+        var holds = readable.Contains(entityLogicalName);
+        try
         {
-            // A fault propagates from here: never answered false, never cached. The caller refuses 503.
-            readable = await _fetchTeamReadable(teamId, ct);
-            try
+            if (holds)
             {
                 await _cache.SetAsync(
                     tenantId, TeamCacheResource, cacheId, CacheVersion,
                     new HashSet<string>(readable, StringComparer.Ordinal), TeamPrivilegeTtl, ct: ct);
             }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
+            else
             {
-                _logger.LogWarning(ex, "Failed to write the team privilege cache for team {TeamId}; continuing", teamId);
+                // A NO is not stored, and a YES remembered before it is dropped, so no caller is answered from it again.
+                await _cache.RemoveAsync(tenantId, TeamCacheResource, cacheId, CacheVersion, ct: ct);
             }
         }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Failed to update the team privilege cache for team {TeamId}; continuing", teamId);
+        }
 
-        return readable.Contains(entityLogicalName);
+        return holds;
     }
 
     /// <summary>

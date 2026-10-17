@@ -22,8 +22,8 @@ public sealed class TeamPrivilegeCheckerDouble : IDataversePrivilegeChecker
     /// <summary>When set, every team question throws it (the privileges could not be read).</summary>
     public Exception? Fault { get; set; }
 
-    /// <summary>Every team question, in order.</summary>
-    public ConcurrentQueue<(Guid TeamId, string Table)> TeamQuestions { get; } = new();
+    /// <summary>Every team question, in order, with whether it was asked fresh (review round 3, K2).</summary>
+    public ConcurrentQueue<(Guid TeamId, string Table, bool Fresh)> TeamQuestions { get; } = new();
 
     /// <summary>A double in which <paramref name="teamId"/> lacks Read.</summary>
     public static TeamPrivilegeCheckerDouble Lacking(Guid teamId)
@@ -33,9 +33,9 @@ public sealed class TeamPrivilegeCheckerDouble : IDataversePrivilegeChecker
         return double_;
     }
 
-    public Task<bool> TeamHasReadPrivilegeAsync(Guid teamId, string entityLogicalName, CancellationToken ct)
+    public Task<bool> TeamHasReadPrivilegeAsync(Guid teamId, string entityLogicalName, bool fresh, CancellationToken ct)
     {
-        TeamQuestions.Enqueue((teamId, entityLogicalName));
+        TeamQuestions.Enqueue((teamId, entityLogicalName, fresh));
         if (Fault is not null)
             return Task.FromException<bool>(Fault);
         return Task.FromResult(!TeamsLackingRead.Contains(teamId));

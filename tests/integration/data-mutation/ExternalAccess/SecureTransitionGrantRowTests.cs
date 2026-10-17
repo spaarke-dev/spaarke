@@ -5,6 +5,7 @@ using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
@@ -155,6 +156,13 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
         first.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
         var problem = await JsonOf(first);
         problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonChildrenIncomplete);
+        // Review round 3 (K2): the cause is named, and a repeat call is not promised to complete it before the role is fixed.
+        problem.GetProperty(ProvisionProjectEndpoint.ChildrenBlockedByKey).GetString()
+            .Should().Be(ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode);
+        var detail = problem.GetProperty("detail").GetString();
+        detail.Should().Contain("until an administrator").And.Contain("does not complete them")
+            .And.NotContain("completes them regardless", "the reconciliation cannot complete them either")
+            .And.NotContain(SecureTeam.ToString(), "the detail names no team id");
         _fixture.OwningTeamOf(rootId).Should().Be(SecureTeam, "the record's own steps are not undone");
         foreach (var grant in grants.Moving())
         {
@@ -171,6 +179,26 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
         foreach (var grant in grants.Moving())
             OwnerOf(grant).Should().Be(DataversePrincipalRef.Team(SecureTeam));
         AssertDecoyUntouched(grants);
+    }
+
+    [Fact]
+    public async Task MakeSecure_WhenAGrantRowFailsForAnotherReason_IsChildrenIncomplete_AndStillPromisesTheRetry()
+    {
+        // Twin of the privilege case: the team may own the row, but its assignment fails (a transient write fault). A repeat
+        // call does complete that, so the detail keeps its promise and names no blocking cause.
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_project", rootId);
+        _fixture.UseChildWorldForRoots();
+        var grants = SeedGrants("sprk_project", rootId, owner: GeneralTeam);
+        _fixture.ChildWorld.RefusingOwnerWritesOf(grants.TeamOwned);
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(ProvisionRoute, new { projectId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await JsonOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonChildrenIncomplete);
+        problem.TryGetProperty(ProvisionProjectEndpoint.ChildrenBlockedByKey, out _).Should().BeFalse();
+        problem.GetProperty("detail").GetString().Should().Contain("Calling provisioning again (the same caller may) completes them");
     }
 
     // ── Unsecure ─────────────────────────────────────────────────────────────────────────────────────────────────

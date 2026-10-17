@@ -685,8 +685,10 @@ public static class GrantExternalAccessEndpoint
             // owner-privilege helper: owner_privilege_missing only when the owner team really lacks Read on the table
             // ("Read Privilege Check For Owner failed"); otherwise (it holds Read, or that cannot be read) the original
             // fault propagates to the caller's generic 500, as before 099b.
+            // Review round 3 (K2): asked FRESH — a YES remembered before an administrator removed the privilege must not
+            // turn this refusal into the generic 500.
             var privilegeRefusal = await CheckGrantOwnerPrivilegeAsync(
-                ownerPrivileges, owner.TeamId!.Value, rootType, rootId, key, logger, ct);
+                ownerPrivileges, owner.TeamId!.Value, rootType, rootId, key, fresh: true, logger, ct);
             if (privilegeRefusal?.ReasonCode != ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode)
             {
                 logger.LogError(ex,
@@ -1248,8 +1250,8 @@ public static class GrantExternalAccessEndpoint
     /// Task 099b review round 2: the ONE owner-privilege check for a grant row. Dataverse refuses to create (or assign) a
     /// <c>sprk_externalrecordaccess</c> row owned by a team whose security roles lack Read on the table ("Read Privilege Check
     /// For Owner failed") — the Secure Record Owner role until it holds <c>prvReadsprk_ExternalRecordAccess</c>. Asked
-    /// read-only, through <see cref="IDataversePrivilegeChecker.TeamHasReadPrivilegeAsync"/> (app-only, cached per team for a
-    /// short time; a fault is never cached).
+    /// read-only, through <see cref="IDataversePrivilegeChecker.TeamHasReadPrivilegeAsync"/> (app-only; a YES is cached per team
+    /// for a short time, a NO and a fault never are — review round 3, K2).
     /// </summary>
     /// <returns>
     /// <c>null</c> when the team holds Read; <see cref="GrantPolicyDecision.OwnerPrivilegeMissing"/> (500) when it does not;
@@ -1260,17 +1262,20 @@ public static class GrantExternalAccessEndpoint
     /// Callers: <c>/invite-and-grant</c> asks BEFORE onboarding a new person (F1), so a refusal leaves no Contact, CIAM
     /// account or email; the grant core asks after Dataverse refused a create on a privilege check, to name the refusal only
     /// when it is this one (K1); the secure-transition child pass asks before it re-owns a grant row
-    /// (<c>SecureChildReconciler</c>, F1 Make Secure).
+    /// (<c>SecureChildReconciler</c>, F1 Make Secure). <paramref name="fresh"/> (review round 3, K2): the grant core's
+    /// classification asks fresh, so a YES remembered before an administrator removed the privilege cannot turn a real owner
+    /// refusal into the generic 500; the callers that ask BEFORE a write accept a remembered YES (Dataverse's own owner check
+    /// still decides the write).
     /// </remarks>
     internal static async Task<GrantPolicyDecision?> CheckGrantOwnerPrivilegeAsync(
         IDataversePrivilegeChecker ownerPrivileges, Guid ownerTeamId, ExternalGrantRootType rootType, Guid rootId,
-        ExternalGrantKey? key, ILogger logger, CancellationToken ct)
+        ExternalGrantKey? key, bool fresh, ILogger logger, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(ownerPrivileges);
         bool holdsRead;
         try
         {
-            holdsRead = await ownerPrivileges.TeamHasReadPrivilegeAsync(ownerTeamId, EntityLogicalName, ct);
+            holdsRead = await ownerPrivileges.TeamHasReadPrivilegeAsync(ownerTeamId, EntityLogicalName, fresh, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {

@@ -178,6 +178,12 @@ public sealed record SecureChildReconcileReport(
     /// <summary>Rows re-owned by this pass.</summary>
     public int ChildrenReowned => Tables.Sum(t => t.Changed);
 
+    /// <summary>
+    /// UAC task 099b review round 3 (K2): a grant row of this pass was left where it is because the team the rule gives it
+    /// may not own one — a repeat call does not complete the pass until an administrator adds the privilege.
+    /// </summary>
+    public bool BlockedByGrantOwnerPrivilege => Changes.Any(SecureChildReconciler.IsGrantOwnerPrivilegeRefusal);
+
     /// <summary>Isolated rows the rule would release but this pass may not (owner round 24 item 2): only unsecure does.</summary>
     public int ChildrenNeedingF3 => Tables.Sum(t => t.NeedsF3);
 
@@ -335,6 +341,22 @@ public sealed class SecureChildReconciler
 
     /// <summary>The grant table's entity set (the owner-change eviction names it).</summary>
     private const string GrantEntitySet = "sprk_externalrecordaccesses";
+
+    /// <summary>
+    /// UAC task 099b review round 3 (K2): the detail of a grant row left where it is because the team the rule gives it may
+    /// not own one (its roles lack Read on the grant table). Unlike any other failed row, a repeat pass cannot move it until an
+    /// administrator adds the privilege, so the endpoints say so (<see cref="IsGrantOwnerPrivilegeRefusal"/>).
+    /// </summary>
+    private static readonly string GrantOwnerPrivilegeMissingDetail =
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode
+        + ": the owner team may not own an access grant (its security roles lack Read on sprk_externalrecordaccess); it is "
+        + "left as it is until an administrator adds that privilege";
+
+    /// <summary>Whether <paramref name="change"/> is a grant row this pass could not move for want of the owner privilege.</summary>
+    internal static bool IsGrantOwnerPrivilegeRefusal(SecureChildRowChange change) =>
+        change.Outcome == SecureChildRowOutcome.Failed
+        && string.Equals(change.Table, GrantTable, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(change.Detail, GrantOwnerPrivilegeMissingDetail, StringComparison.Ordinal);
 
     private readonly IGenericEntityService _dataverse;
     private readonly IRecordOwnershipResolver _ownership;
@@ -1069,13 +1091,14 @@ public sealed class SecureChildReconciler
                 .First(t => string.Equals(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantRoot.LogicalNameFor(t),
                     _root.EntityLogicalName, StringComparison.OrdinalIgnoreCase));
             var refusal = await Sprk.Bff.Api.Api.ExternalAccess.GrantExternalAccessEndpoint.CheckGrantOwnerPrivilegeAsync(
-                privileges, target, rootType, _root.RecordId, key: null, Log, _ct).ConfigureAwait(false);
+                privileges, target, rootType, _root.RecordId, key: null, fresh: false, Log, _ct).ConfigureAwait(false);
+            // Review round 3 (K2): the detail reaches the endpoint's problem detail, so it names no team id (the helper has
+            // logged it); the privilege refusal's detail is the one IsGrantOwnerPrivilegeRefusal recognises.
             return refusal is null
                 ? null
                 : refusal.ReasonCode == Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode
-                    ? $"{refusal.ReasonCode}: team {target} may not own an access grant (its security roles lack Read on " +
-                      "sprk_externalrecordaccess); it is left as it is until an administrator adds that privilege"
-                    : $"{refusal.ReasonCode}: whether team {target} may own an access grant could not be read; it is left as it is";
+                    ? GrantOwnerPrivilegeMissingDetail
+                    : $"{refusal.ReasonCode}: whether the owner team may own an access grant could not be read; it is left as it is";
         }
 
         private async Task<IReadOnlyList<Entity>> ReadAllPagesAsync(string table, QueryExpression query)

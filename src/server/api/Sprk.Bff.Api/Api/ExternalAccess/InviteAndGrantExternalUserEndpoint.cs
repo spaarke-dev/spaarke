@@ -260,7 +260,7 @@ public static class InviteAndGrantExternalUserEndpoint
             // through the ONE owner-privilege helper: 500 owner_privilege_missing, or 503 owner_unreadable when it cannot be
             // read (fail closed) — before any side effect.
             var privilegeRefusal = await GrantExternalAccessEndpoint.CheckGrantOwnerPrivilegeAsync(
-                ownerPrivileges, owner.TeamId!.Value, grantRoot.Type, grantRoot.Id, preGrantee.Key, logger, ct);
+                ownerPrivileges, owner.TeamId!.Value, grantRoot.Type, grantRoot.Id, preGrantee.Key, fresh: false, logger, ct);
             if (privilegeRefusal is not null)
             {
                 logger.LogWarning(
