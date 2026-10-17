@@ -317,7 +317,12 @@ public class ExternalMessageSendTests
         _appOnly
             .Setup(q => q.QueryAsync("sprk_communications", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Callback<string, string?, CancellationToken>((_, odata, _) => _lastReadOData = odata)
-            .ReturnsAsync(rows.ToList());
+            .ReturnsAsync(AppOnlySelectProjection.WithOpenThread(rows));
+        // Owner decision D7: the read shows a row only when its thread reads Open; these cases are not about D7.
+        _appOnly
+            .Setup(q => q.QueryAsync("sprk_communicationthreads", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string?, CancellationToken>((_, odata, _) =>
+                Task.FromResult(AppOnlySelectProjection.OpenThreadAnswer(odata)));
         var read = new CommunicationThreadReadService(
             Mock.Of<IImpersonatedCommunicationQuery>(MockBehavior.Strict),
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
@@ -325,10 +330,15 @@ public class ExternalMessageSendTests
             _identity.Object,
             Mock.Of<ILogger<CommunicationThreadReadService>>(),
             _appOnly.Object);
+        // Task 187 x D7 (merge of master into r3): the thread is also a LIVE PARENT of every message, and a read given no
+        // live-parent reader resolves nothing and withholds a row that names a parent (fail closed). So the read gets the
+        // reader the route passes, over a filing world that holds the shared Open thread (filed under nothing).
+        var roots = new ExternalRootEventReadTests.FakeDataverse();
+        roots.AddFilingRow("sprk_communicationthread", AppOnlySelectProjection.OpenThreadId);
+        var data = roots.NewService();
         return ExternalMessageEndpoints.GetMessagesCoreAsync(
             root, id, caller, ProductionRegistry(), ReadRecord, read,
-            new ExternalRootEventReadTests.FakeDataverse().NewService().GetNonSecureRootsAsync,
-            NullLogger.Instance, CancellationToken.None);
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync);
     }
 
     private static IReadOnlyList<ExternalMessageDto> Messages(IResult result) =>
@@ -405,6 +415,46 @@ public class ExternalMessageSendTests
             AsDataverseRow(row, Guid.Parse(dto.SprkCommunicationid), "2026-10-11T09:00:00Z", sentByName: "Lee Lawyer")));
 
         messages.Should().ContainSingle().Which.SenderName.Should().Be("Lee Lawyer");
+    }
+
+    // ── task 062 rework: the createdby fallback names a PERSON only, never the BFF's application user ──────────────
+
+    private async Task<string?> SenderNameWithCreatedBy(string createdByName, Dictionary<string, object?>? createdByExpand)
+    {
+        var project = Guid.NewGuid();
+        var caller = Ciam(project: project, contactId: Guid.NewGuid());
+        var dto = Created(await Post("projects", project, caller, "From the model-driven app"));
+        var dataverseRow = AsDataverseRow(TheRow(), Guid.Parse(dto.SprkCommunicationid), "2026-10-11T09:00:00Z");
+        dataverseRow["_createdby_value"] = El(Guid.NewGuid().ToString("D"));
+        dataverseRow["_createdby_value@OData.Community.Display.V1.FormattedValue"] = El(createdByName);
+        if (createdByExpand is not null)
+            dataverseRow["createdby"] = El(createdByExpand);
+        // No contact name annotation and no sprk_sentby: only createdby can name the sender.
+        dataverseRow.Remove("_sprk_createdbycontact_value@OData.Community.Display.V1.FormattedValue");
+
+        var messages = Messages(await ReadBack("projects", project, caller, dataverseRow));
+        _lastReadOData.Should().Contain("_createdby_value").And.Contain("&$expand=createdby($select=applicationid,accessmode)&");
+        return messages.Should().ContainSingle().Subject.SenderName;
+    }
+
+    [Fact]
+    public async Task ExternalRead_CreatedByIsAnApplicationUser_SenderNameIsNull()
+    {
+        (await SenderNameWithCreatedBy("Spaarke BFF App",
+            new() { ["applicationid"] = Guid.NewGuid(), ["accessmode"] = 4 })).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExternalRead_CreatedByIsAnInteractiveUser_SenderNameIsTheirName()
+    {
+        (await SenderNameWithCreatedBy("Dana Dataverse",
+            new() { ["applicationid"] = null, ["accessmode"] = 0 })).Should().Be("Dana Dataverse");
+    }
+
+    [Fact]
+    public async Task ExternalRead_CreatedByCannotBeClassified_SenderNameIsNull()
+    {
+        (await SenderNameWithCreatedBy("Dana Dataverse", createdByExpand: null)).Should().BeNull();
     }
 
     [Fact]
@@ -870,5 +920,108 @@ public class ExternalMessageSendTests
         TheRow().GetAttributeValue<OptionSetValue>("sprk_direction").Value.Should().Be(Outgoing);
         seen!.Direction.Should().Be(CommunicationDirection.Outgoing);
         seen.Message.Direction.Should().Be(CommunicationDirection.Outgoing);
+    }
+
+    // ── Task 065 fix round 6 (F2): a post nobody can see is never acknowledged ────────────────────────────────────
+
+    private static void ShouldBeThreadUnavailable(IResult result)
+    {
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["errorCode"].Should().Be(CommunicationService.ThreadUnavailableCode);
+    }
+
+    private (Guid CreatedId, List<Dictionary<string, object>> Updates) CaptureCreatesAndUpdates()
+    {
+        var createdId = Guid.NewGuid();
+        _entities
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => _created.Add(e))
+            .ReturnsAsync(createdId);
+        var updates = new List<Dictionary<string, object>>();
+        _entities
+            .Setup(s => s.UpdateAsync("sprk_communication", createdId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, fields, _) => updates.Add(fields))
+            .Returns(Task.CompletedTask);
+        return (createdId, updates);
+    }
+
+    [Fact]
+    public async Task WhenTheThreadStepResolvesNoThread_Is503Retryable_AndTheCreatedRowIsDeactivated()
+    {
+        var project = Guid.NewGuid();
+        var (createdId, updates) = CaptureCreatesAndUpdates();
+        _threads
+            .Setup(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ThreadAssignment?)null);
+
+        var result = await Post("projects", project, Ciam(project: project));
+
+        ShouldBeThreadUnavailable(result);
+        TheRow(); // the row was created before the thread step ran...
+        var retire = updates.Should().ContainSingle("...and is retired, not left behind").Subject;
+        ((OptionSetValue)retire["statecode"]).Value.Should().Be(1, "Inactive");
+        ((OptionSetValue)retire["statuscode"]).Value.Should().Be((int)CommunicationStatus.Deleted);
+        result.Should().NotBeOfType<Created<ExternalMessageDto>>("no 201 for a post nobody can see");
+        createdId.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task WhenTheThreadStepThrows_Is503Retryable_AndTheCreatedRowIsDeactivated()
+    {
+        var project = Guid.NewGuid();
+        var (_, updates) = CaptureCreatesAndUpdates();
+        _threads
+            .Setup(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse unavailable"));
+
+        ShouldBeThreadUnavailable(await Post("projects", project, Ciam(project: project)));
+
+        updates.Should().ContainSingle().Which["statecode"].Should().BeOfType<OptionSetValue>().Which.Value.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task WhenTheThreadStepFails_AndTheRowCannotBeDeactivatedEither_StillAnswers503_NeverA201()
+    {
+        var project = Guid.NewGuid();
+        var (createdId, _) = CaptureCreatesAndUpdates();
+        _entities
+            .Setup(s => s.UpdateAsync("sprk_communication", createdId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse unavailable"));
+        _threads
+            .Setup(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ThreadAssignment?)null);
+
+        ShouldBeThreadUnavailable(await Post("projects", project, Ciam(project: project)));
+    }
+
+    [Fact]
+    public async Task WhenTheThreadResolves_TheRowIsNotDeactivated()
+    {
+        var project = Guid.NewGuid();
+        var (_, updates) = CaptureCreatesAndUpdates();
+
+        Created(await Post("projects", project, Ciam(project: project)));
+
+        updates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task APartnersPost_AsksTheResolverForAnOpenDefaultThread_D8(bool systemUserAuthor)
+    {
+        var project = Guid.NewGuid();
+        ThreadResolutionRequest? seen = null;
+        _threads
+            .Setup(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<ThreadResolutionRequest, CancellationToken>((r, _) => seen = r)
+            .ReturnsAsync(ThreadAssignment.NoGrant(_threadId));
+
+        Created(await Post("projects", project, systemUserAuthor ? SystemUser(Guid.NewGuid(), project) : Ciam(project: project)));
+
+        seen.Should().NotBeNull();
+        seen!.RequireOpenDefaultThread.Should().BeTrue(
+            "D8: the post must not be filed into a Private default thread the author cannot read back");
     }
 }

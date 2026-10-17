@@ -244,7 +244,11 @@ internal static class NoAccessEnforcementTestDoubles
             DataMutation.ExternalAccess.SecureChildShareWorld.EntitiesOver(() => ChildWorld).Object;
 
         public NoAccessShareEnforcer Enforcer => new(
-            Store, Participations, Identities, Shares, Cache.Mock.Object, Lease, ChildShares(), Entities(),
+            Store, Participations, Identities, Shares, Cache.Mock.Object, Lease, ChildShares(), Entities(), WorkforceIdentity,
             NullLogger<NoAccessShareEnforcer>.Instance);
+
+        /// <summary>r3 task 048: the customer home directories the enforcer also clears root sets under (none by default).</summary>
+        public Microsoft.Extensions.Options.IOptionsMonitor<WorkforceIdentityOptions> WorkforceIdentity { get; set; } =
+            Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.IdentityBindingTestKit.Tenants();
     }
 }

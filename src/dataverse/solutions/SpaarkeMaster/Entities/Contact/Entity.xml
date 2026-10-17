@@ -330,6 +330,46 @@
             <Description description="Mirror of sprk_externalobjectid that carries the alternate key (Dataverse cannot key a field-secured column). Written by the BFF with the same oid, in the same request, as every bind and create. NOTHING resolves by it — it carries no identity. A value here that the binding does not carry is a squat or a half-cleared binding: see SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §6.5.3. Task 141, owner round 4 item 4 (B2)." languagecode="1033" />
           </Descriptions>
         </attribute>
+        <attribute PhysicalName="sprk_ExternalTenantId">
+          <Type>nvarchar</Type>
+          <Name>sprk_externaltenantid</Name>
+          <LogicalName>sprk_externaltenantid</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>1</IsSecured>
+          <IntroducedVersion>1.2.3.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <Format>text</Format>
+          <MaxLength>36</MaxLength>
+          <Length>72</Length>
+          <displaynames>
+            <displayname description="External Tenant Id" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="Home tenant id (tid) of a WorkforceHome contact: the Entra tenant of the company account the person signs in with. Written once with the binding (sprk_externalobjectid) by the BFF only (field-secured). A WorkforceHome contact is found by plane + this + the oid. A9, task 044." languagecode="1033" />
+          </Descriptions>
+        </attribute>
         <attribute PhysicalName="sprk_IdentityCollisionOid">
           <Type>nvarchar</Type>
           <Name>sprk_identitycollisionoid</Name>

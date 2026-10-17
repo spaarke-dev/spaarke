@@ -36,6 +36,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Dataverse.Privileges;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -92,6 +93,7 @@ public static class ExternalNotificationFeedEndpoints
     {
         externalGroup.MapGet("/notifications", GetFeedAsync)
             .WithName("GetExternalNotificationFeed")
+            .WorkforceCeilingInHandler("The feed mixes tables: items are filtered to the tables the role can Read, before each read.")
             .WithSummary("Read the caller's in-portal notification feed")
             .WithDescription(
                 "Returns up to 100 items of the last 30 days, newest first: new grants to the caller and new messages by " +
@@ -108,6 +110,7 @@ public static class ExternalNotificationFeedEndpoints
 
         externalGroup.MapPost("/notifications/seen", MarkSeenAsync)
             .WithName("MarkExternalNotificationsSeen")
+            .ExemptFromWorkforceCeiling("Writes only the caller's own last-seen marker in Redis; no Dataverse record.")
             .WithSummary("Set the caller's notification last-seen marker to now")
             .WithDescription(
                 "Stores the caller's last-seen marker (server time). Feed items at or before it are read; unreadCount " +
@@ -122,24 +125,30 @@ public static class ExternalNotificationFeedEndpoints
         return externalGroup;
     }
 
-    private static Task<IResult> GetFeedAsync(
+    private static async Task<IResult> GetFeedAsync(
         HttpContext httpContext,
         ExternalModuleRegistry registry,
         ExternalDataService dataService,
         CommunicationThreadReadService threadReadService,
         ITenantCache cache,
+        IDataversePrivilegeChecker privileges,
         ILogger<Program> logger,
         CancellationToken ct)
     {
         if (httpContext.Items[CallerPrincipal.HttpContextItemsKey] is not CallerPrincipal principal)
         {
-            return Task.FromResult(MissingPrincipal());
+            return MissingPrincipal();
         }
 
+        // The workforce ceiling (unified-access-control-r2 task 186, review round 1 F1): the feed mixes tables, so a
+        // workforce-contact caller gets only the items whose tables the Workforce role can Read, and nothing is read from a
+        // table it cannot. An unavailable role reads nothing (an empty feed, not an error, so the SPA renders).
+        var ceiling = await WorkforceRoleCeilingGate.CeilingForAsync(principal, privileges, ct).ConfigureAwait(false);
+
         var now = (httpContext.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow();
-        return GetFeedCoreAsync(
+        return await GetFeedCoreAsync(
             principal, MembershipEndpoints.ExtractTenantId(httpContext.User), registry, dataService, threadReadService,
-            cache, now, logger, ct);
+            cache, now, logger, ct, table => WorkforceRoleCeilingGate.CanRead(ceiling, table)).ConfigureAwait(false);
     }
 
     private static Task<IResult> MarkSeenAsync(
@@ -239,6 +248,10 @@ public static class ExternalNotificationFeedEndpoints
     /// requests through the module predicate) → the app-only recent-message read under the external rules, minus the
     /// caller's own → titles (an item whose record is gone is dropped) → newest first, at most <see cref="MaxItems"/> →
     /// unread against the marker. Separated from the route handler so it can be driven with doubles at the I/O seams.
+    /// <para><paramref name="canReadTable"/> is the workforce ceiling (task 186): a table it refuses contributes no item and
+    /// is not read — grants on its records are dropped, its records are not asked for messages, a refused
+    /// <c>sprk_servicerequest</c> is not queried, and a refused <c>sprk_communication</c> skips the message read. Null
+    /// (every caller the ceiling does not apply to) reads every table.</para>
     /// </summary>
     internal static async Task<IResult> GetFeedCoreAsync(
         CallerPrincipal principal,
@@ -249,8 +262,11 @@ public static class ExternalNotificationFeedEndpoints
         ITenantCache cache,
         DateTimeOffset now,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<string, bool>? canReadTable = null)
     {
+        canReadTable ??= static _ => true;
+
         if (RefuseWhenContactUnreadable(principal, logger, "Feed") is { } refused)
         {
             return refused;
@@ -262,8 +278,10 @@ public static class ExternalNotificationFeedEndpoints
             var truncated = false;
             var items = new List<FeedItem>();
 
-            // (a) Grants to the caller's contact — each root re-checked against the accessible set (fail-closed).
-            if (principal.ContactId != Guid.Empty)
+            // (a) Grants to the caller's contact — each root re-checked against the accessible set (fail-closed). Under a
+            //     ceiling that can read none of the grant roots, the grant rows are not read at all.
+            if (principal.ContactId != Guid.Empty
+                && (canReadTable("sprk_project") || canReadTable("sprk_matter") || canReadTable("sprk_workassignment")))
             {
                 // EventOn is the grant time, or the renewal time of a grant restored in place (owner 2026-10-12).
                 var grants = await dataService.GetRecentGrantsAsync(
@@ -274,6 +292,7 @@ public static class ExternalNotificationFeedEndpoints
 
                 var kept = grants.Grants
                     .Where(g => g.EventOn >= cutoff
+                                && canReadTable(EntityFor(g.RootType))
                                 && principal.RightsOn(g.RootType, g.RootId).HasFlag(Spaarke.Dataverse.AccessRights.Read))
                     .OrderByDescending(g => g.EventOn)
                     .ThenByDescending(g => g.GrantId)
@@ -285,12 +304,15 @@ public static class ExternalNotificationFeedEndpoints
 
             // (b) The accessible records whose messages the feed reports.
             var records = new List<(string EntityType, Guid RecordId)>();
-            records.AddRange(principal.GetAccessibleProjectIds().Select(id => ("sprk_project", id)));
-            records.AddRange(principal.GetAccessibleMatterIds().Select(id => ("sprk_matter", id)));
-            records.AddRange(principal.GetAccessibleWorkAssignmentIds().Select(id => ("sprk_workassignment", id)));
+            if (canReadTable("sprk_project"))
+                records.AddRange(principal.GetAccessibleProjectIds().Select(id => ("sprk_project", id)));
+            if (canReadTable("sprk_matter"))
+                records.AddRange(principal.GetAccessibleMatterIds().Select(id => ("sprk_matter", id)));
+            if (canReadTable("sprk_workassignment"))
+                records.AddRange(principal.GetAccessibleWorkAssignmentIds().Select(id => ("sprk_workassignment", id)));
 
             var serviceRequestNames = new Dictionary<Guid, string?>();
-            var serviceRequests = registry.FindByEntity(ServiceRequestEntity);
+            var serviceRequests = canReadTable(ServiceRequestEntity) ? registry.FindByEntity(ServiceRequestEntity) : null;
             if (serviceRequests is not null)
             {
                 var requesterIds = serviceRequests.EffectiveDimensions
@@ -324,26 +346,30 @@ public static class ExternalNotificationFeedEndpoints
 
             // Messages: the external read rules (status, privilege, internal-only) are the read service's; the caller's
             // own messages are dropped by the creator stamp.
-            var recent = await threadReadService
-                .ReadRecentForRecordsAppOnlyAsync(
-                    records, cutoff, principal.SystemUserId, MaxItems,
-                    // A message also filed to a SECURE root the caller cannot read is not reported (ExternalMultiRootRule,
-                    // owner decision 2026-10-12, option B); the secure flags are read once for the whole feed.
-                    ExternalMessageEndpoints.SecureRootsFilter(
-                        principal, dataService.GetNonSecureRootsAsync, logger, dataService.GetLiveParentRootsAsync),
-                    ct)
-                .ConfigureAwait(false);
-            truncated |= recent.Truncated;
-            foreach (var m in recent.Messages)
+            // A ceiling without Read on sprk_communication reads no message at all.
+            if (canReadTable(WorkforceRoleCeilingGate.CommunicationTable))
             {
-                if (ExternalMessageEndpoints.IsAuthoredBy(m.Message, principal) || m.Message.CreatedOn is not { } createdOn)
+                var recent = await threadReadService
+                    .ReadRecentForRecordsAppOnlyAsync(
+                        records, cutoff, principal.SystemUserId, MaxItems,
+                        // A message also filed to a SECURE root the caller cannot read is not reported (ExternalMultiRootRule,
+                        // owner decision 2026-10-12, option B); the secure flags are read once for the whole feed.
+                        ExternalMessageEndpoints.SecureRootsFilter(
+                            principal, dataService.GetNonSecureRootsAsync, logger, dataService.GetLiveParentRootsAsync),
+                        ct)
+                    .ConfigureAwait(false);
+                truncated |= recent.Truncated;
+                foreach (var m in recent.Messages)
                 {
-                    continue;
-                }
+                    if (ExternalMessageEndpoints.IsAuthoredBy(m.Message, principal) || m.Message.CreatedOn is not { } createdOn)
+                    {
+                        continue;
+                    }
 
-                items.Add(new FeedItem(
-                    ExternalNotificationDto.KindMessage, m.Message.MessageId, m.EntityType, m.RecordId, createdOn,
-                    m.Message.SentByName));
+                    items.Add(new FeedItem(
+                        ExternalNotificationDto.KindMessage, m.Message.MessageId, m.EntityType, m.RecordId, createdOn,
+                        m.Message.SentByName));
+                }
             }
 
             // Titles. A complete read that does not return a record means the record is gone: its item is dropped.

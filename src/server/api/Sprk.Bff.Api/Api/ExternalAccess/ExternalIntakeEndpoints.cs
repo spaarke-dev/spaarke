@@ -109,6 +109,7 @@ public static class ExternalIntakeEndpoints
     {
         externalGroup.MapPost("/servicerequests", SubmitServiceRequestAsync)
             .WithName("SubmitExternalServiceRequest")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.SubmitServiceRequest)
             .WithSummary("Submit a Legal Front Door request as the caller")
             // Minimal API binds the whole body before any gate; cap it (precedent: ComposeSaveEndpoints).
             .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes))
