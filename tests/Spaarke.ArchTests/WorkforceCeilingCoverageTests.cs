@@ -23,7 +23,8 @@ namespace Spaarke.ArchTests;
 [Collection(BootedBffCollection.Name)]
 public sealed class WorkforceCeilingCoverageTests
 {
-    private const string Prefix = "/api/v1/external";
+    // Compared without the leading slash: a group mapped as "api/v1/external" yields slash-less RawText (review round 2).
+    private const string Prefix = "api/v1/external";
 
     private readonly BootedBff _booted;
 
@@ -82,15 +83,35 @@ public sealed class WorkforceCeilingCoverageTests
             Endpoint("/api/v1/external/in-handler", WorkforceCeilingMetadata.Declared(WorkforceCeilingCoverage.InHandler, "seam")),
             Endpoint("/api/v1/external/registration", WorkforceCeilingMetadata.Declared(WorkforceCeilingCoverage.Exempt, "bootstrap")),
             Endpoint("/api/v1/external-access/grant"),
+            Endpoint("api/v1/external-access/record-grants"),
             Endpoint("/api/v1/externalthing"),
         };
 
         Assert.Empty(Violations(endpoints));
     }
 
+    [Fact(DisplayName = "Task 186 review round 2 must-fire: an undeclared endpoint on a group mapped without a leading slash is reported")]
+    public void TheGuardFires_OnASlashlessExternalPattern()
+    {
+        var endpoints = new[]
+        {
+            Endpoint("api/v1/external/slashless"),
+            Endpoint("api/v1/external"),
+            Endpoint("API/V1/EXTERNAL/upper"),
+        };
+
+        var violations = Violations(endpoints);
+
+        Assert.Equal(3, violations.Count);
+        Assert.Contains(violations, v => v.Contains("api/v1/external/slashless", StringComparison.Ordinal) && v.Contains("no declaration", StringComparison.Ordinal));
+        Assert.Contains(violations, v => v.Contains("* api/v1/external ", StringComparison.Ordinal));
+        Assert.Contains(violations, v => v.Contains("API/V1/EXTERNAL/upper", StringComparison.Ordinal));
+    }
+
     private static bool IsExternal(RouteEndpoint endpoint)
     {
-        var raw = endpoint.RoutePattern.RawText ?? string.Empty;
+        // Path-segment boundary: "api/v1/external" itself or "api/v1/external/…", never "api/v1/external-access".
+        var raw = (endpoint.RoutePattern.RawText ?? string.Empty).TrimStart('/');
         return raw.Equals(Prefix, StringComparison.OrdinalIgnoreCase)
                || raw.StartsWith(Prefix + "/", StringComparison.OrdinalIgnoreCase);
     }
