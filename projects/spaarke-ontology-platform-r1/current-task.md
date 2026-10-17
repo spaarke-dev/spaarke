@@ -4,7 +4,7 @@
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
 > D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6 gotchas.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-148). Deferred work: one self-contained GitHub issue per item,
-> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-107**).
+> label `ontology-deferred`, plus a DI-nn row in `notes/defer-issues.md` (next free: **DI-108**).
 > Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
@@ -36,6 +36,8 @@ Shared brief: scratchpad `lane-brief.md` (no live writes/deploys; PR into docs b
 **Docs->master #2044 MERGED** `e702c3401` (2026-10-16, 100+101+103). Console auto-deployed from it (Deploy SpaarkeAi success 23:28:56Z); peers told (uac-r2, R3; word-add-in notice HELD by its session). R3 asked to include e702c3401 in its next dev BFF line and send the ProductVersion; until then the admin tab's Rules/Classification areas call routes the live BFF may not have (only Ontology Administrators see the tab).
 
 **ebilling 070 (#1911) re-checked 2026-10-16** (7fc6b0593..be28df779): OK from ontology side; Q1 keep the throw. PAIRED CHANGE asked of ebilling in their 070 PR (ontology F3): 101 ValidateRule passes RuleDomain.Ontology + RuleTypeWrongDomain -> "ruleType"; 100/101 domain filters from RuleDomains constants; test billing type -> 400 on ruleType. If they decline: do it as our follow-up right after 070 merges (fail-closed window). Owner D-92 (ebilling log f4a96f10e) records schema sign-off - ask owner to confirm. ebilling 026 (touches Signal + DR writers, sprk_regardinginvoiceline) comes to us for full review. Temp worktree C:\wts-eb070 (detached be28df779) - remove with scripts/worktree/Remove-WorktreeSafe.ps1.
+
+**ebilling 026 reviewed 2026-10-16** (ef3efce73..b5f4a4c78; Opus, writers + secure family; uac-r2 reviews resolvers): NOT READY. F1 writer lacks prvAppendTosprk_BillingEvent (Spaarke Ontology Service) - role change needs OWNER approval; told ebilling not to apply until I confirm. K1-K6 sent (K2 sprk_firmreason not write-protected; K4 import before BFF). DI-107 #2046 filed (writer AppendTo on core tables only via root team Basic User). Temp worktree C:\wts-eb026 (detached).
 
 **Endpoint census at docs->master:** uac-r2 #2035 (099a) sets master ExpectedEndpointFileCount 127 (104 = 125->126, 099a = 126->127). Each ontology admin file (100 merged, 101, 103) adds one: expect a conflict and recompute from the census when the next docs->master PR merges after #2035.
 
