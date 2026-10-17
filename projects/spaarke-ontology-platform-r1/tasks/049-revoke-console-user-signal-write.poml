@@ -4,7 +4,7 @@
     <title>Remove Spaarke Console User Write on sprk_signal once the BFF closes Signals</title>
     <phase>4b Commit and actions</phase>
     <gate>043, 055 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One owner-approved privilege removal plus the union re-verify; no code.</rigor-reason>
     <model-tier>sonnet</model-tier>

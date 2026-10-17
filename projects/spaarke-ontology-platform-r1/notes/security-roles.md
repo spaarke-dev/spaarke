@@ -1037,3 +1037,17 @@ the deployed dev Console.
 - **Read-back**: 50 → 58, all 8 at Global, nothing unrequested, nothing removed. Child BU copy `0d5642b7-…` holds 58. The writer
   resolves `prvAppendTosprk_BillingEvent`, `_Matter`, `_RecordType_Ref` at Global via BU `06fbf21c-…`. uac-r2 notified before and after.
 - **Repo**: `SpaarkeMaster/Roles/Spaarke Ontology Service.xml` + a guard test follow in an ontology PR. Other environments need the same grant.
+
+## 16. 2026-10-17 — Append on `sprk_policy` / `sprk_policyversion` for Spaarke Ontology Administrator (owner-approved, D-150)
+
+- **Why**: saving or publishing a rule links rule rows (Append on the referencing row). The role had AppendTo but not Append, so only System Administrators could author.
+- **Change**: `AddPrivilegesRole` on the root `2f2b2137-bfbe-f111-aaaf-0022482913fc`: `prvAppendsprk_Policy`, `prvAppendsprk_PolicyVersion` at **Deep**.
+- **Read-back**: 38 → 40 on the root and all 5 copies (`4f6a91ff`, `2c4541b2`, `675098f9`, `efca5b32`, `d785bc47`), both Deep; nothing unrequested. uac-r2 notified before and after. Repo XML already on master.
+
+## 17. 2026-10-17 — Task 049 APPLIED (D-17, D-62, D-147, D-159)
+
+- **03:17Z `-Apply`** (evidence `049-role-removal-evidence-apply-20261017T031742Z.md`): root-only `RemovePrivilegeRole` in K-A order — Ontology Administrator `prvCreatesprk_DecisionRecord` (40 → 39); Console User `prvCreatesprk_DecisionRecord`, then `prvWritesprk_Signal` (23 → 21). All 6 copies of each role read back with no divergence; Ontology Service unchanged (58). A1–A5 PASS.
+- **Owner Q6, same window**: root-only `RemovePrivilegeRole` of `prvWritesprk_Signal` (Deep) on Ontology Administrator; all 6 copies 39 → 38, nothing else changed.
+- **03:24Z `-Verify` with `$A5Waiver = $null`** (PR #2050 branch): PASS; no non-platform, non-admin, non-writer role holds Write on `sprk_signal`.
+- **Still held (owner question, raised by uac-r2)**: Ontology Administrator keeps `prvDeletesprk_Signal` and `prvAssignsprk_Signal` (Deep). No shipped flow deletes or assigns a Signal as the caller (2026-10-17 search; test cleanups run as the operator or the writer). Console User holds neither. No Spaarke human role holds Write, Delete or Assign on `sprk_decisionrecord`.
+- **Rollback**: §14.
