@@ -123,6 +123,12 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.53 (task 099c review round 1, PR #2062): no change in this file's logic. In the bundled modal's Expiration:
+ *   adds, Save and a suggestion's Grant wait while an Apply is in flight, and the Expiration waits while an add is in
+ *   flight (no add lands on the old date); shares on different dates offer Apply with no edit; "Not applied yet" shows
+ *   only for a date that differs from the applied one; a past-date refusal of an add shows the server's sentence; and
+ *   an Apply that finds no share keeps its date for the next add.
+ *
  * v1.0.52 (task 099c round 2 — owner 2026-09-10, every add sends the date): no change in this file's logic. Every
  *   external add in the bundled modal (contact, organization, suggestion; `/grant` and `/invite-and-grant`) sends the
  *   record's applied Expiration as `expiryDate` — with shares, their date (never an unapplied edit; a re-add of a later
@@ -1539,7 +1545,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.52 • Built 2026-10-17',
+      versionText: 'v1.0.53 • Built 2026-10-17',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
