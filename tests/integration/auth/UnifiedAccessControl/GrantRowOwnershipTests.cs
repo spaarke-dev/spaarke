@@ -368,6 +368,33 @@ public class GrantRowOwnershipTests
         _h.Store.RowsOf(_matter, contact).Should().NotContain(r => r.State == AssignedAccessState.Granted);
     }
 
+    [Fact]
+    public async Task AssignedToRenewal_ThatReachesACreate_WhenTheOwnerReadFaults_IsAFailure_NotOnlyLogged()
+    {
+        // Review round 1, K2: a renewal (owner A5) whose row vanished between the rule's read and the core's goes to a CREATE,
+        // which needs an owner. An owner refusal there is reported as a failure, the same as on the grant path.
+        ChildBuMatter();
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        (await Sync()).Complete.Should().BeTrue();
+        var granted = _h.Grants.ActiveRowsOf(_matter, contact).Single();
+        _h.Time.Now = _h.Time.Now.AddDays(70); // 20 days left: inside the 30-day renewal window
+        OwnerReadFaults();
+        var reads = 0;
+        _h.Grants.BeforeGrantQuery = _ =>
+        {
+            // Read 1 is the rule's (the row is there, so it renews); read 2 is the grant core's: the row is gone by then.
+            if (++reads == 2)
+                granted.StateCode = 1;
+        };
+
+        var outcome = await _h.SyncAsync(Matter, _matter, trigger: AssignedAccessTrigger.Job);
+
+        outcome.Complete.Should().BeFalse("a renewal whose owner could not be resolved is a failure, never only a log line");
+        outcome.Failures.Should().ContainSingle().Which.Kind.Should().Be("subject-failed");
+        _h.Grants.Creates.Should().ContainSingle("only the original grant: the renewal wrote no application-owned row");
+    }
+
     /// <summary>Counts <c>ResolveOwnerAsync</c> calls over an inner resolver.</summary>
     private sealed class CountingResolver : Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver
     {

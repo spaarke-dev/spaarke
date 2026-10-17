@@ -843,6 +843,18 @@ public sealed class AssignedAccessMaterializer
                     // pass and the next one tries again (the grant is kept as it is below).
                     DenyListFault(run, subject, "its renewal");
                 }
+                else if (outcome.Refusal.IsOwnerRefusal)
+                {
+                    // Task 099b review round 1 (K2): the renewal reached a CREATE (the row vanished between this pass's read
+                    // and the core's) and the new row's owner team could not be read, resolved or written — so the core wrote
+                    // NOTHING. Reported as a failure, exactly as on the grant path below (never only logged); the grant is
+                    // kept as it is below and the next pass decides again from fresh reads.
+                    _logger.LogError(
+                        "[ASSIGNED-ACCESS] {Type} {RootId}: the renewal of {Subject} was not written — its owner team could not " +
+                        "be resolved ({Reason}).", run.Logical, run.RootId, subject, outcome.Refusal.ReasonCode);
+                    run.Fail(subject, "subject-failed",
+                        $"Access for {subject} on this record could not be renewed: {outcome.Refusal.Detail}");
+                }
                 else
                 {
                     _logger.LogWarning(
