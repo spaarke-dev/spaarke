@@ -36,8 +36,8 @@
 - **Batch 6 gates** (`notes/batch6-live-gates-2026-10-17.md`): #2021, #1620, #994 and #1755 PASS. The #1755 fixture is the secure project `a9e04977-…`, kept with its container.
 - #1363: registration PASS. **First run PENDING: after 2026-10-18 00:15Z**, run the KQL in the batch6 notes and `GET /api/admin/jobs/demo-expiration/status`.
 - #2002: **FAIL** → #2049. The reconciliation job still resolves with Write intent. Fixed by PR #2052, **merged at 901c7eeed** (R3 told). Next R3 deploy, then re-gate: 0 Warnings in 1 h.
-- **Dev BFF = R3 build 28720f997** (06:01–06:03Z 2026-10-17; contains 901c7eeed, bed14dd67, 1d435e695). TrackingFieldTrio 1.0.50 imported on dev. Gates running: #1576, 099a. #2049: the first 2 min show 0 Warnings; the 1 h query is scheduled for 07:05Z.
-- Still to gate on later builds: #1576 (bed14dd67 is merged; needs an R3 deploy that contains it), 099a (1d435e695: an R3 deploy plus the TrackingFieldTrio 1.0.50 import, then the live check in #2035's body). Waiting on R3 for the deployed SHA and time.
+- **Dev BFF = R3 build 28720f997** (06:01–06:03Z 2026-10-17; contains 901c7eeed, bed14dd67, 1d435e695). Batch 7 gates (`notes/batch7-live-gates-2026-10-17.md`): **#1576 PASS** ((a) and (c); live disabled-caller leg NOT AVAILABLE; issue closed with evidence). **099a PASS**: child-BU testuser1 sees 5 root-owned grants; 403 without Write; TrackingFieldTrio 1.0.50 served after the scoped publish at 06:28Z (the first import skipped the publish; always use `Import-SolutionScoped.ps1`). #2049: 0 Warnings so far; the 1 h query is scheduled for 07:05Z.
+- Still to gate on later builds: 099b and 099c (after merge).
 
 ## Waiting on others
 - **Ontology:** RESOLVED: #2039 option (b)/(c) = owner D-151 (both; 102a PR #2054 is UAC-OK at decbc9e6a). Ontology Administrator Append is live. 049 is applied live, including Q6 (Ontology Administrator Signal Write removed); repo PR #2050 is UAC-OK. **OPEN with the owner, through ontology:** remove the Ontology Administrator's prvAssignsprk_Signal and prvDeletesprk_Signal (recommended: remove).
