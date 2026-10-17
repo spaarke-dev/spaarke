@@ -128,6 +128,7 @@ public static class ExternalModuleDataEndpoints
         // accessible record set. Non-participant → empty result.
         data.MapPost("/fetch", ExecuteScopedFetchAsync)
             .WithName("ExternalModuleFetch")
+            .WorkforceCeilingInHandler("Read on the requested module's table, decided at the seam before the read (the table is in the body).")
             .WithSummary("Execute a module read (FetchXML), Tier-2-scoped to the caller's accessible records")
             .Produces<FetchResponseDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -139,6 +140,7 @@ public static class ExternalModuleDataEndpoints
         // any Dataverse read. App-only.
         data.MapGet("/record/{entityLogicalName}/{id:guid}", GetScopedRecordAsync)
             .WithName("ExternalModuleRecord")
+            .WorkforceCeilingInHandler("Read on the requested module's table, decided at the seam before the read.")
             .WithSummary("Read one module record by id, denied unless it is in the caller's Tier-2 set")
             .Produces<IReadOnlyDictionary<string, object?>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -149,6 +151,7 @@ public static class ExternalModuleDataEndpoints
         // GET /metadata/{entity} — projected entity metadata (schema; no record data). App-only passthrough.
         data.MapGet("/metadata/{entityLogicalName}", GetMetadataAsync)
             .WithName("ExternalModuleMetadata")
+            .ExemptFromWorkforceCeiling("Schema only (column metadata); no record data. The rows are read through /fetch, which is checked.")
             .WithSummary("Projected entity metadata for a module DataGrid (schema only)")
             .Produces<EntityMetadataDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -159,6 +162,7 @@ public static class ExternalModuleDataEndpoints
         // grid is registered to use (task 157, F1); 404 otherwise.
         data.MapGet("/savedquery/{savedQueryId:guid}", GetSavedQueryAsync)
             .WithName("ExternalModuleSavedQuery")
+            .ExemptFromWorkforceCeiling("A registered view definition; no record data. The rows are read through /fetch, which is checked.")
             .WithSummary("Saved query payload for a module DataGrid (a registered view only)")
             .Produces<SavedQueryDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -169,6 +173,7 @@ public static class ExternalModuleDataEndpoints
         // App-only. 404 when the entity has no module or its module registers no view.
         data.MapGet("/savedqueries/{entityLogicalName}", GetSavedQueriesAsync)
             .WithName("ExternalModuleSavedQueries")
+            .ExemptFromWorkforceCeiling("Registered view definitions; no record data. The rows are read through /fetch, which is checked.")
             .WithSummary("Registered saved queries for a module entity (view definitions only)")
             .Produces<IReadOnlyList<SavedQuerySummaryDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -210,10 +215,11 @@ public static class ExternalModuleDataEndpoints
 
     /// <summary>
     /// The workforce ceiling (unified-access-control-r2 task 186) at the module-data seam: a workforce-contact caller
-    /// reading SERVICE REQUESTS (the module that owns <paramref name="entityLogicalName"/> records
-    /// <c>sprk_servicerequest</c>) also needs Read on <c>sprk_servicerequest</c> in the Workforce role. Decided before the
-    /// pipeline reads anything; the Tier-2 scope still applies after it (both must pass). Other modules are outside the
-    /// owner's round-101 route map and are not checked here.
+    /// reading ANY module (review round 1 F1: service requests, projects, matters, work assignments, documents, invoices
+    /// and the grid configuration the grids read) also needs Read on that module's table
+    /// (<see cref="ExternalModuleDescriptor.RecordEntity"/>) in the Workforce role. Decided before the pipeline reads
+    /// anything; the Tier-2 scope still applies after it (both must pass). An entity with no module is not checked here:
+    /// the pipeline refuses it before any read.
     /// </summary>
     private static Task<IResult?> WorkforceCeilingDeniedAsync(
         string? entityLogicalName,
@@ -225,8 +231,8 @@ public static class ExternalModuleDataEndpoints
     {
         var module = string.IsNullOrWhiteSpace(entityLogicalName) ? null : registry.FindByEntity(entityLogicalName);
         return module is not null
-               && string.Equals(module.RecordEntity, WorkforceRoleCeilingGate.ServiceRequestTable, StringComparison.OrdinalIgnoreCase)
-            ? WorkforceRoleCeilingGate.DenyAsync(principal, privileges, WorkforceRoleCeilingGate.ReadServiceRequests, logger, ct)
+            ? WorkforceRoleCeilingGate.DenyAsync(
+                principal, privileges, WorkforceRoleCeilingGate.ReadModuleRecords(module.RecordEntity), logger, ct)
             : Task.FromResult<IResult?>(null);
     }
 

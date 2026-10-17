@@ -466,16 +466,46 @@ public sealed class WorkforceCeilingModuleDataRouteTests : IClassFixture<Externa
     }
 
     [Fact]
-    public async Task AnotherModule_IsNotChecked_EvenWhenTheRoleCannotBeRead()
+    public async Task AnotherModule_IsCheckedToo_AndAnUnreadableRole_Is403_BaselineUnavailable()
     {
-        // Only the owner's round-101 map is enforced: a project read is not a service-request read.
+        // Review round 1 F1 (inverted from round 0): every module is held to the ceiling, not only service requests.
         _fixture.Principal = CeilingRouteTestData.WorkforceContact(Guid.NewGuid());
         _fixture.WorkforceCeiling.Ceiling = WorkforceRoleCeiling.Unavailable("role_missing");
 
         using var record = await _fixture.CreateAuthenticatedClient()
             .GetAsync($"{Base}/record/sprk_project/{Guid.NewGuid()}");
 
+        await CeilingRouteTestData.ShouldBeCeilingDenial(record, WorkforceRoleCeilingGate.DenyBaselineUnavailable);
+        _fixture.WorkforceCeiling.Reads.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("sprk_project", "<fetch><entity name='sprk_project'><attribute name='sprk_projectid' /></entity></fetch>")]
+    [InlineData("sprk_matter", "<fetch><entity name='sprk_matter'><attribute name='sprk_matterid' /></entity></fetch>")]
+    [InlineData("sprk_workassignment", "<fetch><entity name='sprk_workassignment'><attribute name='sprk_workassignmentid' /></entity></fetch>")]
+    [InlineData("sprk_document", "<fetch><entity name='sprk_document'><attribute name='sprk_documentid' /></entity></fetch>")]
+    [InlineData("sprk_invoice", "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid' /></entity></fetch>")]
+    [InlineData("sprk_gridconfiguration", "<fetch><entity name='sprk_gridconfiguration'><attribute name='sprk_gridconfigurationid' /></entity></fetch>")]
+    public async Task EveryModule_WhoseTableTheRoleCannotRead_Is403_OnFetch(string table, string fetchXml)
+    {
+        _fixture.Principal = CeilingRouteTestData.WorkforceContact(Guid.NewGuid());
+        _fixture.WorkforceCeiling.Ceiling = CeilingRouteTestData.Without(table, AccessRights.Read);
+
+        using var fetch = await Fetch(table, fetchXml);
+
+        await CeilingRouteTestData.ShouldBeCeilingDenial(fetch, WorkforceRoleCeilingGate.DenyBaselinePrivilegeMissing);
+    }
+
+    [Fact]
+    public async Task AnotherModule_WhoseTableTheRoleCanRead_PassesTheCeiling_AndTheTier2ScopeStillDecides()
+    {
+        // Must-not-fire: Read on sprk_project held, so the scope (no grant) refuses the record, not the ceiling.
+        _fixture.Principal = CeilingRouteTestData.WorkforceContact(Guid.NewGuid());
+
+        using var record = await _fixture.CreateAuthenticatedClient()
+            .GetAsync($"{Base}/record/sprk_project/{Guid.NewGuid()}");
+
         (await CeilingRouteTestData.ReasonCode(record)).Should().Be(ExternalModuleDataEndpoints.DenyRecordNotAccessible);
-        _fixture.WorkforceCeiling.Reads.Should().Be(0);
+        _fixture.WorkforceCeiling.Reads.Should().Be(1);
     }
 }

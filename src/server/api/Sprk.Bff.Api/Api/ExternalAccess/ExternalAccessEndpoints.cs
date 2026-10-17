@@ -72,11 +72,16 @@ public static class ExternalAccessEndpoints
         var externalGroup = app.MapGroup("/api/v1/external")
             .WithTags("External Access")
             .RequireAuthorization(AuthPolicies.ExternalCollaboration)
-            .AddCallerPrincipalAuthorizationFilter();
+            .AddCallerPrincipalAuthorizationFilter()
+            // The workforce privilege ceiling (unified-access-control-r2 task 186): every route below declares its
+            // requirement set, or why it is checked in its handler or exempt (WorkforceCeilingEndpointFilter.cs). After the
+            // principal filter, which it needs; before every route filter and handler, so it decides before any record read.
+            .AddWorkforceCeilingFilter();
 
         // GET /api/v1/external/me — Returns the caller's project access context (either plane)
         externalGroup.MapGet("/me", ExternalUserContextEndpoint.Handle)
             .WithName("GetExternalUserContext")
+            .ExemptFromWorkforceCeiling("Identity: the caller's own access context, read to start the SPA; no table operation.")
             .WithSummary("Get the authenticated collaboration caller's project access context")
             .WithDescription(
                 "Returns the caller's project access list with access levels. Called by the external " +
@@ -95,6 +100,7 @@ public static class ExternalAccessEndpoints
         // /me above (Tier-2 record access). Same group → same dual-scheme policy + CallerPrincipal filter.
         externalGroup.MapGet("/me/entitlements", MeEntitlementsEndpoint.Handle)
             .WithName("GetExternalUserEntitlements")
+            .WorkforceCeilingInHandler("Module codes and intake types are intersected with the ceiling in the handler (review round 1 F2).")
             .WithSummary("Get the authenticated collaboration caller's Tier-1 module entitlement context")
             .WithDescription(
                 "Returns the caller's entitled module codes (Tier-1): default modules by server-resolved " +

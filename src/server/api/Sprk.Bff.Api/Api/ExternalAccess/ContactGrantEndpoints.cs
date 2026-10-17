@@ -50,6 +50,9 @@ public static class ContactGrantEndpoints
         group.MapPost("/contact-grants", GrantAsync)
             .AddContactGrantorAuthorizationFilter()
             .WithName("GrantAccessAsContact")
+            // The record is in the body (bound before the filter runs): AppendTo on ITS table, plus the grant row itself.
+            .RequireWorkforceCeiling(context => WorkforceRoleCeilingGate.GrantAsContact(
+                context.Arguments.OfType<ContactGrantRequest>().FirstOrDefault()?.RecordType))
             .WithSummary("A contact grants a colleague of their own organization access to a record")
             .WithDescription(
                 "Grants ONE active colleague of the caller's own organization access to a project, matter or work " +
@@ -67,6 +70,7 @@ public static class ContactGrantEndpoints
         group.MapGet("/contact-grants", ListAsync)
             .AddContactGrantorAuthorizationFilter()
             .WithName("ListGrantsIssuedByContact")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ListIssuedGrants)
             .WithSummary("The grants the calling contact issued on a record")
             .Produces<ContactIssuedGrantsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -77,6 +81,7 @@ public static class ContactGrantEndpoints
         group.MapPost("/contact-grants/revoke", RevokeAsync)
             .AddContactGrantorAuthorizationFilter()
             .WithName("RevokeGrantIssuedByContact")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.RevokeIssuedGrant)
             .WithSummary("The calling contact revokes a grant they issued")
             .Produces<ContactGrantRevokeResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)

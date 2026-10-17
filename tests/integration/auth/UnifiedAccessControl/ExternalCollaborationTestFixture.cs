@@ -45,9 +45,9 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 public class ExternalCollaborationTestFixture : WorkspaceTestFixture
 {
     /// <summary>
-    /// The Workforce-role ceiling (unified-access-control-r2 task 186) this host answers with. Defaults to the owner's
-    /// prerequisite privileges (<see cref="WorkforceCeilingDouble.OwnerPrerequisite"/>), so a workforce-contact test written
-    /// before the ceiling keeps its meaning; a ceiling test sets <see cref="WorkforceCeilingDouble.Ceiling"/>.
+    /// The Workforce-role ceiling (unified-access-control-r2 task 186) this host answers with. Defaults to every privilege
+    /// the <c>/api/v1/external</c> routes need (<see cref="WorkforceCeilingDouble.OwnerPrerequisite"/>), so a workforce-contact
+    /// test written before the ceiling keeps its meaning; a ceiling test sets <see cref="WorkforceCeilingDouble.Ceiling"/>.
     /// </summary>
     internal WorkforceCeilingDouble WorkforceCeiling { get; } = new();
 
@@ -86,11 +86,27 @@ internal sealed class WorkforceCeilingDouble : IDataversePrivilegeChecker
 {
     private int _reads;
 
-    /// <summary>The privileges the owner is asked to add to the Workforce role for the Legal Front Door (design note section 0).</summary>
+    /// <summary>
+    /// Every privilege the Workforce role needs for workforce contacts to keep every <c>/api/v1/external</c> route working
+    /// (review round 1 F1): the union of the routes' requirement sets, the message and contact-grant roots, and Read on every
+    /// module the module-data seam serves. It is the table the owner is given; <c>TheFixtureDefault_IsEveryRoutesPrivilege</c>
+    /// pins it to the routes, so a route that needs more fails there first.
+    /// </summary>
     public static IReadOnlyDictionary<string, AccessRights> OwnerPrerequisite { get; } = new Dictionary<string, AccessRights>
     {
         ["sprk_servicerequest"] = AccessRights.Create | AccessRights.Read | AccessRights.AppendTo | AccessRights.Delete,
-        ["sprk_document"] = AccessRights.Create | AccessRights.Read,
+        ["sprk_document"] = AccessRights.Create | AccessRights.Read | AccessRights.Delete,
+        ["sprk_project"] = AccessRights.Read | AccessRights.AppendTo,
+        ["sprk_matter"] = AccessRights.Read | AccessRights.AppendTo,
+        ["sprk_workassignment"] = AccessRights.Read | AccessRights.AppendTo,
+        ["sprk_invoice"] = AccessRights.Read | AccessRights.AppendTo,
+        ["sprk_todo"] = AccessRights.Create | AccessRights.Read | AccessRights.Write | AccessRights.Delete,
+        ["sprk_event"] = AccessRights.Create | AccessRights.Read | AccessRights.Delete,
+        ["contact"] = AccessRights.Read,
+        ["account"] = AccessRights.Read,
+        ["sprk_communication"] = AccessRights.Create | AccessRights.Read,
+        ["sprk_externalrecordaccess"] = AccessRights.Create | AccessRights.Read | AccessRights.Write,
+        ["sprk_gridconfiguration"] = AccessRights.Read,
     };
 
     public WorkforceRoleCeiling Ceiling { get; set; } = WorkforceRoleCeiling.Available(OwnerPrerequisite);

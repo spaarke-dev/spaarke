@@ -38,7 +38,6 @@ using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
-using Sprk.Bff.Api.Services.Dataverse.Privileges;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -110,6 +109,7 @@ public static class ExternalIntakeEndpoints
     {
         externalGroup.MapPost("/servicerequests", SubmitServiceRequestAsync)
             .WithName("SubmitExternalServiceRequest")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.SubmitServiceRequest)
             .WithSummary("Submit a Legal Front Door request as the caller")
             // Minimal API binds the whole body before any gate; cap it (precedent: ComposeSaveEndpoints).
             .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes))
@@ -146,7 +146,6 @@ public static class ExternalIntakeEndpoints
         ModuleEntitlementResolver entitlements,
         ExternalDataService dataService,
         IRecordOwnershipResolver ownership,
-        IDataversePrivilegeChecker privileges,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -156,15 +155,6 @@ public static class ExternalIntakeEndpoints
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 detail: "Authentication context not available — ensure AddCallerPrincipalAuthorizationFilter is applied");
-        }
-
-        // 0. The workforce ceiling (task 186): a workforce-contact caller also needs Create on sprk_servicerequest in the
-        //    Workforce role. Systemusers and CIAM partners pass through. The checks below still apply (both must pass).
-        if (await WorkforceRoleCeilingGate
-                .DenyAsync(principal, privileges, WorkforceRoleCeilingGate.SubmitServiceRequest, logger, ct)
-                .ConfigureAwait(false) is { } ceilingDenied)
-        {
-            return ceilingDenied;
         }
 
         // 1. Tier-1, server-side: the one shared check (see the file header).

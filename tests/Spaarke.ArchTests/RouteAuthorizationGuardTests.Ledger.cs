@@ -1097,6 +1097,14 @@ public partial class RouteAuthorizationGuardTests
             "Resolves the caller principal (contact-plane identity) as the PRECONDITION of the per-record checks the handlers "
             + "make — by design, never a decision itself.",
             "the file references no decision service"),
+        // Task 186 (review round 1 F1): the workforce privilege ceiling on the /api/v1/external group. It only NARROWS — a
+        // workforce contact whose Workforce role lacks the route's declared table privileges is refused before the handler
+        // — and passes every other caller straight through. It never decides on a record, so it earns no Rule A credit; each
+        // route keeps the credit it had. Its coverage of the group is WorkforceCeilingCoverageTests.
+        new NonDecidingAttachment("AddWorkforceCeilingFilter", "Api/ExternalAccess/WorkforceCeilingEndpointFilter.cs", "-",
+            "A role-privilege ceiling by design (table x operation, never a record): a caller it does not apply to (a systemuser, "
+            + "a CIAM partner) goes straight to next, and a workforce contact the role allows goes to next too.",
+            "|| !WorkforceRoleCeilingGate.Applies(principal)) { ... return await next(context) (WorkforceCeilingEndpointFilter.cs, InvokeAsync)"),
         new NonDecidingAttachment("AddReportingAuthorizationFilter", "Api/Reporting/ReportingAuthorizationFilter.cs", "-",
             "A module gate plus the sprk_ReportingAccess role claim — a module role by design, not per-resource and not an "
             + "operator surface (sweep S-70, S-71, S-81).",
@@ -1142,6 +1150,10 @@ public partial class RouteAuthorizationGuardTests
             + "admin routes so that SpeAdminTenantScopeFilter, which decides, confines them to a root admin of a Spaarke-"
             + "operated environment (the platform-operator check that runs first in its InvokeAsync). It narrows an "
             + "AdminOnlyRoutes surface further and decides nothing itself."),
+        new NotAuthorizationForm("RequireWorkforceCeiling",
+            "Task 186 (review round 1 F1): endpoint METADATA, not a filter — the route's table x operation set for the "
+            + "workforce privilege ceiling, read by the group's AddWorkforceCeilingFilter (NonDecidingAttachments). It narrows "
+            + "what a workforce contact may do and decides nothing about any record."),
         new NotAuthorizationForm("AddEndpointFilter(ValidateFilingRequestAsync)",
             "Task 147 r1c: PATCH /api/v1/events/{id}/filing request SHAPE only (EventEndpoints.cs:172-177, "
             + "ChildRecordEndpoints.FilingShapeProblem, no I/O), before the route's RecordRouteAccessAuthorizationFilter(\"write\")."),
