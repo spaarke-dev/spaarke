@@ -1577,3 +1577,15 @@ The full record is in `notes/185-invite-code-design.md` §11.
 - **The agent's assessment:** C stands on its own merits. The research recommended C **against** the owner's own round 94 suggestion (B, an access team). It matches Microsoft's guidance for a recurring user set. It has no per-row grant, a one-query drift check, isolation between families by construction, and `ReassignObjectsOwner` per family. The family key itself is the more direct design: today membership is a computed lineage walk, which is the root of #1506, #1857 (task 187) and the share-mirror drift. With the key, the walk runs once at write time, in one owner, and every reader uses one hop.
 - **Not more design research.** The §7 spikes verify platform behaviour and are the build's first phase, with go/no-go criteria. Spike 1 is dropped (B only). Spike 3 (BU depth through team membership) would hit B equally, so it can't flip the choice. Genuinely open design items: nested families (task 158), and whether to generalise to a "record family" (§8).
 - **Recorded:** C is decided, conditional on spikes 2–7. Not built; it needs its own task or project. Task 187's walk ships now and is replaced by the family key later.
+
+## Round 101 (2026-10-17): OWNER: sign-offs, the 186 ceiling, admin Signal rights
+
+1. **Sign-off on PR #2025 (#1576: disabled users and the per-request token) and PR #2035 (099a: GET /record-grants and Manage Access Current Access): "yes".** Both may merge on a green Router. #2025 is auth code (CLAUDE.md §6). Both go out in the next R3 dev BFF deploy, with server gates afterwards.
+2. **Task 186 ceiling: "yes"** to design note §0, option (a).
+   - The Workforce role "Spaarke Internal Contact User (Workforce)" is read app-only as a CEILING.
+   - A workforce-contact operation is allowed only when the role holds the privilege at any depth AND UAC's record scope allows it.
+   - It fails closed (`workforce_baseline_unavailable`), and privilege edits take effect within 5 minutes.
+   - Privileges for the role: `sprk_servicerequest` Create, Read, AppendTo and Delete at Basic, plus `sprk_document` Create (uploads).
+   - **The owner edits the role. UAC does not.** Until the owner adds these, the ceiling denies every workforce-contact operation on those routes, as designed.
+   - UAC builds task 186 now.
+3. **Ontology Administrator `prvAssignsprk_Signal` and `prvDeletesprk_Signal` (Deep): KEEP.** The owner said: "not a risk (we can remove later)". Raised by UAC in the review of ontology PR #2050 (task 049). Relayed to ontology-r1, who record it in their decisions and in security-roles.md. The guard is not extended to cover them.
