@@ -123,6 +123,12 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.51 (task 099c, unified-access-control-r2 — FR-33, #961): no change in this file's logic. The bundled modal's
+ *   "Add Access Permissions" toolbar gains the record-wide "Expiration": it shows the shares' earliest expiry (from
+ *   `fetchExistingGrants`, 099a) and states when they differ, and applying a date calls
+ *   `POST /api/v1/external-access/set-record-share-expiry` once with the date only (never a level), then re-reads
+ *   Current Access. It goes through the same `authenticatedFetchGated` and is shown only when Manage Access is allowed.
+ *
  * v1.0.50 (task 099a review round 2): no change in this file's logic. The bundled modal lets a failed grants read
  *   settle on its own, so role candidates, Suggested Access and the secure-owner line still load beside Current Access's
  *   error; when another read fails, Current Access shows "Not shown." under the one load notice, not a second error.
@@ -1528,7 +1534,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.50 • Built 2026-10-16',
+      versionText: 'v1.0.51 • Built 2026-10-17',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
