@@ -44,6 +44,12 @@ export const REASON_SCOPE_SUBJECT_MISMATCH = 'ontology.admin.scope_subject_misma
  * both. The wizard always sends one of them; the code is placed on the scope field.
  */
 export const REASON_SCOPE_INTENT_REQUIRED = 'ontology.admin.scope_intent_required';
+/**
+ * Task 102b fix round 4 (uac-r2 E, D-123): a matter limit on a Secure or Restricted matter, or on one whose access level the caller's read
+ * did not return. The matter picker searches every matter the caller can read, secure ones included, so the refusal is placed on the scope
+ * field.
+ */
+export const REASON_SCOPE_MATTER_SECURED = 'ontology.admin.scope_matter_secured';
 
 // ---- wire shapes: the catalog -----------------------------------------------------------------------------------------------
 
@@ -321,6 +327,11 @@ const REASON_FIELD: Readonly<Record<string, { field: string; message: string }>>
   [REASON_SCOPE_INTENT_REQUIRED]: {
     field: 'matterId',
     message: 'Choose one matter, or All matters.',
+  },
+  [REASON_SCOPE_MATTER_SECURED]: {
+    field: 'matterId',
+    message:
+      'A rule cannot be limited to a Secure or Restricted matter, or to one whose access level could not be read.',
   },
 };
 

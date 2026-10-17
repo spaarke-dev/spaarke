@@ -13,6 +13,7 @@ import {
   REASON_POLICY_CODE_TAKEN,
   REASON_POLICY_RETIRED,
   REASON_SCOPE_INTENT_REQUIRED,
+  REASON_SCOPE_MATTER_SECURED,
   REASON_SCOPE_SUBJECT_MISMATCH,
   createOntologyAuthoringService,
   fieldErrorsOfValidation,
@@ -195,6 +196,33 @@ describe('createOntologyAuthoringService - failures are results', () => {
     });
     const answer = await service.publishVersion('p', { draft });
     expect(!answer.ok && answer.fieldErrors).toEqual({ matterId: ['Choose one matter, or All matters.'] });
+  });
+
+  it('puts a scope_matter_secured refusal on matterId, the scope field, with or without a message (fix round 4)', async () => {
+    const secured =
+      'A rule cannot be limited to a Secure or Restricted matter, or to one whose access level could not be read.';
+    const codeOnly = createOntologyAuthoringService({
+      fetch: jest.fn(async () => bad(400, { reasonCode: REASON_SCOPE_MATTER_SECURED })),
+      baseUrl: 'https://bff.example',
+    });
+    const withMessage = createOntologyAuthoringService({
+      fetch: jest.fn(async () =>
+        bad(400, { reasonCode: REASON_SCOPE_MATTER_SECURED, errors: { matterId: [secured] } })
+      ),
+      baseUrl: 'https://bff.example',
+    });
+    for (const service of [codeOnly, withMessage]) {
+      const answer = await service.dryRun({
+        ruleType: 'Existence',
+        ruleBody: '{}',
+        messageTemplate: 't',
+        matterId: 'm-1',
+      } as never);
+      expect(!answer.ok && answer.fieldErrors).toEqual({ matterId: [secured] });
+    }
+    expect(fieldErrorsOfValidation(validation({ valid: false, reasonCode: REASON_SCOPE_MATTER_SECURED }))).toEqual({
+      matterId: [secured],
+    });
   });
 
   it('sends the scope as given: the matter id on the body, nothing else', async () => {

@@ -1665,6 +1665,13 @@ public sealed class AuthoringWorld : IDataverseUserClient
     /// <summary>Task 102b fix round 2 (uac-r2 F1): when set, the read of a matter's name throws it (an HttpClient timeout surfaces as a
     /// <see cref="TaskCanceledException"/> while the request is still live).</summary>
     public Exception? MatterNameReadThrows { get; set; }
+
+    /// <summary>Task 102b fix round 4 (uac-r2 E): a matter's access columns as the caller's read returns them: <c>sprk_issecure</c> (null:
+    /// not returned, a masked field) and <c>sprk_accesspermission</c> (null: Standard). A matter not listed is ordinary.</summary>
+    public Dictionary<Guid, (bool? IsSecure, int? AccessPermission)> MatterAccess { get; } = new();
+
+    /// <summary>Task 102b fix round 4: when set, the scope check's read of the matter throws it.</summary>
+    public Exception? MatterAccessReadThrows { get; set; }
     public List<string> Requests { get; } = new();
     public List<Write> Writes { get; } = new();
 
@@ -1689,6 +1696,8 @@ public sealed class AuthoringWorld : IDataverseUserClient
         Missing.Clear();
         MatterNames.Clear();
         MatterNameReadThrows = null;
+        MatterAccess.Clear();
+        MatterAccessReadThrows = null;
         Requests.Clear();
         Writes.Clear();
     }
@@ -1887,6 +1896,22 @@ public sealed class AuthoringWorld : IDataverseUserClient
                         ? Array.Empty<object>()
                         : new object[] { new Dictionary<string, object?> { ["sprk_matterid"] = id.ToString("D"), ["sprk_mattername"] = MatterNames.GetValueOrDefault(id) } },
                 });
+            }
+
+            // Task 102b fix round 4 (uac-r2 E): the scope check's read of the matter with its access columns, as the caller. A row the caller
+            // cannot read (or that does not exist) is absent; sprk_issecure is false and sprk_accesspermission absent (Standard) unless set.
+            var matterAccess = Regex.Match(relativePath,
+                @"^sprk_matters\?\$select=sprk_matterid,sprk_issecure,sprk_accesspermission,statecode&\$filter=sprk_matterid eq ([0-9a-f-]{36})&\$top=1$");
+            if (matterAccess.Success)
+            {
+                if (MatterAccessReadThrows is { } thrown) throw thrown;
+                var id = Guid.Parse(matterAccess.Groups[1].Value);
+                if (Unreadable.Contains(("sprk_matter", id)) || Missing.Contains(("sprk_matter", id))) return Ok(new { value = Array.Empty<object>() });
+                var row = new Dictionary<string, object?> { ["sprk_matterid"] = id.ToString("D"), ["statecode"] = 0 };
+                var (isSecure, accessPermission) = MatterAccess.GetValueOrDefault(id, (false, null));
+                if (isSecure is { } secure) row["sprk_issecure"] = secure;
+                if (accessPermission is { } permission) row["sprk_accesspermission"] = permission;
+                return Ok(new { value = new object[] { row } });
             }
 
             var table = Regex.Match(relativePath, @"^([a-z_]+)s\?\$select=([a-z_]+)id&\$filter=Microsoft\.Dynamics\.CRM\.In\(PropertyName='[a-z_]+id',PropertyValues=\[(.*)\]\)$");

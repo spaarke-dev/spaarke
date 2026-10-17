@@ -43,7 +43,8 @@ public partial class OntologyAdminAuthoringEndpointTests
         _fixture.World.Writes.Should().ContainSingle(x => x.Kind == $"PATCH sprk_policies({PolicyId:D})").Subject;
 
     private bool MatterWasRead(Guid matter) =>
-        _fixture.World.Requests.Any(r => r.StartsWith("GET sprk_matters?$select=sprk_matterid&$filter=", StringComparison.Ordinal)
+        // Fix round 4: the scope check reads the matter's access columns with its id ("sprk_matterid,sprk_issecure,...").
+        _fixture.World.Requests.Any(r => r.StartsWith("GET sprk_matters?$select=sprk_matterid", StringComparison.Ordinal)
             && r.Contains(matter.ToString("D"), StringComparison.Ordinal));
 
     // ── Save and publish persist the scope (AC1) ──────────────────────────────────────────────────────────────────
@@ -469,5 +470,101 @@ public partial class OntologyAdminAuthoringEndpointTests
         var refusal = await Refusal(route, null, tenant: "  ");
 
         refusal.Errors.Should().BeEmpty(route);
+    }
+
+    // ── Fix round 4 (uac-r2 E, D-123): a rule cannot be limited to a Secure or Restricted matter ────────────────────────────────
+
+    private const string ScopeMatterSecured = "ontology.admin.scope_matter_secured";
+    private const string ScopeMatterSecuredMessage =
+        "A rule cannot be limited to a Secure or Restricted matter, or to one whose access level could not be read.";
+
+    /// <summary>Restricted, as the root tables' <c>sprk_accesspermission</c> option set holds it (ExternalParticipationService).</summary>
+    private const int AccessPermissionRestricted = 100000002;
+    private const int AccessPermissionLimited = 100000001;
+
+    public static TheoryData<string, string> SecuredMatterCases()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var route in new[] { "validate", "dry run", "dry run (new)", "save", "publish" })
+        {
+            foreach (var kind in new[] { "secure", "restricted", "secure and restricted", "flag not returned" }) data.Add(route, kind);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(SecuredMatterCases))]
+    public async Task Scope_R4_ASecureOrRestrictedMatter_IsRefused_ScopeMatterSecured_OnEveryRoute(string route, string kind)
+    {
+        _fixture.World.MatterAccess[MatterA] = kind switch
+        {
+            "secure" => (true, null),
+            "restricted" => (false, AccessPermissionRestricted),
+            "secure and restricted" => (true, AccessPermissionRestricted),
+            _ => (null, null), // sprk_issecure masked: fails closed as Unreadable
+        };
+
+        var refusal = await Refusal(route, MatterA);
+
+        refusal.Should().Be((HttpStatusCode.BadRequest, ScopeMatterSecured, "matterId=" + ScopeMatterSecuredMessage), $"{route}, {kind}");
+        MatterWasRead(MatterA).Should().BeTrue("the matter is read as the caller");
+        _fixture.Engine.Evaluated.Should().BeEmpty("a refused scope is never evaluated");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(ScopedRoutes))]
+    public async Task Scope_R4_AnOrdinaryOrLimitedMatter_IsAllowed(string route)
+    {
+        // Must-not-fire: Standard (no value) and Limited are not refused; the refusal is Secure or Restricted only.
+        _fixture.World.MatterAccess[MatterB] = (false, AccessPermissionLimited);
+        if (route == "publish")
+        {
+            (await ScopedDryRun(PolicyId, MatterA)).StatusCode.Should().Be(HttpStatusCode.OK);
+            (await ScopedPublish(PolicyId, MatterA)).StatusCode.Should().Be(HttpStatusCode.OK);
+            _fixture.World.Policies[PolicyId].Matter.Should().Be(MatterA);
+            return;
+        }
+
+        if (route == "save")
+        {
+            (await ScopedDryRun(null, MatterB, lane: "Decide")).StatusCode.Should().Be(HttpStatusCode.OK);
+            (await ScopedSave(MatterB)).StatusCode.Should().Be(HttpStatusCode.Created);
+            return;
+        }
+
+        var ordinary = await Refusal(route, MatterA);
+        var limited = await Refusal(route, MatterB);
+
+        ordinary.Should().Be((HttpStatusCode.OK, (string?)null, string.Empty), route);
+        limited.Should().Be(ordinary, route);
+    }
+
+    [Theory]
+    [InlineData("validate", "500")]
+    [InlineData("dry run", "500")]
+    [InlineData("save", "500")]
+    [InlineData("publish", "500")]
+    [InlineData("dry run", "throws")]
+    [InlineData("publish", "throws")]
+    public async Task Scope_R4_WhenTheMattersAccessCannotBeRead_TheScopeIsNeverAllowed(string route, string fault)
+    {
+        // Fail closed: a read fault is "unavailable", never an ordinary matter.
+        if (fault == "throws") _fixture.World.MatterAccessReadThrows = new HttpRequestException("Dataverse is unreachable.");
+        else _fixture.World.FailRead = "sprk_matters?$select=sprk_matterid,sprk_issecure";
+
+        var response = route switch
+        {
+            "validate" => await ScopedValidate(MatterA),
+            "dry run" => await ScopedDryRun(PolicyId, MatterA),
+            "save" => await ScopedSave(MatterA),
+            _ => await ScopedPublish(PolicyId, MatterA),
+        };
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, $"{route}: {await response.Content.ReadAsStringAsync()}");
+        (await Json(response)).GetProperty("reasonCode").GetString().Should().Be("ontology.admin.unavailable");
+        _fixture.Engine.Evaluated.Should().BeEmpty();
+        _fixture.World.Writes.Should().BeEmpty();
     }
 }

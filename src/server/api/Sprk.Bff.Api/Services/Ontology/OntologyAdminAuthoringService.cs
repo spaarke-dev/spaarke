@@ -93,6 +93,13 @@ public sealed partial class OntologyAdminAuthoringService
         "This rule is limited to a matter. Send that matter to keep the limit, or all matters to remove it.";
     internal const string ScopeIntentConflictMessage = "Send a matter or all matters, not both.";
 
+    /// <summary>Task 102b fix round 4 (uac-r2 E, D-123): the stable code every authoring route (validate, dry run, save, publish) returns
+    /// for a matter scope on a Secure or Restricted matter, or on one whose access level the caller's read did not return. Only reached
+    /// after the caller's own read returned the matter, so it tells the caller nothing their read did not (no existence oracle).</summary>
+    internal const string ReasonScopeMatterSecured = "ontology.admin.scope_matter_secured";
+    internal const string ScopeMatterSecuredMessage =
+        "A rule cannot be limited to a Secure or Restricted matter, or to one whose access level could not be read.";
+
     /// <summary>The privilege the dry run requires, asked FRESH on every request as the caller (F1-1): creating a policy version is
     /// what authoring a rule means (D-22).</summary>
     internal const string AuthoringPrivilegeName = "prvCreatesprk_PolicyVersion";
@@ -1568,6 +1575,8 @@ public sealed partial class OntologyAdminAuthoringService
     /// <item>otherwise the matter is read AS THE CALLER (the dry run's readable-ids read): a matter that does not exist and one the caller
     /// cannot read get the same <see cref="MatterNotFoundMessage"/>, so the answer is no oracle. The read is skipped when the request is
     /// refused anyway.</item>
+    /// <item>(fix round 4, uac-r2 E) a matter the caller's read returns as Secure or Restricted, or with an access level it did not return,
+    /// is refused with <see cref="ReasonScopeMatterSecured"/> (<see cref="ReadMatterAccessAsync"/>).</item>
     /// </list>
     /// No matter id means all matters: the rule behaves exactly as before task 102b, except (fix round 1, F4) on a dry run or publish of a
     /// policy whose <paramref name="storedMatter"/> is set: there, no matter id needs <paramref name="allMatters"/> true, or the request is
@@ -1621,19 +1630,81 @@ public sealed partial class OntologyAdminAuthoringService
             return default;
         }
 
-        var sets = new Dictionary<string, string>(StringComparer.Ordinal) { [MatterSubject] = MatterEntitySet };
-        var readable = await ReadableIdsAsync(MatterSubject, [matter], sets, ct).ConfigureAwait(false);
-        if (readable.Failure is { } failure)
+        var access = await ReadMatterAccessAsync(matter, ct).ConfigureAwait(false);
+        if (access.Failure is { } failure)
         {
             return new ScopeCheck(null, failure);
         }
 
-        if (!readable.Value!.Contains(matter))
+        if (access.Flags is not { } flags)
         {
             errors["matterId"] = [MatterNotFoundMessage]; // absent or unreadable: one answer
+            return default;
+        }
+
+        // Fix round 4 (uac-r2 E, D-123): the rule row is not a secure-family record and Console User reads sprk_policy at Deep depth, so a
+        // limit on a Secure or Restricted matter would show a non-member the matter link and what is watched on it. Refused; an access
+        // level the caller's read did not return (a masked sprk_issecure) is refused the same way, never read as ordinary.
+        if (flags.IsUnreadable || flags.IsSecure || flags.IsRestricted)
+        {
+            errors["matterId"] = [ScopeMatterSecuredMessage];
+            return new ScopeCheck(ReasonScopeMatterSecured, null);
         }
 
         return default;
+    }
+
+    /// <summary>Fix round 4: what the caller's read of a matter scope returned.</summary>
+    /// <param name="Flags">The matter's access flags, mapped by the one rule the access services use
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService.FlagsFrom"/>); null when the read returned no row
+    /// (the matter does not exist, or the caller cannot read it).</param>
+    /// <param name="Failure">The read failed: the scope is neither allowed nor refused on a guess.</param>
+    private readonly record struct MatterAccess(Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags? Flags, Failure? Failure);
+
+    /// <summary>
+    /// Fix round 4 (uac-r2 E): reads the scope matter AS THE CALLER with its access columns
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService.RootFlagColumns"/>: <c>sprk_issecure</c>,
+    /// <c>sprk_accesspermission</c>, <c>statecode</c>) and maps them with <c>ExternalParticipationService.FlagsFrom</c>, the canonical
+    /// Secure / Restricted rule (an EMPTY <c>sprk_issecure</c> is <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags.IsUnreadable"/>).
+    /// The caller's own read is the existence check as before (no row: not found), so a matter the caller cannot read is never classified.
+    /// Fails closed: an unresolved caller, a non-success other than a refusal, or a fault is a failure, never "allowed".
+    /// </summary>
+    private async Task<MatterAccess> ReadMatterAccessAsync(Guid matterId, CancellationToken ct)
+    {
+        DataverseUserResponse response;
+        try
+        {
+            response = await _user.GetAsync(
+                $"{MatterEntitySet}?$select=sprk_matterid,{Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService.RootFlagColumns}"
+                + $"&$filter=sprk_matterid eq {matterId:D}&$top=1", ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Ontology authoring: the caller's read of the scope matter failed ({ExceptionType}).", ex.GetType().Name);
+            return new MatterAccess(null, Failure.Unavailable);
+        }
+
+        if (!response.IsSuccess)
+        {
+            if (IsCallerUnresolved(response.ErrorCode)) return new MatterAccess(null, Failure.CallerUnresolved);
+            if (response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied) return new MatterAccess(null, null);
+            _logger.LogWarning("Ontology authoring: the caller's read of the scope matter failed ({ErrorCode}).", response.ErrorCode);
+            return new MatterAccess(null, Failure.Unavailable);
+        }
+
+        foreach (var row in Rows(response.Body))
+        {
+            if (!TryGuid(row, "sprk_matterid", out var id) || id != matterId) continue;
+            bool? isSecure = row.TryGetProperty("sprk_issecure", out var secure) && secure.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? secure.GetBoolean()
+                : null;
+            return new MatterAccess(
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService.FlagsFrom(
+                    isSecure, ReadInt(row, "sprk_accesspermission"), ReadInt(row, "statecode")),
+                null);
+        }
+
+        return new MatterAccess(null, null);
     }
 
     /// <summary>The rule body's <c>subject</c>, or null when the body cannot be read (its own validation reports that).</summary>
