@@ -111,12 +111,6 @@
                         </labels>
                         <control id="sprk_totalamount" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_totalamount" disabled="false" />
                       </cell>
-                      <cell id="{981398e4-1e74-4374-a119-2a8a1b8a1245}" locklevel="0" colspan="1" rowspan="1">
-                        <labels>
-                          <label description="" languagecode="1033" />
-                        </labels>
-                        <control id="sprk_invoicestatus" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_invoicestatus" disabled="false" />
-                      </cell>
                     </row>
                   </rows>
                 </section>
@@ -790,7 +784,7 @@
               <boundField type="SingleLine.Text">sprk_invoicenumber</boundField>
               <title type="SingleLine.Text" static="true">INVOICE INFORMATION</title>
               <showVersion type="TwoOptions" static="true">true</showVersion>
-              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Invoice","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_invoicenumber","span":1},{"name":"sprk_name","span":2,"required":true},{"name":"sprk_totalamount","span":1},{"name":"sprk_invoicedate","span":1},{"name":"sprk_invoicestatus","span":1},{"name":"sprk_highpriority","span":1},{"name":"sprk_description","span":3,"renderer":"textarea"}]}</layoutJson>
+              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Invoice","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_invoicenumber","span":1},{"name":"sprk_name","span":2,"required":true},{"name":"sprk_totalamount","span":1},{"name":"sprk_invoicedate","span":1},{"name":"sprk_highpriority","span":1},{"name":"sprk_description","span":3,"renderer":"textarea"}]}</layoutJson>
             </parameters>
           </customControl>
           <customControl formFactor="2" name="sprk_Spaarke.Records.RecordHeader">
@@ -798,7 +792,7 @@
               <boundField type="SingleLine.Text">sprk_invoicenumber</boundField>
               <title type="SingleLine.Text" static="true">INVOICE INFORMATION</title>
               <showVersion type="TwoOptions" static="true">true</showVersion>
-              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Invoice","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_invoicenumber","span":1},{"name":"sprk_name","span":2,"required":true},{"name":"sprk_totalamount","span":1},{"name":"sprk_invoicedate","span":1},{"name":"sprk_invoicestatus","span":1},{"name":"sprk_highpriority","span":1},{"name":"sprk_description","span":3,"renderer":"textarea"}]}</layoutJson>
+              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Invoice","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_invoicenumber","span":1},{"name":"sprk_name","span":2,"required":true},{"name":"sprk_totalamount","span":1},{"name":"sprk_invoicedate","span":1},{"name":"sprk_highpriority","span":1},{"name":"sprk_description","span":3,"renderer":"textarea"}]}</layoutJson>
             </parameters>
           </customControl>
           <customControl formFactor="1" name="sprk_Spaarke.Records.RecordHeader">
@@ -806,7 +800,7 @@
               <boundField type="SingleLine.Text">sprk_invoicenumber</boundField>
               <title type="SingleLine.Text" static="true">INVOICE INFORMATION</title>
               <showVersion type="TwoOptions" static="true">true</showVersion>
-              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Invoice","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_invoicenumber","span":1},{"name":"sprk_name","span":2,"required":true},{"name":"sprk_totalamount","span":1},{"name":"sprk_invoicedate","span":1},{"name":"sprk_invoicestatus","span":1},{"name":"sprk_highpriority","span":1},{"name":"sprk_description","span":3,"renderer":"textarea"}]}</layoutJson>
+              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Invoice","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_invoicenumber","span":1},{"name":"sprk_name","span":2,"required":true},{"name":"sprk_totalamount","span":1},{"name":"sprk_invoicedate","span":1},{"name":"sprk_highpriority","span":1},{"name":"sprk_description","span":3,"renderer":"textarea"}]}</layoutJson>
             </parameters>
           </customControl>
         </controlDescription>
