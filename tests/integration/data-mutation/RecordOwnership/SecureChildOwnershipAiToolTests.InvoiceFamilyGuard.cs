@@ -71,6 +71,126 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _appCreates.Should().BeEmpty();
     }
 
+    // ── Task 026 (fix-round-1 item 3b): a line belongs only to an invoice of its own core record ─────────────────
+
+    private static readonly Guid GuardLine = Guid.Parse("a2470000-0000-4000-8000-0000000013a4");
+
+    /// <summary>A stored line as the caller reads it: its own core lookup and its invoice.</summary>
+    private void StoredLine(Guid id, Guid matter, Guid invoice)
+    {
+        _user.RowValues[id] = new Dictionary<string, object?>
+        {
+            ["_sprk_matter_value"] = matter.ToString("D"), ["_sprk_invoice_value"] = invoice.ToString("D"),
+        };
+        _world.WithRecord("sprk_billingevent", id, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", matter), ["sprk_invoice"] = new EntityReference("sprk_invoice", invoice) });
+    }
+
+    [Fact]
+    public async Task ChildCreate_ALineOfAnInvoiceOfItsOwnMatter_IsCreated()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+
+        var result = await CreateChild("sprk_billingevent", new()
+        {
+            ["sprk_name"] = "x",
+            ["sprk_matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_Invoice@odata.bind"] = $"/sprk_invoices({GuardInvoice:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        _appCreates.Should().ContainSingle().Which.Table.Should().Be("sprk_billingevent");
+    }
+
+    [Fact]
+    public async Task ChildCreate_ALineOfAnInvoiceOfAnotherMatter_IsRefusedLineMismatch_AndCreatesNothing()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", SecureMatter);
+
+        var result = await CreateChild("sprk_billingevent", new()
+        {
+            ["sprk_name"] = "x",
+            ["sprk_matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_Invoice@odata.bind"] = $"/sprk_invoices({GuardInvoice:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildCreate_ALineOfAnInvoiceTheCallerCannotRead_IsTheUniformNotFound_AndCreatesNothing()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _user.UnreadableRows.Add(GuardInvoice);
+
+        var result = await CreateChild("sprk_billingevent", new()
+        {
+            ["sprk_name"] = "x",
+            ["sprk_matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_Invoice@odata.bind"] = $"/sprk_invoices({GuardInvoice:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status404NotFound, Detail(result));
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.NotFoundCode);
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateRecordTool_ALineOfAnInvoiceOfAnotherMatter_IsRefusedLineMismatch()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", SecureMatter);
+
+        var result = await CreateRecord("sprk_billingevent",
+            ("sprk_name", JsonSerializer.SerializeToElement("x")),
+            Lookup("sprk_matter", "sprk_matter", OrdinaryMatter),
+            Lookup("sprk_invoice", "sprk_invoice", GuardInvoice));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateRecordTool_ALineMovedToAnInvoiceOfAnotherMatter_IsRefusedLineMismatch()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        StoredInvoice(SupersededInvoice, "sprk_matter", SecureMatter);
+        StoredLine(GuardLine, OrdinaryMatter, GuardInvoice);
+
+        var result = await UpdateRecord("sprk_billingevent", GuardLine, Lookup("sprk_invoice", "sprk_invoice", SupersededInvoice));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        _user.Patches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateRecordTool_ALineMovedToAnotherMatter_KeepingItsStoredInvoice_IsRefusedLineMismatch()
+    {
+        // The merge keeps the stored invoice (read from the invoice set, not the line's) while the change moves the line's
+        // own core record: the invoice stays on the old matter.
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        StoredLine(GuardLine, OrdinaryMatter, GuardInvoice);
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        var reads = new List<string>();
+        _user.GetOverride = path =>
+        {
+            reads.Add(path);
+            return null;
+        };
+
+        var result = await UpdateRecord("sprk_billingevent", GuardLine,
+            ("sprk_matter", JsonNull),
+            Lookup("sprk_project", "sprk_project", OrdinaryProject));
+
+        result.Success.Should().BeFalse(result.ErrorMessage);
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        reads.Should().Contain(p => p.StartsWith($"sprk_invoices({GuardInvoice:D})?$select=", StringComparison.Ordinal));
+        _user.Patches.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task ChildCreate_AnInvoiceSupersedingAnInvoiceOfAnotherCoreRecord_IsRefusedMismatch_AndCreatesNothing()
     {

@@ -528,15 +528,21 @@ public class InvoiceFamilyCoreRecordGuardTests
         (_, _) => throw new InvalidOperationException("must not be read");
 
     [Fact]
-    public void GuardedLookups_AreTheCoreLookups_PlusTheInvoicesSupersedes_AndTheExternalIdentifiersInvoice_NeverALinesInvoice()
+    public void GuardedLookups_AreTheCoreLookups_PlusTheInvoicesSupersedes_TheLinesInvoice_AndTheExternalIdentifiersInvoice()
     {
         InvoiceFamilyCoreRecordGuard.GuardedLookups("sprk_invoice").Should().BeEquivalentTo(new[]
         {
             ("sprk_matter", "sprk_matter"), ("sprk_project", "sprk_project"),
             ("sprk_regardingworkassignment", "sprk_workassignment"), ("sprk_supersedesinvoice", "sprk_invoice"),
         });
-        InvoiceFamilyCoreRecordGuard.GuardedLookups("sprk_billingevent")!.Select(g => g.Column)
-            .Should().NotContain("sprk_invoice", "D-75");
+        // Task 026: a line's invoice is guarded (compared with the line's own core record); D-75 still holds, because the
+        // stored-row twin (ColumnsToRead) never reads it and the line's core record is never taken from it.
+        InvoiceFamilyCoreRecordGuard.GuardedLookups("sprk_billingevent").Should().BeEquivalentTo(new[]
+        {
+            ("sprk_matter", "sprk_matter"), ("sprk_project", "sprk_project"),
+            ("sprk_regardingworkassignment", "sprk_workassignment"), ("sprk_invoice", "sprk_invoice"),
+        });
+        InvoiceFamilyCoreRecordGuard.ColumnsToRead("sprk_billingevent").Should().NotContain("sprk_invoice", "D-75");
         InvoiceFamilyCoreRecordGuard.GuardedLookups("sprk_externalidentifier")!.Should().Contain(("sprk_regardinginvoice", "sprk_invoice"));
         InvoiceFamilyCoreRecordGuard.GuardedLookups("sprk_todo").Should().BeNull();
     }
@@ -618,5 +624,108 @@ public class InvoiceFamilyCoreRecordGuardTests
         notAnInvoice.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.LookupNotACoreRecordCode);
         none.IsRefused.Should().BeFalse(none.Reason);
         twoCores.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode, "the row's own rule is asked first");
+    }
+
+    // ── Task 026 (fix-round-1 item 3b): a line belongs only to an invoice of its own core record ────────────────────
+
+    [Fact]
+    public async Task CheckWrite_ALineOfAnInvoiceOfTheSameMatter_IsDecided_OnItsOwnLookup()
+    {
+        EntityReference? asked = null;
+        var result = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_billingevent",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_invoice", new EntityReference("sprk_invoice", InvoiceId))),
+            (invoice, ct) => { asked = invoice; return SupersededRegarding("sprk_matter", MatterId)(invoice, ct); });
+
+        result.IsRefused.Should().BeFalse(result.Reason);
+        result.Regarding.Should().BeEquivalentTo(new EntityReference("sprk_matter", MatterId));
+        result.RegardingColumn.Should().Be("sprk_matter", "D-75: the line's own lookup, never its invoice");
+        asked.Should().BeEquivalentTo(new EntityReference("sprk_invoice", InvoiceId));
+    }
+
+    [Theory]
+    [InlineData("sprk_matter", "22222222-2222-2222-2222-222222222222")] // another matter
+    [InlineData("sprk_project", "11111111-1111-1111-1111-111111111111")] // the same id, another core table
+    [InlineData("sprk_workassignment", "33333333-3333-3333-3333-333333333333")]
+    public async Task CheckWrite_ALineOfAnInvoiceOfAnotherCoreRecord_IsRefusedLineMismatch(string core, string id)
+    {
+        var result = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_billingevent",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_invoice", new EntityReference("sprk_invoice", InvoiceId))),
+            SupersededRegarding(core, Guid.Parse(id)));
+
+        result.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        result.Reason.Should().Contain("the invoice it belongs to");
+    }
+
+    [Fact]
+    public async Task CheckWrite_ALineOfAnInvoiceThatNamesNoSingleCoreRecord_IsRefusedLineMismatch()
+    {
+        var none = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_billingevent",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_invoice", new EntityReference("sprk_invoice", InvoiceId))),
+            (_, _) => Task.FromResult(InvoiceFamilyCoreRecordGuard.Check("sprk_invoice", _ => null)));
+        var two = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_billingevent",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_invoice", new EntityReference("sprk_invoice", InvoiceId))),
+            (_, _) => Task.FromResult(InvoiceFamilyCoreRecordGuard.Check("sprk_invoice",
+                Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                    ("sprk_project", new EntityReference("sprk_project", ProjectId))))));
+
+        none.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        two.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode,
+            "never accepted because the invoice's own lookups include the line's core record");
+    }
+
+    [Theory]
+    [InlineData(InvoiceFamilyCoreRecordGuard.ReadFailedCode)]
+    [InlineData(InvoiceFamilyCoreRecordGuard.RecordNotFoundCode)]
+    public async Task CheckWrite_WhenALinesInvoiceCannotBeRead_FailsClosedWithThatCode_NeverAMatch(string code)
+    {
+        var refused = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_billingevent",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_invoice", new EntityReference("sprk_invoice", InvoiceId))),
+            (_, _) => Task.FromResult(new InvoiceFamilyCoreRecord { EntityLogicalName = "sprk_invoice", RefusalCode = code, Reason = "x" }));
+        var thrown = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_billingevent",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_invoice", new EntityReference("sprk_invoice", InvoiceId))),
+            (_, _) => throw new HttpRequestException("boom"));
+
+        refused.RefusalCode.Should().Be(code);
+        thrown.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        thrown.Reason.Should().NotContain("boom", "the fault's own text stays out of the reason");
+    }
+
+    [Fact]
+    public async Task CheckWrite_ALineWithNoInvoice_IsNotRead_ALinesOwnRuleIsAskedFirst_AndANonInvoiceValueIsRefused()
+    {
+        var noInvoice = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_billingevent",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId))), NeverRead);
+        var onlyItsInvoice = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_billingevent",
+            Reads(("sprk_invoice", new EntityReference("sprk_invoice", InvoiceId))), NeverRead);
+        var notAnInvoice = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_billingevent",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_invoice", new EntityReference("sprk_matter", InvoiceId))),
+            NeverRead);
+
+        noInvoice.IsRefused.Should().BeFalse(noInvoice.Reason);
+        onlyItsInvoice.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.NoCoreRecordCode, "D-75: never derived from the invoice");
+        notAnInvoice.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.LookupNotACoreRecordCode);
+    }
+
+    [Theory]
+    [InlineData("sprk_invoicesubmission")]
+    [InlineData("sprk_invoiceapproval")]
+    [InlineData("sprk_invoicecorrection")]
+    [InlineData("sprk_externalidentifier")]
+    public async Task CheckWrite_TheOtherFamilyTables_AreNeverComparedWithAnInvoice(string table)
+    {
+        var result = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync(table,
+            Reads(("sprk_regardingmatter", new EntityReference("sprk_matter", MatterId)),
+                ("sprk_invoice", new EntityReference("sprk_invoice", InvoiceId)),
+                ("sprk_regardinginvoice", new EntityReference("sprk_invoice", InvoiceId))),
+            NeverRead);
+
+        result.IsRefused.Should().BeFalse(result.Reason);
     }
 }

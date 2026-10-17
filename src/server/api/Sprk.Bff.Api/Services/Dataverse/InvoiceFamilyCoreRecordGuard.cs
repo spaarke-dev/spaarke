@@ -45,8 +45,10 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// keep their typed <c>sprk_matter</c> / <c>sprk_project</c> and add <c>sprk_regardingworkassignment</c>; the tables
 /// created for eBilling carry the <c>sprk_regarding{core}</c> trio (<see cref="CoreAncestorResolver.CoreAncestorLookups"/>
 /// names). FR-05 names three core types, so <c>sprk_regardingservicerequest</c> is never one of them.</para>
-/// <para><b>D-75.</b> A line's core record is its OWN lookup. <c>sprk_billingevent.sprk_invoice</c> is never read here: a
-/// line may in future not belong to exactly one invoice.</para>
+/// <para><b>D-75.</b> A line's core record is its OWN lookup, never derived from <c>sprk_billingevent.sprk_invoice</c>: a
+/// line may in future not belong to exactly one invoice. On a WRITE, a line that does name an invoice must regard the same
+/// core record as that invoice (<see cref="LineInvoiceCoreRecordMismatchCode"/>, task 026): the invoice is compared, never
+/// the source of the answer, and a line with no invoice is decided on its own lookup alone.</para>
 /// <para><b>Invoice-only external identifiers (D-68).</b> An <c>sprk_externalidentifier</c> row with no core lookup but
 /// with <c>sprk_regardinginvoice</c> regards the invoice: its pair (<c>sprk_regardingrecordid</c> and the other four
 /// fields) describes the invoice, so the D-68 alternate key (firm, type, normalized value, record) never has an empty
@@ -82,6 +84,17 @@ public static class InvoiceFamilyCoreRecordGuard
     /// </summary>
     public const string SupersedesCoreRecordMismatchCode = "invoice_family_supersedes_core_record_mismatch";
 
+    /// <summary>
+    /// A line (<c>sprk_billingevent</c>) names an invoice filed under a different core record than its own (or an invoice
+    /// that names none, or more than one). The line's core record is its own lookup (D-75); the invoice it belongs to must
+    /// regard the same matter, project or work assignment (ebilling-r1 task 026, D-94 condition 2), so what is filed under
+    /// a line and under its invoice lands in one core record.
+    /// </summary>
+    public const string LineInvoiceCoreRecordMismatchCode = "invoice_family_line_invoice_core_record_mismatch";
+
+    /// <summary><c>sprk_billingevent.sprk_invoice</c> (lookup to <c>sprk_invoice</c>): the invoice a line belongs to.</summary>
+    public const string LineInvoiceColumn = "sprk_invoice";
+
     /// <summary><c>sprk_invoice.sprk_supersedesinvoice</c> (lookup to <c>sprk_invoice</c>, task 012): the invoice this one replaces.</summary>
     public const string SupersedesInvoiceColumn = "sprk_supersedesinvoice";
 
@@ -92,6 +105,8 @@ public static class InvoiceFamilyCoreRecordGuard
     public const string ExternalIdentifierInvoiceColumn = "sprk_regardinginvoice";
 
     private const string InvoiceEntity = "sprk_invoice";
+
+    private const string LineEntity = "sprk_billingevent";
 
     /// <summary>
     /// The shortest live <c>sprk_regardingrecordname</c> in the family (<c>sprk_invoice</c> / <c>sprk_billingevent</c>:
@@ -152,8 +167,9 @@ public static class InvoiceFamilyCoreRecordGuard
 
     /// <summary>
     /// Every lookup a write of <paramref name="entityLogicalName"/> is decided on, with the one table it targets: the core
-    /// lookups (<see cref="CoreRecordLookups"/>), an external identifier's invoice (D-68) and an invoice's
-    /// <see cref="SupersedesInvoiceColumn"/>. Never a line's <c>sprk_invoice</c> (D-75). Null for a table outside the family.
+    /// lookups (<see cref="CoreRecordLookups"/>), an external identifier's invoice (D-68), an invoice's
+    /// <see cref="SupersedesInvoiceColumn"/> and a line's <see cref="LineInvoiceColumn"/> (compared with the line's own core
+    /// record, never its source — D-75). Null for a table outside the family.
     /// The write core reads these from the stored row and overlays the change before <see cref="CheckWriteAsync"/>.
     /// </summary>
     public static IReadOnlyList<(string Column, string Table)>? GuardedLookups(string entityLogicalName)
@@ -169,6 +185,8 @@ public static class InvoiceFamilyCoreRecordGuard
             columns.Add((ExternalIdentifierInvoiceColumn, InvoiceEntity));
         if (IsInvoice(entityLogicalName))
             columns.Add((SupersedesInvoiceColumn, InvoiceEntity));
+        if (IsLine(entityLogicalName))
+            columns.Add((LineInvoiceColumn, InvoiceEntity));
 
         return columns;
     }
@@ -177,13 +195,15 @@ public static class InvoiceFamilyCoreRecordGuard
     /// The rule for a write (create or update) of an invoice-family row: <see cref="Check(string, Func{string, object?})"/>
     /// on the row AS IT WILL BE after the write, then, for an invoice that supersedes another, the superseded invoice must
     /// regard the SAME core record (<see cref="SupersedesCoreRecordMismatchCode"/> otherwise — never accepted because one
-    /// side could not be decided). A failure to read the superseded invoice is <see cref="ReadFailedCode"/> or
-    /// <see cref="RecordNotFoundCode"/>, never a match.
+    /// side could not be decided); for a line that names its invoice, that invoice must regard the line's own core record
+    /// (<see cref="LineInvoiceCoreRecordMismatchCode"/>, task 026). A failure to read the other invoice is
+    /// <see cref="ReadFailedCode"/> or <see cref="RecordNotFoundCode"/>, never a match.
     /// </summary>
     /// <param name="entityLogicalName">The table written.</param>
     /// <param name="read">Each guarded lookup's value after the write (<see cref="GuardedLookups"/>; null = not set).</param>
-    /// <param name="resolveSuperseded">Decides the superseded invoice's core record from its stored row — read by the
-    /// writer, as its caller; its refusal (a read fault included) is taken as given.</param>
+    /// <param name="resolveSuperseded">Decides the other invoice's core record (the superseded invoice, or a line's
+    /// invoice) from its stored row — read by the writer, as its caller; its refusal (a read fault included) is taken as
+    /// given.</param>
     public static async Task<InvoiceFamilyCoreRecord> CheckWriteAsync(
         string entityLogicalName,
         Func<string, object?> read,
@@ -193,44 +213,56 @@ public static class InvoiceFamilyCoreRecordGuard
         ArgumentNullException.ThrowIfNull(read);
         ArgumentNullException.ThrowIfNull(resolveSuperseded);
         var decided = Check(entityLogicalName, read);
-        if (decided.IsRefused || !IsInvoice(decided.EntityLogicalName))
+        if (decided.IsRefused)
             return decided;
 
-        if (!TryReadReference(read(SupersedesInvoiceColumn), InvoiceEntity, out var superseded))
+        // The one other invoice a write is compared with: the invoice an invoice supersedes, or the invoice a line belongs
+        // to (task 026). Every other family table has none.
+        var (column, mismatchCode, relation, rule) = IsInvoice(decided.EntityLogicalName)
+            ? (SupersedesInvoiceColumn, SupersedesCoreRecordMismatchCode, "the invoice it supersedes",
+                "an invoice supersedes only an invoice of the same matter, project or work assignment")
+            : IsLine(decided.EntityLogicalName)
+                ? (LineInvoiceColumn, LineInvoiceCoreRecordMismatchCode, "the invoice it belongs to",
+                    "a line belongs only to an invoice of its own matter, project or work assignment")
+                : ((string?)null, (string?)null, (string?)null, (string?)null);
+        if (column is null || mismatchCode is null || relation is null || rule is null)
+            return decided;
+
+        if (!TryReadReference(read(column), InvoiceEntity, out var invoice))
         {
             return decided.Refuse(LookupNotACoreRecordCode,
-                $"{InvoiceEntity}.{SupersedesInvoiceColumn} must be a lookup to {InvoiceEntity}; the value given is not.");
+                $"{decided.EntityLogicalName}.{column} must be a lookup to {InvoiceEntity}; the value given is not.");
         }
 
-        if (superseded is null)
+        if (invoice is null)
             return decided;
 
         InvoiceFamilyCoreRecord other;
         try
         {
-            other = await resolveSuperseded(superseded, ct).ConfigureAwait(false);
+            other = await resolveSuperseded(invoice, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             // The reason reaches the caller (a 500's detail): the fault's own text stays out of it.
             return decided.Refuse(ReadFailedCode,
-                $"The invoice it supersedes could not be read ({ex.GetType().Name}); nothing was written.");
+                $"The {relation["the ".Length..]} could not be read ({ex.GetType().Name}); nothing was written.");
         }
 
         if (other.RefusalCode is ReadFailedCode or RecordNotFoundCode)
-            return decided.Refuse(other.RefusalCode, other.Reason ?? $"The superseded {InvoiceEntity} could not be read; nothing was written.");
+            return decided.Refuse(other.RefusalCode, other.Reason ?? $"The {relation["the ".Length..]} could not be read; nothing was written.");
 
         var own = decided.Regarding!; // decided, so it names its record
         if (other.IsRefused || other.Regarding is not { } otherCore
             || !string.Equals(otherCore.LogicalName, own.LogicalName, StringComparison.OrdinalIgnoreCase)
             || otherCore.Id != own.Id)
         {
-            return decided.Refuse(SupersedesCoreRecordMismatchCode,
-                $"{InvoiceEntity} regards {own.LogicalName}({own.Id:D}) but the invoice it supersedes "
+            return decided.Refuse(mismatchCode,
+                $"{decided.EntityLogicalName} regards {own.LogicalName}({own.Id:D}) but {relation} "
                 + (other.Regarding is { } r && !other.IsRefused
                     ? $"regards {r.LogicalName}({r.Id:D})"
                     : $"names no single core record ({other.RefusalCode})")
-                + "; an invoice supersedes only an invoice of the same matter, project or work assignment. Nothing was written.");
+                + $"; {rule}. Nothing was written.");
         }
 
         return decided;
@@ -417,6 +449,9 @@ public static class InvoiceFamilyCoreRecordGuard
 
     private static bool IsInvoice(string entity) =>
         string.Equals(entity.Trim(), InvoiceEntity, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLine(string entity) =>
+        string.Equals(entity.Trim(), LineEntity, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// A value is unset (null, or a reference with an empty id), a reference to <paramref name="core"/> (a reference

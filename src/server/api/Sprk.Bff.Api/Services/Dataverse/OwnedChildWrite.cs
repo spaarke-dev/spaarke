@@ -1490,6 +1490,11 @@ internal static class OwnedChildWrite
     /// </summary>
     internal sealed record InvoiceFamilyStep(InvoiceFamilyCoreRecord? Refusal, DataverseUserResponse? ClientFailure, bool ParentUnavailable);
 
+    /// <summary>The invoice line table, and the invoice table's entity set (the one table a line's invoice lookup targets).</summary>
+    private const string LineTable = "sprk_billingevent";
+
+    private const string InvoiceEntitySet = "sprk_invoices";
+
     /// <summary>
     /// ebilling-r1 FR-05 (ISS-010, #1973), as unified-access-control-r2 answered it: the write core — the create
     /// (<see cref="CreateAsync"/>) and the update / re-file (<see cref="RefileAsync"/>) — invokes
@@ -1501,8 +1506,8 @@ internal static class OwnedChildWrite
     /// <item><b>Update</b>: only when the change sets or clears a guarded lookup (<see cref="InvoiceFamilyCoreRecordGuard.GuardedLookups"/>)
     /// — an update that leaves them as stored cannot change the answer. The stored lookups are read once, as the caller, and
     /// overlaid with the change (<see cref="EffectiveLookups"/>) BEFORE the guard runs.</item>
-    /// <item><b>Supersedes</b>: the superseded invoice's core lookups are read as the caller; a row they cannot read (403)
-    /// and one that does not exist (404) are the uniform not-found.</item>
+    /// <item><b>Supersedes, and a line's invoice</b> (task 026): the other invoice's core lookups are read as the caller; a
+    /// row they cannot read (403) and one that does not exist (404) are the uniform not-found.</item>
     /// </list>
     /// Fail closed: a read that fails is the caller's own error and an answer that lacks a column the guard asked for is
     /// <see cref="InvoiceFamilyCoreRecordGuard.ReadFailedCode"/> — never "not set". A guarded column written as anything but
@@ -1568,15 +1573,19 @@ internal static class OwnedChildWrite
             column => effective.TryGetValue(column, out var value) ? value : null,
             async (invoice, token) =>
             {
-                // The bind names its entity set; a superseded invoice kept from the stored row is in the written table's set.
+                // The other invoice is the one an invoice supersedes or the one a line belongs to (task 026). The bind names
+                // its entity set; one kept from the stored row is in the invoice set — for an invoice, the written table's.
                 var entitySet = item.Lookups.FirstOrDefault(l =>
-                                    string.Equals(l.Column, InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn, StringComparison.OrdinalIgnoreCase)
+                                    (string.Equals(l.Column, InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn, StringComparison.OrdinalIgnoreCase)
+                                     || string.Equals(l.Column, InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, StringComparison.OrdinalIgnoreCase))
                                     && l.RecordId == invoice.Id)?.RelatedEntitySet
-                                ?? stored?.EntitySetName;
+                                ?? (stored is null ? null
+                                    : string.Equals(table, LineTable, StringComparison.OrdinalIgnoreCase) ? InvoiceEntitySet
+                                    : stored.Value.EntitySetName);
                 if (entitySet is null)
                 {
                     return InvoiceFamilyCoreRecord.Refused(invoice.LogicalName, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
-                        "The superseded invoice's table could not be told; nothing was written.");
+                        "The other invoice's table could not be told; nothing was written.");
                 }
 
                 var other = await ReadLookupsAsCallerAsync(
@@ -1592,14 +1601,14 @@ internal static class OwnedChildWrite
                         supersededFailure = failure;
                     return InvoiceFamilyCoreRecord.Refused(invoice.LogicalName,
                         supersededUnavailable ? InvoiceFamilyCoreRecordGuard.RecordNotFoundCode : InvoiceFamilyCoreRecordGuard.ReadFailedCode,
-                        "The superseded invoice could not be read; nothing was written.");
+                        "The other invoice could not be read; nothing was written.");
                 }
 
                 return other.Values is { } otherValues
                     ? InvoiceFamilyCoreRecordGuard.Check(invoice.LogicalName,
                         column => otherValues.TryGetValue(column, out var value) ? value : null)
                     : InvoiceFamilyCoreRecord.Refused(invoice.LogicalName, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
-                        $"The superseded invoice could not be read ({other.Problem}); nothing was written.");
+                        $"The other invoice could not be read ({other.Problem}); nothing was written.");
             },
             ct).ConfigureAwait(false);
 
