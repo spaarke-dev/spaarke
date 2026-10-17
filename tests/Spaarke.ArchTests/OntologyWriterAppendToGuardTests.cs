@@ -41,18 +41,24 @@ public class OntologyWriterAppendToGuardTests
     /// </summary>
     private static readonly string[] SubjectTablesWithoutLookup = ["sprk_billingevent"];
 
+    /// <summary>
+    /// Grants the derivation excludes but the writer still needs: <c>prvAppendToUser</c> covers the <c>systemuser</c> lookups
+    /// (<c>sprk_resolvedby</c>, <c>sprk_createdbyperson</c>), so it is asserted directly rather than derived.
+    /// </summary>
+    private static readonly string[] StandingGrants = ["prvAppendToUser"];
+
     private static string SolutionRoot => Path.Combine(SourceScan.RepoRoot, "src", "dataverse", "solutions", "SpaarkeMaster");
 
     [Fact(DisplayName = "Spaarke Ontology Service holds AppendTo on every Signal / Decision Record lookup target (DI-107)")]
     public void WriterRoleHoldsAppendToOnEveryLookupTarget()
     {
         var required = RequiredPrivileges();
-        // Sanity floor: the real lookup targets are 14 tables, the regarding map 9, plus the subject-only table.
-        Assert.True(required.Count >= 15,
+        // Sanity floor: the real lookup targets are 15 tables plus the subject-only table (the regarding map's 9 are among them).
+        Assert.True(required.Count >= 16,
             $"Derived only {required.Count} required AppendTo privileges ({string.Join(", ", required)}); the solution scan is probably broken.");
 
         var role = File.ReadAllText(Path.Combine(SolutionRoot, "Roles", WriterRoleFile));
-        var missing = Missing(role, required);
+        var missing = Missing(role, required.Concat(StandingGrants));
 
         Assert.True(missing.Count == 0,
             "Spaarke Ontology Service is missing AppendTo on a table a Signal / Decision Record lookup points at; the writer's create/update "
