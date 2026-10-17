@@ -2,8 +2,11 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Services.Dataverse.Privileges;
 using Sprk.Bff.Api.Tests.Integration.Workspace;
+using AccessRights = Spaarke.Dataverse.AccessRights;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
@@ -41,12 +44,28 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// </summary>
 public class ExternalCollaborationTestFixture : WorkspaceTestFixture
 {
+    /// <summary>
+    /// The Workforce-role ceiling (unified-access-control-r2 task 186) this host answers with. Defaults to the owner's
+    /// prerequisite privileges (<see cref="WorkforceCeilingDouble.OwnerPrerequisite"/>), so a workforce-contact test written
+    /// before the ceiling keeps its meaning; a ceiling test sets <see cref="WorkforceCeilingDouble.Ceiling"/>.
+    /// </summary>
+    internal WorkforceCeilingDouble WorkforceCeiling { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
 
         builder.ConfigureTestServices(services =>
         {
+            // The real checker still answers the per-user Read questions; only the Workforce-role read is scripted (it
+            // needs a live ServiceClient).
+            services.RemoveAll<IDataversePrivilegeChecker>();
+            services.AddSingleton<IDataversePrivilegeChecker>(sp =>
+            {
+                WorkforceCeiling.Inner = ActivatorUtilities.CreateInstance<UserPrivilegeChecker>(sp);
+                return WorkforceCeiling;
+            });
+
             services.Configure<AuthorizationOptions>(options =>
             {
                 options.AddPolicy(AuthPolicies.ExternalCollaboration, policy =>
@@ -56,5 +75,46 @@ public class ExternalCollaborationTestFixture : WorkspaceTestFixture
                 });
             });
         });
+    }
+}
+
+/// <summary>
+/// The Workforce-role ceiling as a test double (task 186): <see cref="GetWorkforceRoleCeilingAsync"/> answers
+/// <see cref="Ceiling"/> and counts the reads; the per-user Read questions go to the real checker (<see cref="Inner"/>).
+/// </summary>
+internal sealed class WorkforceCeilingDouble : IDataversePrivilegeChecker
+{
+    private int _reads;
+
+    /// <summary>The privileges the owner is asked to add to the Workforce role for the Legal Front Door (design note section 0).</summary>
+    public static IReadOnlyDictionary<string, AccessRights> OwnerPrerequisite { get; } = new Dictionary<string, AccessRights>
+    {
+        ["sprk_servicerequest"] = AccessRights.Create | AccessRights.Read | AccessRights.AppendTo | AccessRights.Delete,
+        ["sprk_document"] = AccessRights.Create | AccessRights.Read,
+    };
+
+    public WorkforceRoleCeiling Ceiling { get; set; } = WorkforceRoleCeiling.Available(OwnerPrerequisite);
+
+    /// <summary>How many times the ceiling was asked for.</summary>
+    public int Reads => Volatile.Read(ref _reads);
+
+    public IDataversePrivilegeChecker? Inner { get; set; }
+
+    public void Reset()
+    {
+        Ceiling = WorkforceRoleCeiling.Available(OwnerPrerequisite);
+        Interlocked.Exchange(ref _reads, 0);
+    }
+
+    public Task<bool> HasReadPrivilegeAsync(Guid userOid, string entityLogicalName, CancellationToken ct) =>
+        (Inner ?? throw new InvalidOperationException("No inner checker.")).HasReadPrivilegeAsync(userOid, entityLogicalName, ct);
+
+    public Task<IReadOnlySet<string>> GetReadableEntitiesAsync(Guid userOid, CancellationToken ct) =>
+        (Inner ?? throw new InvalidOperationException("No inner checker.")).GetReadableEntitiesAsync(userOid, ct);
+
+    public Task<WorkforceRoleCeiling> GetWorkforceRoleCeilingAsync(CancellationToken ct)
+    {
+        Interlocked.Increment(ref _reads);
+        return Task.FromResult(Ceiling);
     }
 }

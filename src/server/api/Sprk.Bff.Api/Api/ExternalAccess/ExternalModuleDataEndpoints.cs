@@ -57,6 +57,7 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.FetchXml;
 using Sprk.Bff.Api.Services.Dataverse.Models;
+using Sprk.Bff.Api.Services.Dataverse.Privileges;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -182,22 +183,51 @@ public static class ExternalModuleDataEndpoints
     // Handlers
     // =========================================================================
 
-    private static Task<IResult> ExecuteScopedFetchAsync(
+    private static async Task<IResult> ExecuteScopedFetchAsync(
         [FromBody] FetchRequestDto request,
         HttpContext httpContext,
         ExternalModuleRegistry registry,
         FetchService fetchService,
         IFetchXmlEntityExtractor entityExtractor,
         ExternalDataService dataService,
+        IDataversePrivilegeChecker privileges,
         ILogger<Program> logger,
         CancellationToken ct)
     {
         var principal = GetCallerPrincipal(httpContext);
-        if (principal is null) return Task.FromResult(MissingContextResult());
+        if (principal is null) return MissingContextResult();
 
-        return ExecuteScopedFetchCoreAsync(
+        if (await WorkforceCeilingDeniedAsync(request?.EntityName, principal, registry, privileges, logger, ct)
+                .ConfigureAwait(false) is { } ceilingDenied)
+        {
+            return ceilingDenied;
+        }
+
+        return await ExecuteScopedFetchCoreAsync(
             request, principal, registry, entityExtractor, fetchService.ExecuteAsync, dataService.GetNonSecureRootsAsync,
-            logger, ct, dataService.GetLiveParentRootsAsync);
+            logger, ct, dataService.GetLiveParentRootsAsync).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The workforce ceiling (unified-access-control-r2 task 186) at the module-data seam: a workforce-contact caller
+    /// reading SERVICE REQUESTS (the module that owns <paramref name="entityLogicalName"/> records
+    /// <c>sprk_servicerequest</c>) also needs Read on <c>sprk_servicerequest</c> in the Workforce role. Decided before the
+    /// pipeline reads anything; the Tier-2 scope still applies after it (both must pass). Other modules are outside the
+    /// owner's round-101 route map and are not checked here.
+    /// </summary>
+    private static Task<IResult?> WorkforceCeilingDeniedAsync(
+        string? entityLogicalName,
+        CallerPrincipal principal,
+        ExternalModuleRegistry registry,
+        IDataversePrivilegeChecker privileges,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var module = string.IsNullOrWhiteSpace(entityLogicalName) ? null : registry.FindByEntity(entityLogicalName);
+        return module is not null
+               && string.Equals(module.RecordEntity, WorkforceRoleCeilingGate.ServiceRequestTable, StringComparison.OrdinalIgnoreCase)
+            ? WorkforceRoleCeilingGate.DenyAsync(principal, privileges, WorkforceRoleCeilingGate.ReadServiceRequests, logger, ct)
+            : Task.FromResult<IResult?>(null);
     }
 
     /// <summary>
@@ -345,21 +375,28 @@ public static class ExternalModuleDataEndpoints
         }
     }
 
-    private static Task<IResult> GetScopedRecordAsync(
+    private static async Task<IResult> GetScopedRecordAsync(
         string entityLogicalName,
         Guid id,
         [FromQuery(Name = "$select")] string? select,
         HttpContext httpContext,
         ExternalModuleRegistry registry,
         RecordService recordService,
+        IDataversePrivilegeChecker privileges,
         ILogger<Program> logger,
         CancellationToken ct)
     {
         var principal = GetCallerPrincipal(httpContext);
-        if (principal is null) return Task.FromResult(MissingContextResult());
+        if (principal is null) return MissingContextResult();
 
-        return GetScopedRecordCoreAsync(
-            entityLogicalName, id, select, principal, registry, recordService.GetRecordAsync, logger, ct);
+        if (await WorkforceCeilingDeniedAsync(entityLogicalName, principal, registry, privileges, logger, ct)
+                .ConfigureAwait(false) is { } ceilingDenied)
+        {
+            return ceilingDenied;
+        }
+
+        return await GetScopedRecordCoreAsync(
+            entityLogicalName, id, select, principal, registry, recordService.GetRecordAsync, logger, ct).ConfigureAwait(false);
     }
 
     /// <summary>

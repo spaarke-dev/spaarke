@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.Privileges;
 using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -1082,8 +1083,9 @@ public static class ExternalProjectDataEndpoints
 
     private static Task<IResult> GetServiceRequestDocuments(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        CancellationToken ct) =>
-        ListDocumentsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, httpContext, dataService, modules, ct);
+        IDataversePrivilegeChecker privileges, ILogger<Program> logger, CancellationToken ct) =>
+        WithWorkforceCeilingAsync(httpContext, privileges, WorkforceRoleCeilingGate.ReadServiceRequestDocuments, logger, ct,
+            () => ListDocumentsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, httpContext, dataService, modules, ct));
 
     private static Task<IResult> GetInvoiceDocuments(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
@@ -1114,9 +1116,10 @@ public static class ExternalProjectDataEndpoints
     private static Task<IResult> DownloadServiceRequestDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        ILogger<Program> logger, CancellationToken ct) =>
-        DownloadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, logger, ct);
+        IDataversePrivilegeChecker privileges, ILogger<Program> logger, CancellationToken ct) =>
+        WithWorkforceCeilingAsync(httpContext, privileges, WorkforceRoleCeilingGate.ReadServiceRequestDocuments, logger, ct,
+            () => DownloadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
+                dataService, modules, storageResolver, fileStore, logger, ct));
 
     private static Task<IResult> DownloadInvoiceDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
@@ -1153,9 +1156,10 @@ public static class ExternalProjectDataEndpoints
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
         IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
-        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
-        UploadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
+        IConfiguration configuration, IDataversePrivilegeChecker privileges, ILogger<Program> logger, CancellationToken ct) =>
+        WithWorkforceCeilingAsync(httpContext, privileges, WorkforceRoleCeilingGate.UploadServiceRequestDocument, logger, ct,
+            () => UploadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, file, httpContext, dataService,
+                modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct));
 
     private static Task<IResult> UploadInvoiceDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
@@ -1189,9 +1193,11 @@ public static class ExternalProjectDataEndpoints
     private static Task<IResult> GetServiceRequestDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
-        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
-        ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
-            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+        Spaarke.Dataverse.IGenericEntityService entityService, IDataversePrivilegeChecker privileges,
+        ILogger<Program> logger, CancellationToken ct) =>
+        WithWorkforceCeilingAsync(httpContext, privileges, WorkforceRoleCeilingGate.ReadServiceRequestDocuments, logger, ct,
+            () => ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
+                dataService, modules, storageResolver, fileStore, entityService, logger, ct));
 
     private static Task<IResult> GetInvoiceDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
@@ -2181,10 +2187,19 @@ public static class ExternalProjectDataEndpoints
     /// </remarks>
     private static async Task<IResult> DeleteOwnServiceRequest(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        ILogger<Program> logger, CancellationToken ct)
+        IDataversePrivilegeChecker privileges, ILogger<Program> logger, CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
+
+        // The workforce ceiling (task 186): a workforce-contact caller also needs Delete on sprk_servicerequest in the
+        // Workforce role. Decided before the row read, so it discloses nothing about the request.
+        if (await WorkforceRoleCeilingGate
+                .DenyAsync(callerContext, privileges, WorkforceRoleCeilingGate.DeleteServiceRequest, logger, ct)
+                .ConfigureAwait(false) is { } ceilingDenied)
+        {
+            return ceilingDenied;
+        }
 
         // ONE row read gives the requester and the state. The requester gate decides first (a non-requester never has the
         // state used); a read that fails is the existing 503 service_request_unreadable and nothing is deleted.
@@ -2291,6 +2306,27 @@ public static class ExternalProjectDataEndpoints
     // "holds Read" before they test Create.
     private static CallerPrincipal? GetCallerPrincipal(HttpContext httpContext) =>
         httpContext.Items[CallerPrincipal.HttpContextItemsKey] as CallerPrincipal;
+
+    /// <summary>
+    /// The workforce ceiling (unified-access-control-r2 task 186) in front of a service-request route: a workforce-contact
+    /// caller whose Workforce role lacks <paramref name="required"/>, or whose role cannot be read, is refused BEFORE
+    /// <paramref name="next"/> reads anything; everyone else, and a workforce contact the role allows, gets
+    /// <paramref name="next"/>, which applies the requester scope as before (both must pass).
+    /// </summary>
+    private static async Task<IResult> WithWorkforceCeilingAsync(
+        HttpContext httpContext,
+        IDataversePrivilegeChecker privileges,
+        IReadOnlyList<WorkforceCeilingRequirement> required,
+        ILogger logger,
+        CancellationToken ct,
+        Func<Task<IResult>> next)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        return await WorkforceRoleCeilingGate.DenyAsync(callerContext, privileges, required, logger, ct).ConfigureAwait(false)
+               ?? await next().ConfigureAwait(false);
+    }
 
     private static IResult MissingContextResult() =>
         Results.Problem(

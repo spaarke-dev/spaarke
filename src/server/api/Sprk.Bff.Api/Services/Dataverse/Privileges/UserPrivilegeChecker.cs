@@ -28,6 +28,14 @@ namespace Sprk.Bff.Api.Services.Dataverse.Privileges;
 /// On-wire key shape: <c>tenant:{tenantId}:privileges:{userOid:D}:v1</c>.
 /// Value: JSON-serialised <see cref="HashSet{T}"/> of strings.
 /// </para>
+/// <para>
+/// <b>The workforce ceiling (unified-access-control-r2 task 186, owner round 101 option (a)).</b>
+/// <see cref="GetWorkforceRoleCeilingAsync"/> reads the role <see cref="WorkforceRoleName"/> app-only (the root role by
+/// name; exactly one, else fail closed), its privileges with <c>RetrieveRolePrivilegesRole</c>, and resolves them to a
+/// table → operations map through the same <c>privilege</c> table this class already queries. Depth is collapsed to
+/// "some". Cached as data for <see cref="WorkforceCeilingTtl"/> under <c>tenant:{tenantId}:workforce-ceiling:role:v1</c>;
+/// a missing, ambiguous or unreadable role is never cached.
+/// </para>
 /// </remarks>
 internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
 {
@@ -44,6 +52,23 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
     private readonly ITenantCache _cache;
     private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly ILogger<UserPrivilegeChecker> _logger;
+    private readonly Func<CancellationToken, Task<WorkforceRoleCeiling>> _readWorkforceRole;
+
+    /// <summary>
+    /// The Dataverse role whose privileges are the ceiling for workforce-contact callers (task 186; the owner created it in
+    /// round 97 and approved its use as a ceiling in round 101). The owner edits its privileges; the BFF only reads them.
+    /// </summary>
+    internal const string WorkforceRoleName = "Spaarke Internal Contact User (Workforce)";
+
+    /// <summary>Cache resource label for the workforce ceiling. On-wire key: <c>tenant:{tenantId}:workforce-ceiling:role:v1</c>.</summary>
+    internal const string WorkforceCeilingCacheResource = "workforce-ceiling";
+
+    private const string WorkforceCeilingCacheId = "role";
+
+    private const int WorkforceCeilingCacheVersion = 1;
+
+    /// <summary>How long a READ ceiling is reused: the owner's role edits take effect within this (design note §0).</summary>
+    internal static readonly TimeSpan WorkforceCeilingTtl = TimeSpan.FromMinutes(5);
 
     // Per task 010 §6: 6-hour sliding TTL, 24-hour absolute maximum.
     // ITenantCache supports only absolute TTL; preserve the 24-hour bound.
@@ -60,6 +85,22 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _httpContextAccessor = httpContextAccessor;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _readWorkforceRole = ReadWorkforceRoleFromDataverseAsync;
+    }
+
+    /// <summary>
+    /// Test seam: the same checker with the Dataverse role read replaced (the live read needs a <see cref="ServiceClient"/>).
+    /// Not visible to DI, which uses the public constructor.
+    /// </summary>
+    internal UserPrivilegeChecker(
+        IDataverseService dataverseService,
+        ITenantCache cache,
+        ILogger<UserPrivilegeChecker> logger,
+        IHttpContextAccessor? httpContextAccessor,
+        Func<CancellationToken, Task<WorkforceRoleCeiling>> readWorkforceRole)
+        : this(dataverseService, cache, logger, httpContextAccessor)
+    {
+        _readWorkforceRole = readWorkforceRole ?? throw new ArgumentNullException(nameof(readWorkforceRole));
     }
 
     /// <summary>
@@ -298,6 +339,213 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
                 "Error resolving privilege IDs to entity logical names; failing closed");
             return new List<string>();
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<WorkforceRoleCeiling> GetWorkforceRoleCeilingAsync(CancellationToken ct)
+    {
+        var tenantId = GetTenantId();
+
+        // Cache read (graceful: a cache fault falls through to Dataverse).
+        try
+        {
+            var cached = await _cache.GetAsync<Dictionary<string, Spaarke.Dataverse.AccessRights>>(
+                tenantId, WorkforceCeilingCacheResource, WorkforceCeilingCacheId, WorkforceCeilingCacheVersion, ct: ct);
+            if (cached is not null)
+            {
+                return WorkforceRoleCeiling.Available(cached);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[WF-CEILING] Cache read failed for tenant={TenantId}; reading the role from Dataverse", tenantId);
+        }
+
+        WorkforceRoleCeiling read;
+        try
+        {
+            read = await _readWorkforceRole(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Fail closed: "could not read the role" is never "the role allows".
+            _logger.LogError(ex, "[WF-CEILING] Reading role '{Role}' failed; every workforce-contact operation is denied", WorkforceRoleName);
+            read = WorkforceRoleCeiling.Unavailable("read_failed");
+        }
+
+        if (!read.IsAvailable)
+        {
+            // Never cached: the next request reads again, so a transient fault clears as soon as Dataverse answers.
+            _logger.LogWarning(
+                "[WF-CEILING] Role '{Role}' unavailable ({Reason}); every workforce-contact operation is denied",
+                WorkforceRoleName, read.UnavailableReason);
+            return read;
+        }
+
+        try
+        {
+            await _cache.SetAsync(
+                tenantId,
+                WorkforceCeilingCacheResource,
+                WorkforceCeilingCacheId,
+                WorkforceCeilingCacheVersion,
+                new Dictionary<string, Spaarke.Dataverse.AccessRights>(read.Privileges, StringComparer.Ordinal),
+                WorkforceCeilingTtl,
+                ct: ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[WF-CEILING] Cache write failed for tenant={TenantId}; continuing without cache", tenantId);
+        }
+
+        return read;
+    }
+
+    /// <summary>
+    /// The live role read, app-only: the ROOT role named <see cref="WorkforceRoleName"/> (<c>parentroleid</c> null; its
+    /// business-unit copies are not separate roles), then <c>RetrieveRolePrivilegesRole</c>, then the privilege names.
+    /// No role, or more than one, is unavailable. Any exception propagates to <see cref="GetWorkforceRoleCeilingAsync"/>,
+    /// which fails closed.
+    /// </summary>
+    private async Task<WorkforceRoleCeiling> ReadWorkforceRoleFromDataverseAsync(CancellationToken ct)
+    {
+        var serviceClient = _dataverseService.TryUnwrapServiceClient(nameof(ReadWorkforceRoleFromDataverseAsync), _logger);
+        if (serviceClient is null)
+        {
+            return WorkforceRoleCeiling.Unavailable("dataverse_client_unavailable");
+        }
+
+        var roleQuery = new QueryExpression("role")
+        {
+            ColumnSet = new ColumnSet("roleid"),
+            TopCount = 2, // two is enough to tell "exactly one" from "ambiguous"
+            Criteria = new FilterExpression(LogicalOperator.And)
+            {
+                Conditions =
+                {
+                    new ConditionExpression("name", ConditionOperator.Equal, WorkforceRoleName),
+                    new ConditionExpression("parentroleid", ConditionOperator.Null),
+                }
+            }
+        };
+
+        var roles = await serviceClient.RetrieveMultipleAsync(roleQuery, ct);
+        if (roles.Entities.Count == 0)
+        {
+            return WorkforceRoleCeiling.Unavailable("role_missing");
+        }
+
+        if (roles.Entities.Count > 1)
+        {
+            return WorkforceRoleCeiling.Unavailable("role_ambiguous");
+        }
+
+        var roleId = roles.Entities[0].Id;
+        var response = (RetrieveRolePrivilegesRoleResponse)await serviceClient.ExecuteAsync(
+            new RetrieveRolePrivilegesRoleRequest { RoleId = roleId }, ct);
+
+        var privilegeIds = (response.RolePrivileges ?? Array.Empty<RolePrivilege>())
+            .Select(rp => rp.PrivilegeId)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        var privileges = new List<(string Name, int AccessRight)>();
+        foreach (var chunk in Chunk(privilegeIds, 500))
+        {
+            var query = new QueryExpression("privilege")
+            {
+                ColumnSet = new ColumnSet("name", "accessright"),
+                Criteria = new FilterExpression(LogicalOperator.And)
+                {
+                    Conditions =
+                    {
+                        new ConditionExpression("privilegeid", ConditionOperator.In, chunk.Cast<object>().ToArray()),
+                    }
+                }
+            };
+
+            var result = await serviceClient.RetrieveMultipleAsync(query, ct);
+            foreach (var entity in result.Entities)
+            {
+                var name = entity.GetAttributeValue<string>("name");
+                var accessRight = entity.Attributes.TryGetValue("accessright", out var raw)
+                    ? raw switch { int i => i, OptionSetValue o => o.Value, _ => 0 }
+                    : 0;
+                if (!string.IsNullOrEmpty(name))
+                {
+                    privileges.Add((name, accessRight));
+                }
+            }
+        }
+
+        var map = BuildWorkforceCeilingMap(privileges);
+        _logger.LogInformation(
+            "[WF-CEILING] Read role '{Role}' ({RoleId}): {PrivilegeCount} privileges over {TableCount} tables",
+            WorkforceRoleName, roleId, privilegeIds.Count, map.Count);
+        return WorkforceRoleCeiling.Available(map);
+    }
+
+    /// <summary>
+    /// Dataverse <c>privilege.accessright</c> values for the table operations the ceiling maps, with the privilege-name
+    /// prefix each one carries (<c>prv{Operation}{TableSchemaName}</c>). Assign has no
+    /// <see cref="Spaarke.Dataverse.AccessRights"/> bit and is not mapped.
+    /// </summary>
+    private static readonly (int AccessRight, string Prefix, Spaarke.Dataverse.AccessRights Rights)[] CeilingOperations =
+    {
+        (1, "prvRead", Spaarke.Dataverse.AccessRights.Read),
+        (2, "prvWrite", Spaarke.Dataverse.AccessRights.Write),
+        (4, "prvAppend", Spaarke.Dataverse.AccessRights.Append),
+        (16, "prvAppendTo", Spaarke.Dataverse.AccessRights.AppendTo),
+        (32, "prvCreate", Spaarke.Dataverse.AccessRights.Create),
+        (65536, "prvDelete", Spaarke.Dataverse.AccessRights.Delete),
+        (262144, "prvShare", Spaarke.Dataverse.AccessRights.Share),
+    };
+
+    /// <summary>
+    /// Builds the table → operations map from privilege (name, accessright) pairs. The OPERATION comes from
+    /// <c>accessright</c>, not from the name, so <c>prvAppendTool</c> (Append on a table "tool") is never read as AppendTo
+    /// on "ol"; the table is the name after that operation's prefix, lower-cased (the logical name). A privilege whose
+    /// accessright is not a mapped operation, or whose name does not carry that operation's prefix (a miscellaneous
+    /// privilege), is skipped: an unrecognized privilege grants nothing.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, Spaarke.Dataverse.AccessRights> BuildWorkforceCeilingMap(
+        IEnumerable<(string Name, int AccessRight)> privileges)
+    {
+        var map = new Dictionary<string, Spaarke.Dataverse.AccessRights>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, accessRight) in privileges)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                continue;
+            }
+
+            foreach (var (right, prefix, rights) in CeilingOperations)
+            {
+                if (right != accessRight || !name.StartsWith(prefix, StringComparison.Ordinal) || name.Length == prefix.Length)
+                {
+                    continue;
+                }
+
+                var table = name.Substring(prefix.Length).ToLowerInvariant();
+                map[table] = map.TryGetValue(table, out var existing) ? existing | rights : rights;
+                break;
+            }
+        }
+
+        return map;
     }
 
     private static IEnumerable<List<T>> Chunk<T>(IList<T> source, int size)
