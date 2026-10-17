@@ -2,7 +2,7 @@
   <metadata>
     <title>Dataverse cleanup session — spaarkedev2 replay</title>
     <phase>P6</phase>
-    <status>not-started</status>
+    <status>cancelled</status>
     <estimated-effort>3-5 hours</estimated-effort>
     <dependencies>005</dependencies>
     <blocks>007</blocks>

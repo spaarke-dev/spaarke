@@ -220,6 +220,40 @@ public class AssignedAccessSendsInviteTests
             .Which.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("ownerid").Id.Should().Be(owner);
     }
 
+    // ── A disabled internal user is nobody — never a partner (issue #1576) ─────────────────────────────────────────
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisabledInternalUsersAssignment_SendsNoInvite_AndIsNeverClassedAsAPartner(bool aContactCarriesTheSameOid)
+    {
+        // A disabled systemuser keeps its oid. Resolved, it would invite as an internal user; filtered out naively, it would
+        // fall through to the contact lookup and — when a contact carries the same oid — be classed as a PARTNER (told to
+        // the record's owner as "needs an internal invite"). It must be neither: nobody is behind the pass.
+        var disabledOid = Guid.NewGuid();
+        _h.Grants.SystemUserIdsByOid[disabledOid] = Guid.NewGuid();
+        _h.Grants.DisabledSystemUserOids[disabledOid] = true;
+        if (aContactCarriesTheSameOid)
+        {
+            _h.Identities.AddContact(Guid.NewGuid(), email: "same-oid@outside.test", oid: disabledOid.ToString("D"),
+                plane: IdentityPlaneMarker.External);
+        }
+
+        _h.Grants.RootOwners[_matter] = Guid.NewGuid();
+        var contact = UnboundContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        var outcome = await Pass(AssignedAccessTrigger.Sync, disabledOid.ToString("D"));
+
+        outcome.Complete.Should().BeTrue();
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("the grant stands; only the invite depends on who asked");
+        EntryOf(outcome, contact).Invite.Should().BeNull("nobody is behind a disabled user's pass");
+        _h.Ciam.Attempts.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+        _h.Identities.Contacts[contact].InvitedOn.Should().BeNull();
+        _h.SentNotifications.Should().BeEmpty("a partner's 'needs an internal invite' notice would mean it was classed a partner");
+    }
+
     // ── A background pass never invites ─────────────────────────────────────────────────────────────────────────────
 
     [Theory]

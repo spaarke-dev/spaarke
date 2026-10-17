@@ -757,7 +757,7 @@ Use `/conflict-check` skill to detect file overlap with active PRs before starti
 **At end of skill** (after worktree scaffolded): check if a matching Project Issue exists on Project #2 (search by branch name or folder slug).
 
 - **If matching Issue found**: invoke `/devops-project-register` to link this worktree → populate `Worktree Path` field on the Issue.
-- **If no matching Issue**: prompt "Register this project on the portfolio? [Y/n]".
+- **If no matching Issue**: no prompt here. Registration is a MUST at `/project-pipeline` Step 4.2, and `task-execute` refuses to start a task in an unregistered project (2026-10-15).
 
 Silent on success. Failure degrades to ⚠️ warn.
 

@@ -29,6 +29,13 @@ public sealed record RecordDispositionRequest(Guid ReplyCommunicationId, int Dis
 /// and the reply's association unconfirmed.</para>
 /// <para><b>Placement (bff-extensions.md).</b> In the BFF: a request/response write under the caller's own identity, no
 /// background work, no package, no AI capability.</para>
+/// <para><b>The for-todo read (task 154).</b> <c>GET /for-todo/{todoId}</c> carries
+/// <c>RecordRouteAccessAuthorizationFilter("read", sprk_todos, todoId)</c> (no Read on the To Do: the uniform 404), and every read
+/// behind it runs AS THE CALLER (<see cref="InquiryDispositionService.FindForTodoAsync"/>). Component justification: Existing, this
+/// group's POST and <see cref="InquiryDispositionService"/>, which owns the To Do id derivation. Extension, the POST is a write and this
+/// is its read, a GET beside it on the same group that reuses the derivation. Cost of doing nothing, the D-111 picker cannot find the
+/// inquiry or its reply without Dataverse reads from the widget (forbidden by D-15), so an inquiry-outcome To Do cannot be completed
+/// with a disposition (success criterion 10).</para>
 /// </remarks>
 public static class InquiryEndpoints
 {
@@ -55,9 +62,57 @@ public static class InquiryEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict);
+
+        // Task 154 (D-111, #1958): the read the disposition picker needs, so the widget never reads Dataverse (D-15).
+        group.MapGet("/for-todo/{todoId:guid}", GetInquiryForTodoAsync)
+            .AddRecordRouteAccessAuthorizationFilter("read", TodoEntitySet, "todoId")
+            .WithName("GetInquiryForTodo")
+            .WithSummary("Get the inquiry a \"Record the outcome\" To Do records, and its incoming replies")
+            .WithDescription("Reads the To Do as the caller and finds its inquiry: the To Do's serviceRequestId= notes line when its "
+                + "derived To Do id matches, else the To Do's matter's open outbound inquiry whose derived To Do id matches. Returns "
+                + "the inquiry and the incoming replies the caller can read, newest first. 404 when the To Do is not readable or no "
+                + "inquiry matches; 503 when Dataverse could not be read.")
+            .Produces<InquiryForTodoResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
+    internal const string TodoEntitySet = "sprk_todos";
+    internal const string LookupUnavailableReasonCode = "inquiry.unavailable";
+
     public sealed record RecordDispositionResponse(Guid ServiceRequestId, bool TodoCompleted);
+
+    /// <summary>The body of <c>GET /api/v1/inquiries/for-todo/{todoId}</c>.</summary>
+    public sealed record InquiryForTodoResponse(Guid ServiceRequestId, IReadOnlyList<InquiryReplyDto> Replies);
+
+    /// <summary>One incoming reply: the picker shows it and sends its id as <c>replyCommunicationId</c>.</summary>
+    public sealed record InquiryReplyDto(Guid CommunicationId, string? Subject, DateTimeOffset? ReceivedOn);
+
+    internal static async Task<IResult> GetInquiryForTodoAsync(
+        Guid todoId,
+        [FromServices] InquiryDispositionService inquiries,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var result = await inquiries.FindForTodoAsync(todoId, ct).ConfigureAwait(false);
+        return result.Outcome switch
+        {
+            InquiryLookupOutcome.Found when result.ServiceRequestId is { } id => Results.Ok(new InquiryForTodoResponse(
+                id, (result.Replies ?? []).Select(r => new InquiryReplyDto(r.CommunicationId, r.Subject, r.ReceivedOn)).ToList())),
+            InquiryLookupOutcome.NotFound => ProblemDetailsHelper.UniformRecordNotFound(httpContext),
+            _ => Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Service Unavailable",
+                detail: "The inquiry could not be read. Try again.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["reasonCode"] = LookupUnavailableReasonCode,
+                    ["reason"] = result.Reason,
+                    ["correlationId"] = httpContext.TraceIdentifier,
+                }),
+        };
+    }
 
     internal static async Task<IResult> RecordDispositionAsync(
         Guid serviceRequestId,

@@ -28,21 +28,23 @@ class ResizeObserverStub {
 function renderResponse(): { json: () => Promise<unknown> } {
   return {
     json: async () => ({
-      tldr: { summary: '', keyTakeaways: [], topAction: '', categoryCount: 0, priorityItemCount: 1, itemRefs: [] },
-      channelNarratives: [],
-      generatedAtUtc: '2026-10-12T08:00:00Z',
-      highPriorityItems: [
+      tldr: { summary: '', keyTakeaways: [], categoryCount: 1, priorityItemCount: 0, itemRefs: [] },
+      // The record is opened from a Know channel bullet (the retired Critical Today list used to offer this link).
+      channelNarratives: [
         {
-          entityType: 'sprk_matter',
-          entityId: RECORD_ID,
-          name: 'Acme v. Globex',
-          highPriority: true,
-          monitor: false,
-          kindLabel: 'Matter',
-          action: 'None',
-          reason: 'HighPriority',
+          category: 'matters',
+          bullets: [
+            {
+              narrative: 'Acme v. Globex',
+              itemIds: ['item-1'],
+              primaryEntityType: 'sprk_matter',
+              primaryEntityId: RECORD_ID,
+              primaryEntityName: 'Acme v. Globex',
+            },
+          ],
         },
       ],
+      generatedAtUtc: '2026-10-12T08:00:00Z',
     }),
   };
 }
@@ -57,7 +59,10 @@ function installXrm(navigateTo: jest.Mock | undefined): void {
       deleteRecord: jest.fn(),
     },
     Utility: {
-      getGlobalContext: () => ({ userSettings: { userId: `{${USER_ID}}` }, getClientUrl: () => 'https://org.crm.dynamics.com' }),
+      getGlobalContext: () => ({
+        userSettings: { userId: `{${USER_ID}}` },
+        getClientUrl: () => 'https://org.crm.dynamics.com',
+      }),
     },
     Navigation: navigateTo ? { navigateTo } : {},
   };

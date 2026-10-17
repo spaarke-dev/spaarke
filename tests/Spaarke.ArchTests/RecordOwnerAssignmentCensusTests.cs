@@ -550,6 +550,14 @@ public class RecordOwnerAssignmentCensusTests
         // spaarke-ontology-platform-r1 task 143 (D-130): SignalWriter writes no owner of its own either. BuildEntity applies the
         // resolver's answer (ApplyTo) on every path, and ReassignNoCoreOwnerAsync re-owns through SecureChildReconciler.
         // ReownOrdinaryRowAsync (listed above), so the former PerUser entries for the no-core item's owner are gone.
+        // spaarke-ontology-platform-r1 task 149 (D-144 as amended, owner ruling on uac-r2 F1 of PR #1907): the ONE owner write the Decision
+        // Record writer makes itself. A gate decision about an UNFILED communication (the resolver answered Unchanged: not team-owned and
+        // filed under nothing) is owned by the communication's own owning user, as read from the row; the business unit's default team is
+        // never applied, and the secure-if-any check (the Secure Record team) is still the resolver's.
+        new OwnerWriteEntry("DecisionRecordWriter.cs", "FiledAndOwnedAsync", 1, OwnerWriteKind.Routed,
+            "D-144 as amended: only after IRecordOwnershipResolver answered Unchanged for a communication-gate decision and the second ask "
+            + "answered an ordinary team or NoDefaultOwnerTeam; every other answer refuses; the owner is the communication's own owner "
+            + "(user or application user)."),
         new OwnerWriteEntry("CommunicationEnrichmentService.cs", "AssignOwningTeamAsync", 1, OwnerWriteKind.UnfiledOnly,
             "FR-E7 category routing — a communication FILED under a record is the resolver's (r2): routing applies only to "
             + "a row filed under nothing (IsFiledOrUnreadableAsync first)."),
@@ -1689,6 +1697,10 @@ public class RecordOwnerAssignmentCensusTests
                                        + "(sprk_assignedto, statuscode Reassigned, reassigned-by) as the caller, after their Write. It writes no "
                                        + "regarding/filing lookup and no owner, so the row is filed under the same records and owned by the same "
                                        + "team before and after; re-filing stays on PATCH /events/{id}/filing.",
+        ["OntologyAdminClassificationService.cs"] = "Ontology platform R1 task 103 (D-22, FR-59): creates and PATCHes rows of sprk_triagecategory as the caller, "
+                                                    + "writing only its own scalar columns (sprk_name, sprk_classifierguidance, sprk_enabled). The table is "
+                                                    + "organisation-owned reference data (no ownerid, no business-unit filing) and no lookup is written, so "
+                                                    + "nothing is created under a record or re-filed.",
     };
 
     [Fact(DisplayName = "Task 146 r2: every run-as-user POST and PATCH in the BFF is classified — routed, or files nothing")]
@@ -2128,7 +2140,7 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview", "hands the HTTP caller to the invoice create"),
         new PersonBearingWriter("UpdateRecordActionCore.cs", "UpdateAsync", "the impersonated user, for F3 (owner round 13 item 8)"),
         new PersonBearingWriter("DecisionActionExecutors.cs", "PlanAsync", "the caller whose decision commit revises the budget (ontology task 147, #1777)"),
-        new PersonBearingWriter("DecisionRecordWriter.cs", "OwnershipContextOf", "the deciding user (ConfirmedByUserId) of the Decision Record (ontology task 142, #1783); none for a communications-gate decision (task 042: Guid.Empty, no person)"),
+        new PersonBearingWriter("DecisionRecordWriter.cs", "OwnershipContextOf", "the deciding user (ConfirmedByUserId) of the Decision Record (ontology task 142, #1783); none for a communications-gate decision (task 042: Guid.Empty, no person) or a condition-cleared closure (task 153: the nightly job asks for nobody)"),
         new PersonBearingWriter("SignalWriter.cs", "OwnershipContextOf", "the person who asked for the Signal (SignalWriteRequest.RequestedBy; null for every job-raised Signal) (ontology task 143, #1783)"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateDocumentAsync", "seam: writes CreatedByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisAsync", "seam: writes createdByPersonId"),

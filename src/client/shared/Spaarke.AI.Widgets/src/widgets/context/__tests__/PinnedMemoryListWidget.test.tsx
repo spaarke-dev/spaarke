@@ -265,8 +265,8 @@ describe('PinnedMemoryListWidget — create flow (POML test #4)', () => {
     // jsdom has already focused the surface, so it is never activated; any later
     // dialog in the same file is fine). Testing Library's default role query skips
     // an aria-hidden subtree, so the button is "not accessible" to it (nightly
-    // #1906). The button is present and clickable. Whether a real browser can hide the
-    // first dialog the same way is not yet verified — the follow-up on #1906 tracks it.
+    // #1906). The button is present and clickable. jsdom-only: in a real browser the
+    // surface is not aria-hidden (verified 2026-10-15). See .claude/FAILURE-MODES.md G-21.
     await user.click(screen.getByRole('button', { name: 'Create pin', hidden: true }));
 
     // Wait for the new pin to appear in the list.

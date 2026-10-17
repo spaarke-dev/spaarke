@@ -375,11 +375,13 @@ public class SpeContainerMembershipService
     // =========================================================================
     // MARKED grants — unified-access-control-r2 task 171 (owner rounds 69 + 70)
     //
-    // The ONLY code that grants a user an SPE container role. Two kinds, one mechanism:
+    // The ONLY code that grants a user an SPE container role. Three kinds, one mechanism:
     //   * STANDING writers on an environment / business-unit container (round 70 option (c)) — every enabled,
     //     internal person user of the business unit(s) that container serves, kept by SpeContainerMembershipSyncJob.
     //   * JUST-IN-TIME writers on a per-record SECURE container (round 69 (2), round 70) — a user with Write on the
     //     secure record, granted on an Office edit-open by OfficeEditAccessService and removed by the same job.
+    //   * DEMO writers on a demo environment's container (#1363) — granted by demo self-registration (Step 8) and
+    //     removed by demo expiry. The sync never reads or changes them (see DemoWriterMarkerPrefix).
     //
     // How a grant is told apart from a hand-granted or owner role (step 0, no Dataverse schema): the grant is POSTed
     // as a plain POST (the container-permission API takes no conflict parameter; Graph answers 409 when the user already
@@ -396,6 +398,15 @@ public class SpeContainerMembershipService
     /// <summary>Marker prefix of a just-in-time Office-edit writer grant on a secure container (round 69 / 70).</summary>
     public const string JitWriterMarkerPrefix = "SprkJit";
 
+    /// <summary>
+    /// Marker prefix of a DEMO self-registration writer grant (#1363). Unlike the other two kinds, the key names the
+    /// holder's ENTRA object id, not a systemuserid: the demo user's systemuser lives in the demo environment's
+    /// Dataverse, which is not the one this BFF's sync reads, so a systemuserid key could never be resolved there. Demo
+    /// expiry owns the grant's whole lifecycle (it has the object id on the registration request); the standing and
+    /// just-in-time passes parse only their own prefixes and so never count, keep or remove one.
+    /// </summary>
+    public const string DemoWriterMarkerPrefix = "SprkDemo";
+
     /// <summary>The narrowest container role that lets Office edit a file (step 0 (b)).</summary>
     internal const string WriterRole = "writer";
 
@@ -407,7 +418,7 @@ public class SpeContainerMembershipService
     internal const string OnlyContainerScopedPrefer = "onlyRemoveContainerScopedPermission";
 
     /// <summary>
-    /// Is <paramref name="propertyName"/> a grant marker (either prefix, case-insensitive)? The SPE admin custom-property
+    /// Is <paramref name="propertyName"/> a grant marker (any of the three prefixes, case-insensitive)? The SPE admin custom-property
     /// editor RESERVES these names (task 171, adversarial finding 7): a marker edited by hand would make a hand-granted
     /// role removable — or make a marked grant unremovable — so no admin route may create, change, delete or show one.
     /// </summary>
@@ -416,7 +427,8 @@ public class SpeContainerMembershipService
         var name = propertyName?.Trim();
         return !string.IsNullOrEmpty(name)
                && (name.StartsWith(StandingWriterMarkerPrefix, StringComparison.OrdinalIgnoreCase)
-                   || name.StartsWith(JitWriterMarkerPrefix, StringComparison.OrdinalIgnoreCase));
+                   || name.StartsWith(JitWriterMarkerPrefix, StringComparison.OrdinalIgnoreCase)
+                   || name.StartsWith(DemoWriterMarkerPrefix, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>The marker key for <paramref name="systemUserId"/> under <paramref name="prefix"/>.</summary>
@@ -487,7 +499,8 @@ public class SpeContainerMembershipService
 
     /// <summary>
     /// Reads <paramref name="containerId"/>'s user roles (paged, honest about completeness) and its grant markers
-    /// (<see cref="StandingWriterMarkerPrefix"/> / <see cref="JitWriterMarkerPrefix"/> custom properties).
+    /// (<see cref="StandingWriterMarkerPrefix"/> / <see cref="JitWriterMarkerPrefix"/> / <see cref="DemoWriterMarkerPrefix"/>
+    /// custom properties).
     /// Returns <see langword="null"/> when the container does not exist. A container this stamp does not own is refused
     /// with <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> <c>spe_container_not_owned</c> (404) before Graph is called (task 227d).
     /// Other faults propagate.
@@ -550,7 +563,8 @@ public class SpeContainerMembershipService
 
         return SpeAdminGraphService.ReadCustomProperties(container)
             .Where(p => p.Name.StartsWith(StandingWriterMarkerPrefix, StringComparison.Ordinal)
-                        || p.Name.StartsWith(JitWriterMarkerPrefix, StringComparison.Ordinal))
+                        || p.Name.StartsWith(JitWriterMarkerPrefix, StringComparison.Ordinal)
+                        || p.Name.StartsWith(DemoWriterMarkerPrefix, StringComparison.Ordinal))
             .GroupBy(p => p.Name, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First().Value ?? string.Empty, StringComparer.Ordinal);
     }
@@ -561,6 +575,8 @@ public class SpeContainerMembershipService
     /// is <see cref="MarkedGrantOutcome.AlreadyHeld"/> and records nothing. A marker that cannot be written undoes the
     /// grant (<see cref="MarkedGrantOutcome.Failed"/>), so every grant this code leaves standing is removable.
     /// </summary>
+    /// <param name="systemUserId">The holder id the marker key names: the systemuserid for the standing and just-in-time
+    /// prefixes, the Entra object id for <see cref="DemoWriterMarkerPrefix"/>.</param>
     public virtual async Task<MarkedGrantOutcome> GrantMarkedWriterAsync(
         string containerId,
         string markerPrefix,

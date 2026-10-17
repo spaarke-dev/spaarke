@@ -25,7 +25,10 @@ public static class GrantInviteStatus
     /// </summary>
     public const string Sent = "Sent";
 
-    /// <summary>The grantee holds a current (under 30 days) invite: no new code was made (§12 I-2).</summary>
+    /// <summary>
+    /// The grantee holds a pending invite — a current (under 30 days) marker whose code no bind has consumed: no new code was
+    /// made (§12 I-2).
+    /// </summary>
     public const string AlreadyPending = "AlreadyPending";
 
     /// <summary>

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
+using DataverseAccessRights = Microsoft.Crm.Sdk.Messages.AccessRights;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Access;
@@ -428,37 +429,53 @@ public class PlaybookSharingService : IPlaybookSharingService
         }
     }
 
-    private static string MapToDataverseAccessRights(PlaybookAccessRights rights)
+    /// <summary>
+    /// <see cref="PlaybookAccessRights"/> → the Dataverse <c>AccessMask</c> CSV that <c>GrantAccess</c> takes.
+    /// </summary>
+    /// <remarks>
+    /// The right names come from the SDK's <see cref="DataverseAccessRights"/> enum (<c>nameof</c>), not string
+    /// literals, so a misspelt or transposed name cannot compile (#994). Write carries Append and AppendTo so a
+    /// team that can edit the playbook can also relate records to it.
+    /// </remarks>
+    internal static string MapToDataverseAccessRights(PlaybookAccessRights rights)
     {
-        // Dataverse access rights: ReadAccess, WriteAccess, AppendAccess, AppendToAccess, CreateAccess, DeleteAccess, ShareAccess, AssignAccess
         var accessList = new List<string>();
 
         if ((rights & PlaybookAccessRights.Read) != 0)
         {
-            accessList.Add("ReadAccess");
+            accessList.Add(nameof(DataverseAccessRights.ReadAccess));
         }
         if ((rights & PlaybookAccessRights.Write) != 0)
         {
-            accessList.Add("WriteAccess");
-            accessList.Add("AppendAccess");
-            accessList.Add("AppendToAccess");
+            accessList.Add(nameof(DataverseAccessRights.WriteAccess));
+            accessList.Add(nameof(DataverseAccessRights.AppendAccess));
+            accessList.Add(nameof(DataverseAccessRights.AppendToAccess));
         }
         if ((rights & PlaybookAccessRights.Share) != 0)
         {
-            accessList.Add("ShareAccess");
+            accessList.Add(nameof(DataverseAccessRights.ShareAccess));
         }
 
         return string.Join(",", accessList);
     }
 
-    private static PlaybookAccessRights MapFromDataverseAccessRights(int accessMask)
+    /// <summary>
+    /// A POA <c>accessrightsmask</c> → <see cref="PlaybookAccessRights"/>, for the sharing UI.
+    /// </summary>
+    /// <remarks>
+    /// The bits are the SDK's <see cref="DataverseAccessRights"/> values. This used to test the literal 524288 for
+    /// Share; that bit is <c>AssignAccess</c> (Share is 262144), so an Assign-only share displayed as re-shareable and
+    /// a real Share right did not display at all (#994). <see cref="PlaybookAccessRights"/> has no Assign member, so
+    /// Assign — like Append, AppendTo, Create and Delete — is not surfaced.
+    /// </remarks>
+    internal static PlaybookAccessRights MapFromDataverseAccessRights(int accessMask)
     {
+        var mask = (DataverseAccessRights)accessMask;
         var rights = PlaybookAccessRights.None;
 
-        // Dataverse access mask bits
-        if ((accessMask & 1) != 0) rights |= PlaybookAccessRights.Read;      // ReadAccess
-        if ((accessMask & 2) != 0) rights |= PlaybookAccessRights.Write;     // WriteAccess
-        if ((accessMask & 524288) != 0) rights |= PlaybookAccessRights.Share; // ShareAccess
+        if ((mask & DataverseAccessRights.ReadAccess) != 0) rights |= PlaybookAccessRights.Read;
+        if ((mask & DataverseAccessRights.WriteAccess) != 0) rights |= PlaybookAccessRights.Write;
+        if ((mask & DataverseAccessRights.ShareAccess) != 0) rights |= PlaybookAccessRights.Share;
 
         return rights;
     }

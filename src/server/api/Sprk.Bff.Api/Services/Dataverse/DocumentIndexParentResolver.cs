@@ -334,7 +334,8 @@ public sealed class DocumentIndexParentResolver
             }
 
             named.Add(new ParentEntityContext(namedType, link.Id.ToString(), link.Name ?? unknownName));
-            var ancestors = await _coreAncestors.ResolveStampsAsync(table, link.Id, ct).ConfigureAwait(false);
+            // Read-only (GitHub #2002): the answer picks a search parent; nothing is written against the related record.
+            var ancestors = await _coreAncestors.ResolveStampsAsync(table, link.Id, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
             if (!ancestors.Succeeded)
             {

@@ -190,3 +190,112 @@ Spaarke Basic User +`prvReadsprk_BudgetRevision` Deep (16:06:59Z, 648 -> 649). S
 - **What:** PATCH (`If-Match: *`) on `sprk_triagecategory` `8b62dd84-1fbc-f111-aaaf-3833c5e9614d` (Fee / rate change) and `8d62dd84-1fbc-f111-aaaf-3833c5e9614d` (Scope / budget change) at 2026-10-10T21:18Z, HTTP 204 each: `sprk_measuredrecall`, `sprk_labelledsetsize`, `sprk_recallmeasuredon` only. `sprk_recallmeasuredon` is DateOnly, written as `2026-10-10`. Guidance and every other column untouched.
 - **Before (read back first):** Fee 25.93 / 92 / 2026-10-10; Scope 39.29 / 92 / 2026-10-10 (run 2, as expected).
 - **After (read back):** Fee **88.89** / 92 / 2026-10-10 (`modifiedon` 21:18:20Z); Scope **89.29** / 92 / 2026-10-10 (`modifiedon` 21:18:21Z). Strict per-category recall from run 4 (24/27, 25/28).
+
+## 2026-10-15 - Task 035: BFF + evaluator deployed to dev (spaarke-bff-dev); verification, alerts, report-only runs
+
+Dev only. Deploy approved by the owner (D-138); the alert deploy is an Azure change approved under D-138 as part of 035. No Dataverse writes in this section: every run below is read-only (GETs, admin-jobs reads, App Insights queries).
+
+### Deploy outcome (done by the main session)
+
+- Built and deployed from **master `f292ad119`** with `scripts/Deploy-BffApi.ps1` to `spaarke-bff-dev` (`rg-spaarke-dev`) at about 05:00Z.
+- Package 37.1 MB. All 4 critical files matched by SHA-256. `/healthz` 200. Signed-in `GET /api/v1/signals/worklist` 200. `/healthz/dataverse` 200.
+- **Publish-size delta: zero by construction.** The deployed branch was master itself, so "branch vs a fresh master build" compares master with master. The per-task deltas were measured in each task's PR (CLAUDE.md section 10 bullet 4). Absolute 37.1 MB (below the 55 MB review and 60 MB hard-stop thresholds).
+- The branch was master (0 behind). Another project (R3) may redeploy its own branch build over `spaarke-bff-dev` at any time; that is expected and does not invalidate this record.
+
+### Schema pre-flight (step 3.5), passed 2026-10-14
+
+On the target environment (spaarkedev1): `sprk_signal.sprk_regardingrecordtype` and `sprk_decisionrecord.sprk_regardingrecordtype` are both **Lookup to `sprk_recordtype_ref`**, matching the repo solution source; `sprk_decisionrecord` carries all 14 `sprk_Regarding*` attributes from task 140. The BFF was not deployed ahead of its schema.
+
+### Criterion 83: the Signal re-evaluation job is registered (read 2026-10-15 04:47Z, signed in)
+
+`GET https://spaarke-bff-dev.azurewebsites.net/api/admin/jobs` (`JobsEndpoints.cs`, `RequireAuthorization("SystemAdmin")`; token from `az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c`) returned 200 with the registry. `GET /api/admin/jobs/signal-reevaluation/status`:
+
+```
+{"jobId":"signal-reevaluation","displayName":"Signal Re-evaluation","enabled":true,"cronSchedule":"30 2 * * *",
+ "lastRunStartedOn":null,"lastRunCompletedOn":null,"lastRunStatus":null,"nextScheduledOn":"2026-10-16T02:30:00+00:00","recentRuns":[]}
+```
+
+Registered and enabled; it has not run yet (first run 2026-10-16 02:30Z). Also registered and running every 5 minutes: `todo-assignee-owner-reconciliation` and `core-ancestor-stamp-reconciliation` (both Succeeded at 04:45Z and 04:50Z).
+
+Side observation (not 035's): `identity-link-reconciliation` reported `lastRunStatus: Failed` at 04:45Z. Not investigated.
+
+### Criterion 85: no 404 behind RequireAuthorization (2026-10-15 04:47Z)
+
+| Route | Anonymous | Signed in |
+|---|---|---|
+| GET /api/v1/signals/worklist | 401 | 200 |
+| GET /api/admin/jobs | 401 | 200 |
+| GET /api/admin/jobs/signal-reevaluation/status | 401 | 200 |
+| GET /api/me | 401 | 200 |
+| GET /api/v1/signals/{guid}/decision-plan (zero guid) | 401 | 404 (ProblemDetails "requested record not found": handler-level, the route matched) |
+| GET /api/v1/signals/{guid}/suppression (zero guid) | 401 | 404 (same ProblemDetails) |
+| POST /api/v1/signals/{guid}/decision | 401 | not probed (it would write) |
+| GET /healthz | 200 | - |
+
+Every protected route answers 401 anonymously, so the route exists and the package is complete. The two signed-in 404s are the handlers reporting an unknown Signal id.
+
+### Alert rules (step 3, deployed 2026-10-15, dev)
+
+Both are `Microsoft.Insights/scheduledQueryRules` in `spe-infrastructure-westus2` (the App Insights resource group; the other deployed alerts live there), scoped to `spe-insights-dev-67e2xz`, action group `ag-spaarke-oncall-dev` (`rg-spaarke-dev`), Sev 1 (critical), enabled, autoMitigate on. Read back with `az monitor scheduled-query list`: both `enabled: true`.
+
+| Rule | Id | Frequency / window | Query |
+|---|---|---|---|
+| writer failures | `/subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/spe-infrastructure-westus2/providers/Microsoft.Insights/scheduledQueryRules/spaarke-bff-dev-ontology-writer-failures` | 5 min / 15 min | `customMetrics \| where name == "ontology.writer.failures" \| summarize failures = sum(valueSum) \| where failures > 0` (no dimension filter) |
+| evaluator stalled | `/subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/spe-infrastructure-westus2/providers/Microsoft.Insights/scheduledQueryRules/spaarke-bff-dev-ontology-evaluator-stalled` | 1 h / 1 day | `customMetrics \| where name == "ontology.evaluator.runs" \| where tostring(customDimensions.outcome) == "succeeded" \| summarize succeededRuns = countif(valueSum > 0) \| where succeededRuns == 0` |
+
+Source: `infrastructure/bicep/modules/alerts.bicep` (alerts 7 and 8).
+
+Deviations from the POML, with reasons:
+1. **Scheduled-query rules, not metric alerts.** The module's other six alerts are metric alerts, but (a) "no successful run" is an absence condition and a metric alert never fires on missing data, and (b) `customMetrics` held no `ontology.*` series at all on dev (checked 2026-10-15), so a metric alert on a never-emitted series is not creatable. Scheduled-query rules are the pattern the deployed dev alerts use (`redis-cache-*`, and the retired notification-playbook rule).
+2. **Window 24 h, not 26 h.** The first deploy failed on `WindowSize of 1560 minutes is not supported` (the allowed set is 5 to 720 minutes, 1440 and 2880). 1440 is the closest to the nightly cadence (job at 02:30Z); 2880 would let one missed night go unreported. A run that finishes a few minutes after the evaluation minute can fire the rule for up to an hour; autoMitigate clears it.
+3. **Scoped deployment.** The module also declares six AI metric alerts that were never deployed and a conditional action group. To deploy only the two new rules, the module was compiled (`az bicep build`), the ARM template filtered to the two `ontology` resources, and deployed with `az deployment group create -g spe-infrastructure-westus2 -n ontology-035-alerts` with `alertNamePrefix=spaarke-bff-dev`, `appInsightsId`, `actionGroupId=.../ag-spaarke-oncall-dev`. What-if showed exactly 2 Create and no other change. The first attempt created nothing for the `/subscriptions/...` id (Git Bash rewrote it into a Windows path); the re-run used `MSYS_NO_PATHCONV=1`. A second attempt at 26 h failed after creating the writer-failures rule only; the final run is idempotent.
+
+**Expect `spaarke-bff-dev-ontology-evaluator-stalled` to fire** at its first evaluation: the job has never run on dev, so there is no succeeded run in the last 24 h. It clears after the first nightly run succeeds (2026-10-16 02:30Z plus export delay). It emails the on-call group.
+
+### Report-only runs (step 4); no Dataverse writes
+
+**(a) 144 stamp reconciliation: `pwsh scripts/Invoke-OntologyStampBackfill.ps1` (no `-Apply`), 2026-10-15T04:54:37Z, spaarkedev1:**
+
+```
+sprk_signal          total=0 coreSubject=0 intermediate=0 (stampEmpty=0 stampSet=0) noSubject=0
+                       typed sprk_matter: set=0 inStamp=0 notInStamp=0
+sprk_decisionrecord  total=0 coreSubject=0 intermediate=0 (stampEmpty=0 stampSet=0) noSubject=0
+                       typed sprk_matter: set=0 inStamp=0 notInStamp=0
+                       typed sprk_project: set=0 inStamp=0 notInStamp=0
+                       typed sprk_workassignment: set=0 inStamp=0 notInStamp=0
+Report only: nothing was written. The backfill is -Apply (see the help for its prerequisites).
+```
+
+Both tables are empty on dev (confirmed independently: `GET sprk_signals?$count=true&$top=1` and `sprk_decisionrecords` both `@odata.count: 0`), so the inventory proves nothing about re-file or stale-stamp behaviour; there is nothing to backfill. The scheduled job itself (`core-ancestor-stamp-reconciliation`, run 2026-10-15T04:50:00Z, Succeeded) reported: `mode=write writesEnabled=true reportOnlyTables=[sprk_decisionrecord,sprk_signal] reportedOnly=0 scanned=64 stale=0 repaired=0 cascaded=0 alreadyApplied=0 claimHeld=0 repairFailures=0 unverified=0 orphanSourceGone=0 scanFailures=0 truncated=false`. The two Ontology tables are held report-only (default `ReportOnlyTables`); `-Apply` was not run.
+
+**(b) 148 to-do assignee/owner reconciler: read from the admin jobs history, not triggered** (`GET /api/admin/jobs/todo-assignee-owner-reconciliation/history`). The job runs every 5 minutes with `Ontology:TodoAssigneeOwner:WritesEnabled` unset (report-only), and the nightly full pass was already taken by the first tick after the deploy, so no trigger, no app-setting change and no write was needed. Full pass, 2026-10-15T04:40:00Z, Succeeded:
+
+```
+{"status":"ok","mode":"report-only","writesEnabled":false,"attempt":1,"fullPass":true,"recentToDos":0,"carriedToDos":0,"scanned":0,"stale":0,"reowned":0,"alreadyApplied":0,"skippedCored":0,"filedNonCore":0,"skippedSecure":0,"skippedRefused":0,"configurationRefusals":0,"assigneeTeamRefusals":0,"skippedUserOwned":0,"skippedGone":0,"skippedConflict":0,"fallbackNoAssignee":0,"fallbackAmbiguous":0,"fallbackDisabled":0,"accessDenied":0,"accessDeniedHeld":0,"claimHeld":0,"repairFailures":0,"unverified":0,"scanFailures":0,"truncated":false,"resumed":false,"sampleStale":[]}
+```
+
+The incremental runs at 04:45Z and 04:50Z are identical apart from `fullPass:false`. App Insights heartbeat: `[TODO-ASSIGNEE-OWNER] heartbeat status=ok mode=report-only attempt=1 fullPass=False ... scanned=0 ... durationMs=353 trigger=Scheduled runId=a25e95db-b37f-47f7-bace-e704eca298e6`. Zero refusals of any kind. `scanned=0` because dev holds no Signal or Decision Record, so the re-own logic, the `accessDenied` path (F2) and the stale-ETag gate remain unexercised; this run proves only that the job is registered, schedules, reads cleanly and stays report-only. `notes/148-report-only-run.md` ("pending") was not edited.
+
+### Not done (by instruction)
+
+Criterion 89 (blank the writer client id, expect the writer-failure alert to fire, restore the setting): **not run.** The main session schedules it around R3's redeploy. Task 035's POML status and TASK-INDEX are not changed here.
+
+## 2026-10-15 — 035 criterion 89: negative alert test + writer setting (main session)
+
+- **Finding (task 146)**: `Ontology__Writer__ManagedIdentityClientId` had never been set on spaarke-bff-dev, so the deployed writers could not write (`OntologyWriterCredentialFactory` throws on first use). UAMI `mi-ontology-writer-dev` (client id `69040982-612e-469e-a85f-26d5172367c5`) was attached.
+- **Negative test** (setting absent, 13:41:44Z): one enabled zz-146 test policy (`ZZ-146-RECIPE`, one matching zz matter), `POST /api/admin/jobs/signal-reevaluation/trigger` → outcome `failed`, policiesEvaluated 1, hits 1, written 0, refused 1. `ontology.writer.failures` reasons `credential_unresolvable` 1, `write_failed` 1. Alert `spaarke-bff-dev-ontology-writer-failures` **fired 13:44:53Z** (Sev 1, action group `ag-spaarke-oncall-dev`).
+- **Setting added** 13:46:55Z (D-138 035 deploy approval; word-add-in, R3 and uac-r2 notified before and after); healthz 200 at 13:47:38Z; code unchanged (master `f292ad119`).
+- **Positive run** 13:48:04Z → outcome `succeeded`, policiesEvaluated 1, hits 1, written 1, refused 0. First proof of the writer's managed-identity token path on dev.
+- The test policy and its rows are cleaned up by task 146 (zz-146 prefix).
+
+
+## 2026-10-16 — task 055 (dev, spaarkedev1): Console + grid configuration from master; policies on (D-146)
+
+- **BFF:** not deployed by ontology. R3 deployed `1.0.0+eb5ba4011` (R3 + master `7315b3e85`, ancestor check passed, hash-verified, healthz 200) at 01:55Z under the owner-approved plan (a).
+- **Policies (D-146):** `sprk_enabled=true` on 6101–6104 and `4d204810…` at 01:56:00Z; manual `signal-reevaluation` run `dd1ebeec`: 5 policies, 87 written, 0 refused.
+- **Grid configuration:** `Apply-WorklistGridConfiguration.ps1` from master `44b6a72c1` (worktree `C:\wts-055`): `-Verify` DRIFT → `-WhatIf` one UPDATE → applied 01:56:17Z (read-back OK) → `-Verify -RequireRow` IN SYNC.
+- **Console:** `npm run build` in `src/solutions/SpaarkeAi` at master `44b6a72c1` (#1989 + #1996); `Deploy-SpaarkeAi.ps1` updated `sprk_spaarkeai` (`5206a442-…`), PublishXml for that web resource only (D-83). Live 01:56:32Z; live content SHA-256 = local build `0470e7f11752cdffb9a0aaa42c507ba5574e89527db1cec18584eddc40db23f2`.
+- **Peer notices:** word-add-in, uac-r2, R3 before and after.
+- **Worklist reachability (task 156, found at this deploy):** no Console path opened the worklist. #2004 → master #2008 `a8c3182ec`. Console rebuilt from `a8c3182ec` in `C:\wts-055` (contains the 01:56 build's `44b6a72c1`; live hash checked unchanged before deploying); `Deploy-SpaarkeAi.ps1` 03:44:03–03:44:16Z, live SHA-256 = build `06d393561564f5835ba5702941b5767095b91f8abdf1a32dcba7670c43f218e1`. `seed-worklist-workspace-layout.ps1`: `-WhatIf` one create → CREATED `Worklist` (`202bcde0-13c9-f111-a05c-0022482913fc`, system, sortorder 13, sections `["worklist"]`) → re-run SKIP. The BFF layout route does not cache. Peer notices before and after.
+  CI also published the same commit at 03:45:41Z (`deploy-spaarke-ai.yml` run 38846776203, push to master): live SHA-256 `b62f6fca…e8b849` differs from the Windows build only in CRLF/LF on 13 HTML wrapper lines. The owner's `Unknown section ID: worklist` was a browser still on the pre-03:44 bundle (hard reload).
+- **Pending (criteria 1–4, 6, 7):** owner checks in the browser (worklist renders real items; one full review with two actions + one Next step; network log; console errors; Daily Briefing).
