@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.Privileges;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -34,6 +35,10 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 public static class GrantExternalAccessEndpoint
 {
     private const string EntitySet = "sprk_externalrecordaccesses";
+
+    /// <summary>The grant table's logical name: the table whose Read an owner team must hold (task 099b review round 2).</summary>
+    internal const string EntityLogicalName = "sprk_externalrecordaccess";
+
     // Cache invalidation (task 137): through ExternalParticipationService.InvalidateGrantSetsAsync — the ONE
     // routine every grant-write path calls. It owns the key (resource + version), removes under every tenant a
     // grant set can be cached under (the CIAM one included), and expands an organization grant to its members.
@@ -85,6 +90,7 @@ public static class GrantExternalAccessEndpoint
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
         IRecordOwnershipResolver ownership,
+        IDataversePrivilegeChecker ownerPrivileges,
         CallerRecordAccessProbe callerAccessProbe,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         GrantAccessNotifier accessNotifier,
@@ -153,7 +159,7 @@ public static class GrantExternalAccessEndpoint
             // call this route with no date, so a re-add over a lapsed grant is a SET — restored at the picked level.
             outcome = await CreateGrantAsync(
                 request, root.Type, root.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, ownership, logger, ct, reAddRestoresLapsed: true);
+                dataverseClient, participations, accessibleRecords, ownership, ownerPrivileges, logger, ct, reAddRestoresLapsed: true);
         }
         catch (Exception ex)
         {
@@ -355,6 +361,7 @@ public static class GrantExternalAccessEndpoint
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
         IRecordOwnershipResolver ownership,
+        IDataversePrivilegeChecker ownerPrivileges,
         ILogger logger,
         CancellationToken ct,
         ContactGrantIssuer? contactIssuer = null,
@@ -365,6 +372,8 @@ public static class GrantExternalAccessEndpoint
         ArgumentNullException.ThrowIfNull(ceiling);
         // Task 099b (D-11): no grant row is ever created without its owner team, so the resolver is not optional either.
         ArgumentNullException.ThrowIfNull(ownership);
+        // Review round 2 (K1 -> fix): a create Dataverse refuses on a privilege check is classified by asking the owner team.
+        ArgumentNullException.ThrowIfNull(ownerPrivileges);
 
         var key = ResolveGrantKey(request, rootType, rootId);
 
@@ -669,15 +678,28 @@ public static class GrantExternalAccessEndpoint
         }
         catch (Exception ex) when (!ct.IsCancellationRequested && Sprk.Bff.Api.Services.Signals.SignalWriter.IsDataverseAccessDenied(ex))
         {
-            // Task 099b review round 1: Dataverse refused the create on a privilege check. The new factor in this payload is
-            // its owner team, so this is the owner's security role lacking Read on the table ("Read Privilege Check For Owner
-            // failed", 0x80040299 — e.g. the Secure Record Owner role before it holds prvReadsprk_ExternalRecordAccess). The
-            // create failed, so nothing was written. Classified with the codebase's ONE privilege-refusal test
-            // (SignalWriter.IsDataverseAccessDenied: the fault code, a 403 from this Web API client, or the message).
+            // Task 099b review round 1: Dataverse refused the create on a privilege check (the codebase's ONE privilege-refusal
+            // test, SignalWriter.IsDataverseAccessDenied: the fault code, a 403 from this Web API client, or the message). The
+            // create failed, so nothing was written.
+            // Review round 2 (K1 -> fix): a bare 403 says nothing about WHICH privilege, so it is confirmed through the ONE
+            // owner-privilege helper: owner_privilege_missing only when the owner team really lacks Read on the table
+            // ("Read Privilege Check For Owner failed"); otherwise (it holds Read, or that cannot be read) the original
+            // fault propagates to the caller's generic 500, as before 099b.
+            var privilegeRefusal = await CheckGrantOwnerPrivilegeAsync(
+                ownerPrivileges, owner.TeamId!.Value, rootType, rootId, key, logger, ct);
+            if (privilegeRefusal?.ReasonCode != ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode)
+            {
+                logger.LogError(ex,
+                    "[EXT-GRANT] Dataverse refused to create grant {Key} on {RootType} {RootId} on a privilege check, but owner " +
+                    "team {OwnerTeamId} {Holds} Read on sprk_externalrecordaccess; reported as a generic failure. Nothing " +
+                    "was granted.",
+                    key, rootType, rootId, owner.TeamId, privilegeRefusal is null ? "holds" : "could not be confirmed to hold");
+                throw;
+            }
+
             logger.LogError(ex,
                 "[EXT-GRANT] REFUSED grant {Key} on {RootType} {RootId}: Dataverse refused to create the row owned by team " +
-                "{OwnerTeamId} on a privilege check — that team's security role is most likely missing Read on " +
-                "sprk_externalrecordaccess. Nothing was granted.",
+                "{OwnerTeamId}, whose security roles lack Read on sprk_externalrecordaccess. Nothing was granted.",
                 key, rootType, rootId, owner.TeamId);
             return GrantUpsertOutcome.Refused(GrantPolicyDecision.OwnerPrivilegeMissing);
         }
@@ -1220,6 +1242,53 @@ public static class GrantExternalAccessEndpoint
         }
 
         return new GrantOwner(resolution.OwningTeamId, null);
+    }
+
+    /// <summary>
+    /// Task 099b review round 2: the ONE owner-privilege check for a grant row. Dataverse refuses to create (or assign) a
+    /// <c>sprk_externalrecordaccess</c> row owned by a team whose security roles lack Read on the table ("Read Privilege Check
+    /// For Owner failed") — the Secure Record Owner role until it holds <c>prvReadsprk_ExternalRecordAccess</c>. Asked
+    /// read-only, through <see cref="IDataversePrivilegeChecker.TeamHasReadPrivilegeAsync"/> (app-only, cached per team for a
+    /// short time; a fault is never cached).
+    /// </summary>
+    /// <returns>
+    /// <c>null</c> when the team holds Read; <see cref="GrantPolicyDecision.OwnerPrivilegeMissing"/> (500) when it does not;
+    /// <see cref="GrantPolicyDecision.OwnerUnreadable"/> (503) when its privileges could not be read (fail closed). The
+    /// caller's own cancellation propagates.
+    /// </returns>
+    /// <remarks>
+    /// Callers: <c>/invite-and-grant</c> asks BEFORE onboarding a new person (F1), so a refusal leaves no Contact, CIAM
+    /// account or email; the grant core asks after Dataverse refused a create on a privilege check, to name the refusal only
+    /// when it is this one (K1); the secure-transition child pass asks before it re-owns a grant row
+    /// (<c>SecureChildReconciler</c>, F1 Make Secure).
+    /// </remarks>
+    internal static async Task<GrantPolicyDecision?> CheckGrantOwnerPrivilegeAsync(
+        IDataversePrivilegeChecker ownerPrivileges, Guid ownerTeamId, ExternalGrantRootType rootType, Guid rootId,
+        ExternalGrantKey? key, ILogger logger, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(ownerPrivileges);
+        bool holdsRead;
+        try
+        {
+            holdsRead = await ownerPrivileges.TeamHasReadPrivilegeAsync(ownerTeamId, EntityLogicalName, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex,
+                "[EXT-GRANT] Whether owner team {OwnerTeamId} may own grant {Key} on {RootType} {RootId} could not be read; " +
+                "nothing was granted.", ownerTeamId, key, rootType, rootId);
+            return GrantPolicyDecision.OwnerUnreadable;
+        }
+
+        if (holdsRead)
+            return null;
+
+        logger.LogError(
+            "[EXT-GRANT] REFUSED grant {Key} on {RootType} {RootId}: owner team {OwnerTeamId}'s security roles lack Read on " +
+            "sprk_externalrecordaccess, so Dataverse would refuse the row. Nothing was granted; an administrator must add " +
+            "that privilege to the team's role (for a secure record, the Secure Record Owner role).",
+            key, rootType, rootId, ownerTeamId);
+        return GrantPolicyDecision.OwnerPrivilegeMissing;
     }
 
     /// <summary>The <c>systemusers</c> projection of <see cref="ResolveGrantedBySystemUserIdAsync"/>. Internal so a test can

@@ -76,14 +76,14 @@ public class GrantRowOwnershipTests
     private Task<IResult> Grant(Guid contactId, Guid? organizationId = null) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contactId, Guid.Empty, ExternalAccessLevel.Collaborate, null, organizationId, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, _h.Ownership, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, _h.Ownership, _h.OwnerPrivileges, new EverythingProbe(),
             _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
     private Task<IResult> InviteAndGrant() =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             new InviteExternalUserRequest(Email, Guid.Empty, (int)ExternalAccessLevel.Collaborate, "Pat", "Partner", null, null,
                 "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, _h.Ownership, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, _h.Ownership, _h.OwnerPrivileges, new EverythingProbe(),
             _h.Ciam, _h.Emails, IdentityBinding.IdentityBindingTestKit.Binder(_h.Identities),
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })
@@ -309,6 +309,54 @@ public class GrantRowOwnershipTests
         counting.ResolveOwnerCalls.Should().Be(1, "the owner resolved before onboarding is handed to the core, not resolved twice");
     }
 
+    // Review round 2 (F1): the resolved team must also be ALLOWED to own the row. On a secure record, before the Secure Record
+    // Owner role holds prvReadsprk_ExternalRecordAccess, Dataverse refuses the create ("Read Privilege Check For Owner
+    // failed") — and before the fix that refusal came after the Contact, the CIAM account and the email.
+
+    [Fact]
+    public async Task InviteAndGrant_ANewPerson_WhenTheOwnerTeamLacksRead_Is500OwnerPrivilegeMissing_AndOnboardsNothing()
+    {
+        SecureMatter();
+        _h.OwnerPrivileges = TeamPrivilegeCheckerDouble.Lacking(OwnershipDirectory.SecureNamedTeam);
+        _h.Grants.GrantCreateFailure = OwnerPrivilegeRefusal(); // what Dataverse would answer to the create
+        _h.Grants.AcceptContactCreates = true; // the email matches no contact: onboarding WOULD create one
+
+        var result = await InviteAndGrant();
+
+        Problem(result).Should().Be((StatusCodes.Status500InternalServerError, ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode));
+        AssertNothingOnboardedOrGranted();
+        _h.OwnerPrivileges.TeamQuestions.Should().ContainSingle().Which.Should().Be(
+            (OwnershipDirectory.SecureNamedTeam, "sprk_externalrecordaccess"), "the resolved owner team is asked, read-only");
+    }
+
+    [Fact]
+    public async Task InviteAndGrant_ANewPerson_WhenTheOwnerTeamsPrivilegesCannotBeRead_Is503OwnerUnreadable_AndOnboardsNothing()
+    {
+        SecureMatter();
+        _h.OwnerPrivileges = new TeamPrivilegeCheckerDouble { Fault = new HttpRequestException("Simulated Dataverse 503.") };
+        _h.Grants.AcceptContactCreates = true;
+
+        var result = await InviteAndGrant();
+
+        Problem(result).Should().Be((StatusCodes.Status503ServiceUnavailable, ExternalGrantLifecycle.GrantOwnerUnreadableReasonCode));
+        AssertNothingOnboardedOrGranted();
+    }
+
+    [Fact]
+    public async Task InviteAndGrant_OnASecureRecord_WhenTheOwnerTeamHoldsRead_GrantsAndOwnsTheRowBySecureRecordOwners()
+    {
+        // The twin: a team that holds Read is not refused.
+        SecureMatter();
+        var contact = _h.Contact();
+        _h.Identities.Contacts[contact].Email = Email;
+
+        var result = await InviteAndGrant();
+
+        result.Should().BeOfType<Ok<InviteAndGrantResponse>>();
+        OwnerOfTheOneCreatedRow().Should().Be(Team(OwnershipDirectory.SecureNamedTeam));
+        _h.OwnerPrivileges.TeamQuestions.Should().ContainSingle().Which.TeamId.Should().Be(OwnershipDirectory.SecureNamedTeam);
+    }
+
     private void AssertNothingOnboardedOrGranted()
     {
         _h.Grants.ContactCreates.Should().BeEmpty("a refused request leaves no Contact behind");
@@ -328,6 +376,7 @@ public class GrantRowOwnershipTests
     public async Task Grant_WhenDataverseRefusesTheOwnerOnAPrivilegeCheck_Is500OwnerPrivilegeMissing_NotTheGenericFailure()
     {
         SecureMatter();
+        _h.OwnerPrivileges = TeamPrivilegeCheckerDouble.Lacking(OwnershipDirectory.SecureNamedTeam); // review round 2: confirmed
         _h.Grants.GrantCreateFailure = OwnerPrivilegeRefusal();
 
         var result = await Grant(_h.Contact());
@@ -335,6 +384,37 @@ public class GrantRowOwnershipTests
         Problem(result).Should().Be((StatusCodes.Status500InternalServerError, ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode));
         result.As<ProblemHttpResult>().ProblemDetails.Detail.Should().Contain("Read on External Record Access",
             "the detail tells an administrator what to fix, not the generic 'Failed to create external access record'");
+        _h.Grants.Creates.Should().BeEmpty();
+    }
+
+    // Review round 2 (K1 -> fix): a bare 403 names no privilege. It is owner_privilege_missing only when the owner team really
+    // lacks Read; otherwise the generic 500, as before 099b.
+
+    [Fact]
+    public async Task Grant_WhenTheCreateIsRefused403_ButTheOwnerTeamHoldsRead_IsTheGeneric500_NotOwnerPrivilegeMissing()
+    {
+        SecureMatter(); // the team holds Read (the double's default)
+        _h.Grants.GrantCreateFailure = OwnerPrivilegeRefusal();
+
+        var result = await Grant(_h.Contact());
+
+        Problem(result).Should().Be((StatusCodes.Status500InternalServerError, null));
+        result.As<ProblemHttpResult>().ProblemDetails.Detail.Should().Be("Failed to create external access record in Dataverse.");
+        _h.OwnerPrivileges.TeamQuestions.Should().ContainSingle().Which.TeamId.Should().Be(OwnershipDirectory.SecureNamedTeam,
+            "the 403 is confirmed by asking the owner team");
+        _h.Grants.Creates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Grant_WhenTheCreateIsRefused403_AndTheOwnerTeamsPrivilegesCannotBeRead_IsTheGeneric500()
+    {
+        SecureMatter();
+        _h.OwnerPrivileges = new TeamPrivilegeCheckerDouble { Fault = new HttpRequestException("Simulated Dataverse 503.") };
+        _h.Grants.GrantCreateFailure = OwnerPrivilegeRefusal();
+
+        var result = await Grant(_h.Contact());
+
+        Problem(result).Should().Be((StatusCodes.Status500InternalServerError, null), "an unconfirmed 403 is not named");
         _h.Grants.Creates.Should().BeEmpty();
     }
 
@@ -355,6 +435,7 @@ public class GrantRowOwnershipTests
     public async Task AssignedToGrant_WhenDataverseRefusesTheOwnerOnAPrivilegeCheck_IsAFailure_AndIsNotRecordedGranted()
     {
         ChildBuMatter();
+        _h.OwnerPrivileges = TeamPrivilegeCheckerDouble.Lacking(OwnershipDirectory.ChildTeam);
         _h.Grants.GrantCreateFailure = OwnerPrivilegeRefusal();
         var contact = _h.Contact();
         _h.Store.Assign(Matter, _matter, Attorney1, contact);

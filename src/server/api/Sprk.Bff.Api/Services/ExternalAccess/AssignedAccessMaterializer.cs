@@ -230,6 +230,9 @@ public sealed class AssignedAccessMaterializer
     /// team-owned like every other grant — there is no exception for the rule's own grants.</summary>
     private readonly IRecordOwnershipResolver _ownership;
 
+    /// <summary>Task 099b review round 2: the owner-team privilege reader the grant core confirms a privilege refusal with.</summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker _ownerPrivileges;
+
     /// <param name="scopes">Task 158 r1c-v2 (main-session round 47 item 1 (3)): reaches the secure-root inheritance's
     /// sharee-only pass after an assignment ended on a work assignment or project — through a scope, because the inheritance
     /// depends on this class (round 47 item 1 (2)) and a constructor dependency back would be a cycle. Always provided by the
@@ -253,9 +256,12 @@ public sealed class AssignedAccessMaterializer
         ExternalInviteService invites,
         GrantAccessNotifier notifier,
         IRecordOwnershipResolver ownership,
+        Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker ownerPrivileges,
         IServiceScopeFactory? scopes = null)
     {
         _scopes = scopes;
+        // A singleton, registered unconditionally (DataverseServiceExtensions); it depends on nothing here.
+        _ownerPrivileges = ownerPrivileges ?? throw new ArgumentNullException(nameof(ownerPrivileges));
         // A singleton, registered unconditionally (MetadataServiceExtensions); it depends on nothing here.
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         // Both Scoped and unconditionally registered beside this class (ExternalAccessModule); neither depends on it.
@@ -1734,7 +1740,7 @@ public sealed class AssignedAccessMaterializer
         // The ONE grant core (task 139, WP-1): policy, never-lower, No Access, expiry default, dedupe, invalidation.
         return GrantExternalAccessEndpoint.CreateGrantAsync(
             request, run.Request.RootType, run.RootId, run.Today, GrantCeiling.AssignedToRule, run.Request.GrantorOid,
-            _dataverse, _participations, _accessibleRecords, _ownership, _logger, ct);
+            _dataverse, _participations, _accessibleRecords, _ownership, _ownerPrivileges, _logger, ct);
     }
 
     /// <summary>

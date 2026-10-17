@@ -1094,6 +1094,11 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
             services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
+            // Task 099b review round 2: /invite-and-grant asks whether that team may own the row (it does); the host's
+            // UserPrivilegeChecker would need a real ServiceClient, so the owner-team question is answered at its boundary.
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker>(
+                new Sprk.Bff.Api.Tests.TestInfrastructure.TeamPrivilegeCheckerDouble());
 
             // Task 063: the system-user share routes read and write POA shares through the one seam. In memory, so
             // their wire contract can be asserted without a Dataverse.

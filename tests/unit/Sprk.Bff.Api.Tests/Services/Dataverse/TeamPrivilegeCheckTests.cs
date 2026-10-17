@@ -1,0 +1,83 @@
+using FluentAssertions;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Services.Dataverse.Privileges;
+using Xunit;
+
+namespace Sprk.Bff.Api.Tests.Services.Dataverse;
+
+/// <summary>
+/// unified-access-control-r2 task 099b review round 2: <see cref="UserPrivilegeChecker.TeamHasReadPrivilegeAsync"/> — whether
+/// an OWNER TEAM's roles hold Read on a table (the grant routes ask before a grant row is created for, or assigned to, a
+/// team). An answer is cached per team for a short time; a fault propagates and is NEVER cached, so "could not be read"
+/// (503) is never turned into "lacks it" or remembered. The team fetch is the seam (a ServiceClient cannot be faked); the cache
+/// is the production <see cref="TenantCache"/> over an in-memory distributed cache.
+/// </summary>
+public class TeamPrivilegeCheckTests
+{
+    private static readonly Guid SecureTeam = Guid.Parse("6eabc7f9-13be-f111-a05b-0022482913fc");
+    private static readonly Guid DefaultTeam = Guid.Parse("cf15f587-baa0-f111-aaac-000d3a99d1d7");
+    private const string GrantTable = "sprk_externalrecordaccess";
+
+    private readonly List<Guid> _fetches = new();
+    private Func<Guid, IReadOnlySet<string>> _answer = _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    private UserPrivilegeChecker Checker() => new(
+        new Mock<IDataverseService>().Object,
+        new TenantCache(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<TenantCache>.Instance),
+        NullLogger<UserPrivilegeChecker>.Instance,
+        (team, _) =>
+        {
+            _fetches.Add(team);
+            return Task.FromResult(_answer(team));
+        });
+
+    private static IReadOnlySet<string> Readable(params string[] tables) =>
+        new HashSet<string>(tables, StringComparer.OrdinalIgnoreCase);
+
+    [Fact]
+    public async Task ATeamWhoseRolesGrantRead_HoldsIt_AndOneWhoseRolesDoNot_DoesNot()
+    {
+        _answer = team => team == DefaultTeam ? Readable("sprk_ExternalRecordAccess", "sprk_matter") : Readable("sprk_matter");
+        var checker = Checker();
+
+        (await checker.TeamHasReadPrivilegeAsync(DefaultTeam, GrantTable, CancellationToken.None)).Should().BeTrue();
+        (await checker.TeamHasReadPrivilegeAsync(SecureTeam, GrantTable, CancellationToken.None)).Should().BeFalse(
+            "the Secure Record Owner role before it holds prvReadsprk_ExternalRecordAccess");
+    }
+
+    [Fact]
+    public async Task AnAnswer_IsCachedPerTeam_SoASecondQuestionReadsNothing()
+    {
+        _answer = _ => Readable(GrantTable);
+        var checker = Checker();
+
+        await checker.TeamHasReadPrivilegeAsync(SecureTeam, GrantTable, CancellationToken.None);
+        await checker.TeamHasReadPrivilegeAsync(SecureTeam, "sprk_matter", CancellationToken.None);
+        await checker.TeamHasReadPrivilegeAsync(DefaultTeam, GrantTable, CancellationToken.None);
+
+        _fetches.Should().Equal(new[] { SecureTeam, DefaultTeam }, "one read per team, then the cached set answers");
+        UserPrivilegeChecker.TeamPrivilegeTtl.Should().BeLessThanOrEqualTo(TimeSpan.FromMinutes(5),
+            "short: a role an administrator fixes is seen within minutes");
+    }
+
+    [Fact]
+    public async Task AFault_Propagates_AndIsNeverCached()
+    {
+        var calls = 0;
+        _answer = _ => ++calls == 1 ? throw new HttpRequestException("Simulated Dataverse 503.") : Readable(GrantTable);
+        var checker = Checker();
+
+        var first = () => checker.TeamHasReadPrivilegeAsync(SecureTeam, GrantTable, CancellationToken.None);
+        await first.Should().ThrowAsync<HttpRequestException>("a fault is not 'lacks it' — the caller refuses 503");
+
+        (await checker.TeamHasReadPrivilegeAsync(SecureTeam, GrantTable, CancellationToken.None)).Should().BeTrue(
+            "the fault was not cached: the next question reads Dataverse again");
+        _fetches.Should().HaveCount(2);
+    }
+}

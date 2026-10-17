@@ -58,6 +58,7 @@ public partial class ContactGrantAuthorizationTests
     {
         // Review round 1: the owner team's role lacks Read on sprk_externalrecordaccess, so Dataverse answers 403 to the create.
         Ownership = OwnershipDirectory.Standard().WithOrdinaryRoot("sprk_project", ProjectId).Resolver();
+        OwnerPrivileges = TeamPrivilegeCheckerDouble.Lacking(OwnershipDirectory.ChildTeam); // review round 2: confirmed
         _dataverse.BeforeCreate = () => throw new HttpRequestException(
             "Response status code does not indicate success: 403 (Forbidden).", null, System.Net.HttpStatusCode.Forbidden);
 

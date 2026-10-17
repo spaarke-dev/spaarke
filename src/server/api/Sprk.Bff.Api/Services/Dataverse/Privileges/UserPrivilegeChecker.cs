@@ -40,10 +40,26 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
     /// <summary>Cache schema version per ADR-009.</summary>
     private const int CacheVersion = 1;
 
+    /// <summary>
+    /// Task 099b review round 2: the per-TEAM cache resource. On-wire key: <c>tenant:{tenantId}:team-privileges:{teamId:D}:v1</c>.
+    /// Value: the team's Read-allowed entity logical names. Only an ANSWER is stored; a fault is never cached.
+    /// </summary>
+    internal const string TeamCacheResource = "team-privileges";
+
+    /// <summary>
+    /// Task 099b review round 2: short, because the answer gates a write the moment an administrator fixes the role (the
+    /// Secure Record Owner role gaining <c>prvReadsprk_ExternalRecordAccess</c> is seen within this window).
+    /// </summary>
+    internal static readonly TimeSpan TeamPrivilegeTtl = TimeSpan.FromMinutes(5);
+
     private readonly IDataverseService _dataverseService;
     private readonly ITenantCache _cache;
     private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly ILogger<UserPrivilegeChecker> _logger;
+
+    // Task 099b review round 2: how a team's Read set is fetched on a cache miss: RetrieveTeamPrivileges (below) in the host;
+    // a test supplies its own through the internal constructor, since a ServiceClient cannot be faked. Throws on a fault.
+    private readonly Func<Guid, CancellationToken, Task<IReadOnlySet<string>>> _fetchTeamReadable;
 
     // Per task 010 §6: 6-hour sliding TTL, 24-hour absolute maximum.
     // ITenantCache supports only absolute TTL; preserve the 24-hour bound.
@@ -60,6 +76,19 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _httpContextAccessor = httpContextAccessor;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _fetchTeamReadable = FetchTeamReadablePrivilegesAsync;
+    }
+
+    /// <summary>Test seam (task 099b review round 2): the team fetch is given; everything else is the host's code.</summary>
+    internal UserPrivilegeChecker(
+        IDataverseService dataverseService,
+        ITenantCache cache,
+        ILogger<UserPrivilegeChecker> logger,
+        Func<Guid, CancellationToken, Task<IReadOnlySet<string>>> fetchTeamReadable,
+        IHttpContextAccessor? httpContextAccessor = null)
+        : this(dataverseService, cache, logger, httpContextAccessor)
+    {
+        _fetchTeamReadable = fetchTeamReadable ?? throw new ArgumentNullException(nameof(fetchTeamReadable));
     }
 
     /// <summary>
@@ -112,6 +141,75 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
         await TrySetInCacheAsync(tenantId, cacheId, fetched, ct);
 
         return fetched;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> TeamHasReadPrivilegeAsync(Guid teamId, string entityLogicalName, CancellationToken ct)
+    {
+        if (teamId == Guid.Empty)
+            throw new ArgumentException("A team id is required.", nameof(teamId));
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+
+        var tenantId = GetTenantId();
+        var cacheId = teamId.ToString("D");
+
+        IReadOnlySet<string>? readable = null;
+        try
+        {
+            var cached = await _cache.GetAsync<HashSet<string>>(tenantId, TeamCacheResource, cacheId, CacheVersion, ct: ct);
+            if (cached is not null)
+                readable = new HashSet<string>(cached, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Failed to read the team privilege cache for team {TeamId}; reading Dataverse", teamId);
+        }
+
+        if (readable is null)
+        {
+            // A fault propagates from here: never answered false, never cached. The caller refuses 503.
+            readable = await _fetchTeamReadable(teamId, ct);
+            try
+            {
+                await _cache.SetAsync(
+                    tenantId, TeamCacheResource, cacheId, CacheVersion,
+                    new HashSet<string>(readable, StringComparer.Ordinal), TeamPrivilegeTtl, ct: ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Failed to write the team privilege cache for team {TeamId}; continuing", teamId);
+            }
+        }
+
+        return readable.Contains(entityLogicalName);
+    }
+
+    /// <summary>
+    /// Task 099b review round 2: the entity logical names the TEAM's own roles grant Read on, through
+    /// <c>RetrieveTeamPrivileges</c> on the application <see cref="ServiceClient"/> (no impersonation: the team is the
+    /// principal asked about). THROWS on any fault, unlike the user path: "could not be read" is not "lacks it".
+    /// </summary>
+    private async Task<IReadOnlySet<string>> FetchTeamReadablePrivilegesAsync(Guid teamId, CancellationToken ct)
+    {
+        var serviceClient = _dataverseService.TryUnwrapServiceClient(nameof(FetchTeamReadablePrivilegesAsync), _logger)
+            ?? throw new InvalidOperationException(
+                "The Dataverse ServiceClient is unavailable, so the team's privileges could not be read.");
+
+        var response = (RetrieveTeamPrivilegesResponse)await serviceClient.ExecuteAsync(
+            new RetrieveTeamPrivilegesRequest { TeamId = teamId }, ct);
+        var privilegeIds = response.RolePrivileges
+            .Select(rp => rp.PrivilegeId)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        var readable = privilegeIds.Count == 0
+            ? new List<string>()
+            : await QueryReadEntitiesAsync(serviceClient, privilegeIds, ct);
+        _logger.LogInformation(
+            "Fetched privilege set for team {TeamId}: {PrivilegeCount} privileges, {ReadableCount} entities with Read",
+            teamId, privilegeIds.Count, readable.Count);
+        return new HashSet<string>(readable, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -251,6 +349,27 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
     {
         try
         {
+            return await QueryReadEntitiesAsync(client, privilegeIds, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Error resolving privilege IDs to entity logical names; failing closed");
+            return new List<string>();
+        }
+    }
+
+    /// <summary>
+    /// The <see cref="ResolveReadEntitiesAsync"/> query without its fail-closed catch (task 099b review round 2): the team
+    /// path needs a fault to propagate. One code path for both, so the <c>prvRead</c> to logical-name rule is not copied.
+    /// </summary>
+    private static async Task<List<string>> QueryReadEntitiesAsync(
+        ServiceClient client,
+        List<Guid> privilegeIds,
+        CancellationToken ct)
+    {
+        {
             // Use a paged ConditionOperator.In query against the privilege entity.
             // Dataverse caps IN to 500 values per condition; chunk if necessary.
             var entities = new List<string>();
@@ -293,13 +412,6 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
             }
 
             return entities;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "Error resolving privilege IDs to entity logical names; failing closed");
-            return new List<string>();
         }
     }
 

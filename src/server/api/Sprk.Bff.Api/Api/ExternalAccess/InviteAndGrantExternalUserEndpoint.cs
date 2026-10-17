@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.Privileges;
 using Sprk.Bff.Api.Services.Registration;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -69,6 +70,7 @@ public static class InviteAndGrantExternalUserEndpoint
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
         IRecordOwnershipResolver ownership,
+        IDataversePrivilegeChecker ownerPrivileges,
         CallerRecordAccessProbe callerAccessProbe,
         CiamUserProvisioningService ciamProvisioner,
         RegistrationEmailService emailService,
@@ -252,6 +254,22 @@ public static class InviteAndGrantExternalUserEndpoint
                 return GrantExternalAccessEndpoint.PolicyRefusalProblem(ownerRefusal, httpContext);
             }
 
+            // Review round 2 (F1): the resolved team must also be ALLOWED to own the row. Dataverse refuses a create owned by a
+            // team whose roles lack Read on the table (the Secure Record Owner role until it holds the privilege), and that
+            // refusal would come only after the Contact, the CIAM account and the email. So it is asked here, read-only,
+            // through the ONE owner-privilege helper: 500 owner_privilege_missing, or 503 owner_unreadable when it cannot be
+            // read (fail closed) — before any side effect.
+            var privilegeRefusal = await GrantExternalAccessEndpoint.CheckGrantOwnerPrivilegeAsync(
+                ownerPrivileges, owner.TeamId!.Value, grantRoot.Type, grantRoot.Id, preGrantee.Key, logger, ct);
+            if (privilegeRefusal is not null)
+            {
+                logger.LogWarning(
+                    "[EXT-INVITE-GRANT] Refused {Email} on {RootType} {RootId} before onboarding: the new grant row's owner " +
+                    "team may not own it ({ReasonCode}). Nothing was onboarded or granted.",
+                    request.Email, grantRoot.Type, grantRoot.Id, privilegeRefusal.ReasonCode);
+                return GrantExternalAccessEndpoint.PolicyRefusalProblem(privilegeRefusal, httpContext);
+            }
+
             ownerTeamId = owner.TeamId;
         }
 
@@ -331,8 +349,8 @@ public static class InviteAndGrantExternalUserEndpoint
             // not happen.
             grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 grantRequest, grantRoot.Type, grantRoot.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, ownership, logger, ct, reAddRestoresLapsed: true,
-                resolvedOwnerTeamId: ownerTeamId);
+                dataverseClient, participations, accessibleRecords, ownership, ownerPrivileges, logger, ct,
+                reAddRestoresLapsed: true, resolvedOwnerTeamId: ownerTeamId);
 
             // Task 138: the core's own policy check refused (the record changed after the pre-check above) — or, since
             // task 139, its ceiling, never-lower or No Access check did. The Contact was onboarded; the refusal is
