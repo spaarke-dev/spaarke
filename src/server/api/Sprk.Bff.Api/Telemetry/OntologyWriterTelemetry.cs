@@ -401,6 +401,12 @@ public static class OntologyWriterFailureReason
     /// <c>in</c>-list length).</summary>
     public const string CompileRefused = "compile_refused";
 
+    /// <summary>Task 102a (owner option 101(b)): the body compiled, but it names a column outside
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.AuthorableColumns"/>. Returned only by
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.ValidateForAuthoring"/> (the BFF authoring routes); never
+    /// logged or metered by the evaluator.</summary>
+    public const string ColumnNotAuthorable = "column_not_authorable";
+
     /// <summary>The <c>sprk_messagetemplate</c> references a <c>{{field}}</c> token outside
     /// <see cref="Sprk.Bff.Api.Services.Signals.CompiledPredicate.TemplateEligibleFields"/> — absent entirely,
     /// present only on a <c>notExists</c> clause (whose value can never be read for a firing subject), read by an
