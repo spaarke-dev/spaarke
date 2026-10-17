@@ -4,7 +4,7 @@
     <title>Ontology admin slice (b), BFF: the authoring contract the rule wizard needs (catalog lanes, validate route, authorable-column allow-list)</title>
     <phase>10 Ontology admin (D-22)</phase>
     <gate>101 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-relevant: narrows a column-value oracle on the dry run (owner option 101(b)) and adds an authoring route; treated as auth-tagged.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -105,4 +105,5 @@
   <notes>spec.md FR-58; D-22; #39, #46; owner option A (2026-10-17) and 101(b).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion date="2026-10-17">PR #2054 merged into docs `a9ed6f41a` (head `c4785ff07`). Catalog per lane (actions, nextSteps, dismissalReasons, severities, workTypes, authorableFields); compile-only `POST /authoring/validate`; authorable-column allow-list (50 entries, all IsSecured=False live) on dry run, save, publish and validate (`ontology.admin.column_not_authorable`). Reviews: uac-r2 OK; adversarial pass 1 (fixed: duplicate_action, dry-run reasonCode, null ReadColumns fail closed, SkippableFact live tests); pass 2 no F (K1 residual text for derived Threshold base reads fixed). ArchTests 1076/1076 on branch and on branch+master. Residual oracle (D-151(c)) open with the owner: A re-sign or B narrow; spec §6 corrected. Contract for 102: validate 200 with errors, save/publish 400, same reasonCodes; assign-work must not be offered in both actions and nextSteps.</completion>
 </task>

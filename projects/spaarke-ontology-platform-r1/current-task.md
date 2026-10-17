@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-17 ~05:10Z (main session; #2055 merged, DI-109..111 filed). State only — history is in git log,
+> **Last Updated**: 2026-10-17 ~05:40Z (main session; #2054 102a merged, 102 relaunched). State only — history is in git log,
 > task `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path;
 > D-123 secure family; D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-159). Deferred work: one self-contained GitHub issue per item, label
@@ -10,7 +10,7 @@
 
 | Field | Value |
 |---|---|
-| **Task** | Lane 102a (adversarial pass 2 running); 064 merged, switch pending owner |
+| **Task** | Lane 102 running; 102a done (#2054 `a9ed6f41a`); 064 merged, switch pending owner |
 | **Status** | 055 done, 073 deferred (#2051), admin Append live (§16), 049 done (§17, #2050 `32a923ca4`), #2048 merged `adc213d9b` (#2046 closed) |
 | **Next Action** | On each lane notification: independent review → fix round → re-check → merge into docs. 063 done: POL-MATTER-NOBUDGET on dev Off; enabling is the owner's call (~58 Signals) |
 
@@ -21,8 +21,7 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 | Task | Worktree / branch | Model | State |
 |---|---|---|---|
 | 064 replace Briefing tab | `C:\wts-064` `task/ontology-064` | — | **PR #2055 merged `640794bf2`** (reviewed, fix round, re-check). Task stays wip: the switch (`Set-DefaultWorkspaceLayout.ps1 -To Worklist`, runbook `notes/briefing-cutover.md` §6.2) waits on the §6.1 non-admin checks or an owner waiver, then owner approval; notify word-add-in, R3, uac-r2 before/after. Follow-ups DI-109..DI-111 (#2058, #2057, #2059) + #2006 comment |
-| 102a authoring contract + allow-list [auth] | `C:\wts-102a` `task/ontology-102a` | opus/high (agent `lane-102a`) | Running. D-149 + D-151(b). Agent writes the POML `102a-authoring-contract-for-rule-wizard.poml`; add the TASK-INDEX row (`🔄 [wip] 102a`, after 102) when its PR merges. Approved extra scope: nextSteps[] and authorableFields[] in the catalog. Two adversarial passes + uac-r2 |
-| 102 rule wizard UI | `C:\wts-102` `task/ontology-102` | sonnet/xhigh | Waits on 102a. Local commit `8993db08c` (Retire dialog jest timeouts) not pushed. On restart: rebase onto docs after 102a merges; contract per D-149 (rebuild condition on New version) |
+| 102 rule wizard UI | `C:\wts-102` `task/ontology-102` | sonnet/xhigh (agent `lane-102`) | Running from docs `a9ed6f41a` + local `8993db08c`. Contract: D-149 + `notes/102a-authoring-contract.md` (POML updated 2026-10-17). UI-only; no BFF change |
 
 ## Open owner questions
 
