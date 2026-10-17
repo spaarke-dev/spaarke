@@ -257,13 +257,30 @@ public static class ExternalModuleDataEndpoints
             .Select(d => new Tier2ScopeFilterInjector.ScopeFilterDimension(d.Attribute, d.AccessibleIds(principal)))
             .Where(d => d.AccessibleIds.Count > 0)
             .ToList();
+
+        // NFR-03 (task 036): rows scoped through an accessible set known to be incomplete may be missing records the caller
+        // can read, so the response says so. A dimension is a lambda over the principal, so which root types this module's
+        // scope reads is not knowable here: ANY truncated root set marks the response (over-reporting "may be incomplete" is
+        // the safe direction; a silent cap is not).
+        var scopeTruncated = principal.TruncatedRootEntityTypes.Count > 0;
+        if (scopeTruncated)
+        {
+            logger.LogWarning(
+                "[EXT-MODULE] Fetch module={Module} entity={Entity}: the caller's accessible set is truncated on {RootTypes}; " +
+                "the response is flagged truncated (NFR-03).",
+                module.Name, module.RecordEntity, string.Join(",", principal.TruncatedRootEntityTypes));
+        }
+
         if (scopeDimensions.Count == 0)
         {
             logger.LogInformation(
                 "[EXT-MODULE] Fetch module={Module} entity={Entity}: caller has empty accessible set (all dimensions) — 0 rows (no query).",
                 module.Name, module.RecordEntity);
             return Results.Ok(new FetchResponseDto(
-                Array.Empty<IReadOnlyDictionary<string, object?>>(), MoreRecords: false, PagingCookie: null));
+                Array.Empty<IReadOnlyDictionary<string, object?>>(), MoreRecords: false, PagingCookie: null)
+            {
+                Truncated = scopeTruncated,
+            });
         }
 
         try
@@ -322,7 +339,10 @@ public static class ExternalModuleDataEndpoints
             // holds only accessible rows; per-module config `behavior.pageSize` is sized to cover a
             // realistic per-caller accessible set in one page. Documented in
             // notes/grid-widget-empty-diagnosis.md.
-            return Results.Ok(new FetchResponseDto(projected, MoreRecords: false, PagingCookie: null));
+            return Results.Ok(new FetchResponseDto(projected, MoreRecords: false, PagingCookie: null)
+            {
+                Truncated = scopeTruncated,
+            });
         }
         catch (FetchXmlParseException)
         {
