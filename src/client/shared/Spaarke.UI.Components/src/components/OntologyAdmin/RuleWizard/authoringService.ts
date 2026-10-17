@@ -37,6 +37,8 @@ export const REASON_POLICY_CODE_TAKEN = 'ontology.admin.policy_code_taken';
 export const REASON_POLICY_RETIRED = 'ontology.admin.policy_retired';
 export const REASON_POLICY_CHANGED = 'ontology.admin.policy_changed';
 export const REASON_CALLER_UNRESOLVED = 'sdap.access.deny.caller_unresolved';
+/** Task 102b (D-165): a matter limit on a rule that is not about matters. */
+export const REASON_SCOPE_SUBJECT_MISMATCH = 'ontology.admin.scope_subject_mismatch';
 
 // ---- wire shapes: the catalog -----------------------------------------------------------------------------------------------
 
@@ -134,6 +136,14 @@ export interface AuthoringCatalog {
 
 // ---- wire shapes: requests --------------------------------------------------------------------------------------------------
 
+/**
+ * Task 102b (D-165): the rule's scope, on every authoring request. `matterId` limits the rule to one matter (a rule about matters only);
+ * absent means all matters. Only the id is sent: the BFF reads the matter as the caller. The wizard never sends a tenant.
+ */
+export interface RuleScopeRequest {
+  matterId?: string;
+}
+
 /** A rule version as the wizard authors it. `ruleBody` and `decisionPlan` are JSON text, exactly as they will be stored. */
 export interface RuleDraftPayload {
   ruleType: string;
@@ -144,13 +154,13 @@ export interface RuleDraftPayload {
   decisionPlan: string;
 }
 
-export interface ValidateRequest {
+export interface ValidateRequest extends RuleScopeRequest {
   policyId?: string;
   lane?: string;
   draft: RuleDraftPayload;
 }
 
-export interface DryRunRequest {
+export interface DryRunRequest extends RuleScopeRequest {
   policyId?: string;
   lane?: string;
   ruleType: string;
@@ -158,7 +168,7 @@ export interface DryRunRequest {
   messageTemplate: string;
 }
 
-export interface NewPolicyRequest {
+export interface NewPolicyRequest extends RuleScopeRequest {
   policyCode: string;
   name: string;
   shortName: string | null;
@@ -170,7 +180,8 @@ export interface NewPolicyRequest {
   draft: RuleDraftPayload;
 }
 
-export interface PublishRequest {
+/** A publish carries the scope the new version is in force with: a matter, or none (all matters; clears a limit the rule had). */
+export interface PublishRequest extends RuleScopeRequest {
   draft: RuleDraftPayload;
 }
 
@@ -281,6 +292,10 @@ const REASON_FIELD: Readonly<Record<string, { field: string; message: string }>>
     message: 'Each code may appear once, in actions or in next steps, never twice in one list and never in both.',
   },
   [REASON_POLICY_CODE_TAKEN]: { field: 'policyCode', message: 'Another rule already uses this code.' },
+  [REASON_SCOPE_SUBJECT_MISMATCH]: {
+    field: 'matterId',
+    message: 'A matter limit is allowed only on a rule about matters.',
+  },
 };
 
 /** The field a stable reason code belongs on, or null when the code is not about one field. */
@@ -343,7 +358,8 @@ const CONFLICT_MESSAGES: Readonly<Record<string, string | undefined>> = {
   [REASON_DRY_RUN_REQUIRED]: 'Run Test on this exact rule before saving it; any edit needs a new test run.',
   [REASON_POLICY_CODE_TAKEN]: 'Another rule already uses this code.',
   [REASON_POLICY_RETIRED]: 'The rule is retired; a retired rule cannot be published.',
-  [REASON_POLICY_CHANGED]: 'The rule changed while this was being saved. Nothing new is in force; reload and try again.',
+  [REASON_POLICY_CHANGED]:
+    'The rule changed while this was being saved. Nothing new is in force; reload and try again.',
 };
 
 function firstMessage(fieldErrors: FieldErrors): string | null {
@@ -382,7 +398,11 @@ function messageFor(
     return 'That rule no longer exists, or it is not an Ontology rule. Nothing was changed.';
   }
   if (status === 409) {
-    return (reasonCode !== null ? CONFLICT_MESSAGES[reasonCode] : undefined) ?? detailOf(problem) ?? 'The rule is in a state that does not allow this change.';
+    return (
+      (reasonCode !== null ? CONFLICT_MESSAGES[reasonCode] : undefined) ??
+      detailOf(problem) ??
+      'The rule is in a state that does not allow this change.'
+    );
   }
   if (writes && (status === null || status >= 500)) {
     // A saved-Off policy whose first version could not be made current (K6) carries its own, more exact, sentence.
@@ -405,7 +425,12 @@ function failure(status: number | null, problem: Problem | null, writes: boolean
   };
 }
 
-async function call<T>(fetch: ResponseFetchFn, url: string, init: RequestInit, writes: boolean): Promise<AuthoringResult<T>> {
+async function call<T>(
+  fetch: ResponseFetchFn,
+  url: string,
+  init: RequestInit,
+  writes: boolean
+): Promise<AuthoringResult<T>> {
   try {
     const response = await fetch(url, init);
     if (!response.ok) {
@@ -428,7 +453,10 @@ async function call<T>(fetch: ResponseFetchFn, url: string, init: RequestInit, w
 
 // ---- the service ------------------------------------------------------------------------------------------------------------
 
-export function createOntologyAuthoringService({ fetch, baseUrl }: OntologyAuthoringServiceOptions): OntologyAuthoringService {
+export function createOntologyAuthoringService({
+  fetch,
+  baseUrl,
+}: OntologyAuthoringServiceOptions): OntologyAuthoringService {
   const root = `${baseUrl.replace(/\/+$/, '')}${ONTOLOGY_ADMIN_AUTHORING_ROUTE}`;
   const read = { Accept: 'application/json' };
   const write = { Accept: 'application/json', 'Content-Type': 'application/json' };

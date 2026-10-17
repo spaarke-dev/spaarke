@@ -18,8 +18,12 @@ import {
   newPolicyRequest,
   priorityProblem,
   quietWindowProblem,
+  scopeRequest,
   validateRequest,
 } from '../ruleDraft';
+import { initialDraftOf, versionModeOf } from '../ruleWizardTypes';
+import type { RuleDetail } from '../../Rules/rulesService';
+import { stepOfField, STEP_FIELDS } from '../wizardSteps';
 import type { ConditionDraft, FilterRow, RuleDraft } from '../ruleDraft';
 import { catalog } from './fixtures';
 
@@ -53,7 +57,11 @@ describe('buildRuleBody - Existence', () => {
       row({ field: 'zz_colour', op: '<>', valueKind: 'text', value: 'red' }),
       row({ field: 'zz_due', op: '>=', valueKind: 'date', date: { form: 'now-{N}d', days: '7' } }),
     ];
-    expect(bodyOf(existence({ when })).when).toEqual({ zz_state: 0, zz_colour: { '<>': 'red' }, zz_due: { '>=': 'now-7d' } });
+    expect(bodyOf(existence({ when })).when).toEqual({
+      zz_state: 0,
+      zz_colour: { '<>': 'red' },
+      zz_due: { '>=': 'now-7d' },
+    });
   });
 
   it('writes a yes-or-no value as a JSON boolean', () => {
@@ -61,7 +69,7 @@ describe('buildRuleBody - Existence', () => {
     expect(bodyOf(existence({ when })).when).toEqual({ zz_state: false });
   });
 
-  it('writes a list, a window and a null test as the grammar\'s shapes', () => {
+  it("writes a list, a window and a null test as the grammar's shapes", () => {
     const when = [
       row({ field: 'zz_state', test: 'in', valueKind: 'number', listText: '1, 2' }),
       row({
@@ -87,7 +95,9 @@ describe('buildRuleBody - Existence', () => {
       filter: [row({ field: 'zz_triage', test: 'in', ids: ['cat-aaa', 'cat-bbb'] })],
     };
     const body = bodyOf(existence({ clauses: [clause] }));
-    expect(body.all).toEqual([{ exists: 'zz_mail', path: 'zz_widgetlink', filter: { zz_triage: ['cat-aaa', 'cat-bbb'] } }]);
+    expect(body.all).toEqual([
+      { exists: 'zz_mail', path: 'zz_widgetlink', filter: { zz_triage: ['cat-aaa', 'cat-bbb'] } },
+    ]);
     expect(JSON.stringify(body)).not.toContain('Cheese');
   });
 
@@ -106,7 +116,11 @@ describe('buildRuleBody - Existence', () => {
   });
 
   it('writes the join path from the catalog into a clause; the admin never chooses it', () => {
-    const clause = { ...emptyClause(catalog, 'zz_note'), kind: 'notExists' as const, filter: [row({ field: 'zz_kind', value: 'x' })] };
+    const clause = {
+      ...emptyClause(catalog, 'zz_note'),
+      kind: 'notExists' as const,
+      filter: [row({ field: 'zz_kind', value: 'x' })],
+    };
     expect(bodyOf(existence({ clauses: [clause] })).all).toEqual([
       { notExists: 'zz_note', path: 'zz_widgetref', filter: { zz_kind: 'x' } },
     ]);
@@ -120,10 +134,20 @@ describe('buildRuleBody - Existence', () => {
 
 describe('buildRuleBody - Threshold', () => {
   const threshold = (over: Partial<ConditionDraft> = {}) =>
-    existence({ ruleType: 'Threshold', thresholdField: 'zz_load', thresholdOperator: '>=', thresholdValue: '80', ...over });
+    existence({
+      ruleType: 'Threshold',
+      thresholdField: 'zz_load',
+      thresholdOperator: '>=',
+      thresholdValue: '80',
+      ...over,
+    });
 
   it('writes one comparison and no clauses', () => {
-    expect(bodyOf(threshold())).toEqual({ type: 'Threshold', subject: 'zz_widget', threshold: { field: 'zz_load', operator: '>=', value: 80 } });
+    expect(bodyOf(threshold())).toEqual({
+      type: 'Threshold',
+      subject: 'zz_widget',
+      threshold: { field: 'zz_load', operator: '>=', value: 80 },
+    });
   });
 
   it('reports the measure and the value that are missing, and writes no body', () => {
@@ -149,7 +173,7 @@ describe('buildRuleBody - only what cannot be written is refused here', () => {
     expect(buildRuleBody(unusual, '', catalog).ruleBody).not.toBeNull();
   });
 
-  it('reports an empty value, a non-number, an empty list and a list over the catalog\'s limit', () => {
+  it("reports an empty value, a non-number, an empty list and a list over the catalog's limit", () => {
     const empty = row({ field: 'zz_state', value: '  ' });
     const nan = row({ field: 'zz_colour', valueKind: 'number', value: 'abc' });
     const none = row({ field: 'zz_due', test: 'in', listText: ' , ' });
@@ -173,11 +197,16 @@ describe('buildRuleBody - only what cannot be written is refused here', () => {
 describe('quiet window and priority', () => {
   it('the quiet window is written for the Decide lane only', () => {
     const base: RuleDraft = { ...emptyDraft(catalog), condition: existence(), quietWindowDays: '30' };
-    expect(JSON.parse(buildDraftBody({ ...base, lane: 'Decide' }, catalog).ruleBody as string)).toHaveProperty('quietWindowDays', 30);
-    expect(JSON.parse(buildDraftBody({ ...base, lane: 'Do' }, catalog).ruleBody as string)).not.toHaveProperty('quietWindowDays');
+    expect(JSON.parse(buildDraftBody({ ...base, lane: 'Decide' }, catalog).ruleBody as string)).toHaveProperty(
+      'quietWindowDays',
+      30
+    );
+    expect(JSON.parse(buildDraftBody({ ...base, lane: 'Do' }, catalog).ruleBody as string)).not.toHaveProperty(
+      'quietWindowDays'
+    );
   });
 
-  it('checks the quiet window against the catalog\'s limit and the priority for a whole number', () => {
+  it("checks the quiet window against the catalog's limit and the priority for a whole number", () => {
     expect(quietWindowProblem('', catalog)).toBeNull();
     expect(quietWindowProblem('90', catalog)).toBeNull();
     expect(quietWindowProblem('91', catalog)).toMatch(/0 to 90/);
@@ -228,13 +257,22 @@ describe('one serialisation for validate, the dry run, save and publish', () => 
 
   it('trims the identity, sends no short name when blank, and a priority only when typed', () => {
     const body = buildDraftBody(draft, catalog).ruleBody as string;
-    expect(newPolicyRequest(draft, body)).toMatchObject({ policyCode: 'POL-X', name: 'Name', shortName: null, priority: 250 });
+    expect(newPolicyRequest(draft, body)).toMatchObject({
+      policyCode: 'POL-X',
+      name: 'Name',
+      shortName: null,
+      priority: 250,
+    });
     expect(newPolicyRequest({ ...draft, priority: '' }, body).priority).toBeNull();
   });
 });
 
 describe('draftKey - a test is for exactly one draft', () => {
-  const base: RuleDraft = { ...emptyDraft(catalog), lane: 'Decide', condition: existence({ when: [row({ field: 'zz_state', value: 'a' })] }) };
+  const base: RuleDraft = {
+    ...emptyDraft(catalog),
+    lane: 'Decide',
+    condition: existence({ when: [row({ field: 'zz_state', value: 'a' })] }),
+  };
 
   it('changes on every kind of edit', () => {
     const edits: Array<(d: RuleDraft) => RuleDraft> = [
@@ -246,6 +284,7 @@ describe('draftKey - a test is for exactly one draft', () => {
       d => ({ ...d, priority: '1' }),
       d => ({ ...d, quietWindowDays: '5' }),
       d => ({ ...d, countsTowardSuppression: false }),
+      d => ({ ...d, matterId: 'm-1' }),
       d => ({ ...d, condition: { ...d.condition, thresholdValue: '1' } }),
       d => ({ ...d, condition: { ...d.condition, when: d.condition.when.map(r => ({ ...r, value: 'b' })) } }),
     ];
@@ -254,10 +293,73 @@ describe('draftKey - a test is for exactly one draft', () => {
     }
   });
 
+  it('binds the matter scope by its id, not by the name shown for it (task 102b)', () => {
+    const scoped: RuleDraft = { ...base, matterId: 'm-1', matterName: 'Matter One' };
+    expect(draftKey({ ...scoped, matterName: 'Renamed' })).toBe(draftKey(scoped));
+    expect(draftKey({ ...scoped, matterId: 'm-2' })).not.toBe(draftKey(scoped));
+  });
+
   it('ignores the identity of rows, which is never sent', () => {
-    const renamed: RuleDraft = { ...base, condition: { ...base.condition, when: base.condition.when.map(r => ({ ...r, id: 'other' })) } };
+    const renamed: RuleDraft = {
+      ...base,
+      condition: { ...base.condition, when: base.condition.when.map(r => ({ ...r, id: 'other' })) },
+    };
     expect(draftKey(renamed)).toBe(draftKey(base));
     expect(hasWork(renamed, base)).toBe(false);
     expect(hasWork({ ...base, name: 'x' }, base)).toBe(true);
+  });
+});
+
+describe('the matter scope (task 102b; D-165)', () => {
+  const draft: RuleDraft = {
+    ...emptyDraft(catalog),
+    lane: 'Decide',
+    condition: existence({ when: [row({ field: 'zz_state', value: 'open' })] }),
+    messageTemplate: 'Msg',
+    actions: ['frobnicate'],
+  };
+  const scoped: RuleDraft = { ...draft, matterId: 'm-1', matterName: 'Matter One' };
+
+  it('a new draft applies to all matters', () => {
+    expect(emptyDraft(catalog)).toMatchObject({ matterId: null, matterName: null });
+  });
+
+  it('sends only the matter id, on validate and save alike, and nothing for all matters', () => {
+    const body = buildDraftBody(draft, catalog).ruleBody as string;
+    expect(scopeRequest(scoped)).toEqual({ matterId: 'm-1' });
+    expect(scopeRequest(draft)).toEqual({});
+    expect(validateRequest(scoped, body, null).matterId).toBe('m-1');
+    expect(validateRequest(scoped, body, 'p-1').matterId).toBe('m-1');
+    expect(newPolicyRequest(scoped, body).matterId).toBe('m-1');
+    expect(validateRequest(draft, body, null)).not.toHaveProperty('matterId');
+    expect(newPolicyRequest(draft, body)).not.toHaveProperty('matterId');
+    for (const request of [validateRequest(scoped, body, null), newPolicyRequest(scoped, body)]) {
+      expect(JSON.stringify(request)).not.toContain('Matter One');
+      expect(request).not.toHaveProperty('tenant');
+    }
+  });
+
+  it('places a matterId refusal on the Scope and noise step', () => {
+    expect(stepOfField('matterId')).toBe('scope');
+    expect(STEP_FIELDS.scope).toContain('matterId');
+  });
+
+  it('a new version starts with the scope the rule has', () => {
+    const detail = {
+      summary: { policyId: 'p-1', code: 'POL-A', name: 'Rule A', lane: 'Decide', versionNumber: 2, enabled: true },
+      wording: { headline: null, messageTemplate: null, proposedAction: null },
+      plan: { actions: [], nextSteps: [] },
+      scope: { tenant: null, matterId: 'm-9', matterName: 'Matter Nine', priority: null },
+      noise: {
+        countsTowardSuppression: true,
+        suppressAfterDismissals: 3,
+        suppressionWindowDays: 30,
+        quietWindowDays: 21,
+      },
+    } as unknown as RuleDetail;
+    const mode = versionModeOf(detail);
+    expect(mode.scope).toEqual({ tenant: null, matter: 'Matter Nine', matterId: 'm-9' });
+    expect(initialDraftOf(catalog, mode)).toMatchObject({ matterId: 'm-9', matterName: 'Matter Nine' });
+    expect(initialDraftOf(catalog, { kind: 'new' })).toMatchObject({ matterId: null });
   });
 });
