@@ -1674,17 +1674,20 @@ public partial class SignalReevaluationJobTests
         const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_totalspendtodate","operator":">=","value":50000}}""";
         var h = new Harness().WithThresholdPolicy(body, "Spend to date is {{sprk_totalspendtodate}}.");
         h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId) { ["sprk_matterid"] = MatterId });
-        h.WithInvoice("sprk_matter", MatterId, 30000m, FinanceBaseValues.InvoiceStatusReviewed)
-            .WithInvoice("sprk_matter", MatterId, 15000m, FinanceBaseValues.InvoiceStatusReviewed)
-            .WithInvoice("sprk_matter", MatterId, 4000m, FinanceBaseValues.InvoiceStatusReviewed)
-            .WithInvoice("sprk_matter", MatterId, 900000m, 100000000); // ToReview: the other real status, not counted, ignored
+        // ebilling-r1 D-98: counted = statuscode In Review, Approved, Sent to AP, Paid (Paid is Inactive and still counts).
+        h.WithInvoice("sprk_matter", MatterId, 30000m, InvoiceStatusCodes.Approved)
+            .WithInvoice("sprk_matter", MatterId, 15000m, InvoiceStatusCodes.Paid)
+            .WithInvoice("sprk_matter", MatterId, 4000m, InvoiceStatusCodes.SentToAp)
+            .WithInvoice("sprk_matter", MatterId, 900000m, InvoiceStatusCodes.Rejected)        // not counted, ignored
+            .WithInvoice("sprk_matter", MatterId, 800000m, InvoiceStatusCodes.ReturnedToFirm)  // not counted, ignored
+            .WithInvoice("sprk_matter", MatterId, 700000m, InvoiceStatusCodes.Cancelled);      // not counted, ignored
 
         await h.RunAsync();
 
         h.Sysadmin.AggregateFetches.Should().ContainSingle().Which.Should().Contain("sprk_invoice");
-        h.Org.CreatedPayloads.Should().BeEmpty("30000 + 15000 + 4000 = 49000 is under 50000, and the uncounted 900000 must not be added");
+        h.Org.CreatedPayloads.Should().BeEmpty("30000 + 15000 + 4000 = 49000 is under 50000, and the uncounted rows must not be added");
 
-        h.WithInvoice("sprk_matter", MatterId, 1000m); // now exactly 50000: at-least is inclusive
+        h.WithInvoice("sprk_matter", MatterId, 1000m); // In Review (the default): now exactly 50000, at-least is inclusive
         h.Org.ResetCounts();
         await h.RunAsync();
         h.Org.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_sentence").Should().Be("Spend to date is 50000.");
@@ -2644,13 +2647,13 @@ public partial class SignalReevaluationJobTests
             return this;
         }
 
-        public Harness WithInvoice(string parent, Guid parentId, decimal amount, int status = FinanceBaseValues.InvoiceStatusReviewed)
+        public Harness WithInvoice(string parent, Guid parentId, decimal amount, int status = InvoiceStatusCodes.InReview)
         {
             Sysadmin.InvoiceRows.Add(new Entity("sprk_invoice", Guid.NewGuid())
             {
                 [parent] = new EntityReference(parent, parentId),
                 ["sprk_totalamount"] = new Money(amount),
-                ["sprk_invoicestatus"] = new OptionSetValue(status),
+                ["statuscode"] = new OptionSetValue(status),
             });
             return this;
         }
@@ -3250,13 +3253,13 @@ public partial class SignalReevaluationJobTests
             var conditions = entity.Element("filter")!.Elements("condition").ToList();
             var parents = conditions.Single(c => (string)c.Attribute("attribute")! == lookup && (string)c.Attribute("operator")! == "in")
                 .Elements("value").Select(v => Guid.Parse(v.Value)).ToHashSet();
-            var statuses = conditions.SingleOrDefault(c => (string)c.Attribute("attribute")! == "sprk_invoicestatus")
+            var statuses = conditions.SingleOrDefault(c => (string)c.Attribute("attribute")! == "statuscode")
                 ?.Elements("value").Select(v => int.Parse(v.Value)).ToHashSet();
 
             var result = new EntityCollection();
             var rows = (name == "sprk_invoice" ? InvoiceRows : BudgetRows).Where(r =>
                 r.GetAttributeValue<EntityReference>(lookup) is { } p && parents.Contains(p.Id)
-                && (statuses is null || r.GetAttributeValue<OptionSetValue>("sprk_invoicestatus") is { } s && statuses.Contains(s.Value)));
+                && (statuses is null || r.GetAttributeValue<OptionSetValue>("statuscode") is { } s && statuses.Contains(s.Value)));
             foreach (var byParent in rows.GroupBy(r => r.GetAttributeValue<EntityReference>(lookup)!.Id))
             {
                 result.Entities.Add(new Entity(name)

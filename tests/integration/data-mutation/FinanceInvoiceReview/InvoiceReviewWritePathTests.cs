@@ -169,7 +169,7 @@ public class InvoiceReviewWritePathTests
             ["sprk_Matter@odata.bind"] = $"/sprk_matters({request.MatterId})",
             ["sprk_vendororg@odata.bind"] = $"/sprk_organizations({request.VendorOrgId})",
             ["sprk_name"] = "Acme LLP - INV-77",
-            ["sprk_invoicestatus"] = 100000000,
+            // No status column: the invoice takes the statuscode default, In Review (ebilling-r1 D-41, task 015).
             ["sprk_extractionstatus"] = 100000000,
             ["sprk_invoicenumber"] = "INV-77",
             ["sprk_invoicedate"] = request.InvoiceDate!.Value,
@@ -184,6 +184,8 @@ public class InvoiceReviewWritePathTests
         });
         create.Keys.Should().NotContain(k => k.StartsWith('_') && k.EndsWith("_value"),
             "the Web API does not accept _x_value keys as a lookup write");
+        create.Keys.Should().NotContain(new[] { "statuscode", "statecode" },
+            "a new invoice starts at the statuscode default, In Review; only InvoiceLifecycleService moves it");
 
         var link = _records.Writes[1];
         link.Id.Should().Be(request.DocumentId);

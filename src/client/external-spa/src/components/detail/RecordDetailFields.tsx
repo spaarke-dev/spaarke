@@ -141,7 +141,7 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
       { attribute: 'sprk_invoicenumber', label: 'Invoice number' },
       { attribute: 'sprk_name', label: 'Name' },
       { attribute: 'sprk_invoicedate', label: 'Invoice date', kind: 'date' },
-      { attribute: 'sprk_invoicestatus', label: 'Status' },
+      { attribute: 'statuscode', label: 'Status' },
       { attribute: 'sprk_totalamount', label: 'Total amount', kind: 'money' },
       { attribute: 'sprk_project', label: 'Project', kind: 'lookup' },
       { attribute: 'sprk_matter', label: 'Matter', kind: 'lookup' },

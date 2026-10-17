@@ -36,7 +36,9 @@ public static class FinanceBaseValues
 
     public const string InvoiceEntity = "sprk_invoice";
     public const string InvoiceTotalAmount = "sprk_totalamount";
-    public const string InvoiceStatus = "sprk_invoicestatus";
+    /// <summary>The invoice status column: <c>statuscode</c>, never <c>statecode</c> (Paid is Inactive and still counts). The
+    /// retired invoice-status choice column is gone (ebilling-r1 task 015, D-41).</summary>
+    public const string InvoiceStatusCodeColumn = "statuscode";
 
     public const string BudgetEntity = "sprk_budget";
     public const string BudgetTotalBudget = "sprk_totalbudget";
@@ -46,14 +48,14 @@ public static class FinanceBaseValues
     public const string BudgetColumn = "sprk_totalbudget";
     public const string UtilizationColumn = "sprk_budgetutilizationpercent";
 
-    /// <summary><c>sprk_invoicestatus</c> "Reviewed". The option set has exactly two values, <c>100000000</c> ToReview and
-    /// <c>100000001</c> Reviewed (live <c>spaarkedev1</c> and <c>OptionSets/sprk_invoicestatus.xml</c>, read 2026-10-12). Whether spend
-    /// should count ONLY Reviewed invoices is an owner business decision (pending); this is what the rollup has always been able to
-    /// match, since the other statuses it once named do not exist.</summary>
-    public const int InvoiceStatusReviewed = 100000001;
-
-    /// <summary>The invoice statuses whose amount counts as spend.</summary>
-    public static readonly IReadOnlyList<int> CountedInvoiceStatuses = new[] { InvoiceStatusReviewed };
+    /// <summary>The invoice <c>statuscode</c> values whose amount counts as spend: In Review, Approved, Sent to AP and Paid. Rejected,
+    /// Returned to Firm and Cancelled are not counted, so a Signal raised by an invoice that is later rejected can clear. Owner
+    /// decision D-98 (ebilling-r1, 2026-10-17; spec FR-06), which replaces ontology D-137 Q24 ("spend counts only Reviewed").
+    /// The numbers live once, in <see cref="InvoiceStatusCodes"/>.</summary>
+    public static readonly IReadOnlyList<int> CountedInvoiceStatuses = new[]
+    {
+        InvoiceStatusCodes.InReview, InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid,
+    };
 
     /// <summary>Parent ids per grouped query. Matches <c>PredicateCompiler.MaxInListLength</c>: the size of an <c>in</c> list
     /// the Signal code already sends to Dataverse.</summary>
@@ -170,7 +172,7 @@ public static class FinanceBaseValues
                 parentIds.Select(id => new XElement("value", id.ToString("D", CultureInfo.InvariantCulture)))));
         if (forInvoices)
         {
-            filter.Add(new XElement("condition", new XAttribute("attribute", InvoiceStatus), new XAttribute("operator", "in"),
+            filter.Add(new XElement("condition", new XAttribute("attribute", InvoiceStatusCodeColumn), new XAttribute("operator", "in"),
                 CountedInvoiceStatuses.Select(s => new XElement("value", s.ToString(CultureInfo.InvariantCulture)))));
         }
 

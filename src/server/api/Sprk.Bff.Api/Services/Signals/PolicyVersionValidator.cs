@@ -145,7 +145,7 @@ public sealed class PolicyVersionValidator
     /// <c>sprk_totalbudget</c> or <c>sprk_budgetutilizationpercent</c> records only the stored subject column in
     /// <see cref="CompiledPredicate.ReadColumns"/>, but the evaluator decides it from org-wide grouped sums
     /// (<c>FinanceBaseValues.BuildGroupedSumFetchXml</c>) over <c>sprk_invoice.sprk_totalamount</c>,
-    /// <c>sprk_invoice.sprk_invoicestatus</c> and <c>sprk_budget.sprk_totalbudget</c>. Those base columns are not on this list and
+    /// <c>sprk_invoice.statuscode</c> (ebilling-r1 D-41 / D-98) and <c>sprk_budget.sprk_totalbudget</c>. Those base columns are not on this list and
     /// not covered by the live <c>IsSecured</c> test. Repeated dry runs with a moving threshold reveal the current sum, including
     /// invoices the author cannot read (the stored roll-up on the subject already shows a possibly stale copy).</para>
     /// <para><b>Seed (2026-10-16), and nothing else.</b>

@@ -44,7 +44,7 @@ public class FinanceRollupService
     private const string Invoice_Matter = FinanceBaseValues.MatterEntity;
     private const string Invoice_Project = FinanceBaseValues.ProjectEntity;
     private const string Invoice_TotalAmount = FinanceBaseValues.InvoiceTotalAmount;
-    private const string Invoice_InvoiceStatus = FinanceBaseValues.InvoiceStatus;
+    private const string Invoice_StatusCode = FinanceBaseValues.InvoiceStatusCodeColumn;
     private const string Invoice_InvoiceDate = "sprk_invoicedate";
 
     private const string BudgetEntity = FinanceBaseValues.BudgetEntity;
@@ -238,12 +238,12 @@ public class FinanceRollupService
     {
         var query = new QueryExpression(InvoiceEntity)
         {
-            ColumnSet = new ColumnSet(Invoice_TotalAmount, Invoice_InvoiceDate, Invoice_InvoiceStatus),
+            ColumnSet = new ColumnSet(Invoice_TotalAmount, Invoice_InvoiceDate, Invoice_StatusCode),
             Criteria = new FilterExpression(LogicalOperator.And)
         };
         query.Criteria.AddCondition(lookupField, ConditionOperator.Equal, parentId);
         query.Criteria.AddCondition(
-            Invoice_InvoiceStatus,
+            Invoice_StatusCode,
             ConditionOperator.In,
             FinanceBaseValues.CountedInvoiceStatuses.Cast<object>().ToArray());
         return query;

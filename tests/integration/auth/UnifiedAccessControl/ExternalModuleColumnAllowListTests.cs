@@ -671,7 +671,8 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     {
         { "sprk_project", "<fetch><entity name='sprk_project'><attribute name='sprk_projectid'/><attribute name='sprk_projectname'/><attribute name='sprk_projectnumber'/><attribute name='statuscode'/><attribute name='modifiedon'/><order attribute='sprk_projectname' descending='false'/></entity></fetch>" },
         { "sprk_document", LiveDocumentsGridFetchXml },
-        { "sprk_invoice", "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_invoicenumber'/><attribute name='sprk_invoicedate'/><attribute name='sprk_invoicestatus'/><attribute name='sprk_totalamount'/><attribute name='sprk_project'/><attribute name='sprk_matter'/><order attribute='sprk_invoicedate' descending='true'/></entity></fetch>" },
+        // ebilling-r1 task 015 (D-41): grid 3ff4102c's status column moved from the retired status choice column to statuscode.
+        { "sprk_invoice", "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_invoicenumber'/><attribute name='sprk_invoicedate'/><attribute name='statuscode'/><attribute name='sprk_totalamount'/><attribute name='sprk_project'/><attribute name='sprk_matter'/><order attribute='sprk_invoicedate' descending='true'/></entity></fetch>" },
         { "sprk_workassignment", "<fetch><entity name='sprk_workassignment'><attribute name='sprk_workassignmentid'/><attribute name='sprk_workassignmentnumber'/><attribute name='sprk_priority'/><attribute name='sprk_responseduedate'/><attribute name='statuscode'/><attribute name='sprk_regardingproject'/><order attribute='sprk_responseduedate' descending='false'/></entity></fetch>" },
         { "sprk_matter", "<fetch><entity name='sprk_matter'><attribute name='sprk_matterid'/><attribute name='sprk_mattername'/><attribute name='sprk_matternumber'/><attribute name='statuscode'/><order attribute='sprk_mattername' descending='false'/></entity></fetch>" },
         { "sprk_servicerequest", "<fetch><entity name='sprk_servicerequest'><attribute name='sprk_servicerequestid'/><attribute name='sprk_servicerequestnumber'/><attribute name='sprk_name'/><attribute name='statuscode'/><attribute name='createdon'/><attribute name='sprk_requestedby'/><order attribute='createdon' descending='true'/></entity></fetch>" },
@@ -753,7 +754,8 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         },
         ["sprk_invoice"] = new[]
         {
-            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
+            // ebilling-r1 task 015 (D-41): statuscode replaces the retired status choice column (grid 3ff4102c moved with it).
+            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "statuscode",
             "sprk_totalamount", "sprk_project", "sprk_matter",
         },
         ["sprk_workassignment"] = new[]
@@ -789,9 +791,12 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         // Task 134's document list was the task-157 derivation (no rule-(b) column); task 032's two creator stamps are a
         // later, deliberate addition, so they appear on both sides of the shrink comparison and drop nothing.
         ["sprk_document"] = LiveDerivedAllowLists["sprk_document"],
+        // ebilling-r1 task 015 (D-41) renamed the status column on BOTH sides of this comparison (the retired status choice
+        // column -> statuscode), as task 032's later addition to the document list appears on both sides: the rename drops
+        // and adds nothing the shrink is about.
         ["sprk_invoice"] = new[]
         {
-            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
+            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "statuscode",
             "sprk_totalamount", "sprk_project", "sprk_matter", "sprk_visibilitystate", "modifiedon", "statecode",
         },
         ["sprk_workassignment"] = new[]

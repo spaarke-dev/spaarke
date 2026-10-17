@@ -61,7 +61,7 @@
  * <OptionSetField span={1} label="Status" value={statusLabel} />
  *
  * // Editable (consumer resolves options + wires the form buffer):
- * const attr = getXrmPage().getAttribute("sprk_invoicestatus");
+ * const attr = getXrmPage().getAttribute("sprk_priority");
  * <OptionSetField
  *   span={1}
  *   label="Status"

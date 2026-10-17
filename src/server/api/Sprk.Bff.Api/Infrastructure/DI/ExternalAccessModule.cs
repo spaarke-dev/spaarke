@@ -444,11 +444,13 @@ public static class ExternalAccessModule
             },
             // Grid 3ff4102c. Primary name = sprk_name (not on the grid; admitted for the /record default
             // projection). Task 157 dropped (rule (b) only): sprk_visibilitystate, modifiedon, statecode.
+            // ebilling-r1 task 015 (D-41): the invoice status is statuscode; the retired status choice column it replaces
+            // is gone, and grid 3ff4102c's status column is moved to statuscode in the same change.
             SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_name",
             ReadableColumns = new HashSet<string>
             {
-                "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
+                "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "statuscode",
                 "sprk_totalamount", "sprk_project", "sprk_matter",
             },
         });

@@ -19,12 +19,40 @@ public class FinanceBaseValuesTests
     private static readonly Guid MatterB = Guid.Parse("b68299c6-bafb-f011-8407-7c1e520aa4df");
 
     [Fact]
-    public void TheCountedInvoiceStatuses_AreOnlyValuesThatExistInTheOptionSet()
+    public void TheCountedInvoiceStatuses_AreTheFourStatuscodeValues_InReviewThroughPaid()
     {
-        // sprk_invoicestatus has exactly 100000000 ToReview and 100000001 Reviewed (live spaarkedev1 + OptionSets/sprk_invoicestatus.xml).
-        FinanceBaseValues.CountedInvoiceStatuses.Should().Equal(FinanceBaseValues.InvoiceStatusReviewed);
-        FinanceBaseValues.InvoiceStatusReviewed.Should().Be(100000001);
-        FinanceBaseValues.CountedInvoiceStatuses.Should().BeSubsetOf(new[] { 100000000, 100000001 });
+        // Owner decision D-98 (spec FR-06): In Review, Approved, Sent to AP, Paid - filtered on statuscode (Paid is Inactive).
+        FinanceBaseValues.CountedInvoiceStatuses.Should().Equal(
+            InvoiceStatusCodes.InReview, InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid);
+        FinanceBaseValues.CountedInvoiceStatuses.Should().Equal(1, 659490000, 659490001, 659490002);   // task 012's live values
+        FinanceBaseValues.CountedInvoiceStatuses.Should().NotContain(new[]
+        {
+            InvoiceStatusCodes.Rejected, InvoiceStatusCodes.ReturnedToFirm, InvoiceStatusCodes.Cancelled,
+        });
+        FinanceBaseValues.InvoiceStatusCodeColumn.Should().Be("statuscode");
+    }
+
+    [Theory]
+    [InlineData(InvoiceStatusCodes.InReview, true)]
+    [InlineData(InvoiceStatusCodes.Approved, true)]
+    [InlineData(InvoiceStatusCodes.SentToAp, true)]
+    [InlineData(InvoiceStatusCodes.Paid, true)]              // Inactive (statecode 1) and still counted: the filter is statuscode
+    [InlineData(InvoiceStatusCodes.Rejected, false)]
+    [InlineData(InvoiceStatusCodes.ReturnedToFirm, false)]
+    [InlineData(InvoiceStatusCodes.Cancelled, false)]
+    public void AnInvoice_IsCountedAsSpend_ByItsStatuscodeAlone(int statusCode, bool counted)
+    {
+        // The rollup's query and the evaluator's grouped query admit exactly the counted statuscodes, on statuscode only.
+        var rollup = FinanceRollupService.BuildInvoiceQuery(MatterA, "sprk_matter");
+        rollup.Criteria.Conditions.Should().NotContain(c => c.AttributeName == "statecode");
+        rollup.Criteria.Conditions.Single(c => c.AttributeName == "statuscode").Values.Cast<int>().Contains(statusCode)
+            .Should().Be(counted);
+
+        var grouped = XElement.Parse(FinanceBaseValues.BuildGroupedSumFetchXml("sprk_matter", forInvoices: true, new[] { MatterA }));
+        var conditions = grouped.Descendants("condition").ToList();
+        conditions.Should().NotContain(c => (string)c.Attribute("attribute")! == "statecode");
+        conditions.Single(c => (string)c.Attribute("attribute")! == "statuscode").Elements("value").Select(v => int.Parse(v.Value))
+            .Contains(statusCode).Should().Be(counted);
     }
 
     [Theory]
@@ -33,13 +61,13 @@ public class FinanceBaseValuesTests
     public void TheRollupsInvoiceQuery_AndTheEvaluatorsGroupedQuery_AgreeOnLookupAndStatuses(string parent)
     {
         var rollup = FinanceRollupService.BuildInvoiceQuery(MatterA, FinanceBaseValues.ParentLookup(parent));
-        var statusCondition = rollup.Criteria.Conditions.Single(c => c.AttributeName == "sprk_invoicestatus");
+        var statusCondition = rollup.Criteria.Conditions.Single(c => c.AttributeName == "statuscode");
         statusCondition.Operator.Should().Be(ConditionOperator.In);
 
         var grouped = XElement.Parse(FinanceBaseValues.BuildGroupedSumFetchXml(parent, forInvoices: true, new[] { MatterA }));
         var conditions = grouped.Element("entity")!.Element("filter")!.Elements("condition").ToList();
 
-        conditions.Single(c => (string)c.Attribute("attribute")! == "sprk_invoicestatus").Elements("value").Select(v => int.Parse(v.Value))
+        conditions.Single(c => (string)c.Attribute("attribute")! == "statuscode").Elements("value").Select(v => int.Parse(v.Value))
             .Should().Equal(statusCondition.Values.Cast<int>());
         rollup.Criteria.Conditions.Single(c => c.AttributeName == parent).Operator.Should().Be(ConditionOperator.Equal);
         conditions.Should().Contain(c => (string)c.Attribute("attribute")! == parent && (string)c.Attribute("operator")! == "in");

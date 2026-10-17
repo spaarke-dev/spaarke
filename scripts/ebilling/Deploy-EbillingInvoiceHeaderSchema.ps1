@@ -26,7 +26,7 @@
     NEVER deletes or renames anything by logical name (display labels of statuscode values 1 and 2 change). If an
     existing column has the same logical name but a different type (or a lookup targets a different table), or a
     status value exists under another state, the script STOPS with exit code 2 and an ESCALATION message
-    (project CLAUDE.md section 5). sprk_invoicestatus is not touched (task 015 retires it).
+    (project CLAUDE.md section 5). The old invoice-status choice column is not touched (task 015 retired it; D-41).
 
     Eventually consistent metadata reads: a 404 right after a create is not trusted; a create refused with "already
     exists" counts as skipped (after a type check on a settled read). Customization / publish locks and transient

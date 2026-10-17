@@ -321,7 +321,6 @@ public class InvoiceReviewService : IInvoiceReviewService
     internal const string InvMatterValue = "_sprk_matter_value";
     internal const string InvVendorOrgValue = "_sprk_vendororg_value";
     internal const string InvName = "sprk_name";
-    internal const string InvInvoiceStatus = "sprk_invoicestatus";
     internal const string InvExtractionStatus = "sprk_extractionstatus";
     internal const string InvInvoiceNumber = "sprk_invoicenumber";
     internal const string InvInvoiceDate = "sprk_invoicedate";
@@ -331,9 +330,6 @@ public class InvoiceReviewService : IInvoiceReviewService
 
     /// <summary>sprk_invoice.sprk_name MaxLength (live: 850).</summary>
     internal const int InvoiceNameMaxLength = 850;
-
-    // Invoice status option set values (live: ToReview 100000000, Reviewed 100000001).
-    internal const int InvoiceStatusToReview = 100000000;
 
     // Extraction status option set values (live: NotRun 100000000, Extracted, Failed).
     internal const int ExtractionStatusNotRun = 100000000;
@@ -824,6 +820,8 @@ public class InvoiceReviewService : IInvoiceReviewService
     /// describe the MATTER the invoice regards, populated together as <c>TodoRegardingBuilder</c> does: id
     /// (lowercase "D"), name (empty when unknown), relative record URL, and — when resolved — the record type
     /// and the matter number (<c>IncomingAssociationResolver</c>). Pure, so the exact wire shape is pinned by a test.
+    /// No status is written: a new invoice takes the <c>statuscode</c> default, In Review (ebilling-r1 D-41; transitions go
+    /// through <see cref="InvoiceLifecycleService"/>).
     /// </summary>
     internal static Dictionary<string, object?> BuildInvoiceCreateFields(
         InvoiceReviewConfirmRequest request,
@@ -840,7 +838,6 @@ public class InvoiceReviewService : IInvoiceReviewService
             [InvMatterBind] = $"/{MatterEntitySet}({request.MatterId})",
             [InvVendorOrgBind] = $"/{OrganizationEntitySet}({request.VendorOrgId})",
             [InvName] = BuildInvoiceName(vendorName, request.InvoiceNumber, request.InvoiceDate),
-            [InvInvoiceStatus] = InvoiceStatusToReview,
             [InvExtractionStatus] = ExtractionStatusNotRun,
             [InvRegardingRecordId] = matterId,
             [InvRegardingRecordName] = Cap(matterName?.Trim() ?? string.Empty, RegardingRecordNameMaxLength),

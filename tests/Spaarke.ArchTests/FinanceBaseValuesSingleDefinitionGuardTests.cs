@@ -16,14 +16,16 @@ namespace Spaarke.ArchTests;
 /// </remarks>
 public class FinanceBaseValuesSingleDefinitionGuardTests
 {
-    private static readonly Regex CountedStatusLiteral = new(@"\b10000000[123]\b", RegexOptions.Compiled);
+    // ebilling-r1 task 015 (D-41, D-98): the counted set is statuscode In Review (1), Approved, Sent to AP, Paid. The publisher-range
+    // values 659490000..659490004 are what a private copy would spell (a bare 1 is undetectable and is never spelled alone).
+    private static readonly Regex CountedStatusLiteral = new(@"\b65949000[0-4]\b", RegexOptions.Compiled);
     private static readonly Regex PercentFormula = new(@"\*\s*100m?\b", RegexOptions.Compiled);
 
     internal static IReadOnlyList<string> Violations(string code)
     {
         var found = new List<string>();
         if (!code.Contains("FinanceBaseValues.", StringComparison.Ordinal)) found.Add("does not call FinanceBaseValues");
-        if (CountedStatusLiteral.IsMatch(code)) found.Add("spells a counted invoice status (100000001-3) instead of FinanceBaseValues.CountedInvoiceStatuses");
+        if (CountedStatusLiteral.IsMatch(code)) found.Add("spells an invoice statuscode (659490000-659490004) instead of FinanceBaseValues.CountedInvoiceStatuses");
         if (PercentFormula.IsMatch(code)) found.Add("multiplies by 100 itself instead of FinanceBaseValues.UtilizationPercent");
         return found;
     }
@@ -45,7 +47,7 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
     [Fact(DisplayName = "Task 025b control: the detector fires on a private copy of the status set and the formula")]
     public void TheDetector_FiresOnAPrivateCopy()
     {
-        var copy = "var u = spend / budget * 100m; var s = new[] { 100000001, 100000002, 100000003 };";
+        var copy = "var u = spend / budget * 100m; var s = new[] { 1, 659490000, 659490001, 659490002 };";
         Assert.Equal(3, Violations(copy).Count);
     }
 
