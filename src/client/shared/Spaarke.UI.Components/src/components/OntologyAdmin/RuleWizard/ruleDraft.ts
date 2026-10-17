@@ -19,6 +19,7 @@ import type {
   CatalogSubject,
   NewPolicyRequest,
   RuleDraftPayload,
+  RuleScopeIntentRequest,
   RuleScopeRequest,
   ValidateRequest,
 } from './authoringService';
@@ -427,6 +428,31 @@ export function draftPayload(draft: RuleDraft, ruleBody: string): RuleDraftPaylo
  */
 export function scopeRequest(draft: RuleDraft): RuleScopeRequest {
   return draft.matterId === null ? {} : { matterId: draft.matterId };
+}
+
+/**
+ * Task 102b fix round 1 (F4): the scope the test and the publish carry, said explicitly: the matter id, or `allMatters: true` when "All
+ * matters" is chosen. Never neither: the BFF refuses a publish of a rule limited to a matter that names no scope, so a limit is cleared
+ * only when the admin chose All matters.
+ */
+export function scopeIntentRequest(draft: RuleDraft): RuleScopeIntentRequest {
+  return draft.matterId === null ? { allMatters: true } : { matterId: draft.matterId };
+}
+
+/**
+ * Task 102b fix round 1 (F4): the sentence the publish confirmation adds when the publish changes the rule's scope, or null when it keeps
+ * it. `stored` is the scope in force (its id and, when known, its name); `draft` holds the scope chosen.
+ */
+export function scopeChangeSentence(
+  stored: { matterId: string | null; matterName: string | null },
+  draft: RuleDraft
+): string | null {
+  if (stored.matterId === draft.matterId) {
+    return null;
+  }
+  const from = stored.matterId === null ? 'all matters' : (stored.matterName ?? stored.matterId);
+  const to = draft.matterId === null ? 'all matters' : (draft.matterName ?? draft.matterId);
+  return `This changes the rule from ${from} to ${to}.`;
 }
 
 export function validateRequest(draft: RuleDraft, ruleBody: string, policyId: string | null): ValidateRequest {

@@ -12,6 +12,7 @@ import {
   REASON_POLICY_CHANGED,
   REASON_POLICY_CODE_TAKEN,
   REASON_POLICY_RETIRED,
+  REASON_SCOPE_INTENT_REQUIRED,
   REASON_SCOPE_SUBJECT_MISMATCH,
   createOntologyAuthoringService,
   fieldErrorsOfValidation,
@@ -185,6 +186,15 @@ describe('createOntologyAuthoringService - failures are results', () => {
     expect(fieldErrorsOfValidation(validation({ valid: false, reasonCode: REASON_SCOPE_SUBJECT_MISMATCH }))).toEqual({
       matterId: ['A matter limit is allowed only on a rule about matters.'],
     });
+  });
+
+  it('puts a scope_intent_required refusal on matterId, the scope field (fix round 1, F4)', async () => {
+    const service = createOntologyAuthoringService({
+      fetch: jest.fn(async () => bad(400, { reasonCode: REASON_SCOPE_INTENT_REQUIRED })),
+      baseUrl: 'https://bff.example',
+    });
+    const answer = await service.publishVersion('p', { draft });
+    expect(!answer.ok && answer.fieldErrors).toEqual({ matterId: ['Choose one matter, or All matters.'] });
   });
 
   it('sends the scope as given: the matter id on the body, nothing else', async () => {

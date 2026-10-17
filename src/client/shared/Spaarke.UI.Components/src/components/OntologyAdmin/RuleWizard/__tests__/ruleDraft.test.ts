@@ -18,6 +18,8 @@ import {
   newPolicyRequest,
   priorityProblem,
   quietWindowProblem,
+  scopeChangeSentence,
+  scopeIntentRequest,
   scopeRequest,
   validateRequest,
 } from '../ruleDraft';
@@ -319,6 +321,27 @@ describe('the matter scope (task 102b; D-165)', () => {
     actions: ['frobnicate'],
   };
   const scoped: RuleDraft = { ...draft, matterId: 'm-1', matterName: 'Matter One' };
+
+  it('says the scope intent explicitly on the test and the publish: the matter id, or allMatters (fix round 1, F4)', () => {
+    expect(scopeIntentRequest(scoped)).toEqual({ matterId: 'm-1' });
+    expect(scopeIntentRequest(draft)).toEqual({ allMatters: true });
+  });
+
+  it('states a scope change in plain words, and nothing when the scope is kept (fix round 1, F4)', () => {
+    const storedM = { matterId: 'm-1', matterName: 'Matter One' };
+    expect(scopeChangeSentence(storedM, draft)).toBe('This changes the rule from Matter One to all matters.');
+    expect(scopeChangeSentence({ matterId: null, matterName: null }, scoped)).toBe(
+      'This changes the rule from all matters to Matter One.'
+    );
+    expect(scopeChangeSentence(storedM, { ...draft, matterId: 'm-2', matterName: 'Matter Two' })).toBe(
+      'This changes the rule from Matter One to Matter Two.'
+    );
+    expect(scopeChangeSentence({ matterId: 'm-7', matterName: null }, draft)).toBe(
+      'This changes the rule from m-7 to all matters.'
+    );
+    expect(scopeChangeSentence(storedM, scoped)).toBeNull();
+    expect(scopeChangeSentence({ matterId: null, matterName: null }, draft)).toBeNull();
+  });
 
   it('a new draft applies to all matters', () => {
     expect(emptyDraft(catalog)).toMatchObject({ matterId: null, matterName: null });

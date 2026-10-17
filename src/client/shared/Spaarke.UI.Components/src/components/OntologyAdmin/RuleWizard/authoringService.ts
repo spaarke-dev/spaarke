@@ -39,6 +39,11 @@ export const REASON_POLICY_CHANGED = 'ontology.admin.policy_changed';
 export const REASON_CALLER_UNRESOLVED = 'sdap.access.deny.caller_unresolved';
 /** Task 102b (D-165): a matter limit on a rule that is not about matters. */
 export const REASON_SCOPE_SUBJECT_MISMATCH = 'ontology.admin.scope_subject_mismatch';
+/**
+ * Task 102b fix round 1 (F4): a test or publish of a rule limited to a matter that says neither which matter nor "all matters", or says
+ * both. The wizard always sends one of them; the code is placed on the scope field.
+ */
+export const REASON_SCOPE_INTENT_REQUIRED = 'ontology.admin.scope_intent_required';
 
 // ---- wire shapes: the catalog -----------------------------------------------------------------------------------------------
 
@@ -144,6 +149,15 @@ export interface RuleScopeRequest {
   matterId?: string;
 }
 
+/**
+ * Task 102b fix round 1 (F4): the test and the publish say the scope they mean explicitly: a matter, or `allMatters: true`. A publish of
+ * a rule limited to a matter that names neither is refused (`ontology.admin.scope_intent_required`), so a limit is never cleared by
+ * omission. Validate and save carry only `matterId` (a new rule has no stored scope).
+ */
+export interface RuleScopeIntentRequest extends RuleScopeRequest {
+  allMatters?: true;
+}
+
 /** A rule version as the wizard authors it. `ruleBody` and `decisionPlan` are JSON text, exactly as they will be stored. */
 export interface RuleDraftPayload {
   ruleType: string;
@@ -160,7 +174,7 @@ export interface ValidateRequest extends RuleScopeRequest {
   draft: RuleDraftPayload;
 }
 
-export interface DryRunRequest extends RuleScopeRequest {
+export interface DryRunRequest extends RuleScopeIntentRequest {
   policyId?: string;
   lane?: string;
   ruleType: string;
@@ -180,8 +194,8 @@ export interface NewPolicyRequest extends RuleScopeRequest {
   draft: RuleDraftPayload;
 }
 
-/** A publish carries the scope the new version is in force with: a matter, or none (all matters; clears a limit the rule had). */
-export interface PublishRequest extends RuleScopeRequest {
+/** A publish carries the scope the new version is in force with: a matter, or `allMatters: true` (clears a limit the rule had). */
+export interface PublishRequest extends RuleScopeIntentRequest {
   draft: RuleDraftPayload;
 }
 
@@ -223,6 +237,13 @@ export interface DryRunResult {
   windowAnchorUtc: string;
   /** Whether the test was recorded for this caller and this exact rule; save and publish need it. */
   recorded: boolean;
+  /**
+   * Task 102b fix round 1 (F4): for an existing rule, the matter it is limited to as stored when the test ran (null: all matters). The
+   * publish is refused (409 policy_changed) if it changes before the publish.
+   */
+  storedMatterId?: string | null;
+  /** The stored matter's name, when the caller can read it (otherwise null: only its id is known). */
+  storedMatterName?: string | null;
 }
 
 export interface PolicySaved {
@@ -295,6 +316,10 @@ const REASON_FIELD: Readonly<Record<string, { field: string; message: string }>>
   [REASON_SCOPE_SUBJECT_MISMATCH]: {
     field: 'matterId',
     message: 'A matter limit is allowed only on a rule about matters.',
+  },
+  [REASON_SCOPE_INTENT_REQUIRED]: {
+    field: 'matterId',
+    message: 'Choose one matter, or All matters.',
   },
 };
 

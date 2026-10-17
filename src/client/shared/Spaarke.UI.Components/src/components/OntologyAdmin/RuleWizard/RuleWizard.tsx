@@ -47,7 +47,8 @@ import {
   newPolicyRequest,
   priorityProblem,
   quietWindowProblem,
-  scopeRequest,
+  scopeChangeSentence,
+  scopeIntentRequest,
   validateRequest,
 } from './ruleDraft';
 import type { RuleDraft } from './ruleDraft';
@@ -436,8 +437,9 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
       ruleType: draft.condition.ruleType,
       ruleBody: body,
       messageTemplate: draft.messageTemplate,
-      // Task 102b (DI-112): the test runs within the same scope the save or publish will have, so its counts are exact.
-      ...scopeRequest(draft),
+      // Task 102b (DI-112): the test runs within the same scope the save or publish will have, so its counts are exact. Fix round 1
+      // (F4): said explicitly, a matter or all matters.
+      ...scopeIntentRequest(draft),
     });
     if (!mounted.current) {
       return;
@@ -533,7 +535,7 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
     }
     const answer = await service.publishVersion(current.policyId, {
       draft: draftPayload(draft, body),
-      ...scopeRequest(draft),
+      ...scopeIntentRequest(draft),
     });
     if (!answer.ok) {
       return failWrite(answer, asked);
@@ -734,6 +736,19 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
     const counts = testResult;
     const supersede = counts === null ? 0 : counts.wouldSupersede;
     const reraise = counts === null ? 0 : counts.wouldReraise;
+    // Fix round 1 (F4): the scope in force as the test read it (the BFF refuses the publish if it changed since), else as the page showed.
+    const stored =
+      counts !== null && counts.storedMatterId !== undefined
+        ? {
+            matterId: counts.storedMatterId,
+            matterName:
+              counts.storedMatterName ??
+              (counts.storedMatterId !== null && counts.storedMatterId === current.scope.matterId
+                ? current.scope.matter
+                : null),
+          }
+        : { matterId: current.scope.matterId, matterName: current.scope.matter };
+    const scopeChange = scopeChangeSentence(stored, draft);
     return (
       <span data-testid="rule-wizard-publish-confirm">
         Publishing makes this the version in force for {current.code}. {plural(supersede, 'open item', 'open items')}{' '}
@@ -742,6 +757,7 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
         {counts !== null && counts.policyEnabled === false
           ? ' The rule is Off, so nothing is replaced or raised until it is turned On.'
           : ''}
+        {scopeChange !== null ? <span data-testid="rule-wizard-publish-scope-change"> {scopeChange}</span> : null}
       </span>
     );
   };

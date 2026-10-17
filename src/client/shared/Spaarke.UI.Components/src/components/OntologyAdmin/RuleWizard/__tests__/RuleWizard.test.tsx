@@ -1113,15 +1113,17 @@ describe('RuleWizard - matter scope', () => {
     }
   });
 
-  it('sends no scope for all matters', async () => {
+  it('sends no matter for all matters, and says allMatters on the test (fix round 1, F4)', async () => {
     const { service } = setup({ matterPicker: makePicker() });
     await toScopeAsNewRule();
     await next('rule-wizard-test');
     await runTest();
 
     expect('matterId' in service.dryRun.mock.calls[0][0]).toBe(false);
+    expect(service.dryRun.mock.calls[0][0].allMatters).toBe(true);
     for (const [request] of service.validate.mock.calls) {
       expect('matterId' in request).toBe(false);
+      expect('allMatters' in request).toBe(false);
     }
   });
 
@@ -1156,13 +1158,15 @@ describe('RuleWizard - matter scope', () => {
     await next('rule-wizard-scope');
   }
 
-  async function publishFromScope() {
+  /** Publishes from the Scope and noise step; answers what the confirmation said about the scope (null: nothing). */
+  async function publishFromScope(): Promise<string | null> {
     await next('rule-wizard-test');
     await runTest();
     click('rule-wizard-next');
     await find('rule-wizard-save');
     fireEvent.click(screen.getByRole('button', { name: 'Publish', hidden: true }));
     const confirm = await find('rule-wizard-publish-confirm');
+    const scopeChange = maybe('rule-wizard-publish-scope-change')?.textContent?.trim() ?? null;
     fireEvent.click(
       within(confirm.closest('[role="alertdialog"]') as HTMLElement).getByRole('button', {
         name: 'Publish',
@@ -1170,6 +1174,7 @@ describe('RuleWizard - matter scope', () => {
       })
     );
     await find('rule-wizard-published');
+    return scopeChange;
   }
 
   it('a new version shows the scope in force, starts with it and publishes it unchanged', async () => {
@@ -1179,23 +1184,51 @@ describe('RuleWizard - matter scope', () => {
     expect(byId('rule-wizard-scope-facts')).toHaveTextContent('In force now');
     expect(byId('rule-wizard-scope-facts')).toHaveTextContent('Matter Nine');
     expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: Matter Nine');
-    await publishFromScope();
+    const scopeChange = await publishFromScope();
 
     expect(service.dryRun.mock.calls[0][0].matterId).toBe('m-9');
     expect(service.publishVersion.mock.calls[0][1].matterId).toBe('m-9');
+    expect('allMatters' in service.publishVersion.mock.calls[0][1]).toBe(false);
+    expect(scopeChange).toBeNull();
   });
 
-  it('a new version can change the scope to all matters: the test and the publish then carry no matter', async () => {
+  it('a new version can change the scope to all matters: the test and the publish say allMatters, and the confirmation says so', async () => {
     const { service } = setup({ mode: scopedVersion, matterPicker: makePicker() });
     await toScopeAsNewVersion();
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear Limit to one matter', hidden: true }));
     expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: All matters');
     expect(byId('rule-wizard-scope-facts')).toHaveTextContent('Matter Nine'); // the scope in force until the version is published
-    await publishFromScope();
+    const scopeChange = await publishFromScope();
 
     expect('matterId' in service.dryRun.mock.calls[0][0]).toBe(false);
     expect('matterId' in service.publishVersion.mock.calls[0][1]).toBe(false);
+    // Fix round 1 (F4): "All matters" is said explicitly; a publish with no scope intent is refused by the BFF.
+    expect(service.dryRun.mock.calls[0][0].allMatters).toBe(true);
+    expect(service.publishVersion.mock.calls[0][1].allMatters).toBe(true);
+    expect(scopeChange).toBe('This changes the rule from Matter Nine to all matters.');
+  });
+
+  it('the confirmation names the scope the test read as stored, and an unscoped rule kept unscoped says nothing (fix round 1, F4)', async () => {
+    // The test read a stored scope (Matter Seven) other than the one the page showed: the sentence is about what the publish changes.
+    const dryRun = jest.fn(async () => ({
+      ok: true as const,
+      data: dryRunResult({ storedMatterId: 'm-7', storedMatterName: 'Matter Seven' }),
+    }));
+    setup({ service: makeAuthoringService({ dryRun }), mode: scopedVersion, matterPicker: makePicker() });
+    await toScopeAsNewVersion();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Limit to one matter', hidden: true }));
+    await pickMatter('Matter One');
+
+    expect(await publishFromScope()).toBe('This changes the rule from Matter Seven to Matter One.');
+  });
+
+  it('an unscoped rule published for all matters states no scope change and still says allMatters (fix round 1, F4)', async () => {
+    const { service } = setup({ mode: versionMode, matterPicker: makePicker() });
+    await toScopeAsNewVersion();
+
+    expect(await publishFromScope()).toBeNull();
+    expect(service.publishVersion.mock.calls[0][1].allMatters).toBe(true);
   });
 
   it('a new version can change the scope to another matter', async () => {
@@ -1204,10 +1237,11 @@ describe('RuleWizard - matter scope', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear Limit to one matter', hidden: true }));
     await pickMatter('Matter One');
-    await publishFromScope();
+    const scopeChange = await publishFromScope();
 
     expect(service.dryRun.mock.calls[0][0].matterId).toBe('m-1');
     expect(service.publishVersion.mock.calls[0][1].matterId).toBe('m-1');
+    expect(scopeChange).toBe('This changes the rule from Matter Nine to Matter One.');
   });
 
   it('places scope_subject_mismatch on the scope field, and the limit can be removed there', async () => {
