@@ -319,3 +319,146 @@ would let the new wizard send an intent an old BFF does not read.
 - **Known limits, accepted (no fix):**
   - K2: the cancellation half of the catch at `OntologyAdminAuthoringService.cs:1689` has no test. A bare catch would pass all tests; the code mirrors :498 and a swallowed cancel would only send 200 to a client that has gone. Optional: a must-not-fire test with a cancelled request token.
   - K1: the 50 logged ids are in read order; the count is exact. The log test covers 60 Signals, not the 50/51 boundary (the code is correct at both, by reading).
+
+## Fix round 3: matter delete removes its rule
+
+### Owner decision (2026-10-17)
+
+If a rule (`sprk_policy`) is limited to one matter and that matter is deleted, the rule is deleted. A rule with no matter (all
+matters) is never affected: it has no `sprk_matter` value, so no matter's delete reaches it.
+
+### Schema change
+
+`sprk_policy_matter` (`src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_Matter.xml`, the relationship at :555):
+CascadeDelete `RemoveLink` -> `Cascade`. Nothing else under `src/dataverse/**` changed. The repo already has 9 relationships with
+Delete=Cascade and Archive=RemoveLink (e.g. `sprk_analysis.xml`), so the platform exports and imports that pair.
+
+**Parental rule.** A table can be the child in only ONE relationship with Delete=Cascade. Every relationship in
+`src/dataverse/solutions/**` with `sprk_Policy` as the referencing entity:
+
+| Relationship | Parent | CascadeDelete |
+|---|---|---|
+| `business_unit_sprk_policy` | BusinessUnit | Restrict |
+| `owner_sprk_policy` | Owner | NoCascade |
+| `sprk_policy_matter` | sprk_Matter | **Cascade** (this change) |
+| `sprk_policy_currentversion` | sprk_PolicyVersion | RemoveLink |
+| `lk_sprk_policy_createdby`, `lk_sprk_policy_modifiedby`, `user_sprk_policy` | SystemUser | NoCascade |
+| `team_sprk_policy` | Team | NoCascade |
+
+No other relationship has Cascade, so `sprk_policy_matter` is the only one.
+
+### Cascade chain (what a matter delete removes)
+
+| Hop | Relationship | CascadeDelete | Effect |
+|---|---|---|---|
+| matter -> policy | `sprk_policy_matter` | Cascade | a rule limited to the matter is **deleted** |
+| policy -> policy version | `sprk_policyversion_policy` (`sprk_Policy.xml:11`) | RemoveLink | versions keep their rows; `sprk_policy` nulled |
+| policy -> Signal | `sprk_signal_policy` (`sprk_Policy.xml:42`) | RemoveLink | Signals keep their rows; `sprk_policy` nulled |
+| policy version -> Decision Record | `sprk_decisionrecord_policyversion` (`sprk_PolicyVersion.xml`) | RemoveLink | not reached (the version is not deleted) |
+| policy version -> Signal | `sprk_signal_policyversion` (`sprk_PolicyVersion.xml`) | RemoveLink | not reached |
+
+Only the policy row is deleted. **Decision Records are never deleted.** No hop reaches them, and they keep their version link
+because the versions survive. No Restrict is on the path.
+
+### The deleted-policy sweep
+
+A deleted policy's open Signals were stranded. The policy loop reads Signals by the dedupe-key prefix of an EXISTING enabled
+policy. The Off/Retired close reads by the `sprk_policy` lookup, which RemoveLink nulled. So those Signals stayed open in the
+Worklist forever (outer join, null work type). `notes/033-closure-progress.md` item 2 recorded this as "no path creates the state".
+This change creates that state, and so does an Ontology Administrator's hard delete. Item 2 now points here.
+
+`SignalClosureService.CloseSignalsOfDeletedPoliciesAsync` (:188) runs in the nightly job after the Off/Retired close
+(`SignalReevaluationJob.cs:138`, wrapper :458):
+
+- It reads every `sprk_policy` code, in any state, paged (`AllPolicyCodesAsync`, :227). More than `MaxPages` pages throws,
+  because an incomplete list could make a live policy look deleted.
+- It reads Open and Acknowledged Signals with `sprk_policy` null (`ReadOpenSignalsWithoutPolicyAsync`, :258), at most `MaxPages`
+  pages of `PageSize` (200 x 500) per run. Any remainder is logged as a Warning and the next run continues (a closed Signal
+  drops out of the read).
+- It closes, as `PolicyRetired`, each one whose dedupe key parses and whose code matches no existing policy. Codes are compared
+  ignoring case, so a doubtful match counts as "exists". The close uses the same `CloseAsync` -> `SignalWriter.CloseAsync` as
+  `ClosePolicyRetiredNowAsync`: status, resolution, resolvedon, lastevaluated, and no Decision Record.
+- It leaves alone: a Signal whose code still exists (whatever the policy's state or scope), an unparseable key (Warning,
+  counted), and any row read back with a `sprk_policy` despite the condition.
+- Fail closed: both reads finish before any close. A fault in either closes nothing, counts a policy failure (the run is failed,
+  visibly) and logs EventId `EvaluatorPolicyFailed`. The run continues, and the redaction sweep still runs.
+- Logging: the exact count and at most `MaxLoggedOutOfScopeIds` (50) ids, the K4 pattern. Result JSON: `deletedPolicyRetired`,
+  which is part of `policyRetiredClosed`.
+- §11: no new service. This is one method on the existing closure service and one call in the existing job.
+
+**Can a Signal legitimately have a null `sprk_policy`?** No code path creates one:
+
+- The only create of `sprk_signal` is `SignalWriter` (`SignalWriter.cs:583`), which always sets
+  `entity["sprk_policy"] = new EntityReference("sprk_policy", request.PolicyId)` (:1519).
+- The only `SignalWriteRequest` builder is `SignalReevaluationJob.BuildRequest` (:1055). It sets `PolicyId: policy.Id` from a
+  policy row it has read, so the id is never empty.
+- No script, seed or client creates Signals: a grep of `scripts/`, `src/client`, `src/solutions` and `src/dataverse` found none.
+  Task 049 removes Signal Write from the Console User and Ontology Administrator roles; only the BFF creates Signals.
+- The column is optional (`sprk_Signal/Entity.xml:995`, RequiredLevel `none`), so a System Administrator or an import could
+  still write one.
+
+So the sweep requires BOTH conditions (lookup null AND the code names no existing policy), and the code condition decides.
+
+### Archive
+
+`CascadeArchive` stays `RemoveLink`. Microsoft Learn documents `CascadeConfiguration.Archive` as "For internal use only", and
+nobody knows whether `Restrict` is accepted there.
+
+**Limit:** long-term retention is not enabled on these tables. If it ever is, archiving a matter would clear the rule's
+`sprk_matter` link, and the rule would **widen to all matters**. Revisit this before retention is enabled on `sprk_matter` or
+`sprk_policy`.
+
+### Open item: privileges for the matter delete
+
+The `DeleteRequest` remarks say a cascade delete checks the caller's Delete privilege on each child, and if any check is
+refused, the whole matter delete fails (probably `0x80040220`, not verified). So a user without Delete on `sprk_policy` cannot
+delete a matter that a rule names. For that user it behaves as Restrict: an Ontology Administrator must delete or retire the
+rule first. Nobody gains the right to delete rules through this change. *The main session confirms this live on dev.*
+
+### `SignalSuppressionService` retrieves of `sprk_policy` (checked)
+
+- `:892` reads the policy id from the Signal's `sprk_policy`, and returns null first when the lookup is empty (:870). After
+  RemoveLink the lookup is null, so the retrieve is not reached. Only a race throws: the policy deleted between the Signal read
+  and this retrieve. The method is documented to throw on a fault, and the route answers it as a fault, not a guess.
+- `:1138` gets `policyId` from that same path or from the caller's own policy, so the same holds.
+
+No change.
+
+### Tests (fix round 3)
+
+New file `tests/unit/domain/Signals/SignalReevaluationJobDeletedPolicyTests.cs`. It runs the real job and closure service over
+the existing in-memory seams. The fake now answers the sweep's `sprk_policy` null query.
+
+| Test | Covers |
+|---|---|
+| `Run_OpenAndAcknowledgedSignalsOfADeletedPolicy_AreClosedPolicyRetired_AndAResolvedOneIsUntouched` | (a) must-fire; no Decision Record |
+| `Run_ASignalWithNoPolicyLookup_WhosePolicyStillExists_IsNeverClosedByTheDeletedPolicySweep` (enabled, off, retired, scoped) | (b) must-not-fire, with an orphan control in the same world |
+| `Run_WhenTheSweepCannotRead_ItClosesNothing_TheRunFailsVisibly_AndContinues` (signals, policies) | (c) fail closed |
+| `Run_ASignalWithNoPolicyLookup_AndAnUnparseableKey_IsLeftOpen_AndLogged` | (d) |
+| `Run_ManySignalsOfADeletedPolicy_LogTheExactCount_AndOnlyTheFirstFiftyIds` | K4 cap |
+
+- **Seeding proof (b):** with the `existingCodes.Contains(code)` check removed, all four (b) cases fail. So do four existing
+  tests that seed policy-less Signals of live policies. With the check restored, all pass.
+- **Fail before:** with the pre-change job and closure service, all 9 new cases fail.
+- **Fixture:** `Run_AnotherPoliciesKeyUnderTheSamePrefix_PolicyCodeContainingAPipe_IsNotUnparseable` seeded a policy-less Signal
+  for policy `POL|ODD` without that policy existing. That is now a deleted policy's Signal, so the test now adds `POL|ODD` (Off).
+  Its intent and assertions are unchanged.
+
+| Suite | Result |
+|---|---|
+| BFF, filtered (`Ontology\|Signal\|Reevaluation\|PolicyVersion\|Closure`) | 2456 passed, 3 skipped, 0 failed |
+| `Spaarke.ArchTests`, full | 1076 passed, 0 failed |
+
+No test pins `sprk_policy_matter` or its cascade; a grep of `tests/` found none. The two relationship scans
+(`OntologyWriterAppendToGuardTests`, `SignalPairTypeSchemaAgreementTests`) read only the lookup's shape, and both pass.
+
+### Known limits after fix round 3
+
+- An unparseable key on a policy-less Signal is left open with a Warning, and it does not fail the run. The job never read these
+  Signals before, so failing on them would turn every run red over data the job cannot fix.
+- If a new policy reuses a deleted policy's code, the old Signals are left alone because the code exists. The new policy's prefix
+  read then treats them as its own episodes, which is how a recreated policy already behaved.
+- The redaction sweep (task 145) covers Off/Retired policies by code. A deleted policy's code is in neither list, so its Signals'
+  stored evidence is not re-checked. Reported; not fixed here because it is out of scope.
+- The per-run bound could in theory starve an orphan: that needs more than 100,000 policy-less Signals (live codes or
+  unparseable keys) to sort ahead of it by id.
