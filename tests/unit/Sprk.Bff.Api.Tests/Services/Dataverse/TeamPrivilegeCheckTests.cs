@@ -116,6 +116,23 @@ public class TeamPrivilegeCheckTests
         _fetches.Should().HaveCount(3);
     }
 
+    /// <summary>
+    /// Review round 3 (K3): the privilege-name mapping both privilege reads use. The live read on spaarkedev1 (2026-10-17)
+    /// returned <c>prvReadsprk_ExternalRecordAccess</c> for the default team of "Spaarke Business Unit 1", and none for
+    /// Secure Record Owners; the name must map to the grant table the grant routes ask about.
+    /// </summary>
+    [Theory]
+    [InlineData("prvReadsprk_ExternalRecordAccess", GrantTable)]
+    [InlineData("prvReadAccount", "account")]
+    [InlineData("prvReadsprk_analysis", "sprk_analysis")]
+    [InlineData("prvWritesprk_ExternalRecordAccess", null)]
+    [InlineData("prvreadsprk_ExternalRecordAccess", null)]
+    [InlineData("prvRead", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void AReadPrivilegesName_MapsToItsTable_AndAnyOtherNameToNone(string? privilegeName, string? table) =>
+        UserPrivilegeChecker.ReadPrivilegeEntity(privilegeName).Should().Be(table);
+
     [Fact]
     public async Task AFault_Propagates_AndIsNeverCached()
     {

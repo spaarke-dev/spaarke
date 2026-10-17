@@ -404,27 +404,33 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
                 var result = await client.RetrieveMultipleAsync(query, ct);
                 foreach (var entity in result.Entities)
                 {
-                    var name = entity.GetAttributeValue<string>("name");
-                    if (string.IsNullOrEmpty(name) || !name.StartsWith("prvRead", StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-
-                    // Convention: prv{AccessRight}{EntitySchemaName} (e.g., prvReadAccount → account).
-                    // The privilege Name uses the schema name (PascalCase); the logical name is the
-                    // lower-case form. We lower-case the trailing portion.
-                    var schemaName = name.Substring("prvRead".Length);
-                    if (string.IsNullOrEmpty(schemaName))
-                    {
-                        continue;
-                    }
-
-                    entities.Add(schemaName.ToLowerInvariant());
+                    if (ReadPrivilegeEntity(entity.GetAttributeValue<string>("name")) is { } logicalName)
+                        entities.Add(logicalName);
                 }
             }
 
             return entities;
         }
+    }
+
+    /// <summary>
+    /// The table a Read privilege's name grants Read on, or <c>null</c> when the name is not a Read privilege's. Convention:
+    /// <c>prv{AccessRight}{EntitySchemaName}</c> (e.g. <c>prvReadAccount</c> → <c>account</c>,
+    /// <c>prvReadsprk_ExternalRecordAccess</c> → <c>sprk_externalrecordaccess</c>): the name carries the schema name
+    /// (PascalCase), and the logical name is its lower-case form. Pure (task 099b review round 3, K3): the user and the team
+    /// privilege reads both map through it.
+    /// </summary>
+    internal static string? ReadPrivilegeEntity(string? privilegeName)
+    {
+        const string ReadPrefix = "prvRead";
+        if (string.IsNullOrEmpty(privilegeName)
+            || !privilegeName.StartsWith(ReadPrefix, StringComparison.Ordinal)
+            || privilegeName.Length == ReadPrefix.Length)
+        {
+            return null;
+        }
+
+        return privilegeName.Substring(ReadPrefix.Length).ToLowerInvariant();
     }
 
     private static IEnumerable<List<T>> Chunk<T>(IList<T> source, int size)
