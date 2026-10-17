@@ -29,13 +29,27 @@ public class SpaarkeRoleLedgerPrivilegeGuardTests
     private static readonly string[] DecisionRecordWriteOrDelete = ["prvWritesprk_DecisionRecord", "prvDeletesprk_DecisionRecord"];
     private static readonly string[] SignalWrite = ["prvWritesprk_Signal"];
 
-    [Fact(DisplayName = "Spaarke roles: only the writer creates Decision Records, none writes or deletes them, Console User cannot write a Signal (task 049)")]
+    [Fact(DisplayName = "Spaarke roles: only the writer creates Decision Records, none writes or deletes them, Console User and Ontology Administrator cannot write a Signal (task 049)")]
     public void SourceRolesKeepTheLedgerGuarantees()
     {
         var rolesRoot = Path.Combine(SourceScan.RepoRoot, "src", "dataverse", "solutions", "SpaarkeMaster", "Roles");
         var roles = Directory.EnumerateFiles(rolesRoot, "*.xml", SearchOption.TopDirectoryOnly).ToList();
         Assert.True(roles.Count >= 12,
             $"Scanner found only {roles.Count} role definitions under {rolesRoot} (expected >= 12). Repo root resolved to '{SourceScan.RepoRoot}'.");
+
+        // The named roles must be among the scanned files. If a role file's name attribute changed, the role rules below would
+        // silently stop applying to it and this guard would pass green.
+        var scannedNames = roles
+            .Select(path => (string?)XDocument.Parse(File.ReadAllText(path)).Root?.Attribute("name"))
+            .Where(n => !string.IsNullOrEmpty(n))
+            .ToHashSet(StringComparer.Ordinal);
+        var missingRoles = SignalWriteForbiddenRoles.Append(WriterRole)
+            .Where(r => !scannedNames.Contains(r))
+            .ToList();
+        Assert.True(missingRoles.Count == 0,
+            $"The role guard names roles that no scanned file under {rolesRoot} defines: [{string.Join(", ", missingRoles)}]. "
+            + "A role file was renamed or removed, so the Signal Write and Decision Record Create rules would no longer apply to it. "
+            + "Update WriterRole / SignalWriteForbiddenRoles with the rename.");
 
         var violations = roles
             .SelectMany(path => Violations(File.ReadAllText(path))
@@ -47,7 +61,7 @@ public class SpaarkeRoleLedgerPrivilegeGuardTests
             + "(writer identity) creates a Decision Record or closes a Signal:\n  " + string.Join("\n  ", violations));
     }
 
-    [Fact(DisplayName = "Role ledger-privilege guard control: Create/Write/Delete on a Decision Record and Console User Write on a Signal are reported")]
+    [Fact(DisplayName = "Role ledger-privilege guard control: Create/Write/Delete on a Decision Record and Console User / Ontology Administrator Write on a Signal are reported")]
     public void GuardFiresOnTheForbiddenGrants()
     {
         const string humanRole = """
