@@ -368,7 +368,8 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
         WorkforceRoleCeiling read;
         try
         {
-            read = await _readWorkforceRole(ct);
+            // A read that answers nothing (a loose test seam) is a fault like any other: fail closed, never a 500.
+            read = await _readWorkforceRole(ct) ?? WorkforceRoleCeiling.Unavailable("read_failed");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

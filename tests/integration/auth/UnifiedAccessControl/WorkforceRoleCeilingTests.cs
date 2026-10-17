@@ -179,6 +179,20 @@ public sealed class WorkforceRoleCeilingTests
     }
 
     [Fact]
+    public async Task ARoleReadThatAnswersNothing_FailsClosed_AndIsNeverCached()
+    {
+        // Review round 1 nit: a seam that answers null was dereferenced (a 500); it is a fault like any other.
+        var cache = new RecordingTenantCache();
+        var checker = Checker(cache, _ => Task.FromResult<WorkforceRoleCeiling>(null!));
+
+        var ceiling = await checker.GetWorkforceRoleCeilingAsync(CancellationToken.None);
+
+        ceiling.IsAvailable.Should().BeFalse();
+        ceiling.UnavailableReason.Should().Be("read_failed");
+        cache.Sets.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ACacheReadFault_FallsThroughToTheRoleRead()
     {
         var cache = new RecordingTenantCache { FaultOnGet = true };
