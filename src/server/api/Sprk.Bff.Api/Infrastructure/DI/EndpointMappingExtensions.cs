@@ -379,6 +379,7 @@ public static class EndpointMappingExtensions
         app.MapFinanceEndpoints();
         app.MapFinanceRollupEndpoints();
         app.MapRateCardImportEndpoints(); // ebilling-r1 task 078 (FR-29)
+        app.MapRuleSetEndpoints(); // ebilling-r1 task 076 (FR-28)
         app.MapInvoiceContextEndpoints(); // ebilling-r1 task 106 (FR-33)
         app.MapInvoiceRelatedWorkEndpoints(); // ebilling-r1 task 107 (FR-34)
         app.MapInvoiceSubmissionEndpoints(); // ebilling-r1 task 044 (FR-17 internal channel)

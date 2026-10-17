@@ -81,6 +81,11 @@ public static class FinanceModule
         // overlap re-check and publish. Concrete (ADR-010: no interface, no second implementation). Scoped: holds the scoped Dataverse
         // clients and the SPE facade. Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<RateCardImportService>();
+        // Billing rule sets (ebilling-r1 task 076, FR-28): create from a source document, review proposals, edit / accept / reject, publish
+        // (PolicyVersionValidator, all or nothing, immutable versions), assign, visibility, and the one firm-facing clause-visibility decision.
+        // Concrete (ADR-010: no interface, no second implementation). Scoped: holds the scoped SPE facade and ownership resolver; it uses the
+        // singleton PolicyVersionValidator and RuleBodyDescriber (SignalsModule). Unconditional (flag rule above); the routes carry the kill switch.
+        services.AddScoped<RuleSetService>();
         // Invoice Review context panel (ebilling-r1 task 106, FR-33): read-only, deterministic assembly of five independent sections for
         // one invoice (core record, budget rollups, other invoices, disallow history, rate history). Concrete (ADR-010: no interface, no second
         // implementation). Scoped: per-request, holds the (singleton) generic Dataverse client. Unconditional (flag rule above); the route carries the kill switch.

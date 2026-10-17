@@ -343,6 +343,12 @@ public partial class RouteAuthorizationGuardTests
             "/api/finance/ratecards/* (ebilling-r1 task 078, FR-29) -- rate card and timekeeper workbook template, import and publish. "
             + "Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, D-76, fail closed), "
             + "plus a Read check on any matter, project or work assignment the card is scoped to; the eBilling kill switch runs after it."),
+        new GovernedFile("Api/Finance/RuleSetEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/rulesets/* (ebilling-r1 task 076, FR-28) -- create a rule set from a source document, list / read it with its rules, "
+            + "edit / accept / reject a rule, publish, assign, visibility. Each route declares the billing-admin Dataverse table privileges the "
+            + "caller must hold (BillingAdminAuthorization via AddFinanceAuthorizationFilter, D-76, fail closed; Write on sprk_ruleset is the marker "
+            + "because the Ontology Administrator holds every privilege on the shared policy tables); reads of the proposals are admin-only too. "
+            + "The eBilling kill switch runs after it."),
         new GovernedFile("Api/Finance/InvoiceContextEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/context (ebilling-r1 task 106, FR-33) -- the Invoice Review context panel. The route carries "
             + "AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; the eBilling "
@@ -911,7 +917,11 @@ public partial class RouteAuthorizationGuardTests
     //
     // Integration (2026-10-17, ebilling-r1 merge of origin/master 1df4ee12d): both sides counted from 125: master +5 (130) and
     // ebilling-r1 +6 (131). Combined 125 + 5 + 6 = 136.
-    private const int ExpectedEndpointFileCount = 136;
+    // 136 -> 137 (2026-10-17, ebilling-r1 task 076, FR-28). Net +1: Api/Finance/RuleSetEndpoints.cs ADDED -- POST/GET /api/finance/rulesets,
+    // GET /api/finance/rulesets/{ruleSetId}, PATCH .../proposals/{policyId}, POST .../proposals/{policyId}/accept|reject, POST .../publish,
+    // PUT .../assignment and PUT .../visibility. Classified by GovernedFiles (RouteLevelGate: AddFinanceAuthorizationFilter, the caller's own
+    // billing-admin table privileges, D-76); the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 137;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision

@@ -73,6 +73,25 @@ public static class RuleDomains
         query.Criteria.AddFilter(domain);
     }
 
+    /// <summary>Adds <c>sprk_domain = Billing</c> to <paramref name="query"/>'s criteria (AND), for a billing reader or writer of
+    /// <c>sprk_policy</c> or <c>sprk_ruleset</c> (ebilling-r1 task 076). The mirror of <see cref="AddOntologyPolicyAllowlist"/> with the
+    /// opposite empty rule: an EMPTY domain is Ontology, so it never matches here. A top-level condition, so it cannot be bypassed by an
+    /// <c>Or</c> sibling.</summary>
+    public static void AddBillingFilter(QueryExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        query.Criteria.AddCondition(PolicyDomainColumn, ConditionOperator.Equal, PolicyDomainBilling);
+    }
+
+    /// <summary>True only when the row's <c>sprk_domain</c> is exactly Billing. An empty value (which reads as Ontology), any other
+    /// value, or a value of the wrong type is not a billing row (fail closed), so a billing reader whose query lost its filter still
+    /// cannot act on an Ontology policy.</summary>
+    public static bool IsBillingRow(Entity row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return row.Attributes.TryGetValue(PolicyDomainColumn, out var value) && value is OptionSetValue { Value: PolicyDomainBilling };
+    }
+
     /// <summary>True when the row's <c>sprk_domain</c> is empty or Ontology. Any other value, or a value of the wrong
     /// type, is not an Ontology policy (fail closed).</summary>
     public static bool IsOntologyPolicy(Entity policy)
