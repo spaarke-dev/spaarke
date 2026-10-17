@@ -703,6 +703,8 @@ public static class ExternalProjectDataEndpoints
         HttpContext httpContext,
         ExternalDataService dataService,
         IRecordOwnershipResolver ownership,
+        CallerRecordAccessProbe probe,
+        ILogger logger,
         CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
@@ -723,7 +725,9 @@ public static class ExternalProjectDataEndpoints
         // ADR-003 fail closed: this runs BEFORE any Dataverse write, and RightsForRoot returns None
         // for a root the caller cannot reach — so out-of-scope and insufficient-rights are one
         // check, and a root type added to one branch cannot be forgotten in the other.
-        var rights = RightsForRoot(callerContext, rootKind, rootId);
+        // Task 036 (FR-20): a caller whose access Dataverse decided is confirmed against Dataverse on the root (AppendTo).
+        var rights = await RightsForRootWriteAsync(
+            callerContext, rootKind, rootId, CallerRightsReader(probe, httpContext), logger, ct);
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "Your access level does not permit creating to-dos on this record",
@@ -820,6 +824,118 @@ public static class ExternalProjectDataEndpoints
         };
 
     /// <summary>
+    /// FR-20 (unified-access-control-r2 task 036, owner round 59 item 2): the ONE Dataverse confirmation of a write on this
+    /// surface. For a caller whose own access Dataverse decided (<see cref="CallerPrincipal.DataverseConfirmsWrites"/>), the
+    /// rights a write route checks are <paramref name="composed"/> widened by what Dataverse itself grants the caller on the
+    /// target record, asked as the caller through <see cref="CallerRecordAccessProbe"/>. For every other caller it returns
+    /// <paramref name="composed"/> unchanged and asks nothing, so their routes decide exactly as before.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why widen, not replace.</b> With the flag on, the caller's own term is Read only (the impersonated set
+    /// confers Read). <paramref name="composed"/> can carry more only through the contact-grants union (a systemuser who is
+    /// also a granted contact keeps those grants, B-17). So the write is allowed when the grants allow it OR Dataverse does,
+    /// and never through a constant: no membership term reaches a flag-on composition.</para>
+    /// <para><b>Read first.</b> Nothing is asked unless <paramref name="composed"/> holds Read: a record outside the caller's
+    /// accessible set, or removed by the deny list or the Restricted veto, is refused by the route without a Dataverse
+    /// call, so the vetoes stay in force.</para>
+    /// <para><b>Fail closed (NFR-01).</b> The probe answers None when it cannot ask (no token, a failed exchange, a refused
+    /// or failed call); a reader that throws, or no reader, also adds None. The route then refuses the write unless the
+    /// grants alone allow it. There is no fallback to membership, an app-only read or a constant. The caller's own
+    /// cancellation is rethrown.</para>
+    /// <para>One Dataverse round trip per confirmed write (NFR-02), for the single record in hand.</para>
+    /// </remarks>
+    /// <param name="caller">The resolved principal.</param>
+    /// <param name="composed">The rights the route computed from the principal.</param>
+    /// <param name="entitySet">The target record's entity set (plural), as the probe needs it.</param>
+    /// <param name="recordId">The target record.</param>
+    /// <param name="readCallerRights">Asks Dataverse for the caller's rights on (entity set, id): the probe with the
+    /// caller's bearer token (<see cref="CallerRightsReader"/>).</param>
+    /// <param name="logger">Logger.</param>
+    /// <param name="ct">Cancellation.</param>
+    internal static async Task<Spaarke.Dataverse.AccessRights> WithDataverseRightsAsync(
+        CallerPrincipal caller,
+        Spaarke.Dataverse.AccessRights composed,
+        string entitySet,
+        Guid recordId,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>>? readCallerRights,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (!caller.DataverseConfirmsWrites || !composed.HasFlag(Spaarke.Dataverse.AccessRights.Read))
+            return composed;
+
+        var dataverse = Spaarke.Dataverse.AccessRights.None;
+        if (readCallerRights is null)
+        {
+            logger.LogError(
+                "[WF-AUTHZ] No Dataverse rights reader for systemuser {SystemUserId} on {EntitySet} {RecordId}: the write is " +
+                "confirmed by nothing and adds no rights (fail closed, task 036).",
+                caller.SystemUserId, entitySet, recordId);
+        }
+        else
+        {
+            try
+            {
+                dataverse = await readCallerRights(entitySet, recordId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+            {
+                logger.LogError(ex,
+                    "[WF-AUTHZ] Dataverse's rights for systemuser {SystemUserId} on {EntitySet} {RecordId} could not be read: " +
+                    "the write adds no rights (fail closed, NFR-01, task 036).",
+                    caller.SystemUserId, entitySet, recordId);
+                dataverse = Spaarke.Dataverse.AccessRights.None;
+            }
+        }
+
+        var surface = SurfaceRightsFromDataverse(dataverse);
+        logger.LogInformation(
+            "[WF-AUTHZ] Dataverse-confirmed write rights for systemuser {SystemUserId} on {EntitySet} {RecordId}: Dataverse " +
+            "{Dataverse} -> {Surface} (composed {Composed}).",
+            caller.SystemUserId, entitySet, recordId, dataverse, surface, composed);
+        return composed | surface;
+    }
+
+    /// <summary>
+    /// Dataverse's rights on a record, in this surface's vocabulary (task 036): Read, Write and Delete as Dataverse answers
+    /// them; <see cref="Spaarke.Dataverse.AccessRights.Create"/> — "may add a child (a to-do, document, event or message)
+    /// under this record" — from Dataverse's <see cref="Spaarke.Dataverse.AccessRights.AppendTo"/> on it.
+    /// </summary>
+    /// <remarks>
+    /// AppendTo, not Dataverse's own CreateAccess, because RetrievePrincipalAccess's CreateAccess on an existing record
+    /// speaks of the caller's create privilege on the record's TABLE, not of attaching to this record: a user who can never
+    /// create a project but can file a to-do against one would be refused, and the reverse let through. Attaching to a
+    /// record is AppendTo everywhere else in the BFF (<c>OperationAccessPolicy</c>: <c>entity.associate_document</c>,
+    /// <c>event.attach_regarding</c>). Append, Share and Dataverse's CreateAccess carry nothing here.
+    /// </remarks>
+    internal static Spaarke.Dataverse.AccessRights SurfaceRightsFromDataverse(Spaarke.Dataverse.AccessRights dataverse) =>
+        (dataverse & (Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Write
+                      | Spaarke.Dataverse.AccessRights.Delete))
+        | (dataverse.HasFlag(Spaarke.Dataverse.AccessRights.AppendTo)
+            ? Spaarke.Dataverse.AccessRights.Create
+            : Spaarke.Dataverse.AccessRights.None);
+
+    /// <summary>
+    /// The Dataverse rights reader for <see cref="WithDataverseRightsAsync"/>: the existing
+    /// <see cref="CallerRecordAccessProbe"/> (OBO, as the caller, fail closed) with this request's bearer token.
+    /// </summary>
+    internal static Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>> CallerRightsReader(
+        CallerRecordAccessProbe probe, HttpContext httpContext)
+    {
+        var token = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext);
+        return (entitySet, recordId, ct) => probe.GetCallerRightsAsync(token, entitySet, recordId, ct);
+    }
+
+    /// <summary>A root's rights for a write route: <see cref="RightsForRoot"/>, confirmed against Dataverse (task 036).</summary>
+    private static Task<Spaarke.Dataverse.AccessRights> RightsForRootWriteAsync(
+        CallerPrincipal caller, ExternalDataService.TodoRootKind rootKind, Guid rootId,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>> readCallerRights,
+        ILogger logger, CancellationToken ct) =>
+        WithDataverseRightsAsync(
+            caller, RightsForRoot(caller, rootKind, rootId),
+            ExternalDataService.TryGetRootBinding(rootKind)?.EntitySet ?? string.Empty, rootId, readCallerRights, logger, ct);
+
+    /// <summary>
     /// The read gate every project-scoped GET route uses (unified-access-control-r2 task 136 · defect C2):
     /// does the caller hold <see cref="Spaarke.Dataverse.AccessRights.Read"/> on the project?
     /// </summary>
@@ -851,22 +967,29 @@ public static class ExternalProjectDataEndpoints
     /// rights on its parent records — the union over its matter and project (<see cref="RightsForInvoiceAsync"/>). An
     /// invoice read that FAILS is a 503 <see cref="InvoiceUnreadableReasonCode"/>.</para>
     /// </remarks>
+    /// <param name="confirmWrites">Task 036: set ONLY by the upload route. Confirms the rights against Dataverse for a
+    /// caller whose access Dataverse decided (<see cref="WithDataverseRightsAsync"/>) — on the root, or on the invoice
+    /// before its secure-roots gate. A service request's requester scope is not confirmed (see the task 036 notes). The
+    /// read routes pass nothing and ask Dataverse nothing.</param>
+    /// <param name="logger">Logger for the confirmation; required when <paramref name="confirmWrites"/> is set.</param>
     private static async Task<(Spaarke.Dataverse.AccessRights Rights, IResult? Fault)> RightsForDocumentParentAsync(
         CallerPrincipal caller,
         ExternalDataService.DocumentParentKind parentKind,
         Guid parentId,
         ExternalDataService dataService,
         ExternalModuleRegistry modules,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>>? confirmWrites = null,
+        ILogger? logger = null)
     {
         switch (parentKind)
         {
             case ExternalDataService.DocumentParentKind.Project:
-                return (RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, parentId), null);
+                return (await RootRightsForParentAsync(ExternalDataService.TodoRootKind.Project), null);
             case ExternalDataService.DocumentParentKind.Matter:
-                return (RightsForRoot(caller, ExternalDataService.TodoRootKind.Matter, parentId), null);
+                return (await RootRightsForParentAsync(ExternalDataService.TodoRootKind.Matter), null);
             case ExternalDataService.DocumentParentKind.WorkAssignment:
-                return (RightsForRoot(caller, ExternalDataService.TodoRootKind.WorkAssignment, parentId), null);
+                return (await RootRightsForParentAsync(ExternalDataService.TodoRootKind.WorkAssignment), null);
             case ExternalDataService.DocumentParentKind.ServiceRequest:
                 try
                 {
@@ -882,7 +1005,7 @@ public static class ExternalProjectDataEndpoints
             case ExternalDataService.DocumentParentKind.Invoice:
                 try
                 {
-                    return (await RightsForInvoiceAsync(caller, parentId, dataService, modules, ct), null);
+                    return (await RightsForInvoiceAsync(caller, parentId, dataService, modules, ct, confirmWrites, logger), null);
                 }
                 catch (ExternalDataService.DataverseUnavailableException)
                 {
@@ -897,6 +1020,12 @@ public static class ExternalProjectDataEndpoints
             default:
                 return (Spaarke.Dataverse.AccessRights.None, null);
         }
+
+        Task<Spaarke.Dataverse.AccessRights> RootRightsForParentAsync(ExternalDataService.TodoRootKind rootKind) =>
+            confirmWrites is null
+                ? Task.FromResult(RightsForRoot(caller, rootKind, parentId))
+                : RightsForRootWriteAsync(caller, rootKind, parentId, confirmWrites,
+                    logger ?? throw new ArgumentNullException(nameof(logger)), ct);
     }
 
     /// <summary>The 503 reason code when a service request's requester could not be read (task 031 review).</summary>
@@ -941,7 +1070,9 @@ public static class ExternalProjectDataEndpoints
         Guid invoiceId,
         ExternalDataService dataService,
         ExternalModuleRegistry modules,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>>? confirmWrites = null,
+        ILogger? logger = null)
     {
         if (caller.GetAccessibleMatterIds().Count == 0 && !caller.GetAccessibleProjectIds().Any())
             return Spaarke.Dataverse.AccessRights.None;
@@ -955,6 +1086,14 @@ public static class ExternalProjectDataEndpoints
             rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.Matter, matterId);
         if (invoiceParents.ProjectId is { } projectId)
             rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, projectId);
+
+        // Task 036 (FR-20): the upload confirms against Dataverse on the INVOICE itself (the target record), BEFORE the
+        // secure-roots gate below, so a Dataverse-confirmed Create is put to that gate exactly as a grant-derived one is.
+        if (confirmWrites is not null)
+            rights = await WithDataverseRightsAsync(
+                caller, rights,
+                ExternalDataService.GetDocumentParentBinding(ExternalDataService.DocumentParentKind.Invoice).EntitySet,
+                invoiceId, confirmWrites, logger ?? throw new ArgumentNullException(nameof(logger)), ct);
 
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
             return rights;
@@ -1129,41 +1268,41 @@ public static class ExternalProjectDataEndpoints
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
         IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
-        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
+        IConfiguration configuration, CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.Project, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct);
 
     private static Task<IResult> UploadMatterDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
         IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
-        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
+        IConfiguration configuration, CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.Matter, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct);
 
     private static Task<IResult> UploadWorkAssignmentDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
         IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
-        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
+        IConfiguration configuration, CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct);
 
     private static Task<IResult> UploadServiceRequestDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
         IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
-        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
+        IConfiguration configuration, CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct);
 
     private static Task<IResult> UploadInvoiceDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
         IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
-        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
+        IConfiguration configuration, CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.Invoice, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, probe, logger, ct);
 
     private static Task<IResult> GetDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
@@ -1227,18 +1366,24 @@ public static class ExternalProjectDataEndpoints
 
     private static Task<IResult> CreateTodo(
         Guid id, CreateExternalTodoRequest request, HttpContext httpContext,
-        ExternalDataService dataService, IRecordOwnershipResolver ownership, CancellationToken ct) =>
-        CreateTodoForRoot(ExternalDataService.TodoRootKind.Project, id, request, httpContext, dataService, ownership, ct);
+        ExternalDataService dataService, IRecordOwnershipResolver ownership, CallerRecordAccessProbe probe,
+        ILogger<Program> logger, CancellationToken ct) =>
+        CreateTodoForRoot(ExternalDataService.TodoRootKind.Project, id, request, httpContext, dataService, ownership,
+            probe, logger, ct);
 
     private static Task<IResult> CreateMatterTodo(
         Guid id, CreateExternalTodoRequest request, HttpContext httpContext,
-        ExternalDataService dataService, IRecordOwnershipResolver ownership, CancellationToken ct) =>
-        CreateTodoForRoot(ExternalDataService.TodoRootKind.Matter, id, request, httpContext, dataService, ownership, ct);
+        ExternalDataService dataService, IRecordOwnershipResolver ownership, CallerRecordAccessProbe probe,
+        ILogger<Program> logger, CancellationToken ct) =>
+        CreateTodoForRoot(ExternalDataService.TodoRootKind.Matter, id, request, httpContext, dataService, ownership,
+            probe, logger, ct);
 
     private static Task<IResult> CreateWorkAssignmentTodo(
         Guid id, CreateExternalTodoRequest request, HttpContext httpContext,
-        ExternalDataService dataService, IRecordOwnershipResolver ownership, CancellationToken ct) =>
-        CreateTodoForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, request, httpContext, dataService, ownership, ct);
+        ExternalDataService dataService, IRecordOwnershipResolver ownership, CallerRecordAccessProbe probe,
+        ILogger<Program> logger, CancellationToken ct) =>
+        CreateTodoForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, request, httpContext, dataService, ownership,
+            probe, logger, ct);
 
     /// <summary>
     /// POST /api/v1/external/{projects|matters|workassignments|servicerequests}/{id}/documents — upload a file
@@ -1287,6 +1432,7 @@ public static class ExternalProjectDataEndpoints
         IPostUploadIndexingEnqueuer indexing,
         JobSubmissionService jobs,
         IConfiguration configuration,
+        CallerRecordAccessProbe probe,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -1298,7 +1444,9 @@ public static class ExternalProjectDataEndpoints
 
         // ── AUTHORIZATION FIRST — nothing below touches SPE, or writes Dataverse, until both checks pass ──
         // (A service request's rights need one app-only read of its requester; nothing is written.)
-        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        // Task 036 (FR-20): the rights are confirmed against Dataverse for a caller whose access Dataverse decided.
+        var (rights, upstreamFault) = await RightsForDocumentParentAsync(
+            callerContext, parentKind, id, dataService, modules, ct, CallerRightsReader(probe, httpContext), logger);
         if (upstreamFault is not null) return upstreamFault;
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
@@ -1731,6 +1879,8 @@ public static class ExternalProjectDataEndpoints
         HttpContext httpContext,
         ExternalDataService dataService,
         IRecordOwnershipResolver ownership,
+        CallerRecordAccessProbe probe,
+        ILogger<Program> logger,
         CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
@@ -1740,8 +1890,10 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "You do not have access to this project");
 
-        // Require Create on THIS project (see CreateTodo — effective as of task 033).
-        var rights = callerContext.GetEffectiveRights(id);
+        // Require Create on THIS project (see CreateTodo — effective as of task 033). Task 036 (FR-20): confirmed against
+        // Dataverse (AppendTo on the project) for a caller whose access Dataverse decided.
+        var rights = await RightsForRootWriteAsync(
+            callerContext, ExternalDataService.TodoRootKind.Project, id, CallerRightsReader(probe, httpContext), logger, ct);
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "Your access level does not permit creating events on this project",
@@ -1812,6 +1964,8 @@ public static class ExternalProjectDataEndpoints
         UpdateExternalTodoRequest request,
         HttpContext httpContext,
         ExternalDataService dataService,
+        CallerRecordAccessProbe probe,
+        ILogger<Program> logger,
         CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
@@ -1857,6 +2011,14 @@ public static class ExternalProjectDataEndpoints
         // root lookup populated) both return None there, so they deny with the same response as an
         // out-of-scope root and the caller cannot infer WHY.
         var rights = RightsForRoot(callerContext, rootKind, rootId ?? Guid.Empty);
+
+        // Task 036 (FR-20): for a caller whose access Dataverse decided, the write is confirmed against Dataverse on the
+        // TARGET record — this to-do (Write on it), not its root. The root's Read (above) is still the scope check, so a
+        // to-do under a root outside the set, or vetoed, asks Dataverse nothing.
+        rights = await WithDataverseRightsAsync(
+            callerContext, rights,
+            ExternalDataService.GetDeletableBinding(ExternalDataService.DeletableKind.Todo).EntitySet, id,
+            CallerRightsReader(probe, httpContext), logger, ct);
 
         // Out-of-scope and insufficient-rights are ONE check: every accessor above returns None for a
         // record the caller cannot reach, so an absent record can never satisfy Write. Keeping them as
@@ -1949,7 +2111,8 @@ public static class ExternalProjectDataEndpoints
     /// parent the caller lost all get the SAME 403 (<see cref="DeleteOwnDeniedReasonCode"/>). A read that FAILED is a 503
     /// (<see cref="DeleteOwnUnavailableReasonCode"/>, or the service-request 503 of
     /// <see cref="RightsForDocumentParentAsync"/>), never a 403 and never a delete.</para>
-    /// <para>App-only, like every read on this plane: no OBO (ADR-028).</para>
+    /// <para>App-only, like every read on this plane: no OBO (ADR-028) — except step (2b), which, for a caller whose access
+    /// Dataverse decided (task 036), asks Dataverse as the caller through <see cref="CallerRecordAccessProbe"/>.</para>
     /// </remarks>
     private static async Task<IResult?> AuthorizeDeleteOwnAsync(
         CallerPrincipal caller,
@@ -1957,6 +2120,7 @@ public static class ExternalProjectDataEndpoints
         Guid id,
         ExternalDataService dataService,
         ExternalModuleRegistry modules,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>> readCallerRights,
         ILogger logger,
         CancellationToken ct)
     {
@@ -1993,6 +2157,21 @@ public static class ExternalProjectDataEndpoints
             {
                 logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: no Read on its {ParentKind} {ParentId}",
                     kind, id, parent.Kind, parent.Id);
+                return DenyDeleteOwn();
+            }
+        }
+
+        // (2b) Task 036 (FR-20, owner round 59 item 2): a caller whose access Dataverse decided must ALSO hold Delete on the
+        //      row itself in Dataverse, asked as the caller. The creator stamp stays required (FR-26): Dataverse adds its own
+        //      answer, it never stands in for the stamp. A probe that fails answers None, so nothing is deleted.
+        if (caller.DataverseConfirmsWrites)
+        {
+            var confirmed = await WithDataverseRightsAsync(
+                caller, Spaarke.Dataverse.AccessRights.Read, ExternalDataService.GetDeletableBinding(kind).EntitySet, id,
+                readCallerRights, logger, ct);
+            if (!confirmed.HasFlag(Spaarke.Dataverse.AccessRights.Delete))
+            {
+                logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: Dataverse does not grant the caller Delete on it", kind, id);
                 return DenyDeleteOwn();
             }
         }
@@ -2054,6 +2233,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         ExternalModuleRegistry modules,
         DocumentCheckoutService documents,
+        CallerRecordAccessProbe probe,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -2061,7 +2241,7 @@ public static class ExternalProjectDataEndpoints
         if (callerContext is null) return MissingContextResult();
 
         if (await AuthorizeDeleteOwnAsync(callerContext, ExternalDataService.DeletableKind.Document, id, dataService,
-                modules, logger, ct) is { } refusal)
+                modules, CallerRightsReader(probe, httpContext), logger, ct) is { } refusal)
             return refusal;
 
         DeleteResult result;
@@ -2120,13 +2300,13 @@ public static class ExternalProjectDataEndpoints
     /// <summary>DELETE /api/v1/external/todos/{id} — hard-delete a to-do the caller created (FR-26).</summary>
     private static async Task<IResult> DeleteOwnTodo(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        ILogger<Program> logger, CancellationToken ct)
+        CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (await AuthorizeDeleteOwnAsync(callerContext, ExternalDataService.DeletableKind.Todo, id, dataService,
-                modules, logger, ct) is { } refusal)
+                modules, CallerRightsReader(probe, httpContext), logger, ct) is { } refusal)
             return refusal;
 
         return await DeleteAuthorizedRowAsync(ExternalDataService.DeletableKind.Todo, id, dataService, logger, ct);
@@ -2135,13 +2315,13 @@ public static class ExternalProjectDataEndpoints
     /// <summary>DELETE /api/v1/external/events/{id} — hard-delete a calendar event the caller created (FR-26).</summary>
     private static async Task<IResult> DeleteOwnEvent(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
-        ILogger<Program> logger, CancellationToken ct)
+        CallerRecordAccessProbe probe, ILogger<Program> logger, CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
         if (await AuthorizeDeleteOwnAsync(callerContext, ExternalDataService.DeletableKind.Event, id, dataService,
-                modules, logger, ct) is { } refusal)
+                modules, CallerRightsReader(probe, httpContext), logger, ct) is { } refusal)
             return refusal;
 
         return await DeleteAuthorizedRowAsync(ExternalDataService.DeletableKind.Event, id, dataService, logger, ct);

@@ -1684,21 +1684,22 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/todos", "GetTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot, which requires Read from RightsForRoot on the route project "
             + "(ExternalProjectDataEndpoints.cs:688-689)."),
-        new HandlerDecision("POST /api/v1/external/projects/{id:guid}/todos", "CreateTodo", "RightsForRoot", Array.Empty<string>(),
-            "Delegates to CreateTodoForRoot, which requires Create from RightsForRoot before any write "
-            + "(ExternalProjectDataEndpoints.cs:722-723)."),
+        new HandlerDecision("POST /api/v1/external/projects/{id:guid}/todos", "CreateTodo", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForRootWriteAsync" },
+            "Delegates to CreateTodoForRoot, which requires Create from RightsForRoot before any write — through "
+            + "RightsForRootWriteAsync, which (task 036, FR-20) also confirms it against Dataverse for a Dataverse-decided "
+            + "caller (ExternalProjectDataEndpoints.cs:729-730, :930)."),
         new HandlerDecision("GET /api/v1/external/matters/{id:guid}/todos", "GetMatterTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot: Read from RightsForRoot on the route matter "
             + "(ExternalProjectDataEndpoints.cs:688-689)."),
-        new HandlerDecision("POST /api/v1/external/matters/{id:guid}/todos", "CreateMatterTodo", "RightsForRoot", Array.Empty<string>(),
-            "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route matter "
-            + "(ExternalProjectDataEndpoints.cs:722-723)."),
+        new HandlerDecision("POST /api/v1/external/matters/{id:guid}/todos", "CreateMatterTodo", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForRootWriteAsync" },
+            "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route matter, through "
+            + "RightsForRootWriteAsync (ExternalProjectDataEndpoints.cs:729-730, :930)."),
         new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/todos", "GetWorkAssignmentTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot: Read from RightsForRoot on the route work assignment "
             + "(ExternalProjectDataEndpoints.cs:688-689)."),
-        new HandlerDecision("POST /api/v1/external/workassignments/{id:guid}/todos", "CreateWorkAssignmentTodo", "RightsForRoot", Array.Empty<string>(),
-            "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route work assignment "
-            + "(ExternalProjectDataEndpoints.cs:722-723)."),
+        new HandlerDecision("POST /api/v1/external/workassignments/{id:guid}/todos", "CreateWorkAssignmentTodo", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForRootWriteAsync" },
+            "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route work assignment, through "
+            + "RightsForRootWriteAsync (ExternalProjectDataEndpoints.cs:729-730, :930)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/documents", "UploadDocument", "AccessRights", Array.Empty<string>(),
             "Delegates to UploadDocumentForParent: requires Create on the route project from the caller principal's "
             + "rights before the upload (rights.HasFlag(AccessRights.Create), ExternalProjectDataEndpoints.cs:1269)."),
@@ -1774,7 +1775,8 @@ public partial class RouteAuthorizationGuardTests
             + "(ExternalProjectDataEndpoints.cs:1524) before any Dataverse read; an event also filed to a SECURE linked root the "
             + "caller cannot read is withheld, by effective status (ExternalDataService.ReadableEventsAsync, ExternalMultiRootRule; unknown counts as secure)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/events", "CreateEvent", "AccessRights", Array.Empty<string>(),
-            "Requires Create on the route project (ExternalProjectDataEndpoints.cs:1570) before the write."),
+            "Requires Create on the route project (RightsForRootWriteAsync, ExternalProjectDataEndpoints.cs:1895-1897; "
+            + "task 036 confirms it against Dataverse for a Dataverse-decided caller) before the write."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/contacts", "GetContacts", "HoldsReadOnProject", Array.Empty<string>(),
             "Read on the route project (ExternalProjectDataEndpoints.cs:1612)."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/organizations", "GetOrganizations", "HoldsReadOnProject", Array.Empty<string>(),
