@@ -82,7 +82,7 @@ import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
 import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
 import { TruncatedListNotice } from './TruncatedListNotice';
 import { BffAccessState, accessFailureOf, type BffAccessFailure } from './auth/BffAccessState';
-import { AccessLevel } from '../types';
+import { AccessLevel, ApiError } from '../types';
 import { problemMessage } from '../auth/bff-client';
 import { SectionCard } from './SectionCard';
 
@@ -260,6 +260,9 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /** To-Do statuscode values per FR-24. */
+/** A refused status toggle (403 from PATCH /todos/{id}); never the server's body (task 036 fix round 2). */
+const TOGGLE_DENIED = 'You do not have permission to change this task.';
+
 const TODO_STATUS = {
   OPEN: 1,
   IN_PROGRESS: 659490001,
@@ -323,7 +326,8 @@ function isTerminalStatus(statuscode: number | null | undefined): boolean {
 
 interface TaskItemProps {
   task: ODataTodo;
-  accessLevel: AccessLevel;
+  /** Offer the status toggle (the list decides: the level, or per-record write access — task 036 fix round 2). */
+  allowEdit: boolean;
   isToggling: boolean;
   onToggleStatus: (task: ODataTodo) => void;
   /** Show Delete (the caller created this to-do). */
@@ -331,12 +335,11 @@ interface TaskItemProps {
   onDelete?: (task: ODataTodo) => void;
 }
 
-const TaskItem: React.FC<TaskItemProps> = ({ task, accessLevel, isToggling, onToggleStatus, canDelete, onDelete }) => {
+const TaskItem: React.FC<TaskItemProps> = ({ task, allowEdit, isToggling, onToggleStatus, canDelete, onDelete }) => {
   const styles = useStyles();
 
   const isCompleted = isTerminalStatus(task.statuscode);
   const overdueFlag = isOverdue(task.sprk_duedate, isCompleted);
-  const allowEdit = canEdit(accessLevel);
 
   const handleToggle = React.useCallback(() => {
     if (!allowEdit || isToggling) return;
@@ -599,8 +602,9 @@ export interface SmartTodoProps {
   caller?: CallerIdentity | null;
   /**
    * The caller's write access is decided per record (`/me` `writeAccessPerRecord`, task 036 fix round 1): "Add Task"
-   * then follows the BFF's `canCreate` on this record's to-do list instead of `accessLevel`. The status toggle still
-   * follows `accessLevel` (a per-row Write is not asked of a list).
+   * then follows the BFF's `canCreate` on this record's to-do list instead of `accessLevel`. The status toggle is offered
+   * on a project's to-dos (fix round 2): PATCH confirms Write on each to-do against Dataverse, a per-row Write is not asked
+   * of the list (owner round 59), so a refused toggle reverts and says so.
    */
   writeAccessPerRecord?: boolean;
 }
@@ -649,6 +653,10 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
   // "Add Task" (create is a project action here, task 057); otherwise the level does, as before.
   const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
   const allowCreate = writeAccessPerRecord ? root === 'projects' && listCanCreate === true : allowEdit;
+  // Task 036 fix round 2: the status toggle. A per-record caller's level says only what they may SEE; PATCH /todos/{id}
+  // asks Dataverse for Write on that to-do, so the toggle is offered on a project's to-dos and the PATCH decides (a 403
+  // reverts it). Every other caller keeps the level rule, and a matter / work-assignment list stays read-only (task 057).
+  const allowToggle = allowEdit || (writeAccessPerRecord && root === 'projects');
 
   // Delete-own (task 054): the to-do leaves the list on the server's 204; any refusal keeps it and is shown.
   const del = useDeleteOwn<ODataTodo>({
@@ -703,7 +711,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
 
   const handleToggleStatus = React.useCallback(
     async (task: ODataTodo) => {
-      if (!allowEdit || togglingTaskId) return;
+      if (!allowToggle || togglingTaskId) return;
 
       setTogglingTaskId(task.sprk_todoid);
       setToggleError(null);
@@ -721,13 +729,17 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
         setTasks(prev =>
           prev.map(t => (t.sprk_todoid === task.sprk_todoid ? { ...t, statuscode: task.statuscode } : t))
         );
-        const message = err instanceof Error ? err.message : 'Failed to update task status';
-        setToggleError(message);
+        // A refusal says so plainly; it never shows the server's body (task 036 fix round 2).
+        setToggleError(
+          err instanceof ApiError && err.statusCode === 403
+            ? TOGGLE_DENIED
+            : problemMessage(err, 'The task status could not be updated just now.')
+        );
       } finally {
         setTogglingTaskId(null);
       }
     },
-    [allowEdit, togglingTaskId]
+    [allowToggle, togglingTaskId]
   );
 
   // ---------------------------------------------------------------------------
@@ -867,7 +879,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
                       <TaskItem
                         key={task.sprk_todoid}
                         task={task}
-                        accessLevel={accessLevel}
+                        allowEdit={allowToggle}
                         isToggling={togglingTaskId === task.sprk_todoid}
                         onToggleStatus={handleToggleStatus}
                         canDelete={isCreatedByCaller(task, caller)}
@@ -888,7 +900,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
                       <TaskItem
                         key={task.sprk_todoid}
                         task={task}
-                        accessLevel={accessLevel}
+                        allowEdit={allowToggle}
                         isToggling={togglingTaskId === task.sprk_todoid}
                         onToggleStatus={handleToggleStatus}
                         canDelete={isCreatedByCaller(task, caller)}
