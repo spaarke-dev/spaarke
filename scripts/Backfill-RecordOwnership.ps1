@@ -18,10 +18,13 @@
                       round 1, F3). D-11 says a grant row is owned by a team, never a user, so a human-owned grant is
                       the same defect. The summary splits the candidates into AppOwned and HumanOwned, and the
                       manifest records each row's previous owner, so either is restored exactly by -RevertManifest.
-                      ALSO every ACTIVE row owned by a TEAM that is not the team the resolver gives its root (task 099b
-                      review round 2): a grant created on an ordinary root and left on that unit's default team when the
-                      root was made secure before the secure-transition pass re-owned grants (or the reverse, left on the
-                      Secure team after an unsecure). Reported as TeamMismatch; the manifest records the previous TEAM.
+                      ALSO every row, in EVERY state (review round 3, F1: an inactive grant still names the record and the
+                      contact), owned by a TEAM that is not the team the resolver gives its root (task 099b review round
+                      2): a grant created on an ordinary root and left on that unit's default team when the root was made
+                      secure before the secure-transition pass re-owned grants (or the reverse, left on the Secure team
+                      after an unsecure). Reported as TeamMismatch; the manifest records the previous TEAM. A team-owned
+                      row filed to nothing is counted Unfiled (review round 3, K4), and a row read both as user-owned and
+                      as team-owned is processed once.
 
     WHICH TEAM — record-first, the SAME order RecordOwnershipResolver applies to new creates:
       sprk_document : the filed record — sprk_matter, sprk_project, sprk_invoice, sprk_workassignment, then the
@@ -29,8 +32,8 @@
       sprk_todo     : the record regarding (matter / project / invoice), then the document, then the communication.
       sprk_externalrecordaccess (unified-access-control-r2 task 099b, D-11, #1010): the grant's ROOT — sprk_project,
                       sprk_matter, sprk_workassignment (a grant binds exactly one) — the SAME parent the BFF's grant core
-                      hands RecordOwnershipResolver for a new grant. ACTIVE grants only (statecode = 0); user-owned
-                      inactive grants are counted (NotActive) and left alone.
+                      hands RecordOwnershipResolver for a new grant. User-owned grants: ACTIVE only (statecode = 0);
+                      user-owned inactive grants are counted (NotActive) and left alone. Team-owned grants: every state.
     The target's owningbusinessunit → that unit's default owner team (isdefault = true AND teamtype = 0 — both
     predicates are required; dev has non-default Owner teams and Access teams in the same units).
 
@@ -111,8 +114,8 @@
 .EXAMPLE
     .\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Entities sprk_externalrecordaccess
     The grant backfill dry run (task 099b). It is also the VERIFY: after -Apply, it must report ToWrite: 0 and
-    Candidates: 0 — no ACTIVE grant owned by a user, application or human (review round 1, F3), and none owned by a team
-    other than its root's (TeamMismatch 0, review round 2).
+    Candidates: 0 — no ACTIVE grant owned by a user, application or human (review round 1, F3), and no grant in any state
+    owned by a team other than its root's (TeamMismatch 0, review rounds 2 and 3).
 
 .EXAMPLE
     .\Backfill-RecordOwnership.ps1 -SelfTest
@@ -188,6 +191,20 @@ $AnyUserOwned = @{ 'sprk_externalrecordaccess' = $true }
 $SecureFlaggedSets = @{ 'sprk_projects' = $true; 'sprk_matters' = $true; 'sprk_workassignments' = $true }
 $OwnerTeamType = 0
 
+function ConvertTo-CleanGuid {
+    # ADR-044: bare, lowercase, at every boundary.
+    param([AllowEmptyString()][string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+    return $Value.Trim().Trim('{', '}').ToLowerInvariant()
+}
+
+function Get-Lookup {
+    param($Row, [string]$Attribute)
+    $p = $Row.PSObject.Properties["_${Attribute}_value"]
+    if ($null -eq $p -or $null -eq $p.Value) { return $null }
+    return ConvertTo-CleanGuid $p.Value
+}
+
 # ── PURE: the resolver's owner decision for a row filed under ONE target (RecordOwnershipResolver.ResolveFromParentsAsync) ──
 #    $Facts    : @{ Bu = <target's owning business unit or $null>; Flagged = <sprk_issecure true/empty on a ROOT target> }
 #    $Topology : @{ BuId = <Secure Record unit or $null>; Ambiguous = <bool>; TeamId = <named team or $null>; TeamCount = <n> }
@@ -220,15 +237,16 @@ function Get-CandidateFilter {
     return $owned
 }
 
-# ── PURE (task 099b review round 2): the rows read to find TEAM-owned active grants. A row is a candidate only when it is
-#    team-owned (_owningteam_value set, checked per row) and Test-TeamMismatch says its team is not the resolver's team for
-#    its root. Other entities: none ($null). The filter is the active state ONLY: measured on spaarkedev1 2026-10-17,
-#    '_owningteam_value ne null' returns USER-owned grant rows too (62 of 62 active, none team-owned), so ownership is
-#    tested on the row, never in the query. ──
-function Get-TeamOwnedFilter {
-    param([string]$Entity)
+# ── PURE (task 099b review round 2): the read that finds the entity's TEAM-owned rows, or $null when they are not checked
+#    (grants only). A row is a candidate only when it is team-owned (_owningteam_value set, checked per row) and
+#    Test-TeamMismatch says its team is not the resolver's team for its root. The read has NO filter: every row in EVERY
+#    state (review round 3, F1 — an inactive grant on the wrong team exposes the record like an active one), and team
+#    ownership is tested on the row, never in the query (measured on spaarkedev1 2026-10-17: '_owningteam_value ne null'
+#    returns USER-owned grant rows too). ──
+function Get-TeamOwnedQuery {
+    param([string]$Entity, [string]$EntitySetName, [string]$Select)
     if (-not $AnyUserOwned[$Entity]) { return $null }
-    return 'statecode eq 0'
+    return "$EntitySetName`?`$select=$Select"
 }
 
 # ── PURE: of the rows Get-TeamOwnedFilter read, the TEAM-owned ones (a user-owned row is a Get-CandidateFilter candidate). ──
@@ -242,6 +260,49 @@ function Select-TeamOwnedRows {
 function Test-TeamMismatch {
     param([string]$CurrentTeam, [hashtable]$Decision)
     return [bool]($Decision.Team -and $CurrentTeam -and $Decision.Team -ne $CurrentTeam)
+}
+
+# ── PURE (review round 3, K4): the user-owned candidates, then the team-owned rows, each row ONCE. The two reads are separate
+#    queries, so a row can land in both (both owner columns read back, or an owner change between the reads); the first
+#    reading is kept. Returns @{ Rows; Duplicates = the ids dropped }. ──
+function Merge-BackfillRows {
+    param([object[]]$Candidates, [object[]]$TeamOwned, [string]$IdColumn)
+    $seen = @{}; $rows = [System.Collections.Generic.List[object]]::new(); $duplicates = [System.Collections.Generic.List[string]]::new()
+    foreach ($row in @($Candidates) + @($TeamOwned)) {
+        if ($null -eq $row) { continue }
+        $id = ConvertTo-CleanGuid $row.$IdColumn
+        if ($seen.ContainsKey($id)) { $duplicates.Add($id); continue }
+        $seen[$id] = $true
+        $rows.Add($row)
+    }
+    return @{ Rows = $rows.ToArray(); Duplicates = $duplicates.ToArray() }
+}
+
+# ── PURE (review round 3, K4): what the backfill does with one row. $Order: lookup -> entity set, first non-null wins.
+#    $Decide: { param($Target) <Get-OwnerTeamDecision's answer for that target> }. Returns @{ Outcome; Target; Decision;
+#    CurrentTeam; Mismatch }, Outcome one of:
+#      Unfiled      — filed to nothing, WHATEVER its owner (a team-owned row too: counted, never skipped silently); not written
+#      Unresolvable — the decision refused; not written
+#      Correct      — a team-owned row already on its root's team; nothing to do
+#      Write        — re-own it to Decision.Team (Mismatch = it is team-owned by another team) ──
+function Get-RowPlan {
+    param($Row, [System.Collections.IDictionary]$Order, [scriptblock]$Decide)
+    $currentTeam = Get-Lookup $Row 'owningteam'
+    $target = $null
+    foreach ($attr in $Order.Keys) {
+        $value = Get-Lookup $Row $attr
+        if ($value) { $target = @{ Attribute = $attr; Set = $Order[$attr]; Id = $value }; break }
+    }
+    $plan = @{ Outcome = $null; Target = $target; Decision = $null; CurrentTeam = $currentTeam; Mismatch = $false }
+    if (-not $target) { $plan.Outcome = 'Unfiled'; return $plan }
+    $plan.Decision = & $Decide $target
+    if ($currentTeam) {
+        $plan.Mismatch = Test-TeamMismatch -CurrentTeam $currentTeam -Decision $plan.Decision
+        $plan.Outcome = if ($plan.Mismatch) { 'Write' } elseif ($plan.Decision.Team) { 'Correct' } else { 'Unresolvable' }
+        return $plan
+    }
+    $plan.Outcome = if ($plan.Decision.Team) { 'Write' } else { 'Unresolvable' }
+    return $plan
 }
 
 # ══ SELF-TEST (offline) ══════════════════════════════════════════════════════════════════════════════════════
@@ -276,9 +337,9 @@ if ($SelfTest) {
         @{ Name = 'grant candidates: active rows owned by ANY user (F3)'; Got = (Get-CandidateFilter 'sprk_externalrecordaccess' @('11')); Want = '_owninguser_value ne null and statecode eq 0' }
         @{ Name = 'grant NotActive: inactive rows owned by any user'; Got = (Get-CandidateFilter 'sprk_externalrecordaccess' @('11') -Inactive); Want = '_owninguser_value ne null and statecode ne 0' }
         @{ Name = 'document candidates: application-owned rows only'; Got = (Get-CandidateFilter 'sprk_document' @('11', '22')); Want = "Microsoft.Dynamics.CRM.In(PropertyName='owninguser',PropertyValues=['11','22'])" }
-        @{ Name = 'grant team-owned check: every active row, team ownership tested per row (review round 2)'; Got = (Get-TeamOwnedFilter 'sprk_externalrecordaccess'); Want = 'statecode eq 0' }
+        @{ Name = 'grant team-owned read: every row in EVERY state, no filter; ownership tested per row (review rounds 2, 3)'; Got = (Get-TeamOwnedQuery 'sprk_externalrecordaccess' 'sprk_externalrecordaccesses' 'a,b'); Want = 'sprk_externalrecordaccesses?$select=a,b' }
         @{ Name = 'grant team-owned rows: only rows with an owning team (a user-owned row is not one)'; Got = ((Select-TeamOwnedRows @([pscustomobject]@{ _owningteam_value = 't1'; _owninguser_value = $null }, [pscustomobject]@{ _owningteam_value = $null; _owninguser_value = 'u1' })) | ForEach-Object { $_._owningteam_value }) -join ','; Want = 't1' }
-        @{ Name = 'document team-owned check: none (team-owned documents are not this backfill''s)'; Got = [string](Get-TeamOwnedFilter 'sprk_document'); Want = '' }
+        @{ Name = 'document team-owned read: none (team-owned documents are not this backfill''s)'; Got = [string](Get-TeamOwnedQuery 'sprk_document' 'sprk_documents' 'a,b'); Want = '' }
     )
     # Review round 2: which TEAM-owned grants are re-owned. The decision is Get-OwnerTeamDecision's, as for every row.
     $mismatches = @(
@@ -296,6 +357,27 @@ if ($SelfTest) {
         Write-Host ("{0} {1} -> mismatch={2} team={3}" -f $(if ($pass) { 'PASS' } else { 'FAIL' }), $m.Name, $got, $d.Team)
     }
     $cases += $mismatches
+    # Review round 3 (K4): each row once, and a team-owned row filed to nothing is counted, not skipped.
+    $grantOrder = $TargetOrder['sprk_externalrecordaccess']
+    $toSecure = { param($t) Get-OwnerTeamDecision -Facts @{ Bu = $secureBu; Flagged = $true } -Topology $ok -DefaultTeamOf $defaults }
+    $row = { param($id, $user, $team, $project) [pscustomobject]@{ sprk_externalrecordaccessid = $id; _owninguser_value = $user; _owningteam_value = $team; _sprk_project_value = $project; _sprk_matter_value = $null; _sprk_workassignment_value = $null } }
+    $merged = Merge-BackfillRows -Candidates @((& $row 'r1' 'u1' $null 'p1'), (& $row 'r2' 'u1' $null 'p1')) -TeamOwned @((& $row 'R2' 'u1' 't1' 'p1'), (& $row 'r3' $null $childTeam 'p1')) -IdColumn 'sprk_externalrecordaccessid'
+    $planOf = { param($r) (Get-RowPlan -Row $r -Order $grantOrder -Decide $toSecure).Outcome }
+    $rowCases = @(
+        @{ Name = 'dedup: a row in both the user-owned and the team-owned reads is processed once (first reading kept)'; Got = (($merged.Rows | ForEach-Object { $_.sprk_externalrecordaccessid }) -join ',') + ' dropped=' + ($merged.Duplicates -join ','); Want = 'r1,r2,r3 dropped=r2' }
+        @{ Name = 'dedup: no overlap drops nothing'; Got = [string](Merge-BackfillRows -Candidates @((& $row 'r1' 'u1' $null 'p1')) -TeamOwned @((& $row 'r3' $null $childTeam 'p1')) -IdColumn 'sprk_externalrecordaccessid').Duplicates.Count; Want = '0' }
+        @{ Name = 'unfiled: a TEAM-owned row filed to nothing is counted Unfiled, not skipped'; Got = (& $planOf (& $row 'r4' $null $childTeam $null)); Want = 'Unfiled' }
+        @{ Name = 'unfiled: a user-owned row filed to nothing is Unfiled'; Got = (& $planOf (& $row 'r5' 'u1' $null $null)); Want = 'Unfiled' }
+        @{ Name = 'plan: a team-owned row on another team than its root''s is written (TeamMismatch)'; Got = (& $planOf (& $row 'r6' $null $childTeam 'p1')); Want = 'Write' }
+        @{ Name = 'plan: a team-owned row already on its root''s team is left (Correct)'; Got = (& $planOf (& $row 'r7' $null $secureTeam 'p1')); Want = 'Correct' }
+        @{ Name = 'plan: a user-owned row filed to a root is written'; Got = (& $planOf (& $row 'r8' 'u1' $null 'p1')); Want = 'Write' }
+    )
+    foreach ($r in $rowCases) {
+        $pass = $r.Got -eq $r.Want
+        if (-not $pass) { $failures++ }
+        Write-Host ("{0} {1}: {2}" -f $(if ($pass) { 'PASS' } else { 'FAIL' }), $r.Name, $r.Got)
+    }
+    $cases += $rowCases
     foreach ($f in $filters) {
         $pass = $f.Got -eq $f.Want
         if (-not $pass) { $failures++ }
@@ -318,13 +400,6 @@ function Get-DvToken {
     $t = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
     if (-not $t) { throw "No Dataverse token for $EnvironmentUrl. Run 'az login' and retry." }
     return $t
-}
-
-function ConvertTo-CleanGuid {
-    # ADR-044: bare, lowercase, at every boundary.
-    param([AllowEmptyString()][string]$Value)
-    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
-    return $Value.Trim().Trim('{', '}').ToLowerInvariant()
 }
 
 $script:Token = Get-DvToken
@@ -358,13 +433,6 @@ function Invoke-DvGet {
         $uri = $resp.'@odata.nextLink'
     }
     return , $all.ToArray()
-}
-
-function Get-Lookup {
-    param($Row, [string]$Attribute)
-    $p = $Row.PSObject.Properties["_${Attribute}_value"]
-    if ($null -eq $p -or $null -eq $p.Value) { return $null }
-    return ConvertTo-CleanGuid $p.Value
 }
 
 # ── Business unit → default owner team (cached; ambiguity refuses, same as the resolver) ────────────────────
@@ -508,48 +576,43 @@ foreach ($entity in $Entities) {
 
     $appOwnedCount = @($candidates | Where-Object { $appUserSet[(Get-Lookup $_ 'owninguser')] }).Count
     $userOwnedCount = @($candidates).Count
-    # Review round 2: the TEAM-owned active grants, each checked against its root's team below (TeamMismatch).
+    # Review round 2: the TEAM-owned grants, each checked against its root's team below (TeamMismatch) — in every state since
+    # review round 3 (F1), so the read has no filter.
     $teamOwnedRows = @()
-    $teamOwnedFilter = Get-TeamOwnedFilter $entity
-    if ($teamOwnedFilter) { $teamOwnedRows = Select-TeamOwnedRows (Invoke-DvGet "$set`?`$select=$select&`$filter=$teamOwnedFilter") }
-    $stats = [ordered]@{ Entity = $entity; Candidates = $userOwnedCount; AppOwned = $appOwnedCount; HumanOwned = $userOwnedCount - $appOwnedCount; TeamOwnedChecked = $(if ($teamOwnedFilter) { @($teamOwnedRows).Count } else { '-' }); TeamMismatch = 0; ToWrite = 0; Written = 0; Failed = 0; Unfiled = 0; Unresolvable = 0; NotActive = $notActive }
-    foreach ($row in @($candidates) + @($teamOwnedRows)) {
+    $teamOwnedQuery = Get-TeamOwnedQuery $entity $set $select
+    if ($teamOwnedQuery) { $teamOwnedRows = Select-TeamOwnedRows (Invoke-DvGet $teamOwnedQuery) }
+    $stats = [ordered]@{ Entity = $entity; Candidates = $userOwnedCount; AppOwned = $appOwnedCount; HumanOwned = $userOwnedCount - $appOwnedCount; TeamOwnedChecked = $(if ($teamOwnedQuery) { @($teamOwnedRows).Count } else { '-' }); TeamMismatch = 0; ToWrite = 0; Written = 0; Failed = 0; Unfiled = 0; Unresolvable = 0; NotActive = $notActive }
+    # Review round 3 (K4): a row read both as a user-owned candidate and as team-owned is processed once.
+    $merged = Merge-BackfillRows -Candidates $candidates -TeamOwned $teamOwnedRows -IdColumn "$($entity)id"
+    foreach ($dup in $merged.Duplicates) { Write-BackfillLog "DUPLICATE $entity $dup — read both as user-owned and as team-owned; processed once (first reading)." }
+    # Every entity: the resolver's secure-aware decision (review round 1 — documents and to-dos owned in the Secure Record
+    # unit used to map to that unit's DEFAULT team, and a flagged-but-not-isolated root to an ordinary team).
+    $decide = { param($Target) Resolve-SecureAwareTeam $Target.Set $Target.Id }
+    foreach ($row in $merged.Rows) {
         $id = ConvertTo-CleanGuid $row."$($entity)id"
-        $currentTeam = Get-Lookup $row 'owningteam'
-        $target = $null
-        foreach ($attr in $order.Keys) {
-            $value = Get-Lookup $row $attr
-            if ($value) { $target = @{ Attribute = $attr; Set = $order[$attr]; Id = $value }; break }
-        }
+        $plan = Get-RowPlan -Row $row -Order $order -Decide $decide
+        $currentTeam = $plan.CurrentTeam
+        $target = $plan.Target
+        $ownedBy = if ($currentTeam) { " (team-owned by $currentTeam)" } else { '' }
 
-        if (-not $target) {
-            if ($currentTeam) { continue }   # a team-owned row filed to nothing is not this check's
+        if ($plan.Outcome -eq 'Unfiled') {
+            # Review round 3 (K4): a team-owned row filed to nothing is counted too, never skipped silently.
             $stats.Unfiled++
-            Write-BackfillLog "UNFILED $entity $id — filed to nothing; the acting user is not recorded (app-only create). Not written."
+            Write-BackfillLog "UNFILED $entity $id$ownedBy — filed to nothing; the acting user is not recorded (app-only create). Not written."
             continue
         }
-
-        # Every entity: the resolver's secure-aware decision (review round 1 — documents and to-dos owned in the Secure Record
-        # unit used to map to that unit's DEFAULT team, and a flagged-but-not-isolated root to an ordinary team).
-        $answer = Resolve-SecureAwareTeam $target.Set $target.Id
-        $bu = $answer.Bu
-        $team = $answer.Team
-        if ($currentTeam) {
+        $bu = $plan.Decision.Bu
+        $team = $plan.Decision.Team
+        if ($plan.Outcome -eq 'Correct') { continue }
+        if ($plan.Outcome -eq 'Unresolvable') {
+            $stats.Unresolvable++
+            Write-BackfillLog "UNRESOLVABLE $entity $id$ownedBy — target $($target.Attribute)=$($target.Id) BU=${bu}: $($plan.Decision.Reason). Not written."
+            continue
+        }
+        if ($plan.Mismatch) {
             # A TEAM-owned grant (review round 2): a candidate only when its team is not its root's.
-            if (-not (Test-TeamMismatch -CurrentTeam $currentTeam -Decision $answer)) {
-                if (-not $team) {
-                    $stats.Unresolvable++
-                    Write-BackfillLog "UNRESOLVABLE $entity $id (team-owned by $currentTeam) — target $($target.Attribute)=$($target.Id) BU=${bu}: $($answer.Reason). Not written."
-                }
-                continue
-            }
             $stats.Candidates++
             $stats.TeamMismatch++
-        }
-        if (-not $team) {
-            $stats.Unresolvable++
-            Write-BackfillLog "UNRESOLVABLE $entity $id — target $($target.Attribute)=$($target.Id) BU=${bu}: $($answer.Reason). Not written."
-            continue
         }
 
         $stats.ToWrite++
