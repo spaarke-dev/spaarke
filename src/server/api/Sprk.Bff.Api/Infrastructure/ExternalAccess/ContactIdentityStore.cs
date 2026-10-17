@@ -542,6 +542,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public static string BuildGuestSystemUserLookupPath(Guid guestObjectId)
         => $"systemusers?$select=systemuserid,isdisabled,{ContactBindingDecision.HomeTenantIdColumn},"
            + ContactBindingDecision.HomeObjectIdColumn
+           // includes disabled: the link must see a disabled guest systemuser in order to refuse it;
+           // ContactBindingDecision.DecideHomeLinkWrite keeps only enabled rows and denies when none is left.
            + $"&$filter=azureactivedirectoryobjectid eq {guestObjectId:D}&$top=2&$orderby=isdisabled asc";
 
     /// <summary>
