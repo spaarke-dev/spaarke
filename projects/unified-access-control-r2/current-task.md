@@ -2,7 +2,7 @@
 
 > **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules incl. D-11 team ownership, §3 Owner directives incl. the ADR-028 A9 block, §5 Environment incl. the R3-holds-dev deploy rule, §6 Gotchas). Decisions: `notes/decisions.md` (D-113 amended 2026-10-16). Defer list with the 2026-10-16 release disposition: `notes/defer-issues.md`. Task 186: `notes/186-model1-workforce-design.md` §0. Narrative: checkpoint commit messages.
 
-> **Last Updated**: 2026-10-16 (checkpoint #42).
+> **Last Updated**: 2026-10-17 (checkpoint #43).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -15,10 +15,12 @@
 ## Open PRs (UAC) and their state
 | PR | Issue | Worktree / branch | Head | State |
 |---|---|---|---|---|
-| #2025 | #1576 (disabled users + per-request token) | C:/wt1576 `fix/uac-1576-disabled-users-per-request-token` | 689f217ff | **OWNER SIGNED OFF (round 101).** Master merged in (ea7e295b7, guards 126/126, build OK); the merge watcher is running. 2 full passes + 2 scoped re-checks; no F-class. Known limits closed (fail-closed JIT sweep and Decision Record owner, guard shapes, per-site ratchet). Filed #2033 (disabled sender) and #2034 (guest writer, provisioning). After merge: close #1576 parts (b) 61b0aa77a and (d) 633cce424; tell provisioning about the baseline marker. |
-| #2035 (099a) | task 099 (amendment 5) + #1010 read half | C:/wt099a `feat/uac-099a-record-grants-read` | 14e58eb38 | **OWNER SIGNED OFF (round 101).** Merge after #2025: merge master in again, re-run the guards, then the watcher. Passes 1 and 2 are fixed (TrackingFieldTrio 1.0.50). The scoped re-check of the round-2 fix found no F-class issues; K1–K4 are in the PR body. Master merged in: route ledger 126→127, after ontology 104. Master merged again after ontology #2044 (e702c3401): ledger 129→130, guard 87/87. After merge and an R3 deploy, run the live check in the PR body (a child-BU Core User sees root-owned grant G; TrackingFieldTrio 1.0.50 import). Next: **099b** (after #2025 merges), **099c** (after #2035). #1010 closes after 099a+099b; #961 closes with 099c. |
+| (099b, pending) | #1010 D-11 half | C:/wt099b `feat/uac-099b-grant-team-ownership` from bed14dd67 | — | Executor running (Opus high). Then 2 adversarial passes (auth) and owner sign-off; the main session runs backfill -Apply after merge. |
+| (186, draft pending) | task 186 | C:/wt186 `feat/uac-186-workforce-ceiling` @ b59e7e2a1 (master + R3 61e74ef64) | — | Executor running (Opus high). DRAFT; merges after R3's interim → master PR; R3 reviews any R3-file hunks. |
+| #2035 (099a) | task 099 (amendment 5) + #1010 read half | C:/wt099a `feat/uac-099a-record-grants-read` | 1def4ee06 | **OWNER SIGNED OFF (round 101).** Master (bed14dd67) merged again 2026-10-17: guards 126/126, ledger 130, 107/107 unit tests. Merge watcher bn1vqa55m running. After merge: send R3 the SHA; start **099c**; live check after the R3 deploy (child-BU Core User sees root-owned grant G; TrackingFieldTrio 1.0.50 import). |
 
-## Merged today (2026-10-16)
+## Merged (2026-10-16/17)
+- **#2025 `bed14dd67`** (2026-10-17; #1576 (b)+(d); #1576 commented and stays open until the dev gate; R3 and provisioning (`-bb`) told)
 - #2007 `96d5b16c2` (#2005, live gate PASS)
 - #1983 `42aecf064`
 - #2013 `0ccc75b4c` (#994)
@@ -33,7 +35,7 @@
 - **Batch 6 gates** (`notes/batch6-live-gates-2026-10-17.md`): #2021, #1620, #994 and #1755 PASS. The #1755 fixture is the secure project `a9e04977-…`, kept with its container.
 - #1363: registration PASS. **First run PENDING: after 2026-10-18 00:15Z**, run the KQL in the batch6 notes and `GET /api/admin/jobs/demo-expiration/status`.
 - #2002: **FAIL** → #2049. The reconciliation job still resolves with Write intent. Fixed by PR #2052, **merged at 901c7eeed** (R3 told). Next R3 deploy, then re-gate: 0 Warnings in 1 h.
-- Still to gate on later builds: #1576 (after #2025), 099a (after #2035).
+- Still to gate on later builds: #1576 (bed14dd67 is merged; needs an R3 deploy that contains it), 099a (after #2035).
 
 ## Waiting on others
 - **Ontology:** RESOLVED: #2039 option (b)/(c) = owner D-151 (both; 102a PR #2054 is UAC-OK at decbc9e6a). Ontology Administrator Append is live. 049 is applied live, including Q6 (Ontology Administrator Signal Write removed); repo PR #2050 is UAC-OK. **OPEN with the owner, through ontology:** remove the Ontology Administrator's prvAssignsprk_Signal and prvDeletesprk_Signal (recommended: remove).
