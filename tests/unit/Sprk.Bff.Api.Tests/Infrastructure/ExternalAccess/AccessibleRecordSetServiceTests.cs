@@ -2765,8 +2765,10 @@ public class AccessibleRecordSetServiceTests
         set.Rights.Should().BeEmpty("task 132: an unknown veto subject denies every candidate, whichever term found it");
     }
 
-    [Fact(DisplayName = "Task 036 (no constant): flag ON, three records with three different Dataverse answers compose and confirm to exactly those answers")]
-    public async Task Fr20_FlagOn_NoConstant_ThreeRecordsThreeDataverseAnswers()
+    [Theory(DisplayName = "Task 036 (no constant): flag ON, three records with three different Dataverse answers compose and confirm to exactly those answers")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Fr20_FlagOn_NoConstant_ThreeRecordsThreeDataverseAnswers(bool holdsChildCreate)
     {
         var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
         var source = new FakeImpersonatedRootSetSource().Answer(MatterEntity, RecordX, RecordY, RecordZ);
@@ -2801,20 +2803,26 @@ public class AccessibleRecordSetServiceTests
             [RecordZ] = AccessRights.Read | AccessRights.Write | AccessRights.AppendTo | AccessRights.Delete,
         };
         Task<AccessRights> Read(string entitySet, Guid id, CancellationToken _) => Task.FromResult(dataverse[id]);
+        // A child create (here a to-do under the matter) also needs the child table's Create privilege (fix round 1, F1):
+        // AppendTo on Z becomes Create only when the caller holds it; otherwise Z keeps exactly Read|Write|Delete.
+        Task<bool> Holds(string privilege, CancellationToken _) => Task.FromResult(holdsChildCreate);
 
         var confirmed = new Dictionary<Guid, AccessRights>();
         foreach (var id in new[] { RecordX, RecordY, RecordZ })
         {
             confirmed[id] = await Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.WithDataverseRightsAsync(
                 principal, principal.GetMatterRights(id), "sprk_matters", id, Read,
-                NullLogger.Instance, CancellationToken.None);
+                NullLogger.Instance, CancellationToken.None,
+                childCreatePrivilege: "prvCreatesprk_Todo", readCallerPrivilege: Holds);
         }
 
         confirmed.Should().BeEquivalentTo(new Dictionary<Guid, AccessRights>
         {
             [RecordX] = AccessRights.Read,
             [RecordY] = AccessRights.Read | AccessRights.Write,
-            [RecordZ] = AccessRights.Read | AccessRights.Write | AccessRights.Create | AccessRights.Delete,
+            [RecordZ] = holdsChildCreate
+                ? AccessRights.Read | AccessRights.Write | AccessRights.Create | AccessRights.Delete
+                : AccessRights.Read | AccessRights.Write | AccessRights.Delete,
         });
     }
 
