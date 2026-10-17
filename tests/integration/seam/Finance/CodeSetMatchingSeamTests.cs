@@ -1,5 +1,9 @@
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -85,8 +89,8 @@ public sealed class CodeSetMatchingSeamTests
         proposal.Closest.Should().BeNull();
         proposal.Confidence.Should().Be(0.86m);
         proposal.Rationale.Should().Be("Commercial matters are contract and deal work.");
-        list.Coverage.MatterTypes.Should().Be(new CodeSetCoverageCount(Active: 1, Mapped: 0, Proposed: 1, NoneFits: 0, Unreviewed: 0));
-        list.Coverage.PracticeAreas.Should().Be(new CodeSetCoverageCount(Active: 1, Mapped: 1, Proposed: 0, NoneFits: 0, Unreviewed: 0));
+        list.Coverage.MatterTypes.Should().Be(new CodeSetCoverageCount(Active: 1, Mapped: 0, Proposed: 1, NoneFits: 0, Unreviewed: 0, Failed: 0));
+        list.Coverage.PracticeAreas.Should().Be(new CodeSetCoverageCount(Active: 1, Mapped: 1, Proposed: 0, NoneFits: 0, Unreviewed: 0, Failed: 0));
         _h.Data.Updates.Should().BeEmpty("proposing writes nothing (FR-22)");
         _h.Data.ConditionalWrites.Should().BeEmpty();
     }
@@ -108,7 +112,7 @@ public sealed class CodeSetMatchingSeamTests
         row.Reviewed.Should().BeTrue();
         row.Confidence.Should().Be(0.9m);
         row.Rationale.Should().Contain("Catering is not legal work").And.Contain("by hand").And.Contain("add a code set");
-        list.Coverage.PracticeAreas.Should().Be(new CodeSetCoverageCount(Active: 1, Mapped: 0, Proposed: 0, NoneFits: 1, Unreviewed: 0));
+        list.Coverage.PracticeAreas.Should().Be(new CodeSetCoverageCount(Active: 1, Mapped: 0, Proposed: 0, NoneFits: 1, Unreviewed: 0, Failed: 0));
     }
 
     public static TheoryData<string> OutOfCandidateAnswers => new() { "activity-set-id", "unknown-id", "set-name", "empty" };
@@ -170,21 +174,56 @@ public sealed class CodeSetMatchingSeamTests
         list.Coverage.PracticeAreas.Unreviewed.Should().Be(1);
     }
 
-    [Fact]
-    public async Task Propose_WithMoreUsableSetsThanTheLimit_SendsOnlyTheTopRankedCandidates()
+    [Theory]
+    [InlineData("top-candidate")]
+    [InlineData("fifth-ranked")]
+    public async Task Propose_WithMoreUsableSetsThanTheLimit_SendsOnlyTheTopRankedCandidates_AndAcceptsOnlyThose(string answer)
     {
         _h.TaskSet("UTBMS Extra One", [0f, 0f, 0f, 0f, 0f, 0.1f]);
         _h.TaskSet("UTBMS Extra Two", [0f, 0f, 0f, 0f, 0f, 0.05f]);
         _h.MatterType("Litigation", [1f, 0.2f, 0.1f, 0.05f, 0f, 0f]);
-        _h.Respond = input => Answer(input.GetProperty("candidates")[0].GetProperty("codeSetId").GetString()!, 0.9, "Disputes.");
 
-        await _h.Sut.ProposeAsync();
+        // Ranked for this row: Litigation, Counseling, IP Patent Prosecution, Bankruptcy | Trademark (5th), Project, the two extras.
+        // Trademark is a usable set of this environment, so a guard that checked "any usable set" would accept it (fix-round-1 F3).
+        _h.Respond = input => answer == "top-candidate"
+            ? Answer(input.GetProperty("candidates")[0].GetProperty("codeSetId").GetString()!, 0.9, "Disputes.")
+            : Answer(_h.Trademark.ToString(), 0.9, "Trademark work.");
+
+        var list = await _h.Sut.ProposeAsync();
 
         AuthoredActionMirror.InputSection(_h.Prompts.Single()).GetProperty("candidates").EnumerateArray()
             .Select(c => c.GetProperty("name").GetString())
             .Should().Equal(
                 ["UTBMS Litigation", "UTBMS Counseling", "UTBMS IP Patent Prosecution", "UTBMS Bankruptcy"],
                 $"eight usable sets exceed {CodeSetProposalService.AllCandidatesUpTo}, so only the top {CodeSetProposalService.TopCandidates} by similarity go");
+        var row = list.Proposals.Should().ContainSingle().Subject;
+        row.Proposed!.CodeSetId.Should().Be(_h.Litigation);
+        if (answer == "top-candidate")
+        {
+            row.Reviewed.Should().BeTrue();
+        }
+        else
+        {
+            row.Reviewed.Should().BeFalse("the 5th-ranked set is usable but was not one of THIS request's candidates, so the answer is refused");
+            row.Confidence.Should().BeNull();
+            row.Rationale.Should().StartWith("Not reviewed by AI");
+        }
+    }
+
+    [Fact]
+    public async Task Propose_EmbedsEachSetsProfile_FromItsDescriptionHintsAndActiveTaskCodes_NotJustItsName()
+    {
+        _h.MatterType("Commercial", [0f, 0f, 0f, 0f, 1f, 0f]);
+        _h.Respond = input => Answer(input.GetProperty("candidates")[0].GetProperty("codeSetId").GetString()!, 0.9, "Deals.");
+
+        await _h.Sut.ProposeAsync();
+
+        var project = _h.ProfileEmbeddings().Should().ContainSingle(t => t.StartsWith("UTBMS Project (ABA)\n", StringComparison.Ordinal)).Subject;
+        var lines = project.Split('\n');
+        lines.Should().Contain("Task codes for transactional and project work.", "the admin-editable description is part of the profile");
+        lines.Should().Contain("Fits: " + "Fits commercial transactions, mergers and acquisitions, banking and finance.");
+        lines.Should().Contain("Task codes: P100 Project Administration; P210 Corporate Review", "active Task codes only, in code order");
+        project.Should().NotContain("P900", "an inactive code is not part of what the set covers");
     }
 
     [Fact]
@@ -196,7 +235,7 @@ public sealed class CodeSetMatchingSeamTests
         _h.Data.AddMatterType(_h.Activity, "B mapped to the activity set");
         for (var i = 0; i < 12; i++)
         {
-            _h.Data.AddPracticeArea(_h.Litigation, $"Mapped {i:00}");
+            _h.PracticeArea($"Mapped {i:00}", [1f, 0f, 0f, 0f, 0f, 0f], mapped: _h.Litigation);
         }
 
         _h.MatterType("Commercial", [0f, 0f, 0f, 0f, 1f, 0f]);
@@ -208,6 +247,207 @@ public sealed class CodeSetMatchingSeamTests
         examples.Should().HaveCount(CodeSetProposalService.MaxExamples);
         examples.Select(e => e.GetProperty("codeSetName").GetString()).Should().OnlyContain(n => n == "UTBMS Litigation",
             "mappings to an inactive set or a set without Task codes would teach the model the wrong thing");
+    }
+
+    [Fact]
+    public async Task Propose_SendsTheConfirmedMappingsMostSimilarToTheRow_NotTheFirstByName()
+    {
+        // Ten mappings that sort first by name but are about something else, and one, last by name, that is about the row's kind of work.
+        for (var i = 0; i < CodeSetProposalService.MaxExamples; i++)
+        {
+            _h.PracticeArea($"A{i:00} Disputes", [1f, 0f, 0f, 0f, 0f, 0f], mapped: _h.Litigation);
+        }
+
+        _h.PracticeArea("Zz Corporate Deals", [0f, 0f, 0f, 0f, 1f, 0.1f], mapped: _h.Project);
+        _h.MatterType("Commercial", [0f, 0f, 0.05f, 0f, 1f, 0f]);
+        _h.Respond = input => Answer(input.GetProperty("candidates")[0].GetProperty("codeSetId").GetString()!, 0.9, "Deals.");
+
+        await _h.Sut.ProposeAsync();
+
+        var examples = AuthoredActionMirror.InputSection(_h.Prompts.Single()).GetProperty("examples").EnumerateArray().ToList();
+        examples.Should().HaveCount(CodeSetProposalService.MaxExamples);
+        examples[0].GetProperty("referenceName").GetString().Should().Be("Zz Corporate Deals", "the most similar precedent comes first");
+        examples[0].GetProperty("codeSetName").GetString().Should().Be("UTBMS Project");
+    }
+
+    // ── Parallel matching, isolation, logging (task 054 fix-round-1) ────────────
+
+    [Fact]
+    public async Task Propose_MatchesSeveralRowsAtOnce_ButNeverMoreThanTheParallelismLimit()
+    {
+        for (var i = 1; i <= 9; i++)
+        {
+            _h.MatterType($"Row {i}", [1f, 0f, 0f, 0f, 0f, 0f]);
+        }
+
+        var calls = 0;
+        var inFlight = 0;
+        var maxInFlight = 0;
+        _h.RespondAsync = async input =>
+        {
+            var answer = Answer(input.GetProperty("candidates")[0].GetProperty("codeSetId").GetString()!, 0.9, "Disputes.");
+            if (Interlocked.Increment(ref calls) == 1)
+            {
+                return answer; // the probe row is matched alone
+            }
+
+            // Hold every call open long enough that all rows the implementation lets start are in flight together: sequential gives 1,
+            // bounded gives the limit, unbounded gives all eight.
+            InterlockedMax(ref maxInFlight, Interlocked.Increment(ref inFlight));
+            await Task.Delay(250);
+            Interlocked.Decrement(ref inFlight);
+            return answer;
+        };
+
+        var list = await _h.Sut.ProposeAsync();
+
+        CodeSetProposalService.MatchParallelism.Should().Be(4, "the comment on the constant explains why four");
+        maxInFlight.Should().Be(4, "rows are matched in parallel (more than one at a time), bounded by the limit");
+        list.Proposals.Should().HaveCount(9).And.OnlyContain(p => p.Reviewed);
+    }
+
+    [Fact]
+    public async Task Propose_KeepsTheRowOrder_WhenLaterRowsFinishFirst()
+    {
+        string[] names = ["Row A", "Row B", "Row C", "Row D", "Row E", "Row F"];
+        foreach (var name in names)
+        {
+            _h.MatterType(name, [1f, 0f, 0f, 0f, 0f, 0f]);
+        }
+
+        _h.RespondAsync = async input =>
+        {
+            var index = Array.IndexOf(names, input.GetProperty("reference").GetProperty("name").GetString());
+            await Task.Delay((names.Length - index) * 40); // the later the row, the sooner it finishes
+            return Answer(input.GetProperty("candidates")[0].GetProperty("codeSetId").GetString()!, 0.9, "Disputes.");
+        };
+
+        var list = await _h.Sut.ProposeAsync();
+
+        list.Proposals.Select(p => p.ReferenceName).Should().Equal(names);
+    }
+
+    [Fact]
+    public async Task Propose_WhenOneRowCannotBeMatched_ListsItAsFailed_AndTheOtherRowsAreUnaffected()
+    {
+        _h.MatterType("Alpha Litigation", [1f, 0f, 0f, 0f, 0f, 0f]);
+        var broken = _h.Data.AddMatterType(null, "Broken Row"); // no vector: embedding its name throws
+        _h.MatterType("Gamma Bankruptcy", [0f, 0f, 1f, 0f, 0f, 0f]);
+        _h.Respond = input => Answer(input.GetProperty("candidates")[0].GetProperty("codeSetId").GetString()!, 0.9, "Fits.");
+
+        var list = await _h.Sut.ProposeAsync();
+
+        list.Proposals.Select(p => p.ReferenceName).Should().Equal("Alpha Litigation", "Broken Row", "Gamma Bankruptcy");
+        var failed = list.Proposals[1];
+        failed.ReferenceId.Should().Be(broken);
+        failed.Outcome.Should().Be(CodeSetMatchOutcome.Failed);
+        failed.Proposed.Should().BeNull("a failed row carries nothing that could be confirmed");
+        failed.Reviewed.Should().BeFalse();
+        failed.Rationale.Should().Contain("by hand");
+        list.Proposals[0].Should().Match<CodeSetProposal>(p => p.Outcome == CodeSetMatchOutcome.Proposed && p.Reviewed && p.Proposed!.CodeSetId == _h.Litigation);
+        list.Proposals[2].Should().Match<CodeSetProposal>(p => p.Outcome == CodeSetMatchOutcome.Proposed && p.Reviewed && p.Proposed!.CodeSetId == _h.Bankruptcy);
+        list.Coverage.MatterTypes.Should().Be(new CodeSetCoverageCount(Active: 3, Mapped: 0, Proposed: 2, NoneFits: 0, Unreviewed: 0, Failed: 1));
+    }
+
+    [Fact]
+    public async Task Propose_WhenTheRequestIsCancelled_Throws_InsteadOfListingRowsAsFailed()
+    {
+        for (var i = 1; i <= 9; i++)
+        {
+            _h.MatterType($"Row {i}", [1f, 0f, 0f, 0f, 0f, 0f]);
+        }
+
+        using var cts = new CancellationTokenSource();
+        var calls = 0;
+        _h.Respond = input =>
+        {
+            if (Interlocked.Increment(ref calls) == 2)
+            {
+                cts.Cancel();
+            }
+
+            return Answer(input.GetProperty("candidates")[0].GetProperty("codeSetId").GetString()!, 0.9, "Disputes.");
+        };
+
+        var act = () => _h.Sut.ProposeAsync(cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task Propose_WhenTheBindingIsMissing_ResolvesItOnce_AndLogsOneWarningForTheRequest_NotOnePerRow()
+    {
+        _h.MatterType("Litigation", [1f, 0f, 0f, 0f, 0f, 0f]);
+        _h.MatterType("Bankruptcy", [0f, 0f, 1f, 0f, 0f, 0f]);
+        _h.PracticeArea("Intellectual Property Patents", [0f, 1f, 0f, 0f, 0f, 0.4f]);
+        _h.Routing.Setup(r => r.ResolveActionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<IRoutingContext?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null);
+
+        var list = await _h.Sut.ProposeAsync();
+
+        list.Proposals.Should().HaveCount(3).And.OnlyContain(p => p.Outcome == CodeSetMatchOutcome.Proposed && !p.Reviewed);
+        list.Proposals.Select(p => p.Proposed!.CodeSetId).Should().Equal(_h.Bankruptcy, _h.Litigation, _h.Patent);
+        _h.Routing.Verify(
+            r => r.ResolveActionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<IRoutingContext?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Once(),
+            "the first row finds the Action unavailable; the others do not ask again");
+        var warning = _h.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject;
+        warning.Message.Should().Contain("3 row(s)").And.Contain(InvoiceAiException.BindingMissing);
+    }
+
+    // ── Set-profile embedding cache (task 054 fix-round-1 K6) ───────────────────
+
+    [Fact]
+    public async Task Propose_ReusesCachedSetProfileAndNameEmbeddings_InTheNextRequest()
+    {
+        var cache = new InMemoryEmbeddingCache();
+        _h.MatterType("Commercial", [0f, 0f, 0f, 0f, 1f, 0f]);
+        _h.PracticeArea("Appellate", [1f, 0f, 0f, 0f, 0f, 0f], mapped: _h.Litigation);
+        _h.Respond = input => Answer(input.GetProperty("candidates")[0].GetProperty("codeSetId").GetString()!, 0.9, "Deals.");
+
+        var first = await _h.NewSut(cache).ProposeAsync();
+        _h.ProfileEmbeddings().Should().HaveCount(6, "the first request embeds every usable set's profile");
+        _h.EmbeddedTexts.Should().Contain(["Commercial", "Appellate"], "and the row's and the example's names");
+        cache.Count.Should().Be(8);
+
+        _h.EmbeddedTexts.Clear();
+        var second = await _h.NewSut(cache).ProposeAsync();
+
+        _h.EmbeddedTexts.Should().BeEmpty("a new request (new scope) reads the six profiles and both names from the cache");
+        second.Proposals.Single().Proposed.Should().Be(first.Proposals.Single().Proposed, "the cached vectors rank exactly as the fresh ones");
+        AuthoredActionMirror.InputSection(_h.Prompts[1]).GetProperty("examples")[0].GetProperty("referenceName").GetString().Should().Be("Appellate");
+    }
+
+    [Fact]
+    public async Task Propose_ReEmbedsOnlyTheSetWhoseTaskCodeTextOrRowChanged()
+    {
+        var cache = new InMemoryEmbeddingCache();
+        _h.MatterType("Commercial", [0f, 0f, 0f, 0f, 1f, 0f]);
+        _h.Respond = input => Answer(input.GetProperty("candidates")[0].GetProperty("codeSetId").GetString()!, 0.9, "Deals.");
+        await _h.NewSut(cache).ProposeAsync();
+
+        // A code is edited; its set row (and so the set's modifiedon) is not touched.
+        _h.Data.EditCode(_h.Project, "P100", "Project Management");
+        _h.EmbeddedTexts.Clear();
+        await _h.NewSut(cache).ProposeAsync();
+
+        _h.ProfileEmbeddings().Should().ContainSingle().Which.Should()
+            .StartWith("UTBMS Project (ABA)\n").And.Contain("P100 Project Management", "the edited Task-code text invalidates that set only");
+
+        // The set row itself is saved (modifiedon moves) with the same text.
+        _h.Data.Apply("sprk_billingcodeset", _h.Litigation, new Dictionary<string, object> { ["sprk_name"] = "UTBMS Litigation" });
+        _h.EmbeddedTexts.Clear();
+        await _h.NewSut(cache).ProposeAsync();
+
+        _h.ProfileEmbeddings().Should().ContainSingle().Which.Should().StartWith("UTBMS Litigation (ABA)\n", "a newer modifiedon invalidates that set only");
+    }
+
+    private static void InterlockedMax(ref int target, int value)
+    {
+        int seen;
+        while ((seen = Volatile.Read(ref target)) < value && Interlocked.CompareExchange(ref target, value, seen) != seen)
+        {
+        }
     }
 
     // ── FR-22 step 4: the per-line hook uses the same matcher ───────────────────
@@ -272,9 +512,51 @@ public sealed class CodeSetMatchingSeamTests
     private static CodeSetSuggestionContext Context(Guid? matterTypeId, Guid? practiceAreaId) =>
         new(new CodingCoreRecord("sprk_matter", Guid.NewGuid()), matterTypeId, practiceAreaId, []);
 
+    /// <summary>The service's own log, captured (thread-safe: rows are matched in parallel).</summary>
+    private sealed class CapturingLogger : ILogger<CodeSetProposalService>
+    {
+        public ConcurrentQueue<(LogLevel Level, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Enqueue((logLevel, formatter(state, exception)));
+    }
+
+    /// <summary>An in-memory <see cref="IEmbeddingCache"/> with the production key derivation (SHA-256 of the content).</summary>
+    private sealed class InMemoryEmbeddingCache : IEmbeddingCache
+    {
+        private readonly ConcurrentDictionary<string, float[]> _entries = new(StringComparer.Ordinal);
+
+        public int Count => _entries.Count;
+
+        public Task<ReadOnlyMemory<float>?> GetEmbeddingAsync(string contentHash, CancellationToken cancellationToken = default) =>
+            Task.FromResult(_entries.TryGetValue(contentHash, out var vector) ? new ReadOnlyMemory<float>(vector) : (ReadOnlyMemory<float>?)null);
+
+        public Task SetEmbeddingAsync(string contentHash, ReadOnlyMemory<float> embedding, CancellationToken cancellationToken = default)
+        {
+            _entries[contentHash] = embedding.ToArray();
+            return Task.CompletedTask;
+        }
+
+        public string ComputeContentHash(string content) =>
+            Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+
+        public Task<ReadOnlyMemory<float>?> GetEmbeddingForContentAsync(string content, CancellationToken cancellationToken = default) =>
+            GetEmbeddingAsync(ComputeContentHash(content), cancellationToken);
+
+        public Task SetEmbeddingForContentAsync(string content, ReadOnlyMemory<float> embedding, CancellationToken cancellationToken = default) =>
+            SetEmbeddingAsync(ComputeContentHash(content), embedding, cancellationToken);
+    }
+
     private sealed class Harness
     {
         private readonly Dictionary<string, float[]> _vectors = new(StringComparer.Ordinal);
+        private readonly object _sync = new();
+        private readonly InvoiceAi _ai;
 
         public Harness()
         {
@@ -293,9 +575,15 @@ public sealed class CodeSetMatchingSeamTests
 
             Model.Setup(m => m.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string text, string? _, int? _, CancellationToken _) =>
-                    new ReadOnlyMemory<float>(_vectors.TryGetValue(text.Split('\n')[0], out var v)
-                        ? v
-                        : throw new InvalidOperationException($"The test has no vector for '{text}'.")));
+                {
+                    lock (_sync)
+                    {
+                        EmbeddedTexts.Add(text);
+                        return new ReadOnlyMemory<float>(_vectors.TryGetValue(text.Split('\n')[0], out var v)
+                            ? v
+                            : throw new InvalidOperationException($"The test has no vector for '{text}'."));
+                    }
+                });
             Routing.Setup(r => r.ResolveActionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<IRoutingContext?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(ActionId);
             Catalog.Setup(s => s.GetActionAsync(ActionId, It.IsAny<CancellationToken>()))
@@ -313,13 +601,18 @@ public sealed class CodeSetMatchingSeamTests
                     It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
                 .Returns((string prompt, BinaryData schema, string _, string? deployment, int? _, float? temperature, CancellationToken _) =>
                 {
-                    Prompts.Add(prompt);
-                    Schemas.Add(schema);
-                    Temperatures.Add(temperature);
-                    Deployments.Add(deployment);
+                    lock (_sync)
+                    {
+                        Prompts.Add(prompt);
+                        Schemas.Add(schema);
+                        Temperatures.Add(temperature);
+                        Deployments.Add(deployment);
+                    }
+
                     try
                     {
-                        return Task.FromResult(Respond(AuthoredActionMirror.InputSection(prompt)));
+                        var input = AuthoredActionMirror.InputSection(prompt);
+                        return RespondAsync is { } respondAsync ? respondAsync(input) : Task.FromResult(Respond(input));
                     }
                     catch (Exception ex)
                     {
@@ -332,15 +625,35 @@ public sealed class CodeSetMatchingSeamTests
                 new PromptSchemaRenderer(NullLogger<PromptSchemaRenderer>.Instance),
                 NullLogger<ActionRunner>.Instance,
                 Options.Create(new DocumentIntelligenceOptions { FastModel = "fast-deployment", StandardModel = "standard-deployment" }));
-            var ai = new InvoiceAi(
+            _ai = new InvoiceAi(
                 new Mock<IPlaybookService>(MockBehavior.Strict).Object,
                 Model.Object,
                 new ActionResolver(Routing.Object, Catalog.Object, NullLogger<ActionResolver>.Instance),
                 runner,
                 ContentUnderstandingTestHost.Unconfigured(),
                 NullLogger<InvoiceAi>.Instance);
-            Sut = new CodeSetProposalService(Data.Entities.Object, Data.Records.Object, ai, NullLogger<CodeSetProposalService>.Instance);
+            Sut = NewSut();
         }
+
+        /// <summary>A fresh instance (a new request scope) over the same data and model, optionally with a cross-request embedding cache.</summary>
+        public CodeSetProposalService NewSut(IEmbeddingCache? cache = null) =>
+            new(Data.Entities.Object, Data.Records.Object, _ai, Log, cache);
+
+        public CapturingLogger Log { get; } = new();
+
+        /// <summary>Every text sent to the embedding model, in order.</summary>
+        public List<string> EmbeddedTexts { get; } = [];
+
+        /// <summary>The set-profile texts embedded so far (a profile always ends with its Task-codes line).</summary>
+        public List<string> ProfileEmbeddings()
+        {
+            lock (_sync)
+            {
+                return EmbeddedTexts.Where(t => t.Contains("\nTask codes: ", StringComparison.Ordinal)).ToList();
+            }
+        }
+
+        public void Vector(string text, float[] vector) => _vectors[text] = vector;
 
         private Guid AddProject()
         {
@@ -389,6 +702,9 @@ public sealed class CodeSetMatchingSeamTests
 
         /// <summary>The fake model: given the parsed <c>## Input</c>, returns the JSON output (or throws).</summary>
         public Func<JsonElement, string> Respond { get; set; } = _ => throw new InvalidOperationException("The test set no answer.");
+
+        /// <summary>An asynchronous fake model (takes precedence over <see cref="Respond"/>): lets a test hold calls open.</summary>
+        public Func<JsonElement, Task<string>>? RespondAsync { get; set; }
 
         public Guid TaskSet(string name, float[] vector, string code = "X100 A task", string body = "ABA")
         {

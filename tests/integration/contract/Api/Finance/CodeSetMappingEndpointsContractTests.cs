@@ -326,8 +326,8 @@ public sealed class CodeSetMappingEndpointsContractTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await Json(response);
         var coverage = body["coverage"]!;
-        Count(coverage["matterTypes"]!).Should().Be((2, 1, 1, 0, 0));
-        Count(coverage["practiceAreas"]!).Should().Be((1, 0, 0, 1, 0));
+        Count(coverage["matterTypes"]!).Should().Be((2, 1, 1, 0, 0, 0));
+        Count(coverage["practiceAreas"]!).Should().Be((1, 0, 0, 1, 0, 0));
 
         var proposals = body["proposals"]!.AsArray();
         var reviewed = proposals.Single(p => p!["referenceId"]!.GetValue<Guid>() == litigationType)!;
@@ -362,15 +362,16 @@ public sealed class CodeSetMappingEndpointsContractTests
         proposals.Should().OnlyContain(p => p!["reviewed"]!.GetValue<bool>() == false && p["outcome"]!.GetValue<string>() == "Proposed");
         proposals.Should().OnlyContain(p => p!["confidence"] == null);
         proposals.Select(p => p!["proposed"]!["codeSetId"]!.GetValue<Guid>()).Should().Equal(host.Litigation, host.Litigation);
-        Count(body["coverage"]!["matterTypes"]!).Should().Be((1, 0, 1, 0, 1));
+        Count(body["coverage"]!["matterTypes"]!).Should().Be((1, 0, 1, 0, 1, 0));
     }
 
-    private static (int Active, int Mapped, int Proposed, int NoneFits, int Unreviewed) Count(JsonNode node) => (
+    private static (int Active, int Mapped, int Proposed, int NoneFits, int Unreviewed, int Failed) Count(JsonNode node) => (
         node["active"]!.GetValue<int>(),
         node["mapped"]!.GetValue<int>(),
         node["proposed"]!.GetValue<int>(),
         node["noneFits"]!.GetValue<int>(),
-        node["unreviewed"]!.GetValue<int>());
+        node["unreviewed"]!.GetValue<int>(),
+        node["failed"]!.GetValue<int>());
 
     // ═══════════════════════════════════════════════════════════════════════════
     // POST confirm
@@ -409,6 +410,31 @@ public sealed class CodeSetMappingEndpointsContractTests
         (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ebilling.codeset.already_mapped");
         host.Data.Updates.Should().BeEmpty();
         host.Data.Find("sprk_practicearea_ref", row)!.GetAttributeValue<EntityReference>(DefaultSetColumn).Id.Should().Be(host.Counseling);
+    }
+
+    [Fact]
+    public async Task Confirm_WhenAnUnmappedRowKeepsChangingUnderTheWrite_Returns409ConcurrentChange_NotAlreadyMapped()
+    {
+        await using var host = await Host.StartAsync();
+        var row = host.Data.AddMatterType(null, "Litigation");
+
+        // Every re-read of the row is followed by an unrelated edit (a rename), so each conditional write meets a newer version. The row
+        // never gains a mapping: "already has a default code set" would be false (task 054 fix-round-1 K4).
+        host.Data.AfterQuery = query =>
+        {
+            if (query.EntityName == "sprk_mattertype_ref" && query.TopCount == 1)
+            {
+                host.Data.Apply("sprk_mattertype_ref", row, new Dictionary<string, object> { ["sprk_mattertypename"] = "Litigation" });
+            }
+        };
+
+        var response = await host.Client.SendAsync(Req("POST", ConfirmUrl("mattertype", row), body: new { codeSetId = host.Litigation }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var body = await Json(response);
+        body["errorCode"]!.GetValue<string>().Should().Be("ebilling.codeset.concurrent_change");
+        body["detail"]!.GetValue<string>().Should().NotContain("already has a default code set").And.Contain("Try again");
+        host.Data.Find("sprk_mattertype_ref", row)!.Contains(DefaultSetColumn).Should().BeFalse();
     }
 
     [Fact]

@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance.Resolution;
 
@@ -85,13 +86,20 @@ public enum CodeSetMatchOutcome
 
     /// <summary>No code set fits. Nothing is proposed: the admin maps the row by hand or adds a code set.</summary>
     NoneFits,
+
+    /// <summary>
+    /// Matching this one row failed (for example its name could not be embedded). Nothing is proposed; the other rows are unaffected.
+    /// The admin tries again later or maps the row by hand. Never used for "the AI review step failed" (that is an unreviewed proposal).
+    /// </summary>
+    Failed,
 }
 
 /// <summary>The outcome for one unmapped reference row. Nothing here has been applied.</summary>
 /// <param name="Table"><c>mattertype</c> or <c>practicearea</c> (the confirm route's <c>{table}</c> segment).</param>
-/// <param name="Outcome"><see cref="CodeSetMatchOutcome.Proposed"/> or <see cref="CodeSetMatchOutcome.NoneFits"/>.</param>
-/// <param name="Proposed">The proposed set (with its similarity); always <c>null</c> for <see cref="CodeSetMatchOutcome.NoneFits"/>, so a
-/// none-fits row never carries a proposal that could be confirmed by mistake.</param>
+/// <param name="Outcome"><see cref="CodeSetMatchOutcome.Proposed"/>, <see cref="CodeSetMatchOutcome.NoneFits"/> or
+/// <see cref="CodeSetMatchOutcome.Failed"/>.</param>
+/// <param name="Proposed">The proposed set (with its similarity); always <c>null</c> for <see cref="CodeSetMatchOutcome.NoneFits"/> and
+/// <see cref="CodeSetMatchOutcome.Failed"/>, so such a row never carries a proposal that could be confirmed by mistake.</param>
 /// <param name="RunnerUp">For a proposal, the most similar other set; otherwise <c>null</c>.</param>
 /// <param name="Closest">For none-fits, the most similar set, as context only (not a proposal); otherwise <c>null</c>.</param>
 /// <param name="Confidence">The AI review step's confidence (0-1) in its answer; <c>null</c> when the step did not decide.</param>
@@ -112,10 +120,10 @@ public sealed record CodeSetProposal(
     string Rationale);
 
 /// <summary>
-/// Coverage of one reference table: every ACTIVE row is exactly one of mapped, proposed or none-fits
-/// (<c>Active = Mapped + Proposed + NoneFits</c>). <see cref="Unreviewed"/> counts the proposals the AI review step did not decide.
+/// Coverage of one reference table: every ACTIVE row is exactly one of mapped, proposed, none-fits or failed
+/// (<c>Active = Mapped + Proposed + NoneFits + Failed</c>). <see cref="Unreviewed"/> counts the proposals the AI review step did not decide.
 /// </summary>
-public sealed record CodeSetCoverageCount(int Active, int Mapped, int Proposed, int NoneFits, int Unreviewed);
+public sealed record CodeSetCoverageCount(int Active, int Mapped, int Proposed, int NoneFits, int Unreviewed, int Failed);
 
 /// <summary>Coverage of both reference tables (D-93).</summary>
 public sealed record CodeSetCoverage(CodeSetCoverageCount MatterTypes, CodeSetCoverageCount PracticeAreas);
@@ -135,8 +143,14 @@ public enum CodeSetConfirmOutcome
     /// <summary>No active code set with at least one active Task code has that id.</summary>
     CodeSetNotFound,
 
-    /// <summary>The row gained a mapping since the proposal (or kept changing under the write); nothing was written.</summary>
+    /// <summary>The row gained a mapping since the proposal; nothing was written.</summary>
     AlreadyMapped,
+
+    /// <summary>
+    /// The row is still unmapped but kept changing under the conditional write (<see cref="CodeSetProposalService.MaxConfirmAttempts"/>
+    /// refused writes in a row); nothing was written. The admin retries.
+    /// </summary>
+    ConcurrentChange,
 }
 
 /// <summary>
@@ -151,8 +165,9 @@ public enum CodeSetConfirmOutcome
 /// (<c>sprk_description</c>, <c>sprk_matchhints</c>, seeded for the six UTBMS task sets) and its active Task codes; the profiles are
 /// embedded once per instance. (2) The row's name is embedded and the sets are ranked by cosine similarity (pre-rank only). (3) The
 /// candidates (every usable set when there are at most <see cref="AllCandidatesUpTo"/>, else the top <see cref="TopCandidates"/>) go to
-/// the <c>invoice-codeset-match</c> Action through <see cref="IInvoiceAi.MatchCodeSetAsync"/> with up to <see cref="MaxExamples"/>
-/// confirmed mappings of this environment as examples; it picks one or answers "none". (4) The answer is guarded: an id that is not a
+/// the <c>invoice-codeset-match</c> Action through <see cref="IInvoiceAi.MatchCodeSetAsync"/> with, as examples, the (up to)
+/// <see cref="MaxExamples"/> confirmed mappings of this environment whose names are most similar to the row's; it picks one or answers
+/// "none". (4) The answer is guarded: an id that is not a
 /// candidate is refused. When the Action fails, is switched off or is refused, the row falls back to the embedding ranking marked
 /// <see cref="CodeSetProposal.Reviewed"/> = false: the list never fails because of the review step, and a "none fits" is never
 /// fabricated (only the Action, or the absence of any usable set, produces one). Prompt, tier and schema live in the Action row (D-52).
@@ -169,11 +184,21 @@ public enum CodeSetConfirmOutcome
 /// <b>Concurrency.</b> Confirm re-reads the row with its <c>versionnumber</c> and writes through
 /// <see cref="IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync"/> (<c>If-Match</c> on that version). Two admins
 /// confirming the same row at once: the second write gets HTTP 412, the row is re-read, and it is refused as
-/// <see cref="CodeSetConfirmOutcome.AlreadyMapped"/>, so the first admin's mapping is never silently overwritten.
+/// <see cref="CodeSetConfirmOutcome.AlreadyMapped"/>, so the first admin's mapping is never silently overwritten. A row that is still
+/// unmapped after <see cref="MaxConfirmAttempts"/> refused writes is <see cref="CodeSetConfirmOutcome.ConcurrentChange"/>.
 /// </para>
 /// <para>
-/// <b>Lifetime.</b> Scoped. The usable sets, their embeddings and the examples are loaded once per instance (one request or one job
-/// scope); nothing is cached across scopes, so an admin's edit of a set or a new confirmation is seen by the next request.
+/// <b>Parallelism (task 054 fix-round-1).</b> The proposals list matches rows <see cref="MatchParallelism"/> at a time; the output order
+/// is the row order, cancellation propagates, and a row whose matching throws is listed as <see cref="CodeSetMatchOutcome.Failed"/>
+/// without affecting the others. The first row that reaches the Action is matched alone: when the Action is unavailable (no Binding,
+/// or switched off) the remaining rows skip it, so one request makes one resolver call and logs one warning, not one per row.
+/// </para>
+/// <para>
+/// <b>Lifetime.</b> Scoped. The usable sets, the confirmed mappings and their embeddings are loaded once per instance (one request or
+/// one job scope), so an admin's edit or a new confirmation is seen by the next request. Set-profile embeddings are also cached across
+/// requests in the BFF's <see cref="IEmbeddingCache"/> when it is registered, keyed on the set id, its <c>modifiedon</c> and the full
+/// profile text (which includes the Task-code text, so an edited code re-embeds its set even though the set row did not change).
+/// Reference-row names (the matched row and the example mappings) are cached by the name itself.
 /// </para>
 /// </remarks>
 public sealed class CodeSetProposalService : ICodeSetSuggestionProvider
@@ -192,6 +217,18 @@ public sealed class CodeSetProposalService : ICodeSetSuggestionProvider
 
     /// <summary>Re-read and retry a confirm this many times when the row keeps changing under the conditional write.</summary>
     internal const int MaxConfirmAttempts = 3;
+
+    /// <summary>
+    /// Rows matched at once on the proposals list (each makes one embedding call and one Action call). A constant, not a setting: four
+    /// keeps a list of tens of rows to a few seconds without bursting the shared Fast-tier deployment's rate limit from one admin page.
+    /// </summary>
+    internal const int MatchParallelism = 4;
+
+    /// <summary>Cache-key prefix for set-profile embeddings in <see cref="IEmbeddingCache"/>; bump the version if the profile format changes.</summary>
+    internal const string ProfileCacheKeyPrefix = "sprk-code-set-profile:v1";
+
+    /// <summary>Cache-key prefix for reference-row name embeddings (the matched row and the confirmed-mapping examples).</summary>
+    internal const string NameCacheKeyPrefix = "sprk-code-set-reference-name:v1";
 
     internal const string VersionColumn = "versionnumber";
 
@@ -215,24 +252,50 @@ public sealed class CodeSetProposalService : ICodeSetSuggestionProvider
     private readonly IFieldMappingDataverseService _records;
     private readonly IInvoiceAi _ai;
     private readonly ILogger<CodeSetProposalService> _logger;
+    private readonly IEmbeddingCache? _embeddingCache;
 
     private List<ProfiledCodeSet>? _codeSets;
-    private List<InvoiceCodeSetMatchExample>? _examples;
+    private List<ConfirmedMapping>? _examples;
 
+    /// <param name="embeddingCache">The BFF's embedding cache (registered only when AI Search is configured); without it set profiles and
+    /// names are embedded once per instance.</param>
     public CodeSetProposalService(
         IGenericEntityService entities,
         IFieldMappingDataverseService records,
         IInvoiceAi ai,
-        ILogger<CodeSetProposalService> logger)
+        ILogger<CodeSetProposalService> logger,
+        IEmbeddingCache? embeddingCache = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _records = records ?? throw new ArgumentNullException(nameof(records));
         _ai = ai ?? throw new ArgumentNullException(nameof(ai));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _embeddingCache = embeddingCache;
     }
 
     private sealed record ProfiledCodeSet(
         Guid Id, string Name, string? Body, string? Description, string? MatchHints, IReadOnlyList<string> TaskCodes, float[] Vector);
+
+    /// <summary>A confirmed mapping offered as an example; <c>Vector</c> is the embedding of its row name (null if it could not be embedded).</summary>
+    private sealed record ConfirmedMapping(InvoiceCodeSetMatchExample Example, float[]? Vector);
+
+    /// <summary>Why the AI review step did not decide a row. Reported once per request per kind, not once per row.</summary>
+    private enum ReviewIssue
+    {
+        None,
+
+        /// <summary>No Binding (or Action) resolved, or the step is switched off: the same for every row of the request.</summary>
+        Unavailable,
+
+        /// <summary>The Action call failed for this row.</summary>
+        Failed,
+
+        /// <summary>The Action answered with an id that is not one of the row's candidates.</summary>
+        Refused,
+    }
+
+    /// <summary>One row's outcome, plus what the logging needs: the review issue, if any, and whether the Action was called.</summary>
+    private sealed record RowMatch(CodeSetProposal Proposal, ReviewIssue Issue = ReviewIssue.None, string? IssueDetail = null, bool CalledAction = false);
 
     private sealed record ReferenceRow(Guid Id, string Name, bool Active, Guid? MappedTo, long? Version)
     {
@@ -248,38 +311,115 @@ public sealed class CodeSetProposalService : ICodeSetSuggestionProvider
 
     /// <summary>
     /// One entry for every ACTIVE matter type and practice area that has no default code set (matter types first, each group by name):
-    /// proposed or none-fits. Mapped rows are counted in the coverage, not listed. Writes nothing.
+    /// proposed, none-fits or failed. Mapped rows are counted in the coverage, not listed. Writes nothing. Rows are matched
+    /// <see cref="MatchParallelism"/> at a time; the output order does not depend on which finishes first.
     /// </summary>
     public async Task<CodeSetProposalList> ProposeAsync(CancellationToken cancellationToken = default)
     {
-        var proposals = new List<CodeSetProposal>();
-        var counts = new Dictionary<CodeSetReferenceKind, CodeSetCoverageCount>();
+        var tables = new List<(CodeSetReferenceKind Kind, List<ReferenceRow> Rows)>();
         foreach (var kind in new[] { CodeSetReferenceKind.MatterType, CodeSetReferenceKind.PracticeArea })
         {
-            var rows = await ListActiveAsync(kind, cancellationToken).ConfigureAwait(false);
-            var forKind = new List<CodeSetProposal>();
-            foreach (var row in rows.Where(r => !r.Mapped))
-            {
-                forKind.Add(await MatchAsync(kind, row, cancellationToken).ConfigureAwait(false));
-            }
-
-            proposals.AddRange(forKind);
-            counts[kind] = new CodeSetCoverageCount(
-                Active: rows.Count,
-                Mapped: rows.Count(r => r.Mapped),
-                Proposed: forKind.Count(p => p.Outcome == CodeSetMatchOutcome.Proposed),
-                NoneFits: forKind.Count(p => p.Outcome == CodeSetMatchOutcome.NoneFits),
-                Unreviewed: forKind.Count(p => p.Outcome == CodeSetMatchOutcome.Proposed && !p.Reviewed));
+            tables.Add((kind, await ListActiveAsync(kind, cancellationToken).ConfigureAwait(false)));
         }
 
+        var work = tables.SelectMany(t => t.Rows.Where(r => !r.Mapped).Select(r => (t.Kind, Row: r))).ToList();
+
+        // Every row reads the usable sets and the confirmed mappings and none writes them: load both once, before any parallel work.
+        if (work.Count > 0 && (await LoadCodeSetsAsync(cancellationToken).ConfigureAwait(false)).Count > 0)
+        {
+            await LoadExamplesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var results = new RowMatch[work.Count];
+
+        // Probe: match one row at a time until one has reached the Action. If the Action is unavailable (no Binding, or switched off),
+        // it is unavailable for every row, so the rest skip it: one resolver call and one warning per request, not one per row.
+        var next = 0;
+        string? unavailable = null;
+        while (next < work.Count)
+        {
+            var probe = results[next] = await MatchRowAsync(work[next].Kind, work[next].Row, null, cancellationToken).ConfigureAwait(false);
+            next++;
+            if (probe.CalledAction)
+            {
+                unavailable = probe.Issue == ReviewIssue.Unavailable ? probe.IssueDetail : null;
+                break;
+            }
+        }
+
+        // The rest, MatchParallelism at a time. Each result goes to its row's slot, so the order is the row order, not the finishing order.
+        using (var gate = new SemaphoreSlim(MatchParallelism))
+        {
+            await Task.WhenAll(Enumerable.Range(next, work.Count - next).Select(async index =>
+            {
+                await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    results[index] = await MatchRowAsync(work[index].Kind, work[index].Row, unavailable, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            })).ConfigureAwait(false);
+        }
+
+        var proposals = results.Select(r => r.Proposal).ToList();
+        var counts = tables.ToDictionary(
+            t => t.Kind,
+            t =>
+            {
+                var forKind = work.Select((w, i) => (w.Kind, Proposal: proposals[i])).Where(p => p.Kind == t.Kind).Select(p => p.Proposal).ToList();
+                return new CodeSetCoverageCount(
+                    Active: t.Rows.Count,
+                    Mapped: t.Rows.Count(r => r.Mapped),
+                    Proposed: forKind.Count(p => p.Outcome == CodeSetMatchOutcome.Proposed),
+                    NoneFits: forKind.Count(p => p.Outcome == CodeSetMatchOutcome.NoneFits),
+                    Unreviewed: forKind.Count(p => p.Outcome == CodeSetMatchOutcome.Proposed && !p.Reviewed),
+                    Failed: forKind.Count(p => p.Outcome == CodeSetMatchOutcome.Failed));
+            });
+
         var coverage = new CodeSetCoverage(counts[CodeSetReferenceKind.MatterType], counts[CodeSetReferenceKind.PracticeArea]);
+        LogReviewIssues("Code-set proposals", results);
         _logger.LogInformation(
-            "Code-set proposals: {Count} unmapped reference rows ({Proposed} proposed, {NoneFits} none fits, {Unreviewed} unreviewed)",
+            "Code-set proposals: {Count} unmapped reference rows ({Proposed} proposed, {NoneFits} none fits, {Unreviewed} unreviewed, {Failed} failed)",
             proposals.Count,
             proposals.Count(p => p.Outcome == CodeSetMatchOutcome.Proposed),
             proposals.Count(p => p.Outcome == CodeSetMatchOutcome.NoneFits),
-            proposals.Count(p => p.Outcome == CodeSetMatchOutcome.Proposed && !p.Reviewed));
+            proposals.Count(p => p.Outcome == CodeSetMatchOutcome.Proposed && !p.Reviewed),
+            proposals.Count(p => p.Outcome == CodeSetMatchOutcome.Failed));
         return new CodeSetProposalList(proposals, coverage);
+    }
+
+    /// <summary>
+    /// Matches one row of the proposals list, isolated from the others: anything it throws (other than the AI being off, which fails the
+    /// whole list with 503, and this request's cancellation) makes the row <see cref="CodeSetMatchOutcome.Failed"/>.
+    /// </summary>
+    private async Task<RowMatch> MatchRowAsync(CodeSetReferenceKind kind, ReferenceRow row, string? reviewUnavailable, CancellationToken ct)
+    {
+        try
+        {
+            return await MatchAsync(kind, row, reviewUnavailable, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not FeatureDisabledException && !ct.IsCancellationRequested)
+        {
+            var segment = CodeSetReferenceTables.Segment(kind);
+            _logger.LogWarning(ex, "Code-set match for {Table} {ReferenceId} failed; the row is listed as failed, the other rows are unaffected", segment, row.Id);
+            return new RowMatch(new CodeSetProposal(
+                segment, row.Id, row.Name, CodeSetMatchOutcome.Failed, null, null, null, null, false,
+                "Matching failed for this row. Try again later, or map it by hand."));
+        }
+    }
+
+    /// <summary>One warning per distinct review issue for the whole operation (task 054 fix-round-1), never one per row.</summary>
+    private void LogReviewIssues(string operation, IEnumerable<RowMatch> matches)
+    {
+        foreach (var issue in matches.Where(m => m.Issue != ReviewIssue.None).GroupBy(m => (m.Issue, m.IssueDetail)))
+        {
+            _logger.LogWarning(
+                "{Operation}: the AI review step did not decide {Count} row(s) ({Issue}, {Detail}); they use the embedding ranking, unreviewed",
+                operation, issue.Count(), issue.Key.Issue, issue.Key.IssueDetail ?? "none");
+        }
     }
 
     // ── FR-22 step 4 (ICodeSetSuggestionProvider) ───────────────────────────────
@@ -319,16 +459,27 @@ public sealed class CodeSetProposalService : ICodeSetSuggestionProvider
             }
         }
 
+        var matches = new List<RowMatch>();
+        string? unavailable = null;
+        Guid? suggestion = null;
         foreach (var (kind, row) in rows)
         {
-            var match = await MatchAsync(kind, row, cancellationToken).ConfigureAwait(false);
-            if (match is { Outcome: CodeSetMatchOutcome.Proposed, Proposed: { } proposed })
+            var match = await MatchAsync(kind, row, unavailable, cancellationToken).ConfigureAwait(false);
+            matches.Add(match);
+            if (match is { CalledAction: true, Issue: ReviewIssue.Unavailable })
             {
-                return proposed.CodeSetId;
+                unavailable = match.IssueDetail;
+            }
+
+            if (match.Proposal is { Outcome: CodeSetMatchOutcome.Proposed, Proposed: { } proposed })
+            {
+                suggestion = proposed.CodeSetId;
+                break;
             }
         }
 
-        return null;
+        LogReviewIssues("Code-set suggestion", matches);
+        return suggestion;
     }
 
     // ── Confirm (POST) ──────────────────────────────────────────────────────────
@@ -400,32 +551,42 @@ public sealed class CodeSetProposalService : ICodeSetSuggestionProvider
         _logger.LogWarning(
             "Code-set mapping: {Table} {ReferenceId} kept changing; confirm refused after {MaxAttempts} attempts, nothing written",
             CodeSetReferenceTables.Segment(kind), referenceId, MaxConfirmAttempts);
-        return CodeSetConfirmOutcome.AlreadyMapped;
+        return CodeSetConfirmOutcome.ConcurrentChange;
     }
 
     // ── The matcher ─────────────────────────────────────────────────────────────
 
-    private async Task<CodeSetProposal> MatchAsync(CodeSetReferenceKind kind, ReferenceRow row, CancellationToken ct)
+    /// <param name="reviewUnavailable">Set when an earlier row of the same request found the Action unavailable: the Action is not
+    /// called again and the row falls back to the embedding ranking.</param>
+    private async Task<RowMatch> MatchAsync(CodeSetReferenceKind kind, ReferenceRow row, string? reviewUnavailable, CancellationToken ct)
     {
         var segment = CodeSetReferenceTables.Segment(kind);
         if (row.Name.Length == 0)
         {
-            return new CodeSetProposal(
+            return new RowMatch(new CodeSetProposal(
                 segment, row.Id, row.Name, CodeSetMatchOutcome.NoneFits, null, null, null, null, false,
-                "The row has no name to match. Name it, or map it by hand.");
+                "The row has no name to match. Name it, or map it by hand."));
         }
 
         var sets = await LoadCodeSetsAsync(ct).ConfigureAwait(false);
         if (sets.Count == 0)
         {
-            return new CodeSetProposal(
+            return new RowMatch(new CodeSetProposal(
                 segment, row.Id, row.Name, CodeSetMatchOutcome.NoneFits, null, null, null, null, false,
-                "No active code set with Task codes exists. Add a code set, then map this row.");
+                "No active code set with Task codes exists. Add a code set, then map this row."));
         }
 
-        var ranked = await RankAsync(row.Name, ct).ConfigureAwait(false);
+        var rowVector = await EmbedNameAsync(row.Name, ct).ConfigureAwait(false);
+        var ranked = Rank(sets, rowVector);
         var candidates = ranked.Count <= AllCandidatesUpTo ? ranked : ranked.Take(TopCandidates).ToList();
-        var examples = await LoadExamplesAsync(ct).ConfigureAwait(false);
+        if (reviewUnavailable is not null)
+        {
+            _logger.LogDebug("Code-set match for {Table} {ReferenceId}: AI review step unavailable ({Reason}); not called", segment, row.Id, reviewUnavailable);
+            return new RowMatch(
+                Fallback(segment, row, ranked, "the AI review step is unavailable"), ReviewIssue.Unavailable, reviewUnavailable);
+        }
+
+        var examples = ExamplesFor(await LoadExamplesAsync(ct).ConfigureAwait(false), rowVector);
 
         InvoiceCodeSetMatchResult? reply;
         try
@@ -442,43 +603,62 @@ public sealed class CodeSetProposalService : ICodeSetSuggestionProvider
                 },
                 ct).ConfigureAwait(false);
         }
+        // Per-row logs are Debug: the request logs one warning per distinct issue (LogReviewIssues), not one per row.
         catch (InvoiceAiException ex)
         {
-            _logger.LogWarning(
+            _logger.LogDebug(
                 "Code-set match for {Table} {ReferenceId}: AI review step failed ({ReasonCode}); using the embedding ranking, unreviewed",
                 segment, row.Id, ex.ReasonCode);
-            return Fallback(segment, row, ranked, "the AI review step failed");
+            var issue = ex.ReasonCode == InvoiceAiException.BindingMissing ? ReviewIssue.Unavailable : ReviewIssue.Failed;
+            return new RowMatch(Fallback(segment, row, ranked, "the AI review step failed"), issue, ex.ReasonCode, CalledAction: true);
         }
         catch (FeatureDisabledException ex)
         {
-            _logger.LogWarning(
+            _logger.LogDebug(
                 "Code-set match for {Table} {ReferenceId}: AI review step is off ({ErrorCode}); using the embedding ranking, unreviewed",
                 segment, row.Id, ex.ErrorCode);
-            return Fallback(segment, row, ranked, "the AI review step is switched off");
+            return new RowMatch(
+                Fallback(segment, row, ranked, "the AI review step is switched off"), ReviewIssue.Unavailable, ex.ErrorCode, CalledAction: true);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            // The facade wraps model failures in InvoiceAiException; anything else is still the review step failing, never the row.
+            _logger.LogDebug(ex, "Code-set match for {Table} {ReferenceId}: AI review step threw; using the embedding ranking, unreviewed", segment, row.Id);
+            return new RowMatch(
+                Fallback(segment, row, ranked, "the AI review step failed"), ReviewIssue.Failed, ex.GetType().Name, CalledAction: true);
         }
 
         var choice = reply?.CodeSetId?.Trim();
         if (reply is not null && string.Equals(choice, InvoiceCodeSetMatchResult.NoneFits, StringComparison.OrdinalIgnoreCase))
         {
+            // The Action is told not to name a closest set (fix-round-1 F1): the similarity ranking below is the only one named.
             var closest = ranked[0].ToCandidate();
-            return new CodeSetProposal(
-                segment, row.Id, row.Name, CodeSetMatchOutcome.NoneFits, null, null, closest, reply.Confidence, true,
-                $"No code set fits: {reply.Reason.Trim()} Map this row by hand or add a code set (closest by similarity: '{closest.Name}').");
+            return new RowMatch(
+                new CodeSetProposal(
+                    segment, row.Id, row.Name, CodeSetMatchOutcome.NoneFits, null, null, closest, reply.Confidence, true,
+                    $"No code set fits: {reply.Reason.Trim()} Map this row by hand or add a code set (closest by similarity: '{closest.Name}')."),
+                CalledAction: true);
         }
 
         // The output guard (same discipline as LineCodingGuard): only an id from THIS request's candidates is accepted.
         if (reply is not null && Guid.TryParse(choice, out var chosenId) && candidates.FirstOrDefault(c => c.Set.Id == chosenId) is { } chosen)
         {
             var runnerUp = ranked.FirstOrDefault(r => r.Set.Id != chosenId)?.ToCandidate();
-            return new CodeSetProposal(
-                segment, row.Id, row.Name, CodeSetMatchOutcome.Proposed, chosen.ToCandidate(), runnerUp, null, reply.Confidence, true,
-                reply.Reason.Trim());
+            return new RowMatch(
+                new CodeSetProposal(
+                    segment, row.Id, row.Name, CodeSetMatchOutcome.Proposed, chosen.ToCandidate(), runnerUp, null, reply.Confidence, true,
+                    reply.Reason.Trim()),
+                CalledAction: true);
         }
 
-        _logger.LogWarning(
+        _logger.LogDebug(
             "Code-set match for {Table} {ReferenceId}: refused an AI answer that is not one of the {CandidateCount} candidates; using the embedding ranking, unreviewed",
             segment, row.Id, candidates.Count);
-        return Fallback(segment, row, ranked, "the AI review step answered with a code set that was not one of the candidates");
+        return new RowMatch(
+            Fallback(segment, row, ranked, "the AI review step answered with a code set that was not one of the candidates"),
+            ReviewIssue.Refused,
+            "answer outside the candidates",
+            CalledAction: true);
     }
 
     /// <summary>The embedding ranking as an UNREVIEWED proposal: never a "none fits", never a failure.</summary>
@@ -534,10 +714,11 @@ public sealed class CodeSetProposalService : ICodeSetSuggestionProvider
         row.Contains(VersionColumn) && row[VersionColumn] is long version ? version : null);
 
     /// <summary>
-    /// Confirmed mappings of this environment, as the Action's examples: active rows of both tables mapped to a usable set (a mapping to
-    /// a stale set would teach the wrong thing), matter types first, each by name, at most <see cref="MaxExamples"/>.
+    /// Every confirmed mapping of this environment that can be an example: active rows of both tables mapped to a usable set (a mapping
+    /// to a stale set would teach the wrong thing), matter types first, each by name, with the embedding of the row name. Loaded and
+    /// embedded once per instance. If the names cannot be embedded the examples are still offered, in that order, without similarity.
     /// </summary>
-    private async Task<List<InvoiceCodeSetMatchExample>> LoadExamplesAsync(CancellationToken ct)
+    private async Task<List<ConfirmedMapping>> LoadExamplesAsync(CancellationToken ct)
     {
         if (_examples is not null)
         {
@@ -567,9 +748,39 @@ public sealed class CodeSetProposalService : ICodeSetSuggestionProvider
             }
         }
 
-        _examples = examples.Take(MaxExamples).ToList();
-        return _examples;
+        List<ConfirmedMapping> loaded;
+        try
+        {
+            loaded = new List<ConfirmedMapping>(examples.Count);
+            foreach (var example in examples)
+            {
+                loaded.Add(new ConfirmedMapping(example, await EmbedNameAsync(example.ReferenceName, ct).ConfigureAwait(false)));
+            }
+        }
+        catch (Exception ex) when (ex is not FeatureDisabledException && !ct.IsCancellationRequested)
+        {
+            // Examples only inform the review step; failing to rank them must not fail the list.
+            _logger.LogWarning(ex, "Code-set matching: the {Count} confirmed mappings could not be embedded; examples are chosen by name, not by similarity", examples.Count);
+            loaded = examples.Select(e => new ConfirmedMapping(e, null)).ToList();
+        }
+
+        _examples = loaded;
+        return loaded;
     }
+
+    /// <summary>
+    /// The examples for one row: the <see cref="MaxExamples"/> confirmed mappings whose names are most similar to the row's (task 054
+    /// fix-round-1), so the model sees the precedents that matter for THIS row rather than the first ones alphabetically. Ties, and
+    /// mappings that could not be embedded, keep the load order.
+    /// </summary>
+    private static List<InvoiceCodeSetMatchExample> ExamplesFor(List<ConfirmedMapping> mappings, float[] rowVector) =>
+        mappings
+            .Select((m, index) => (m.Example, Index: index, Score: m.Vector is null ? decimal.MinValue : TimekeeperMatcher.Cosine(rowVector, m.Vector)))
+            .OrderByDescending(m => m.Score)
+            .ThenBy(m => m.Index)
+            .Take(MaxExamples)
+            .Select(m => m.Example)
+            .ToList();
 
     // ── Usable code sets, profiles and ranking ──────────────────────────────────
 
@@ -618,7 +829,7 @@ public sealed class CodeSetProposalService : ICodeSetSuggestionProvider
 
         var setQuery = new QueryExpression(CodeSetEntity)
         {
-            ColumnSet = new ColumnSet("sprk_name", "sprk_body", DescriptionColumn, MatchHintsColumn),
+            ColumnSet = new ColumnSet("sprk_name", "sprk_body", DescriptionColumn, MatchHintsColumn, "modifiedon"),
             Criteria = new FilterExpression(LogicalOperator.And),
         };
         setQuery.Criteria.AddCondition("statecode", ConditionOperator.Equal, ActiveState);
@@ -671,12 +882,52 @@ public sealed class CodeSetProposalService : ICodeSetSuggestionProvider
             }
 
             profile.Add("Task codes: " + string.Join("; ", codes));
-            var vector = await EmbedAsync(string.Join('\n', profile), ct).ConfigureAwait(false);
+            var vector = await EmbedProfileAsync(set, string.Join('\n', profile), ct).ConfigureAwait(false);
             loaded.Add(new ProfiledCodeSet(set.Id, name, body, description, hints, codes, vector));
         }
 
         _codeSets = loaded;
         return loaded;
+    }
+
+    /// <summary>
+    /// The profile's embedding, through <see cref="IEmbeddingCache"/> when it is registered (task 054 fix-round-1). The key holds the set
+    /// id, its <c>modifiedon</c> and the whole profile text, which includes the Task-code text: editing a code changes only the code row,
+    /// not the set's <c>modifiedon</c>, and must still re-embed the set.
+    /// </summary>
+    private Task<float[]> EmbedProfileAsync(Entity set, string profile, CancellationToken ct)
+    {
+        var modifiedOn = set.GetAttributeValue<DateTime?>("modifiedon") is { } stamp
+            ? stamp.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture)
+            : "none";
+        return EmbedCachedAsync($"{ProfileCacheKeyPrefix}|{set.Id:N}|{modifiedOn}|{profile}", profile, ct);
+    }
+
+    /// <summary>
+    /// A reference-row name's embedding (the row being matched, or a confirmed mapping offered as an example), through the cache: the
+    /// key is the name itself, whose embedding never changes. Without it the per-invoice suggestion hook would embed every confirmed
+    /// mapping's name again in each job scope.
+    /// </summary>
+    private Task<float[]> EmbedNameAsync(string name, CancellationToken ct) =>
+        EmbedCachedAsync($"{NameCacheKeyPrefix}|{name}", name, ct);
+
+    /// <summary>Embeds <paramref name="text"/>, reading and filling <see cref="IEmbeddingCache"/> under <paramref name="key"/> when it is
+    /// registered. The cache hashes the key (SHA-256) and is best-effort: its own errors are logged and read as a miss.</summary>
+    private async Task<float[]> EmbedCachedAsync(string key, string text, CancellationToken ct)
+    {
+        if (_embeddingCache is null)
+        {
+            return await EmbedAsync(text, ct).ConfigureAwait(false);
+        }
+
+        if (await _embeddingCache.GetEmbeddingForContentAsync(key, ct).ConfigureAwait(false) is { } cached)
+        {
+            return cached.ToArray();
+        }
+
+        var vector = await EmbedAsync(text, ct).ConfigureAwait(false);
+        await _embeddingCache.SetEmbeddingForContentAsync(key, vector, ct).ConfigureAwait(false);
+        return vector;
     }
 
     private static string? Text(Entity row, string column)
@@ -685,18 +936,14 @@ public sealed class CodeSetProposalService : ICodeSetSuggestionProvider
         return string.IsNullOrEmpty(value) ? null : value;
     }
 
-    /// <summary>The usable sets for <paramref name="referenceName"/>, best first (ties by name, then id, so the order is stable).</summary>
-    private async Task<List<Ranked>> RankAsync(string referenceName, CancellationToken ct)
-    {
-        var sets = await LoadCodeSetsAsync(ct).ConfigureAwait(false);
-        var vector = await EmbedAsync(referenceName, ct).ConfigureAwait(false);
-        return sets
+    /// <summary>The usable sets ranked against a row's embedding, best first (ties by name, then id, so the order is stable).</summary>
+    private static List<Ranked> Rank(List<ProfiledCodeSet> sets, float[] vector) =>
+        sets
             .Select(s => new Ranked(s, decimal.Round(TimekeeperMatcher.Cosine(vector, s.Vector), 3)))
             .OrderByDescending(c => c.Score)
             .ThenBy(c => c.Set.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(c => c.Set.Id)
             .ToList();
-    }
 
     private async Task<float[]> EmbedAsync(string text, CancellationToken ct) =>
         (await _ai.GenerateEmbeddingAsync(text, cancellationToken: ct).ConfigureAwait(false)).ToArray();

@@ -17,12 +17,14 @@ namespace Sprk.Bff.Api.Tests.Seam.Finance;
 /// <remarks>
 /// Only <see cref="ConditionOperator.Equal"/>, <see cref="ConditionOperator.In"/>, <see cref="ConditionOperator.Null"/> and <see cref="ConditionOperator.NotNull"/> over a flat AND filter are supported; anything
 /// else throws, so a new kind of query in the production code makes this fake fail loudly rather than silently match nothing.
+/// Thread-safe (task 054 fix-round-1): every read, write and builder takes one lock, because the proposals list matches rows in parallel.
 /// </remarks>
 internal sealed class FakeCodingReferenceData
 {
     /// <summary>What Dataverse returns per page when a query sets no page size (it silently truncates there).</summary>
     private const int DataverseDefaultPageSize = 5000;
 
+    private readonly object _sync = new();
     private readonly List<Entity> _rows = [];
     private int _created;
 
@@ -38,32 +40,38 @@ internal sealed class FakeCodingReferenceData
             .Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns((string name, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
             {
-                Updates.Add((name, id, new Dictionary<string, object>(fields)));
-                Apply(name, id, fields);
-                return Task.CompletedTask;
+                lock (_sync)
+                {
+                    Updates.Add((name, id, new Dictionary<string, object>(fields)));
+                    Apply(name, id, fields);
+                    return Task.CompletedTask;
+                }
             });
         Records
             .Setup(r => r.UpdateRecordFieldsIfUnchangedAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
             .Returns((string name, Guid id, Dictionary<string, object?> fields, long expectedVersion, CancellationToken _) =>
             {
-                ConditionalWrites.Add((name, id, expectedVersion));
-                var row = Find(name, id);
-                if (row is null)
+                lock (_sync)
                 {
-                    return Task.FromException(new KeyNotFoundException($"{name} record was not found."));
-                }
+                    ConditionalWrites.Add((name, id, expectedVersion));
+                    var row = Find(name, id);
+                    if (row is null)
+                    {
+                        return Task.FromException(new KeyNotFoundException($"{name} record was not found."));
+                    }
 
-                if (row.GetAttributeValue<long>(VersionColumn) != expectedVersion)
-                {
-                    // What DataverseWebApiService does on HTTP 412: nothing is written.
-                    return Task.FromException(new DBConcurrencyException($"{name} record changed since it was read; the update was not applied."));
-                }
+                    if (row.GetAttributeValue<long>(VersionColumn) != expectedVersion)
+                    {
+                        // What DataverseWebApiService does on HTTP 412: nothing is written.
+                        return Task.FromException(new DBConcurrencyException($"{name} record changed since it was read; the update was not applied."));
+                    }
 
-                var applied = fields.ToDictionary(f => WebApiColumn(f.Key), f => WebApiValue(f.Key, f.Value));
-                Updates.Add((name, id, applied));
-                Apply(name, id, applied);
-                return Task.CompletedTask;
+                    var applied = fields.ToDictionary(f => WebApiColumn(f.Key), f => WebApiValue(f.Key, f.Value));
+                    Updates.Add((name, id, applied));
+                    Apply(name, id, applied);
+                    return Task.CompletedTask;
+                }
             });
     }
 
@@ -116,6 +124,14 @@ internal sealed class FakeCodingReferenceData
 
     public Guid AddSet(string name, bool active = true, string? body = null, string? description = null, string? matchHints = null)
     {
+        lock (_sync)
+        {
+            return AddSetLocked(name, active, body, description, matchHints);
+        }
+    }
+
+    private Guid AddSetLocked(string name, bool active, string? body, string? description, string? matchHints)
+    {
         var set = new Entity(CodeSetTable, Guid.NewGuid());
         set["sprk_name"] = name;
         if (body is not null)
@@ -135,6 +151,7 @@ internal sealed class FakeCodingReferenceData
 
         set["statecode"] = new OptionSetValue(active ? 0 : 1);
         set["createdon"] = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(_created++);
+        set["modifiedon"] = set["createdon"];
         _rows.Add(set);
         return set.Id;
     }
@@ -146,6 +163,29 @@ internal sealed class FakeCodingReferenceData
         string description = "",
         string? guidance = null,
         bool active = true)
+    {
+        lock (_sync)
+        {
+            AddCodeLocked(setId, code, kind, description, guidance, active);
+        }
+    }
+
+    /// <summary>
+    /// Edits a code's description IN PLACE, without touching its set row (as an admin editing the code record does): the set's
+    /// <c>modifiedon</c> stays the same, so only a cache key that covers the Task-code text sees the change.
+    /// </summary>
+    public void EditCode(Guid setId, string code, string description)
+    {
+        lock (_sync)
+        {
+            var row = _rows.Single(r => r.LogicalName == CodeTable
+                && r.GetAttributeValue<EntityReference>("sprk_codeset")?.Id == setId
+                && r.GetAttributeValue<string>("sprk_code") == code);
+            row["sprk_description"] = description;
+        }
+    }
+
+    private void AddCodeLocked(Guid setId, string code, BillingCodeKind kind, string description, string? guidance, bool active)
     {
         var row = new Entity(CodeTable, Guid.NewGuid());
         row["sprk_code"] = code;
@@ -168,28 +208,45 @@ internal sealed class FakeCodingReferenceData
         AddReference("sprk_practicearea_ref", defaultSetId, name is null ? null : ("sprk_practiceareaname", name), active);
 
     /// <summary>The reference or set row as stored (for asserting what a write changed).</summary>
-    public Entity? Find(string entityLogicalName, Guid id) =>
-        _rows.FirstOrDefault(r => r.LogicalName == entityLogicalName && r.Id == id);
+    public Entity? Find(string entityLogicalName, Guid id)
+    {
+        lock (_sync)
+        {
+            return _rows.FirstOrDefault(r => r.LogicalName == entityLogicalName && r.Id == id);
+        }
+    }
 
     /// <summary>Applies an <c>UpdateAsync</c> to the stored row, as Dataverse would (a C# null skips, DBNull clears).</summary>
     public void Apply(string entityLogicalName, Guid id, Dictionary<string, object> fields)
     {
-        var row = Find(entityLogicalName, id) ?? throw new InvalidOperationException($"{entityLogicalName} {id} does not exist in the fake.");
-        foreach (var (key, value) in fields)
+        lock (_sync)
         {
-            if (value is null)
+            var row = Find(entityLogicalName, id) ?? throw new InvalidOperationException($"{entityLogicalName} {id} does not exist in the fake.");
+            foreach (var (key, value) in fields)
             {
-                continue;
+                if (value is null)
+                {
+                    continue;
+                }
+
+                row[key] = value is DBNull ? null : value;
             }
 
-            row[key] = value is DBNull ? null : value;
+            // Every write moves the row to a new version and a later modifiedon, as in Dataverse.
+            row[VersionColumn] = ++_version;
+            row["modifiedon"] = new DateTime(2026, 10, 2, 0, 0, 0, DateTimeKind.Utc).AddSeconds(_version);
         }
-
-        // Every write moves the row to a new version, as in Dataverse.
-        row[VersionColumn] = ++_version;
     }
 
     public CodingCoreRecord AddCoreRecord(string entityLogicalName, Guid? matterTypeId = null, Guid? practiceAreaId = null)
+    {
+        lock (_sync)
+        {
+            return AddCoreRecordLocked(entityLogicalName, matterTypeId, practiceAreaId);
+        }
+    }
+
+    private CodingCoreRecord AddCoreRecordLocked(string entityLogicalName, Guid? matterTypeId, Guid? practiceAreaId)
     {
         var row = new Entity(entityLogicalName, Guid.NewGuid());
         if (matterTypeId is { } matterType)
@@ -245,6 +302,14 @@ internal sealed class FakeCodingReferenceData
 
     private Guid AddReference(string entityLogicalName, Guid? defaultSetId, (string Column, string Value)? name = null, bool active = true)
     {
+        lock (_sync)
+        {
+            return AddReferenceLocked(entityLogicalName, defaultSetId, name, active);
+        }
+    }
+
+    private Guid AddReferenceLocked(string entityLogicalName, Guid? defaultSetId, (string Column, string Value)? name, bool active)
+    {
         var row = new Entity(entityLogicalName, Guid.NewGuid());
         if (name is { } named)
         {
@@ -264,12 +329,23 @@ internal sealed class FakeCodingReferenceData
 
     private Entity Get(string entityLogicalName, Guid id, string[] columns)
     {
-        var row = _rows.FirstOrDefault(r => r.LogicalName == entityLogicalName && r.Id == id)
-            ?? throw new InvalidOperationException($"{entityLogicalName} {id} does not exist in the fake.");
-        return Project(row, columns);
+        lock (_sync)
+        {
+            var row = _rows.FirstOrDefault(r => r.LogicalName == entityLogicalName && r.Id == id)
+                ?? throw new InvalidOperationException($"{entityLogicalName} {id} does not exist in the fake.");
+            return Project(row, columns);
+        }
     }
 
     private EntityCollection Query(QueryExpression query)
+    {
+        lock (_sync)
+        {
+            return QueryLocked(query);
+        }
+    }
+
+    private EntityCollection QueryLocked(QueryExpression query)
     {
         Queries.Add(query);
 

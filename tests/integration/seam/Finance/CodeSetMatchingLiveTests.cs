@@ -92,7 +92,12 @@ public sealed class CodeSetMatchingLiveTests
         foreach (var proposal in list.Proposals)
         {
             var c = rowIds[proposal.ReferenceId];
-            var result = proposal.Outcome == CodeSetMatchOutcome.NoneFits ? "none" : names[proposal.Proposed!.CodeSetId];
+            var result = proposal.Outcome switch
+            {
+                CodeSetMatchOutcome.NoneFits => "none",
+                CodeSetMatchOutcome.Failed => "failed",
+                _ => names[proposal.Proposed!.CodeSetId],
+            };
             var top = proposal.Outcome == CodeSetMatchOutcome.NoneFits ? proposal.Closest : proposal.Reviewed ? null : proposal.Proposed;
             var pass = proposal.Reviewed && result == c.Expected;
             report.AppendLine(CultureInfo.InvariantCulture,

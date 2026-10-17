@@ -269,6 +269,28 @@ public sealed class CodeSetProposalServiceSeamTests
     }
 
     [Fact]
+    public async Task Confirm_WhenTheRowKeepsChangingButStaysUnmapped_ReturnsConcurrentChange_NotAlreadyMapped_AfterTheAttemptLimit()
+    {
+        // Task 054 fix-round-1 K4: every refused write was reported as AlreadyMapped ("already has a default code set") although the
+        // row was still unmapped. Each re-read here is followed by an unrelated edit, so every conditional write meets a newer version.
+        var row = MatterType("Litigation", [1f, 0f, 0f, 0f]);
+        _data.AfterQuery = query =>
+        {
+            if (query.EntityName == "sprk_mattertype_ref" && query.TopCount == 1)
+            {
+                _data.Apply("sprk_mattertype_ref", row, new Dictionary<string, object> { ["sprk_mattertypename"] = "Litigation" });
+            }
+        };
+
+        var outcome = await Sut().ConfirmAsync(CodeSetReferenceKind.MatterType, row, _litigation, null);
+
+        outcome.Should().Be(CodeSetConfirmOutcome.ConcurrentChange);
+        _data.ConditionalWrites.Should().HaveCount(CodeSetProposalService.MaxConfirmAttempts);
+        _data.Updates.Should().BeEmpty();
+        _data.Find("sprk_mattertype_ref", row)!.Contains(DefaultSetColumn).Should().BeFalse("nothing was written and nobody mapped it");
+    }
+
+    [Fact]
     public async Task Confirm_UnknownOrInactiveOrWrongTableReference_IsNotFound_AndWritesNothing()
     {
         var matterType = MatterType("Litigation", [1f, 0f, 0f, 0f]);

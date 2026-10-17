@@ -28,6 +28,7 @@ public static class CodeSetMappingEndpoints
     public const string CodeForbidden = "ebilling.codeset.forbidden";
     public const string CodeNotFound = "ebilling.codeset.not_found";
     public const string CodeAlreadyMapped = "ebilling.codeset.already_mapped";
+    public const string CodeConcurrentChange = "ebilling.codeset.concurrent_change";
 
     public static IEndpointRouteBuilder MapCodeSetMappingEndpoints(this IEndpointRouteBuilder app)
     {
@@ -64,7 +65,8 @@ public static class CodeSetMappingEndpoints
             .WithDescription(
                 "{table} is 'mattertype' or 'practicearea'. Re-reads the row and refuses with 409 when it already has a default code set; " +
                 "otherwise sets sprk_defaultbillingcodeset on exactly that row to the named code set. The write is conditional on the " +
-                "row version read, so a mapping another admin saved in the meantime is never overwritten (also 409).")
+                "row version read, so a mapping another admin saved in the meantime is never overwritten (also 409). A row that is still " +
+                "unmapped but keeps changing under the write is refused with 409 ebilling.codeset.concurrent_change; retry.")
             .Produces<CodeSetMappingConfirmedResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -124,6 +126,9 @@ public static class CodeSetMappingEndpoints
             CodeSetConfirmOutcome.Confirmed => Results.Ok(new CodeSetMappingConfirmedResponse(CodeSetReferenceTables.Segment(kind), id, request.CodeSetId)),
             CodeSetConfirmOutcome.AlreadyMapped => Refused(
                 StatusCodes.Status409Conflict, CodeAlreadyMapped, "This row already has a default code set; nothing was changed."),
+            CodeSetConfirmOutcome.ConcurrentChange => Refused(
+                StatusCodes.Status409Conflict, CodeConcurrentChange,
+                "This row is still unmapped but kept changing while the mapping was being saved; nothing was changed. Try again."),
             CodeSetConfirmOutcome.CodeSetNotFound => Refused(
                 StatusCodes.Status404NotFound, CodeNotFound, "The code set was not found, is inactive or has no active Task codes."),
             _ => Refused(StatusCodes.Status404NotFound, CodeNotFound, "The matter type or practice area was not found."),
@@ -140,8 +145,8 @@ public static class CodeSetMappingEndpoints
 public sealed record ConfirmCodeSetMappingRequest(Guid CodeSetId);
 
 /// <summary>
-/// Response of the proposals route (task 054, D-93): one entry per unmapped active row (proposed or none-fits) and the coverage of both
-/// tables, so every active matter type and practice area is accounted for as mapped, proposed or none-fits.
+/// Response of the proposals route (task 054, D-93): one entry per unmapped active row (proposed, none-fits or failed) and the coverage
+/// of both tables, so every active matter type and practice area is accounted for as mapped, proposed, none-fits or failed.
 /// </summary>
 public sealed record CodeSetProposalsResponse(IReadOnlyList<CodeSetProposal> Proposals, CodeSetCoverage Coverage);
 
