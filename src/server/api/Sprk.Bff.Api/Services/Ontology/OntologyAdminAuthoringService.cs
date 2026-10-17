@@ -173,14 +173,12 @@ public sealed partial class OntologyAdminAuthoringService
     /// this service carries <see cref="Filter"/>, and <see cref="Admits"/> re-checks the row it returns; a new policy is created with
     /// <see cref="Value"/>.
     /// </summary>
-    // Swap to RuleDomains (ebilling-r1 task 070, #1911) when it lands
     private static class OntologyDomain
     {
-        /// <summary>The live <c>sprk_policy.sprk_domain</c> option "Ontology" (spaarkedev1, 2026-10-16: Billing 100000000,
-        /// Ontology 100000001, Docketing 100000002).</summary>
-        public const int Value = 100000001;
+        /// <summary>The <c>sprk_policy.sprk_domain</c> option "Ontology", from <see cref="RuleDomains"/> (ebilling-r1 task 070).</summary>
+        public const int Value = RuleDomains.PolicyDomainOntology;
 
-        public const string Column = "sprk_domain";
+        public const string Column = RuleDomains.PolicyDomainColumn;
 
         public static string Filter => $"({Column} eq null or {Column} eq {Value.ToString(CultureInfo.InvariantCulture)})";
 
@@ -1376,16 +1374,21 @@ public sealed partial class OntologyAdminAuthoringService
         {
             var field = result.Reason switch
             {
-                OntologyWriterFailureReason.RuleTypeUnsupported => "ruleType",
+                OntologyWriterFailureReason.RuleTypeUnsupported or OntologyWriterFailureReason.RuleTypeWrongDomain => "ruleType",
                 OntologyWriterFailureReason.TemplateMalformed or OntologyWriterFailureReason.TemplateTokenOutsideReadSet => "messageTemplate",
                 _ => "ruleBody",
             };
             errors[field] = result.Errors.ToArray();
+            // A billing rule type (ebilling-r1 070) is refused by ValidateForAuthoring (RuleDomain.Ontology) as RuleTypeWrongDomain,
+            // reported on ruleType with that reason as its code, before any body check: nothing is compiled or evaluated.
             return new RuleCheck(null, authoring.TemplateEligibleFields,
-                result.Reason == OntologyWriterFailureReason.ColumnNotAuthorable ? ReasonColumnNotAuthorable : null);
+                result.Reason == OntologyWriterFailureReason.ColumnNotAuthorable ? ReasonColumnNotAuthorable
+                : result.Reason == OntologyWriterFailureReason.RuleTypeWrongDomain ? OntologyWriterFailureReason.RuleTypeWrongDomain
+                : null);
         }
 
-        // ValidateForAuthoring accepted it, so the type is Existence or Threshold (Switch is refused, D-16).
+        // ValidateForAuthoring accepted it, so the type is an Ontology type, Existence or Threshold: a billing type was refused above
+        // as RuleTypeWrongDomain, and Switch is refused (D-16).
         return new RuleCheck(RuleBodySchemaValidator.TryParseRuleType(ruleType, out var parsed) ? parsed.ToString() : null,
             authoring.TemplateEligibleFields, null);
     }

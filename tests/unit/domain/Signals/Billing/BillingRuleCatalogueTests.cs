@@ -457,6 +457,27 @@ public class BillingRuleCatalogueTests
         }
     }
 
+    /// <summary>fix-round-2 (ontology-r1 paired change): ValidateForAuthoring is the Ontology admin's one validation (validate, dry run,
+    /// save, publish), so it expects the Ontology domain: a billing type, by name or option value and even with a valid billing body,
+    /// is refused as RuleTypeWrongDomain before any body check, and offers no template fields (nothing was compiled).</summary>
+    [Theory]
+    [MemberData(nameof(Valid))]
+    public void ValidateForAuthoring_RefusesEveryBillingType_WrongDomain_WithNoTemplateFields(RuleType type, int optionValue, string body)
+    {
+        foreach (var raw in new[] { type.ToString(), optionValue.ToString(System.Globalization.CultureInfo.InvariantCulture) })
+        {
+            var result = Validator().ValidateForAuthoring(raw, body, null);
+
+            result.Validation.IsValid.Should().BeFalse(raw);
+            result.Validation.Reason.Should().Be(OntologyWriterFailureReason.RuleTypeWrongDomain, raw);
+            result.TemplateEligibleFields.Should().BeEmpty(raw);
+        }
+
+        // Control: an Ontology type is still validated (and compiled) by the same call.
+        Validator().ValidateForAuthoring("Existence", """{"type":"Existence","subject":"sprk_matter","when":{"statecode":0},"all":[]}""", null)
+            .Validation.IsValid.Should().BeTrue();
+    }
+
     [Fact]
     public void BillingGate_NullSnapshot_IsACallerBug()
     {
