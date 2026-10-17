@@ -188,6 +188,19 @@ public sealed class CoreAncestorResolver
                 ("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter"),
                 ("sprk_regardingworkassignment", "sprk_workassignment"),
             ],
+            // ebilling-r1 task 026 (FR-15, D-94, uac-r2 option A): the Invoice Line, so a Signal or Decision Record about a line
+            // (sprk_regardinginvoiceline) is stamped with the line's root. Root columns are ONLY the line's own core lookups
+            // (FR-05, D-75), read live, spaarkedev1 2026-10-16 (EntityDefinitions(sprk_billingevent)/ManyToOneRelationships):
+            // sprk_project -> sprk_project, sprk_matter -> sprk_matter, sprk_regardingworkassignment -> sprk_workassignment.
+            // NEVER sprk_invoice (a line may in future not belong to exactly one invoice) and never sprk_resolvedtimekeeper
+            // (a timekeeper is a party). Not a CHILD (ChildRecordEntities unchanged): an intermediate only, like the budget.
+            // More than one of these set is a derivation error (SingleRootIntermediates). The TypeScript mirror and
+            // RecordContainerResolver.ChildAncestorLinks changed in the same change.
+            ["sprk_billingevent"] =
+            [
+                ("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter"),
+                ("sprk_regardingworkassignment", "sprk_workassignment"),
+            ],
             // The canonical document link vocabulary's (Spaarke.Dataverse.DocumentLinkFields — the one declaration)
             // links to a project / matter / work assignment: the typed column and its related twin. EXCLUDED, by name:
             // the related service request (a service request cannot carry sprk_issecure, and the storage resolver
@@ -271,13 +284,23 @@ public sealed class CoreAncestorResolver
             ["sprk_decisionrecord"] = OntologySubjectSources(),
         };
 
-    /// <summary>The subject lookups of a Signal / Decision Record that name an intermediate (task 144): the stamp's sources.</summary>
+    /// <summary>The subject lookups of a Signal / Decision Record that name an intermediate (task 144): the stamp's sources.
+    /// ebilling-r1 task 026 (FR-15, D-94): + the invoice-line subject, <c>sprk_regardinginvoiceline</c> → <c>sprk_billingevent</c>
+    /// (live spaarkedev1 2026-10-16, <c>scripts/ebilling/Deploy-EbillingSignalLineSubjectSchema.ps1</c>).</summary>
     private static IReadOnlyList<(string Column, string Intermediate)> OntologySubjectSources() =>
     [
         ("sprk_regardingcommunication", "sprk_communication"), ("sprk_regardingdocument", "sprk_document"),
         ("sprk_regardingevent", "sprk_event"), ("sprk_regardinginvoice", "sprk_invoice"),
-        ("sprk_regardingtodo", "sprk_todo"),
+        ("sprk_regardingtodo", "sprk_todo"), ("sprk_regardinginvoiceline", "sprk_billingevent"),
     ];
+
+    /// <summary>
+    /// ebilling-r1 task 026 (FR-05, D-94 condition 3): intermediates whose row names exactly ONE root. A line naming more than one
+    /// (a matter AND a project, say) is a derivation ERROR here, never two stamps: FR-05 refuses, never picks, and the D-75 rule
+    /// means nothing on the row can say which one it belongs to. (Every other intermediate may legitimately name several roots.)
+    /// </summary>
+    internal static readonly IReadOnlySet<string> SingleRootIntermediates =
+        new HashSet<string>(["sprk_billingevent"], StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// The typed PARTY regarding lookups of each table that carries the polymorphic pair (task 155 f5, from the f3 / f4
@@ -690,6 +713,16 @@ public sealed class CoreAncestorResolver
                 "Child target {Entity}({Id}) carries no core-ancestor stamp; a record written against it will inherit no access.",
                 targetEntityLogicalName, targetRecordId);
             return new CoreAncestorResult(CoreAncestorStatus.NoAncestor, [], null);
+        }
+
+        if (stamps.Count > 1 && SingleRootIntermediates.Contains(targetEntityLogicalName))
+        {
+            // ebilling-r1 task 026 (FR-05, D-94): a line names exactly one core record. Two is not a choice this resolver makes.
+            _logger.LogError(
+                "{Entity}({Id}) names {Count} core records ({Roots}); FR-05 allows one, so no stamp is derived.",
+                targetEntityLogicalName, targetRecordId, stamps.Count, string.Join(", ", stamps.Select(s => s.EntityType)));
+            return CoreAncestorResult.Refused(
+                $"{targetEntityLogicalName}({targetRecordId}) names more than one core record, so its root cannot be determined.");
         }
 
         return new CoreAncestorResult(CoreAncestorStatus.Derived, stamps, null);

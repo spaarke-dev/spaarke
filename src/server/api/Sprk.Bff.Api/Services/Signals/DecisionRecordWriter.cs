@@ -926,6 +926,16 @@ public sealed class DecisionRecordWriter
                 : FilingFailed(subject, stamp.Error);
         }
 
+        // ebilling-r1 task 026 (FR-05, FR-15, D-75): an invoice or invoice-line subject is filed under exactly ONE core record, its own
+        // (the resolver reads the subject's own core lookups, never a line's invoice). None (a NoAncestor derivation) or more than one is a
+        // data condition a retry does not change: refused, never written as a record with no core, or with two.
+        if (InvoiceFamilyCoreRecordGuard.CoreRecordLookups.ContainsKey(subject.Entity) && stamp.Stamps.Count != 1)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.SubjectUnfileable,
+                "The decision's subject is an invoice or invoice line that is not filed under exactly one core record; nothing was written.");
+        }
+
         return stamp.Stamps;
     }
 

@@ -52,7 +52,7 @@ public sealed record SignalEvidenceRef(string Kind, string Ref, string Tier, dou
 /// <param name="PolicyVersionId">The immutable version that fired (<c>sprk_signal.sprk_policyversion</c>).</param>
 /// <param name="SubjectEntityLogicalName">The subject's Dataverse logical name, e.g. <c>sprk_matter</c> or
 /// <c>sprk_communication</c>. MUST be one of <see cref="SignalWriter.VerifiedSubjects"/> (a subset of
-/// <see cref="SignalWriter.RegardingLookupByEntity"/>'s 9 keys). It is also the subject segment of the dedupe key.</param>
+/// <see cref="SignalWriter.RegardingLookupByEntity"/>'s 10 keys). It is also the subject segment of the dedupe key.</param>
 /// <param name="SubjectId">The subject record's id.</param>
 /// <param name="SubjectDisplayName">For the denormalized <c>sprk_regardingrecordname</c> — display only.</param>
 /// <param name="ShortHeadline">The Signal's <c>sprk_name</c> (required, NOT NULL). Max 200 chars (schema
@@ -273,7 +273,7 @@ public sealed class SignalSentenceTemplateException : Exception
 /// emits stops matching the type the SpaarkeMaster solution declares.</para>
 /// <para><b>Core record (task 037; D-34, D-36, D-37, D-35).</b> <see cref="VerifiedSubjects"/> is the closed set of
 /// subjects the writer accepts (matter, communication, and the Do-lane event, To Do and work assignment); it is a
-/// subset of <see cref="RegardingLookupByEntity"/>'s 9 schema keys. The grouping CORE record (any type
+/// subset of <see cref="RegardingLookupByEntity"/>'s 10 schema keys. The grouping CORE record (any type
 /// <c>CoreAncestorResolver</c> knows) comes only from <c>CoreAncestorResolver.ResolveStampsAsync</c>: the subject itself
 /// for a core subject, its single stamp, or, for several stamps, the record the subject is directly filed under, then
 /// matter over project, else a refusal. It is written as <c>sprk_corerecordtype</c> (catalog row) +
@@ -334,7 +334,7 @@ public sealed partial class SignalWriter
         new[] { SeverityInfo, SeverityWarning, SeverityCritical }.ToFrozenSet();
 
     /// <summary>
-    /// The 9 entity-specific regarding lookups on <c>sprk_signal</c>: the shared regarding builder's own map for this host
+    /// The 10 entity-specific regarding lookups on <c>sprk_signal</c>: the shared regarding builder's own map for this host
     /// table (<c>TodoRegardingBuilder.RegardingLookupsByHostTable["sprk_signal"]</c>, task 141), not a copy. ADR-024: AT MOST
     /// ONE is populated per row.
     /// </summary>
@@ -390,12 +390,17 @@ public sealed partial class SignalWriter
     /// <see cref="RegardingLookupByEntity"/>'s keys. Task 037 (D-16/D-36) adds the three Do-lane subjects to matter and
     /// communication. Task 025b (owner decision D-122) adds <c>sprk_project</c>: a Threshold rule on a project's spend, budget or
     /// utilization raises a Signal about the project, which is a core record and groups under itself like a matter.
-    /// <c>sprk_servicerequest</c> (and invoice, document) stay refused as a SUBJECT: no rule reads them in R1. Each subject's core
-    /// record comes from <see cref="CoreAncestorResolver"/>, never from a lookup walk here.
+    /// ebilling-r1 task 026 (FR-15, D-31) adds <c>sprk_invoice</c> and <c>sprk_billingevent</c> (the Invoice Line): a billing
+    /// finding is about an invoice or one of its lines. Their core record is the subject's OWN core lookup, derived by
+    /// <see cref="CoreAncestorResolver"/> (a line is never resolved through its invoice, D-75), and exactly one is required
+    /// (<see cref="RequireSingleInvoiceFamilyCore"/>). <c>sprk_servicerequest</c> and <c>sprk_document</c> stay refused as a
+    /// SUBJECT: no rule reads them in R1. Each subject's core record comes from <see cref="CoreAncestorResolver"/>, never from a
+    /// lookup walk here.
     /// </summary>
     public static readonly FrozenSet<string> VerifiedSubjects = new[]
     {
         "sprk_matter", "sprk_project", "sprk_communication", "sprk_event", "sprk_todo", "sprk_workassignment",
+        "sprk_invoice", "sprk_billingevent",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>The subject column the Signal's <c>sprk_duedate</c> copies (task 037, D-27): an event's
@@ -1106,6 +1111,7 @@ public sealed partial class SignalWriter
         }
 
         var result = await _coreAncestors.ResolveStampsAsync(subjectEntity, subjectId, ct).ConfigureAwait(false);
+        RequireSingleInvoiceFamilyCore(subjectEntity, subjectId, result);
         switch (result.Status)
         {
             case CoreAncestorStatus.CoreTarget:
@@ -1131,6 +1137,41 @@ public sealed partial class SignalWriter
                     $"The core-record derivation for {subjectEntity} {subjectId:D} returned status '{result.Status}', which " +
                     "this writer does not map to a core record. Refusing to write.",
                     OntologyWriterFailureReason.CoreRecordUnresolved);
+        }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 026 (FR-05, FR-15, D-75): an invoice or invoice-line subject (a table of
+    /// <see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/>) is filed under exactly ONE core record, its own. The
+    /// resolver's answer for it is used only when it names one: no core record is refused here, never written as a no-core Do
+    /// item (D-35), and more than one is refused, never picked by D-37's matter-over-project rule. (A line naming more than one
+    /// is already a derivation error in the resolver; an invoice is checked here.) Other subjects are untouched.
+    /// </summary>
+    /// <exception cref="SignalWriterEscalationException">The invoice-family subject names no core record
+    /// (<see cref="OntologyWriterFailureReason.CoreRecordUnresolved"/>) or more than one
+    /// (<see cref="OntologyWriterFailureReason.CoreRecordAmbiguous"/>).</exception>
+    internal static void RequireSingleInvoiceFamilyCore(string subjectEntity, Guid subjectId, CoreAncestorResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (!InvoiceFamilyCoreRecordGuard.CoreRecordLookups.ContainsKey(subjectEntity))
+        {
+            return;
+        }
+
+        if (result.Status == CoreAncestorStatus.NoAncestor)
+        {
+            throw new SignalWriterEscalationException(
+                $"{subjectEntity} {subjectId:D} names no core record of its own (FR-05); an invoice or invoice-line Signal is " +
+                "never written without one. Refusing to write.",
+                OntologyWriterFailureReason.CoreRecordUnresolved);
+        }
+
+        if (result.Status == CoreAncestorStatus.Derived && result.Stamps.Count != 1)
+        {
+            throw new SignalWriterEscalationException(
+                $"{subjectEntity} {subjectId:D} names {result.Stamps.Count} core records " +
+                $"({string.Join(", ", result.Stamps.Select(s => s.EntityType))}); FR-05 allows exactly one, so none is picked.",
+                OntologyWriterFailureReason.CoreRecordAmbiguous);
         }
     }
 

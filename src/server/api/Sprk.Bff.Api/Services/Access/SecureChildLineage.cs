@@ -99,8 +99,14 @@ internal static class SecureChildLineage
         // out, as on the Signal row (see the remarks). The typed core lookups STAY: they are the decision context (D-34, the
         // core the decision was made on) and a lineage parent, not a stamp awaiting retirement. Ontology task 144 K1 and 145
         // keep them; the stamp follows the subject, the typed core does not, so stamp == core is no reason to retire one.
+        // ebilling-r1 task 026 (FR-15, D-94): + the invoice-line subject, sprk_regardinginvoiceline -> sprk_billingevent (live
+        // spaarkedev1 2026-10-16). An explicit tuple: Regarding("sprk_billingevent") would build sprk_regardingbillingevent.
         T("sprk_decisionrecord", "sprk_decisionrecords",
-            new[] { ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment) }
+            new[]
+                {
+                    ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment),
+                    ("sprk_regardinginvoiceline", "sprk_billingevent"),
+                }
                 .Concat(Regarding("sprk_communication", "sprk_document", "sprk_event", "sprk_invoice", Matter, Project,
                     "sprk_todo", WorkAssignment))
                 .ToArray()),
@@ -168,8 +174,13 @@ internal static class SecureChildLineage
         // read live, spaarkedev1 2026-10-07: the typed core lookup sprk_matter, the subject's regarding lookups and the
         // Decision Record. sprk_regardingservicerequest is left out (see the remarks); sprk_policy, sprk_policyversion and
         // sprk_corerecordtype (a catalog row) are not filing parents.
+        // ebilling-r1 task 026 (FR-15, D-94): + sprk_regardinginvoiceline -> sprk_billingevent, as on the Decision Record row.
         T("sprk_signal", "sprk_signals",
-            new[] { ("sprk_matter", Matter), ("sprk_decisionrecord", "sprk_decisionrecord") }
+            new[]
+                {
+                    ("sprk_matter", Matter), ("sprk_decisionrecord", "sprk_decisionrecord"),
+                    ("sprk_regardinginvoiceline", "sprk_billingevent"),
+                }
                 .Concat(Regarding("sprk_communication", "sprk_document", "sprk_event", "sprk_invoice", Matter, Project,
                     "sprk_todo", WorkAssignment))
                 .ToArray()),

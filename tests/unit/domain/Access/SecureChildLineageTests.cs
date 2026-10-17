@@ -48,7 +48,7 @@ public class SecureChildLineageTests
     }
 
     /// <summary>
-    /// Task 182 (contract C4): the Decision Record is filed under its subject like a Signal. Its row carries the same eight
+    /// Task 182 (contract C4): the Decision Record is filed under its subject like a Signal. Its row carries the same nine (eight before ebilling-r1 task 026)
     /// subject lookups as the Signal row (never the service request's) and keeps the three typed core lookups: they are
     /// the decision context and a lineage parent, kept for good (ontology task 144 K1 / 145), not retired after a backfill.
     /// </summary>
@@ -60,7 +60,9 @@ public class SecureChildLineageTests
             .Where(l => l.Key.StartsWith("sprk_regarding", StringComparison.Ordinal))
             .ToDictionary(l => l.Key, l => l.Value);
 
-        signalSubjects.Should().HaveCount(8);
+        // Nine since ebilling-r1 task 026 (FR-15, D-94): + sprk_regardinginvoiceline -> sprk_billingevent.
+        signalSubjects.Should().HaveCount(9);
+        signalSubjects.Should().Contain("sprk_regardinginvoiceline", "sprk_billingevent");
         decisionRecord.Where(l => l.Key.StartsWith("sprk_regarding", StringComparison.Ordinal))
             .ToDictionary(l => l.Key, l => l.Value)
             .Should().BeEquivalentTo(signalSubjects);
@@ -70,7 +72,7 @@ public class SecureChildLineageTests
             ["sprk_project"] = "sprk_project",
             ["sprk_workassignment"] = "sprk_workassignment",
         });
-        decisionRecord.Should().HaveCount(11);
+        decisionRecord.Should().HaveCount(12);
         decisionRecord.Keys.Should().NotContain("sprk_regardingservicerequest");
     }
 

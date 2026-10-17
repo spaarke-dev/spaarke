@@ -25,6 +25,8 @@ internal sealed class RecordTypeCatalogStub : ICommunicationDataverseService
         ["sprk_servicerequest"] = Guid.Parse("144c6790-d58a-f111-8076-7ced8d174eb8"),
         ["sprk_document"] = Guid.Parse("b83dbfc1-8600-f111-8407-7c1e520aa4df"),
         ["sprk_invoice"] = Guid.Parse("8e4a04f1-8600-f111-8406-7c1e525abd8b"),
+        // ebilling-r1 task 026: created on spaarkedev1 2026-10-16 by Deploy-EbillingSignalLineSubjectSchema.ps1 ("Invoice Line").
+        ["sprk_billingevent"] = Guid.Parse("fb30d221-bbc9-f111-a05a-7c1e520a989f"),
     };
 
     private readonly Func<string, CancellationToken, Task<Entity?>> _query;

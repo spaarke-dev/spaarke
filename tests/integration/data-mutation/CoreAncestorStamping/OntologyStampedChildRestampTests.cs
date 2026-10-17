@@ -43,6 +43,8 @@ public class OntologyStampedChildRestampTests
             ("sprk_regardingcommunication", "sprk_communication"), ("sprk_regardingdocument", "sprk_document"),
             ("sprk_regardingevent", "sprk_event"), ("sprk_regardinginvoice", "sprk_invoice"),
             ("sprk_regardingtodo", "sprk_todo"),
+            // ebilling-r1 task 026 (FR-15, D-94): the invoice-line subject.
+            ("sprk_regardinginvoiceline", "sprk_billingevent"),
         });
 
         CoreAncestorResolver.StampSourceColumns[table].Select(s => s.Column).Should().NotIntersectWith(
