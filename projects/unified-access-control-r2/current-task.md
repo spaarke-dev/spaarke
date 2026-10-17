@@ -16,7 +16,7 @@
 | PR | Issue | Worktree / branch | Head | State |
 |---|---|---|---|---|
 | (099b, pending) | #1010 D-11 half | C:/wt099b `feat/uac-099b-grant-team-ownership` from bed14dd67 | — | Executor running (Opus high). Then 2 adversarial passes (auth) and owner sign-off; the main session runs backfill -Apply after merge. |
-| #2061 (186, DRAFT) | task 186 | C:/wt186 `feat/uac-186-workforce-ceiling` (base b59e7e2a1 = master + R3 61e74ef64) | a6d12a0b5 | Built: 44/44 new tests, 1598 external-access tests, guard 87, +0.008 MB, no R3-file hunks. **Adversarial pass 1 running.** Still owed: pass 2, a full integration run before merge, owner questions K1 (unmapped routes) and K2 (/me/entitlements), the owner's role edit, and R3's interim PR merging first. |
+| #2061 (186, DRAFT) | task 186 | C:/wt186 `feat/uac-186-workforce-ceiling` (base b59e7e2a1 = master + R3 61e74ef64) | a6d12a0b5 | Pass 1 found two F-class issues: (1) per §0 the ceiling must cover the module-data seam and every `/api/v1/external` route a workforce contact can reach (it covered only the 6 service-request routes); (2) /me/entitlements must be intersected with the ceiling (§5). **Fix round 1 running**: declarative per-route requirements, a coverage guard, and an owner privilege table with what dev lacks. Then a scoped re-check and pass 2. Still owed: a full integration run before merge, the owner's role edit (wider than the round-101 list), and R3's interim PR merging first. |
 | (099c, pending) | #961 | C:/wt099c `feat/uac-099c-expiration-picker` from 1d435e695 | — | Executor running (Opus high): Expiration picker, TrackingFieldTrio 1.0.51. Then one adversarial pass; import on dev after merge, once the BFF with 1d435e695 is live. |
 
 ## Merged (2026-10-16/17)
