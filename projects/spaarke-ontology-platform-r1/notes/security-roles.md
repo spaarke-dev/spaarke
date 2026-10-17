@@ -1021,3 +1021,19 @@ After restoring:
 Still to do by the main session after uac-r2's check: `-Apply`, `-Verify`, the live negatives (non-admin update of a
 `sprk_signal` row, and create of a `sprk_decisionrecord`, both refused: task 008 §10.4 method), and one decision recorded in
 the deployed dev Console.
+
+## 15. 2026-10-17 — AppendTo on the Signal/Decision Record lookup targets for Spaarke Ontology Service (owner-approved; ebilling 026 F1, DI-107 #2046)
+
+- **Why**: the writer (`mi-ontology-writer-dev`, systemuser `3121bf1b-…`) sets lookups on `sprk_signal` / `sprk_decisionrecord` to tables
+  its own role held no AppendTo on. `sprk_billingevent` (ebilling 026's invoice-line subject) had no route at all, so every line-subject
+  Signal or Decision Record would fail 0x80040220. Matter, project, invoice, record-type catalog and the rest worked only through the root
+  team "Spaarke" Basic User role (#2046).
+- **Approval**: owner, 2026-10-16 ("yes grant 'append to'; also for other records").
+- **Change**: `AddPrivilegesRole` on the root **Spaarke Ontology Service** `b1fb7ee0-bfbe-f111-aaaf-0022482913fc` (BU `06fbf21c-…`),
+  all at **Global**: `prvAppendTosprk_AnalysisAction`, `prvAppendTosprk_BillingEvent`, `prvAppendTosprk_Document`,
+  `prvAppendTosprk_Invoice`, `prvAppendTosprk_Matter`, `prvAppendTosprk_Project`, `prvAppendTosprk_RecordType_Ref`,
+  `prvAppendTosprk_ServiceRequest`. The set is every `ReferencedEntity` of a ManyToOne on the two tables that the role lacked, apart from
+  the ownership lookups (businessunit, owner, team).
+- **Read-back**: 50 → 58, all 8 at Global, nothing unrequested, nothing removed. Child BU copy `0d5642b7-…` holds 58. The writer
+  resolves `prvAppendTosprk_BillingEvent`, `_Matter`, `_RecordType_Ref` at Global via BU `06fbf21c-…`. uac-r2 notified before and after.
+- **Repo**: `SpaarkeMaster/Roles/Spaarke Ontology Service.xml` + a guard test follow in an ontology PR. Other environments need the same grant.
