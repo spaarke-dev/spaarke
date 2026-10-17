@@ -45,9 +45,10 @@ the three root types; the flag is read per composition, so any = all, and "any" 
 - Flag on returns `Sources = (SystemUserMembership: false, ContactGrants, StandingGrantMembership: false, …,
   ImpersonatedRootSet: true)`.
 
-### 2.3 Writes (`ExternalProjectDataEndpoints.WithDataverseRightsAsync`, `:855`)
+### 2.3 Writes (`ExternalProjectDataEndpoints.WithDataverseRightsAsync`, `:897`)
 
-`WithDataverseRightsAsync(caller, composed, entitySet, recordId, readCallerRights, logger, ct)`:
+`WithDataverseRightsAsync(caller, composed, entitySet, recordId, readCallerRights, logger, ct, childCreatePrivilege = null,
+readCallerPrivilege = null)`:
 
 - returns `composed` unchanged, asking nothing, unless `caller.DataverseConfirmsWrites` **and** `composed` has Read — so a
   record outside the set, or vetoed off it, is refused by the route with no Dataverse call;
@@ -55,14 +56,34 @@ the three root types; the flag is read per composition, so any = all, and "any" 
   `composed` carries more than Read under the flag is the contact-grants union (B-17).
 - a probe exception (other than the caller's own cancellation) or a null reader adds `None` (NFR-01). The real probe
   already answers `None` on a missing token, a failed exchange or a non-2xx.
+- **Fix round 1 (F1).** When Dataverse answers AppendTo and `composed` lacks Create, the Create it surfaces is kept only
+  if the caller also holds the child table's Create privilege (`:935-940`, `CallerHoldsChildCreateAsync` `:954`):
+  `prvCreatesprk_Todo` (`TodoSourceAccessFilter.CreateTodoPrivilege`), `prvCreatesprk_Document`
+  (`CommunicationRecordAuthorizationFilter.CreateDocumentPrivilege`), `prvCreatesprk_Event`
+  (`EventEndpoints.CreateEventPrivilege`), `prvCreatesprk_Communication` (`ExternalMessageEndpoints.CreateMessagePrivilege`,
+  `:167`, new). A null privilege name, a null reader, a `false` answer or a fault (other than the caller's own
+  cancellation) strips Create — fail closed, logged `[WF-AUTHZ]`. A Create the contact grants already put in `composed`
+  is not asked about (B-17 is unchanged). The BFF writes the child app-only, so without this Dataverse never checked the
+  caller's Create privilege on the child table.
 
-`SurfaceRightsFromDataverse` (`:911`): Read, Write and Delete as Dataverse answers them; **AppendTo → Create** ("may add a
-child under this record"). Dataverse's own `CreateAccess` from RetrievePrincipalAccess is table-level (the caller's create
-privilege on the record's table), not "may attach to this record", so it carries nothing. Precedent: `OperationAccessPolicy`
-`entity.associate_document` / `event.attach_regarding` = AppendTo.
+`SurfaceRightsFromDataverse` (`:1005`): Read, Write and Delete as Dataverse answers them; **AppendTo → Create** ("may add a
+child under this record", subject to the Create-privilege half above). Dataverse's own `CreateAccess` from
+RetrievePrincipalAccess is table-level (the caller's create privilege on the record's table), not "may attach to this
+record", so it carries nothing. Precedent: `OperationAccessPolicy` `entity.associate_document` /
+`event.attach_regarding` = AppendTo.
 
-`CallerRightsReader(probe, httpContext)` (`:922`) binds the probe to this request's bearer token
-(`TokenHelper.ExtractBearerTokenOrNull`).
+`CallerRightsReader(probe, httpContext)` binds the probe to this request's bearer token
+(`TokenHelper.ExtractBearerTokenOrNull`); `CallerPrivilegeReader(probe, httpContext)` (`:1028`, fix round 1) binds
+`CallerRecordAccessProbe.CallerHoldsPrivilegeAsync` the same way.
+
+**Why that checker (CLAUDE.md §11).** Existing: `CallerRecordAccessProbe.CallerHoldsPrivilegeAsync` (WhoAmI +
+`RetrieveUserSetOfPrivilegesByNames`, OBO as the caller, uncached, fail closed) — already the child-create gate of
+`TodoSourceAccessFilter` (task 166, `prvCreatesprk_Todo` + AppendTo on the source) and `CommunicationRecordAuthorizationFilter`
+(G5, `prvCreatesprk_Document`), and used by `QuickCreateSourceAccessFilter`, `FinanceAuthorizationFilter`,
+`RecordRouteAccessAuthorizationFilter`, `DelegationRuleFilter`, `ReportingEndpoints`, `RecordCreationService` and the
+decision action executors. Extension: reused as is, no change. Rejected: `UserPrivilegeChecker` (Read only, app-only
+impersonation, 24 h cache — the brief says caller-scoped and no new cache). Cost of doing nothing: a systemuser whose
+role refuses `sprk_todo` Create in MDA could create one here through AppendTo on the project.
 
 ### 2.4 Write-route inventory — every write under `/api/v1/external`
 
@@ -71,21 +92,21 @@ the write for a Dataverse-decided caller.
 
 | Route | Map | Target record asked about | Right needed | Confirmation site |
 |---|---|---|---|---|
-| `POST /projects/{id}/todos` | `:153` | the project (`sprk_projects`) | AppendTo → Create | `CreateTodoForRoot` → `RightsForRootWriteAsync` `:729`, `:930` |
-| `POST /matters/{id}/todos` | `:183` | the matter (`sprk_matters`) | AppendTo → Create | same |
-| `POST /workassignments/{id}/todos` | `:199` | the work assignment (`sprk_workassignments`) | AppendTo → Create | same |
-| `POST /projects/{id}/documents` | `:211` | the project | AppendTo → Create | `UploadDocumentForParent` `:1448` → `RightsForDocumentParentAsync` `RootRightsForParentAsync` |
-| `POST /matters/{id}/documents` | `:259` | the matter | AppendTo → Create | same |
-| `POST /workassignments/{id}/documents` | `:295` | the work assignment | AppendTo → Create | same |
-| `POST /invoices/{id}/documents` | `:372` | **the invoice** (`sprk_invoices`), before the secure-roots gate | AppendTo → Create | `RightsForInvoiceAsync` `:1093` |
-| `POST /servicerequests/{id}/documents` | `:331` | — not confirmed | requester rule | open question (e) |
-| `POST /projects/{id}/events` | `:419` | the project | AppendTo → Create | `CreateEvent` `:1895` |
-| `PATCH /todos/{id}` | `:445` | **the to-do** (`sprk_todos`); the root's Read stays the scope check | Write | `UpdateTodo` `:2018` |
-| `DELETE /documents/{id}` | `:464` | the row (`sprk_documents`) | Delete (+ creator stamp + parent Read, unchanged) | `AuthorizeDeleteOwnAsync` step (2b) `:2167` |
+| `POST /projects/{id}/todos` | `:153` | the project (`sprk_projects`) | AppendTo + `prvCreatesprk_Todo` → Create | `CreateTodoForRoot` `:724` → `RightsForRootWriteAsync` `:755`, `:1039` |
+| `POST /matters/{id}/todos` | `:183` | the matter (`sprk_matters`) | AppendTo + `prvCreatesprk_Todo` → Create | same |
+| `POST /workassignments/{id}/todos` | `:199` | the work assignment (`sprk_workassignments`) | AppendTo + `prvCreatesprk_Todo` → Create | same |
+| `POST /projects/{id}/documents` | `:211` | the project | AppendTo + `prvCreatesprk_Document` → Create | `UploadDocumentForParent` `:1552` → `RightsForDocumentParentAsync` `:1092` (`:1146-1148`) |
+| `POST /matters/{id}/documents` | `:259` | the matter | AppendTo + `prvCreatesprk_Document` → Create | same |
+| `POST /workassignments/{id}/documents` | `:295` | the work assignment | AppendTo + `prvCreatesprk_Document` → Create | same |
+| `POST /invoices/{id}/documents` | `:372` | **the invoice** (`sprk_invoices`), before the secure-roots gate | AppendTo + `prvCreatesprk_Document` → Create | `RightsForInvoiceAsync` `:1188` (`:1218`) |
+| `POST /servicerequests/{id}/documents` | `:331` | — not confirmed | requester rule | decision (e), accepted |
+| `POST /projects/{id}/events` | `:419` | the project | AppendTo + `prvCreatesprk_Event` → Create | `CreateEvent` `:2027` (`:2047-2049`) |
+| `PATCH /todos/{id}` | `:445` | **the to-do** (`sprk_todos`); the root's Read stays the scope check | Write | `UpdateTodo` `:2115` |
+| `DELETE /documents/{id}` | `:464` | the row (`sprk_documents`) | Delete (+ creator stamp + parent Read, unchanged) | `AuthorizeDeleteOwnAsync` `:2270`, step (2b) `:2317` |
 | `DELETE /todos/{id}` | `:474` | the row (`sprk_todos`) | Delete (+ stamp + Read) | same |
 | `DELETE /events/{id}` | `:482` | the row (`sprk_events`) | Delete (+ stamp + Read) | same |
-| `DELETE /servicerequests/{id}` | `:494` | — not confirmed | requester rule | open question (e) |
-| `POST /{root}/{id}/messages` | `ExternalMessageEndpoints.cs:107` | the project / matter / work assignment / invoice itself; a service request is not confirmed | AppendTo → Create | `PostMessageCoreAsync` `:251-253` |
+| `DELETE /servicerequests/{id}` | `:494` | — not confirmed | requester rule | decision (e), accepted |
+| `POST /{root}/{id}/messages` | `ExternalMessageEndpoints.cs:107` | the project / matter / work assignment / invoice itself; a service request is not confirmed | AppendTo + `prvCreatesprk_Communication` → Create | `PostMessageCoreAsync` `:192`, `:264-266` |
 | `POST /servicerequests` (intake) | `ExternalIntakeEndpoints.cs:110` | no existing target — a new request filed by the caller's own contact | module entitlement (never membership) | not applicable |
 | `POST /notifications/seen` | `ExternalNotificationFeedEndpoints.cs:109` | the caller's own last-seen marker | — | not applicable |
 | `POST /contact-grants`, `POST /contact-grants/revoke` | `ContactGrantEndpoints.cs:50`, `:77` | — | — | **unreachable by a systemuser**: `ContactGrantorAuthorizationFilter` refuses one (`ContactGrantorAuthorizationFilter.cs:339`) |
@@ -94,6 +115,17 @@ the write for a Dataverse-decided caller.
 
 No write on the surface rests on `MembershipTermRights` under the flag: the only writes not confirmed are the requester's
 own service request (requester rule), self-identity and self-state writes, none of which consult membership.
+
+**Enforced by** (fix round 1): `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.ExternalWrites.cs`. Every
+`MapPost`/`MapPatch`/`MapPut`/`MapDelete` on `/api/v1/external` must reach `WithDataverseRightsAsync` (a name-based walk of
+at most 5 hops over the `Api/ExternalAccess/` units, on lexed code with string literals blanked) or be one of 9 exemptions,
+each with a reason: `POST servicerequests`, `POST servicerequests/{id}/documents`, `DELETE servicerequests/{id}`
+(requester rule, decision e), `POST notifications/seen`, `POST registration`, `POST workforce/link` (self state / identity),
+`POST contact-grants`, `POST contact-grants/revoke` (systemuser refused by `ContactGrantorAuthorizationFilter`), and
+`POST api/dataverse/fetch` (a read in POST shape). Controls: the real tree has no violation; every exemption names a live
+route and has a reason; a fixture fires on a DELETE that names the call only in a string literal and on a PUT that never
+reaches it, and does not fire on a POST two hops away, on a PATCH lambda or on a GET; an exemption silences its route. A
+mutation of `CreateEvent` (confirmation removed) fired the guard; the file was restored.
 
 ### 2.5 Truncation (NFR-03)
 
@@ -115,12 +147,17 @@ own service request (requester rule), self-identity and self-state writes, none 
 |---|---|---|
 | D1 | Round 59 shape: the impersonated set confers Read; writes confirmed per route, per record. No batched RPA over the set | Owner round 59 item 2 (the review's cheaper shape replaces the 2026-09-30 per-root rights map) |
 | D2 | Widen (`composed | Dataverse`), not replace | Keeps the B-17 contact-grants union on writes; under the flag no constant can reach `composed` |
-| D3 | AppendTo → Create; Dataverse `CreateAccess` ignored | RPA's CreateAccess is table-level; AppendTo is "attach to this record" everywhere else in the BFF |
+| D3 | **Revised in fix round 1 (F1 option b):** Create = AppendTo on the parent **AND** the caller's `prvCreate<child>` privilege; Dataverse `CreateAccess` ignored. Append (`prvAppend<child>`) not checked — known limit | RPA's CreateAccess is table-level; AppendTo is "attach to this record" everywhere else in the BFF. The child is written app-only, so Dataverse never asked the caller's Create privilege on the child table; the task 166 / G5 precedent (AppendTo on the source + `prvCreatesprk_Todo` / `_Document`) closes that. Append would cost another privilege round trip (the checker answers one name per call); every SpaarkeMaster role granting Create on the four tables (Spaarke Basic User, Spaarke Core User, Spaarke Office Add In User) grants Append too (role XML) |
 | D4 | PATCH to-do confirms on the to-do (Write), not its root | The target record is the to-do; the root's Read stays the scope check |
 | D5 | Delete-own adds Dataverse Delete on the row; the creator stamp stays required | FR-26 stamp unchanged; Dataverse adds its own answer, never stands in for the stamp |
 | D6 | Invoice upload confirms on the invoice, before the secure-roots gate | The invoice is the target record; a Dataverse-confirmed Create meets the same gate as a grant-derived one |
-| D7 | Service-request writes not confirmed | Requester scope is neither a grant nor membership; widening could only add nothing; replacing would refuse requesters Dataverse does not admit (their request is owned by their BU's team). Owner question (e) |
-| D8 | Read routes (lists, `canCreate`, `/me`) ask nothing | Cost; a per-row RPA on every list is the shape round 59 rejected. Consequence: UX gap (g) |
+| D7 | Service-request writes not confirmed — **accepted (decision e)** | Requester scope is neither a grant nor membership; widening could only add nothing; replacing would refuse requesters Dataverse does not admit (their request is owned by their BU's team). Explicit access Dataverse cannot see, like B-17. The owner can reverse it |
+| D8 | **Revised in fix round 1 (F4 option g):** a view scoped to ONE record asks Dataverse once for a Dataverse-decided caller (one RPA, plus the D3 privilege read when the answer is AppendTo) and reports `canCreate` = that record's create-route answer: document lists (project / matter / work assignment / invoice; a service request's list keeps the requester rule, decision e), to-do lists (three roots), the project event list (the only event list with a create route). Multi-record reads, module fetch and `/me` ask nothing; `/me` says `writeAccessPerRecord: true` instead | Round 59 rejected a per-row RPA over the set, not one confirmation for the record in hand. The level `/me` reports for such a caller says only what they may SEE (Read), so the SPA would hide controls the routes admit |
+| D12 | The privilege half reuses `CallerRecordAccessProbe.CallerHoldsPrivilegeAsync`; no new checker, no cache | §2.3 "Why that checker" |
+| D13 | `canCreate` on `ExternalCollectionResponse<T>` is `bool?`, written only when the list asked Dataverse; `/me` `writeAccessPerRecord` omitted when false | Flag off, and every caller other than a Dataverse-decided systemuser, get byte-identical responses |
+| D14 | The route rule is mechanised by `RouteAuthorizationGuardTests.ExternalWrites` | CLAUDE.md §16 enforcement ladder; was the "enforcement follow-up" in §8 |
+| D15 | Delete-own needs Dataverse Delete on the row (D5) — **accepted (decision c)** | MDA parity: a creator whose role lacks Delete cannot delete the row in MDA either |
+| D16 | Non-root entity types throw under the flag — **known limit (decision d)** | Fails closed; no production caller reaches it (§8 d) |
 | D9 | No DI change | `CallerRecordAccessProbe` (typed client, `ExternalAccessModule.cs:157`), `IImpersonatedRootSetSource` (`:317`) and the options binding (`BindConfiguration("ExternalAccess")`) already exist; `AccessibleRecordSetService` (`:542`) takes the source and options as optional constructor parameters. The POML names `ExternalAccessModule.cs` as a modified file; nothing there needed to change |
 | D10 | Truncation in both flag states | The AC is unqualified; flag-off capping was silently dropped (pre-existing defect) |
 | D11 | Flag-off membership `Capped` previously dropped — fixed in scope | Same code path; filing it separately would leave NFR-03 half-done |
@@ -156,6 +193,23 @@ Test files: `AccessibleRecordSetServiceTests` (ARS), `CallerPrincipalResolverTes
 | ADR-034 path B, concise + full | `docs/adr/ADR-034-user-record-membership.md` Amendment A2; concise draft `notes/036-adr034-concise-amendment.md` (main session applies) | — |
 | MANUAL LIVE GATE (i)–(v); PR cites the canary | **Not run** (brief: no canary, no dev writes). Command in §7 | — |
 
+**Fix round 1 additions.** More test files: `CallerPrincipalTests` (ME), `RouteAuthorizationGuardTests.ExternalWrites`
+(ARCH), and the SPA's `src/client/external-spa/tests/PerRecordWriteAccess.test.tsx` (SPA). The test double
+`CallerRecordAccessProbeDouble` gained `Holds(...)`, `PrivilegeFault` and `PrivilegeCalls`; the pre-existing allow cases
+(TODO `Fr20_CreateTodo_AppendToInDataverse_IsCreated`, the event theory, DOC `Fr20_Upload_AppendToInDataverse_Is201`, MSG
+`Fr20_AppendToInDataverse_Is201`) now also hold the child Create privilege — the allow side of F1.
+
+| Item | Test(s) | Twin (must-not-fire) |
+|---|---|---|
+| F1: AppendTo yes + Create privilege no → 403, nothing written, on EACH child-create route | TODO `Fr20_CreateTodo_AppendToButNoCreatePrivilege_Is403_AndWritesNothing` (3 roots), `Fr20_CreateEvent_IsConfirmedOnTheProject` (`holdsCreate: false` row); DOC `Fr20_Upload_AppendToButNoCreatePrivilegeOnSprkDocument_Is403_AndWritesNothing` (project, matter, work assignment, invoice); MSG `Fr20_AppendToButNoCreatePrivilegeOnTheMessageTable_Is403InsufficientRights_AndCreatesNoRow` (4 roots) | the allow rows above (both held → created); TODO `Fr20_CreateTodo_ContactGrantUnion_StillAllows` and the PATCH theory assert no privilege is asked |
+| F1: privilege read fault → 403 | TODO `Fr20_CreateTodo_PrivilegeReadFault_Is403_AndWritesNothing`; DOC `Fr20_Upload_APrivilegeReadThatFaults_Is403_AndWritesNothing`; MSG `Fr20_APrivilegeReaderThatThrows_OrNoPrivilegeReader_Is403_AndCreatesNoRow` | — |
+| F1: the asked privilege names are the live ones | MSG `Fr20_TheMessageCreatePrivilege_IsTheLiveName`; TODO / DOC assert the exact name in `PrivilegeCalls` | — |
+| F4: flag-on systemuser with Write/AppendTo → `canCreate: true` on X's list; Read only → `false`; probe fault → `false` | DOC `Fr20_List_CanCreate_IsTheUploadRoutesDataverseAnswer` (12 rows: 4 parents × Read\|Write\|AppendTo with the privilege → true / without it → false / Read only → false; one probe, for the record in hand), `Fr20_List_AProbeThatFaults_ReportsCanCreateFalse_AndStillLists`; TODO `Fr20_TodoList_CanCreate_IsTheCreateRoutesDataverseAnswer` (9 rows), `Fr20_TodoList_AProbeThatFaults_ReportsCanCreateFalse`, `Fr20_ProjectEventList_CanCreate_IsTheCreateRoutesDataverseAnswer` | DOC `Fr20_List_FlagOff_ReportsCanCreateFromTheComposedRights_AndAsksDataverseNothing`; TODO `Fr20_TodoList_FlagOff_IsUnchanged_AndAsksNothing` (no `canCreate` key), `Fr20_EventList_WithoutACreateRoute_OrFlagOff_IsUnchanged` |
+| F4: `/me` truthful without a per-record call | ME `Me_DataverseDecidedSystemUser_SaysWriteAccessIsPerRecord_AndKeepsItsLevels` | ME `Me_EveryOtherCaller_OmitsWriteAccessPerRecord_SoTheWireIsUnchanged` (no key on the wire) |
+| F4: the SPA takes create/upload from the record's list for a per-record caller | SPA: SmartTodo "Add Task" (ViewOnly level + `canCreate: true` → offered; Collaborate + `false` → hidden; missing → hidden), EventsCalendar "Create Event" (same two), project DocumentLibrary "Upload Document" (same two) | SPA: the three "every other caller keeps the level rule" cases |
+| Guard: every external write route reaches the confirmation or is an exemption with a reason | ARCH `EveryExternalWriteRoute_ReachesTheDataverseConfirmation_OrIsAnExemptionWithAReason`, `ExternalWriteExemptions_EachNameALiveWriteRoute_AndCarryAReason` | ARCH `ExternalWriteGuard_FiresOnAWriteRouteWithoutTheConfirmation_AndNotOnOneThatReachesIt` (must-fire and must-not-fire fixtures) |
+| Flag-off byte-identical; existing tests untouched except the F1 allow cases above | `ExternalAccessContractTests`, `ExternalDeleteOwnTests` unchanged and green; every flag-off twin above | — |
+
 ### Fail-before evidence
 
 The behaviour was neutered in place, the API surface kept (flag read forced false; `WithDataverseRightsAsync` returning
@@ -166,14 +220,25 @@ must-not-fire twins and deny-direction cases a deny-everything base also satisfi
 403, stamp first, missing SystemUserId → throw, which the task 020 invariant already did). Each deny-direction case is
 paired with an allow case that fails before. After: **98 / 98 pass**.
 
+**Fix round 1.** BFF: the four behaviours were neutered in place (the Create-privilege strip disabled; the list
+confirmation removed; list `canCreate` never written; `/me` `writeAccessPerRecord` forced false), then the filter
+`CallerPrincipalTests | ExternalAccessContractTests | ExternalTodoScopeTests | ExternalRecordDocumentRoutesTests |
+ExternalMessageSendTests | ExternalDeleteOwnTests` run: **55 failed / 278 passed** of 333 (the passes are the flag-off
+twins, the deny-direction cases and the pre-existing tests). Restored (`cmp` identical): **504 / 504**. ArchTests: the
+guard fired on a mutated `CreateEvent` (confirmation removed); restored. SPA: the HEAD versions of the eight changed
+sources put back → `PerRecordWriteAccess.test.tsx` **7 failed / 3 passed** (the three level-rule twins pass by design);
+after: **10 / 10**.
+
 ## 5. NFR-02 round trips
 
 | Path | Dataverse calls added |
 |---|---|
 | Flag on, principal composition, cache miss | 3 impersonated id-only reads (one per root type, `$select=<id>&$top=5000`), replacing the membership walk's ≥ 3 resolver pages. Cached 2 minutes per (user, type): 0 on a hit |
 | Flag on, each confirmed write (to-do, upload, event, PATCH, message) | +1 RetrievePrincipalAccess as the caller (OBO; the token exchange is MSAL-cached) |
+| Flag on, a child create Dataverse answers AppendTo for (to-do, upload, event, message) — fix round 1 | +1 privilege read as the caller (WhoAmI + `RetrieveUserSetOfPrivilegesByNames`; uncached). Not asked when the answer lacks AppendTo or a contact grant already carries Create |
 | Flag on, delete-own | +1 RPA on the row, after the existing reads |
-| Flag on, reads (lists, `/me`, module fetch) | 0 |
+| Flag on, a single-record list (documents of X, to-dos of X, a project's events) — fix round 1 | +1 RPA on X, + the privilege read when it answers AppendTo: **+1 probe per single-record view** |
+| Flag on, `/me`, module fetch, multi-record reads | 0 |
 | Flag off; CIAM; workforce contacts | 0 |
 
 ## 6. Verification
@@ -201,6 +266,30 @@ paired with an allow case that fails before. After: **98 / 98 pass**.
   none in `IDataverseClient.ts`.
 - `git grep WorkforceProjectAccessLevel -- src tests`: 0.
 
+**Fix round 1 (2026-10-17).**
+
+- **Build**: `Sprk.Bff.Api` 0 warnings, 0 errors. `dotnet format whitespace --verify-no-changes` on the changed files:
+  the BFF files and the ArchTests file are clean. The only findings in the changed test files are on lines this round did
+  not write: the expression-bodied `=> new() { … }` principal builders (`ExternalTodoScopeTests.cs:1039-1054` from the
+  first 036 build, `ExternalMessageSendTests.cs:107-120` from `664e6dfa5`, `CallerPrincipalTests.cs:293,297` from
+  `b03f71326`) — the file's existing idiom; not reformatted (scope).
+- **Filtered tests (Sprk.Bff.Api.Tests)** — `CallerPrincipalTests | ExternalAccessContractTests | ExternalTodoScopeTests |
+  ExternalRecordDocumentRoutesTests | ExternalMessageSendTests | ExternalDeleteOwnTests`: **504 passed, 0 failed**
+  (fail-before: 55 failed / 278 passed of 333, §4).
+- **ArchTests** (`RouteAuthorizationGuard* | TenantIsolation | ExternalAccessQueryIntegrityGuard |
+  ExternalChildRowLiveParentGuard | CallerIdentityGuard | ADR008`): **179 passed** (176 + the 3 new guard tests).
+- **SPA** (`src/client/external-spa`): `vitest run` **1040 / 1040** (38 files); `tsc --noEmit` 0 errors; ESLint 0;
+  prettier clean (pre-commit). `node scripts/quality/client-lint/client-lint.mjs check`: **exit 0, all 10 packages ok**.
+  external-spa is not one of client-lint's packages. The first run in this worktree failed 8 packages the branch does not
+  touch, because their `node_modules` were not installed (type-aware rules read unresolved types, e.g. `Reporting`
+  `ReportDropdown.tsx:278` "always falsy"); after `client-lint.mjs install` (no tracked file changed) every package passes.
+- **Publish** (same method: `dotnet publish -c Release -r linux-x64 --self-contained false`, the same deflate script):
+  base `5b2375f6f` 38,250,205 bytes (re-zipped 38,249,877) → fix round 1 **38,255,137** bytes: **+4,932 bytes** (+5,260
+  like for like; +1,112 over the pre-fix branch's 38,254,025); uncompressed 130,852,084 → 130,874,252 (+22,168). Total
+  ≈ 36.5 MiB, under 55 / 60 MB.
+- **CVE**: `dotnet list src/server/api/Sprk.Bff.Api package --vulnerable --include-transitive` — no vulnerable packages;
+  no package or csproj change.
+
 ## 7. The NFR-04 canary (manual gate — not run here)
 
 `tests/integration/auth/UnifiedAccessControl/ImpersonationNegativeCanaryTests.cs`; environment contract in
@@ -226,35 +315,58 @@ two sizes in `notes/task-034-negative-canary.md`.
 
 ## 8. Open questions and escalations
 
-- **(a) WorkforceHome-linked systemusers can't be probed.** The OBO probe cannot exchange a customer-directory (A9) token
-  for a Dataverse token in Spaarke's tenant, so under the flag such a user's writes deny unless contact grants allow.
-  Options: accept as a known limit until Model 1 users use a Spaarke-tenant token; or an app-only RPA keyed on the
-  systemuserid (a departure from the probe's caller-token design — ADR-028 review needed). Owner decision.
-- **(b) RPA CreateAccess semantics.** Decided D3 (AppendTo → Create). Flagged for review.
-- **(c) Delete-own needs Dataverse Delete on the row** in addition to the stamp (D5). A creator whose role lacks Delete on
-  `sprk_document`/`sprk_todo`/`sprk_event` can no longer delete their own row under the flag. Confirm.
-- **(d) Non-root entity types throw under the flag.** `ComposeAsync` is called only by `WorkforcePrincipalStrategy` for the
-  three root types, and `IsRecordAccessibleAsync` / `IsOperationPermittedAsync` have no production callers, so nothing
-  reaches it. Stated, not changed.
-- **(e) Service-request writes** (upload, message, delete) keep the requester rule and are not confirmed (D7). Round 59
-  says "every write route"; these rest on the requester scope, not membership. Owner: confirm, or require a Dataverse
-  answer (which would refuse requesters whose request is owned by another BU's team).
-- **(f) C-1 ordering.** The impersonated read is `$select=<id>&$top=5000` with no `$orderby`, so which 5,000 records a
-  capped set keeps is Dataverse's default order. The cap is flagged (`truncated`); the ordering is an owner decision
-  (escalation trigger in the POML) — not chosen here.
-- **(g) Write affordances under the flag (must be settled before enabling).** Dataverse-term records are listed at Read,
-  so `/me` reports ViewOnly and the document list `canCreate = false`; the SPA (`DocumentLibrary.tsx`,
-  `RecordDetailModal.tsx`) hides create/upload although the routes admit writes Dataverse confirms. Options: a batched RPA
-  for affordances (the cost round 59 avoided); a distinct "Dataverse decides" level the client treats as "offer and let
-  the route decide"; or the client always offers and handles 403. Pinned by DOC
-  `Fr20_List_AsksDataverseNothing_AndReportsCanCreateFromTheComposedRights`.
+Status after fix round 1 (main-session decisions, 2026-10-17): (b), (c), (d), (e), (g) and the enforcement follow-up are
+settled; **(a) and (f) are open with the owner.**
+
+- **(a) OPEN — owner. WorkforceHome-linked systemusers can't be probed.** The OBO probe cannot exchange a
+  customer-directory (A9) token for a Dataverse token in Spaarke's tenant, so under the flag such a user's writes deny
+  unless contact grants allow — and since fix round 1, their single-record lists report `canCreate: false` (the same
+  answer, fail closed). Options:
+  1. **Known limit** until Model 1 users carry a Spaarke-tenant token: they read under the flag, and write only where a
+     contact grant allows.
+  2. **(Recommended)** An **app-only RetrievePrincipalAccess naming the systemuser principal** (`Principal =
+     systemusers(<id>)`), and the same for the Create privilege (`RetrieveUserSetOfPrivilegesByNames` on that
+     systemuser), used only for callers whose token cannot be exchanged. Same trust basis as the A5 impersonated read
+     (the BFF application user asks Dataverse about a systemuser the authenticated identity was resolved to), so it adds
+     no new trust; Dataverse still answers from that user's own roles, teams and shares. Needs owner + ADR-028 sign-off
+     (it departs from the probe's caller-token design). **Not built here.**
+  3. Keep the flag off for tenants with WorkforceHome-linked users.
+- **(b) Settled.** D3 as revised in fix round 1 (AppendTo + the child Create privilege → Create).
+- **(c) Accepted.** Delete-own needs Dataverse Delete on the row as well as the creator stamp (D5, D15) — MDA parity: a
+  creator whose role lacks Delete on `sprk_document`/`sprk_todo`/`sprk_event` cannot delete the row in MDA either.
+- **(d) Known limit.** Non-root entity types throw under the flag. `ComposeAsync` is called only by
+  `WorkforcePrincipalStrategy` for the three root types, and `IsRecordAccessibleAsync` / `IsOperationPermittedAsync`
+  have no production callers, so nothing reaches it; it fails closed (D16).
+- **(e) Accepted.** Service-request writes (upload, message, delete) keep the requester rule and are not confirmed (D7):
+  the requester's access is explicit access Dataverse cannot see, like the B-17 contact grants. The owner can reverse
+  this (requiring a Dataverse answer would refuse requesters whose request is owned by another BU's team). The guard
+  lists the three routes as exemptions citing this decision.
+- **(f) OPEN — owner. C-1 ordering.** The impersonated read is `$select=<id>&$top=5000` with no `$orderby`, so which
+  5,000 records a capped set keeps is Dataverse's default order. The cap is flagged (`truncated`). Options: (1) leave the
+  default order (no extra sort; arbitrary but stable enough for a flagged cap); (2) `$orderby=modifiedon desc` (the most
+  recently active records survive a cap — matches what a user expects to see; one index-backed sort per read); (3)
+  `$orderby=createdon desc`. Not chosen here (escalation trigger in the POML).
+- **(g) Settled (option g, fix round 1).** Single-record views answer write affordances from Dataverse for a
+  Dataverse-decided caller (D8); `/me` says `writeAccessPerRecord: true`; the SPA takes Add Task / Create Event / Upload
+  Document from the record's list `canCreate` for such a caller and keeps the level rule for everyone else (§10).
 - **(h) Pre-existing, fixed in scope:** flag-off membership `Capped` was silently dropped (D11).
-- **Rollout:** default off; enabled on dev only after the canary passes strictly smaller and 142 and 143 are done
-  (and (g) is settled). No date can be named yet. Flag-off is transitional and does **not** close the flag-off BU
-  over-grant.
-- **Enforcement follow-up (not built):** a source-scan ArchTest that every `MapPost/MapPatch/MapPut/MapDelete` on the
-  external group either calls `WithDataverseRightsAsync` or is listed with a reason (§2.4) would mechanise the round 59
-  rule (CLAUDE.md §16 ladder). Recommended as a follow-up issue.
+- **Rollout:** default off; enabled on dev only after the canary passes strictly smaller and 142 and 143 are done, and
+  (a) is decided. No date can be named yet. Flag-off is transitional and does **not** close the flag-off BU over-grant.
+- **Enforcement — built (fix round 1):** `RouteAuthorizationGuardTests.ExternalWrites` (§2.4, D14).
+
+### Known limits (fix round 1)
+
+- **Append not checked** (D3). `prvAppend<child>` is not asked; the SpaarkeMaster roles that grant Create on the four
+  child tables grant Append too.
+- **Per-record affordances cover create/upload only.** For a flag-on caller whose `/me` level is ViewOnly, the to-do
+  status toggle, document download/version history, the AI actions and invite still follow the level, so they stay
+  hidden although a route may admit them (PATCH to-do is confirmed per record). Widening those needs a per-record answer
+  for each — not in the brief.
+- **To-do / event create is offered only on `ProjectPage`**, as before; matter and work-assignment to-do lists carry
+  `canCreate` on the wire, but the SPA has no create control there.
+- **The invoice document list may now hit the invoice gate read** for a Dataverse-decided caller (it shares the upload
+  route's rights path), so it can 503 like upload when the invoice cannot be read. Every other caller is unchanged.
+- **NFR-02**: +1 probe per single-record view for a Dataverse-decided caller (§5); `/me` and multi-record reads add 0.
 
 ## 9. Deviations
 
@@ -264,3 +376,22 @@ two sizes in `notes/task-034-negative-canary.md`.
 - `ExternalAccessModule.cs` is listed as modified in the POML; no change was needed (D9).
 - `TASK-INDEX.md` was not updated: this branch is cut from R3's tip, and the task closes on merge + deploy + the live gate.
 - The `.claude/adr` concise amendment is a draft (`036-adr034-concise-amendment.md`) for the main session.
+
+## 10. Fix round 1 (2026-10-17) — before → after
+
+Commits: `42444834e` (BFF F1 + F4), `7e75082ca` (guard), `0cee354d3` (SPA F4), plus the docs commit (ADR-034 full text,
+these notes, the concise-ADR draft).
+
+| Item | Before | After |
+|---|---|---|
+| F1 child create (to-do ×3, upload ×3 + invoice, event, message) | AppendTo on the parent alone admitted the child (`SurfaceRightsFromDataverse` AppendTo → Create) | AppendTo **and** the caller's `prvCreate<child>` (`ExternalProjectDataEndpoints.cs:935-940`, `:954`; privilege names at `:755-757`, `:1146-1148`, `:1218`, `:2047-2049`; `ExternalMessageEndpoints.cs:167`, `:264-266`). Read fault / `false` / no reader → 403, nothing written |
+| F4 single-record lists | Document list `canCreate` from the composed rights (ViewOnly for a flag-on systemuser); to-do / event lists carried no `canCreate` | Flag-on systemuser: the list's rights are the create route's own Dataverse answer (`:568-584` documents; `:713-720` to-dos; `:1990-1997` project events). Everyone else: unchanged, no `canCreate` key on to-do / event lists (`Dtos/ExternalProjectDtos.cs:28-38`) |
+| F4 `/me` | Level only; a flag-on systemuser mostly ViewOnly | `writeAccessPerRecord: true` for a Dataverse-decided caller (`ExternalUserContextEndpoint.cs:96`, `Dtos/ExternalUserContextResponse.cs:17-32`); omitted otherwise |
+| F4 SPA | Add Task / Create Event / Upload Document from the `/me` level | For a per-record caller: from the record's list `canCreate` (missing = cannot): `SmartTodo.tsx:651`, `EventsCalendar.tsx:588-590`, `DocumentLibrary.tsx:783`, `RecordDetailModal.tsx:390`; every other caller keeps the level rule |
+| Guard | Prose rule only (§8 follow-up) | `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.ExternalWrites.cs` |
+| Decisions | (a)–(g) open | (b), (c), (d), (e), (g) settled; (a), (f) open with the owner (§8) |
+
+**Client files changed** (all in `src/client/external-spa/`): `src/api/web-api-client.ts`, `src/auth/bff-client.ts`,
+`src/hooks/useAccessLevel.ts`, `src/pages/ProjectPage.tsx`, `src/components/DocumentLibrary.tsx`,
+`src/components/SmartTodo.tsx`, `src/components/EventsCalendar.tsx`, `src/components/detail/RecordDetailModal.tsx`; new
+test `tests/PerRecordWriteAccess.test.tsx`.

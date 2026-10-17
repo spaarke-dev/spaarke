@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted, as amended** |
 | Date | 2026-06-21 |
-| Updated | 2026-10-17 (Amendment A2 written — accepted 2026-10-06, owner round 75; task 036); 2026-10-08 (correction note in §5: FetchXML list helper, ISS-018 #1452 — no rule change); 2026-10-03 (Amendment A4 accepted; A3 2026-10-02; A1 2026-09-04) |
+| Updated | 2026-10-17 (Amendment A2 written — accepted 2026-10-06, owner round 75; task 036; fix round 1: a child create also needs the caller's Create privilege on the child table, single-record views report Dataverse write affordances, write-route guard); 2026-10-08 (correction note in §5: FetchXML list helper, ISS-018 #1452 — no rule change); 2026-10-03 (Amendment A4 accepted; A3 2026-10-02; A1 2026-09-04) |
 | Authors | Spaarke Engineering, R3 project |
 | Source project | `spaarke-platform-foundations-r3` Part 1 |
 | Supersedes | n/a (closes a gap — there was no prior canonical mechanism) |
@@ -402,8 +402,18 @@ group) while **`ExternalAccess:ImpersonatedRootSets:Enabled` is `true`**:
   `truncated`). That answer confers **Read**.
 - **Every write is confirmed by Dataverse.** Before any write on that plane — create to-do, upload, create event, edit a
   to-do, post a message, delete own — the route asks Dataverse, as the user, for the user's rights on the target record
-  through the existing `CallerRecordAccessProbe` (RetrievePrincipalAccess, OBO, fail closed). `AppendTo` on the record
-  admits a child; `Write` admits an edit; `Delete` admits a delete-own, which also still requires the creator stamp.
+  through the existing `CallerRecordAccessProbe` (RetrievePrincipalAccess, OBO, fail closed). A child (to-do, document,
+  event, message) is admitted by `AppendTo` on the parent record **AND** the user's own Create privilege on the child
+  table (`prvCreatesprk_Todo` / `_Document` / `_Event` / `_Communication`, asked as the user through
+  `CallerRecordAccessProbe.CallerHoldsPrivilegeAsync`, uncached). The second half matters because the BFF writes the
+  child app-only: Dataverse would otherwise never check the user's Create privilege, and a user MDA refuses could create
+  the row here (task 036 fix round 1). `Write` admits an edit; `Delete` admits a delete-own, which also still requires
+  the creator stamp.
+- **Write affordances come from the same answer, for the record in hand.** A view scoped to ONE record reports what its
+  create route would admit: the document list's `canCreate`, and — for a Dataverse-decided user only — the to-do list's and
+  a project event list's `canCreate` (one confirmation per view; no per-row reads). `/me` carries
+  `writeAccessPerRecord: true` for such a user, because its per-project level then says only what they may see; the
+  client takes create/upload controls from the record's list instead.
 - **The membership walk is not consulted** for that user's access: not the A1 registry terms, not A1.1's ownership
   columns, not `MembershipTermRights`.
 - **Unchanged:** the contact-grants union (`sprk_externalrecordaccess` — Dataverse cannot see it, register B-17) on both
@@ -420,9 +430,15 @@ Dataverse Read reaches a record through their unit's depth (owner D1).
 
 - **MUST**, with the flag on, take a systemuser's SPA/Teams record set from the impersonated read only, at Read.
 - **MUST** confirm every write a Dataverse-decided caller makes on `/api/v1/external` against Dataverse on the target
-  record through `CallerRecordAccessProbe` before writing. No write rests on a constant. (Enforced by:
-  `ExternalProjectDataEndpoints.WithDataverseRightsAsync` at each write route, and the per-route tests listed in the task
-  036 notes.)
+  record through `CallerRecordAccessProbe` before writing; a child create needs `AppendTo` on the parent AND the caller's
+  Create privilege on the child table. No write rests on a constant. (Enforced by:
+  `ExternalProjectDataEndpoints.WithDataverseRightsAsync` at each write route, the per-route tests listed in the task
+  036 notes, and `RouteAuthorizationGuardTests.ExternalWrites` — every `MapPost`/`MapPatch`/`MapPut`/`MapDelete` on the
+  group reaches the confirmation or is an exemption with a reason.)
+- **Known limit:** the child table's **Append** privilege (`prvAppend<child>`, which Dataverse also asks of a user setting
+  the child's parent lookup) is not checked. The existing checker answers one privilege per round trip; Create plus
+  AppendTo on the parent is the material gate, and every SpaarkeMaster role that grants Create on these four tables
+  (Spaarke Basic User, Spaarke Core User, Spaarke Office Add In User) grants Append on them too.
 - **MUST** fail closed: a failed impersonated read (a fault, a missing or empty `SystemUserId`, no source) fails the
   composition; a failed, refused or absent rights answer adds no rights. **MUST NOT** fall back to the membership walk, an
   app-only read or a constant.

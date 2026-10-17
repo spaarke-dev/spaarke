@@ -55,3 +55,28 @@ Append to **❌ MUST NOT**:
 - **MUST NOT** (A2) fall back to the membership walk, an app-only read or a constant when Dataverse's answer cannot be read, or stamp `MembershipTermRights` (or any constant) on a record of a flag-on systemuser composition.
 - **MUST NOT** (A2) narrow A1.1 or edit `PlatformOwnershipColumns` for the flag-off path (owner D1: flag-off never under-grants), and **MUST NOT** turn the flag on in an environment before tasks 142 and 143 are complete there and the task 034 canary passes there **strictly smaller** (equal sets are a failure). The checked-in value stays `false` (enforced by `ImpersonationNegativeCanaryTests`' config tripwire).
 ```
+
+## Fix round 1 (2026-10-17) — suggested Edit 4, for the main session
+
+Edits 1–3 are applied (`1e8cf1e27`; the applied A2 MUST bullet already says "adding a child needs AppendTo on the
+parent record AND the caller's Create privilege on the child table"). The full text (`docs/adr/ADR-034-…` § Amendment
+A2) now also names the write-route guard, the per-record write affordances and the Append known limit. Suggested
+concise counterpart, two edits in `.claude/adr/ADR-034-user-record-membership.md`:
+
+**4a — the A2 MUST bullet (line 93): replace its last sentence**
+
+```markdown
+Enforced by: `ExternalProjectDataEndpoints.WithDataverseRightsAsync` at each write route, with per-route tests.
+```
+
+with:
+
+```markdown
+Enforced by: `ExternalProjectDataEndpoints.WithDataverseRightsAsync` at each write route, with per-route tests, and `RouteAuthorizationGuardTests.ExternalWrites` (every `MapPost`/`MapPatch`/`MapPut`/`MapDelete` on the group reaches the confirmation or is an exemption with a reason). Known limit: the child table's Append privilege is not checked (the SpaarkeMaster roles that grant Create on those tables grant Append too).
+```
+
+**4b — append to ✅ MUST, after the A2 fail-closed bullet**
+
+```markdown
+- **MUST** (A2, task 036 fix round 1) answer a Dataverse-decided caller's write affordances for ONE record from the same confirmation the record's create route makes (the list's `canCreate`), never from the `/me` level, which then says only what the caller may see; `/me` says `writeAccessPerRecord: true` for such a caller. Every other caller's responses stay byte-identical.
+```
