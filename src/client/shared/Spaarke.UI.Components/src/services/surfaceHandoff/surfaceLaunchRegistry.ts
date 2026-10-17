@@ -174,8 +174,11 @@ export const SURFACE_LAUNCH_REGISTRY: Readonly<Record<string, SurfaceLaunchRegis
   // this one generic Dashboard identity server-side, per that file's task-022 comment) — the
   // distinguishing input is `widgetData.layoutId`, a `sprk_workspacelayout` row id.
   //
-  // `layoutId`/`layoutName` are the system "Daily Briefing" row (isSystem=true, isDefault=true)
-  // queried on spaarkedev1 — an ENVIRONMENT-SPECIFIC Dataverse row id, not a deploy-time code
+  // `layoutId`/`layoutName` are the system "Daily Briefing" row (isSystem=true) queried on
+  // spaarkedev1. It was the default landing row; since the ontology R1 task 064 cutover the
+  // default flag on dev is a data switch (`scripts/Set-DefaultWorkspaceLayout.ps1`) between this
+  // row and the "Worklist" row, so do not read `isDefault` from this comment. Either way this
+  // entry opens THIS row by id (it is also the revert target). It is an ENVIRONMENT-SPECIFIC Dataverse row id, not a deploy-time code
   // constant. This mirrors the EXISTING `ENTITY_VIEW_CONFIG_IDS` precedent in
   // register-workspace-widgets.ts (hardcoded `sprk_gridconfiguration` GUIDs, e.g. `myTasks`) —
   // the same accepted pattern, same environment-portability caveat: an environment without this

@@ -63,6 +63,15 @@ public sealed partial class OntologyAdminAuthoringService
     internal const string ReasonUnavailable = "ontology.admin.unavailable";
     internal const string ReasonForbidden = "ontology.admin.forbidden";
 
+    /// <summary>The stable code every authoring route (validate, dry run, save, publish) returns when the body names a column outside
+    /// <see cref="PolicyVersionValidator.AuthorableColumns"/> (task 102a, owner option 101(b)).</summary>
+    internal const string ReasonColumnNotAuthorable = "ontology.admin.column_not_authorable";
+
+    /// <summary>The stable code a plan refused for <see cref="DecisionPlanRefusalReason.DuplicateAction"/> carries: a code listed twice
+    /// in one list, or in both <c>actions</c> and <c>nextSteps</c> (PR #2054 review). The catalog offers <c>assign-work</c> in both the
+    /// Decide lane's actions and the next steps, so the wizard must pick one place for it.</summary>
+    internal const string ReasonDuplicateAction = "ontology.admin.duplicate_action";
+
     /// <summary>The privilege the dry run requires, asked FRESH on every request as the caller (F1-1): creating a policy version is
     /// what authoring a rule means (D-22).</summary>
     internal const string AuthoringPrivilegeName = "prvCreatesprk_PolicyVersion";
@@ -219,6 +228,17 @@ public sealed partial class OntologyAdminAuthoringService
         static IReadOnlyList<string> DateOnlyOf(string entity) =>
             PredicateCompiler.DateOnlyColumns.Where(c => c.Entity == entity).Select(c => c.Column).Order(StringComparer.Ordinal).ToList();
 
+        // Task 102a: the allow-listed columns a filter may name. Two kinds are left out. A join path is named by "path", never as a
+        // filter field. A Threshold column is offered as a ThresholdField: a 'when' on its stored copy is refused (task 025b).
+        static IReadOnlyList<string> AuthorableOf(string entity) =>
+            PolicyVersionValidator.AuthorableColumns
+                .Where(c => c.Entity == entity
+                            && !PredicateCompiler.ThresholdColumns.Contains(c)
+                            && !PredicateCompiler.VerifiedJoins.Any(j => j.Key.Related == entity && j.Value == c.Column))
+                .Select(c => c.Column)
+                .Order(StringComparer.Ordinal)
+                .ToList();
+
         var subjects = PredicateCompiler.EvaluatorGlobalReadableEntities
             .Where(SubjectTypeBySubject.ContainsKey)
             .Order(StringComparer.Ordinal)
@@ -233,8 +253,9 @@ public sealed partial class OntologyAdminAuthoringService
                 PredicateCompiler.VerifiedJoins
                     .Where(kv => kv.Key.Subject == subject && PredicateCompiler.EvaluatorGlobalReadableEntities.Contains(kv.Key.Related))
                     .OrderBy(kv => kv.Key.Related, StringComparer.Ordinal)
-                    .Select(kv => new OntologyCatalogJoin(kv.Key.Related, kv.Value, DateOnlyOf(kv.Key.Related)))
-                    .ToList()))
+                    .Select(kv => new OntologyCatalogJoin(kv.Key.Related, kv.Value, DateOnlyOf(kv.Key.Related), AuthorableOf(kv.Key.Related)))
+                    .ToList(),
+                AuthorableOf(subject)))
             .ToList();
 
         return new OntologyAuthoringCatalog(
@@ -251,7 +272,35 @@ public sealed partial class OntologyAdminAuthoringService
             Limits: new OntologyCatalogLimits(
                 PredicateCompiler.MaxClauses, PredicateCompiler.MaxRuleBodyLength,
                 PredicateCompiler.DefaultQuietWindowDays, PredicateCompiler.MaxQuietWindowDays),
-            Triage: new OntologyCatalogTriage(TriageEntity, TriageField, categories));
+            Triage: new OntologyCatalogTriage(TriageEntity, TriageField, categories),
+            Lanes: [LaneCatalog(DecisionLane.Decide), LaneCatalog(DecisionLane.Do)]);
+    }
+
+    /// <summary>
+    /// One lane's authoring lists (task 102a, owner option A), each read from its server source:
+    /// <list type="bullet">
+    /// <item>actions: <see cref="DecisionActionCatalog"/> codes whose plan lane is this one, the same test as
+    /// <see cref="DecisionPlanService.Resolve"/>;</item>
+    /// <item>next steps: its <c>IsNextStep</c> codes;</item>
+    /// <item>dismissal reasons: <see cref="DecisionActionCatalog.DismissalReasons"/>;</item>
+    /// <item>severities and work types: the <c>sprk_policy</c> option labels of <see cref="OntologyAdminRulesService"/>, which
+    /// OntologyAdminRulesSchemaAgreementTests pins to the solution source.</item>
+    /// </list>
+    /// The server has no lane mapping for severities or work types, so each lane carries the full list.
+    /// </summary>
+    internal static OntologyCatalogLane LaneCatalog(DecisionLane lane)
+    {
+        static OntologyCatalogAction ActionOf(DecisionActionDefinition a) => new(a.Code, a.Label, a.Excludes.ToList());
+        static IReadOnlyList<OntologyCatalogOption> OptionsOf(IReadOnlyDictionary<int, string> labels) =>
+            labels.OrderBy(kv => kv.Key).Select(kv => new OntologyCatalogOption(kv.Key, kv.Value)).ToList();
+
+        return new OntologyCatalogLane(
+            lane.ToString(),
+            DecisionActionCatalog.All.Where(a => a.PlanLane == lane).Select(ActionOf).ToList(),
+            DecisionActionCatalog.All.Where(a => a.IsNextStep).Select(ActionOf).ToList(),
+            DecisionActionCatalog.DismissalReasons(lane).Select(r => new OntologyCatalogChoice(r.Code, r.Label)).ToList(),
+            OptionsOf(OntologyAdminRulesService.SeverityLabels),
+            OptionsOf(OntologyAdminRulesService.WorkTypeLabels));
     }
 
     private async Task<Read<IReadOnlyList<OntologyCatalogCategory>>> ReadTriageCategoriesAsync(CancellationToken ct)
@@ -341,7 +390,8 @@ public sealed partial class OntologyAdminAuthoringService
                 errors["lane"] = ["A dry run of a new rule names its lane: Decide or Do."];
             }
 
-            var ruleTypeName = ValidateRule(request.RuleType, request.RuleBody, request.MessageTemplate, errors);
+            var check = ValidateRule(request.RuleType, request.RuleBody, request.MessageTemplate, errors);
+            var ruleTypeName = check.RuleTypeName;
             if (errors.Count == 0 && policy is null && !TrySubjectType(request.RuleBody!, out _))
             {
                 // K5: a new rule the save would refuse for its subject is refused here, before it is evaluated.
@@ -350,7 +400,7 @@ public sealed partial class OntologyAdminAuthoringService
 
             if (errors.Count > 0)
             {
-                return Invalid<OntologyDryRunResult>(errors);
+                return Invalid<OntologyDryRunResult>(errors, check.ReasonCode);
             }
 
             // The policy, built IN MEMORY from the caller's read plus the draft; the evaluator is never handed the request itself.
@@ -652,6 +702,88 @@ public sealed partial class OntologyAdminAuthoringService
     }
 
     // =================================================================================================================
+    // Validate (task 102a): compile only
+    // =================================================================================================================
+
+    /// <summary>
+    /// Checks a draft the way save (a new rule) or publish (with a policy id) would, and returns the field errors and the fields a template
+    /// may name. It compiles only: nothing is written, nothing is evaluated, and no dry-run proof is recorded or needed.
+    /// </summary>
+    /// <remarks>Authorization is the dry run's: WhoAmI as the caller, then the caller's <see cref="AuthoringPrivilegeName"/> asked fresh
+    /// as the caller, before anything in the request is read. A policy id is read as the caller through the Ontology domain allow-list
+    /// (the uniform 404). The rule is checked by <see cref="ValidateDraft"/>, the path save and publish use.</remarks>
+    public async Task<OntologyAdminAuthoringResult<OntologyRuleValidation>> ValidateAsync(OntologyValidateRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            var caller = await ResolveCallerAsync(ct).ConfigureAwait(false);
+            if (caller.Failure is { } failure)
+            {
+                return Fail<OntologyRuleValidation>(failure);
+            }
+
+            if (await CheckAuthoringPrivilegeAsync(caller.UserId, ct).ConfigureAwait(false) is { } privilegeFailure)
+            {
+                return Fail<OntologyRuleValidation>(privilegeFailure);
+            }
+
+            var errors = new Dictionary<string, string[]>(StringComparer.Ordinal);
+            DecisionLane? lane = null;
+            var newRule = true;
+            if (request.PolicyId is { } policyId)
+            {
+                if (policyId == Guid.Empty)
+                {
+                    return Fail<OntologyRuleValidation>(Failure.NotFound);
+                }
+
+                var read = await ReadPolicyAsync(policyId, ct).ConfigureAwait(false);
+                if (read.Failure is { } readFailure)
+                {
+                    return Fail<OntologyRuleValidation>(readFailure);
+                }
+
+                lane = read.Value!.Lane; // as publish: the policy's own lane, never the request's
+                newRule = false;
+            }
+            else if (TryParseLane(request.Lane, out var parsedLane))
+            {
+                lane = parsedLane;
+            }
+            else
+            {
+                errors["lane"] = ["The lane is Decide or Do."];
+            }
+
+            var check = RuleCheck.None;
+            if (request.Draft is not { } draft)
+            {
+                errors["draft"] = ["The rule is required."];
+            }
+            else
+            {
+                check = ValidateDraft(draft, lane, errors);
+                if (errors.Count == 0 && newRule && !TrySubjectType(draft.RuleBody!, out _))
+                {
+                    errors["ruleBody"] = [NoSubjectTypeMessage]; // as save: a new rule needs a policy subject type
+                }
+            }
+
+            var list = errors
+                .OrderBy(e => e.Key, StringComparer.Ordinal)
+                .SelectMany(e => e.Value.Select(message => new OntologyValidationError(e.Key, message)))
+                .ToList();
+            return new(OntologyAdminAuthoringOutcome.Ok,
+                new OntologyRuleValidation(errors.Count == 0, list, check.ReasonCode, check.TemplateEligibleFields));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Fault<OntologyRuleValidation>("validate", ex);
+        }
+    }
+
+    // =================================================================================================================
     // Save a new rule (FR-10: Off)
     // =================================================================================================================
 
@@ -713,13 +845,16 @@ public sealed partial class OntologyAdminAuthoringService
 
             var draft = request.Draft;
             string? ruleTypeName = null;
+            string? reasonCode = null;
             if (draft is null)
             {
                 errors["draft"] = ["The rule is required."];
             }
             else
             {
-                ruleTypeName = ValidateDraft(draft, errors.ContainsKey("lane") ? null : lane, errors);
+                var check = ValidateDraft(draft, errors.ContainsKey("lane") ? null : lane, errors);
+                ruleTypeName = check.RuleTypeName;
+                reasonCode = check.ReasonCode;
             }
 
             var subjectType = 0;
@@ -730,7 +865,7 @@ public sealed partial class OntologyAdminAuthoringService
 
             if (errors.Count > 0)
             {
-                return Invalid<OntologyPolicySaved>(errors);
+                return Invalid<OntologyPolicySaved>(errors, reasonCode);
             }
 
             if (!await HasProofAsync(proofScope.Value, null, lane, ruleTypeName!, draft!.RuleBody!, draft.MessageTemplate, ct).ConfigureAwait(false))
@@ -875,10 +1010,11 @@ public sealed partial class OntologyAdminAuthoringService
                 return Invalid<OntologyVersionPublished>(errors);
             }
 
-            ruleTypeName = ValidateDraft(draft, policy.Lane, errors);
+            var check = ValidateDraft(draft, policy.Lane, errors);
+            ruleTypeName = check.RuleTypeName;
             if (errors.Count > 0)
             {
-                return Invalid<OntologyVersionPublished>(errors);
+                return Invalid<OntologyVersionPublished>(errors, check.ReasonCode);
             }
 
             if (!await HasProofAsync(proofScope.Value, policy.Id, policy.Lane, ruleTypeName!, draft.RuleBody!, draft.MessageTemplate, ct).ConfigureAwait(false))
@@ -1208,14 +1344,25 @@ public sealed partial class OntologyAdminAuthoringService
     // Validation (ValidateForSave + the plan check)
     // =================================================================================================================
 
-    /// <summary>The draft's rule (type, body, template) through <see cref="PolicyVersionValidator.ValidateForSave"/>; returns the rule
-    /// type's name on success and adds field-level errors otherwise.</summary>
-    private string? ValidateRule(string? ruleType, string? ruleBody, string? messageTemplate, Dictionary<string, string[]> errors)
+    /// <summary>What <see cref="ValidateRule"/> decided: the rule type's name on success (null otherwise), the fields a template may name
+    /// (filled whenever the body compiled), and a stable reason code for a refusal that has one.</summary>
+    internal readonly record struct RuleCheck(string? RuleTypeName, IReadOnlyList<string> TemplateEligibleFields, string? ReasonCode)
+    {
+        public static RuleCheck None => new(null, Array.Empty<string>(), null);
+    }
+
+    /// <summary>
+    /// THE validation of a draft's rule (type, body, template), shared by validate, dry run, save and publish so they cannot disagree
+    /// (task 102a). It calls <see cref="PolicyVersionValidator.ValidateForAuthoring"/>, which is <c>ValidateForSave</c> plus the
+    /// authorable-column allow-list. It adds field-level errors and, for a column outside the allow-list, returns
+    /// <see cref="ReasonColumnNotAuthorable"/>.
+    /// </summary>
+    private RuleCheck ValidateRule(string? ruleType, string? ruleBody, string? messageTemplate, Dictionary<string, string[]> errors)
     {
         if (string.IsNullOrWhiteSpace(ruleBody))
         {
             errors["ruleBody"] = ["The rule body is required."];
-            return null;
+            return RuleCheck.None;
         }
 
         if (messageTemplate is { Length: > MaxMessageTemplateLength })
@@ -1223,7 +1370,8 @@ public sealed partial class OntologyAdminAuthoringService
             errors["messageTemplate"] = [$"The message template is at most {MaxMessageTemplateLength} characters."];
         }
 
-        var result = _validator.ValidateForSave(ruleType, ruleBody, messageTemplate);
+        var authoring = _validator.ValidateForAuthoring(ruleType, ruleBody, messageTemplate);
+        var result = authoring.Validation;
         if (!result.IsValid)
         {
             var field = result.Reason switch
@@ -1233,17 +1381,20 @@ public sealed partial class OntologyAdminAuthoringService
                 _ => "ruleBody",
             };
             errors[field] = result.Errors.ToArray();
-            return null;
+            return new RuleCheck(null, authoring.TemplateEligibleFields,
+                result.Reason == OntologyWriterFailureReason.ColumnNotAuthorable ? ReasonColumnNotAuthorable : null);
         }
 
-        // ValidateForSave accepted it, so the type is Existence or Threshold (Switch is refused, D-16).
-        return RuleBodySchemaValidator.TryParseRuleType(ruleType, out var parsed) ? parsed.ToString() : null;
+        // ValidateForAuthoring accepted it, so the type is Existence or Threshold (Switch is refused, D-16).
+        return new RuleCheck(RuleBodySchemaValidator.TryParseRuleType(ruleType, out var parsed) ? parsed.ToString() : null,
+            authoring.TemplateEligibleFields, null);
     }
 
-    /// <summary>A whole draft for save or publish: the rule, the required columns, and the plan against the lane's catalog (task 036).</summary>
-    private string? ValidateDraft(OntologyRuleDraft draft, DecisionLane? lane, Dictionary<string, string[]> errors)
+    /// <summary>A whole draft for save, publish or validate: the rule, the required columns, and the plan against the lane's catalog
+    /// (task 036). The rule type's name is null unless the whole draft is valid.</summary>
+    private RuleCheck ValidateDraft(OntologyRuleDraft draft, DecisionLane? lane, Dictionary<string, string[]> errors)
     {
-        var ruleTypeName = ValidateRule(draft.RuleType, draft.RuleBody, draft.MessageTemplate, errors);
+        var check = ValidateRule(draft.RuleType, draft.RuleBody, draft.MessageTemplate, errors);
         RequireText(draft.MessageTemplate, "messageTemplate", MaxMessageTemplateLength, errors);
         RequireText(draft.ShortHeadline, "shortHeadline", MaxShortHeadlineLength, errors);
         RequireText(draft.ProposedAction, "proposedAction", MaxProposedActionLength, errors);
@@ -1255,13 +1406,19 @@ public sealed partial class OntologyAdminAuthoringService
         else if (lane is { } l)
         {
             var plan = DecisionPlanService.Resolve(draft.DecisionPlan, l);
-            if (plan.IsRefused)
+            if (plan.IsRefused && plan.RefusalReason == DecisionPlanRefusalReason.DuplicateAction)
+            {
+                errors["decisionPlan"] = [$"The decision plan is refused ({plan.RefusalReason}): each code may appear once, in actions or in " +
+                    "nextSteps, never twice in one list and never in both."];
+                check = check with { ReasonCode = check.ReasonCode ?? ReasonDuplicateAction };
+            }
+            else if (plan.IsRefused)
             {
                 errors["decisionPlan"] = [$"The decision plan is refused ({plan.RefusalReason}): it must list actions from the {l} lane's catalog."];
             }
         }
 
-        return errors.Count == 0 ? ruleTypeName : null;
+        return errors.Count == 0 ? check : check with { RuleTypeName = null };
     }
 
     private static void RequireText(string? value, string field, int max, Dictionary<string, string[]> errors)
@@ -1609,8 +1766,8 @@ public sealed partial class OntologyAdminAuthoringService
             _ => new(OntologyAdminAuthoringOutcome.Unavailable, ReasonCode: ReasonUnavailable),
         };
 
-    private static OntologyAdminAuthoringResult<T> Invalid<T>(Dictionary<string, string[]> errors)
-        where T : class => new(OntologyAdminAuthoringOutcome.Invalid, Errors: errors);
+    private static OntologyAdminAuthoringResult<T> Invalid<T>(Dictionary<string, string[]> errors, string? reasonCode = null)
+        where T : class => new(OntologyAdminAuthoringOutcome.Invalid, Errors: errors, ReasonCode: reasonCode);
 
     private static OntologyAdminAuthoringResult<T> Conflict<T>(string reason)
         where T : class => new(OntologyAdminAuthoringOutcome.Conflict, ReasonCode: reason);

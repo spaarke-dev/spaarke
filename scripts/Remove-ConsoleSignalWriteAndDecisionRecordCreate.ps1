@@ -1,20 +1,21 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Ontology task 049 (spaarke-ontology-platform-r1): remove, from the ROOT copy of the named roles, exactly three
+    Ontology task 049 (spaarke-ontology-platform-r1): remove, from the ROOT copy of the named roles, exactly four
     privileges, verify every inherited business-unit copy by read-back, then re-run the union-of-roles check (NFR-11).
     Dry run by default; -WhatIf is supported.
 
 .DESCRIPTION
-    THE THREE REMOVALS (closed list; nothing else is ever removed or added):
+    THE FOUR REMOVALS (closed list; nothing else is ever removed or added):
       D-17   Spaarke Console User           prvWritesprk_Signal            (only the BFF commit route closes a Signal)
       D-62   Spaarke Console User           prvCreatesprk_DecisionRecord   (only the BFF commit route creates a Decision Record)
       D-147  Spaarke Ontology Administrator prvCreatesprk_DecisionRecord   (same basis, owner 2026-10-15)
+      Q6     Spaarke Ontology Administrator prvWritesprk_Signal            (owner Q6, 2026-10-17; the administrator no longer holds Signal Write)
 
     uac-r2 K-A (binding): Write on sprk_signal never goes without Create on sprk_decisionrecord in the SAME change. The
-    Create removals therefore run FIRST. Console User's Signal Write is removed only if Console User's Decision Record Create
-    was removed in this run or is already absent; if the Create removal failed or was declined, the Signal Write is SKIPPED,
-    the reason is printed and the run exits non-zero.
+    Create removals therefore run FIRST. A role's Signal Write (Console User, Ontology Administrator) is removed only if that same
+    role's Decision Record Create was removed in this run or is already absent (checked by read-back of its root); if the Create
+    removal failed or was declined, that role's Signal Write is SKIPPED, the reason is printed and the run exits non-zero.
 
     METHOD (task 008, #1618: SpaarkeMaster is never imported in full)
       1. Enumerate EVERY business-unit copy of each role. Only the ROOT copy (no parent role) is edited. Child copies are
@@ -22,11 +23,11 @@
          (scripts/provisioning/Grant-ControlPlaneIdentity.ps1:451), and RetrieveRolePrivilegesRole on a child reports the
          root's set. The roleprivileges rows for these privileges exist only on the root copies.
       2. RetrieveRolePrivilegesRole on every copy BEFORE: count and the exact privileges.
-      3. RemovePrivilegeRole on the ROOT copy only: 3 calls (one per root role and privilege). A root that does not hold the
+      3. RemovePrivilegeRole on the ROOT copy only: 4 calls (one per root role and privilege). A root that does not hold the
          privilege is skipped (this is what makes a re-run a no-op).
       4. RetrieveRolePrivilegesRole on every copy AFTER; diff. The run FAILS (exit 1) unless the removed set is exactly the
          planned set (on every copy, children included), nothing was added, and no depth changed. Every inherited copy is also
-         compared with its root for the three privileges by read-back only: a copy that still shows one the root no longer
+         compared with its root for that role's removed privileges by read-back only: a copy that still shows one the root no longer
          holds is reported DIVERGENT and fails the run. The script never edits a copy and never repairs a diff.
          (It never runs the Secure Record Owner SharePoint-privilege strip loop; that is a different role and a different
          procedure, project CLAUDE.md section 3, D-110.)
@@ -42,9 +43,9 @@
       A3  Spaarke Console User does not hold Write on sprk_signal.
       A4  Control: Spaarke Ontology Service still holds Create on sprk_decisionrecord and Write on sprk_signal.
       A5  Write on sprk_signal is held only by platform roles, admin roles and Spaarke Ontology Service (no human member, no
-          human via a team). ONE named waiver
-          ($A5Waiver below) lets Spaarke Ontology Administrator (Deep) pass while the owner question is open; it is printed
-          as WAIVED, and any other holder fails the run. Remove the waiver by setting $A5Waiver to $null.
+          human via a team). No waiver (owner Q6,
+          2026-10-17: Spaarke Ontology Administrator lost Write on sprk_signal); $A5Waiver below is $null, and any other holder
+          fails the run.
     A team-membership read that fails fails A1 (a membership that cannot be read is never counted as zero humans).
     Also printed as a FINDING (not an assertion): every non-platform, non-admin, non-writer role that holds Write on sprk_signal.
 
@@ -92,18 +93,19 @@ elseif (-not [IO.Path]::IsPathRooted($EvidencePath)) {
     $EvidencePath = Join-Path $RepoRoot $EvidencePath   # absolute: [IO.File] resolves against the process directory otherwise
 }
 
-# ── The closed list. Order matters: the two Decision Record Create removals run before the Signal Write removal (K-A). ──
+# ── The closed list. Order matters: the two Decision Record Create removals run before the two Signal Write removals (K-A). ──
 $Removals = @(
     [pscustomobject]@{ Role = 'Spaarke Ontology Administrator'; Privilege = 'prvCreatesprk_DecisionRecord'; Decision = 'D-147' }
     [pscustomobject]@{ Role = 'Spaarke Console User'; Privilege = 'prvCreatesprk_DecisionRecord'; Decision = 'D-62' }
     [pscustomobject]@{ Role = 'Spaarke Console User'; Privilege = 'prvWritesprk_Signal'; Decision = 'D-17' }
+    [pscustomobject]@{ Role = 'Spaarke Ontology Administrator'; Privilege = 'prvWritesprk_Signal'; Decision = 'Q6' }
 )
 $ControlRole = 'Spaarke Ontology Service'
 $PlatformRoles = @('Service Writer', 'Service Deleter', 'Service Reader')   # held only by Microsoft first-party application identities
 $AdminRoles = @('System Administrator', 'System Customizer')
 # A5 waiver: the ONE role allowed to hold Write on sprk_signal besides platform, admin and the writer, while the owner question
 # "Ontology Administrator Signal Write" is open (uac-r2 Q1, review 2026-10-16). Set to $null to remove the waiver (one line).
-$A5Waiver = [pscustomobject]@{ Role = 'Spaarke Ontology Administrator'; Label = 'Ontology Administrator Signal Write' }
+$A5Waiver = $null   # owner Q6 (2026-10-17): the Ontology Administrator's Signal Write was removed; no waiver
 $DepthNames = @{ 1 = 'Basic'; 2 = 'Local'; 4 = 'Deep'; 8 = 'Global' }
 
 # ── Output: console and evidence together ────────────────────────────────────────────────────────────────────
@@ -256,15 +258,17 @@ if ($Mode -ne 'verify') {
         else { $alreadyAbsent.Add("$($r.Role) root copy: $($r.Privilege) already absent ($($r.Decision))") }
     }
     Out-Line ''
-    Out-Line "PLAN: $($planned.Count) RemovePrivilegeRole call(s), ROOT roles only; order is the two Decision Record Create removals, then the Signal Write (K-A)"
+    Out-Line "PLAN: $($planned.Count) RemovePrivilegeRole call(s), ROOT roles only; order is the two Decision Record Create removals, then the two Signal Write removals (K-A)"
     foreach ($p in $planned) { Out-Line ("  remove {0,-30} ({1}) from {2} [root copy, BU {3}, id {4}] {5}" -f $p.Privilege, $p.Depth, $p.Role, $p.BuName, $p.RoleId, $p.Decision) 'Yellow' }
     foreach ($a in $alreadyAbsent) { Out-Line "  note: $a" }
     if ($planned.Count -eq 0) { Out-Line '  Nothing to remove: the privileges are already absent on every root (idempotent re-run).' 'Green' }
 
-    # K-A (binding): Console User Signal Write goes only after its Decision Record Create is gone (removed in this run, or absent now).
-    $consoleRoot = @($before['Spaarke Console User'] | Where-Object IsRoot)[0]
-    $consoleCreateAbsentAtStart = (@($consoleRoot.Privileges | Where-Object Name -eq 'prvCreatesprk_DecisionRecord').Count -eq 0)
-    Out-Line ("K-A: Console User Create on sprk_decisionrecord is {0}; its Signal Write is removed only after a read-back of the root shows that Create absent." -f $(if ($consoleCreateAbsentAtStart) { 'ALREADY ABSENT' } else { 'still held (removed first in this run)' }))
+    # K-A (binding): a role's Signal Write goes only after that role's Decision Record Create is gone (removed in this run, or absent now).
+    foreach ($kaRole in @($Removals | Where-Object Privilege -eq 'prvWritesprk_Signal' | ForEach-Object { $_.Role })) {
+        $kaRoot = @($before[$kaRole] | Where-Object IsRoot)[0]
+        $kaCreateAbsentAtStart = (@($kaRoot.Privileges | Where-Object Name -eq 'prvCreatesprk_DecisionRecord').Count -eq 0)
+        Out-Line ("K-A: {0} Create on sprk_decisionrecord is {1}; its Signal Write is removed only after a read-back of the root shows that Create absent." -f $kaRole, $(if ($kaCreateAbsentAtStart) { 'ALREADY ABSENT' } else { 'still held (removed first in this run)' }))
+    }
 }
 
 # ── Step 3: APPLY ────────────────────────────────────────────────────────────────────────────────────────────
@@ -282,12 +286,12 @@ if ($Mode -ne 'verify') {
     Out-Line ''
     foreach ($p in $planned) {
         $target = "ROOT role '$($p.Role)' (BU '$($p.BuName)', $($p.RoleId))"
-        # K-A, by read-back (never by trusting a 204 or a flag): Console User Signal Write goes only if the Console User ROOT
-        # now shows NO Create on sprk_decisionrecord. A declined, failed or silently ineffective Create removal skips it.
-        if ($Mode -eq 'apply' -and $p.Role -eq 'Spaarke Console User' -and $p.Privilege -eq 'prvWritesprk_Signal') {
+        # K-A, by read-back (never by trusting a 204 or a flag): a role's Signal Write goes only if that role's ROOT now shows
+        # NO Create on sprk_decisionrecord. A declined, failed or silently ineffective Create removal skips it.
+        if ($Mode -eq 'apply' -and $p.Privilege -eq 'prvWritesprk_Signal') {
             $createStillHeld = @(Get-RolePrivilegeList $p.RoleId | Where-Object Name -eq 'prvCreatesprk_DecisionRecord').Count -gt 0
             if ($createStillHeld) {
-                $msg = 'K-A: SKIPPED the Console User Signal Write removal because a read-back of the Console User root still shows Create on sprk_decisionrecord (the Create removal was declined, failed or had no effect). Re-run once the Create is gone.'
+                $msg = "K-A: SKIPPED the $($p.Role) Signal Write removal because a read-back of the $($p.Role) root still shows Create on sprk_decisionrecord (the Create removal was declined, failed or had no effect). Re-run once the Create is gone."
                 Out-Line "  $msg" 'Red'
                 $failures.Add($msg)
                 continue
@@ -473,12 +477,12 @@ Test-Assert 'A3' 'Spaarke Console User does not hold Write on sprk_signal' ($a3.
 $a4w = @($union['Write on sprk_signal'] | Where-Object Name -eq $ControlRole)
 $a4c = @($union['Create on sprk_decisionrecord'] | Where-Object Name -eq $ControlRole)
 Test-Assert 'A4' "Control: $ControlRole still holds Write on sprk_signal and Create on sprk_decisionrecord" ($a4w.Count -eq 1 -and $a4c.Count -eq 1) 'the writer lost a privilege it needs'
-# A5: Write on sprk_signal is held only by platform roles, admin roles and the writer. The single named waiver ($A5Waiver) passes
-# one other role and is printed; any other holder fails the run.
+# A5: Write on sprk_signal is held only by platform roles, admin roles and the writer. $A5Waiver is $null (owner Q6); if it is ever
+# set again it passes one other role and is printed as WAIVED; any other holder fails the run.
 $signalHolders = @($union['Write on sprk_signal'])
 $a5Waived = @($signalHolders | Where-Object { $A5Waiver -and $_.Name -eq $A5Waiver.Role })
 $a5Bad = @($signalHolders | Where-Object { -not ($A5Waiver -and $_.Name -eq $A5Waiver.Role) -and ($_.Class -notin @('platform', 'admin', 'spaarke-service') -or ($_.Class -eq 'spaarke-service' -and (Test-HasHumanOrUnreadable $_))) })
-Test-Assert 'A5' 'Write on sprk_signal is held only by platform roles, admin roles and Spaarke Ontology Service, which has no human member (one named waiver)' ($a5Bad.Count -eq 0) ("unexpected holders (or a service role with a human / unreadable member): [" + (($a5Bad.Name) -join ', ') + "]")
+Test-Assert 'A5' 'Write on sprk_signal is held only by platform roles, admin roles and Spaarke Ontology Service, which has no human member (no waiver, owner Q6)' ($a5Bad.Count -eq 0) ("unexpected holders (or a service role with a human / unreadable member): [" + (($a5Bad.Name) -join ', ') + "]")
 foreach ($w in $a5Waived) { Out-Line ("       {0} ({1}): WAIVED (owner question open: {2})" -f $w.Name, $w.Depth, $A5Waiver.Label) 'Yellow' }
 if ($Mode -eq 'apply' -and $failures.Count -gt 0) { Out-Line '' ; Out-Line 'The after-diff, a divergent copy or an assertion failed: STOP, report, and decide whether to restore (escalation in the 049 POML).' 'Red' }
 

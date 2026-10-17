@@ -86,27 +86,79 @@ public sealed record OntologyNewPolicyRequest(
 /// <summary>A new version of an existing Ontology policy, published.</summary>
 public sealed record OntologyPublishRequest(OntologyRuleDraft? Draft);
 
-/// <summary>The authorable condition catalog (#46), every entry read from the compiler's own lists.</summary>
+/// <summary>A compile-only check of a draft (task 102a). With <paramref name="PolicyId"/> it is checked as a new version of that Ontology
+/// policy would be on publish (its lane, read as the caller). Without one, <paramref name="Lane"/> is required and it is checked as a new
+/// rule would be on save.</summary>
+public sealed record OntologyValidateRequest(Guid? PolicyId, string? Lane, OntologyRuleDraft? Draft);
+
+/// <summary>The answer of the validate route. Nothing was written or evaluated.</summary>
+/// <param name="Valid">True when save or publish would accept the draft, apart from the dry-run proof and the policy's own fields.</param>
+/// <param name="Errors">The field errors save and publish would return, one per message, ordered by field.</param>
+/// <param name="ReasonCode">A stable code for a refusal that has one (<c>ontology.admin.column_not_authorable</c>); otherwise null.</param>
+/// <param name="TemplateEligibleFields">The fields the message template may name: the compiled predicate's TemplateEligibleFields that
+/// are on the authorable-column allow-list (section 0.3). Empty when the body does not compile.</param>
+public sealed record OntologyRuleValidation(
+    bool Valid,
+    IReadOnlyList<OntologyValidationError> Errors,
+    string? ReasonCode,
+    IReadOnlyList<string> TemplateEligibleFields);
+
+/// <summary>One field error.</summary>
+public sealed record OntologyValidationError(string Field, string Message);
+
+/// <summary>The authorable condition catalog (#46), every entry read from the compiler's own lists. <paramref name="Lanes"/> (task 102a)
+/// holds, per lane, what the wizard's Actions and Basics steps offer, read from the server's closed catalogs.</summary>
 public sealed record OntologyAuthoringCatalog(
     IReadOnlyList<string> RuleTypes,
     IReadOnlyList<OntologyCatalogSubject> Subjects,
     OntologyCatalogOperators Operators,
     OntologyCatalogRelativeDates RelativeDates,
     OntologyCatalogLimits Limits,
-    OntologyCatalogTriage Triage);
+    OntologyCatalogTriage Triage,
+    IReadOnlyList<OntologyCatalogLane> Lanes);
 
-/// <summary>A table a rule may be about, with the fields and joins the compiler verifies for it.</summary>
+/// <summary>A table a rule may be about, with the fields and joins the compiler verifies for it. <paramref name="AuthorableFields"/>
+/// (task 102a) are the columns of this table a rule may name (<c>PolicyVersionValidator.AuthorableColumns</c>).</summary>
 public sealed record OntologyCatalogSubject(
     string Entity,
     IReadOnlyList<string> DateOnlyFields,
     IReadOnlyList<OntologyCatalogThresholdField> ThresholdFields,
-    IReadOnlyList<OntologyCatalogJoin> Joins);
+    IReadOnlyList<OntologyCatalogJoin> Joins,
+    IReadOnlyList<string> AuthorableFields);
 
 /// <summary>A column a Threshold rule may compare, with the range Dataverse holds for it.</summary>
 public sealed record OntologyCatalogThresholdField(string Field, decimal Min, decimal Max);
 
-/// <summary>A clause table reachable from the subject through its one verified lookup.</summary>
-public sealed record OntologyCatalogJoin(string Related, string Path, IReadOnlyList<string> DateOnlyFields);
+/// <summary>A clause table reachable from the subject through its one verified lookup. <paramref name="AuthorableFields"/> (task 102a)
+/// are the columns of the clause table a filter may name (the join path itself is not a filter field).</summary>
+public sealed record OntologyCatalogJoin(string Related, string Path, IReadOnlyList<string> DateOnlyFields, IReadOnlyList<string> AuthorableFields);
+
+/// <summary>
+/// One lane's authoring lists (task 102a, owner option A), each read from its server source:
+/// <list type="bullet">
+/// <item>actions: the codes <c>DecisionActionCatalog</c> allows in this lane's plan, with their mutual excludes;</item>
+/// <item>next steps: the codes a plan's <c>nextSteps</c> may name;</item>
+/// <item>dismissal reasons: the lane's closed dismissal-reason list;</item>
+/// <item>severities and work types: the <c>sprk_policy</c> option labels the Rules page uses.</item>
+/// </list>
+/// The server has no lane mapping for severities or work types, so both lanes carry the full list.
+/// </summary>
+public sealed record OntologyCatalogLane(
+    string Lane,
+    IReadOnlyList<OntologyCatalogAction> Actions,
+    IReadOnlyList<OntologyCatalogAction> NextSteps,
+    IReadOnlyList<OntologyCatalogChoice> DismissalReasons,
+    IReadOnlyList<OntologyCatalogOption> Severities,
+    IReadOnlyList<OntologyCatalogOption> WorkTypes);
+
+/// <summary>One catalog action: its stable code, its label, and the codes it excludes (mutual).</summary>
+public sealed record OntologyCatalogAction(string Code, string Label, IReadOnlyList<string> Excludes);
+
+/// <summary>A choice whose stable value is a code (a dismissal reason).</summary>
+public sealed record OntologyCatalogChoice(string Value, string Label);
+
+/// <summary>A choice whose value is a Dataverse option value (severity, work type).</summary>
+public sealed record OntologyCatalogOption(int Value, string Label);
 
 /// <summary>The operators, by where they may appear.</summary>
 public sealed record OntologyCatalogOperators(
