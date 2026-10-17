@@ -10,7 +10,7 @@
 
 | Field | Value |
 |---|---|
-| **Task** | Lane 102b (rule matter scope, D-165) running |
+| **Task** | 102b in review (PR #2075) |
 | **Next Action** | On the 102b notification: two adversarial passes (tenant-isolation) + uac-r2 → fix → re-check → merge into docs. Owner: 111 row 4 with R3's URL; CORS reload result to R3 |
 
 ## Lanes in flight
@@ -19,7 +19,7 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 
 | Task | Worktree / branch | Model | State |
 |---|---|---|---|
-| 102b rule matter scope [tenant-isolation] | `C:\wts-102b` `task/ontology-102b` | opus/high (agent `lane-102b`) | Running. Closes DI-62 #1647 + DI-112 #2069. Matter scope only (subject `sprk_matter`), tenant stays blank. uac-r2 review focus: tenant never from the body, server-side scope in the evaluator, no Signal outside the matter, must-fire/must-not-fire tests |
+| 102b rule matter scope [tenant-isolation] | `C:\wts-102b` `task/ontology-102b` | opus/high (lane done) | **PR #2075** head `5152cabea`. Adversarial pass 1 (opus) running + uac-r2 review requested. Then fix round, pass 2, re-check, merge. Publish +3.9 KB vs base |
 
 ## Open owner / peer items
 
@@ -27,7 +27,7 @@ Shared brief: scratchpad `lane-brief.md`. Each lane: review → fix round → re
 2. **CORS on `/api/v1/external/notifications`** (R3 owns): the owner saw it, time unknown (probably after the 14:32Z deploy). Owner to reload and report; R3 wants owner approval for live reads (platform CORS, anonymous preflight). **Never dispatch `deploy-external-spa.yml` from master** (task 122) while R3's SPA work is off master.
 3. **POL-MATTER-NOBUDGET** is on (D-163): the owner bulk-closes the dev Signals after the next evaluation.
 4. **Owner: does ebilling 015 supersede D-137 Q24?** ebilling task 015 (retire `sprk_invoicestatus`, owner-OK'd live delete) changes `FinanceBaseValues.CountedInvoiceStatuses` from Reviewed only (Q24, "for now") to statuscode In Review, Approved, Sent to AP, Paid. That changes every ontology spend/budget Threshold (POL-COMMIT-BUDGET). Asked ebilling not to merge that change to master until the owner confirms directly. When 015 lands: update `notes/102a-authoring-contract.md` residual row and D-161 base columns.
-5. **ebilling 070 re-check** includes their master-merge resolution of `PolicyVersionValidator.ValidateInternal` (domain + authoring). 102b touches the same files; second to master resolves.
+5. **ebilling 070**: re-check CLEAN through `cc01731b3` (reported). Their master PR and our 102b touch the same authoring files; second to master resolves.
 
 ## Next, in order
 
