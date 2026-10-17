@@ -716,8 +716,10 @@ function splitAccessFailure(err: unknown): { deny: IAccessDeny | null; parentRef
  * person, so the modal shows it verbatim instead of a generic "try again": a
  * policy refusal says why retrying would fail the same way, and the two 503s
  * (`.policy_unreadable`, `.no_access_unverifiable`) say themselves that a retry
- * may succeed. */
+ * may succeed. Task 099c: `.expiry_in_past` (400 — the add's Expiration is
+ * before UTC today; the server's sentence names its "today"). */
 const GRANT_POLICY_REASON_CODES = new Set([
+  'sdap.access.grant.expiry_in_past',
   'sdap.access.grant.record_restricted',
   'sdap.access.grant.org_grant_direct_only_record',
   'sdap.access.grant.policy_unreadable',
@@ -1132,6 +1134,23 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
             ? expiryDraft
             : undefined
         : undefined;
+  // Task 099c (review F1-c): an add with no share sent the field's date, and the refresh now shows that date as the
+  // shares' own — the draft has been applied, so it is no longer pending. (A draft the shares did not take stays.)
+  const shareExpiryKind = shareExpiry.kind;
+  const shareExpiryEarliest = shareExpiry.kind === 'shares' ? shareExpiry.earliest : null;
+  const prevShareExpiryKindRef = React.useRef(shareExpiryKind);
+  React.useEffect(() => {
+    const was = prevShareExpiryKindRef.current;
+    prevShareExpiryKindRef.current = shareExpiryKind;
+    if (
+      was === 'noShares' &&
+      shareExpiryKind === 'shares' &&
+      expiryDraft !== null &&
+      expiryDraft === shareExpiryEarliest
+    ) {
+      setExpiryDraft(null);
+    }
+  }, [shareExpiryKind, shareExpiryEarliest, expiryDraft]);
   // Items (contacts OR organizations) checked to grant, keyed by contactId/orgId.
   const [selectedCandidateIds, setSelectedCandidateIds] = React.useState<Set<string>>(new Set());
   const [approving, setApproving] = React.useState(false);
@@ -2080,13 +2099,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           recordId,
           expiryDate,
         });
-        setExpiryDraft(null);
+        // With no active share the route stores nothing and the date is kept as the next add's (the route's contract,
+        // `SetRecordShareExpiryResponse.UpdatedCount`): the field, now in its no-shares state, holds it.
+        setExpiryDraft(data.updatedCount === 0 ? expiryDate : null);
         await loadData();
         setNoticeIfCurrent(
           data.updatedCount === 0
             ? {
                 intent: 'warning',
-                text: 'This record has no external shares now, so no expiration date was changed.',
+                text: `This record has no external shares now, so no share was changed. People you add have access until ${formatGrantDate(expiryDate)}.`,
               }
             : {
                 intent: 'success',
@@ -2239,14 +2260,23 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       : shareExpiry.kind === 'noShares'
         ? utcDateOnly(DEFAULT_SHARE_EXPIRY_DAYS)
         : '';
-  const expiryEditable = shareExpiry.kind !== 'unknown' && !actionsBlocked && !expiryApplying;
+  // Review F1-a: not while an add or a suggestion's Grant is in flight — it sends the date read when it started, so an
+  // Apply meanwhile would leave the rest of that batch on the old date.
+  const expiryEditable =
+    shareExpiry.kind !== 'unknown' && !actionsBlocked && !expiryApplying && !approving && suggestionBusy === null;
+  // With shares: an edit that differs from the applied date is pending (review F1-c: a draft the shares now carry is
+  // not). Apply sends the edit, or — when the shares end on different dates — the shown date, which aligns them
+  // (review F1-b: the divergence line offers Apply, so it is there with no edit).
+  const expiryPending = shareExpiry.kind === 'shares' && expiryDraft !== null && expiryDraft !== expiryShown;
+  const expiryApplyOffered = shareExpiry.kind === 'shares' && (expiryPending || shareExpiry.diverges);
+  const expiryApplyValue = expiryDraft ?? expiryShown;
   const expiryCanApply =
     expiryEditable &&
-    shareExpiry.kind === 'shares' &&
-    expiryDraftValid &&
-    (expiryDraft !== expiryShown || shareExpiry.diverges);
+    expiryApplyOffered &&
+    /^\d{4}-\d{2}-\d{2}$/.test(expiryApplyValue) &&
+    expiryApplyValue >= expiryMin;
   const expiryValidationMessage = expiryDraftBeforeMin
-    ? 'Choose today or a later date.'
+    ? `Choose ${formatGrantDate(expiryMin)} or later.`
     : addExpiryInvalid
       ? 'Choose the date new shares end.'
       : undefined;
@@ -2346,7 +2376,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           </Button>
         }
         footer={
-          <Button appearance="primary" onClick={() => void handleSave()}>
+          // Review F1-a: Save commits staged adds, so not while an Expiration Apply is in flight.
+          <Button appearance="primary" disabled={expiryApplying} onClick={() => void handleSave()}>
             Save
           </Button>
         }
@@ -2448,7 +2479,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                               appearance="primary"
                               size="small"
                               onClick={() => void grantSuggestion(entry)}
-                              disabled={actionsBlocked || suggestionBusy !== null}
+                              // Review F1-a: not while an Apply is in flight — the grant would carry the old date.
+                              disabled={actionsBlocked || suggestionBusy !== null || expiryApplying}
                               aria-label={`Grant ${entry.subjectName ?? 'suggested person'}`}
                             >
                               Grant
@@ -2498,21 +2530,21 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                               disabled={!expiryEditable}
                               onChange={(_, d) => setExpiryDraft(d.value)}
                               onKeyDown={e => {
-                                if (e.key === 'Enter' && expiryCanApply && expiryDraft !== null) {
+                                if (e.key === 'Enter' && expiryCanApply) {
                                   // With shares only: with none, Enter has nothing to apply (the date goes with an add).
                                   e.preventDefault();
-                                  void applyShareExpiry(expiryDraft);
+                                  void applyShareExpiry(expiryApplyValue);
                                 }
                               }}
                               data-testid="share-expiry-input"
                             />
                           </Field>
-                          {expiryDraft !== null && shareExpiry.kind === 'shares' && (
+                          {expiryApplyOffered && (
                             <Button
                               appearance="primary"
                               size="small"
                               disabled={!expiryCanApply}
-                              onClick={() => void applyShareExpiry(expiryDraft)}
+                              onClick={() => void applyShareExpiry(expiryApplyValue)}
                               data-testid="share-expiry-apply"
                             >
                               {expiryApplying ? 'Applying…' : 'Apply'}
@@ -2580,7 +2612,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       sets them to this date.
                     </Text>
                   )}
-                  {shareExpiry.kind === 'shares' && expiryDraft !== null && (
+                  {expiryPending && (
                     <Text className={styles.shareExpiryHint} data-testid="share-expiry-unapplied">
                       Not applied yet. Until you apply it, people you add get{' '}
                       {addExpiryDate ? formatGrantDate(addExpiryDate) : `${DEFAULT_SHARE_EXPIRY_DAYS} days of access`}.
@@ -2668,7 +2700,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   <div className={styles.levelRow}>
                     <Button
                       appearance="primary"
-                      disabled={selectedOfferedCount === 0 || approving || actionsBlocked}
+                      // Review F1-a: not while an Apply is in flight — the add would carry the old date.
+                      disabled={selectedOfferedCount === 0 || approving || actionsBlocked || expiryApplying}
                       icon={approving ? <Spinner size="tiny" /> : undefined}
                       onClick={handleGrantSelected}
                     >

@@ -19,6 +19,7 @@ import * as path from 'path';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
+import type { IAssignedAccessEntry } from '../AccessGrantModal';
 import type {
   IAccessGrantCandidate,
   IAccessGrantModalProps,
@@ -97,6 +98,12 @@ function utcDate(days = 0): string {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days))
     .toISOString()
     .slice(0, 10);
+}
+
+/** A bare `yyyy-MM-dd` as the modal shows it (`formatGrantDate`). */
+function displayDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 async function expiryInput(): Promise<HTMLInputElement> {
@@ -225,7 +232,8 @@ describe('AccessGrantModal — toolbar Expiration (task 099c)', () => {
     expect(input.min).toBe(utcDate());
 
     fireEvent.change(input, { target: { value: '2000-01-01' } });
-    expect(screen.getByText('Choose today or a later date.')).toBeInTheDocument();
+    // Review K1: the minimum is named (UTC today, in the modal's date format), not "today" in the viewer's zone.
+    expect(screen.getByText(`Choose ${displayDate(utcDate())} or later.`)).toBeInTheDocument();
     const apply = screen.getByTestId('share-expiry-apply');
     expect(apply).toBeDisabled();
     fireEvent.click(apply);
@@ -539,6 +547,301 @@ describe('AccessGrantModal — every add sends the record Expiration (task 099c)
 
     await waitFor(() => expect(bodiesFor(fetchMock, GRANT_PATH)).toHaveLength(2));
     for (const body of bodiesFor(fetchMock, GRANT_PATH)) expect(body).not.toHaveProperty('expiryDate');
+  });
+});
+
+// ── Review round 1 (PR #2062) ────────────────────────────────────────────────────────────────────────────────────────
+
+const SUGGESTION: IAssignedAccessEntry = {
+  entryId: 'entry-1',
+  sourceField: 'sprk_assignedparalegal1',
+  sourceFieldLabel: 'Assigned Paralegal 1',
+  subjectKind: 'contact',
+  subjectId: 'contact-sug',
+  subjectName: 'Pat Paralegal',
+  systemUserId: null,
+  accessRecordId: null,
+  state: 'PendingConfirmation',
+  reason: null,
+  residualAccessTerms: [],
+};
+
+/** A double whose answer per path comes from `route` (undefined → `{}`), with one pending Suggested Access entry. */
+function routedFetch(route: (p: string) => Promise<Response> | undefined) {
+  return jest.fn(async (p: string) => {
+    const answer = route(p);
+    if (answer) return answer;
+    if (p.includes('/assigned-access?')) return jsonResponse({ entries: [SUGGESTION] });
+    return jsonResponse({});
+  });
+}
+
+/** A response the test releases. */
+function deferred(): { promise: Promise<Response>; release: (r: Response) => void } {
+  let release!: (r: Response) => void;
+  const promise = new Promise<Response>(r => {
+    release = r;
+  });
+  return { promise, release };
+}
+
+describe('AccessGrantModal — Expiration review round 1 (task 099c, PR #2062)', () => {
+  it('F1-a: while an Apply is in flight, Add, Save and a suggestion Grant are disabled (an add would carry the old date)', async () => {
+    const pending = deferred();
+    const fetchMock = routedFetch(p => (p === SET_EXPIRY_PATH ? pending.promise : undefined));
+    renderModal(
+      addProps(
+        jest.fn(async () => [share('a', 'Ann Able', '2099-03-01'), share('b', 'Bo Baker', '2099-03-01')]),
+        fetchMock
+      )
+    );
+    const input = await expiryInput();
+    await waitFor(() => expect(input.value).toBe('2099-03-01'));
+    await screen.findByRole('button', { name: 'Grant Pat Paralegal' });
+    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    await screen.findByRole('checkbox', { name: 'Select Nia New' });
+    await pickLevelFor('Nia New', 'Collaborate');
+    expect(addButton()).not.toBeDisabled();
+
+    fireEvent.change(input, { target: { value: '2099-12-31' } });
+    fireEvent.click(screen.getByTestId('share-expiry-apply'));
+    await waitFor(() => expect(input).toBeDisabled());
+
+    expect(addButton()).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Grant Pat Paralegal' })).toBeDisabled();
+    fireEvent.click(addButton());
+    fireEvent.click(screen.getByRole('button', { name: 'Grant Pat Paralegal' }));
+    expect(bodiesFor(fetchMock, GRANT_PATH)).toHaveLength(0);
+
+    pending.release(jsonResponse({ updatedCount: 2, expiresDate: '2099-12-31' }));
+    await screen.findByText(/Every external share on this record now ends on/);
+    expect(addButton()).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
+  });
+
+  it('F1-a: while an add is in flight, the Expiration and Apply cannot be used (the batch would split across dates)', async () => {
+    const pending = deferred();
+    const fetchMock = routedFetch(p => (p === GRANT_PATH ? pending.promise : undefined));
+    renderModal(
+      addProps(
+        jest.fn(async () => [share('a', 'Ann Able', '2099-03-01')]),
+        fetchMock
+      )
+    );
+    const input = await expiryInput();
+    await waitFor(() => expect(input.value).toBe('2099-03-01'));
+    fireEvent.change(input, { target: { value: '2099-12-31' } });
+    expect(screen.getByTestId('share-expiry-apply')).not.toBeDisabled();
+
+    await addContactAndOrganization();
+    await waitFor(() => expect(bodiesFor(fetchMock, GRANT_PATH)).toHaveLength(1));
+
+    expect(input).toBeDisabled();
+    expect(screen.getByTestId('share-expiry-apply')).toBeDisabled();
+    fireEvent.click(screen.getByTestId('share-expiry-apply'));
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(expiryCalls(fetchMock)).toHaveLength(0);
+
+    pending.release(jsonResponse({}));
+    await waitFor(() => expect(bodiesFor(fetchMock, GRANT_PATH)).toHaveLength(2));
+    for (const body of bodiesFor(fetchMock, GRANT_PATH)) {
+      expect(body.expiryDate).toBe('2099-03-01');
+    }
+    await waitFor(() => expect(input).not.toBeDisabled());
+  });
+
+  it('F1-a: while a suggestion Grant is in flight, the Expiration cannot be used', async () => {
+    const pending = deferred();
+    const fetchMock = routedFetch(p => (p === GRANT_PATH ? pending.promise : undefined));
+    renderModal(
+      props(
+        jest.fn(async () => [share('a', 'Ann Able', '2099-03-01')]),
+        fetchMock
+      )
+    );
+    const input = await expiryInput();
+    await waitFor(() => expect(input.value).toBe('2099-03-01'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Grant Pat Paralegal' }));
+    await waitFor(() => expect(input).toBeDisabled());
+    pending.release(jsonResponse({}));
+    await waitFor(() => expect(input).not.toBeDisabled());
+  });
+
+  it('F1-b: divergent shares with no edit offer Apply, and it sets every share to the shown date in ONE call', async () => {
+    const fetchMock = fetchDouble(async () => jsonResponse({ updatedCount: 2, expiresDate: '2099-03-01' }));
+    renderModal(
+      props(
+        jest.fn(async () => [share('a', 'Ann Able', '2099-03-01'), share('b', 'Bo Baker', '2099-08-01')]),
+        fetchMock
+      )
+    );
+    const input = await expiryInput();
+    await waitFor(() => expect(input.value).toBe('2099-03-01'));
+    expect(screen.getByTestId('share-expiry-divergence')).toBeInTheDocument();
+    // Nothing is edited, so nothing is "not applied yet".
+    expect(screen.queryByTestId('share-expiry-unapplied')).not.toBeInTheDocument();
+
+    const apply = screen.getByTestId('share-expiry-apply');
+    expect(apply).not.toBeDisabled();
+    fireEvent.click(apply);
+
+    await screen.findByText(/Every external share on this record now ends on/);
+    const calls = expiryCalls(fetchMock);
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(String(calls[0][1].body))).toEqual({
+      recordType: 'matter',
+      recordId: RECORD_ID,
+      expiryDate: '2099-03-01',
+    });
+  });
+
+  it('F1-c: after a no-share add of the edited date, the refreshed field shows it as applied — no hint, no Apply', async () => {
+    const fetchMock = fetchDouble(async () => jsonResponse({}));
+    const fetchExistingGrants = jest
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([share('new', 'Nia New', '2099-12-31')]);
+    renderModal(addProps(fetchExistingGrants, fetchMock));
+    const input = await expiryInput();
+    await screen.findByTestId('share-expiry-default');
+    fireEvent.change(input, { target: { value: '2099-12-31' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    await screen.findByRole('checkbox', { name: 'Select Nia New' });
+    await pickLevelFor('Nia New', 'Collaborate');
+    fireEvent.click(addButton());
+
+    await waitFor(() => expect(fetchExistingGrants).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByTestId('share-expiry-default')).not.toBeInTheDocument());
+    expect(bodiesFor(fetchMock, GRANT_PATH)[0]).toMatchObject({ expiryDate: '2099-12-31' });
+    expect(input.value).toBe('2099-12-31');
+    expect(screen.queryByTestId('share-expiry-unapplied')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('share-expiry-apply')).not.toBeInTheDocument();
+  });
+
+  it("K2: an add refused for a past Expiration shows the server's sentence", async () => {
+    const DETAIL = 'ExpiryDate 2026-10-16 is in the past. Choose today (2026-10-17) or a later date.';
+    const fetchMock = routedFetch(p =>
+      p === GRANT_PATH
+        ? Promise.resolve(jsonResponse({ detail: DETAIL, reasonCode: 'sdap.access.grant.expiry_in_past' }, 400))
+        : undefined
+    );
+    renderModal(
+      addProps(
+        jest.fn(async () => []),
+        fetchMock
+      )
+    );
+    await screen.findByTestId('share-expiry-default');
+    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    await screen.findByRole('checkbox', { name: 'Select Nia New' });
+    await pickLevelFor('Nia New', 'Collaborate');
+    fireEvent.click(addButton());
+
+    expect(await screen.findByText(new RegExp(DETAIL.replace(/[.()]/g, '\\$&')))).toBeInTheDocument();
+  });
+
+  it('K1: an Apply that finds no share keeps its date for the next add (the route contract), not today + 90', async () => {
+    const fetchMock = fetchDouble(async () => jsonResponse({ updatedCount: 0, expiresDate: '2099-12-31' }));
+    const fetchExistingGrants = jest
+      .fn()
+      .mockResolvedValueOnce([share('a', 'Ann Able', '2099-03-01')])
+      .mockResolvedValue([]);
+    renderModal(addProps(fetchExistingGrants, fetchMock));
+    const input = await expiryInput();
+    await waitFor(() => expect(input.value).toBe('2099-03-01'));
+    fireEvent.change(input, { target: { value: '2099-12-31' } });
+    fireEvent.click(screen.getByTestId('share-expiry-apply'));
+
+    await screen.findByText(/This record has no external shares now/);
+    await screen.findByTestId('share-expiry-default');
+    expect(((await expiryInput()) as HTMLInputElement).value).toBe('2099-12-31');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    await screen.findByRole('checkbox', { name: 'Select Nia New' });
+    await pickLevelFor('Nia New', 'Collaborate');
+    fireEvent.click(addButton());
+    await waitFor(() => expect(bodiesFor(fetchMock, GRANT_PATH)).toHaveLength(1));
+    expect(bodiesFor(fetchMock, GRANT_PATH)[0]).toMatchObject({ expiryDate: '2099-12-31' });
+  });
+
+  it("a suggestion's Grant sends the shares' date when shares exist", async () => {
+    const fetchMock = routedFetch(() => undefined);
+    renderModal(
+      props(
+        jest.fn(async () => [share('a', 'Ann Able', '2099-03-01')]),
+        fetchMock
+      )
+    );
+    const input = await expiryInput();
+    await waitFor(() => expect(input.value).toBe('2099-03-01'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Grant Pat Paralegal' }));
+
+    await waitFor(() => expect(bodiesFor(fetchMock, GRANT_PATH)).toHaveLength(1));
+    expect(bodiesFor(fetchMock, GRANT_PATH)[0]).toMatchObject({
+      contactId: 'contact-sug',
+      expiryDate: '2099-03-01',
+    });
+  });
+
+  it("negative: a suggestion's Grant with an unusable no-share date warns and sends nothing", async () => {
+    const fetchMock = routedFetch(() => undefined);
+    renderModal(
+      props(
+        jest.fn(async () => []),
+        fetchMock
+      )
+    );
+    const input = await expiryInput();
+    await waitFor(() => expect(input.value).toBe(utcDate(90)));
+    fireEvent.change(input, { target: { value: '2000-01-01' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Grant Pat Paralegal' }));
+
+    expect(await screen.findByText('Choose an Expiration of today or later before adding people.')).toBeInTheDocument();
+    expect(bodiesFor(fetchMock, GRANT_PATH)).toHaveLength(0);
+  });
+
+  it('negative: after a failed grants read, an add sends no date (the server keeps or defaults it)', async () => {
+    const fetchMock = fetchDouble(async () => jsonResponse({}));
+    renderModal(
+      addProps(
+        jest.fn(async () => {
+          throw new TypeError('Failed to fetch');
+        }),
+        fetchMock
+      )
+    );
+    await screen.findByTestId('current-access-error');
+
+    await addContactAndOrganization();
+
+    await waitFor(() => expect(bodiesFor(fetchMock, GRANT_PATH)).toHaveLength(2));
+    for (const body of bodiesFor(fetchMock, GRANT_PATH)) expect(body).not.toHaveProperty('expiryDate');
+  });
+
+  it('negative: under the deny banner the Expiration is disabled', async () => {
+    const fetchMock = fetchDouble(async () =>
+      jsonResponse(
+        { detail: 'Write and Share required.', reasonCode: 'sdap.access.deny.delegation_write_required' },
+        403
+      )
+    );
+    renderModal(
+      props(
+        jest.fn(async () => [share('a', 'Ann Able', '2099-03-01')]),
+        fetchMock
+      )
+    );
+    const input = await expiryInput();
+    await waitFor(() => expect(input.value).toBe('2099-03-01'));
+    expect(input).not.toBeDisabled();
+    fireEvent.change(input, { target: { value: '2099-06-30' } });
+    fireEvent.click(screen.getByTestId('share-expiry-apply'));
+
+    expect(await screen.findByText('Write and Share required')).toBeInTheDocument();
+    expect(input).toBeDisabled();
+    expect(screen.queryByTestId('share-expiry-apply')).not.toBeInTheDocument();
   });
 });
 
