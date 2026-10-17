@@ -65,8 +65,12 @@
       - SAMPLE FIRST: -MaxWritesPerRun bounds a run (e.g. 5) so the result can be checked in the app before a
         wholesale run. The summary always reports the true totals regardless of the cap.
       - Idempotent: a re-owned row is team-owned, so it is no longer a candidate. Re-running reports ToWrite: 0.
-      - VERIFY (review round 5, F1-b) is ToWrite: 0, printed per entity as "VERIFY <entity>: PASS". Unfiled and
-        Unresolvable rows are known residue — never written, counted and logged per row — and do not fail it.
+      - VERIFY (review round 6) is ToWrite 0 AND Unresolvable 0 AND ReadFailed 0, printed per entity as
+        "VERIFY <entity>: PASS | NOT MET". An Unresolvable row sits on a root that still exists (e.g. flagged secure but not
+        isolated) and stays user- or wrong-team-owned, so it fails VERIFY. A ReadFailed row's root could not be read (any
+        error but a 404: throttling, 5xx, 403): its owner is undecided, so it is never written and fails VERIFY; each is
+        logged with its HTTP status and the run goes on, so one run lists every failure. Unfiled rows (filed to nothing:
+        the root is gone and the lookup empty) expose no record: known residue, counted and logged per row, not a failure.
       - A todo filed to a document derives from the DOCUMENT'S business unit: run sprk_document first (the default
         order), then re-run for sprk_todo, so todos follow their documents' new units.
 
@@ -117,12 +121,15 @@
 
 .EXAMPLE
     .\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Entities sprk_externalrecordaccess
-    The grant backfill dry run (task 099b). It is also the VERIFY: after -Apply, it must report ToWrite: 0 (the
-    "VERIFY <entity>: PASS" line) — no grant in any state owned by a user, application or human, that the backfill can
-    re-own (review rounds 1 and 4), and no grant in any state owned by a team other than its root's (TeamMismatch 0, review
-    rounds 2 and 3). Candidates is NOT the rule (review round 5, F1-b): Unfiled rows (filed to nothing — e.g. an inactive
-    grant whose root was deleted, which empties the lookup) and Unresolvable rows are never written, so they stay in the
-    candidate read forever. They are KNOWN RESIDUE: each is counted (Unfiled, Unresolvable), logged with its id, and left.
+    The grant backfill dry run (task 099b). It is also the VERIFY: after -Apply, it must print "VERIFY <entity>: PASS",
+    that is ToWrite 0 AND Unresolvable 0 AND ReadFailed 0 (review round 6): no grant in any state owned by a user,
+    application or human (review rounds 1 and 4), and none owned by a team other than its root's (TeamMismatch 0, review
+    rounds 2 and 3). An Unresolvable grant sits on a root that cannot be given a team (e.g. flagged secure but not
+    isolated, or a 404 on the root), and a ReadFailed grant's root could not be read (429, 5xx, 403; logged with the
+    status). Both stay owned against D-11, so both fail VERIFY. Candidates is NOT the rule (review round 5, F1-b): Unfiled
+    rows (filed to nothing, e.g. an inactive grant whose root was deleted, which empties the lookup) stay in the candidate
+    read forever. They expose no record: KNOWN RESIDUE, counted (Unfiled), logged with its id, never written, and they do
+    not fail VERIFY.
 
 .EXAMPLE
     .\Backfill-RecordOwnership.ps1 -SelfTest
@@ -214,12 +221,15 @@ function Get-Lookup {
 }
 
 # ── PURE: the resolver's owner decision for a row filed under ONE target (RecordOwnershipResolver.ResolveFromParentsAsync) ──
-#    $Facts    : @{ Bu = <target's owning business unit or $null>; Flagged = <sprk_issecure true/empty on a ROOT target> }
+#    $Facts    : @{ Bu = <target's owning business unit or $null>; Flagged = <sprk_issecure true/empty on a ROOT target>;
+#                   ReadFailed = <the read failed with anything but a 404 (review round 6)>; Status; Error }
 #    $Topology : @{ BuId = <Secure Record unit or $null>; Ambiguous = <bool>; TeamId = <named team or $null>; TeamCount = <n> }
 #    $DefaultTeamOf : { param($bu) <that unit's single default owner team, or $null> }
 #    Returns @{ Team; Bu; Reason } — Reason is set exactly when Team is $null (UNRESOLVABLE, never written).
 function Get-OwnerTeamDecision {
     param([hashtable]$Facts, [hashtable]$Topology, [scriptblock]$DefaultTeamOf)
+    # Review round 6 (F2): a target that could not be READ (any error but a 404) is not "does not exist": the owner is undecided.
+    if ($Facts.ReadFailed) { return @{ Team = $null; Bu = $null; ReadFailed = $true; Status = $Facts.Status; Reason = "the target could not be read (HTTP $($Facts.Status)): $($Facts.Error)" } }
     if (-not $Facts.Bu) { return @{ Team = $null; Bu = $null; Reason = 'the target does not exist or has no owning business unit' } }
     if ($Topology.Ambiguous) { return @{ Team = $null; Bu = $Facts.Bu; Reason = "more than one business unit is named '$SecureBusinessUnitName'" } }
     if ($Facts.Flagged -and $Facts.Bu -ne $Topology.BuId) {
@@ -315,6 +325,7 @@ function Merge-BackfillRows {
 #    Outcome one of:
 #      Unfiled      — filed to nothing, WHATEVER its owner (a team-owned row too: counted, never skipped silently); not written
 #      Unresolvable — the decision refused; not written
+#      ReadFailed   — the target could not be read (any error but a 404; review round 6, F2); not written
 #      Correct      — a team-owned row already on its root's team; nothing to do
 #      Write        — re-own it to Decision.Team (Mismatch = it is team-owned by another team) ──
 function Get-RowPlan {
@@ -328,6 +339,7 @@ function Get-RowPlan {
     $plan = @{ Outcome = $null; Target = $target; Decision = $null; CurrentTeam = $currentTeam; Mismatch = $false; Inactive = (Test-InactiveRow $Row) }
     if (-not $target) { $plan.Outcome = 'Unfiled'; return $plan }
     $plan.Decision = & $Decide $target
+    if ($plan.Decision.ReadFailed) { $plan.Outcome = 'ReadFailed'; return $plan }
     if ($currentTeam) {
         $plan.Mismatch = Test-TeamMismatch -CurrentTeam $currentTeam -Decision $plan.Decision
         $plan.Outcome = if ($plan.Mismatch) { 'Write' } elseif ($plan.Decision.Team) { 'Correct' } else { 'Unresolvable' }
@@ -337,14 +349,15 @@ function Get-RowPlan {
     return $plan
 }
 
-# ── PURE (review round 5, F1-b): one row's plan counted into its entity's summary. Unfiled and Unresolvable are counted (known
-#    residue, never written); Write counts ToWrite (and Candidates + TeamMismatch for a team-owned row on another team than its
+# ── PURE (review round 5, F1-b): one row's plan counted into its entity's summary. Unfiled, Unresolvable and ReadFailed are
+#    counted (never written); Write counts ToWrite (and Candidates + TeamMismatch for a team-owned row on another team than its
 #    root's, NotActive for an inactive row). ──
 function Add-PlanToStats {
     param([System.Collections.IDictionary]$Stats, [hashtable]$Plan, [bool]$ReportNotActive)
     switch ($Plan.Outcome) {
         'Unfiled' { $Stats.Unfiled++ }
         'Unresolvable' { $Stats.Unresolvable++ }
+        'ReadFailed' { $Stats.ReadFailed++ }
         'Write' {
             if ($Plan.Mismatch) { $Stats.Candidates++; $Stats.TeamMismatch++ }
             $Stats.ToWrite++
@@ -353,11 +366,37 @@ function Add-PlanToStats {
     }
 }
 
-# ── PURE (review round 5, F1-b): the VERIFY rule — nothing left that the backfill would write. Unfiled and Unresolvable rows
-#    stay candidates forever by design, so Candidates is not the rule. ──
+# ── PURE (review round 6): the VERIFY rule — ToWrite 0 AND Unresolvable 0 AND ReadFailed 0. An Unresolvable row sits on a root
+#    that still exists and stays owned against D-11; a ReadFailed row's owner is undecided (its root could not be read). Unfiled
+#    rows (the root is gone, the lookup empty) expose no record: residue, not a failure, so Candidates is not the rule. ──
 function Test-VerifySatisfied {
     param($Stats)
-    return [bool]($Stats.ToWrite -eq 0)
+    return [bool]($Stats.ToWrite -eq 0 -and $Stats.Unresolvable -eq 0 -and $Stats.ReadFailed -eq 0)
+}
+
+# ── PURE (review round 6, F2): the HTTP status of a failed read, or $null when the error carries none (a network failure). ──
+function Get-HttpStatusCode {
+    param($Exception)
+    $response = $Exception.PSObject.Properties['Response']
+    if ($response -and $response.Value -and $response.Value.PSObject.Properties['StatusCode']) { return [int]$response.Value.StatusCode }
+    return $null
+}
+
+# ── PURE (review round 6, F2): a target's facts from ONE read. $Read: { <the row, or throws> }. ONLY a 404 is "does not exist"
+#    (Bu = $null); any other failure (429, 5xx, 403, no response) is ReadFailed with its status, never a missing root. The
+#    failure is recorded, not rethrown: the run goes on, so one run lists every failed read. ──
+function Read-TargetFacts {
+    param([scriptblock]$Read, [bool]$IsRoot)
+    try {
+        $row = & $Read
+        $flag = $row.PSObject.Properties['sprk_issecure']
+        $flagged = $IsRoot -and ($null -eq $flag -or $null -eq $flag.Value -or $flag.Value -eq $true)
+        return @{ Bu = (Get-Lookup $row 'owningbusinessunit'); Flagged = $flagged; ReadFailed = $false }
+    } catch {
+        $status = Get-HttpStatusCode $_.Exception
+        if ($status -eq 404) { return @{ Bu = $null; Flagged = $IsRoot; ReadFailed = $false; Status = 404 } }
+        return @{ Bu = $null; Flagged = $IsRoot; ReadFailed = $true; Status = $(if ($null -ne $status) { $status } else { 'none' }); Error = $_.Exception.Message }
+    }
 }
 
 # ══ SELF-TEST (offline) ══════════════════════════════════════════════════════════════════════════════════════
@@ -445,15 +484,34 @@ if ($SelfTest) {
     # Review round 5 (F1-b): VERIFY is ToWrite 0; an unfiled inactive grant (its root deleted) is counted Unfiled and does not fail it.
     $verifyOf = { param([object[]]$rows, [scriptblock]$decide = $toSecure)
         # Candidates seeded as the main loop seeds it: the user-owned rows of the read, written or not.
-        $s = [ordered]@{ Candidates = (Select-UserOwnedRows $rows).Count; TeamMismatch = 0; ToWrite = 0; Unfiled = 0; Unresolvable = 0; NotActive = 0 }
+        $s = [ordered]@{ Candidates = (Select-UserOwnedRows $rows).Count; TeamMismatch = 0; ToWrite = 0; Unfiled = 0; Unresolvable = 0; ReadFailed = 0; NotActive = 0 }
         foreach ($r in $rows) { Add-PlanToStats -Stats $s -Plan (Get-RowPlan -Row $r -Order $grantOrder -Decide $decide) -ReportNotActive $true }
-        "Unfiled=$($s.Unfiled) Unresolvable=$($s.Unresolvable) ToWrite=$($s.ToWrite) NotActive=$($s.NotActive) verify=$(Test-VerifySatisfied $s)" }
+        "Unfiled=$($s.Unfiled) Unresolvable=$($s.Unresolvable) ReadFailed=$($s.ReadFailed) ToWrite=$($s.ToWrite) NotActive=$($s.NotActive) verify=$(Test-VerifySatisfied $s)" }
     $toUnresolvable = { param($t) Get-OwnerTeamDecision -Facts @{ Bu = $childBu; Flagged = $true } -Topology $ok -DefaultTeamOf $defaults }
     $rowCases += @(
-        @{ Name = 'verify: an unfiled INACTIVE grant (root deleted) is counted Unfiled and VERIFY is satisfied'; Got = (& $verifyOf @((& $row 'v1' 'u1' $null $null 1))); Want = 'Unfiled=1 Unresolvable=0 ToWrite=0 NotActive=0 verify=True' }
-        @{ Name = 'verify: a grant already on its root''s team beside unfiled residue -> VERIFY satisfied'; Got = (& $verifyOf @((& $row 'v2' $null $secureTeam 'p1'), (& $row 'v3' $null $childTeam $null 1))); Want = 'Unfiled=1 Unresolvable=0 ToWrite=0 NotActive=0 verify=True' }
-        @{ Name = 'verify: an Unresolvable grant is counted and does not fail VERIFY'; Got = (& $verifyOf @((& $row 'v4' 'u1' $null 'p1')) $toUnresolvable); Want = 'Unfiled=0 Unresolvable=1 ToWrite=0 NotActive=0 verify=True' }
-        @{ Name = 'verify (must-fire control): a user-owned grant left to write fails VERIFY'; Got = (& $verifyOf @((& $row 'v5' 'u1' $null 'p1' 1))); Want = 'Unfiled=0 Unresolvable=0 ToWrite=1 NotActive=1 verify=False' }
+        @{ Name = 'verify: an unfiled INACTIVE grant (root deleted) is counted Unfiled and VERIFY is satisfied'; Got = (& $verifyOf @((& $row 'v1' 'u1' $null $null 1))); Want = 'Unfiled=1 Unresolvable=0 ReadFailed=0 ToWrite=0 NotActive=0 verify=True' }
+        @{ Name = 'verify: a grant already on its root''s team beside unfiled residue -> VERIFY satisfied'; Got = (& $verifyOf @((& $row 'v2' $null $secureTeam 'p1'), (& $row 'v3' $null $childTeam $null 1))); Want = 'Unfiled=1 Unresolvable=0 ReadFailed=0 ToWrite=0 NotActive=0 verify=True' }
+        # Review round 6: an Unresolvable grant sits on a root that still exists and stays user-owned against D-11, so it FAILS VERIFY.
+        @{ Name = 'verify: an Unresolvable grant (root flagged, not isolated) is counted and FAILS VERIFY'; Got = (& $verifyOf @((& $row 'v4' 'u1' $null 'p1')) $toUnresolvable); Want = 'Unfiled=0 Unresolvable=1 ReadFailed=0 ToWrite=0 NotActive=0 verify=False' }
+        @{ Name = 'verify (must-fire control): a user-owned grant left to write fails VERIFY'; Got = (& $verifyOf @((& $row 'v5' 'u1' $null 'p1' 1))); Want = 'Unfiled=0 Unresolvable=0 ReadFailed=0 ToWrite=1 NotActive=1 verify=False' }
+    )
+    # Review round 6 (F2): a failed root read, simulated as Invoke-RestMethod throws it (an HttpResponseException carrying the
+    # status). ONLY a 404 is "does not exist" (Unresolvable); 403 / 429 / 5xx / no response are ReadFailed. Both: VERIFY NOT MET.
+    $httpFail = { param([int]$code) [Microsoft.PowerShell.Commands.HttpResponseException]::new("Simulated Dataverse $code.", [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]$code)) }
+    $readingAs = { param($thrown)
+        $decision = Get-OwnerTeamDecision -Facts (Read-TargetFacts -IsRoot $true -Read { throw $thrown }) -Topology $ok -DefaultTeamOf $defaults
+        { param($t) $decision }.GetNewClosure() }
+    $okRead = { param($t) Get-OwnerTeamDecision -Facts (Read-TargetFacts -IsRoot $true -Read { [pscustomobject]@{ _owningbusinessunit_value = $childBu; sprk_issecure = $false } }) -Topology $ok -DefaultTeamOf $defaults }
+    $rowCases += @(
+        @{ Name = 'read-failed: root read 403 -> ReadFailed, VERIFY NOT MET'; Got = (& $verifyOf @((& $row 'f1' 'u1' $null 'p1')) (& $readingAs (& $httpFail 403))); Want = 'Unfiled=0 Unresolvable=0 ReadFailed=1 ToWrite=0 NotActive=0 verify=False' }
+        @{ Name = 'read-failed: root read 429 (throttled) -> ReadFailed, VERIFY NOT MET'; Got = (& $verifyOf @((& $row 'f2' 'u1' $null 'p1')) (& $readingAs (& $httpFail 429))); Want = 'Unfiled=0 Unresolvable=0 ReadFailed=1 ToWrite=0 NotActive=0 verify=False' }
+        @{ Name = 'read-failed: root read 503 -> ReadFailed, VERIFY NOT MET'; Got = (& $verifyOf @((& $row 'f3' 'u1' $null 'p1')) (& $readingAs (& $httpFail 503))); Want = 'Unfiled=0 Unresolvable=0 ReadFailed=1 ToWrite=0 NotActive=0 verify=False' }
+        @{ Name = 'read-failed: a TEAM-owned grant whose root read gets no response -> ReadFailed, VERIFY NOT MET'; Got = (& $verifyOf @((& $row 'f4' $null $childTeam 'p1')) (& $readingAs ([System.Net.Http.HttpRequestException]::new('Simulated connection reset.')))); Want = 'Unfiled=0 Unresolvable=0 ReadFailed=1 ToWrite=0 NotActive=0 verify=False' }
+        @{ Name = 'read-failed: root read 429 -> the reason names the HTTP status'; Got = [string]([string](& (& $readingAs (& $httpFail 429)) $null).Reason -like '*HTTP 429*'); Want = 'True' }
+        @{ Name = 'read 404: root does not exist -> Unresolvable, VERIFY NOT MET'; Got = (& $verifyOf @((& $row 'f5' 'u1' $null 'p1')) (& $readingAs (& $httpFail 404))); Want = 'Unfiled=0 Unresolvable=1 ReadFailed=0 ToWrite=0 NotActive=0 verify=False' }
+        @{ Name = 'read 404: the reason is "does not exist"'; Got = [string](& (& $readingAs (& $httpFail 404)) $null).Reason; Want = 'the target does not exist or has no owning business unit' }
+        @{ Name = 'verify: Unfiled residue only -> PASS'; Got = (& $verifyOf @((& $row 'f6' 'u1' $null $null), (& $row 'f7' $null $childTeam $null 1))); Want = 'Unfiled=2 Unresolvable=0 ReadFailed=0 ToWrite=0 NotActive=0 verify=True' }
+        @{ Name = 'verify: everything clean (each grant on its root''s team, root read OK) -> PASS'; Got = (& $verifyOf @((& $row 'f8' $null $childTeam 'p1'), (& $row 'f9' $null $childTeam 'p2' 1)) $okRead); Want = 'Unfiled=0 Unresolvable=0 ReadFailed=0 ToWrite=0 NotActive=0 verify=True' }
     )
     foreach ($r in $rowCases) {
         $pass = $r.Got -eq $r.Want
@@ -561,16 +619,11 @@ function Get-RootFacts {
     $key = "$EntitySetName|$RecordId"
     if ($script:RootFacts.ContainsKey($key)) { return $script:RootFacts[$key] }
     $isRoot = [bool]$SecureFlaggedSets[$EntitySetName]
-    try {
-        $columns = if ($isRoot) { '_owningbusinessunit_value,sprk_issecure' } else { '_owningbusinessunit_value' }
-        $row = (Invoke-DvGet "$EntitySetName($RecordId)?`$select=$columns")[0]
-        $flag = $row.PSObject.Properties['sprk_issecure']
-        $flagged = $isRoot -and ($null -eq $flag -or $null -eq $flag.Value -or $flag.Value -eq $true)
-        $facts = @{ Bu = (Get-Lookup $row 'owningbusinessunit'); Flagged = $flagged }
-    } catch {
-        $facts = @{ Bu = $null; Flagged = $isRoot }
-    }
-    $script:RootFacts[$key] = $facts
+    $columns = if ($isRoot) { '_owningbusinessunit_value,sprk_issecure' } else { '_owningbusinessunit_value' }
+    # Review round 6 (F2): only a 404 is "does not exist"; any other failure is ReadFailed (see Read-TargetFacts).
+    $facts = Read-TargetFacts -IsRoot $isRoot -Read { (Invoke-DvGet "$EntitySetName($RecordId)?`$select=$columns")[0] }
+    # A failed read is not cached: the next row on the same root reads it again (a throttle may have passed).
+    if (-not $facts.ReadFailed) { $script:RootFacts[$key] = $facts }
     return $facts
 }
 
@@ -661,7 +714,7 @@ foreach ($entity in $Entities) {
     $teamOwnedRows = @()
     $teamOwnedQuery = Get-TeamOwnedQuery $entity $set $select
     if ($teamOwnedQuery) { $teamOwnedRows = Select-TeamOwnedRows (Invoke-DvGet $teamOwnedQuery) }
-    $stats = [ordered]@{ Entity = $entity; Candidates = $userOwnedCount; AppOwned = $appOwnedCount; HumanOwned = $userOwnedCount - $appOwnedCount; TeamOwnedChecked = $(if ($teamOwnedQuery) { @($teamOwnedRows).Count } else { '-' }); TeamMismatch = 0; ToWrite = 0; Written = 0; Failed = 0; Unfiled = 0; Unresolvable = 0; NotActive = $notActive }
+    $stats = [ordered]@{ Entity = $entity; Candidates = $userOwnedCount; AppOwned = $appOwnedCount; HumanOwned = $userOwnedCount - $appOwnedCount; TeamOwnedChecked = $(if ($teamOwnedQuery) { @($teamOwnedRows).Count } else { '-' }); TeamMismatch = 0; ToWrite = 0; Written = 0; Failed = 0; Unfiled = 0; Unresolvable = 0; ReadFailed = 0; NotActive = $notActive }
     # Review round 3 (K4): a row read both as a user-owned candidate and as team-owned is processed once.
     $merged = Merge-BackfillRows -Candidates $candidates -TeamOwned $teamOwnedRows -IdColumn "$($entity)id"
     foreach ($dup in $merged.Duplicates) { Write-BackfillLog "DUPLICATE $entity $dup — read both as user-owned and as team-owned; processed once (first reading)." }
@@ -684,6 +737,11 @@ foreach ($entity in $Entities) {
         $bu = $plan.Decision.Bu
         $team = $plan.Decision.Team
         if ($plan.Outcome -eq 'Correct') { continue }
+        if ($plan.Outcome -eq 'ReadFailed') {
+            # Review round 6 (F2): the root could not be read, so the owner is undecided: not written, and VERIFY is NOT MET.
+            Write-BackfillLog "READ-FAILED $entity $id$ownedBy — target $($target.Attribute)=$($target.Id) HTTP $($plan.Decision.Status): $($plan.Decision.Reason). Not written."
+            continue
+        }
         if ($plan.Outcome -eq 'Unresolvable') {
             Write-BackfillLog "UNRESOLVABLE $entity $id$ownedBy — target $($target.Attribute)=$($target.Id) BU=${bu}: $($plan.Decision.Reason). Not written."
             continue
@@ -721,10 +779,10 @@ Write-Host "Application users: $($appUserIds.Count) (the defective owner for spr
 # Review round 4: -Property * - Format-Table shows only the first 10 columns of an object without it, so Unresolvable and
 # NotActive were never printed; -Width keeps a narrow console from cutting them.
 $summary | Format-Table -Property * -AutoSize | Out-String -Width 4096 | Write-Host
-# Review round 5 (F1-b): the VERIFY rule, per entity — ToWrite 0. Unfiled and Unresolvable are known residue (logged per row).
+# Review round 6: the VERIFY rule, per entity — ToWrite, Unresolvable and ReadFailed all 0. Unfiled is residue (logged per row).
 foreach ($s in $summary) {
-    Write-Host ("VERIFY {0}: {1} — ToWrite {2} (must be 0). Known residue, never written, each row in the log: Unfiled {3}, Unresolvable {4}." -f
-        $s.Entity, $(if (Test-VerifySatisfied $s) { 'PASS' } else { 'NOT MET' }), $s.ToWrite, $s.Unfiled, $s.Unresolvable)
+    Write-Host ("VERIFY {0}: {1} — ToWrite {2}, Unresolvable {3}, ReadFailed {4} (each must be 0). Residue, not a failure, each row in the log: Unfiled {5}." -f
+        $s.Entity, $(if (Test-VerifySatisfied $s) { 'PASS' } else { 'NOT MET' }), $s.ToWrite, $s.Unresolvable, $s.ReadFailed, $s.Unfiled)
 }
 
 # Rows planned per target team (read-only name lookups). The Secure Record owner team is always listed, even at 0.
