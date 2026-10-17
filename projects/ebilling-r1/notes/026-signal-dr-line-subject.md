@@ -184,7 +184,27 @@ Source: the ontology-r1 and uac-r2 re-checks of fix-round-1, plus DEF-022.
 
 **Known limits added.**
 - The DEF-022 guard covers `sprk_invoice` and `sprk_billingevent`, as briefed. The other four family tables (submission, approval, external identifier, correction) are not checked on those three paths. No playbook or mapping targets them today.
-- On the two throwing paths, the refusal's exception message starts "No owner could be resolved" (the reused `RecordOwnerUnresolvedException`). The stable code is the guard's.
+- Resolved in fix-round-2b: on the two throwing paths, the refusal's message started "No owner could be resolved" (the reused `RecordOwnerUnresolvedException`). See below.
+- Resolved in fix-round-2b: on the generic paths, the other invoice (superseded, or a line's) is read as the app, so the guard's reason could name its core record to a caller who cannot read it. See below.
+
+**Fix-round-2b** (coordinator, §8.5: the disclosure is on a real path, so it cannot stay a known limit). Commit 386651e2f.
+- **No ids in refusals.**
+  - `UpdateRecordActionCore` and `DataverseUpdateHandler` now throw `InvoiceFamilyCoreRecordGuard.RefusalException`.
+  - Its message is the stable code plus a fixed sentence: "The invoice-family core-record rule refused this write ({code}); nothing was written." It never includes the reason.
+  - The field-mapping push uses the same sentence.
+  - The child-record / `OwnedChildWrite` path (and the chat update tool, which runs through it) is unchanged. Its reasons name only ids from the caller's own payload or from rows read as the caller. The D-96 line check, the only read made as the app there, names no line, only the core record the caller's own write names.
+- **Accurate message.**
+  - `RecordOwnerUnresolvedException` gains an `(entity, code, message)` constructor that uses the message verbatim, so ActionSeam's existing catch (`{code}: {message}`) and the node executor surface it unchanged.
+  - The type is sealed, so a derived exception was not possible. No catch site and no DI changed.
+- **Tests.**
+  - For both paths and both mismatch cases (superseded invoice, line's invoice), the exception message and reason contain no GUID, contain the code, and do not start "No owner could be resolved".
+  - The two-core cases and the push assert the same.
+  - The child-record hidden-line refusal names only the caller's target project.
+- **Mutation proof.** With the guard's reason put back into the two throwing paths, 6 tests fail: the 4 mismatch cases and the 2 two-core cases.
+- **Counts.**
+  - Targeted classes (generic paths, `SecureChildOwnershipAiToolTests`, guard): 451 / 451.
+  - Brief filter: 4,294 passed, 6 skipped, 0 failed.
+  - ArchTests: 1,126 / 1,126.
 
 ## Files
 
