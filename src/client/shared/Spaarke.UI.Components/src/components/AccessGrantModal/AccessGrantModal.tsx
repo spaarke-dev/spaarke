@@ -436,6 +436,9 @@ const SHARE_EXPIRY_UNCONFIRMED_REASON_CODE = 'sdap.access.share_expiry.write_fai
 /** The server's expiry for a share added without one (`ExternalGrantLifecycle.DefaultExpiryDays`). Display only. */
 const DEFAULT_SHARE_EXPIRY_DAYS = 90;
 
+/** An add while the Expiration holds no usable date (task 099c): nothing is sent until it is corrected. */
+const ADD_EXPIRY_INVALID_MESSAGE = 'Choose an Expiration of today or later before adding people.';
+
 /**
  * The UTC calendar date `days` from today, `yyyy-MM-dd` — the server's "today" for every expiry decision
  * (`ExternalGrantLifecycle.TodayUtc`). The picker's minimum mirrors the route's rule: a date before UTC today is
@@ -456,7 +459,11 @@ type ShareExpirySummary =
   | { kind: 'noShares' }
   | {
       kind: 'shares';
-      /** The earliest expiry among the shares (it governs the soonest lapse); null when none carries a date. */
+      /**
+       * The record's date: the earliest expiry among the shares still in force (it governs the soonest lapse). When
+       * every share has lapsed, the earliest lapsed date (shown, never sent: the route refuses a past date). Null when
+       * no share carries a date.
+       */
       earliest: string | null;
       /** The shares do not all end on the same date — stated, never silently resolved to one. */
       diverges: boolean;
@@ -474,9 +481,13 @@ function summarizeShareExpiry(grants: IAccessGrantRecord[] | null): ShareExpiryS
   if (shares.length === 0) return { kind: 'noShares' };
   const dates = shares.map(g => (g.expiresDate ? g.expiresDate.slice(0, 10) : null));
   const dated = dates.filter((d): d is string => d !== null).sort();
+  const liveDated = shares
+    .filter(g => g.isExpired !== true && !!g.expiresDate)
+    .map(g => (g.expiresDate as string).slice(0, 10))
+    .sort();
   return {
     kind: 'shares',
-    earliest: dated[0] ?? null,
+    earliest: liveDated[0] ?? dated[0] ?? null,
     diverges: new Set(dates.map(d => d ?? '')).size > 1,
     anyLapsed: shares.some(g => g.isExpired === true),
   };
@@ -1093,6 +1104,34 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [recordShares, setRecordShares] = React.useState<IAccessGrantRecord[] | null>(null);
   const [expiryDraft, setExpiryDraft] = React.useState<string | null>(null);
   const [expiryApplying, setExpiryApplying] = React.useState(false);
+  // Task 099c: the record's one Expiration (owner 2026-09-10: it "applies to all sharing", and every add sends it).
+  // The minimum mirrors the route (UTC today, today valid, no maximum); the server stays the authority.
+  const shareExpiry = summarizeShareExpiry(recordShares);
+  const expiryMin = utcDateOnly();
+  const expiryDraftBeforeMin = expiryDraft !== null && expiryDraft !== '' && expiryDraft < expiryMin;
+  const expiryDraftValid = expiryDraft !== null && /^\d{4}-\d{2}-\d{2}$/.test(expiryDraft) && !expiryDraftBeforeMin;
+  // With no share yet, the field's own value is the record's date: an unusable one holds every add back.
+  const addExpiryInvalid = shareExpiry.kind === 'noShares' && expiryDraft !== null && !expiryDraftValid;
+  /**
+   * THE ADD RULE (task 099c): every external add — contact, organization, suggestion — sends the record's APPLIED date.
+   * With shares, that is their date (never an unapplied edit, so a new share cannot silently land off the record's
+   * date); re-adding someone whose live grant ends later moves it to the record date (one date per record, owner
+   * 2026-09-10; `/grant` writes an explicit date as given). With no share, it is the field's value (default
+   * today + 90). Nothing is sent when the date is unknown (the grants read failed) or has lapsed (the route would
+   * refuse it): the server then keeps a live grant's date and gives a new or lapsed one today + 90.
+   */
+  const addExpiryDate: string | undefined =
+    shareExpiry.kind === 'shares'
+      ? shareExpiry.earliest !== null && shareExpiry.earliest >= expiryMin
+        ? shareExpiry.earliest
+        : undefined
+      : shareExpiry.kind === 'noShares'
+        ? expiryDraft === null
+          ? utcDateOnly(DEFAULT_SHARE_EXPIRY_DAYS)
+          : expiryDraftValid
+            ? expiryDraft
+            : undefined
+        : undefined;
   // Items (contacts OR organizations) checked to grant, keyed by contactId/orgId.
   const [selectedCandidateIds, setSelectedCandidateIds] = React.useState<Set<string>>(new Set());
   const [approving, setApproving] = React.useState(false);
@@ -1581,6 +1620,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       // failure directions are not symmetric, so the catch must not default
       // to the more harmful one.
       const internal = await isInternalContact(contact.contactId).catch(() => true);
+      // Task 099c: the record's applied Expiration rides on the add (see addExpiryDate).
+      const expiryBody = addExpiryDate ? { expiryDate: addExpiryDate } : {};
       let data: IGrantWriteResponseBody | undefined;
 
       if (!internal && contact.email) {
@@ -1594,6 +1635,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           accessLevel: opts.level,
           firstName,
           lastName,
+          ...expiryBody,
         });
       } else {
         // Internal workforce contact, or an external contact with no email on
@@ -1604,6 +1646,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           recordType,
           recordId,
           accessLevel: opts.level,
+          ...expiryBody,
         });
       }
 
@@ -1611,7 +1654,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       // says when it did, and the batch notice reports it.
       return { notificationFailed: data.notificationFailed === true, narrowed: data.narrowed === true };
     },
-    [isInternalContact, postJson, recordId, recordType]
+    [isInternalContact, postJson, recordId, recordType, addExpiryDate]
   );
 
   // Unified "Available Contacts & Organizations & Users" list (task 073 v1.0.23; task
@@ -1683,11 +1726,13 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         recordId,
         accessLevel: level,
         organizationId: org.id,
+        // Task 099c: the record's applied Expiration rides on the add (see addExpiryDate).
+        ...(addExpiryDate ? { expiryDate: addExpiryDate } : {}),
       });
       // Task 139: an organization-wide grant is capped at the caller's level too.
       return { narrowed: data?.narrowed === true };
     },
-    [postJson, recordType, recordId]
+    [postJson, recordType, recordId, addExpiryDate]
   );
 
   /** Writes an internal system-user POA SHARE (task 065, FR-29) via the task-063
@@ -1717,6 +1762,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const handleGrantSelected = React.useCallback(async (): Promise<boolean> => {
     const selected = availableItems.filter(it => selectedCandidateIds.has(it.id));
     if (selected.length === 0) return true;
+    // Task 099c: contacts and organizations carry the record's Expiration; an unusable one is corrected first.
+    if (addExpiryInvalid && selected.some(it => it.kind !== 'user')) {
+      setNoticeIfCurrent({ intent: 'warning', text: ADD_EXPIRY_INVALID_MESSAGE });
+      return false;
+    }
     // Every selected row must have a level (no default) before it can be granted.
     const missing = selected.filter(it => rowLevels[it.id] === undefined);
     if (missing.length > 0) {
@@ -1838,6 +1888,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     showsThisRecord,
     setNoticeIfCurrent,
     setDenyIfCurrent,
+    addExpiryInvalid,
   ]);
 
   // Save (task 073 UAT v1.0.29 #1B): if rows are staged but not yet added, COMMIT
@@ -1913,6 +1964,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * Adopted. Refusals show the server's own sentence. */
   const grantSuggestion = React.useCallback(
     async (entry: IAssignedAccessEntry) => {
+      // Task 099c: an external grant carries the record's Expiration; an unusable one is corrected first.
+      if (!entry.systemUserId && addExpiryInvalid) {
+        setNoticeIfCurrent({ intent: 'warning', text: ADD_EXPIRY_INVALID_MESSAGE });
+        return;
+      }
       setSuggestionBusy(entry.entryId);
       const name = entry.subjectName ?? 'This person';
       try {
@@ -1929,6 +1985,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
               accessLevel: ASSIGNED_ACCESS_LEVEL,
               recordType,
               recordId,
+              // Task 099c: the record's applied Expiration rides on the add (see addExpiryDate).
+              ...(addExpiryDate ? { expiryDate: addExpiryDate } : {}),
             });
         await loadData();
         const notificationFailed = data.notificationFailed === true;
@@ -1967,7 +2025,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         setSuggestionBusy(null);
       }
     },
-    [postJson, recordType, recordId, loadData, setNoticeIfCurrent, setDenyIfCurrent]
+    [postJson, recordType, recordId, loadData, setNoticeIfCurrent, setDenyIfCurrent, addExpiryDate, addExpiryInvalid]
   );
 
   /** Task 142 (owner A3): "Dismiss" declines the suggestion — the Assigned-To rule will not suggest or grant it again
@@ -2171,25 +2229,27 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // limits internal access.
   const actionsBlocked = accessDenyState !== null;
 
-  // Task 099c (FR-33, #961): the toolbar Expiration. It shows the shares' earliest date (or, with no share, the date
-  // the server would give a new one) and can be changed only when the record has shares and nothing blocks writes.
-  // The minimum mirrors the route (UTC today, no maximum); the server stays the authority.
-  const shareExpiry = summarizeShareExpiry(recordShares);
-  const expiryMin = utcDateOnly();
+  // Task 099c (FR-33, #961): the toolbar Expiration (state and the add rule: see addExpiryDate above). With shares it
+  // shows their date and Apply moves every share to a new one; with no share it holds the date the next add sends
+  // (default today + 90) — there is nothing to Apply to. It cannot be changed while the date is unknown (the grants
+  // read failed) or writes are blocked.
   const expiryShown =
     shareExpiry.kind === 'shares'
       ? (shareExpiry.earliest ?? '')
       : shareExpiry.kind === 'noShares'
         ? utcDateOnly(DEFAULT_SHARE_EXPIRY_DAYS)
         : '';
-  const expiryEditable = shareExpiry.kind === 'shares' && !actionsBlocked && !expiryApplying;
-  const expiryDraftBeforeMin = expiryDraft !== null && expiryDraft !== '' && expiryDraft < expiryMin;
+  const expiryEditable = shareExpiry.kind !== 'unknown' && !actionsBlocked && !expiryApplying;
   const expiryCanApply =
     expiryEditable &&
-    expiryDraft !== null &&
-    /^\d{4}-\d{2}-\d{2}$/.test(expiryDraft) &&
-    !expiryDraftBeforeMin &&
-    (expiryDraft !== expiryShown || (shareExpiry.kind === 'shares' && shareExpiry.diverges));
+    shareExpiry.kind === 'shares' &&
+    expiryDraftValid &&
+    (expiryDraft !== expiryShown || shareExpiry.diverges);
+  const expiryValidationMessage = expiryDraftBeforeMin
+    ? 'Choose today or a later date.'
+    : addExpiryInvalid
+      ? 'Choose the date new shares end.'
+      : undefined;
   // With no share and no contact-based access offered (Restricted), there is nothing for the Expiration to govern.
   const showShareExpiry = shareExpiry.kind !== 'noShares' || contactGrantsOffered;
 
@@ -2426,8 +2486,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                             label="Expiration"
                             orientation="horizontal"
                             size="small"
-                            validationState={expiryDraftBeforeMin ? 'error' : 'none'}
-                            validationMessage={expiryDraftBeforeMin ? 'Choose today or a later date.' : undefined}
+                            validationState={expiryValidationMessage ? 'error' : 'none'}
+                            validationMessage={expiryValidationMessage}
                           >
                             <Input
                               type="date"
@@ -2439,6 +2499,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                               onChange={(_, d) => setExpiryDraft(d.value)}
                               onKeyDown={e => {
                                 if (e.key === 'Enter' && expiryCanApply && expiryDraft !== null) {
+                                  // With shares only: with none, Enter has nothing to apply (the date goes with an add).
                                   e.preventDefault();
                                   void applyShareExpiry(expiryDraft);
                                 }
@@ -2510,13 +2571,19 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       never silently resolved to one (owner 2026-09-10). */}
                   {showShareExpiry && shareExpiry.kind === 'noShares' && (
                     <Text className={styles.shareExpiryHint} data-testid="share-expiry-default">
-                      A new external share ends {DEFAULT_SHARE_EXPIRY_DAYS} days after it is granted.
+                      No external shares yet. People you add have access until this date.
                     </Text>
                   )}
                   {shareExpiry.kind === 'shares' && shareExpiry.diverges && (
                     <Text className={styles.shareExpiryHint} data-testid="share-expiry-divergence">
-                      The external shares on this record end on different dates. The earliest is shown; applying a date
-                      sets it on every share.
+                      Shares on this record end on different dates; the earliest is shown. Apply, or adding a person,
+                      sets them to this date.
+                    </Text>
+                  )}
+                  {shareExpiry.kind === 'shares' && expiryDraft !== null && (
+                    <Text className={styles.shareExpiryHint} data-testid="share-expiry-unapplied">
+                      Not applied yet. Until you apply it, people you add get{' '}
+                      {addExpiryDate ? formatGrantDate(addExpiryDate) : `${DEFAULT_SHARE_EXPIRY_DAYS} days of access`}.
                     </Text>
                   )}
                   {shareExpiry.kind === 'shares' && shareExpiry.anyLapsed && (
