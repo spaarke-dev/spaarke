@@ -290,7 +290,10 @@ public sealed partial class PredicateCompiler
     /// The verified joins: for each <c>(subject, clause entity)</c> pair, the ONE lookup on the clause entity that
     /// targets the subject. Each entry was confirmed against the live <c>spaarkedev1</c> schema on 2026-10-04 (MCP
     /// <c>describe</c>: <c>sprk_communication.sprk_regardingmatter</c> → <c>sprk_matter</c>;
-    /// <c>sprk_budgetrevision.sprk_matter</c> → <c>sprk_matter</c>).
+    /// <c>sprk_budgetrevision.sprk_matter</c> → <c>sprk_matter</c>). <c>sprk_budget.sprk_matter</c> → <c>sprk_matter</c> was
+    /// confirmed on 2026-10-16 (task 063): the relationship <c>sprk_Matter_Budget_1n</c> on <c>sprk_budget</c>, whose
+    /// referencing attribute is <c>sprk_matter</c> and whose referenced entity is <c>sprk_matter</c>; it is the only lookup
+    /// from <c>sprk_budget</c> to the matter.
     /// </summary>
     /// <remarks>
     /// <b>Why a closed list and not "any lookup".</b> Dataverse joins <c>from</c>/<c>to</c> on any type-compatible
@@ -304,6 +307,9 @@ public sealed partial class PredicateCompiler
         {
             [("sprk_matter", "sprk_communication")] = "sprk_regardingmatter",
             [("sprk_matter", "sprk_budgetrevision")] = "sprk_matter",
+            // Task 063 (Know-promotion rule "this matter has no budget"): the budget ITSELF, not its revisions. A rule that says
+            // "no budget" must read sprk_budget; reading sprk_budgetrevision would claim something the predicate never tested (0.3).
+            [("sprk_matter", "sprk_budget")] = "sprk_matter",
         }.ToFrozenDictionary();
 
     /// <summary>
