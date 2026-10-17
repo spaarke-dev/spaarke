@@ -52,6 +52,21 @@ Statuscode numbers: task 012's notes / docs/data-model/sprk_invoice.md. The spec
   </context>
 
   <constraints>
+    <constraint source="owner D-97 (2026-10-17)">The owner approved 015 in full, including deleting the sprk_invoicestatus column and the sprk_invoicestatus option set from spaarkedev1, once nothing references them. Quote D-97 in the task notes.</constraint>
+    <constraint source="main-session code check 2026-10-17 (owner: 'ensure you do a code check that the sprk_invoicestatus field is not used -- it may be used in the ontology-r1 code')">The background inventory is not complete on its own. The check on work/ebilling-r1 at 49acd2f78 (after the origin/master 1df4ee12d merge) found:
+(1) **Indirect readers.** A literal grep for the name misses code that reads the column through FinanceBaseValues.InvoiceStatus / InvoiceStatusReviewed / CountedInvoiceStatuses: FinanceRollupService.cs :47, :241, :246-248 (ontology-owned); FinanceBaseValues.BuildGroupedSumFetchXml :173-174; tests SignalReevaluationJobTests :1677-1679, :2647 and FinanceBaseValuesSeamTests :60-68. Find readers by the constant names as well as the literal, and update every one.
+(2) **Missing from the inventory.**
+  - scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1
+  - docs/data-model/sprk_invoice.md
+  - the PolicyVersionValidator.AuthorableColumns remarks (master, task 102a), which name sprk_invoice.sprk_invoicestatus as a base column of the derived Thresholds
+  - docs/architecture/multi-environment-portability-strategy.md:141 (an InvoiceStatus example)
+(3) **Live-only dependent on dev.** aiskillconfig a32ae5a7-3908-f111-8407-7c1e520aa4df, "ais_FormFillFieldOptOut_sprk_invoice_sprk_invoicestatus", the platform's Copilot form-fill opt-out row. It is NOT in SpaarkeMaster source. It blocks the attribute delete, so delete that row first.
+  - The other dependents are the two forms and two views already listed.
+  - RetrieveDependenciesForDelete on the attribute (MetadataId 150d244b-9a07-f111-8407-7c1e520aa4df) must return 0 before the delete. Record its output before and after in the notes.
+(4) **Live data.** There are 3 rows with a value, all 100000000 (ToReview) with statuscode 1. Re-check the count at migration time.
+(5) **No workflows or flows.** No workflow or flow definition (clientdata or xaml) mentions the column.
+(6) **Stale ontology branches.** Several older unmerged ontology-r1 branches still carry the pre-master FinanceRollupService that reads the column, e.g. task/ontology-070-inquiry, -131b, -044, -039-gate-notes and ontology/081-cleanup. Name them in the ontology-r1 notice, so a later merge of one of them does not bring a reader back.
+(7) **Enforcement ladder** (root CLAUDE.md §16). Add an ArchTest source-scan guard that fails on "sprk_invoicestatus" anywhere under src/, tests/ and scripts/, and on the FinanceBaseValues.InvoiceStatus constant name, with must-fire and must-not-fire controls. Excluded: projects/** history, and this guard's own file. Record it as "Enforced by:" in the notes.</constraint>
     <constraint source="spec FR-06">CountedInvoiceStatuses = the statuscode values In Review, Approved, Sent to AP, Paid; the filter attribute is statuscode, never statecode (Paid is Inactive). FinanceBaseValues stays the single definition (FinanceBaseValuesSingleDefinitionGuardTests keeps passing, with its literal regex and control updated to the new values).</constraint>
     <constraint source="project">Use 014's constants for statuscode values in Finance code; do not spell them again outside FinanceBaseValues and the lifecycle service.</constraint>
     <constraint source="project CLAUDE.md §5">Data migration first (rows with a value → the In Review statuscode where not already; record counts), then readers, forms, views; dropping the column and the option set in dev is destructive and waits for an explicit owner OK quoted in task notes.</constraint>
