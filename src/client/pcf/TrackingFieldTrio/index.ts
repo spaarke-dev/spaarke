@@ -123,6 +123,11 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.52 (task 099c round 2 — owner 2026-09-10, every add sends the date): no change in this file's logic. Every
+ *   external add in the bundled modal (contact, organization, suggestion; `/grant` and `/invite-and-grant`) sends the
+ *   record's applied Expiration as `expiryDate` — with shares, their date (never an unapplied edit; a re-add of a later
+ *   grant moves it to the record date); with none, the field's value, which is now editable (default today + 90).
+ *
  * v1.0.51 (task 099c, unified-access-control-r2 — FR-33, #961): no change in this file's logic. The bundled modal's
  *   "Add Access Permissions" toolbar gains the record-wide "Expiration": it shows the shares' earliest expiry (from
  *   `fetchExistingGrants`, 099a) and states when they differ, and applying a date calls
@@ -1534,7 +1539,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.51 • Built 2026-10-17',
+      versionText: 'v1.0.52 • Built 2026-10-17',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
