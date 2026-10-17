@@ -10,7 +10,7 @@
 |---|---|
 | **Mode** | Final push to release (owner decisions 2026-10-16). Fix-round loop, then merge on a green Router and deploy via R3. A task closes on merge + deploy + server gate. |
 | **Fix bar** | The most technically correct, best-practice, code-efficient fix. Never the quick route. No complexity without value. |
-| **Order** | 099 (099b after #2025, 099c after #2035) and 186 (ceiling approved in round 101; building in C:/wt186) → 036 (alone, Opus xhigh). Then the remaining wrap-up 090 items, then the **UAT checklist** (scenarios by user type). |
+| **Order** | 099 (099b after #2025, 099c after #2035) and 186 (ceiling approved in round 101; **BLOCKED on R3 045–048 reaching master**; R3 asked) → 036 (alone, Opus xhigh). Then the remaining wrap-up 090 items, then the **UAT checklist** (scenarios by user type). |
 
 ## Open PRs (UAC) and their state
 | PR | Issue | Worktree / branch | Head | State |
