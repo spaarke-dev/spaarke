@@ -77,7 +77,7 @@ public static class ExternalRegistrationEndpoints
 
         group.MapPost("/registration", RegisterAsync)
             .WithName("RegisterExternalWorkforceContact")
-            .ExemptFromWorkforceCeiling("Bootstrap: creates the caller's own contact before any principal exists (R3 registration).")
+            .ExemptFromWorkforceCeiling("Bootstrap: creates or (on confirmation) binds the caller's own contact before any principal exists (R3 registration); an already-resolved caller gets 200 with no write.")
             .WithSummary("Register a workforce contact signed in with their home-directory account")
             .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes))
             .WithDescription(
