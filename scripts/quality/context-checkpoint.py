@@ -19,7 +19,9 @@ One script, three modes, all registered in .claude/settings.json:
 
 The window is CLAUDE_CODE_AUTO_COMPACT_WINDOW, else the first settings file (project local, project, user) that sets
 it, where `modelSettings.<model>.autoCompactWindow` wins over the top-level key. With no window configured the warning
-does nothing (the real limit is unknown). Fails open: every path exits 0 and errors are swallowed.
+does nothing (the real limit is unknown); a window above the model's own limit (400K on a 200K model) means it never
+fires. Usage recorded before the latest compaction is ignored. Known limits: settings are resolved per file, not merged
+first (no file here sets both keys); two parallel tool calls could each fire the same level (not reproduced). Fails open: every path exits 0 and errors are swallowed.
 Test seams: SPRK_CONTEXT_STATE_DIR (state + snapshot folder), SPRK_USER_SETTINGS (user settings file).
 Enforced by: this hook; controls in scripts/quality/tests/test_context_checkpoint.py.
 """
@@ -56,6 +58,13 @@ def last_main_usage(transcript_path):
             f.seek(max(0, size - tail))
             lines = f.read().split(b"\n")
         for raw in reversed(lines):
+            if b'"compact_boundary"' in raw or b'"isCompactSummary"' in raw:
+                try:
+                    entry = json.loads(raw)
+                except ValueError:
+                    entry = {}
+                if entry.get("subtype") == "compact_boundary" or entry.get("isCompactSummary"):
+                    return None, None  # compacted since the last call: the usage before it is stale
             if b'"assistant"' not in raw or b'"usage"' not in raw:
                 continue
             try:
@@ -70,6 +79,8 @@ def last_main_usage(transcript_path):
                 continue
             tokens = sum(int(usage.get(k) or 0) for k in
                          ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+            if tokens == 0 or message.get("model") == "<synthetic>":
+                continue  # an API-error placeholder, not a real call
             return tokens, message.get("model")
         if size <= tail:
             break
@@ -155,9 +166,9 @@ def git(cwd, *args):
     try:
         out = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=4,
                              encoding="utf-8", errors="replace")
-        return out.stdout.rstrip() if out.returncode == 0 else ""
+        return out.stdout.rstrip() if out.returncode == 0 else None
     except (OSError, subprocess.SubprocessError):
-        return ""
+        return None
 
 
 def project_task_file(root, branch):
@@ -188,8 +199,9 @@ def precompact(data):
             lines.append(f"- Unpushed commits: {git(root, 'rev-list', '--count', '@{u}..HEAD') or '?'}")
         else:
             lines.append("- Upstream: none")
-        status = [s for s in git(root, "status", "--porcelain").split("\n") if s]
-        lines.append(f"- Uncommitted entries: {len(status)}")
+        porcelain = git(root, "status", "--porcelain")
+        status = [s for s in (porcelain or "").split("\n") if s]
+        lines.append(f"- Uncommitted entries: {len(status) if porcelain is not None else '? (git status failed)'}")
         lines += [f"    {s}" for s in status[:30]]
         if len(status) > 30:
             lines.append(f"    ... and {len(status) - 30} more")
@@ -228,17 +240,17 @@ def reinject(data):
     if not path or now - os.path.getmtime(path) > SNAPSHOT_MAX_AGE_S:
         return
     snapshot = read_json(path) or {}
-    os.remove(path)
     if snapshot.get("text"):
         print("## Pre-compaction snapshot (mechanical; written by scripts/quality/context-checkpoint.py)")
         print("Verify against git before acting on it. current-task.md / your checkpoint is the source of the plan.")
         print(snapshot["text"])
-    save_state(sid, {"fired_level": 0})
+    os.remove(path)
 
 
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # a piped stdout is cp1252 on Windows
         data = json.loads(sys.stdin.read() or "{}")
         if not isinstance(data, dict):
             return

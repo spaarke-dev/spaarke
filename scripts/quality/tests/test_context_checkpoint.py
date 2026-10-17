@@ -15,6 +15,8 @@ import unittest
 
 HOOK = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "context-checkpoint.py")
 MODEL = "claude-test-model"
+BOUNDARY = {"type": "system", "subtype": "compact_boundary"}
+SUMMARY = {"type": "user", "isCompactSummary": True, "message": {"content": "summary"}}
 
 
 def assistant(tokens, sidechain=False, model=MODEL):
@@ -53,7 +55,8 @@ class Base(unittest.TestCase):
                 "hook_event_name": "PostToolUse"}
         data.update(payload or {})
         out = subprocess.run([sys.executable, HOOK, mode], input=raw if raw is not None else json.dumps(data),
-                             capture_output=True, text=True, env=self.env, timeout=30, cwd=cwd or self.project)
+                             capture_output=True, text=True, encoding="utf-8", env=self.env, timeout=30,
+                             cwd=cwd or self.project)
         self.assertEqual(out.returncode, 0, out.stderr)
         return out.stdout.strip()
 
@@ -119,6 +122,16 @@ class WarnMustFire(Base):
         self.write_transcript(assistant(345000))
         self.warning(self.run_hook("warn"))
 
+    def test_new_call_after_compaction_counts(self):
+        self.write_transcript(assistant(385000), BOUNDARY, SUMMARY, assistant(345000))
+        self.assertNotIn("FINAL", self.warning(self.run_hook("warn")))
+
+    def test_synthetic_error_entry_does_not_hide_real_usage(self):
+        synthetic = {"type": "assistant", "isApiErrorMessage": True, "message": {"model": "<synthetic>", "usage": {
+            "input_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 0}}}
+        self.write_transcript(assistant(345000), synthetic)
+        self.warning(self.run_hook("warn", {"hook_event_name": "UserPromptSubmit"}), event="UserPromptSubmit")
+
     def test_usage_found_beyond_first_tail_window(self):
         # The latest main-session call is followed by > 512 KB of tool output.
         with open(self.transcript, "w", encoding="utf-8") as f:
@@ -131,6 +144,13 @@ class WarnMustNotFire(Base):
     def test_below_threshold(self):
         self.write_transcript(assistant(330000))
         self.assertEqual(self.run_hook("warn"), "")
+
+    def test_stale_usage_before_compaction_boundary(self):
+        # First prompt after a /compact: the newest call predates the boundary, so its 96% is no longer true.
+        self.write_transcript(assistant(385000), BOUNDARY)
+        self.assertEqual(self.run_hook("warn", {"hook_event_name": "UserPromptSubmit"}), "")
+        self.write_transcript(assistant(385000), SUMMARY)
+        self.assertEqual(self.run_hook("warn", {"hook_event_name": "UserPromptSubmit"}), "")
 
     def test_fires_only_once_per_level(self):
         self.write_transcript(assistant(345000))
@@ -202,9 +222,16 @@ class Snapshot(Base):
         self.assertIn("first commit", out)
         self.assertIn("current-task.md last written", out)
         self.assertIn("Checkpoint prompt fired at 86%", out)
-        # Consumed once, and the warning is re-armed.
+        # Consumed once.
         self.assertEqual(self.run_hook("reinject", {"source": "compact"}, cwd=repo), "")
-        self.warning(self.run_hook("warn"))
+
+    def test_non_ascii_snapshot_survives(self):
+        repo = self.git_repo()
+        subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "fix → résumé ✓ 🚀"], cwd=repo, check=True)
+        self.run_hook("precompact", {"trigger": "auto"}, cwd=repo)
+        out = self.run_hook("reinject", cwd=repo)
+        self.assertIn("fix → résumé ✓ 🚀", out)
+        self.assertIn("Branch: work/demo", out)
 
     def test_snapshot_outside_git(self):
         self.run_hook("precompact", {"trigger": "manual"})
