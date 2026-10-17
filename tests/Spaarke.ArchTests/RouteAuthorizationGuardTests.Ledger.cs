@@ -318,7 +318,8 @@ public partial class RouteAuthorizationGuardTests
             + "handler's only I/O is one OntologyAdminAuthoringService call whose every read the caller acts on and every write runs AS THE "
             + "CALLER through IDataverseUserClient (WhoAmI first: unresolved is the single 403); a policy id is read as the caller through the "
             + "Ontology domain allow-list before any write (absent, unreadable or non-Ontology: the uniform 404). The dry run evaluates as the "
-            + "evaluator (#39) and returns only rows whose subject AND core record the caller's own read returns. HandlerDecisions below."),
+            + "evaluator (#39) and returns only rows whose subject AND core record the caller's own read returns. Task 102a adds "
+            + "POST /validate (compile only) to this file, gated exactly as the dry run. HandlerDecisions below."),
         new GovernedFile("Api/InquiryEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/inquiries/{serviceRequestId}/disposition (ontology platform R1 task 071, D-111) -- a person records how a "
             + "budget inquiry turned out. The route carries RecordRouteAccessAuthorizationFilter(\"write\", sprk_servicerequests, "
@@ -1876,6 +1877,16 @@ public partial class RouteAuthorizationGuardTests
             + "non-Ontology: the uniform 404) before anything is evaluated. The draft is evaluated as the EVALUATOR (writes nothing, :358), then "
             + "every hit's subject and core record are re-read AS THE CALLER (:476, :493) and a row is returned only when both come back; the "
             + "policy's Signals are read AS THE CALLER (:544). Nothing the caller cannot read is returned or counted."),
+        new HandlerDecision("POST /api/v1/ontology/admin/authoring/validate", "ValidateAsync", "IDataverseUserClient",
+            new[] { "OntologyAdminAuthoringService.ValidateAsync" },
+            "Ontology task 102a: the handler's only I/O is OntologyAdminAuthoringService.ValidateAsync (OntologyAdminAuthoringEndpoints.cs:86). "
+            + "Gated exactly as the dry run: WhoAmI as the caller first (OntologyAdminAuthoringService.cs:720; unresolved: the single 403), "
+            + "then the caller's prvCreatesprk_PolicyVersion asked FRESH, AS THE CALLER (:726; not held: 403 ontology.admin.forbidden, "
+            + "nothing in the request is read). A body policyId is read AS THE CALLER through the Ontology domain allow-list (:741; absent, "
+            + "unreadable or non-Ontology: the uniform 404). The draft is then compiled only, through the same ValidateDraft save and "
+            + "publish use (:766, PolicyVersionValidator.ValidateForAuthoring, including the authorable-column allow-list): nothing is "
+            + "written, nothing is evaluated, and no dry-run proof is recorded. Lives in the already-governed "
+            + "OntologyAdminAuthoringEndpoints.cs, so the file count is unchanged."),
         new HandlerDecision("POST /api/v1/ontology/admin/authoring/policies", "SavePolicyAsync", "IDataverseUserClient",
             new[] { "OntologyAdminAuthoringService.SavePolicyAsync" },
             "Ontology task 101 (FR-10): the handler's only I/O is OntologyAdminAuthoringService.SavePolicyAsync (OntologyAdminAuthoringEndpoints.cs:77). "
