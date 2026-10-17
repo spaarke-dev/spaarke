@@ -34,7 +34,8 @@ public sealed record SignalClosureOutcome(int Closed, int ChangedSinceRead, int 
 /// <summary>
 /// The system closures that are not "the condition stopped holding" (task 033; spec FR-16, D-13, D-14, D-22, D-32): a Signal
 /// citing a superseded policy version closes <c>Superseded</c>; a Signal of a policy that is Off (<c>sprk_enabled = No</c>) or
-/// Retired closes <c>PolicyRetired</c>. ConditionCleared (including a communication that simply aged out of the window) is
+/// Retired closes <c>PolicyRetired</c>, and so does an open Signal of a policy that was deleted (task 102b fix round 3,
+/// <see cref="CloseSignalsOfDeletedPoliciesAsync"/>). ConditionCleared (including a communication that simply aged out of the window) is
 /// the job's own "not a hit" rule in <see cref="SignalEpisodePlanner"/>.
 /// </summary>
 /// <remarks>
@@ -166,6 +167,124 @@ public sealed class SignalClosureService
         return policies;
     }
 
+    /// <summary>
+    /// Task 102b fix round 3 (owner 2026-10-17: a matter's delete deletes a rule limited to it; <c>sprk_policy_matter</c> is
+    /// CascadeDelete=Cascade). A deleted policy's Signals keep their rows with <c>sprk_policy</c> nulled (<c>sprk_signal_policy</c> is
+    /// RemoveLink), so neither the policy loop (by dedupe-key prefix of an EXISTING policy) nor the Off/Retired close (by the lookup)
+    /// ever reaches them again, and an open one would stay in the worklist forever. This closes every Open or Acknowledged Signal whose
+    /// <c>sprk_policy</c> is empty AND whose dedupe key names a policy code that no <c>sprk_policy</c> row carries (any state), as
+    /// <c>PolicyRetired</c>: the same write as <see cref="ClosePolicyRetiredNowAsync"/> (status, resolution, resolvedon, lastevaluated; no
+    /// Decision Record).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Never fires on a live policy.</b> A Signal whose key's code matches an existing policy (compared ignoring case, so a doubt
+    /// counts as "exists") is left alone, whatever that policy's state or scope; so is a Signal whose key cannot be parsed, and a row read
+    /// back with a <c>sprk_policy</c> despite the condition.</para>
+    /// <para><b>Fail closed.</b> The policy codes and the candidate Signals are both read in full before anything is closed; either read
+    /// faulting throws and nothing is closed. A policy list longer than <see cref="SignalEvaluator.MaxPages"/> pages throws (an incomplete
+    /// list could make a live policy look deleted). The Signals read is bounded to <see cref="SignalEvaluator.MaxPages"/> pages per run:
+    /// the rest are reported (<see cref="DeletedPolicySweep.MoreRemain"/>) and closed by the next run, since a closed one drops out.</para>
+    /// </remarks>
+    internal async Task<DeletedPolicySweep> CloseSignalsOfDeletedPoliciesAsync(CancellationToken ct)
+    {
+        var existingCodes = await AllPolicyCodesAsync(ct).ConfigureAwait(false);
+        var (candidates, moreRemain) = await ReadOpenSignalsWithoutPolicyAsync(ct).ConfigureAwait(false);
+
+        var orphans = new Dictionary<string, List<ExistingSignal>>(StringComparer.Ordinal);
+        int stillExists = 0, unparseable = 0;
+        foreach (var (signal, key) in candidates)
+        {
+            if (!SignalWriter.TryParseDedupeKey(key, out var code, out _, out _, out _))
+            {
+                unparseable++;
+                continue;
+            }
+
+            if (existingCodes.Contains(code))
+            {
+                stillExists++;
+                continue;
+            }
+
+            if (!orphans.TryGetValue(code, out var list)) orphans[code] = list = new List<ExistingSignal>();
+            list.Add(signal);
+        }
+
+        var closedIds = new HashSet<Guid>();
+        var total = SignalClosureOutcome.None;
+        foreach (var (code, signals) in orphans)
+        {
+            ct.ThrowIfCancellationRequested();
+            total = total.Plus(await CloseAsync(code, signals, SignalWriter.ResolutionPolicyRetired, ct, closedIds).ConfigureAwait(false));
+        }
+
+        var closedInOrder = candidates.Select(c => c.Signal.Id).Where(closedIds.Contains).ToList();
+        return new DeletedPolicySweep(total, closedInOrder, stillExists, unparseable, moreRemain);
+    }
+
+    /// <summary>Every <c>sprk_policy</c> row's code, whatever its state (Off and Retired included), paged; throws past
+    /// <see cref="SignalEvaluator.MaxPages"/> pages rather than return a partial list.</summary>
+    private async Task<HashSet<string>> AllPolicyCodesAsync(CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_policy")
+        {
+            ColumnSet = new ColumnSet("sprk_policycode"),
+            PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
+        };
+        query.AddOrder("sprk_policyid", OrderType.Ascending);
+
+        var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var page = 1; ; page++)
+        {
+            if (page > SignalEvaluator.MaxPages)
+            {
+                throw new InvalidOperationException($"There are more than {SignalEvaluator.MaxPages} pages of policies; the list is incomplete.");
+            }
+
+            var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            foreach (var row in result.Entities)
+            {
+                if (row.GetAttributeValue<string>("sprk_policycode") is { Length: > 0 } code) codes.Add(code);
+            }
+
+            if (!result.MoreRecords) return codes;
+            query.PageInfo.PageNumber = page + 1;
+            query.PageInfo.PagingCookie = result.PagingCookie;
+        }
+    }
+
+    /// <summary>Open or Acknowledged Signals whose <c>sprk_policy</c> is empty, with the row version the conditional close needs and their
+    /// dedupe key; at most <see cref="SignalEvaluator.MaxPages"/> pages (MoreRemain when Dataverse has more).</summary>
+    private async Task<(IReadOnlyList<(ExistingSignal Signal, string? Key)> Signals, bool MoreRemain)> ReadOpenSignalsWithoutPolicyAsync(CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_signal")
+        {
+            ColumnSet = new ColumnSet("sprk_signalstatus", "sprk_policy", "sprk_policyversion", "sprk_dedupekey", "versionnumber"),
+            PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
+        };
+        query.Criteria.AddCondition("sprk_policy", ConditionOperator.Null);
+        query.Criteria.AddCondition("sprk_signalstatus", ConditionOperator.In,
+            new object[] { SignalWriter.SignalStatusOpen, SignalWriter.SignalStatusAcknowledged });
+        query.AddOrder("sprk_signalid", OrderType.Ascending);
+
+        var signals = new List<(ExistingSignal, string?)>();
+        for (var page = 1; ; page++)
+        {
+            var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            foreach (var row in result.Entities)
+            {
+                // Defence in depth: a row that carries a policy is never this sweep's, whatever the query returned.
+                if (row.GetAttributeValue<EntityReference>("sprk_policy") is not null) continue;
+                signals.Add((ToOpenSignal(row), row.GetAttributeValue<string>("sprk_dedupekey")));
+            }
+
+            if (!result.MoreRecords) return (signals, false);
+            if (page >= SignalEvaluator.MaxPages) return (signals, true);
+            query.PageInfo.PageNumber = page + 1;
+            query.PageInfo.PagingCookie = result.PagingCookie;
+        }
+    }
+
     private static bool IsSuperseded(ExistingSignal signal, Guid currentVersionId) =>
         signal.IsOpen && signal.PolicyVersionId is { } cited && cited != currentVersionId;
 
@@ -237,21 +356,7 @@ public sealed class SignalClosureService
             var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             foreach (var row in result.Entities)
             {
-                signals.Add(new ExistingSignal(
-                    Id: row.Id,
-                    RowVersion: row.RowVersion ?? (row.GetAttributeValue<long?>("versionnumber") is { } v ? v.ToString(CultureInfo.InvariantCulture) : null),
-                    SubjectEntity: string.Empty,
-                    SubjectId: Guid.Empty,
-                    Episode: 0,
-                    Status: row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value,
-                    Resolution: null,
-                    ResolvedOn: null,
-                    SuppressedUntil: null,
-                    DueDate: null,
-                    CoreTypeRefId: null,
-                    CoreRecordId: null,
-                    Owner: null,
-                    PolicyVersionId: row.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id));
+                signals.Add(ToOpenSignal(row));
             }
 
             if (!result.MoreRecords) return signals;
@@ -259,4 +364,30 @@ public sealed class SignalClosureService
             query.PageInfo.PagingCookie = result.PagingCookie;
         }
     }
+
+    /// <summary>The fields a system close needs (id, row version, status, cited version), from a Signal row.</summary>
+    private static ExistingSignal ToOpenSignal(Entity row) => new(
+        Id: row.Id,
+        RowVersion: row.RowVersion ?? (row.GetAttributeValue<long?>("versionnumber") is { } v ? v.ToString(CultureInfo.InvariantCulture) : null),
+        SubjectEntity: string.Empty,
+        SubjectId: Guid.Empty,
+        Episode: 0,
+        Status: row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value,
+        Resolution: null,
+        ResolvedOn: null,
+        SuppressedUntil: null,
+        DueDate: null,
+        CoreTypeRefId: null,
+        CoreRecordId: null,
+        Owner: null,
+        PolicyVersionId: row.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id);
 }
+
+/// <summary>What <see cref="SignalClosureService.CloseSignalsOfDeletedPoliciesAsync"/> did (task 102b fix round 3).</summary>
+/// <param name="Outcome">The closes, as for every system closure (callers add it to the run's counts).</param>
+/// <param name="ClosedIds">The Signals closed <c>PolicyRetired</c>, in read order.</param>
+/// <param name="PolicyStillExists">Signals with no policy lookup whose key names a policy that exists: left alone.</param>
+/// <param name="Unparseable">Signals with no policy lookup whose dedupe key cannot be parsed: left alone.</param>
+/// <param name="MoreRemain">The per-run bound was reached; the next run continues.</param>
+internal sealed record DeletedPolicySweep(
+    SignalClosureOutcome Outcome, IReadOnlyList<Guid> ClosedIds, int PolicyStillExists, int Unparseable, bool MoreRemain);

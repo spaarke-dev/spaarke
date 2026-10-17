@@ -135,6 +135,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             policies.Select(p => p.Code), "is in force but was not evaluated to the end this run", counts, cancellationToken).ConfigureAwait(false);
 
         await ClosePoliciesNotInForceAsync(counts, cancellationToken).ConfigureAwait(false);
+        await CloseSignalsOfDeletedPoliciesAsync(counts, cancellationToken).ConfigureAwait(false);
         await RedactPoliciesNotInForceAsync(counts, cancellationToken).ConfigureAwait(false);
 
         var success = counts.IsSuccess;
@@ -448,6 +449,52 @@ public sealed class SignalReevaluationJob : IScheduledJob
             _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
                 "Policies that are Off or Retired could not be read ({ExceptionType}); their open Signals were not closed this run.",
                 ex.GetType().Name);
+        }
+    }
+
+    /// <summary>Task 102b fix round 3: open Signals of a policy that no longer exists (a matter's delete cascades to a rule limited to it,
+    /// or an administrator deleted the rule) close PolicyRetired (<see cref="SignalClosureService.CloseSignalsOfDeletedPoliciesAsync"/>). A
+    /// read fault closes nothing: it is logged, the run is failed (visible) and continues; the next run retries.</summary>
+    private async Task CloseSignalsOfDeletedPoliciesAsync(RunCounts counts, CancellationToken ct)
+    {
+        try
+        {
+            var sweep = await _closure.CloseSignalsOfDeletedPoliciesAsync(ct).ConfigureAwait(false);
+            counts.AddClosure(sweep.Outcome, retired: true);
+            counts.DeletedPolicyRetired += sweep.ClosedIds.Count;
+            if (sweep.ClosedIds.Count > 0)
+            {
+                // The K4 pattern (fix round 2): the exact count, and at most the first MaxLoggedOutOfScopeIds ids, in one bounded line.
+                _logger.LogInformation(
+                    "{Count} open Signal(s) of a deleted policy were closed PolicyRetired (their policy no longer exists): {SignalIds}{More}.",
+                    sweep.ClosedIds.Count, string.Join(",", sweep.ClosedIds.Take(MaxLoggedOutOfScopeIds)),
+                    sweep.ClosedIds.Count > MaxLoggedOutOfScopeIds ? $" and {sweep.ClosedIds.Count - MaxLoggedOutOfScopeIds} more" : string.Empty);
+            }
+
+            if (sweep.Unparseable > 0)
+            {
+                _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "{Count} open Signal(s) with no policy lookup have a dedupe key that is not {{code}}|{{type}}|{{id}}|{{episode}}; their policy " +
+                    "cannot be named, so they were left open.", sweep.Unparseable);
+            }
+
+            if (sweep.PolicyStillExists > 0)
+            {
+                _logger.LogInformation(
+                    "{Count} open Signal(s) with no policy lookup name a policy code that still exists; they were left alone.", sweep.PolicyStillExists);
+            }
+
+            if (sweep.MoreRemain)
+            {
+                _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "More open Signals with no policy lookup remain than one run reads ({MaxPages} pages); the next run continues.", SignalEvaluator.MaxPages);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            counts.PolicyFailures++;
+            _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                "Open Signals of deleted policies could not be read ({ExceptionType}); none was closed this run.", ex.GetType().Name);
         }
     }
 
@@ -1389,6 +1436,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
         /// <summary>Task 102b (fix round 1, uac-r2 F2): the part of <see cref="SupersededClosed"/> that is an open Signal outside its policy's
         /// matter scope, closed because the scope supersedes it.</summary>
         public int OutOfScopeSuperseded;
+        /// <summary>Task 102b fix round 3: the part of <see cref="RetiredClosed"/> that is an open Signal of a deleted policy.</summary>
+        public int DeletedPolicyRetired;
         /// <summary>Task 145 (review F1): Signals whose stored evidence lost detail outside their secure family this pass.</summary>
         public int EvidenceRedacted;
 
@@ -1472,6 +1521,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             supersededClosed = SupersededClosed,
             outOfScopeSuperseded = OutOfScopeSuperseded,
             policyRetiredClosed = RetiredClosed,
+            deletedPolicyRetired = DeletedPolicyRetired,
             reassigned = Reassigned,
             refused = Refused,
             accessDenied = AccessDenied,

@@ -1096,6 +1096,9 @@ public partial class SignalReevaluationJobTests
     public async Task Run_AnotherPoliciesKeyUnderTheSamePrefix_PolicyCodeContainingAPipe_IsNotUnparseable()
     {
         var h = new Harness().WithPathBPolicy();
+        // Task 102b fix round 3: policy POL|ODD exists (Off, so only POL is evaluated); without it, its Signal would be a deleted
+        // policy's, which the deleted-policy sweep rightly closes.
+        h.Sysadmin.AddPolicy($"{PolicyCode}|ODD", SignalWriter.LaneDecide, false, PathBBody, PathBTemplate);
         var otherId = h.Org.SeedSignal($"{PolicyCode}|ODD|sprk_matter|{Lower(MatterId)}|1", SignalWriter.SignalStatusOpen, coreId: MatterId);
 
         var result = await h.RunAsync();
@@ -3099,6 +3102,18 @@ public partial class SignalReevaluationJobTests
                                  c.Operator == ConditionOperator.Equal && Matches(p, c.AttributeName, c.Values[0]))))
                     {
                         result.Entities.Add(p);
+                    }
+
+                    break;
+                // Task 102b fix round 3: the deleted-policy sweep's read (sprk_policy is null, Open or Acknowledged), as Dataverse answers it.
+                case "sprk_signal" when query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_policy" && c.Operator == ConditionOperator.Null):
+                    var sweepStatuses = query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_signalstatus").Values.Cast<int>().ToHashSet();
+                    foreach (var row in Org.Rows.Values.Where(r => r.GetAttributeValue<EntityReference>("sprk_policy") is null
+                                 && sweepStatuses.Contains(r.GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value)))
+                    {
+                        var copy = new Entity("sprk_signal", row.Id) { RowVersion = Org.VersionOf(row.Id) };
+                        foreach (var attribute in row.Attributes) copy[attribute.Key] = attribute.Value;
+                        result.Entities.Add(copy);
                     }
 
                     break;
