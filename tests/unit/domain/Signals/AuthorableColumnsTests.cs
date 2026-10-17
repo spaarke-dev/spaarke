@@ -177,6 +177,22 @@ public class AuthorableColumnsTests
         result.TemplateEligibleFields.Should().BeEmpty();
     }
 
+    [Fact]
+    public void APredicateWithNoRecordedReads_IsRefused_AndHasNoEligibleFields_FailClosed()
+    {
+        var compiled = Compiler().Compile("""{"type":"Existence","subject":"sprk_matter","when":{"statecode":0},"all":[]}""");
+        PolicyVersionValidator.CheckAuthorableColumns(compiled).Should().BeNull("every read is allow-listed");
+        PolicyVersionValidator.AuthorableTemplateFields(compiled).Should().Equal("statecode");
+
+        var unrecorded = compiled with { ReadColumns = null };
+
+        var refusal = PolicyVersionValidator.CheckAuthorableColumns(unrecorded);
+        refusal.Should().NotBeNull("reads that were not recorded cannot be shown to be on the list");
+        refusal!.IsValid.Should().BeFalse();
+        refusal.Reason.Should().Be(OntologyWriterFailureReason.ColumnNotAuthorable);
+        PolicyVersionValidator.AuthorableTemplateFields(unrecorded).Should().BeEmpty();
+    }
+
     // ── The seed ────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]

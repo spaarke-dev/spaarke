@@ -236,6 +236,21 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
     }
 
     [Fact]
+    public void Catalog_SeveritiesAndWorkTypes_AreExactlyTheValuesTheSaveAccepts()
+    {
+        // The catalog reads OntologyAdminRulesService's labels; the save checks SignalWriter's severities and SignalReadService's work
+        // types. Two sources: this pins them to the same sets, so the wizard never offers a value the save refuses, or hides one.
+        var catalog = OntologyAdminAuthoringService.BuildCatalog(Array.Empty<OntologyCatalogCategory>());
+        int[] saveSeverities = [SignalWriter.SeverityInfo, SignalWriter.SeverityWarning, SignalWriter.SeverityCritical];
+
+        foreach (var lane in catalog.Lanes)
+        {
+            lane.Severities.Select(o => o.Value).Should().BeEquivalentTo(saveSeverities, $"{lane.Lane}: the severities the save accepts");
+            lane.WorkTypes.Select(o => o.Value).Should().BeEquivalentTo(SignalReadService.WorkTypeKeys.Keys, $"{lane.Lane}: the work types the save accepts");
+        }
+    }
+
+    [Fact]
     public void Catalog_EveryColumnItOffers_IsAllowListed_AndEveryAuthorableFieldCompiles()
     {
         var validator = _fixture.Services.GetRequiredService<PolicyVersionValidator>();
@@ -349,6 +364,31 @@ public class OntologyAdminAuthoringEndpointTests : IClassFixture<OntologyAdminAu
         own.GetProperty("valid").GetBoolean().Should().BeTrue(own.ToString());
         _fixture.World.Requests.Should().Contain(r => r.Contains($"sprk_policyid eq {PolicyId:D} and (sprk_domain eq null or sprk_domain eq 100000001)",
             StringComparison.Ordinal), "the policy is read as the caller through the domain allow-list");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Validate_ACodeInBothActionsAndNextSteps_GetsTheDuplicateMessageAndCode_AsTheSaveDoes()
+    {
+        // The catalog offers assign-work as a Decide action AND as a next step; the plan resolver refuses a code in both lists. The
+        // author must be told that, not that the code is outside the lane's catalog.
+        var draft = Draft(plan: """{"actions":["assign-work"],"nextSteps":["assign-work"]}""");
+
+        var validate = await Json(await Validate(draft));
+        var save = await Save(draft: draft);
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        validate.GetProperty("reasonCode").GetString().Should().Be("ontology.admin.duplicate_action");
+        var message = ValidateErrors(validate)["decisionPlan"].Single();
+        message.Should().Contain("duplicate_action").And.Contain("never in both").And.NotContain("lane's catalog");
+        save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ReasonOf(save)).Should().Be("ontology.admin.duplicate_action");
+        (await Json(save)).GetProperty("errors").GetProperty("decisionPlan")[0].GetString().Should().Be(message);
+
+        // A code outside the lane keeps the catalog message and carries no code.
+        var outside = await Json(await Validate(Draft(plan: """{"actions":["mark-complete"]}""")));
+        ValidateErrors(outside)["decisionPlan"].Single().Should().Contain("Decide lane's catalog");
+        outside.GetProperty("reasonCode").ValueKind.Should().Be(JsonValueKind.Null);
         _fixture.World.Writes.Should().BeEmpty();
     }
 

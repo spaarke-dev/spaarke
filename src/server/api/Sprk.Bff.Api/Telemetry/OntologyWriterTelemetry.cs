@@ -227,7 +227,7 @@ public static class DecisionPlanRefusalReason
     /// the Signal's lane, or a Next step that is not a Next-step creator).</summary>
     public const string ActionNotAllowed = "action_not_allowed";
 
-    /// <summary>The same code appears twice in one list.</summary>
+    /// <summary>The same code appears twice in one list, or in both <c>actions</c> and <c>nextSteps</c>.</summary>
     public const string DuplicateAction = "duplicate_action";
 }
 

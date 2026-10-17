@@ -170,10 +170,10 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
 
     // ── Task 102a (owner option 101(b)): the authorable-column allow-list against the live schema and the live policies ─
 
-    [Fact]
+    [SkippableFact]
     public async Task AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema()
     {
-        if (!_dv.IsLive) return;
+        Skip.IfNot(_dv.IsLive, "Live Dataverse not configured (SIGNALS_LIVE_DATAVERSE_URL unset); a vacuous pass would hide that nothing was checked.");
 
         // The dry run evaluates as the evaluator. A field-secured column on the allow-list would let an author learn its values one
         // bit at a time, which is the oracle the allow-list closes. Each entry must exist (RetrieveAttribute throws otherwise) and must
@@ -186,10 +186,10 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task EveryLiveOntologyPolicysCurrentVersion_PassesValidateForAuthoring()
     {
-        if (!_dv.IsLive) return;
+        Skip.IfNot(_dv.IsLive, "Live Dataverse not configured (SIGNALS_LIVE_DATAVERSE_URL unset); a vacuous pass would hide that nothing was checked.");
 
         var validator = new PolicyVersionValidator(new RuleBodySchemaValidator(), _compiler, Microsoft.Extensions.Logging.Abstractions.NullLogger<PolicyVersionValidator>.Instance);
         var rows = await _dv.RunFetchRowsAsync(

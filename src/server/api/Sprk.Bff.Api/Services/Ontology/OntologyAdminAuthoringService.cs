@@ -67,6 +67,11 @@ public sealed partial class OntologyAdminAuthoringService
     /// <see cref="PolicyVersionValidator.AuthorableColumns"/> (task 102a, owner option 101(b)).</summary>
     internal const string ReasonColumnNotAuthorable = "ontology.admin.column_not_authorable";
 
+    /// <summary>The stable code a plan refused for <see cref="DecisionPlanRefusalReason.DuplicateAction"/> carries: a code listed twice
+    /// in one list, or in both <c>actions</c> and <c>nextSteps</c> (PR #2054 review). The catalog offers <c>assign-work</c> in both the
+    /// Decide lane's actions and the next steps, so the wizard must pick one place for it.</summary>
+    internal const string ReasonDuplicateAction = "ontology.admin.duplicate_action";
+
     /// <summary>The privilege the dry run requires, asked FRESH on every request as the caller (F1-1): creating a policy version is
     /// what authoring a rule means (D-22).</summary>
     internal const string AuthoringPrivilegeName = "prvCreatesprk_PolicyVersion";
@@ -1401,7 +1406,13 @@ public sealed partial class OntologyAdminAuthoringService
         else if (lane is { } l)
         {
             var plan = DecisionPlanService.Resolve(draft.DecisionPlan, l);
-            if (plan.IsRefused)
+            if (plan.IsRefused && plan.RefusalReason == DecisionPlanRefusalReason.DuplicateAction)
+            {
+                errors["decisionPlan"] = [$"The decision plan is refused ({plan.RefusalReason}): each code may appear once, in actions or in " +
+                    "nextSteps, never twice in one list and never in both."];
+                check = check with { ReasonCode = check.ReasonCode ?? ReasonDuplicateAction };
+            }
+            else if (plan.IsRefused)
             {
                 errors["decisionPlan"] = [$"The decision plan is refused ({plan.RefusalReason}): it must list actions from the {l} lane's catalog."];
             }

@@ -129,8 +129,15 @@ public sealed class PolicyVersionValidator
     /// <remarks>
     /// <para><b>Why.</b> The dry run evaluates a draft AS THE EVALUATOR, which reads these tables org-wide (#39). A clause on any column
     /// would make each dry run a one-bit question about values the author may not be able to read, including a field-secured column.
-    /// Only the shown rows are filtered by the caller. A closed list of plain, non-secured columns closes that oracle.
-    /// <c>SignalPredicateTests.AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema</c> checks each entry against live metadata.</para>
+    /// Only the shown rows are filtered by the caller. A closed list of plain, non-secured columns NARROWS that oracle to the listed
+    /// columns; it does not close it.
+    /// <c>SignalPredicateTests.AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema</c> checks each entry against live metadata
+    /// (one run, one environment: field security enabled on a listed column later reopens the oracle for that column).</para>
+    /// <para><b>Residual (open, pending the owner's decision on the signed ADR-028 tension, D-151(c)).</b> An <c>exists</c> or
+    /// <c>notExists</c> filter on an allow-listed column of a joinable related table still lets a policy-version author learn that
+    /// column's value on a related row they cannot read, one bit per dry run. Today those columns are <c>sprk_communication</c>:
+    /// <c>sprk_triagecategory</c>, <c>sprk_reviewoutcome</c>, <c>sprk_receiveddate</c>, <c>statecode</c>; and
+    /// <c>sprk_budgetrevision</c>: <c>sprk_revisedon</c>, <c>statecode</c>. Membership of this list is the owner's call.</para>
     /// <para><b>Seed (2026-10-16), and nothing else.</b>
     /// <list type="bullet">
     /// <item>The columns the five live Ontology policies' current versions read on spaarkedev1.</item>
@@ -216,14 +223,41 @@ public sealed class PolicyVersionValidator
     }
 
     /// <summary>The compiled predicate's template-eligible fields whose every read is on <see cref="AuthorableColumns"/>, in ordinal
-    /// order.</summary>
-    private static IReadOnlyList<string> AuthorableTemplateFields(CompiledPredicate compiled)
+    /// order. Fails closed: with no recorded reads (<see cref="CompiledPredicate.ReadColumns"/> null) no field is eligible.</summary>
+    internal static IReadOnlyList<string> AuthorableTemplateFields(CompiledPredicate compiled)
     {
-        var reads = compiled.ReadColumns ?? FrozenSet<(string Entity, string Column)>.Empty;
+        if (compiled.ReadColumns is not { } reads)
+        {
+            return Array.Empty<string>();
+        }
+
         return compiled.TemplateEligibleFields
             .Where(field => reads.Where(r => r.Column == field).All(AuthorableColumns.Contains))
             .Order(StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>The allow-list check of a compiled body: null when every read is on <see cref="AuthorableColumns"/>, otherwise the
+    /// <see cref="OntologyWriterFailureReason.ColumnNotAuthorable"/> refusal. Fails closed: a predicate whose reads were not recorded
+    /// (<see cref="CompiledPredicate.ReadColumns"/> null) cannot be shown to be on the list, so it is refused.</summary>
+    internal static PolicyVersionValidationResult? CheckAuthorableColumns(CompiledPredicate compiled)
+    {
+        if (compiled.ReadColumns is not { } reads)
+        {
+            return PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.ColumnNotAuthorable,
+                "The columns this rule reads were not recorded, so it cannot be checked against the authorable columns; it is refused.");
+        }
+
+        var unlisted = reads
+            .Where(c => !AuthorableColumns.Contains(c))
+            .Select(c => $"{c.Entity}.{c.Column}")
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        return unlisted.Length == 0
+            ? null
+            : PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.ColumnNotAuthorable,
+                $"The rule names column(s) a rule may not use: [{string.Join(", ", unlisted)}]. A rule may name only the " +
+                "authorable columns the catalog offers; adding one is a reviewed code change.");
     }
 
     /// <summary>
@@ -373,20 +407,10 @@ public sealed class PolicyVersionValidator
                 return (PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.CompileRefused, ex.Message), null);
             }
 
-            if (authoring)
+            // Task 102a (owner option 101(b)): only allow-listed columns, wherever the body names them.
+            if (authoring && CheckAuthorableColumns(compiled) is { } notAuthorable)
             {
-                // Task 102a (owner option 101(b)): only allow-listed columns, wherever the body names them.
-                var unlisted = (compiled.ReadColumns ?? FrozenSet<(string Entity, string Column)>.Empty)
-                    .Where(c => !AuthorableColumns.Contains(c))
-                    .Select(c => $"{c.Entity}.{c.Column}")
-                    .Order(StringComparer.Ordinal)
-                    .ToArray();
-                if (unlisted.Length > 0)
-                {
-                    return (PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.ColumnNotAuthorable,
-                        $"The rule names column(s) a rule may not use: [{string.Join(", ", unlisted)}]. A rule may name only the " +
-                        "authorable columns the catalog offers; adding one is a reviewed code change."), compiled);
-                }
+                return (notAuthorable, compiled);
             }
 
             if (!string.IsNullOrWhiteSpace(messageTemplate))
