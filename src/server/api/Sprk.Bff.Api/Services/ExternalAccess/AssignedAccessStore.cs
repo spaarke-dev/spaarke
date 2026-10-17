@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Communication;
 
 namespace Sprk.Bff.Api.Services.ExternalAccess;
 
@@ -856,37 +857,47 @@ public class AssignedAccessStore
         return rows[0].TryGetProperty("statecode", out var s) && s.ValueKind == JsonValueKind.Number ? s.GetInt32() : 1;
     }
 
-    /// <summary>Display names for contacts and organizations (Manage Access suggestions). Display only: a failure is empty.</summary>
+    /// <summary>
+    /// <c>sprk_organization</c>'s primary-name column, from the ONE map (<see cref="RegardingNameFields"/>): it is
+    /// <c>sprk_organizationname</c> — that table has no <c>sprk_name</c>, and a <c>$select</c> naming it fails with a 400.
+    /// </summary>
+    private static readonly string OrganizationNameColumn = RegardingNameFields.PrimaryNameField("sprk_organization")
+        ?? throw new InvalidOperationException(
+            "RegardingNameFields has no primary-name column for sprk_organization; Manage Access cannot read organization names.");
+
+    /// <summary>
+    /// Display names for contacts and organizations (Manage Access suggestions). Display only: a failure is empty. Each subject
+    /// kind is read on its own, so a failure reading one kind's names never drops the names already read for the other.
+    /// </summary>
     internal virtual async Task<IReadOnlyDictionary<Guid, string>> ReadSubjectNamesAsync(
         IReadOnlyCollection<AssignedSubject> subjects, CancellationToken ct)
     {
         var names = new Dictionary<Guid, string>();
+        await ReadNamesAsync(names, subjects, AssignedSubjectKind.Contact, "contacts", "contactid", "fullname", ct).ConfigureAwait(false);
+        await ReadNamesAsync(names, subjects, AssignedSubjectKind.Organization, "sprk_organizations", "sprk_organizationid",
+            OrganizationNameColumn, ct).ConfigureAwait(false);
+        return names;
+    }
+
+    private async Task ReadNamesAsync(
+        Dictionary<Guid, string> names, IReadOnlyCollection<AssignedSubject> subjects, AssignedSubjectKind kind,
+        string entitySet, string idColumn, string nameColumn, CancellationToken ct)
+    {
         try
         {
-            foreach (var batch in subjects.Where(s => s.Kind == AssignedSubjectKind.Contact).Select(s => s.Id).Distinct().Chunk(50))
+            foreach (var batch in subjects.Where(s => s.Kind == kind).Select(s => s.Id).Distinct().Chunk(50))
             {
                 var rows = await _dataverse.QueryAsync<JsonElement>(
-                    "contacts", filter: string.Join(" or ", batch.Select(id => $"contactid eq {id:D}")),
-                    select: "contactid,fullname", top: batch.Length, cancellationToken: ct).ConfigureAwait(false);
+                    entitySet, filter: string.Join(" or ", batch.Select(id => $"{idColumn} eq {id:D}")),
+                    select: $"{idColumn},{nameColumn}", top: batch.Length, cancellationToken: ct).ConfigureAwait(false);
                 foreach (var row in rows)
-                    AddName(names, row, "contactid", "fullname");
-            }
-
-            foreach (var batch in subjects.Where(s => s.Kind == AssignedSubjectKind.Organization).Select(s => s.Id).Distinct().Chunk(50))
-            {
-                var rows = await _dataverse.QueryAsync<JsonElement>(
-                    "sprk_organizations", filter: string.Join(" or ", batch.Select(id => $"sprk_organizationid eq {id:D}")),
-                    select: "sprk_organizationid,sprk_name", top: batch.Length, cancellationToken: ct).ConfigureAwait(false);
-                foreach (var row in rows)
-                    AddName(names, row, "sprk_organizationid", "sprk_name");
+                    AddName(names, row, idColumn, nameColumn);
             }
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            _logger.LogWarning(ex, "[ASSIGNED-ACCESS] Subject names could not be read; suggestions are listed without names.");
+            _logger.LogWarning(ex, "[ASSIGNED-ACCESS] {Kind} names could not be read; suggestions are listed without names.", kind);
         }
-
-        return names;
     }
 
     private static void AddName(Dictionary<Guid, string> names, JsonElement row, string idColumn, string nameColumn)
