@@ -12,16 +12,17 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 
 /// <summary>
-/// unified-access-control-r2 task 099b review round 2 (F1, Make Secure): a record's ACTIVE external-access grant rows follow it
-/// across the isolation boundary. Since 099b a grant row is owned by its root's team (D-11): created on an ordinary record it is
-/// that business unit's default team's, readable by every user of the unit (Deep) — the record's name, the contact and the
-/// level. Before this fix Make Secure left it there; Unsecure left a secure record's grant on the memberless Secure team.
+/// unified-access-control-r2 task 099b review round 2 (F1, Make Secure): a record's external-access grant rows follow it across
+/// the isolation boundary — in every state since review round 3 (F1): an inactive grant names the record and the contact too.
+/// Since 099b a grant row is owned by its root's team (D-11): created on an ordinary record it is that business unit's default
+/// team's, readable by every user of the unit (Deep) — the record's name, the contact and the level. Before this fix Make
+/// Secure left it there; Unsecure left a secure record's grant on the memberless Secure team.
 /// </summary>
 /// <remarks>
 /// Driven through the REAL <c>/provision-project</c> and <c>/unsecure-project</c> endpoints, the REAL
 /// <see cref="SecureChildReconciler"/> (the one pass every secure transition runs) and the REAL ownership resolver over one
-/// in-memory Dataverse (<see cref="SecureChildShareWorld"/>). Decoys — an INACTIVE grant of the record and an active grant of
-/// another record — are never written. KEEP path: <c>tests/integration/data-mutation/**</c>.
+/// in-memory Dataverse (<see cref="SecureChildShareWorld"/>). The decoy — a grant of another record — is never written. KEEP
+/// path: <c>tests/integration/data-mutation/**</c>.
 /// </remarks>
 public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestFixture>
 {
@@ -41,9 +42,9 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
         _fixture.Reset();
     }
 
-    private sealed record Grants(Guid TeamOwned, Guid AppOwned, Guid InactiveDecoy, Guid OtherRecordsDecoy)
+    private sealed record Grants(Guid TeamOwned, Guid AppOwned, Guid Inactive, Guid OtherRecordsDecoy)
     {
-        public IEnumerable<Guid> Moving() => new[] { TeamOwned, AppOwned };
+        public IEnumerable<Guid> Moving() => new[] { TeamOwned, AppOwned, Inactive };
     }
 
     private void SeedRoot(string rootTable, Guid rootId, Guid? owningTeam = null)
@@ -65,7 +66,8 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
 
     /// <summary>
     /// The record's grants: one owned by <paramref name="owner"/> (the team 099b gave it), one still owned by the BFF
-    /// application user (pre-099b), one INACTIVE (a decoy: only active grants move), and an active grant of another record.
+    /// application user (pre-099b), one INACTIVE on <paramref name="owner"/> (it moves too, review round 3 F1), and the decoy:
+    /// an active grant of another record.
     /// </summary>
     private Grants SeedGrants(string rootTable, Guid rootId, Guid owner)
     {
@@ -77,7 +79,7 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
         world.Add(GrantTable, grants.TeamOwned, ("owningteam", new EntityReference("team", owner)), root, active);
         world.Add(GrantTable, grants.AppOwned,
             ("owninguser", new EntityReference("systemuser", SecureChildShareWorld.SomeUser)), root, active);
-        world.Add(GrantTable, grants.InactiveDecoy, ("owningteam", new EntityReference("team", owner)), root,
+        world.Add(GrantTable, grants.Inactive, ("owningteam", new EntityReference("team", owner)), root,
             ("statecode", new OptionSetValue(1)));
 
         var otherRecord = Guid.NewGuid();
@@ -89,11 +91,8 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
 
     private DataversePrincipalRef? OwnerOf(Guid grant) => _fixture.ChildWorld.OwnerOf(GrantTable, grant);
 
-    private void AssertDecoysUntouched(Grants grants)
-    {
-        foreach (var decoy in new[] { grants.InactiveDecoy, grants.OtherRecordsDecoy })
-            _fixture.ChildWorld.OwnerWrites.Should().NotContain(w => w.Id == decoy, "an inactive grant, or another record's, is not moved");
-    }
+    private void AssertDecoyUntouched(Grants grants) =>
+        _fixture.ChildWorld.OwnerWrites.Should().NotContain(w => w.Id == grants.OtherRecordsDecoy, "another record's grant is not moved");
 
     private static async Task<JsonElement> JsonOf(HttpResponseMessage response)
     {
@@ -112,7 +111,7 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
     [InlineData("sprk_project")]
     [InlineData("sprk_matter")]
     [InlineData("sprk_workassignment")]
-    public async Task MakeSecure_ReownsTheRecordsActiveGrantRows_ToSecureRecordOwners(string rootTable)
+    public async Task MakeSecure_ReownsTheRecordsGrantRows_InEveryState_ToSecureRecordOwners(string rootTable)
     {
         var rootId = Guid.NewGuid();
         SeedRoot(rootTable, rootId);
@@ -129,15 +128,14 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
                 "a grant row of a secure record is owned by Secure Record Owners, never left readable by its old unit");
         }
 
-        OwnerOf(grants.InactiveDecoy).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
         OwnerOf(grants.OtherRecordsDecoy).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
-        AssertDecoysUntouched(grants);
+        AssertDecoyUntouched(grants);
         _fixture.OwnerPrivileges.TeamQuestions.Should().OnlyContain(q => q.TeamId == SecureTeam && q.Table == GrantTable,
             "the new owner team is asked whether it may own a grant row before each assignment");
 
         var children = (await JsonOf(response)).GetProperty("children");
         children.GetProperty("status").GetString().Should().Be("Completed");
-        ReownedIn(children, GrantTable).Should().Be(2);
+        ReownedIn(children, GrantTable).Should().Be(3, "the active grants and the inactive one");
     }
 
     [Fact]
@@ -172,7 +170,7 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
         second.StatusCode.Should().Be(HttpStatusCode.OK, await second.Content.ReadAsStringAsync());
         foreach (var grant in grants.Moving())
             OwnerOf(grant).Should().Be(DataversePrincipalRef.Team(SecureTeam));
-        AssertDecoysUntouched(grants);
+        AssertDecoyUntouched(grants);
     }
 
     // ── Unsecure ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -181,7 +179,7 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
     [InlineData("sprk_project")]
     [InlineData("sprk_matter")]
     [InlineData("sprk_workassignment")]
-    public async Task Unsecure_ReownsTheRecordsActiveGrantRows_BackToTheBusinessUnitsTeam(string rootTable)
+    public async Task Unsecure_ReownsTheRecordsGrantRows_InEveryState_BackToTheBusinessUnitsTeam(string rootTable)
     {
         var rootId = Guid.NewGuid();
         SeedRoot(rootTable, rootId, owningTeam: SecureTeam);
@@ -200,8 +198,7 @@ public class SecureTransitionGrantRowTests : IClassFixture<ProvisionProjectTestF
                 "a grant row of an ordinary record is owned by its business unit's team, not the memberless Secure team");
         }
 
-        OwnerOf(grants.InactiveDecoy).Should().Be(DataversePrincipalRef.Team(SecureTeam));
-        AssertDecoysUntouched(grants);
+        AssertDecoyUntouched(grants);
         _fixture.IsSecureOf(rootId).Should().BeFalse();
     }
 }

@@ -326,17 +326,15 @@ public sealed class SecureChildReconciler
     private const string ThreadLookupOnCommunication = "sprk_communicationthread";
 
     /// <summary>
-    /// UAC task 099b review round 2: the grant table. Its ACTIVE rows of the root are owned by the root's team (D-11), so they
-    /// follow the root across the isolation boundary in this pass. Not a lineage child (no row is filed under a grant, and the
-    /// share mirror never covers it); loaded beside the descendants, decided and written by the same rule and sequence.
+    /// UAC task 099b review round 2: the grant table. Its rows of the root, in EVERY state (review round 3, F1), are owned by
+    /// the root's team (D-11), so they follow the root across the isolation boundary in this pass. Not a lineage child (no row
+    /// is filed under a grant, and the share mirror never covers it); loaded beside the descendants, decided and written by
+    /// the same rule and sequence.
     /// </summary>
     internal const string GrantTable = "sprk_externalrecordaccess";
 
     /// <summary>The grant table's entity set (the owner-change eviction names it).</summary>
     private const string GrantEntitySet = "sprk_externalrecordaccesses";
-
-    /// <summary>A grant row's <c>statecode</c> when active.</summary>
-    private const int GrantActiveState = 0;
 
     private readonly IGenericEntityService _dataverse;
     private readonly IRecordOwnershipResolver _ownership;
@@ -1017,12 +1015,14 @@ public sealed class SecureChildReconciler
         }
 
         /// <summary>
-        /// UAC task 099b review round 2 (F1, Make Secure): the root's ACTIVE <c>sprk_externalrecordaccess</c> rows, as rows of
-        /// this pass at level 1. A grant row is owned by its root's team (D-11, 099b), so a transition that moves the root
-        /// across the isolation boundary moves them too — otherwise a grant created on an ordinary root stays on that business
-        /// unit's default team after Make Secure, readable by every user of the unit (the secure record's name, the contact,
-        /// the level), and one on a secure root stays on the memberless Secure team after Unsecure. Only a ROOT pass (a grant
-        /// is filed under a root, never a child) and only the three grant roots. Paged like every other read here; an
+        /// UAC task 099b review round 2 (F1, Make Secure): the root's <c>sprk_externalrecordaccess</c> rows, as rows of this
+        /// pass at level 1. A grant row is owned by its root's team (D-11, 099b), so a transition that moves the root across the
+        /// isolation boundary moves them too — otherwise a grant created on an ordinary root stays on that business unit's
+        /// default team after Make Secure, readable by every user of the unit (the secure record's name, the contact, the
+        /// level), and one on a secure root stays on the memberless Secure team after Unsecure. Review round 3 (F1): in EVERY
+        /// state, both directions — an inactive (revoked or expired) grant row still names the record and the contact, so it is
+        /// as exposed as an active one, and restoring it later updates it in place without re-owning it. Only a ROOT pass (a
+        /// grant is filed under a root, never a child) and only the three grant roots. Paged like every other read here; an
         /// incomplete read throws, so the pass writes nothing.
         /// </summary>
         private async Task LoadGrantRowsAsync()
@@ -1040,7 +1040,6 @@ public sealed class SecureChildReconciler
             var query = new QueryExpression(GrantTable) { ColumnSet = new ColumnSet(true), NoLock = true };
             // The grant's root lookup is the root table's own logical name (sprk_project / sprk_matter / sprk_workassignment).
             query.Criteria.AddCondition(_root.EntityLogicalName, ConditionOperator.Equal, _root.RecordId);
-            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, GrantActiveState);
 
             foreach (var entity in await ReadAllPagesAsync(GrantTable, query).ConfigureAwait(false))
             {
