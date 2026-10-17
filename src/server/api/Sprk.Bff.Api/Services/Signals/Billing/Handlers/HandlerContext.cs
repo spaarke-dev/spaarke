@@ -1,0 +1,170 @@
+using System.Globalization;
+using Sprk.Bff.Api.Services.Finance.Resolution;
+
+namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
+
+/// <summary>
+/// The one rounding rule of the billing handlers (task 071): money is rounded to the cent, a midpoint away from zero
+/// (<c>2.345</c> becomes <c>2.35</c>, <c>-2.345</c> becomes <c>-2.35</c>). Every computed amount (the rate limit with its tolerance, a
+/// suggested reduction) goes through <see cref="ToCent"/>; nothing else rounds. Money and hours are <c>decimal</c> throughout.
+/// </summary>
+internal static class BillingMath
+{
+    internal static decimal ToCent(decimal value) => decimal.Round(value, 2, MidpointRounding.AwayFromZero);
+}
+
+/// <summary>Invariant text for the values a finding records, so a finding does not depend on the machine's culture.</summary>
+internal static class BillingText
+{
+    internal static string? Date(DateOnly? value) => value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    /// <summary>A number without trailing zeros: <c>0.10</c> is <c>0.1</c>, <c>5.0</c> is <c>5</c>.</summary>
+    internal static string? Number(decimal? value) =>
+        value?.ToString("0.############################", CultureInfo.InvariantCulture);
+
+    /// <summary>Money to the cent, two decimals.</summary>
+    internal static string? Money(decimal? value) =>
+        value is null ? null : BillingMath.ToCent(value.Value).ToString("F2", CultureInfo.InvariantCulture);
+
+    /// <summary>The text trimmed, or <c>null</c> when it is absent or blank.</summary>
+    internal static string? Text(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>
+    /// A comparison key for names, narratives and invoice numbers: trimmed, runs of whitespace collapsed, upper-cased with the
+    /// invariant culture. <c>null</c> when nothing is left.
+    /// </summary>
+    internal static string? Key(string? value)
+    {
+        var trimmed = Text(value);
+        if (trimmed is null) return null;
+
+        var parts = trimmed.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return string.Join(' ', parts).ToUpperInvariant();
+    }
+}
+
+/// <summary>
+/// One handler call: the rule, where it came from, the fact set, and the helpers that build a finding. Building every finding
+/// here means every finding carries the policy, version and clause, and every <c>{{token}}</c> value comes from the type's
+/// template fact-field set (<see cref="BillingRuleCatalogue.TemplateFactFields"/>): a handler that names a token outside it
+/// throws, which is a programming error found by the tests, never something an invoice can cause.
+/// </summary>
+internal sealed class HandlerContext
+{
+    private readonly IReadOnlySet<string> _tokens;
+
+    internal HandlerContext(BillingRuleDefinition rule, BillingRuleOrigin origin, BillingFactSet facts)
+    {
+        Rule = rule;
+        Origin = origin;
+        Facts = facts;
+        _tokens = BillingRuleCatalogue.TemplateFactFields(rule.RuleType);
+    }
+
+    internal BillingRuleDefinition Rule { get; }
+
+    internal BillingRuleOrigin Origin { get; }
+
+    internal BillingFactSet Facts { get; }
+
+    internal BillingFinding Finding(
+        BillingSubject subject,
+        string reasonCode,
+        IReadOnlyList<BillingValueRead> values,
+        FactValues factValues,
+        BillingSuggestedAdjustment? adjustment = null)
+    {
+        foreach (var token in factValues.Tokens)
+        {
+            if (!_tokens.Contains(token))
+            {
+                throw new InvalidOperationException(
+                    $"Handler for {Rule.RuleType} used template token '{token}', which is not in its fact-field set (task 070).");
+            }
+        }
+
+        return new BillingFinding
+        {
+            RuleType = Rule.RuleType,
+            PolicyId = Origin.PolicyId,
+            PolicyCode = Rule.PolicyCode,
+            PolicyVersionId = Rule.PolicyVersionId,
+            ClauseReference = Origin.ClauseReference,
+            ClauseLocation = Origin.ClauseLocation,
+            Subject = subject,
+            ReasonCode = reasonCode,
+            ValuesRead = values,
+            SuggestedAdjustment = adjustment,
+            FactValues = factValues.ToDictionary(),
+        };
+    }
+
+    /// <summary>An extracted value of a line, with its confidence from the line's own confidence map.</summary>
+    internal BillingValueRead LineField(BillingLineFacts line, string name, string fieldName, string? value) =>
+        Extracted(name, new FieldRef(line.Index, fieldName), value, line.FieldConfidence);
+
+    /// <summary>The line date (<c>line.date</c>), an extracted value.</summary>
+    internal BillingValueRead LineDate(BillingLineFacts line) =>
+        LineField(line, "line.date", BillingFieldNames.Date, BillingText.Date(line.Date));
+
+    /// <summary>The timekeeper as billed (<c>line.timekeeperName</c>), an extracted value.</summary>
+    internal BillingValueRead LineTimekeeper(BillingLineFacts line) =>
+        LineField(line, "line.timekeeperName", BillingFieldNames.TimekeeperAsBilled, BillingText.Text(line.TimekeeperName));
+
+    /// <summary>The hours (<c>line.hours</c>), an extracted value.</summary>
+    internal BillingValueRead LineHours(BillingLineFacts line) =>
+        LineField(line, "line.hours", BillingFieldNames.Hours, BillingText.Number(line.Hours));
+
+    /// <summary>An extracted value of the header.</summary>
+    internal BillingValueRead HeaderField(string name, string fieldName, string? value) =>
+        Extracted(name, new FieldRef(null, fieldName), value, Facts.Invoice.FieldConfidence);
+
+    private BillingValueRead Extracted(string name, FieldRef field, string? value, IReadOnlyDictionary<string, decimal> confidences)
+    {
+        decimal? confidence = confidences.TryGetValue(field.Field, out var c) ? c : null;
+        return Extracted(name, field, value, confidence);
+    }
+
+    /// <summary>An extracted value whose confidence is already known. Unknown (<c>null</c>) counts as below the threshold.</summary>
+    internal BillingValueRead Extracted(string name, FieldRef field, string? value, decimal? confidence) => new()
+    {
+        Name = name,
+        Value = value,
+        ExtractedField = field,
+        Confidence = confidence,
+        BelowReliabilityThreshold = confidence is null || confidence.Value < Facts.ReliabilityThreshold,
+    };
+
+    /// <summary>A value from the system's own reference data: no field reference, no confidence.</summary>
+    internal static BillingValueRead Reference(string name, string? value) => new() { Name = name, Value = value };
+}
+
+/// <summary>The template token values of one finding. A token without a value is simply not added.</summary>
+internal sealed class FactValues
+{
+    private readonly List<KeyValuePair<string, string>> _values = [];
+
+    internal IEnumerable<string> Tokens => _values.Select(v => v.Key);
+
+    internal FactValues Add(string token, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            _values.Add(new KeyValuePair<string, string>(token, value));
+        }
+
+        return this;
+    }
+
+    internal IReadOnlyDictionary<string, string> ToDictionary()
+    {
+        var map = new Dictionary<string, string>(_values.Count, StringComparer.Ordinal);
+        foreach (var (key, value) in _values)
+        {
+            map[key] = value;
+        }
+
+        return map;
+    }
+}

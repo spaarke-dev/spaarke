@@ -1,0 +1,165 @@
+using Sprk.Bff.Api.Services.Finance.Resolution;
+
+namespace Sprk.Bff.Api.Services.Signals.Billing;
+
+// What a billing rule handler returns (ebilling-r1 task 071; spec FR-24, FR-25, FR-26). A finding is a fact about one invoice or
+// one line, with the evidence behind it. It is not a decision: a handler never rejects a submission (task 073 decides, from the
+// consequence on the policy version, the confidence of the fields the finding read and the type's eligibility), and it carries no
+// prose: the firm-visible text is composed downstream from the reason code (D-66, FR-15) and the policy version's message template.
+
+/// <summary>Whether a finding is about the invoice as a whole or one line of it.</summary>
+public enum BillingSubjectKind
+{
+    Invoice,
+    Line,
+}
+
+/// <summary>
+/// The subject of a finding. Invoice and line rows do not exist while an invoice is being evaluated (the persist step is
+/// all-or-nothing, task 049), so a line is named by its <see cref="BillingLineFacts.Index"/>; 049 maps it to the row it creates.
+/// </summary>
+public readonly record struct BillingSubject(BillingSubjectKind Kind, int? LineIndex)
+{
+    public static BillingSubject ForInvoice() => new(BillingSubjectKind.Invoice, null);
+
+    public static BillingSubject ForLine(int lineIndex) => new(BillingSubjectKind.Line, lineIndex);
+}
+
+/// <summary>The kind of adjustment a finding suggests. Never applied by a handler: applying it is a reviewer action (WP4).</summary>
+public enum BillingAdjustmentKind
+{
+    /// <summary>Reduce the line's amount by <see cref="BillingSuggestedAdjustment.Amount"/> (ApprovedRate).</summary>
+    Reduce,
+
+    /// <summary>Disallow the line; <see cref="BillingSuggestedAdjustment.Amount"/> is the line amount that would be disallowed (NonBillableActivity).</summary>
+    Disallow,
+}
+
+/// <param name="Kind">Reduce or disallow.</param>
+/// <param name="Amount">Money, rounded to the cent (midpoint away from zero), or <c>null</c> when the amount cannot be computed from what was read.</param>
+public sealed record BillingSuggestedAdjustment(BillingAdjustmentKind Kind, decimal? Amount);
+
+/// <summary>
+/// One value a finding read. An <b>extracted</b> value carries the <see cref="FieldRef"/> that names it and its combined
+/// confidence (D-47): task 073 requires every extracted field a Reject finding read to be reliable. A <b>reference</b> value
+/// (an approved rate, a core-record date) is data from the system's own tables, has no field reference and no confidence.
+/// </summary>
+public sealed record BillingValueRead
+{
+    /// <summary>A readable key, such as <c>line.rate</c> or <c>approvedRate</c>.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>The value in invariant text (dates <c>yyyy-MM-dd</c>, money to the cent, numbers without trailing zeros); <c>null</c> = absent.</summary>
+    public string? Value { get; init; }
+
+    /// <summary>Set for an extracted value; <c>null</c> for a reference value.</summary>
+    public FieldRef? ExtractedField { get; init; }
+
+    /// <summary>The combined confidence of an extracted value; <c>null</c> = none is known (task 073 treats it as not reliable).</summary>
+    public decimal? Confidence { get; init; }
+
+    /// <summary>
+    /// True for an extracted value whose confidence is below the reliability threshold or unknown (NFR-05): the finding says so,
+    /// instead of presenting a doubtful value as a fact. Always false for a reference value.
+    /// </summary>
+    public bool BelowReliabilityThreshold { get; init; }
+
+    public bool IsExtracted => ExtractedField.HasValue;
+}
+
+/// <summary>
+/// The policy version a finding came from, besides what <see cref="BillingRuleDefinition"/> already holds (its version id and
+/// policy code): the policy id and the clause the rule was drawn from (<c>sprk_policyversion.sprk_clausereference</c> and
+/// <c>sprk_clauselocation</c>, task 019). Task 072 reads them with the version row.
+/// </summary>
+public sealed record BillingRuleOrigin(Guid PolicyId, string? ClauseReference, string? ClauseLocation);
+
+/// <summary>One finding: a rule that does not hold for an invoice or a line, with the values behind it.</summary>
+public sealed record BillingFinding
+{
+    public required RuleType RuleType { get; init; }
+
+    public required Guid PolicyId { get; init; }
+
+    public required string PolicyCode { get; init; }
+
+    public required Guid PolicyVersionId { get; init; }
+
+    /// <summary>The quoted clause the rule was drawn from (spec FR-09), or <c>null</c> when the version has none.</summary>
+    public string? ClauseReference { get; init; }
+
+    /// <summary>Where the clause is (section, page), or <c>null</c>.</summary>
+    public string? ClauseLocation { get; init; }
+
+    public required BillingSubject Subject { get; init; }
+
+    /// <summary>A stable code, see <see cref="BillingReasonCodes"/>. The firm-visible text is composed from it downstream.</summary>
+    public required string ReasonCode { get; init; }
+
+    /// <summary>Every value the finding read, extracted and reference, in a stable order, with the confidence of the extracted ones.</summary>
+    public required IReadOnlyList<BillingValueRead> ValuesRead { get; init; }
+
+    /// <summary>The adjustment the rule suggests, where design.md 6.1 allows one; <c>null</c> otherwise.</summary>
+    public BillingSuggestedAdjustment? SuggestedAdjustment { get; init; }
+
+    /// <summary>
+    /// The values for the <c>{{token}}</c>s of the policy version's message template: only keys of
+    /// <see cref="BillingRuleCatalogue.TemplateFactFields"/> for <see cref="RuleType"/> (enforced when a finding is built), only
+    /// non-null values, in invariant text. A token with no value for this subject (a line token on an invoice-level
+    /// finding) is absent, and the signal writer refuses a template that names it.
+    /// </summary>
+    public required IReadOnlyDictionary<string, string> FactValues { get; init; }
+
+    /// <summary>
+    /// The extracted fields the finding read (task 073): one entry per extracted value, whether or not it was the one that
+    /// failed. Reference values are not listed: they have no extraction confidence to check.
+    /// </summary>
+    public IReadOnlyList<FieldRef> ReadFields => ValuesRead.Where(v => v.ExtractedField.HasValue).Select(v => v.ExtractedField!.Value).ToArray();
+
+    /// <summary>True when any extracted value the finding read is below the reliability threshold or has no known confidence (NFR-05).</summary>
+    public bool ReadsLowConfidenceValue => ValuesRead.Any(v => v.BelowReliabilityThreshold);
+}
+
+/// <summary>
+/// The stable reason codes of billing findings. One or a few per type; the sub-reasons of ApprovedTimekeeper and ApprovedRate mirror
+/// the resolution reasons (046) so the firm is told why a name or a rate could not be established.
+/// </summary>
+public static class BillingReasonCodes
+{
+    // ApprovedTimekeeper: the roster match of a fee line failed (046 TimekeeperUnmatchedReason).
+    public const string TimekeeperUnmatched = "approved_timekeeper.unmatched";
+    public const string TimekeeperNameMissing = "approved_timekeeper.name_missing";
+    public const string TimekeeperLineDateMissing = "approved_timekeeper.line_date_missing";
+    public const string TimekeeperNameIncomplete = "approved_timekeeper.name_incomplete";
+    public const string TimekeeperNotOnRoster = "approved_timekeeper.not_on_roster";
+    public const string TimekeeperNotApprovedOnLineDate = "approved_timekeeper.not_approved_on_line_date";
+    public const string TimekeeperAmbiguous = "approved_timekeeper.ambiguous";
+    public const string TimekeeperAiBelowThreshold = "approved_timekeeper.ai_below_threshold";
+    public const string TimekeeperAiNotClearlyAhead = "approved_timekeeper.ai_not_clearly_ahead";
+    public const string TimekeeperAiUnavailable = "approved_timekeeper.ai_unavailable";
+
+    // ApprovedRate.
+    public const string RateAboveApproved = "approved_rate.above_approved";
+    public const string RateUnresolved = "approved_rate.unresolved";
+    public const string RateTimekeeperUnmatched = "approved_rate.timekeeper_unmatched";
+    public const string RateLineDateMissing = "approved_rate.line_date_missing";
+    public const string RateNoRateInForce = "approved_rate.no_rate_in_force";
+    public const string RateAmbiguous = "approved_rate.ambiguous";
+
+    public const string TimeNotAMultipleOfIncrement = "time_increment.not_a_multiple";
+    public const string DailyHoursOverCap = "daily_hours_cap.over_cap";
+    public const string NonBillableCode = "non_billable_activity.code_listed";
+    public const string ExpenseCodeNotReimbursable = "expense_rule.code_not_reimbursable";
+    public const string ExpenseAmountOverCap = "expense_rule.amount_over_cap";
+    public const string InvoiceTooOld = "invoice_age.too_old";
+    public const string BeforeCoreRecordOpened = "core_record_window.before_open";
+    public const string AfterCoreRecordClosed = "core_record_window.after_close";
+    public const string CoreRecordClosed = "core_record_window.core_record_closed";
+    public const string DuplicateInvoiceNumber = "duplicate.invoice_number";
+    public const string DuplicateOfPriorSubmissionLine = "duplicate.line_prior_submission";
+    public const string DuplicateOfEarlierLine = "duplicate.line_same_invoice";
+    public const string RequiredFieldMissing = "required_data.missing_field";
+    public const string CurrencyNotUsd = "required_data.currency_not_usd";
+    public const string AiBlockBilling = "ai_observation.block_billing";
+    public const string AiVagueDescription = "ai_observation.vague_description";
+}
