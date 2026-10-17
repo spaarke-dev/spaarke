@@ -104,6 +104,30 @@ public class InvoiceCodeSetMatchActionContractTests
         sawNone.Should().BeTrue("the examples show that none is a legitimate answer (D-93)");
     }
 
+    [Fact]
+    public void NoneAnswer_NeverNamesAClosestSet_BecauseTheApplicationReportsTheClosestBySimilarity()
+    {
+        // Task 054 fix-round-1 F1: the service appends "closest by similarity: '<set>'" from the embedding ranking. A reason that also
+        // named the model's own "closest" set could name a DIFFERENT set in the same sentence, so the Action is told not to.
+        var action = LoadAction();
+        var constraints = action.GetProperty("instruction").GetProperty("constraints").EnumerateArray().Select(c => c.GetString()!).ToList();
+        constraints.Should().NotContain(c => c.Contains("came closest", StringComparison.OrdinalIgnoreCase));
+        constraints.Should().Contain(c => c.Contains("Do not say which candidate is closest", StringComparison.Ordinal));
+
+        foreach (var example in action.GetProperty("examples").EnumerateArray())
+        {
+            var output = example.GetProperty("output");
+            if (output.GetProperty("codeSetId").GetString() == InvoiceCodeSetMatchResult.NoneFits)
+            {
+                output.GetProperty("reason").GetString().Should().NotContainEquivalentOf("closest", "a none example teaches the model what to write");
+            }
+        }
+
+        using var schema = JsonDocument.Parse(File.ReadAllText(Path.Combine(RepoRoot(), "infra", "dataverse", "outputschemas", $"{Code}.schema.json")));
+        schema.RootElement.GetProperty("properties").GetProperty("reason").GetProperty("description").GetString()
+            .Should().NotContainEquivalentOf("closest", "the output schema's field description is part of what the model reads");
+    }
+
     // ── The output schema sidecar ───────────────────────────────────────────────────────────────
 
     [Fact]

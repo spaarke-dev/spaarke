@@ -18,7 +18,7 @@
     },
     "reason": {
       "type": "string",
-      "description": "One or two sentences for an administrator: the work the reference involves and why the chosen code set covers it, or why no candidate does and which came closest. Code sets are named by name, never by id."
+      "description": "One or two sentences for an administrator: the work the reference involves and why the chosen code set covers it, or why no candidate does. Code sets are named by name, never by id."
     }
   }
 }
