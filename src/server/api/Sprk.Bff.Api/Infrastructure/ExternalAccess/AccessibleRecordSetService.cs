@@ -28,6 +28,7 @@
 // resolved principal (task 020). No caller-token exchange (no OBO), no Graph SDK types, no
 // AI-internal types.
 
+using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;               // AccessRights — the rights type (root CLAUDE.md §11: reuse, do not fork)
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
@@ -294,11 +295,19 @@ public sealed class AccessibleRecordSet
 /// </para>
 /// </para>
 /// </param>
+/// <param name="ImpersonatedRootSet">
+/// systemuser → Dataverse's own answer (FR-20, task 036): the root ids came from the impersonated read as the caller
+/// (<see cref="IImpersonatedRootSetSource"/>), at Read only, INSTEAD of the ADR-034 membership walk
+/// (<paramref name="SystemUserMembership"/> is then <c>false</c>). Set only while
+/// <c>ExternalAccess:ImpersonatedRootSets:Enabled</c> is on. A principal composed this way has its writes confirmed against
+/// Dataverse (<c>CallerPrincipal.DataverseConfirmsWrites</c>).
+/// </param>
 public readonly record struct AccessibleRecordSetSources(
     bool SystemUserMembership,
     bool ContactGrants,
     bool StandingGrantMembership,
-    bool OrgExpansionMembership = false);
+    bool OrgExpansionMembership = false,
+    bool ImpersonatedRootSet = false);
 
 /// <summary>
 /// The outcome of the ONE read of a subject's organization memberships (<c>sprk_contactorganization</c>):
@@ -639,7 +648,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     }
 
     /// <summary>
-    /// The systemuser plane's Restricted survivor: its ADR-034 membership term — EXCEPT on a Restricted record when the
+    /// The systemuser plane's Restricted survivor: its own term — the ADR-034 membership term, or with
+    /// <c>ExternalAccess:ImpersonatedRootSets:Enabled</c> on, Dataverse's answer at Read (task 036) — EXCEPT on a Restricted record when the
     /// systemuser is flagged <c>sprk_isexternal = true</c> (task 114 verifier K1, owner round 67: a Restricted record is for
     /// internal use only, and <see cref="Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.IsBarredOnRestricted"/> is
     /// the one predicate). There membership survives nothing, exactly as a contact's access does not. Inactive-only records
@@ -1443,6 +1453,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private readonly ISystemUserIdentityResolver _systemUsers;
     private readonly IGenericEntityService _dataverse;
     private readonly ILogger<AccessibleRecordSetService> _logger;
+    private readonly IImpersonatedRootSetSource? _impersonatedRootSets;
+    private readonly IOptions<ExternalAccessOptions>? _externalAccessOptions;
 
     /// <param name="membership">ADR-034 membership.</param>
     /// <param name="participations">Grants, flags, organization reads.</param>
@@ -1457,6 +1469,11 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// under, secure or not (owner round 82), for the systemuser-plane veto — through <see cref="SecureRootInheritance.ReadSecureParentsOfManyAsync"/>, the ONE
     /// parent walk the write-time guard and the enforcer use (registered unconditionally, GraphModule).</param>
     /// <param name="logger">Logger.</param>
+    /// <param name="impersonatedRootSets">FR-20 (task 036): Dataverse's own answer for a systemuser's root ids, read as the
+    /// caller. Consulted only while <c>ExternalAccess:ImpersonatedRootSets:Enabled</c> is on; both it and the options are
+    /// registered unconditionally (ExternalAccessModule), so DI always supplies them. Optional only so the existing
+    /// constructions keep compiling: a composition with the flag on and no source fails closed.</param>
+    /// <param name="externalAccessOptions">The <c>ExternalAccess</c> options carrying the FR-20 flag. Absent reads as off.</param>
     public AccessibleRecordSetService(
         IMembershipResolverService membership,
         ExternalParticipationService participations,
@@ -1465,7 +1482,9 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         IContactIdentityStore identityStore,
         ISystemUserIdentityResolver systemUsers,
         IGenericEntityService dataverse,
-        ILogger<AccessibleRecordSetService> logger)
+        ILogger<AccessibleRecordSetService> logger,
+        IImpersonatedRootSetSource? impersonatedRootSets = null,
+        IOptions<ExternalAccessOptions>? externalAccessOptions = null)
     {
         ArgumentNullException.ThrowIfNull(membership);
         ArgumentNullException.ThrowIfNull(participations);
@@ -1483,6 +1502,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         _systemUsers = systemUsers;
         _dataverse = dataverse;
         _logger = logger;
+        _impersonatedRootSets = impersonatedRootSets;
+        _externalAccessOptions = externalAccessOptions;
     }
 
     /// <inheritdoc />
@@ -1852,15 +1873,48 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // ⚠️ This SHRINKS the composed set. That is the intended direction, but it is a BEHAVIOUR
         // change for internal callers, not a refactor.
         //
-        // NOTE on the task brief: the POML describes this as "the flag-off branch of 036". There is no
-        // such branch — 036 is still open (and gated behind 034), so this single call IS the membership
-        // path today. 036 will add the impersonated Dataverse answer alongside it.
-        var walk = await WalkMembershipPagesAsync(
-            (options, token) => _membership.ResolveAsync(systemUserId, entityType, options, token),
-            entityType,
-            $"systemuser {systemUserId}",
-            ct,
-            accessConferringOnly: true).ConfigureAwait(false);
+        // ── FR-20 (task 036): WHO decides this systemuser's access — read ONCE per composition ─────────────────
+        // Off (the default): the ADR-034 membership walk below, unchanged. On: Dataverse's own answer, an impersonated
+        // read as the caller, REPLACES the walk for ACCESS on this plane (ADR-034 Amendment A2, owner round 75). The
+        // walk is then not run at all: its business-unit and owning-team matches are the over-grant this closes, and its
+        // Read|Write|Create constant is what the impersonated set must never inherit (round 59: the set confers Read; every
+        // write is confirmed against Dataverse at its route). Everything after this block is the same in both states —
+        // the contact-grants union, the deny list, the Restricted veto, the no-Read sweep.
+        var dataverseDecides = _externalAccessOptions?.Value.ImpersonatedRootSets.Enabled == true;
+        _logger.LogInformation(
+            "[WF-AUTHZ] Access source for systemuser {SystemUserId} on {EntityType}: {Source} " +
+            "(ExternalAccess:ImpersonatedRootSets:Enabled={Enabled}).",
+            systemUserId, entityType, dataverseDecides ? "ImpersonatedRootSet" : "Membership", dataverseDecides);
+
+        // The systemuser's OWN term — the one that is not contact-sourced, and so the one that survives Restricted.
+        IReadOnlyCollection<Guid> ownTermIds;
+        AccessRights ownTermRights;
+        bool capped;
+        int capLimit;
+        var pages = 0;
+        if (dataverseDecides)
+        {
+            var answer = await ReadDataverseRootSetAsync(systemUserId, entityType, ct).ConfigureAwait(false);
+            ownTermIds = answer.Ids;
+            ownTermRights = AccessRights.Read;
+            // NFR-03 through the existing cap fields (round 59 item 3): the source's row cap is this set's ceiling.
+            capped = answer.Truncated;
+            capLimit = ImpersonatedRootSetSource.RowCap;
+        }
+        else
+        {
+            var walk = await WalkMembershipPagesAsync(
+                (options, token) => _membership.ResolveAsync(systemUserId, entityType, options, token),
+                entityType,
+                $"systemuser {systemUserId}",
+                ct,
+                accessConferringOnly: true).ConfigureAwait(false);
+            ownTermIds = walk.Ids;
+            ownTermRights = MembershipTermRights;
+            capped = walk.Capped;
+            capLimit = MembershipResolveOptions.MaxLimit;
+            pages = walk.Pages;
+        }
 
         // ── ADDITIVE TERMS (design §4.5) ───────────────────────────────────────────────────────────
         // Each term contributes (recordId -> rights); AccumulateTerm merges them highest-wins.
@@ -1912,7 +1966,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         }
 
         // ── FLAGS: ONE batched read over every candidate id (NFR-02) ───────────────────────────────
-        var candidates = walk.Ids
+        var candidates = ownTermIds
             .Concat(grants is null ? Enumerable.Empty<Guid>() : GrantedIdsFor(grants, entityType))
             .ToList();
         // Task 174 (owner round 84; #1442): the EFFECTIVE flags — each candidate's own, folded with every record it is filed
@@ -1924,15 +1978,17 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             await _participations.GetRootRecordFlagsAsync(entityType, candidates, ct).ConfigureAwait(false), ancestry);
         var isDirectOnly = DirectOnlyPredicate(flags);
 
-        // Term 1 — ADR-034 membership. NOT contact-sourced, so it survives BOTH vetoes: it is the
+        // Term 1 — the systemuser's own term: ADR-034 membership (flag off) or Dataverse's answer at Read (flag on, task
+        // 036). NOT contact-sourced, so it survives BOTH vetoes: it is the
         // systemuser's own Dataverse-governed access, which is exactly what Restricted preserves
         // ("only system users may have access") and what Secure and Limited leave alone (the Secure BU covers
         // the Dataverse half; the suppression covers the grant half — design §5.1). Task 138: Limited governs
         // which CONTACT grant types count, never internal access, so this term never consults isDirectOnly.
-        var membershipTerm = walk.Ids
-            .Select(id => KeyValuePair.Create(id, MembershipTermRights))
+        // ⚠️ Flag on, ownTermRights is Read: MembershipTermRights must never reach a Dataverse-term record (round 59).
+        var ownTerm = ownTermIds
+            .Select(id => KeyValuePair.Create(id, ownTermRights))
             .ToList();
-        AccumulateTerm(composed, membershipTerm);
+        AccumulateTerm(composed, ownTerm);
 
         // Term 2 — contact grants, with direct-only suppression applied BEFORE the max: on a Secure or
         // Limited record only the caller's OWN grant rows contribute; org-inherited access is suppressed
@@ -2013,28 +2069,96 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             composed,
             veto.RemoveWhole,
             flags,
-            await SurvivesRestrictedForSystemUserAsync(systemUserId, entityType, membershipTerm, flags, ct).ConfigureAwait(false),
+            // Flag on, this is the Dataverse term at Read (amendment 3 of 2026-09-30): the constant cannot creep back here.
+            await SurvivesRestrictedForSystemUserAsync(systemUserId, entityType, ownTerm, flags, ct).ConfigureAwait(false),
             veto.ContactSourcedOnly);
 
         // Last: no key without Read (task 136 · C2). On this plane the reachable case is the linked contact's
         // organization-only grant on a Secure or Limited root, which term 2 enters at None.
         RemoveEntriesWithoutRead(composed);
 
+        if (dataverseDecides)
+        {
+            _logger.LogInformation(
+                "[WF-AUTHZ] Composed accessible set for systemuser {SystemUserId} on {EntityType}: " +
+                "{Count} records (source ImpersonatedRootSet: Dataverse's answer at Read; contact-grants " +
+                "union applied: {ContactGrants}; truncated: {Capped}).",
+                systemUserId, entityType, composed.Count, contactGrantsApplied, capped);
+
+            return new AccessibleRecordSet
+            {
+                PrincipalKind = WorkforcePrincipalKind.SystemUser,
+                EntityType = entityType,
+                Rights = composed,
+                Capped = capped,
+                CapLimit = capLimit,
+                Sources = new AccessibleRecordSetSources(
+                    SystemUserMembership: false, ContactGrants: contactGrantsApplied, StandingGrantMembership: false,
+                    ImpersonatedRootSet: true),
+            };
+        }
+
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for systemuser {SystemUserId} on {EntityType}: " +
             "{Count} records over {Pages} membership page(s) (ADR-034 membership; contact-grants " +
             "union applied: {ContactGrants}; capped: {Capped}).",
-            systemUserId, entityType, composed.Count, walk.Pages, contactGrantsApplied, walk.Capped);
+            systemUserId, entityType, composed.Count, pages, contactGrantsApplied, capped);
 
         return new AccessibleRecordSet
         {
             PrincipalKind = WorkforcePrincipalKind.SystemUser,
             EntityType = entityType,
             Rights = composed,
-            Capped = walk.Capped,
+            Capped = capped,
             Sources = new AccessibleRecordSetSources(
                 SystemUserMembership: true, ContactGrants: contactGrantsApplied, StandingGrantMembership: false),
         };
+    }
+
+    /// <summary>
+    /// FR-20 (task 036): Dataverse's own answer for this systemuser's root ids, read as the caller through
+    /// <see cref="IImpersonatedRootSetSource"/>. Throws on every failure, so the composition fails and the request is
+    /// refused (NFR-01).
+    /// </summary>
+    /// <remarks>
+    /// There is no fallback: not to the membership walk, not to an app-only read, not to a constant. A missing
+    /// systemuserid (<see cref="Guid.Empty"/>), a source that is not registered, an unsupported entity type and a failed
+    /// read all throw. The caller-principal filter does not catch it, so no handler runs (the same posture as a membership
+    /// fault today). Logged <c>[WF-AUTHZ]</c> with the active source. Cancellation by the caller is rethrown unlogged.
+    /// </remarks>
+    private async Task<RootIdSet> ReadDataverseRootSetAsync(Guid systemUserId, string entityType, CancellationToken ct)
+    {
+        if (_impersonatedRootSets is null)
+        {
+            _logger.LogError(
+                "[WF-AUTHZ] ExternalAccess:ImpersonatedRootSets:Enabled is on but no IImpersonatedRootSetSource is " +
+                "available: the composition for systemuser {SystemUserId} on {EntityType} FAILS (source ImpersonatedRootSet; " +
+                "no fallback to membership, NFR-01).", systemUserId, entityType);
+            throw new InvalidOperationException(
+                "ExternalAccess:ImpersonatedRootSets:Enabled is on but no impersonated root-set source is registered.");
+        }
+
+        if (systemUserId == Guid.Empty)
+        {
+            _logger.LogError(
+                "[WF-AUTHZ] A systemuser principal with an empty SystemUserId reached the Dataverse-decided composition on " +
+                "{EntityType}: it FAILS (source ImpersonatedRootSet; no fallback to membership, NFR-01).", entityType);
+            throw new InvalidOperationException(
+                "The Dataverse-decided composition needs the caller's systemuserid; Guid.Empty is never impersonated.");
+        }
+
+        try
+        {
+            return await _impersonatedRootSets.GetAsync(systemUserId, entityType, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+        {
+            _logger.LogError(ex,
+                "[WF-AUTHZ] Dataverse's answer for systemuser {SystemUserId} on {EntityType} could not be read (source " +
+                "ImpersonatedRootSet): the composition FAILS and the request is refused. No fallback to membership, an " +
+                "app-only read or a constant (NFR-01, task 036).", systemUserId, entityType);
+            throw;
+        }
     }
 
     // ── workforce contact plane: grants ∪ (standing membership IFF flag set) ∪ org expansion ─────
