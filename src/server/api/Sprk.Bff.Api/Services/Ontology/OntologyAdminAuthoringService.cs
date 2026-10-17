@@ -76,6 +76,11 @@ public sealed partial class OntologyAdminAuthoringService
     /// rule whose subject is not <see cref="MatterSubject"/>. One shared check (<see cref="CheckScopeAsync"/>), like 102a's allow-list.</summary>
     internal const string ReasonScopeSubjectMismatch = "ontology.admin.scope_subject_mismatch";
 
+    /// <summary>Task 102b fix round 1 (F4): the stable code for a dry run or publish of a policy that is limited to a matter when the
+    /// request says neither which matter (<c>matterId</c>) nor <c>allMatters: true</c>, or says both. A request without a scope intent
+    /// never clears a stored scope (a stale client would otherwise widen the rule silently).</summary>
+    internal const string ReasonScopeIntentRequired = "ontology.admin.scope_intent_required";
+
     /// <summary>Task 102b (D-165): the one subject a matter scope is allowed on, and the table the matter is read from as the caller.</summary>
     internal const string MatterSubject = "sprk_matter";
     internal const string MatterEntitySet = "sprk_matters";
@@ -84,6 +89,9 @@ public sealed partial class OntologyAdminAuthoringService
     internal const string MatterNotFoundMessage = "The matter was not found.";
     internal const string ScopeSubjectMismatchMessage = "A matter limit is allowed only on a rule about matters.";
     internal const string TenantRefusedMessage = "A rule has no tenant scope: every environment is single-tenant.";
+    internal const string ScopeIntentRequiredMessage =
+        "This rule is limited to a matter. Send that matter to keep the limit, or all matters to remove it.";
+    internal const string ScopeIntentConflictMessage = "Send a matter or all matters, not both.";
 
     /// <summary>The privilege the dry run requires, asked FRESH on every request as the caller (F1-1): creating a policy version is
     /// what authoring a rule means (D-22).</summary>
@@ -141,7 +149,7 @@ public sealed partial class OntologyAdminAuthoringService
 
     /// <summary>The tenant-cache resource holding the dry-run proofs, the payload version, and how long a proof lasts.</summary>
     internal const string DryRunProofResource = "ontology-admin-dryrun";
-    internal const int DryRunProofVersion = 1;
+    internal const int DryRunProofVersion = 2;
     internal static readonly TimeSpan DryRunProofTtl = TimeSpan.FromHours(1);
 
     /// <summary>
@@ -412,7 +420,9 @@ public sealed partial class OntologyAdminAuthoringService
             }
 
             // Task 102b (D-165): the scope, through the one check save and publish use; the dry run evaluates within it.
-            var scope = await CheckScopeAsync(request.MatterId, request.Tenant, request.RuleBody, errors, ct).ConfigureAwait(false);
+            // Fix round 1 (F4): for an existing policy limited to a matter, the request must say which scope it means.
+            var scope = await CheckScopeAsync(request.MatterId, request.AllMatters, policy?.MatterId, request.Tenant, request.RuleBody, errors, ct)
+                .ConfigureAwait(false);
             if (scope.Failure is { } scopeFailure)
             {
                 return Fail<OntologyDryRunResult>(scopeFailure);
@@ -469,11 +479,21 @@ public sealed partial class OntologyAdminAuthoringService
             }
 
             var result = Classify(readable.Value!, signals, lane, evaluation.QuietWindowDays, evaluation.WindowAnchorUtc, _clock.GetUtcNow().UtcDateTime);
+            // Fix round 1 (F4): the proof records the policy's STORED scope as read now, so a publish after another admin changed it is
+            // refused (the counts confirmed here were worked out against the scope it replaces).
             var recorded = await RecordProofAsync(
-                    proofScope.Value, policy?.Id, lane, ruleTypeName!, request.RuleBody!, request.MessageTemplate, request.MatterId, ct)
+                    proofScope.Value, policy?.Id, lane, ruleTypeName!, request.RuleBody!, request.MessageTemplate, request.MatterId, policy?.MatterId, ct)
                 .ConfigureAwait(false);
 
-            return new(OntologyAdminAuthoringOutcome.Ok, result with { PolicyEnabled = policy is null ? null : policy.Enabled && policy.Active, Recorded = recorded });
+            // Fix round 1 (F4): the stored scope, so the wizard can say when the publish changes it; the name only when the caller reads it.
+            var storedName = policy?.MatterId is { } stored ? await ReadMatterNameAsync(stored, ct).ConfigureAwait(false) : null;
+            return new(OntologyAdminAuthoringOutcome.Ok, result with
+            {
+                PolicyEnabled = policy is null ? null : policy.Enabled && policy.Active,
+                Recorded = recorded,
+                StoredMatterId = policy?.MatterId,
+                StoredMatterName = storedName,
+            });
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -800,7 +820,7 @@ public sealed partial class OntologyAdminAuthoringService
             }
 
             // Task 102b: the scope, exactly as save and publish check it.
-            var scope = await CheckScopeAsync(request.MatterId, request.Tenant, request.Draft?.RuleBody, errors, ct).ConfigureAwait(false);
+            var scope = await CheckScopeAsync(request.MatterId, null, null, request.Tenant, request.Draft?.RuleBody, errors, ct).ConfigureAwait(false);
             if (scope.Failure is { } scopeFailure)
             {
                 return Fail<OntologyRuleValidation>(scopeFailure);
@@ -900,7 +920,7 @@ public sealed partial class OntologyAdminAuthoringService
             }
 
             // Task 102b (D-165): the scope; the matter is read as the caller before anything is written.
-            var scope = await CheckScopeAsync(request.MatterId, request.Tenant, draft?.RuleBody, errors, ct).ConfigureAwait(false);
+            var scope = await CheckScopeAsync(request.MatterId, null, null, request.Tenant, draft?.RuleBody, errors, ct).ConfigureAwait(false);
             if (scope.Failure is { } scopeFailure)
             {
                 return Fail<OntologyPolicySaved>(scopeFailure);
@@ -911,8 +931,8 @@ public sealed partial class OntologyAdminAuthoringService
                 return Invalid<OntologyPolicySaved>(errors, reasonCode ?? scope.ReasonCode);
             }
 
-            if (!await HasProofAsync(proofScope.Value, null, lane, ruleTypeName!, draft!.RuleBody!, draft.MessageTemplate, request.MatterId, ct)
-                    .ConfigureAwait(false))
+            if (await ReadProofAsync(proofScope.Value, null, lane, ruleTypeName!, draft!.RuleBody!, draft.MessageTemplate, request.MatterId, ct)
+                    .ConfigureAwait(false) is null)
             {
                 return Conflict<OntologyPolicySaved>(ReasonDryRunRequired);
             }
@@ -1059,7 +1079,9 @@ public sealed partial class OntologyAdminAuthoringService
             ruleTypeName = check.RuleTypeName;
 
             // Task 102b (D-165): the scope this version is published with (null: all matters), checked as save checks it.
-            var scope = await CheckScopeAsync(request.MatterId, request.Tenant, draft.RuleBody, errors, ct).ConfigureAwait(false);
+            // Fix round 1 (F4): a policy limited to a matter is published only with an explicit scope intent; none never clears it.
+            var scope = await CheckScopeAsync(request.MatterId, request.AllMatters, policy.MatterId, request.Tenant, draft.RuleBody, errors, ct)
+                .ConfigureAwait(false);
             if (scope.Failure is { } scopeFailure)
             {
                 return Fail<OntologyVersionPublished>(scopeFailure);
@@ -1070,10 +1092,18 @@ public sealed partial class OntologyAdminAuthoringService
                 return Invalid<OntologyVersionPublished>(errors, check.ReasonCode ?? scope.ReasonCode);
             }
 
-            if (!await HasProofAsync(proofScope.Value, policy.Id, policy.Lane, ruleTypeName!, draft.RuleBody!, draft.MessageTemplate, request.MatterId, ct)
-                    .ConfigureAwait(false))
+            if (await ReadProofAsync(proofScope.Value, policy.Id, policy.Lane, ruleTypeName!, draft.RuleBody!, draft.MessageTemplate, request.MatterId, ct)
+                    .ConfigureAwait(false) is not { } proof)
             {
                 return Conflict<OntologyVersionPublished>(ReasonDryRunRequired);
+            }
+
+            if (proof.StoredMatter != policy.MatterId)
+            {
+                // Fix round 1 (F4): another admin changed the policy's stored scope after this dry run, so the change the admin confirmed
+                // ("from X to Y") is not the one this publish would make. Refused before any write.
+                _logger.LogInformation("Ontology authoring: the matter scope of policy {PolicyId} changed since the dry run; refusing.", policy.Id);
+                return Conflict<OntologyVersionPublished>(ReasonPolicyChanged);
             }
 
             var versions = await ReadVersionsAsync(policy.Id, ct).ConfigureAwait(false);
@@ -1535,18 +1565,37 @@ public sealed partial class OntologyAdminAuthoringService
     /// cannot read get the same <see cref="MatterNotFoundMessage"/>, so the answer is no oracle. The read is skipped when the request is
     /// refused anyway.</item>
     /// </list>
-    /// No matter id means all matters: the rule behaves exactly as before task 102b.
+    /// No matter id means all matters: the rule behaves exactly as before task 102b, except (fix round 1, F4) on a dry run or publish of a
+    /// policy whose <paramref name="storedMatter"/> is set: there, no matter id needs <paramref name="allMatters"/> true, or the request is
+    /// refused with <see cref="ReasonScopeIntentRequired"/>; a matter id with <paramref name="allMatters"/> true is refused the same way.
+    /// Validate and save pass null for both (validate has no intent field; a new rule has no stored scope).
     /// </summary>
     private async Task<ScopeCheck> CheckScopeAsync(
-        Guid? matterId, string? tenant, string? ruleBody, Dictionary<string, string[]> errors, CancellationToken ct)
+        Guid? matterId, bool? allMatters, Guid? storedMatter, string? tenant, string? ruleBody, Dictionary<string, string[]> errors,
+        CancellationToken ct)
     {
         if (!string.IsNullOrWhiteSpace(tenant))
         {
             errors["tenant"] = [TenantRefusedMessage];
         }
 
+        // Fix round 1 (F4): the scope intent. A matter AND all matters is a contradiction, whatever is stored.
+        if (matterId is not null && allMatters == true)
+        {
+            errors["matterId"] = [ScopeIntentConflictMessage];
+            return new ScopeCheck(ReasonScopeIntentRequired, null);
+        }
+
         if (matterId is not { } matter)
         {
+            if (storedMatter is not null && allMatters != true)
+            {
+                // A policy limited to a matter, and a request that names no scope (a stale client, or one that never knew of scopes):
+                // refused, so the limit is never cleared by omission. A stored null with no intent stays unscoped (as before 102b).
+                errors["matterId"] = [ScopeIntentRequiredMessage];
+                return new ScopeCheck(ReasonScopeIntentRequired, null);
+            }
+
             return default;
         }
 
@@ -1611,6 +1660,26 @@ public sealed partial class OntologyAdminAuthoringService
         matterScope is { } matter
         && hits.Any(h => !string.Equals(h.SubjectEntity, MatterSubject, StringComparison.Ordinal) || h.SubjectId != matter);
 
+    /// <summary>Fix round 1 (F4): the stored matter's name as the CALLER reads it, for the dry run's answer (the query shape
+    /// <c>OntologyAdminRulesService</c> uses for the rule detail). Null when the caller cannot read it or the read fails: the id is still
+    /// returned, and the name is display only, so it never fails the dry run.</summary>
+    private async Task<string?> ReadMatterNameAsync(Guid matterId, CancellationToken ct)
+    {
+        var response = await _user.GetAsync(
+            $"{MatterEntitySet}?$select=sprk_mattername&$filter=sprk_matterid eq {matterId:D}&$top=1", ct).ConfigureAwait(false);
+        if (!response.IsSuccess)
+        {
+            if (response.ErrorCode != DataverseUserClientErrorCodes.AccessDenied)
+            {
+                _logger.LogWarning("Ontology dry run: the stored matter's name could not be read ({ErrorCode}).", response.ErrorCode);
+            }
+
+            return null;
+        }
+
+        return Rows(response.Body).Select(row => ReadString(row, "sprk_mattername")).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name));
+    }
+
     // =================================================================================================================
     // The dry-run proof (v4: a test run before save; any edit invalidates it)
     // =================================================================================================================
@@ -1638,13 +1707,18 @@ public sealed partial class OntologyAdminAuthoringService
         return $"{callerId:N}:{(policyId is { } p ? p.ToString("N") : "new")}:{hash}";
     }
 
+    /// <summary>A recorded dry run: when, and (fix round 1, F4) the policy's STORED matter scope at that time (null for a new rule or an
+    /// unscoped policy). Publish refuses with <see cref="ReasonPolicyChanged"/> when the stored scope is no longer this one.</summary>
+    internal sealed record DryRunProof(DateTimeOffset At, Guid? StoredMatter);
+
     private async Task<bool> RecordProofAsync(
-        ProofOwner owner, Guid? policyId, DecisionLane lane, string ruleType, string ruleBody, string? template, Guid? matterId, CancellationToken ct)
+        ProofOwner owner, Guid? policyId, DecisionLane lane, string ruleType, string ruleBody, string? template, Guid? matterId, Guid? storedMatter,
+        CancellationToken ct)
     {
         try
         {
             await _cache.SetAsync(owner.TenantId, DryRunProofResource, ProofKey(owner.CallerId, policyId, lane, ruleType, ruleBody, template, matterId),
-                DryRunProofVersion, _clock.GetUtcNow(), DryRunProofTtl, ct: ct).ConfigureAwait(false);
+                DryRunProofVersion, new DryRunProof(_clock.GetUtcNow(), storedMatter), DryRunProofTtl, ct: ct).ConfigureAwait(false);
             return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -1655,20 +1729,19 @@ public sealed partial class OntologyAdminAuthoringService
         }
     }
 
-    private async Task<bool> HasProofAsync(
+    private async Task<DryRunProof?> ReadProofAsync(
         ProofOwner owner, Guid? policyId, DecisionLane lane, string ruleType, string ruleBody, string? template, Guid? matterId, CancellationToken ct)
     {
         try
         {
-            var at = await _cache.GetAsync<DateTimeOffset?>(owner.TenantId, DryRunProofResource,
+            return await _cache.GetAsync<DryRunProof>(owner.TenantId, DryRunProofResource,
                 ProofKey(owner.CallerId, policyId, lane, ruleType, ruleBody, template, matterId), DryRunProofVersion, ct: ct).ConfigureAwait(false);
-            return at is not null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             // Fail closed: an unreadable proof is no proof.
             _logger.LogWarning("Ontology authoring: the dry-run proof could not be read ({ExceptionType}); refusing.", ex.GetType().Name);
-            return false;
+            return null;
         }
     }
 

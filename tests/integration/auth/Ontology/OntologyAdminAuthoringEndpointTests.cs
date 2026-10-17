@@ -1658,6 +1658,9 @@ public sealed class AuthoringWorld : IDataverseUserClient
 
     /// <summary>Task 102b: rows that do not exist at all (a read of them returns nothing, exactly as for an unreadable row).</summary>
     public HashSet<(string Table, Guid Id)> Missing { get; } = new();
+
+    /// <summary>Task 102b fix round 1 (F4): matter names, for the dry run's read of the stored matter's name as the caller.</summary>
+    public Dictionary<Guid, string> MatterNames { get; } = new();
     public List<string> Requests { get; } = new();
     public List<Write> Writes { get; } = new();
 
@@ -1680,6 +1683,7 @@ public sealed class AuthoringWorld : IDataverseUserClient
         Signals.Clear();
         Unreadable.Clear();
         Missing.Clear();
+        MatterNames.Clear();
         Requests.Clear();
         Writes.Clear();
     }
@@ -1865,6 +1869,18 @@ public sealed class AuthoringWorld : IDataverseUserClient
             if (meta.Success)
             {
                 return Ok(new { EntitySetName = meta.Groups[1].Value + "s" });
+            }
+
+            var matterName = Regex.Match(relativePath, @"^sprk_matters\?\$select=sprk_mattername&\$filter=sprk_matterid eq ([0-9a-f-]{36})&\$top=1$");
+            if (matterName.Success)
+            {
+                var id = Guid.Parse(matterName.Groups[1].Value);
+                return Ok(new
+                {
+                    value = Unreadable.Contains(("sprk_matter", id)) || Missing.Contains(("sprk_matter", id))
+                        ? Array.Empty<object>()
+                        : new object[] { new Dictionary<string, object?> { ["sprk_matterid"] = id.ToString("D"), ["sprk_mattername"] = MatterNames.GetValueOrDefault(id) } },
+                });
             }
 
             var table = Regex.Match(relativePath, @"^([a-z_]+)s\?\$select=([a-z_]+)id&\$filter=Microsoft\.Dynamics\.CRM\.In\(PropertyName='[a-z_]+id',PropertyValues=\[(.*)\]\)$");

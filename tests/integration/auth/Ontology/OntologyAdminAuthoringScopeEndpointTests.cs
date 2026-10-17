@@ -22,9 +22,10 @@ public partial class OntologyAdminAuthoringEndpointTests
 
     private static readonly Guid GhostMatter = Guid.Parse("10100000-0000-4000-8000-00000000c0e1");
 
-    private async Task<HttpResponseMessage> ScopedDryRun(Guid? policyId, Guid? matterId, string body = Body, string? lane = null, string? tenant = null) =>
+    private async Task<HttpResponseMessage> ScopedDryRun(
+        Guid? policyId, Guid? matterId, string body = Body, string? lane = null, string? tenant = null, bool? allMatters = null) =>
         await _client.PostAsJsonAsync($"{Root}/dry-run",
-            new { policyId, lane, ruleType = "Existence", ruleBody = body, messageTemplate = Template, matterId, tenant });
+            new { policyId, lane, ruleType = "Existence", ruleBody = body, messageTemplate = Template, matterId, tenant, allMatters });
 
     private async Task<HttpResponseMessage> ScopedValidate(Guid? matterId, object? draft = null, Guid? policyId = null, string? tenant = null) =>
         await _client.PostAsJsonAsync($"{Root}/validate", new { policyId, lane = "Decide", draft = draft ?? Draft(), matterId, tenant });
@@ -33,8 +34,9 @@ public partial class OntologyAdminAuthoringEndpointTests
         await _client.PostAsJsonAsync($"{Root}/policies",
             new { policyCode = "POL-NEW", name = "A new rule", lane = "Decide", draft = draft ?? Draft(), matterId, tenant });
 
-    private async Task<HttpResponseMessage> ScopedPublish(Guid policyId, Guid? matterId, object? draft = null, string? tenant = null) =>
-        await _client.PostAsJsonAsync($"{Root}/policies/{policyId:D}/versions", new { draft = draft ?? Draft(), matterId, tenant });
+    private async Task<HttpResponseMessage> ScopedPublish(
+        Guid policyId, Guid? matterId, object? draft = null, string? tenant = null, bool? allMatters = null) =>
+        await _client.PostAsJsonAsync($"{Root}/policies/{policyId:D}/versions", new { draft = draft ?? Draft(), matterId, tenant, allMatters });
 
     private AuthoringWorld.Write PointerPatch() =>
         _fixture.World.Writes.Should().ContainSingle(x => x.Kind == $"PATCH sprk_policies({PolicyId:D})").Subject;
@@ -82,12 +84,12 @@ public partial class OntologyAdminAuthoringEndpointTests
     }
 
     [Fact]
-    public async Task Scope_PublishFromOneMatterToAllMatters_ClearsTheScopeWithANullBind()
+    public async Task Scope_PublishFromOneMatterToAllMatters_WithAllMatters_ClearsTheScopeWithANullBind()
     {
         _fixture.World.Policies[PolicyId].Matter = MatterA;
-        (await ScopedDryRun(PolicyId, null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await ScopedDryRun(PolicyId, null, allMatters: true)).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var response = await ScopedPublish(PolicyId, null);
+        var response = await ScopedPublish(PolicyId, null, allMatters: true);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         PointerPatch().Json.GetProperty(AuthoringWorld.MatterBind).ValueKind.Should().Be(JsonValueKind.Null);
@@ -118,6 +120,125 @@ public partial class OntologyAdminAuthoringEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         PointerPatch().Json.EnumerateObject().Select(p => p.Name).Should().Equal("sprk_CurrentVersion@odata.bind");
         _fixture.World.Policies[PolicyId].Matter.Should().Be(MatterA);
+    }
+
+    // ── Fix round 1 (F4): the scope intent is explicit; no intent never clears a stored scope ──────────────────────
+
+    private const string ScopeIntentRequired = "ontology.admin.scope_intent_required";
+
+    [Fact]
+    public async Task Scope_AStaleClientWithNoIntent_OnAScopedPolicy_IsRefused_AndTheScopeIsKept()
+    {
+        _fixture.World.Policies[PolicyId].Matter = MatterA;
+
+        var dryRun = await ScopedDryRun(PolicyId, null);
+        var publish = await ScopedPublish(PolicyId, null);
+
+        foreach (var (route, response) in new[] { ("dry run", dryRun), ("publish", publish) })
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest, route);
+            (await ReasonOf(response)).Should().Be(ScopeIntentRequired, route);
+            (await Json(response)).GetProperty("errors").GetProperty("matterId")[0].GetString()
+                .Should().Be("This rule is limited to a matter. Send that matter to keep the limit, or all matters to remove it.", route);
+        }
+
+        _fixture.Engine.Evaluated.Should().BeEmpty();
+        _fixture.World.Writes.Should().BeEmpty("a request with no scope intent never clears the scope");
+        _fixture.World.Policies[PolicyId].Matter.Should().Be(MatterA);
+    }
+
+    [Fact]
+    public async Task Scope_AllMattersFalse_IsNoIntent_OnAScopedPolicy()
+    {
+        _fixture.World.Policies[PolicyId].Matter = MatterA;
+
+        var publish = await ScopedPublish(PolicyId, null, allMatters: false);
+
+        publish.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ReasonOf(publish)).Should().Be(ScopeIntentRequired);
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    public static TheoryData<string> IntentRoutes => new() { "dry run", "dry run (new)", "publish" };
+
+    [Theory]
+    [MemberData(nameof(IntentRoutes))]
+    public async Task Scope_AMatterAndAllMattersTogether_IsRefused_WithTheIntentCode(string route)
+    {
+        _fixture.World.Policies[PolicyId].Matter = MatterA;
+
+        var response = route switch
+        {
+            "dry run" => await ScopedDryRun(PolicyId, MatterB, allMatters: true),
+            "dry run (new)" => await ScopedDryRun(null, MatterB, lane: "Decide", allMatters: true),
+            _ => await ScopedPublish(PolicyId, MatterB, allMatters: true),
+        };
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, route);
+        (await ReasonOf(response)).Should().Be(ScopeIntentRequired, route);
+        (await Json(response)).GetProperty("errors").GetProperty("matterId")[0].GetString()
+            .Should().Be("Send a matter or all matters, not both.", route);
+        MatterWasRead(MatterB).Should().BeFalse("a contradictory request is not read on");
+        _fixture.Engine.Evaluated.Should().BeEmpty();
+        _fixture.World.Writes.Should().BeEmpty();
+        _fixture.World.Policies[PolicyId].Matter.Should().Be(MatterA);
+    }
+
+    [Fact]
+    public async Task Scope_TwoAdmins_AStoredScopeChangedSinceTheDryRun_IsPolicyChanged_AndNothingIsWritten()
+    {
+        // Admin 1 tests keeping M; admin 2 then publishes N; admin 1's publish (still "keep M") would silently move N back to M.
+        _fixture.World.Policies[PolicyId].Matter = MatterA;
+        (await ScopedDryRun(PolicyId, MatterA)).StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.World.Policies[PolicyId].Matter = MatterB;
+
+        var response = await ScopedPublish(PolicyId, MatterA);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        (await ReasonOf(response)).Should().Be("ontology.admin.policy_changed");
+        _fixture.World.Writes.Should().BeEmpty("refused before any write");
+        _fixture.Engine.ReevaluateCalls.Should().BeEmpty();
+        _fixture.World.Policies[PolicyId].Matter.Should().Be(MatterB);
+    }
+
+    [Fact]
+    public async Task Scope_TwoAdmins_AScopeAddedSinceAnUnscopedDryRun_IsPolicyChanged()
+    {
+        (await ScopedDryRun(PolicyId, null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.World.Policies[PolicyId].Matter = MatterB;
+
+        var response = await ScopedPublish(PolicyId, null, allMatters: true);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReasonOf(response)).Should().Be("ontology.admin.policy_changed");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Scope_DryRun_ReturnsTheStoredScope_WithItsNameWhenTheCallerCanReadIt()
+    {
+        var w = _fixture.World;
+        w.Policies[PolicyId].Matter = MatterA;
+        w.MatterNames[MatterA] = "Alpha matter";
+
+        var keep = await Json(await ScopedDryRun(PolicyId, MatterA));
+        keep.GetProperty("storedMatterId").GetGuid().Should().Be(MatterA);
+        keep.GetProperty("storedMatterName").GetString().Should().Be("Alpha matter");
+
+        // A stored matter the caller cannot read: its id, never its name (uac K3); the admin can still clear the limit (K4).
+        w.Policies[PolicyId].Matter = HiddenMatter;
+        w.Unreadable.Add(("sprk_matter", HiddenMatter));
+        w.MatterNames[HiddenMatter] = "Hidden matter";
+        var clear = await ScopedDryRun(PolicyId, null, allMatters: true);
+        clear.StatusCode.Should().Be(HttpStatusCode.OK, await clear.Content.ReadAsStringAsync());
+        var cleared = await Json(clear);
+        cleared.GetProperty("storedMatterId").GetGuid().Should().Be(HiddenMatter);
+        cleared.GetProperty("storedMatterName").ValueKind.Should().Be(JsonValueKind.Null);
+        (await clear.Content.ReadAsStringAsync()).Should().NotContain("Hidden matter");
+
+        w.Policies[PolicyId].Matter = null;
+        var unscoped = await Json(await ScopedDryRun(PolicyId, null));
+        unscoped.GetProperty("storedMatterId").ValueKind.Should().Be(JsonValueKind.Null, "an unscoped policy with no intent: as before");
     }
 
     // ── Unscoped behaviour is unchanged (AC4) ─────────────────────────────────────────────────────────────────────
