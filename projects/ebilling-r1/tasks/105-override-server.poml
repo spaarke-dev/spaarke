@@ -44,6 +44,7 @@
   </context>
 
   <constraints>
+    <constraint source="owner D-101 (2026-10-17)">An overridden submission already has its invoice (In Review, held). Override releases it to approval, and its Decision Record files under that invoice (D-100 WriteBillingDecisionAsync).</constraint>
     <constraint source="D-76">eBilling Override is a Dataverse table privilege on a small dedicated table (owner decision D-76), checked once through CallerRecordAccessProbe.CallerHoldsPrivilegeAsync and failing closed; no security-role-name check and no app role. The table is created by an idempotent additive script under scripts/ebilling/ and captured into the solution source by the next deploy task; answer the root CLAUDE.md section 11 three questions for it in notes.</constraint>
     <constraint source="FR-19, FR-37, root CLAUDE.md section 6">Override requires the privilege, checked server-side on every call, fail closed (no token, probe failure, unknown user = 403 ebilling.override.not_permitted). Reason required (400). One person: no second approval step.</constraint>
     <constraint source="D-24">Only an internal-channel submission whose processing status is Rejected because of a blocking finding can be overridden; SPA submissions, Failed submissions and already-accepted ones are refused (409 with stable codes). A repeat override is a no-op with no new Decision Record.</constraint>

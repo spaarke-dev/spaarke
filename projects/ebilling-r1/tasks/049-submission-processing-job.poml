@@ -48,6 +48,13 @@
   </context>
 
   <constraints>
+    <constraint source="owner D-101 (2026-10-17)">Every submission that was read creates its invoice and lines in step 6 (all-or-nothing):
+- accepted → In Review;
+- automatically rejected → created with status Rejected through the lifecycle service (task 014), with findings and the report linked to both the submission and the invoice;
+- a blocked internal submission → In Review, held from approval until Override / Return.
+A submission that fails before it is read has no invoice. Two consequences:
+- If the lifecycle service cannot create an invoice directly in Rejected, extend it there (one owner of status). Do not write statuscode elsewhere.
+- The automatic rejection's Decision Record (system decision, null confirmer, `automated:` decider, null gate tier) files under that invoice through WriteBillingDecisionAsync (D-100).</constraint>
     <constraint source="D-89 (owner, 2026-10-16) / 046-078 review">ApprovedTimekeeper findings hold the invoice for review and never reject. Enforce this directly (the rule outcome for ApprovedTimekeeper is never Reject), not only through the confidence cap: ReferenceMissingCap and ReliabilityThreshold are both editable settings, and a cap set at or above the threshold would otherwise let the rule reject. Add a test with the cap raised above the threshold.</constraint>
     <constraint source="D-87 (owner, 2026-10-16)">Every submission already carries its tracking number from creation (044 via the allocator). The job does not allocate; a submission without sprk_submissionsequence is a defect to fail closed on, not a case to repair.</constraint>
     <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md.</constraint>

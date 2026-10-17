@@ -42,6 +42,7 @@
   </context>
 
   <constraints>
+    <constraint source="owner D-101 (2026-10-17)">A blocked or rejected submission already has its invoice (049 persists it). Return to firm sets that invoice to Returned to Firm through the lifecycle service, and its Decision Record files under the invoice (D-100 WriteBillingDecisionAsync). Do not add a submission lookup to sprk_decisionrecord.</constraint>
     <constraint source="FR-36">Reason required for both (400 ebilling.reason_required); reject and return only from In Review (409 otherwise); a second call after the invoice left In Review is a no-op with no new Decision Record.</constraint>
     <constraint source="FR-35 / F-7 default, root CLAUDE.md section 6">Only eligible approvers (103's live check) may reject or return: 403 ebilling.approver.not_eligible otherwise. Route filter "ebilling.invoice.decide".</constraint>
     <constraint source="FR-30">Exactly one Decision Record per reject or return through 074's recorder; the approval portion status set to Rejected or Returned with decider and time.</constraint>
