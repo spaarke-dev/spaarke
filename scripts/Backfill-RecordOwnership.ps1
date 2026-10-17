@@ -18,6 +18,10 @@
                       round 1, F3). D-11 says a grant row is owned by a team, never a user, so a human-owned grant is
                       the same defect. The summary splits the candidates into AppOwned and HumanOwned, and the
                       manifest records each row's previous owner, so either is restored exactly by -RevertManifest.
+                      ALSO every ACTIVE row owned by a TEAM that is not the team the resolver gives its root (task 099b
+                      review round 2): a grant created on an ordinary root and left on that unit's default team when the
+                      root was made secure before the secure-transition pass re-owned grants (or the reverse, left on the
+                      Secure team after an unsecure). Reported as TeamMismatch; the manifest records the previous TEAM.
 
     WHICH TEAM — record-first, the SAME order RecordOwnershipResolver applies to new creates:
       sprk_document : the filed record — sprk_matter, sprk_project, sprk_invoice, sprk_workassignment, then the
@@ -107,7 +111,8 @@
 .EXAMPLE
     .\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Entities sprk_externalrecordaccess
     The grant backfill dry run (task 099b). It is also the VERIFY: after -Apply, it must report ToWrite: 0 and
-    Candidates: 0 — no ACTIVE grant owned by a user, application or human (review round 1, F3).
+    Candidates: 0 — no ACTIVE grant owned by a user, application or human (review round 1, F3), and none owned by a team
+    other than its root's (TeamMismatch 0, review round 2).
 
 .EXAMPLE
     .\Backfill-RecordOwnership.ps1 -SelfTest
@@ -215,6 +220,30 @@ function Get-CandidateFilter {
     return $owned
 }
 
+# ── PURE (task 099b review round 2): the rows read to find TEAM-owned active grants. A row is a candidate only when it is
+#    team-owned (_owningteam_value set, checked per row) and Test-TeamMismatch says its team is not the resolver's team for
+#    its root. Other entities: none ($null). The filter is the active state ONLY: measured on spaarkedev1 2026-10-17,
+#    '_owningteam_value ne null' returns USER-owned grant rows too (62 of 62 active, none team-owned), so ownership is
+#    tested on the row, never in the query. ──
+function Get-TeamOwnedFilter {
+    param([string]$Entity)
+    if (-not $AnyUserOwned[$Entity]) { return $null }
+    return 'statecode eq 0'
+}
+
+# ── PURE: of the rows Get-TeamOwnedFilter read, the TEAM-owned ones (a user-owned row is a Get-CandidateFilter candidate). ──
+function Select-TeamOwnedRows {
+    param([object[]]$Rows)
+    return , @($Rows | Where-Object { $null -ne $_ -and $_.PSObject.Properties['_owningteam_value'] -and $_._owningteam_value })
+}
+
+# ── PURE: a team-owned row needs re-owning when the resolver gives its root a team (the decision resolved) that is not the
+#    team owning it now. An UNRESOLVABLE decision is never a write (it is reported). ──
+function Test-TeamMismatch {
+    param([string]$CurrentTeam, [hashtable]$Decision)
+    return [bool]($Decision.Team -and $CurrentTeam -and $Decision.Team -ne $CurrentTeam)
+}
+
 # ══ SELF-TEST (offline) ══════════════════════════════════════════════════════════════════════════════════════
 if ($SelfTest) {
     $secureBu = 'aaaaaaaa-0000-0000-0000-000000000001'; $secureTeam = 'aaaaaaaa-0000-0000-0000-0000000000f1'
@@ -247,7 +276,26 @@ if ($SelfTest) {
         @{ Name = 'grant candidates: active rows owned by ANY user (F3)'; Got = (Get-CandidateFilter 'sprk_externalrecordaccess' @('11')); Want = '_owninguser_value ne null and statecode eq 0' }
         @{ Name = 'grant NotActive: inactive rows owned by any user'; Got = (Get-CandidateFilter 'sprk_externalrecordaccess' @('11') -Inactive); Want = '_owninguser_value ne null and statecode ne 0' }
         @{ Name = 'document candidates: application-owned rows only'; Got = (Get-CandidateFilter 'sprk_document' @('11', '22')); Want = "Microsoft.Dynamics.CRM.In(PropertyName='owninguser',PropertyValues=['11','22'])" }
+        @{ Name = 'grant team-owned check: every active row, team ownership tested per row (review round 2)'; Got = (Get-TeamOwnedFilter 'sprk_externalrecordaccess'); Want = 'statecode eq 0' }
+        @{ Name = 'grant team-owned rows: only rows with an owning team (a user-owned row is not one)'; Got = ((Select-TeamOwnedRows @([pscustomobject]@{ _owningteam_value = 't1'; _owninguser_value = $null }, [pscustomobject]@{ _owningteam_value = $null; _owninguser_value = 'u1' })) | ForEach-Object { $_._owningteam_value }) -join ','; Want = 't1' }
+        @{ Name = 'document team-owned check: none (team-owned documents are not this backfill''s)'; Got = [string](Get-TeamOwnedFilter 'sprk_document'); Want = '' }
     )
+    # Review round 2: which TEAM-owned grants are re-owned. The decision is Get-OwnerTeamDecision's, as for every row.
+    $mismatches = @(
+        @{ Name = 'grant on the unit default team, root made secure -> re-owned to the named team'; Current = $childTeam; Facts = @{ Bu = $secureBu; Flagged = $true }; Want = $true }
+        @{ Name = 'grant on the named team, root unsecured -> re-owned to the unit default team'; Current = $secureTeam; Facts = @{ Bu = $childBu; Flagged = $false }; Want = $true }
+        @{ Name = 'grant already on its root''s team (ordinary) -> not a candidate'; Current = $childTeam; Facts = @{ Bu = $childBu; Flagged = $false }; Want = $false }
+        @{ Name = 'grant already on its root''s team (secure) -> not a candidate'; Current = $secureTeam; Facts = @{ Bu = $secureBu; Flagged = $true }; Want = $false }
+        @{ Name = 'grant on a team, root flagged but not isolated -> never written (UNRESOLVABLE)'; Current = $childTeam; Facts = @{ Bu = $childBu; Flagged = $true }; Want = $false }
+    )
+    foreach ($m in $mismatches) {
+        $d = Get-OwnerTeamDecision -Facts $m.Facts -Topology $ok -DefaultTeamOf $defaults
+        $got = Test-TeamMismatch -CurrentTeam $m.Current -Decision $d
+        $pass = $got -eq $m.Want
+        if (-not $pass) { $failures++ }
+        Write-Host ("{0} {1} -> mismatch={2} team={3}" -f $(if ($pass) { 'PASS' } else { 'FAIL' }), $m.Name, $got, $d.Team)
+    }
+    $cases += $mismatches
     foreach ($f in $filters) {
         $pass = $f.Got -eq $f.Want
         if (-not $pass) { $failures++ }
@@ -447,7 +495,7 @@ $writes = 0
 foreach ($entity in $Entities) {
     $set = $EntitySet[$entity]
     $order = $TargetOrder[$entity]
-    $select = (@("$($entity)id", '_ownerid_value', '_owninguser_value', '_owningbusinessunit_value') +
+    $select = (@("$($entity)id", '_ownerid_value', '_owninguser_value', '_owningteam_value', '_owningbusinessunit_value') +
         ($order.Keys | ForEach-Object { "_$($_)_value" })) -join ','
     $notActive = '-'
     $candidates = Invoke-DvGet "$set`?`$select=$select&`$filter=$(Get-CandidateFilter $entity $appUserIds)"
@@ -459,9 +507,15 @@ foreach ($entity in $Entities) {
     }
 
     $appOwnedCount = @($candidates | Where-Object { $appUserSet[(Get-Lookup $_ 'owninguser')] }).Count
-    $stats = [ordered]@{ Entity = $entity; Candidates = @($candidates).Count; AppOwned = $appOwnedCount; HumanOwned = @($candidates).Count - $appOwnedCount; ToWrite = 0; Written = 0; Failed = 0; Unfiled = 0; Unresolvable = 0; NotActive = $notActive }
-    foreach ($row in $candidates) {
+    $userOwnedCount = @($candidates).Count
+    # Review round 2: the TEAM-owned active grants, each checked against its root's team below (TeamMismatch).
+    $teamOwnedRows = @()
+    $teamOwnedFilter = Get-TeamOwnedFilter $entity
+    if ($teamOwnedFilter) { $teamOwnedRows = Select-TeamOwnedRows (Invoke-DvGet "$set`?`$select=$select&`$filter=$teamOwnedFilter") }
+    $stats = [ordered]@{ Entity = $entity; Candidates = $userOwnedCount; AppOwned = $appOwnedCount; HumanOwned = $userOwnedCount - $appOwnedCount; TeamOwnedChecked = $(if ($teamOwnedFilter) { @($teamOwnedRows).Count } else { '-' }); TeamMismatch = 0; ToWrite = 0; Written = 0; Failed = 0; Unfiled = 0; Unresolvable = 0; NotActive = $notActive }
+    foreach ($row in @($candidates) + @($teamOwnedRows)) {
         $id = ConvertTo-CleanGuid $row."$($entity)id"
+        $currentTeam = Get-Lookup $row 'owningteam'
         $target = $null
         foreach ($attr in $order.Keys) {
             $value = Get-Lookup $row $attr
@@ -469,6 +523,7 @@ foreach ($entity in $Entities) {
         }
 
         if (-not $target) {
+            if ($currentTeam) { continue }   # a team-owned row filed to nothing is not this check's
             $stats.Unfiled++
             Write-BackfillLog "UNFILED $entity $id — filed to nothing; the acting user is not recorded (app-only create). Not written."
             continue
@@ -479,6 +534,18 @@ foreach ($entity in $Entities) {
         $answer = Resolve-SecureAwareTeam $target.Set $target.Id
         $bu = $answer.Bu
         $team = $answer.Team
+        if ($currentTeam) {
+            # A TEAM-owned grant (review round 2): a candidate only when its team is not its root's.
+            if (-not (Test-TeamMismatch -CurrentTeam $currentTeam -Decision $answer)) {
+                if (-not $team) {
+                    $stats.Unresolvable++
+                    Write-BackfillLog "UNRESOLVABLE $entity $id (team-owned by $currentTeam) — target $($target.Attribute)=$($target.Id) BU=${bu}: $($answer.Reason). Not written."
+                }
+                continue
+            }
+            $stats.Candidates++
+            $stats.TeamMismatch++
+        }
         if (-not $team) {
             $stats.Unresolvable++
             Write-BackfillLog "UNRESOLVABLE $entity $id — target $($target.Attribute)=$($target.Id) BU=${bu}: $($answer.Reason). Not written."
@@ -489,14 +556,15 @@ foreach ($entity in $Entities) {
         $teamKey = "$entity|$team"
         $teamCounts[$teamKey] = 1 + $(if ($teamCounts.Contains($teamKey)) { $teamCounts[$teamKey] } else { 0 })
         $previousBu = Get-Lookup $row 'owningbusinessunit'
-        $previousOwner = Get-Lookup $row 'owninguser'
-        $ownerKind = if ($appUserSet[$previousOwner]) { 'application' } else { 'human' }
-        Write-BackfillLog "PLAN $entity $id — via $($target.Attribute)=$($target.Id): owner systemuser($previousOwner, $ownerKind)@$previousBu -> team($team)@$bu"
+        $previousOwnerType = if ($currentTeam) { 'team' } else { 'systemuser' }
+        $previousOwner = if ($currentTeam) { $currentTeam } else { Get-Lookup $row 'owninguser' }
+        $ownerKind = if ($currentTeam) { 'team-mismatch' } elseif ($appUserSet[$previousOwner]) { 'application' } else { 'human' }
+        Write-BackfillLog "PLAN $entity $id — via $($target.Attribute)=$($target.Id): owner $previousOwnerType($previousOwner, $ownerKind)@$previousBu -> team($team)@$bu"
 
         if ($IsDryRun -or ($MaxWritesPerRun -gt 0 -and $writes -ge $MaxWritesPerRun)) { continue }
 
         # WRITE-AHEAD: the reversal row is on disk before the write it reverses.
-        $manifest.WriteLine("$entity,$id,systemuser,$previousOwner,$previousBu,$team,$bu,$((Get-Date).ToUniversalTime().ToString('o'))")
+        $manifest.WriteLine("$entity,$id,$previousOwnerType,$previousOwner,$previousBu,$team,$bu,$((Get-Date).ToUniversalTime().ToString('o'))")
         $manifest.Flush()
 
         $err = Set-Owner $set $id 'teams' $team 'owningteam'
