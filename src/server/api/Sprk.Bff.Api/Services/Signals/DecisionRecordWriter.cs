@@ -339,9 +339,9 @@ public static class DecisionRecordRefusalReason
     /// two different records of one core table, or it no longer exists). A refusal, not an outage.</summary>
     public const string SubjectUnfileable = "decision_subject_unfileable";
 
-    /// <summary>ebilling-r1 task 074 (D-100): whether a billing decision's Decision Record already exists could not be checked (a Dataverse
-    /// fault on the lookup, or on the writer identity it is narrowed by), so nothing was written rather than risk a second record. A retry
-    /// may succeed.</summary>
+    /// <summary>ebilling-r1 task 074 (D-100): a read the billing entry needs before it writes faulted, so nothing was written: whether the
+    /// decision's Decision Record already exists (the lookup, or the writer identity it is narrowed by; guessing "none" would risk a second
+    /// record), or the policy version it names. A retry may succeed.</summary>
     public const string BillingRecordLookupFailed = "decision_billing_lookup_failed";
 }
 
@@ -1255,18 +1255,24 @@ public sealed class DecisionRecordWriter
     /// <remarks>
     /// <para><b>Order.</b> (1) <see cref="ValidateBilling"/>, no I/O: the code is a billing code, the subject is the code's table, a null
     /// confirmer only with an <c>automated:</c> decider, a required reason and the other required parameters present. (2) The "already
-    /// recorded" lookup (<see cref="FindBillingRecordAsync"/>): a record is returned, nothing written; a fault writes nothing. (3) The core,
-    /// derived from the subject (<see cref="ResolveBillingCoreAsync"/>; never passed by a caller, so a line can never be given its invoice's
-    /// matter). (4) The shared create.</para>
+    /// recorded" lookup (<see cref="FindBillingRecordsAsync"/>): a record is returned, nothing written; a fault writes nothing. (3) The
+    /// policy version, when given, exists (<see cref="RequireBillingPolicyVersionAsync"/>). (4) The subject of every resolved Signal, read
+    /// app-only (<see cref="BillingSignalSubjectsAsync"/>, the commit route's rule): each is a parent of the owner question beside the core
+    /// (D-123, secure-if-any), as <see cref="DecisionRecordRequest.SignalSubjects"/> is on the review path. (5) The core, derived from the
+    /// subject (<see cref="ResolveBillingCoreAsync"/>; never passed by a caller, so a line can never be given its invoice's matter). (6) The
+    /// shared create.</para>
     /// <para><b>Closed field semantics.</b> Class: the catalog's <see cref="DecisionActionDefinition.RecordClass"/>. Outcome: Authorized (the
     /// decision was taken; the code says which, reject and return included). One taken step: the code with its catalog label, values, outcome
     /// and written rows. <c>sprk_gatetier</c>: the code's declared gate factors through <see cref="Ai.PublicContracts.DecisionGateTier"/> for a human decision;
     /// null for a system decision, as on the gate path. <c>sprk_policyversion</c> only when given. <c>sprk_confirmedby</c> null for a system
     /// decision, and then no person is the requester (<c>sprk_createdbyperson</c> stays empty, as for the condition-cleared record).</para>
     /// </remarks>
-    /// <exception cref="DecisionRecordRefusedException">The only exception type (besides cancellation): the request is invalid, the lookup
-    /// faulted (<see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>), the subject cannot be filed, the owner was refused, or the
-    /// create failed. Nothing was written (after a create timeout the row may exist).</exception>
+    /// <exception cref="DecisionRecordRefusedException">The only exception type (besides cancellation): the request is invalid (a policy
+    /// version that does not exist included), the lookup or the policy-version read faulted
+    /// (<see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>), a resolved Signal is missing or its subject cannot be determined
+    /// (<see cref="DecisionRecordRefusalReason.OwnerRefused"/>) or could not be read
+    /// (<see cref="DecisionRecordRefusalReason.OwnerResolutionFailed"/>), the subject cannot be filed, the owner was refused, or the create
+    /// failed. Nothing was written (after a create timeout the row may exist).</exception>
     /// <exception cref="OperationCanceledException">The caller cancelled.</exception>
     public async Task<DecisionRecordWriteResult> WriteBillingDecisionAsync(BillingDecisionRecordRequest request, CancellationToken ct = default)
     {
@@ -1300,8 +1306,14 @@ public sealed class DecisionRecordWriter
                 };
             }
 
+            await RequireBillingPolicyVersionAsync(request.PolicyVersionId, ct).ConfigureAwait(false);
+            var signalSubjects = await BillingSignalSubjectsAsync(request.ResolvedSignalIds, ct).ConfigureAwait(false);
             var (core, derived) = await ResolveBillingCoreAsync(request.Subject, ct).ConfigureAwait(false);
-            var written = await CreateAsync(BillingReview(request, plan, key, core), plan with { AlreadyDerived = derived }, resolvedOwner: null, ct)
+            var written = await CreateAsync(
+                    BillingReview(request, plan, key, core) with { SignalSubjects = signalSubjects },
+                    plan with { AlreadyDerived = derived },
+                    resolvedOwner: null,
+                    ct)
                 .ConfigureAwait(false);
             return written with { ConfirmedByUserId = NoneIfEmpty(request.ConfirmedByUserId) };
         }
@@ -1463,6 +1475,114 @@ public sealed class DecisionRecordWriter
                 "Whether the billing decision's Decision Record already exists could not be checked, so nothing was written.",
                 innerException: ex);
         }
+    }
+
+    /// <summary>The columns a resolved Signal's subject is read from: the pair id and every subject lookup (the commit route reads the same
+    /// ones, task 141), so <see cref="DecisionCommitService.ToRow"/> derives the subject exactly as the commit route does.</summary>
+    private static readonly string[] BillingSignalSubjectColumns = ["sprk_regardingrecordid", .. SignalWriter.RegardingLookupByEntity.Values];
+
+    /// <summary>
+    /// ontology-r1 F4-1 (D-123, secure-if-any): the subject of every Signal a billing decision resolves, read app-only through the shared
+    /// sysadmin reader, as parents of the record's owner question. The rule is the commit route's own, REUSED, not copied:
+    /// <see cref="DecisionCommitService.ToRow"/> derives the subject from the subject lookup that carries the pair id, and
+    /// <see cref="DecisionCommitService.SignalSubjectsOf"/> keeps it (a Signal with no pair id adds none; a pair id no single lookup carries
+    /// is refused). Without this, a finding about a line under a secure record could be closed by an invoice decision whose record an
+    /// ordinary team owns.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.OwnerRefused"/>
+    /// (<see cref="RecordOwnerRefusal.ParentUndetermined"/>): a Signal does not exist, or its subject cannot be determined.
+    /// <see cref="DecisionRecordRefusalReason.OwnerResolutionFailed"/>: a Signal could not be read (a retry may succeed). Nothing is written.</exception>
+    private async Task<IReadOnlyList<DecisionRecordRef>> BillingSignalSubjectsAsync(IReadOnlyList<Guid>? signalIds, CancellationToken ct)
+    {
+        if (signalIds is not { Count: > 0 })
+        {
+            return [];
+        }
+
+        var rows = new List<DecisionCommitService.SignalRow>(signalIds.Count);
+        foreach (var signalId in signalIds)
+        {
+            Entity? row;
+            try
+            {
+                row = await _entities.RetrieveAsync("sprk_signal", signalId, BillingSignalSubjectColumns, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsBillingReadNotFound(ex))
+            {
+                row = null;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.OwnerResolutionFailed,
+                    "A Signal the decision resolves could not be read, so the Decision Record owner is unknown; nothing was written.",
+                    RecordOwnerRefusal.ParentUndetermined,
+                    ex);
+            }
+
+            if (row is null)
+            {
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.OwnerRefused,
+                    "A Signal the decision resolves does not exist, so the Decision Record owner is unknown; nothing was written.",
+                    RecordOwnerRefusal.ParentUndetermined);
+            }
+
+            rows.Add(DecisionCommitService.ToRow(signalId, row));
+        }
+
+        return DecisionCommitService.SignalSubjectsOf(rows);
+    }
+
+    /// <summary>ontology-r1 F4-1: a billing decision's policy version, when it names one, must exist; the record would otherwise reference a
+    /// version no rule ever had. Read app-only through the shared sysadmin reader.</summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ReviewInvalid"/>: no such policy version.
+    /// <see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the read faulted (a retry may succeed). Nothing is written.</exception>
+    private async Task RequireBillingPolicyVersionAsync(Guid? policyVersionId, CancellationToken ct)
+    {
+        if (NoneIfEmpty(policyVersionId) is not { } versionId)
+        {
+            return;
+        }
+
+        Entity? row;
+        try
+        {
+            row = await _entities.RetrieveAsync("sprk_policyversion", versionId, ["sprk_policyversionid"], ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsBillingReadNotFound(ex))
+        {
+            row = null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.BillingRecordLookupFailed,
+                "The billing decision's policy version could not be read, so nothing was written.",
+                innerException: ex);
+        }
+
+        if (row is null)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.ReviewInvalid,
+                "PolicyVersionId names no policy version; nothing was written.");
+        }
+    }
+
+    /// <summary>A by-id read that failed because the row does not exist (<c>0x80040217</c> anywhere in the chain), through the one shared
+    /// predicate (<see cref="Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound"/>).</summary>
+    private static bool IsBillingReadNotFound(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound(e))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

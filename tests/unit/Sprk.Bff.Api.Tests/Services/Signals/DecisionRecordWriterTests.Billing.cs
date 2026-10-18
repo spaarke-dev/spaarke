@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Xunit;
@@ -544,5 +545,105 @@ public sealed partial class DecisionRecordWriterTests
 
         h.Writer.Invoking(w => w.PreflightBillingDecision(Billing("approve-invoice"))).Should().NotThrow();
         NoIo(h);
+    }
+
+    // ── ontology-r1 F4-1 (D-123, secure-if-any): the resolved Signals' subjects reach the owner question ───────────
+
+    private static readonly Guid BillingSignal = Guid.Parse("0740b111-0000-4000-8000-0000000000f1");
+
+    /// <summary>A Signal filed the way the Signal writer files one: the pair id and the subject lookup that repeats it (task 141).</summary>
+    private static Entity SignalAbout(Guid signalId, string subjectTable, Guid subjectId) => new("sprk_signal", signalId)
+    {
+        ["sprk_regardingrecordid"] = subjectId.ToString("D"),
+        [SignalWriter.RegardingLookupByEntity[subjectTable]] = new EntityReference(subjectTable, subjectId),
+    };
+
+    private static System.ServiceModel.FaultException<OrganizationServiceFault> NotFound() =>
+        new(new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217) }, "Does Not Exist");
+
+    private static void NothingWritten(Harness h)
+    {
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty("refused before the owner question");
+        h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Billing_F41_AnInvoiceDecisionResolvingALineSignal_AsksTheOwnerAboutTheLine()
+    {
+        // Must-fire: the invoice decision's own parents are its matter, the invoice and its derived cores; the line is a parent ONLY because
+        // the resolved Signal is about it. A line under a secure record must make the record secure (D-123).
+        var h = BillingHarness();
+        h.Rows[("sprk_signal", BillingSignal)] = SignalAbout(BillingSignal, "sprk_billingevent", LineId);
+
+        await h.Writer.WriteBillingDecisionAsync(Billing("approve-invoice") with { ResolvedSignalIds = [BillingSignal] });
+
+        h.OwnerAsks.Should().ContainSingle().Which.Parents.Should().Contain(new RecordOwnershipParent("sprk_billingevent", LineId));
+        h.Entities.Verify(e => e.RetrieveAsync("sprk_signal", BillingSignal, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once,
+            "read app-only through the shared sysadmin reader");
+        h.Created.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Billing_F41_AMissingSignal_IsRefused_BeforeAnyCreate()
+    {
+        var h = BillingHarness();
+        h.Entities.Setup(e => e.RetrieveAsync("sprk_signal", BillingSignal, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(NotFound());
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing("approve-invoice") with { ResolvedSignalIds = [BillingSignal] }))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        ex.OwnerRefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        NothingWritten(h);
+    }
+
+    [Fact]
+    public async Task Billing_F41_ASignalWhoseSubjectCannotBeDetermined_IsRefused()
+    {
+        // The pair id is set but no subject lookup carries it: an UNKNOWN parent, never dropped (DecisionCommitService.SignalSubjectsOf).
+        var h = BillingHarness();
+        h.Rows[("sprk_signal", BillingSignal)] = new Entity("sprk_signal", BillingSignal) { ["sprk_regardingrecordid"] = LineId.ToString("D") };
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing("approve-invoice") with { ResolvedSignalIds = [BillingSignal] }))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        ex.OwnerRefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        NothingWritten(h);
+    }
+
+    [Fact]
+    public async Task Billing_F41_AFaultOnTheSignalRead_WritesNothing()
+    {
+        var h = BillingHarness();
+        h.Entities.Setup(e => e.RetrieveAsync("sprk_signal", BillingSignal, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("throttled"));
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing("approve-invoice") with { ResolvedSignalIds = [BillingSignal] }))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.OwnerResolutionFailed, "a fault is not an answer; a retry may succeed");
+        ex.InnerException.Should().BeOfType<TimeoutException>();
+        NothingWritten(h);
+    }
+
+    [Fact]
+    public async Task Billing_F41_APolicyVersionThatDoesNotExist_IsRefused_AndAReadFaultWritesNothing()
+    {
+        var h = BillingHarness();
+        h.Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", PolicyVersion, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(NotFound());
+
+        (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing(policyVersion: PolicyVersion)))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        NothingWritten(h);
+
+        h.Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", PolicyVersion, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("throttled"));
+        (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing(policyVersion: PolicyVersion)))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.BillingRecordLookupFailed);
+        NothingWritten(h);
     }
 }
