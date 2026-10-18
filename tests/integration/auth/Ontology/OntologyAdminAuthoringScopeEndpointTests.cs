@@ -524,6 +524,10 @@ public partial class OntologyAdminAuthoringEndpointTests
             (await ScopedDryRun(PolicyId, MatterA)).StatusCode.Should().Be(HttpStatusCode.OK);
             (await ScopedPublish(PolicyId, MatterA)).StatusCode.Should().Be(HttpStatusCode.OK);
             _fixture.World.Policies[PolicyId].Matter.Should().Be(MatterA);
+            // Fix round 5 (uac-r2 K3 nit): and the Limited matter is allowed to publish too, not only the ordinary one.
+            (await ScopedDryRun(PolicyId, MatterB)).StatusCode.Should().Be(HttpStatusCode.OK);
+            (await ScopedPublish(PolicyId, MatterB)).StatusCode.Should().Be(HttpStatusCode.OK);
+            _fixture.World.Policies[PolicyId].Matter.Should().Be(MatterB);
             return;
         }
 

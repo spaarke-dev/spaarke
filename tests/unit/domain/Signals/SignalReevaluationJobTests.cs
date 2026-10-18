@@ -3048,6 +3048,17 @@ public partial class SignalReevaluationJobTests
         /// <summary>Task 102b fix round 4 (K c): each paged read answered, as (table, page number).</summary>
         public List<(string Table, int Page)> PagedReads { get; } = new();
 
+        /// <summary>Task 102b fix round 5 (F3): only the columns the query selects come back, as in Dataverse (a column the query leaves out is
+        /// absent), plus the primary id, which Dataverse always returns, and the row version the fake carries beside the attributes. A
+        /// query that asks for <c>AllColumns</c> gets the whole row. A select that omits a column production reads therefore fails a test.</summary>
+        private static Entity Project(QueryExpression query, Entity row)
+        {
+            if (query.ColumnSet.AllColumns) return row;
+            var copy = new Entity(row.LogicalName, row.Id) { RowVersion = row.RowVersion };
+            foreach (var attribute in row.Attributes.Where(a => query.ColumnSet.Columns.Contains(a.Key))) copy[attribute.Key] = attribute.Value;
+            return copy;
+        }
+
         /// <summary>A query with <c>PageInfo.Count</c> set is answered one page at a time, ordered by id (every paged read here orders by
         /// its primary key), with <c>MoreRecords</c> and a paging cookie as Dataverse sets them; any other query gets every row.</summary>
         private EntityCollection Paged(QueryExpression query, IEnumerable<Entity> rows)
@@ -3056,14 +3067,14 @@ public partial class SignalReevaluationJobTests
             var result = new EntityCollection();
             if (query.PageInfo is not { Count: > 0 } paging)
             {
-                result.Entities.AddRange(ordered);
+                result.Entities.AddRange(ordered.Select(r => Project(query, r)));
                 return result;
             }
 
             var size = PageSizeCap is { } cap ? Math.Min(cap, paging.Count) : paging.Count;
             var page = Math.Max(paging.PageNumber, 1);
             PagedReads.Add((query.EntityName, page));
-            result.Entities.AddRange(ordered.Skip((page - 1) * size).Take(size));
+            result.Entities.AddRange(ordered.Skip((page - 1) * size).Take(size).Select(r => Project(query, r)));
             result.MoreRecords = ordered.Count > page * size;
             result.PagingCookie = result.MoreRecords ? $"<cookie page=\"{page}\" />" : null;
             return result;
@@ -3167,7 +3178,7 @@ public partial class SignalReevaluationJobTests
                     {
                         var copy = new Entity("sprk_signal", row.Id) { RowVersion = Org.VersionOf(row.Id) };
                         foreach (var attribute in row.Attributes) copy[attribute.Key] = attribute.Value;
-                        result.Entities.Add(copy);
+                        result.Entities.Add(Project(query, copy));
                     }
 
                     break;
@@ -3176,7 +3187,7 @@ public partial class SignalReevaluationJobTests
                     {
                         var copy = new Entity("sprk_signal", row.Id) { RowVersion = Org.VersionOf(row.Id) };
                         foreach (var attribute in row.Attributes) copy[attribute.Key] = attribute.Value;
-                        result.Entities.Add(copy);
+                        result.Entities.Add(Project(query, copy));
                     }
 
                     break;

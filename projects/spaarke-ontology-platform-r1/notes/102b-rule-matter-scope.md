@@ -641,3 +641,41 @@ Deep Read on `sprk_policy` still sees it.
 | `Spaarke.ArchTests`, full | 1083 passed, 0 failed |
 | Jest, `Spaarke.UI.Components` `src/components/OntologyAdmin` | 207 passed (8 suites) |
 | `tsc --noEmit`, `Spaarke.UI.Components` | no error in the changed files (9 errors elsewhere, in files this round did not touch) |
+
+## Fix round 5 (tests only; no production change)
+
+Round 4's review found that the fake `World.RetrieveMultipleAsync` in `tests/unit/domain/Signals/SignalReevaluationJobTests.cs`
+ignored `ColumnSet`, so a select could drop `createdon` and every test still passed. Production code is untouched.
+
+- **F3, the fake projects to the query's `ColumnSet`.** A new `Project` helper (applied in `Paged` and to the two other Signal reads that
+  feed the closure service) returns the primary id, the row version and only the selected columns, unless the query asks for
+  `AllColumns`. All 258 closure and re-evaluation tests still passed with the projection, so no production select omits a column the
+  code reads.
+- **Fail-before, F3** (`createdon` removed from one select at a time, restored afterwards):
+
+  | Select with `createdon` removed | Tests that fail |
+  |---|---|
+  | `ExistingPolicyCodesAsync` (policy list) | `Run_R4_AReusedCode_TheOldRulesSignalIsClosed_...`, `DeletedPolicyCodes_R4_AReusedCode_IsListedOnlyForASignalOlderThanThePolicyHoldingIt(-10, true)` |
+  | `DeletedPolicyCodesWithSignalsAsync` (redaction list) | `DeletedPolicyCodes_R4_AReusedCode_IsListedOnlyForASignalOlderThanThePolicyHoldingIt(-10, true)` |
+  | `ReadOpenSignalsWithoutPolicyAsync` (close read) | `Run_R4_AReusedCode_TheOldRulesSignalIsClosed_...` |
+
+- **K3, the date rules are pinned** directly on `ExistingPolicyCodes`, each with its fail-before (the production line changed, the
+  named test fails, the line restored):
+
+  | Test | Production mutation that fails it |
+  |---|---|
+  | `ExistingPolicyCodes_R5_EqualTimestamps_AreNotAnOrphan` | `signal < policy` to `signal <= policy` |
+  | `ExistingPolicyCodes_R5_DuplicateCodesIgnoringCase_TheEarliestDateWins_WhateverTheOrder` | `c < k ? c : k` to `c > k ? c : k` |
+  | `ExistingPolicyCodes_R5_AnUnknownDate_BeatsAKnownOne_AndCountsAsExisting_WhateverTheOrder` | unknown-date branch `: null` to `: k` |
+  | `Run_R5_ManyDeletedPolicies_LogTheExactCount_AndOnlyTheFirstFiftyCodes` (60 deleted codes) | `.Take(MaxLoggedOutOfScopeIds)` removed from `ClosedCodes` in the close log line |
+
+- **uac-r2 K3 nit.** `Scope_R4_AnOrdinaryOrLimitedMatter_IsAllowed` (publish route) now also dry-runs and publishes `MatterB`, the
+  Limited matter, and asserts the stored scope is `MatterB`. It is a must-not-fire addition (no refusal exists to remove), so it has no
+  fail-before.
+
+### Suites (fix round 5)
+
+| Suite | Result |
+|---|---|
+| BFF, filtered `Ontology\|Signal\|Reevaluation\|PolicyVersion\|Closure` | 2501 passed, 3 skipped, 0 failed |
+| `Spaarke.ArchTests`, full | 1056 passed, 0 failed |

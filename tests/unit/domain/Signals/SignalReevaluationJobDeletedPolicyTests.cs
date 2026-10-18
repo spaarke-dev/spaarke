@@ -373,4 +373,80 @@ public partial class SignalReevaluationJobTests
             && e.Message.Contains("the stored evidence of the deleted policies beyond them was not checked", StringComparison.Ordinal));
         result.Success.Should().BeFalse();
     }
+
+    // ── Fix round 5 (task 102b): the date rules of ExistingPolicyCodes, and the cap on the logged codes ─────────────────────────────
+
+    private static readonly DateTime PolicyDate = new(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    public void ExistingPolicyCodes_R5_EqualTimestamps_AreNotAnOrphan()
+    {
+        // K3: a Signal created at the very instant of the policy holding its code is not older than it: not an orphan.
+        var existing = new ExistingPolicyCodes();
+        existing.Add("POL-X", PolicyDate);
+
+        existing.IsOrphan("POL-X", PolicyDate).Should().BeFalse("equal timestamps are not 'created before'");
+        existing.IsOrphan("POL-X", PolicyDate.AddTicks(-1)).Should().BeTrue("the boundary is exact: one tick older is the deleted rule's");
+    }
+
+    [Fact]
+    public void ExistingPolicyCodes_R5_DuplicateCodesIgnoringCase_TheEarliestDateWins_WhateverTheOrder()
+    {
+        // K3: two rows hold the same code (ignoring case). The EARLIEST date is kept, so the Signal between the two dates counts as the
+        // live rule's (never closed), not as an orphan of the later one.
+        var earlier = PolicyDate.AddDays(-10);
+        var later = PolicyDate;
+        var between = PolicyDate.AddDays(-5);
+
+        var laterFirst = new ExistingPolicyCodes();
+        laterFirst.Add("POL-X", later);
+        laterFirst.Add("pol-x", earlier);
+        var earlierFirst = new ExistingPolicyCodes();
+        earlierFirst.Add("pol-x", earlier);
+        earlierFirst.Add("POL-X", later);
+
+        foreach (var existing in new[] { laterFirst, earlierFirst })
+        {
+            existing.Contains("Pol-X").Should().BeTrue();
+            existing.IsOrphan("POL-X", between).Should().BeFalse("the earliest date wins: the Signal is newer than the earlier policy");
+            existing.IsOrphan("POL-X", earlier.AddDays(-1)).Should().BeTrue("a Signal older than both policies is still an orphan");
+        }
+    }
+
+    [Fact]
+    public void ExistingPolicyCodes_R5_AnUnknownDate_BeatsAKnownOne_AndCountsAsExisting_WhateverTheOrder()
+    {
+        // K3: a policy row with no createdon wins over a dated one with the same code: the code "exists" for every Signal.
+        var old = PolicyDate.AddDays(-30);
+        var knownFirst = new ExistingPolicyCodes();
+        knownFirst.Add("POL-X", PolicyDate);
+        knownFirst.Add("POL-X", null);
+        var unknownFirst = new ExistingPolicyCodes();
+        unknownFirst.Add("POL-X", null);
+        unknownFirst.Add("POL-X", PolicyDate);
+
+        foreach (var existing in new[] { knownFirst, unknownFirst })
+        {
+            existing.IsOrphan("POL-X", old).Should().BeFalse("an unknown policy date means the code exists: never an orphan");
+            existing.IsOrphan("POL-X", null).Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task Run_R5_ManyDeletedPolicies_LogTheExactCount_AndOnlyTheFirstFiftyCodes()
+    {
+        // K3: the codes in the close line are capped like the ids (MaxLoggedOutOfScopeIds), with the "and N more" tail.
+        var h = new Harness();
+        var codes = Enumerable.Range(0, 60).Select(i => $"POL-GONE-{i:D3}").ToList();
+        foreach (var code in codes) SeedPolicyless(h, code, Guid.NewGuid(), RunAt.UtcDateTime.AddDays(-2));
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var line = h.Log.Should().ContainSingle(e => e.Level == LogLevel.Information
+            && e.Message.Contains("of a deleted policy were closed PolicyRetired", StringComparison.Ordinal)).Subject.Message;
+        var codePart = line[line.IndexOf("policy code(s) ", StringComparison.Ordinal)..];
+        codes.Count(code => codePart.Contains(code, StringComparison.Ordinal)).Should().Be(SignalReevaluationJob.MaxLoggedOutOfScopeIds);
+        codePart.Should().Contain(codes[0]).And.Contain(codes[49]).And.NotContain(codes[50]).And.EndWith("and 10 more.");
+    }
 }
