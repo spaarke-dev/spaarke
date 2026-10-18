@@ -362,6 +362,37 @@ public class ActionSeamTests
             Times.Never);
     }
 
+    // ── Invoice-family refusal (ebilling-r1 #2081 follow-up): the stable code is printed ONCE ────────────────────────────
+
+    /// <summary>The refusal text the guard builds already carries its code in parentheses, so the seam must not prefix it again.</summary>
+    private const string ReadFailedMessage =
+        "The invoice-family core-record rule refused this write (invoice_family_read_failed); nothing was written.";
+
+    [Theory]
+    [InlineData(false)] // a plain rename: used to be let through unread, creating an orphan row when the id was stale
+    [InlineData(true)] // a lookup write: used to be refused, but with the code printed twice
+    public async Task UpdateRecordAsync_AnInvoiceFamilyRefusal_PrintsTheCodeOnce_AndPinsTheExactMessage(bool writesALookup)
+    {
+        // A scope with no IGenericEntityService: the guard cannot read the stored row, so it fails closed.
+        _scopeFactoryMock.Setup(f => f.CreateScope()).Returns(new ServiceCollection().BuildServiceProvider().CreateScope());
+
+        var result = await CreateSeam().UpdateRecordAsync(new UpdateRecordRequest
+        {
+            EntityLogicalName = "sprk_invoice",
+            RecordId = Guid.NewGuid(),
+            LegacyFields = writesALookup ? null : new Dictionary<string, string?> { ["sprk_name"] = "Renamed" },
+            Lookups = writesALookup ? [new ActionLookup("sprk_matter", "sprk_matter", Guid.NewGuid().ToString())] : null,
+        }, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be(ReadFailedMessage);
+        System.Text.RegularExpressions.Regex.Matches(result.Error!, "invoice_family_read_failed").Count.Should().Be(1);
+        _fieldMappingMock.Verify(
+            s => s.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
     // ── Helpers (metadata cache-HIT for the Choice fail-loud path) ────────────────────────────
 
     private void UseMetadataFor(string entityLogicalName, EntityMetadataDto dto)
