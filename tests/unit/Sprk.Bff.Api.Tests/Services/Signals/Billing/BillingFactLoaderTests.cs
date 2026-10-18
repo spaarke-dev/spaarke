@@ -1,0 +1,434 @@
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Models;
+using Sprk.Bff.Api.Services.Finance.Resolution;
+using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
+using Xunit;
+
+namespace Sprk.Bff.Api.Tests.Services.Signals.Billing;
+
+/// <summary>
+/// ebilling-r1 task 072: <see cref="BillingFactLoader"/> over an in-memory Dataverse that evaluates each query
+/// (<see cref="SecureChildShareWorld"/>), with the REAL uac-r2 walker for the secure roots. Which rules are read (Published rule
+/// sets of the client default and this firm; enabled billing policies; versions that can be in force, K3), the priors (D-112: every
+/// partition, this submission excluded), the secure-root sets under uac-r2's four calling conditions, bounded reads, and no writes.
+/// The D-112 cases run end to end through <see cref="InvoiceComplianceEvaluator.EvaluateAsync"/> with 071's Duplicate handler.
+/// </summary>
+public class BillingFactLoaderTests
+{
+    private const int Published = 659490000;
+    private const int Billing = RuleDomains.PolicyDomainBilling;
+
+    private static readonly Guid FirmId = Guid.Parse("07200000-0000-4000-8000-0000000000f1");
+    private static readonly Guid OtherFirmId = Guid.Parse("07200000-0000-4000-8000-0000000000f2");
+    private static readonly Guid SubmissionId = Guid.Parse("07200000-0000-4000-8000-0000000000b1");
+    private static readonly Guid MatterA = Guid.Parse("07200000-0000-4000-8000-00000000a0a0");
+    private static readonly Guid MatterB = Guid.Parse("07200000-0000-4000-8000-00000000b0b0");
+    private static readonly Guid OrdinaryMatter = Guid.Parse("07200000-0000-4000-8000-00000000c0c0");
+    private static readonly DateTime RulesFrom = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    private SecureChildShareWorld _world = SecureChildShareWorld.Standard();
+    private readonly Mock<IGenericEntityService> _entities;
+
+    public BillingFactLoaderTests()
+    {
+        _entities = SecureChildShareWorld.EntitiesOver(() => _world);
+    }
+
+    // ── World builders ───────────────────────────────────────────────────────────────────────────────────────────
+
+    private static EntityReference Ref(string table, Guid id) => new(table, id);
+
+    private static EntityReference SecureTeam => new("team", SecureChildShareWorld.SecureTeam);
+
+    private Guid RuleSet(RuleSetScope scope, Guid? firm = null, int status = Published, int? domain = Billing)
+    {
+        var id = Guid.NewGuid();
+        var columns = new List<(string, object)> { ("sprk_scope", new OptionSetValue((int)scope)), ("statuscode", new OptionSetValue(status)) };
+        if (domain is { } d) columns.Add((RuleDomains.PolicyDomainColumn, new OptionSetValue(d)));
+        if (firm is { } f) columns.Add(("sprk_firm", Ref("sprk_organization", f)));
+        _world.Add("sprk_ruleset", id, columns.ToArray());
+        return id;
+    }
+
+    /// <summary>A policy with one current version of <paramref name="type"/>; returns (policy id, version id).</summary>
+    private (Guid Policy, Guid Version) Policy(Guid ruleSet, string code, RuleType type, string body, bool enabled = true, int state = 0)
+    {
+        var policy = Guid.NewGuid();
+        var version = Version(policy, 1, type, body, RulesFrom, null);
+        _world.Add("sprk_policy", policy,
+            (RuleDomains.PolicyDomainColumn, new OptionSetValue(Billing)), ("sprk_ruleset", Ref("sprk_ruleset", ruleSet)),
+            ("sprk_enabled", enabled), ("statecode", new OptionSetValue(state)), ("sprk_policycode", code),
+            ("sprk_currentversion", Ref("sprk_policyversion", version)), ("sprk_lane", new OptionSetValue(SignalWriter.LaneDecide)));
+        return (policy, version);
+    }
+
+    private Guid Version(Guid policy, int number, RuleType type, string body, DateTime from, DateTime? to, int? proposalStatus = null)
+    {
+        var id = Guid.NewGuid();
+        var columns = new List<(string, object)>
+        {
+            ("sprk_policy", Ref("sprk_policy", policy)), ("sprk_versionnumber", number), ("sprk_ruletype", new OptionSetValue((int)type)),
+            ("sprk_rulebody", body), ("sprk_inforcefrom", from), ("sprk_clausereference", "Clause " + number),
+        };
+        if (to is { } end) columns.Add(("sprk_inforceto", end));
+        if (proposalStatus is { } s) columns.Add(("sprk_proposalstatus", new OptionSetValue(s)));
+        _world.Add("sprk_policyversion", id, columns.ToArray());
+        return id;
+    }
+
+    private const string DuplicateByNumber = """{"type":"Duplicate","matchFields":["firmInvoiceNumber"]}""";
+
+    private void DuplicateRule() => Policy(RuleSet(RuleSetScope.ClientDefault), "CD-DUPLICATE", RuleType.Duplicate, DuplicateByNumber);
+
+    /// <summary>A prior of the firm with an invoice filed through <paramref name="filing"/> (column, target table, target id).</summary>
+    private Guid PriorWithInvoice(string trackingNumber, (string Column, string Table, Guid Id)? filing, int invoiceStatus = 1,
+        int processing = (int)InvoiceSubmissionStatus.Accepted, Guid? firm = null, Guid? submissionId = null, string firmInvoiceNumber = "INV-100")
+    {
+        var invoice = Guid.NewGuid();
+        var invoiceColumns = new List<(string, object)> { ("statuscode", new OptionSetValue(invoiceStatus)), ("owningteam", SecureTeam) };
+        if (filing is { } f) invoiceColumns.Add((f.Column, Ref(f.Table, f.Id)));
+        _world.Add("sprk_invoice", invoice, invoiceColumns.ToArray());
+        return Submission(trackingNumber, invoice, processing, firm, submissionId, firmInvoiceNumber);
+    }
+
+    private Guid Submission(string trackingNumber, Guid? invoice, int processing = (int)InvoiceSubmissionStatus.Accepted,
+        Guid? firm = null, Guid? id = null, string firmInvoiceNumber = "INV-100")
+    {
+        var submission = id ?? Guid.NewGuid();
+        var columns = new List<(string, object)>
+        {
+            ("sprk_vendororg", Ref("sprk_organization", firm ?? FirmId)), ("sprk_trackingnumber", trackingNumber),
+            ("sprk_firminvoicenumber", firmInvoiceNumber), ("sprk_submissionsequence", 1),
+            ("sprk_processingstatus", new OptionSetValue(processing)),
+        };
+        if (invoice is { } i) columns.Add(("sprk_invoice", Ref("sprk_invoice", i)));
+        _world.Add("sprk_invoicesubmission", submission, columns.ToArray());
+        return submission;
+    }
+
+    private static BillingEvaluationRequest Request(Guid? coreMatter, int lines = 1) => new()
+    {
+        SubmissionId = SubmissionId,
+        FirmId = FirmId,
+        CoreRecord = coreMatter is { } m ? new CoreRecordReference(CoreRecordKind.Matter, m) : null,
+        TrackingNumber = "INV-100.2",
+        FirmInvoiceNumber = "INV-100",
+        InvoiceDate = new DateOnly(2026, 3, 31),
+        Currency = "USD",
+        Lines = Enumerable.Range(0, lines).Select(i => new BillingLineFacts
+        {
+            Index = i,
+            LineType = Sprk.Bff.Api.Services.Ai.PublicContracts.InvoiceLineType.Fee,
+            Date = new DateOnly(2026, 3, 2),
+            TimekeeperName = "Jane Doe",
+            Hours = 1m,
+        }).ToList(),
+    };
+
+    private BillingFactLoader Loader()
+    {
+        var settings = new Mock<IEbillingSettingsReader>(MockBehavior.Strict);
+        settings.Setup(s => s.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new EbillingSettings { ReliabilityThreshold = 0.85m });
+        var configuration = SecureChildShareWorld.Configuration();
+        var walker = new SecureChildShareSynchronizer(_entities.Object, null!, null!, configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
+        return new BillingFactLoader(_entities.Object, settings.Object, walker, configuration, NullLogger<BillingFactLoader>.Instance);
+    }
+
+    private InvoiceComplianceEvaluator Evaluator() =>
+        new(Loader(), Sprk.Bff.Api.Tests.Domain.Signals.Billing.Handlers.BillingHandlerKit.Gate(), NullLogger<InvoiceComplianceEvaluator>.Instance);
+
+    /// <summary>The evaluator and loader read only: the strict entity double has no Create, and no Update or Delete was made.</summary>
+    private void AssertWroteNothing()
+    {
+        _entities.Verify(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()), Times.Never());
+        _entities.Verify(e => e.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
+        _world.Deletes.Should().BeEmpty();
+    }
+
+    private async Task<BillingFinding> TheDuplicateFindingAsync(Guid? coreMatter)
+    {
+        var result = await Evaluator().EvaluateAsync(Request(coreMatter), CancellationToken.None);
+        AssertWroteNothing();
+        return result.Findings.Should().ContainSingle(f => f.RuleType == RuleType.Duplicate).Subject;
+    }
+
+    // ── Rules ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Rules_AreThePublishedBillingRuleSets_OfTheClientDefaultAndThisFirm_Only()
+    {
+        const string body = """{"type":"TimeIncrement","incrementHours":0.5}""";
+        Policy(RuleSet(RuleSetScope.ClientDefault), "CD", RuleType.TimeIncrement, body);
+        Policy(RuleSet(RuleSetScope.Firm, FirmId), "FIRM", RuleType.TimeIncrement, body);
+        Policy(RuleSet(RuleSetScope.Firm, OtherFirmId), "OTHER-FIRM", RuleType.TimeIncrement, body);
+        Policy(RuleSet(RuleSetScope.ClientDefault, status: 1), "DRAFT-SET", RuleType.TimeIncrement, body);
+        Policy(RuleSet(RuleSetScope.ClientDefault, status: 2), "RETIRED-SET", RuleType.TimeIncrement, body);
+        Policy(RuleSet(RuleSetScope.ClientDefault, domain: RuleDomains.PolicyDomainOntology), "ONTOLOGY-SET", RuleType.TimeIncrement, body);
+        Policy(RuleSet(RuleSetScope.ClientDefault, domain: null), "NO-DOMAIN-SET", RuleType.TimeIncrement, body);
+        var set = RuleSet(RuleSetScope.ClientDefault);
+        Policy(set, "DISABLED", RuleType.TimeIncrement, body, enabled: false);
+        Policy(set, "INACTIVE", RuleType.TimeIncrement, body, state: 1);
+
+        var loaded = await Loader().LoadAsync(Request(null), CancellationToken.None);
+
+        loaded.Rules.Select(r => (r.PolicyCode, r.Scope)).Should().Equal(("CD", RuleSetScope.ClientDefault), ("FIRM", RuleSetScope.Firm));
+        var rule = loaded.Rules[0];
+        rule.RuleType.Should().Be("100000005", "the gate reads the option value as invariant text");
+        rule.RuleBody.Should().Be(body);
+        rule.IsCurrent.Should().BeTrue();
+        rule.InForceFrom.Should().Be(new DateOnly(2026, 1, 1));
+        rule.Lane.Should().Be(SignalWriter.LaneDecide);
+        loaded.ReliabilityThreshold.Should().Be(0.85m);
+        AssertWroteNothing();
+    }
+
+    [Fact]
+    public async Task DraftAndRejectedVersionsWithNoEndDate_AreNotReturned_SupersededAndCurrentAre_K3()
+    {
+        const string body = """{"type":"TimeIncrement","incrementHours":0.5}""";
+        var (policy, current) = Policy(RuleSet(RuleSetScope.ClientDefault), "CD", RuleType.TimeIncrement, body);
+        var superseded = Version(policy, 0, RuleType.TimeIncrement, body, RulesFrom.AddMonths(-6), RulesFrom);
+        Version(policy, 2, RuleType.TimeIncrement, body, RulesFrom, null);                                     // a draft
+        Version(policy, 3, RuleType.TimeIncrement, body, RulesFrom, null, proposalStatus: (int)ProposalState.Rejected); // rejected
+
+        var loaded = await Loader().LoadAsync(Request(null), CancellationToken.None);
+
+        loaded.Rules.Select(r => r.PolicyVersionId).Should().BeEquivalentTo([superseded, current]);
+        loaded.Rules.Single(r => r.PolicyVersionId == superseded).InForceTo.Should().Be(new DateOnly(2026, 1, 1));
+    }
+
+    [Fact]
+    public async Task WithNoDuplicateRule_NoPriorIsRead_AndTheSecureRootsAreNotWalked()
+    {
+        Policy(RuleSet(RuleSetScope.ClientDefault), "CD", RuleType.TimeIncrement, """{"type":"TimeIncrement","incrementHours":0.5}""");
+        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", OrdinaryMatter));
+
+        var loaded = await Loader().LoadAsync(Request(null), CancellationToken.None);
+
+        loaded.PriorSubmissions.Should().BeEmpty();
+        loaded.InvoiceSecureRoots.Should().BeNull();
+        _world.QueriedTables.Should().NotContain(["sprk_invoicesubmission", "sprk_invoice", "sprk_billingevent", "team"]);
+    }
+
+    // ── Core record ──────────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task TheCoreRecord_ReadsItsDatesAndState_AndAMissingOne_IsNull()
+    {
+        var closed = Guid.NewGuid();
+        _world.Add("sprk_matter", closed,
+            ("sprk_openeddate", new DateTime(2025, 6, 1)), ("sprk_closeddate", new DateTime(2026, 2, 28)), ("statecode", new OptionSetValue(1)));
+
+        var found = await Loader().LoadAsync(Request(closed), CancellationToken.None);
+        var missing = await Loader().LoadAsync(Request(Guid.NewGuid()), CancellationToken.None);
+
+        found.CoreRecord.Should().Be(new BillingCoreRecordFacts { OpenDate = new DateOnly(2025, 6, 1), CloseDate = new DateOnly(2026, 2, 28), IsClosed = true });
+        missing.CoreRecord.Should().BeNull();
+    }
+
+    // ── Priors (D-112, FR-36) ────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Priors_AreEverySubmissionOfThisFirm_ThisOneExcluded_WithTheirStatusAndLines()
+    {
+        DuplicateRule();
+        Submission("INV-100.2", invoice: null, id: SubmissionId);                                                  // this one
+        var active = PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", OrdinaryMatter));
+        var rejected = PriorWithInvoice("INV-101.1", null, invoiceStatus: InvoiceStatusCodes.Rejected);
+        var returned = PriorWithInvoice("INV-102.1", null, invoiceStatus: InvoiceStatusCodes.ReturnedToFirm);
+        PriorWithInvoice("INV-103.1", null, invoiceStatus: InvoiceStatusCodes.Cancelled);                         // never payable
+        Submission("INV-104.1", invoice: null, processing: (int)InvoiceSubmissionStatus.Failed);                // never payable
+        var rejectedAtIntake = Submission("INV-105.1", invoice: null, processing: (int)InvoiceSubmissionStatus.Rejected);
+        var received = Submission("INV-106.1", invoice: null, processing: (int)InvoiceSubmissionStatus.Received);
+        PriorWithInvoice("INV-100.1", null, firm: OtherFirmId);                                                    // another firm
+
+        var activeInvoice = _world.ValueOf<EntityReference>("sprk_invoicesubmission", active, "sprk_invoice")!.Id;
+        _world.Add("sprk_billingevent", Guid.NewGuid(), ("sprk_invoice", Ref("sprk_invoice", activeInvoice)), ("sprk_linesequence", 2),
+            ("sprk_costtype", new OptionSetValue(100000001)), ("sprk_quantity", 3m), ("sprk_amount", new Money(40m)), ("sprk_eventdate", new DateTime(2026, 2, 3)));
+        _world.Add("sprk_billingevent", Guid.NewGuid(), ("sprk_invoice", Ref("sprk_invoice", activeInvoice)), ("sprk_linesequence", 1),
+            ("sprk_costtype", new OptionSetValue(100000000)), ("sprk_quantity", 1.5m), ("sprk_timekeeper", "Jane Doe"),
+            ("sprk_amount", new Money(862.5m)), ("sprk_eventdate", new DateTime(2026, 2, 2)), ("sprk_description", "Draft motion"));
+
+        var loaded = await Loader().LoadAsync(Request(null), CancellationToken.None);
+
+        loaded.PriorSubmissions.Select(p => (p.SubmissionId, p.Status)).Should().BeEquivalentTo(new[]
+        {
+            (active, BillingPriorStatus.Active), (rejected, BillingPriorStatus.Rejected), (returned, BillingPriorStatus.ReturnedToFirm),
+            (rejectedAtIntake, BillingPriorStatus.Rejected), (received, BillingPriorStatus.Active),
+        });
+        loaded.PriorSubmissions.Should().NotContain(p => p.SubmissionId == SubmissionId, "K1: never its own prior");
+        loaded.PriorSubmissions.Single(p => p.SubmissionId == active).Lines.Should().Equal(
+            new BillingPriorLine { Date = new DateOnly(2026, 2, 2), TimekeeperName = "Jane Doe", Hours = 1.5m, Narrative = "Draft motion", Amount = 862.5m },
+            new BillingPriorLine { Date = new DateOnly(2026, 2, 3), Hours = null, Amount = 40m });
+        AssertWroteNothing();
+    }
+
+    [Fact]
+    public async Task TheReads_AreBounded_WhateverTheNumberOfLines()
+    {
+        DuplicateRule();
+        var prior = PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", OrdinaryMatter));
+        var priorInvoice = _world.ValueOf<EntityReference>("sprk_invoicesubmission", prior, "sprk_invoice")!.Id;
+        _world.SecureRoot("sprk_matter", MatterA);
+        _world.OrdinaryRoot("sprk_matter", OrdinaryMatter);
+        _world.Add("sprk_billingevent", Guid.NewGuid(), ("sprk_invoice", Ref("sprk_invoice", priorInvoice)));
+
+        await Loader().LoadAsync(Request(MatterA, lines: 1), CancellationToken.None);
+        var few = _world.QueriedTables.ToList();
+        _world.QueriedTables.Clear();
+        for (var i = 0; i < 149; i++)
+        {
+            _world.Add("sprk_billingevent", Guid.NewGuid(), ("sprk_invoice", Ref("sprk_invoice", priorInvoice)), ("sprk_linesequence", i));
+        }
+
+        var loaded = await Loader().LoadAsync(Request(MatterA, lines: 150), CancellationToken.None);
+
+        _world.QueriedTables.Should().Equal(few, "150 lines on the invoice and 150 on a prior take the same reads as one");
+        loaded.PriorSubmissions.Single().Lines.Should().HaveCount(150);
+    }
+
+    // ── D-112 secure roots, end to end ───────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task APriorUnderAnotherSecureRoot_ShowsNoDetail_D112()
+    {
+        DuplicateRule();
+        _world.SecureRoot("sprk_matter", MatterA).SecureRoot("sprk_matter", MatterB);
+        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", MatterB));
+
+        var finding = await TheDuplicateFindingAsync(MatterA);
+
+        finding.DetailWithheld.Should().BeTrue();
+        finding.FactValues.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task APriorUnderTheSameSecureRoot_KeepsItsDetail_D112()
+    {
+        DuplicateRule();
+        _world.SecureRoot("sprk_matter", MatterA);
+        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", MatterA));
+
+        var finding = await TheDuplicateFindingAsync(MatterA);
+
+        finding.DetailWithheld.Should().BeFalse();
+        finding.FactValues["duplicateOf.trackingNumber"].Should().Be("INV-100.1");
+    }
+
+    [Fact]
+    public async Task AnOrdinaryPrior_OnASecureInvoice_KeepsItsDetail_D112()
+    {
+        DuplicateRule();
+        _world.SecureRoot("sprk_matter", MatterA).OrdinaryRoot("sprk_matter", OrdinaryMatter);
+        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", OrdinaryMatter));
+
+        var finding = await TheDuplicateFindingAsync(MatterA);
+
+        finding.DetailWithheld.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ASecurePrior_OnAnOrdinaryInvoice_IsHidden_D112()
+    {
+        DuplicateRule();
+        _world.SecureRoot("sprk_matter", MatterB).OrdinaryRoot("sprk_matter", OrdinaryMatter);
+        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", MatterB));
+
+        var ordinaryInvoice = await TheDuplicateFindingAsync(OrdinaryMatter);
+        var noCoreRecord = await TheDuplicateFindingAsync(null);
+
+        ordinaryInvoice.DetailWithheld.Should().BeTrue();
+        noCoreRecord.DetailWithheld.Should().BeTrue("an invoice with no core record has the empty set");
+    }
+
+    [Fact]
+    public async Task ACoreRecordSecureThroughItsParent_TakesTheWalksRoot_NotItsOwnFlag_D112()
+    {
+        // The work assignment carries sprk_issecure = false, but it is owned by the Secure team because the matter above it is
+        // secure. Read through its flag it would look ordinary (empty set) and a prior filed under it would be hidden.
+        var assignment = Guid.NewGuid();
+        DuplicateRule();
+        _world.SecureRoot("sprk_matter", MatterA);
+        _world.Add("sprk_workassignment", assignment, ("owningteam", SecureTeam), ("sprk_issecure", false), ("sprk_matter", Ref("sprk_matter", MatterA)));
+        PriorWithInvoice("INV-100.1", ("sprk_regardingworkassignment", "sprk_workassignment", assignment));
+        var request = Request(null) with { CoreRecord = new CoreRecordReference(CoreRecordKind.WorkAssignment, assignment) };
+
+        var loaded = await Loader().LoadAsync(request, CancellationToken.None);
+        var result = await Evaluator().EvaluateAsync(request, CancellationToken.None);
+
+        loaded.InvoiceSecureRoots.Should().BeEquivalentTo([assignment]);
+        result.Findings.Should().ContainSingle().Which.DetailWithheld.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ARootSetReadFailure_HidesTheDetail_AndTheFindingStillFires_D112()
+    {
+        var project = Guid.NewGuid();
+        DuplicateRule();
+        _world.SecureRoot("sprk_matter", MatterA).SecureRoot("sprk_project", project).FailingQueriesOf("sprk_project");
+        PriorWithInvoice("INV-100.1", ("sprk_project", "sprk_project", project));
+
+        var loaded = await Loader().LoadAsync(Request(MatterA), CancellationToken.None);
+        var finding = await TheDuplicateFindingAsync(MatterA);
+
+        loaded.InvoiceSecureRoots.Should().BeNull("one fault leaves every set unresolved");
+        loaded.PriorSubmissions.Should().ContainSingle().Which.SecureRoots.Should().BeNull();
+        finding.DetailWithheld.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task APriorFiledThroughALookupOtherThanTheMatter_StillHasItsRoot_SoItShowsNoDetail_UacR2Condition1()
+    {
+        // If the loader read the prior without every lineage lookup, this prior would look ordinary and its detail would show.
+        var assignment = Guid.NewGuid();
+        DuplicateRule();
+        _world.OrdinaryRoot("sprk_matter", OrdinaryMatter).SecureRoot("sprk_workassignment", assignment);
+        PriorWithInvoice("INV-100.1", ("sprk_regardingworkassignment", "sprk_workassignment", assignment));
+
+        var loaded = await Loader().LoadAsync(Request(OrdinaryMatter), CancellationToken.None);
+        var finding = await TheDuplicateFindingAsync(OrdinaryMatter);
+
+        loaded.PriorSubmissions.Should().ContainSingle().Which.SecureRoots.Should().BeEquivalentTo([assignment]);
+        finding.DetailWithheld.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task APriorUnderARootFlaggedButNotIsolated_IsUndetermined_SoItShowsNoDetail_UacR2Condition3()
+    {
+        DuplicateRule();
+        _world.OrdinaryRoot("sprk_matter", OrdinaryMatter).FlaggedNotIsolatedRoot("sprk_matter", MatterB);
+        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", MatterB));
+
+        var loaded = await Loader().LoadAsync(Request(OrdinaryMatter), CancellationToken.None);
+        var finding = await TheDuplicateFindingAsync(OrdinaryMatter);
+
+        loaded.InvoiceSecureRoots.Should().BeEmpty("the invoice itself resolved");
+        loaded.PriorSubmissions.Should().ContainSingle().Which.SecureRoots.Should().BeNull();
+        finding.DetailWithheld.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task WithNoSecureRecordOwnerTeam_EverySetIsEmpty_SoDetailIsShown_UacR2Condition4()
+    {
+        _world = SecureChildShareWorld.WithoutSecureBusinessUnit(); // the entity double reads whichever world the field holds
+        _world.Add("sprk_matter", MatterB, ("sprk_issecure", true));
+        DuplicateRule();
+        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", MatterB));
+
+        var loaded = await Loader().LoadAsync(Request(OrdinaryMatter), CancellationToken.None);
+        var finding = await TheDuplicateFindingAsync(OrdinaryMatter);
+
+        loaded.InvoiceSecureRoots.Should().BeEmpty();
+        loaded.PriorSubmissions.Should().ContainSingle().Which.SecureRoots.Should().BeEmpty();
+        finding.DetailWithheld.Should().BeFalse();
+    }
+}

@@ -73,6 +73,15 @@ public static class FinanceModule
         services.AddScoped<TimekeeperMatcher>();
         services.AddScoped<IInvoiceResolutionService, InvoiceResolutionService>();
 
+        // Billing compliance evaluation (ebilling-r1 task 072, FR-25, D-23 in-memory strategy): BillingFactLoader reads the published
+        // billing rules for the client default and the firm, the core record, the firm's priors and their secure roots (D-112) once
+        // per submission; InvoiceComplianceEvaluator selects the versions in force per line (firm over client default, D-39), gates
+        // them (FR-24) and runs the 071 handlers. Writes nothing. Concrete (ADR-010: no interface, one implementation each). Scoped:
+        // the loader holds the scoped SecureChildShareSynchronizer (ExternalAccessModule, unconditional); the gate PolicyVersionValidator
+        // is a singleton (SignalsModule). Unconditional (flag rule above). Caller: task 049 (pipeline orchestration).
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Billing.BillingFactLoader>();
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Billing.InvoiceComplianceEvaluator>();
+
         // Invoice lifecycle (ebilling-r1 task 014, FR-06, I-6, ADR-002): the single server-side owner of sprk_invoice
         // statecode / statuscode. Scoped, unconditional (write-path owner; see the flag rule above). Callers: 103, 104, 150, 151.
         services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
