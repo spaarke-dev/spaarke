@@ -81,12 +81,12 @@ describe('createRuleSetApi routes', () => {
     expect(JSON.parse(init.body)).toEqual({ rowVersion: '4711' });
   });
 
-  it('reject sends the version the page was shown, as the body', async () => {
+  it('reject sends the version the page was shown and the reason, as the body (D-113)', async () => {
     const f = fetchReturning({});
-    await createRuleSetApi(f, BASE).reject(SET_ID, POLICY_ID, '4711');
+    await createRuleSetApi(f, BASE).reject(SET_ID, POLICY_ID, '4711', 'The guideline allows 12 hours.');
     const [url, init] = f.mock.calls[0];
     expect(url).toBe(`${BASE}/api/finance/rulesets/${SET_ID}/proposals/${POLICY_ID}/reject`);
-    expect(JSON.parse(init.body)).toEqual({ rowVersion: '4711' });
+    expect(JSON.parse(init.body)).toEqual({ rowVersion: '4711', reason: 'The guideline allows 12 hours.' });
   });
 
   it('edit patches only the members given', async () => {

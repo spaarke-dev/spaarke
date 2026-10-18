@@ -36,6 +36,7 @@ export function proposal(overrides: Partial<ProposalView> = {}): ProposalView {
     clauseLocation: 'Section 4.2',
     validationErrors: [],
     rowVersion: '4711',
+    rejectionReason: null,
     ...overrides,
   };
 }

@@ -1,4 +1,6 @@
 import {
+  canConfirmReject,
+  checkRejectionReason,
   countProposals,
   decideProposal,
   diffProposals,
@@ -30,15 +32,56 @@ describe('decideProposal (076 re-check K3)', () => {
     if (outcome.kind === 'decided') expect(outcome.detail?.proposals[0].rowVersion).toBe('4712');
   });
 
-  it('Reject sends the version the page displayed', async () => {
+  it('Reject sends the version the page displayed and the trimmed reason', async () => {
     const api = mockApi();
-    api.reject.mockResolvedValue(ok(proposal({ state: 'Rejected', rowVersion: null })));
+    api.reject.mockResolvedValue(ok(proposal({ state: 'Rejected', rowVersion: null, rejectionReason: 'Wrong limit.' })));
     api.get.mockResolvedValue(ok(detail()));
 
-    await decideProposal(api, SET_ID, proposal({ rowVersion: '99' }), false);
+    await decideProposal(api, SET_ID, proposal({ rowVersion: '99' }), false, '  Wrong limit.\n');
 
-    expect(api.reject).toHaveBeenCalledWith(SET_ID, POLICY_ID, '99');
+    expect(api.reject).toHaveBeenCalledWith(SET_ID, POLICY_ID, '99', 'Wrong limit.');
     expect(api.accept).not.toHaveBeenCalled();
+  });
+
+  it.each([['nothing', ''], ['only white space', '   \n\t '], ['over 2,000 characters', 'x'.repeat(2001)]])(
+    'Reject with %s is refused without a request (D-113)',
+    async (_label, reason) => {
+      const api = mockApi();
+
+      const outcome = await decideProposal(api, SET_ID, proposal(), false, reason);
+
+      expect(outcome.kind).toBe('failed');
+      if (outcome.kind === 'failed') expect(outcome.failure.status).toBe(400);
+      expect(api.reject).not.toHaveBeenCalled();
+      expect(api.get).not.toHaveBeenCalled();
+    }
+  );
+
+  it('Reject without any reason argument is refused: a caller that skips the dialog cannot reject without one', async () => {
+    const api = mockApi();
+
+    const outcome = await decideProposal(api, SET_ID, proposal(), false);
+
+    expect(outcome.kind).toBe('failed');
+    expect(api.reject).not.toHaveBeenCalled();
+  });
+
+  it('Accept never needs, and never sends, a reason', async () => {
+    const api = mockApi();
+    api.accept.mockResolvedValue(ok(proposal({ state: 'Accepted', rowVersion: null })));
+    api.get.mockResolvedValue(ok(detail()));
+
+    const outcome = await decideProposal(api, SET_ID, proposal({ rowVersion: '5' }), true, 'ignored');
+
+    expect(outcome.kind).toBe('decided');
+    expect(api.accept).toHaveBeenCalledWith(SET_ID, POLICY_ID, '5');
+  });
+
+  it('a rejected rule whose reason changed is reported as a change when the page reloads', async () => {
+    const before = proposal({ state: 'Rejected', rejectionReason: 'Old reason' });
+    const after = proposal({ state: 'Rejected', rejectionReason: 'New reason' });
+
+    expect(diffProposals(before, after)).toEqual([{ field: 'Rejection reason', before: 'Old reason', after: 'New reason' }]);
   });
 
   it('on 409 concurrent_edit nothing is decided: the rule set is reloaded and what changed is reported', async () => {
@@ -84,7 +127,7 @@ describe('decideProposal (076 re-check K3)', () => {
     api.reject.mockResolvedValue(fail(409, 'ruleset.proposal_in_force'));
     api.get.mockResolvedValue(ok(detail([proposal({ state: 'Accepted', inForce: true, rowVersion: '5000' })])));
 
-    const outcome = await decideProposal(api, SET_ID, proposal({ rowVersion: '4711' }), false);
+    const outcome = await decideProposal(api, SET_ID, proposal({ rowVersion: '4711' }), false, 'Wrong limit.');
 
     expect(outcome.kind).toBe('stale');
     if (outcome.kind === 'stale') {
@@ -135,6 +178,34 @@ describe('decideProposal (076 re-check K3)', () => {
 
     expect(outcome.kind).toBe('failed');
     if (outcome.kind === 'failed') expect(outcome.failure.status).toBe(409);
+  });
+});
+
+describe('the reject dialog: Reject is disabled until a reason is entered (D-113)', () => {
+  it.each([
+    ['empty', ''],
+    ['only white space', '  \t\n '],
+    ['over 2,000 characters once trimmed', 'x'.repeat(2001)],
+  ])('is disabled for a reason that is %s', (_label, text) => {
+    expect(canConfirmReject(text, false)).toBe(false);
+  });
+
+  it.each([
+    ['one character', 'x'],
+    ['a sentence', 'The guideline allows 12 hours a day.'],
+    ['exactly 2,000 characters', 'x'.repeat(2000)],
+    ['2,000 characters between spaces', ` ${'x'.repeat(2000)} `],
+  ])('is enabled for a reason that is %s', (_label, text) => {
+    expect(canConfirmReject(text, false)).toBe(true);
+  });
+
+  it('is disabled while a decision is in flight, whatever the reason', () => {
+    expect(canConfirmReject('A real reason', true)).toBe(false);
+  });
+
+  it('reports how far over the limit the reason is, and sends it trimmed', () => {
+    expect(checkRejectionReason(` ${'x'.repeat(2003)} `)).toMatchObject({ valid: false, over: 3 });
+    expect(checkRejectionReason('  why  ')).toEqual({ reason: 'why', valid: true, over: 0 });
   });
 });
 

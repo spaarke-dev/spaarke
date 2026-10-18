@@ -53,6 +53,12 @@ const useStyles = makeStyles({
     border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`, backgroundColor: tokens.colorNeutralBackground1,
   },
   clauseCard: { backgroundColor: tokens.colorNeutralBackground2 },
+  reasonCard: {
+    display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, padding: tokens.spacingHorizontalM,
+    borderRadius: tokens.borderRadiusMedium, border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  reasonText: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
   cardTitle: { color: tokens.colorNeutralForeground2 },
   quote: {
     margin: 0, padding: tokens.spacingHorizontalM, borderLeft: `${tokens.spacingHorizontalXS} solid ${tokens.colorBrandStroke1}`,
@@ -178,6 +184,17 @@ const RuleForm: React.FC<FormProps> = ({ proposal, canWrite, editable, busy, onA
         </div>
         <ProposalStateBadge proposal={proposal} />
       </div>
+
+      {proposal.state === 'Rejected' && (
+        <section className={s.reasonCard} aria-label="Rejection reason" data-testid="rejection-reason">
+          <Text weight="semibold" block>
+            Rejected: reason
+          </Text>
+          <Text block className={s.reasonText}>
+            {proposal.rejectionReason ?? 'No reason was recorded.'}
+          </Text>
+        </section>
+      )}
 
       {proposal.validationErrors.length > 0 && (
         <div data-testid="detail-validation">

@@ -68,6 +68,11 @@ export interface ProposalView {
    * content the admin was not shown (076 re-check K3). Null in the response to a write: reload the rule set to decide.
    */
   rowVersion: string | null;
+  /**
+   * Why an admin rejected the draft (D-113): set only while `state` is `Rejected`, otherwise null. Admin-only: the BFF never sends it to a
+   * firm, and the page only ever shows it on the draft detail.
+   */
+  rejectionReason: string | null;
 }
 
 export interface RuleSetDetail {
@@ -166,6 +171,9 @@ export interface ApiFailure {
 
 export type ApiResult<T> = { ok: true; value: T } | { ok: false; failure: ApiFailure };
 
+/** The longest rejection reason the server accepts (D-113; the column's maximum). */
+export const MAX_REJECTION_REASON = 2000;
+
 export const CODE_CONCURRENT_EDIT = 'ruleset.concurrent_edit';
 export const CODE_EBILLING_DISABLED = 'ebilling.disabled';
 export const CODE_ALREADY_DRAFTED = 'ruleset.already_drafted';
@@ -236,7 +244,8 @@ export interface RuleSetApi {
   edit(ruleSetId: string, policyId: string, edit: RuleEdit): Promise<ApiResult<ProposalEdited>>;
   /** `rowVersion` is the token the page was shown for this rule ({@link ProposalView.rowVersion}). */
   accept(ruleSetId: string, policyId: string, rowVersion: string): Promise<ApiResult<ProposalView>>;
-  reject(ruleSetId: string, policyId: string, rowVersion: string): Promise<ApiResult<ProposalView>>;
+  /** `reason` is required (D-113): the trimmed text, 1 to {@link MAX_REJECTION_REASON} characters; the server answers 400 otherwise. */
+  reject(ruleSetId: string, policyId: string, rowVersion: string, reason: string): Promise<ApiResult<ProposalView>>;
   publish(ruleSetId: string, effectiveDate: string): Promise<ApiResult<RuleSetPublished>>;
   assign(ruleSetId: string, scope: RuleSetScope, firmId: string | null): Promise<ApiResult<RuleSetSummary>>;
   setVisibility(ruleSetId: string, visibleToFirms: boolean): Promise<ApiResult<RuleSetSummary>>;
@@ -283,8 +292,8 @@ export function createRuleSetApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: stri
 
     accept: (id, policyId, rowVersion) =>
       call<ProposalView>(`${base}/${enc(id)}/proposals/${enc(policyId)}/accept`, json('POST', { rowVersion })),
-    reject: (id, policyId, rowVersion) =>
-      call<ProposalView>(`${base}/${enc(id)}/proposals/${enc(policyId)}/reject`, json('POST', { rowVersion })),
+    reject: (id, policyId, rowVersion, reason) =>
+      call<ProposalView>(`${base}/${enc(id)}/proposals/${enc(policyId)}/reject`, json('POST', { rowVersion, reason })),
 
     publish: (id, effectiveDate) => call<RuleSetPublished>(`${base}/${enc(id)}/publish`, json('POST', { effectiveDate })),
 

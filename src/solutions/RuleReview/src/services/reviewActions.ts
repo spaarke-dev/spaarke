@@ -11,6 +11,7 @@
 
 import {
   CODE_ALREADY_DRAFTED,
+  MAX_REJECTION_REASON,
   isStale,
   type ApiFailure,
   type ProposalView,
@@ -49,6 +50,7 @@ export function diffProposals(before: ProposalView, after: ProposalView): Change
   }
 
   add('Status', before.state, after.state);
+  add('Rejection reason', before.rejectionReason, after.rejectionReason);
   add('Rule type', before.ruleType, after.ruleType);
 
   const keys = new Set<string>([...Object.keys(before.ruleBody ?? {}), ...Object.keys(after.ruleBody ?? {})]);
@@ -80,13 +82,51 @@ export type DecisionOutcome =
   /** Any other failure (400 with per-rule errors, 403, 404, 409 in force, 5xx). Nothing was decided. */
   | { kind: 'failed'; failure: ApiFailure };
 
+/** What the reject dialog knows about the reason typed so far (D-113). */
+export interface ReasonCheck {
+  /** The reason as it will be sent: trimmed. */
+  reason: string;
+  /** 1 to {@link MAX_REJECTION_REASON} characters once trimmed: the only state in which Reject can be confirmed. */
+  valid: boolean;
+  /** Characters over the limit (0 when within it). */
+  over: number;
+}
+
+/** The server's rule for a rejection reason, applied before the request so the dialog can say what is wrong. */
+export function checkRejectionReason(text: string): ReasonCheck {
+  const reason = text.trim();
+  return { reason, valid: reason.length >= 1 && reason.length <= MAX_REJECTION_REASON, over: Math.max(0, reason.length - MAX_REJECTION_REASON) };
+}
+
+/** Reject can be confirmed only with a valid reason and nothing in flight: the dialog's Reject button is disabled otherwise. */
+export const canConfirmReject = (text: string, busy: boolean): boolean => !busy && checkRejectionReason(text).valid;
+
 /**
  * Accept or reject the rule the admin is looking at, naming the version they were shown. A refusal because the rule changed
  * (409 `ruleset.concurrent_edit`) reloads the rule set and reports what changed.
+ *
+ * A reject needs a reason (D-113). One that is blank or too long is refused here as a 400-shaped failure without a request, so a
+ * caller that skips the dialog's disabled button still cannot reject without one; an accept never sends a reason.
  */
 export async function decideProposal(
-  api: RuleSetApi, ruleSetId: string, shown: ProposalView, accept: boolean
+  api: RuleSetApi, ruleSetId: string, shown: ProposalView, accept: boolean, reason = ''
 ): Promise<DecisionOutcome> {
+  const checked = checkRejectionReason(reason);
+  if (!accept && !checked.valid) {
+    return {
+      kind: 'failed',
+      failure: {
+        status: 400,
+        errorCode: 'ruleset.invalid',
+        reasonCode: null,
+        title: 'A reason is required',
+        detail: `Give a reason to reject a rule: 1 to ${MAX_REJECTION_REASON} characters.`,
+        errors: [],
+        signInFailed: false,
+      },
+    };
+  }
+
   if (!shown.rowVersion) {
     // A view built from a write carries no token; deciding on it is exactly what the token exists to prevent.
     const reloaded = await api.get(ruleSetId);
@@ -95,7 +135,7 @@ export async function decideProposal(
 
   const result = accept
     ? await api.accept(ruleSetId, shown.policyId, shown.rowVersion)
-    : await api.reject(ruleSetId, shown.policyId, shown.rowVersion);
+    : await api.reject(ruleSetId, shown.policyId, shown.rowVersion, checked.reason);
 
   if (result.ok) {
     const reloaded = await api.get(ruleSetId);

@@ -21,12 +21,13 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { ArrowLeftRegular, ArrowClockwiseRegular } from '@fluentui/react-icons';
-import { ConfirmModal, PanelSplitter, useTwoPanelLayout } from '@spaarke/ui-components';
+import { PanelSplitter, useTwoPanelLayout } from '@spaarke/ui-components';
 import { AssignmentPanel } from './AssignmentPanel';
 import { NoticeBar, RuleSetStatusBadge, failureNotice, type Notice } from './Notices';
 import { ProposalDetailPane } from './ProposalDetailPane';
 import { ProposalsGrid } from './ProposalsGrid';
 import { PublishModal } from './PublishModal';
+import { RejectModal } from './RejectModal';
 import { useFirmNames } from './useFirmNames';
 import type { FirmLookup } from '../services/firmLookup';
 import {
@@ -160,10 +161,10 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
   };
 
   // ── Accept / Reject ────────────────────────────────────────────────────────
-  const decide = async (shown: ProposalView, accept: boolean): Promise<void> => {
+  const decide = async (shown: ProposalView, accept: boolean, reason = ''): Promise<void> => {
     setBusy(true);
     setNotice(null);
-    const outcome = await decideProposal(api, ruleSetId, shown, accept);
+    const outcome = await decideProposal(api, ruleSetId, shown, accept, reason);
     if (!mounted.current) return;
     setBusy(false);
     setRejecting(null);
@@ -423,15 +424,12 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
         />
       )}
 
-      <ConfirmModal
+      <RejectModal
         open={rejecting !== null}
-        onClose={() => !busy && setRejecting(null)}
-        onConfirm={() => rejecting && void decide(rejecting, false)}
-        title="Reject this rule?"
-        message={`${rejecting?.name ?? 'The rule'} will not be published. While the rule set is a draft you can still accept it later.`}
-        confirmLabel="Reject"
-        destructive
+        ruleName={rejecting?.name ?? 'The rule'}
         busy={busy}
+        onClose={() => !busy && setRejecting(null)}
+        onReject={reason => rejecting && void decide(rejecting, false, reason)}
       />
     </div>
   );
