@@ -73,6 +73,7 @@
 - **uac-r2:**
   - the ExternalWrites exemption rows go in whichever PR merges second;
   - the external invoice-submission POST is not wired to #2078's helper yet.
+- **Next master merge (after the current fix rounds are cherry-picked):** master a82578cdc carries R3 #2086 (external SPA on statuscode + transitional allow-list). In ExternalAccessModule keep 015's marker line. The master route ledger is at 132; take the union with ours. Grid 3ff4102c was switched live 2026-10-18 03:42Z; the column delete waits for R3 to merge 015.
 - Before the PR: merge current master, then run git merge-tree against #2078 and #2061, taking the union. Conflicts are expected in ExternalUserContextResponse, bff-client.ts, the ledger, ExternalRecordDocumentRoutesTests and config/secure-record-owner-role.json.
 - Filed #2077: readers of columns that don't exist (outside our scope).
 - **Standing:**
