@@ -17,6 +17,9 @@
 | **Next Action** | As each agent or review reports: cherry-pick (cp.sh; on a conflict, resolve, commit with the original message and its trailer rewritten, then continue the range), verify, send the range on. Mark ✅: 015 when ontology-r1 is clean; 071 when its re-check is clean; 051 and #2081 when uac-r2 is clean; 074 after its fix round and ontology-r1; 077 after the reject-reason follow-up. Next tasks: 073 after 072; 049 after 073 |
 
 ### Queued briefs (not yet launched)
+- **051 round 3 (uac-r2 accepted the combined range; resume the 051 agent when a slot frees):**
+  - (1) Deleted record gives a retryable 503. The filter's DenyUnlinkedFirmAsync refuses early only on NotLinked and leaves Unreadable to the service. In SubmitAsync, run the link check AFTER DeriveResolverFieldsAsync (still before the owner check and any write), so a missing record gets 422 core_record_unavailable again and 503 means only a real fault. Test: a record that cannot be found gives 422, not 503. Send uac-r2 just that range.
+  - (2) The comment at ExternalParticipationService.cs ~1441-1443 and the wire-test header: change "column security omits a column" to "a property absent from the response". No re-check needed.
 - **(done) #2081 follow-up, superseded by the round 2 brief above; the original items:** For sprk_invoice and sprk_billingevent targets, the guard reads the stored row and refuses not-found, so an upsert cannot create an orphan. Also:
   - DecisionRouteCores.cs:97 passes appOnlyEntities;
   - add a D-96 end-to-end test through the three generic paths;
