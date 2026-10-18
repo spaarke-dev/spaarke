@@ -294,6 +294,11 @@ public sealed class RuleSetServiceTests
 
         public Entity Row(string entity, Guid id) => Rows[entity].Single(r => r.Id == id);
 
+        /// <summary>The version token (row version) of a rule's working (highest-numbered) version, as a page that has just read the rule set holds it.</summary>
+        public long WorkingToken(Guid policyId) => RowVersions[
+            Rows["sprk_policyversion"].Where(v => v.GetAttributeValue<EntityReference>("sprk_policy").Id == policyId)
+                .OrderBy(v => v.GetAttributeValue<int>("sprk_versionnumber")).Last().Id];
+
         public Guid RuleSet(
             int status = RuleSetService.RuleSetDraft, bool visible = true, int? scope = (int)RuleSetScope.ClientDefault, Guid? firm = null,
             int? domain = RuleDomains.PolicyDomainBilling, DateTime? effectiveFrom = null, string? notConverted = null)
@@ -638,7 +643,7 @@ public sealed class RuleSetServiceTests
         await service.ListAsync(default);
         await service.GetAsync(set, default);
         await service.EditAsync(set, policy, Edit(headline: "x"), default);
-        await service.DecideAsync(set, policy, true, default);
+        await service.DecideAsync(set, policy, true, h.WorkingToken(policy), default);
         await service.PublishAsync(set, Effective, default);
         await service.AssignAsync(set, RuleSetScope.ClientDefault, null, default);
         await service.SetVisibilityAsync(set, false, default);
@@ -662,8 +667,8 @@ public sealed class RuleSetServiceTests
         foreach (var policy in new[] { nullDomain, ontology })
         {
             (await service.EditAsync(set, policy, Edit(headline: "x"), default)).StatusCode.Should().Be(404);
-            (await service.DecideAsync(set, policy, true, default)).StatusCode.Should().Be(404);
-            (await service.DecideAsync(set, policy, false, default)).StatusCode.Should().Be(404);
+            (await service.DecideAsync(set, policy, true, h.WorkingToken(policy), default)).StatusCode.Should().Be(404);
+            (await service.DecideAsync(set, policy, false, h.WorkingToken(policy), default)).StatusCode.Should().Be(404);
         }
 
         (await service.PublishAsync(set, Effective, default)).ErrorCode.Should().Be("ruleset.nothing_to_publish");
@@ -805,7 +810,7 @@ public sealed class RuleSetServiceTests
         h.WritesOf("sprk_policy", "sprk_ruleset").Should().BeEmpty("nothing was published");
         h.Writes.Should().NotContain(w => w.Fields.ContainsKey("sprk_inforcefrom") || w.Fields.ContainsKey("sprk_inforceto"), "nothing was published");
 
-        await service.DecideAsync(set, policy, accept: true, default);
+        await service.DecideAsync(set, policy, accept: true, h.WorkingToken(policy), default);
         var published = await service.PublishAsync(set, Effective, default);
 
         published.Value!.Published.Should().ContainSingle().Which.VersionId.Should().Be(v2);
@@ -1001,7 +1006,7 @@ public sealed class RuleSetServiceTests
 
         var missing = await service.EditAsync(set, Guid.NewGuid(), Edit(headline: "x"), default);
         var inAnotherSet = await service.EditAsync(set, foreign, Edit(headline: "x"), default);
-        var unknownSet = await service.DecideAsync(Guid.NewGuid(), foreign, true, default);
+        var unknownSet = await service.DecideAsync(Guid.NewGuid(), foreign, true, h.WorkingToken(foreign), default);
 
         missing.ErrorCode.Should().Be("ruleset.proposal_not_found");
         inAnotherSet.ErrorCode.Should().Be("ruleset.proposal_not_found");
@@ -1035,8 +1040,8 @@ public sealed class RuleSetServiceTests
         var (policy, version) = h.Rule(set);
         var service = h.Service();
 
-        var accepted = await service.DecideAsync(set, policy, accept: true, default);
-        var rejected = await service.DecideAsync(set, policy, accept: false, default);
+        var accepted = await service.DecideAsync(set, policy, accept: true, h.WorkingToken(policy), default);
+        var rejected = await service.DecideAsync(set, policy, accept: false, h.WorkingToken(policy), default);
 
         accepted.Value!.State.Should().Be("Accepted");
         rejected.Value!.State.Should().Be("Rejected");
@@ -1044,6 +1049,143 @@ public sealed class RuleSetServiceTests
         h.Writes.Should().OnlyContain(w => w.Fields.Keys.Single() == "sprk_proposalstatus");
         h.ConditionalCalls.Should().HaveCount(2, "each decision is written conditional on the row version it read");
         h.Row("sprk_policy", policy).Contains("sprk_currentversion").Should().BeFalse("deciding never puts anything in force");
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────────────
+    // The decision names the version the admin was shown (task 077, 076 re-check K3)
+    // ───────────────────────────────────────────────────────────────────────────────────────────
+
+    private static long TokenShown(RuleSetOutcome<RuleSetDetail> read, Guid policy) =>
+        long.Parse(read.Value!.Proposals.Single(p => p.PolicyId == policy).RowVersion!);
+
+    [Fact]
+    public async Task Read_CarriesTheVersionTokenOfEachRule_AndAWriteResponseCarriesNone()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+
+        var storedBeforeTheRead = h.RowVersions[version].ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var read = await service.GetAsync(set, default);
+        var edited = await service.EditAsync(set, policy, Edit(body: CapBody8), default);
+        var decided = await service.DecideAsync(set, policy, accept: true, h.WorkingToken(policy), default);
+
+        read.Value!.Proposals.Single().RowVersion.Should().Be(storedBeforeTheRead, "the token is the row's version number as it was read");
+        edited.Value!.Proposal.RowVersion.Should().BeNull("the token after a write is not read back; a stale one would let the next decision pass");
+        decided.Value!.RowVersion.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Decide_AdminALoads_AdminBEdits_AdminADecides_Is409_AndNothingIsDecided(bool accept)
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+        var shownToA = TokenShown(await service.GetAsync(set, default), policy);
+
+        var bEdit = await service.EditAsync(set, policy, Edit(body: CapBody8), default); // admin B changes what the rule does
+        bEdit.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        var writesAfterB = h.Writes.Count;
+
+        var outcome = await service.DecideAsync(set, policy, accept, shownToA, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Refused);
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("ruleset.concurrent_edit");
+        h.Writes.Should().HaveCount(writesAfterB, "the refused decision wrote nothing");
+        h.Row("sprk_policyversion", version).GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value
+            .Should().Be((int)ProposalState.Proposed, "nothing was accepted or rejected");
+        h.Row("sprk_policyversion", version).GetAttributeValue<string>("sprk_rulebody").Should().Be(CapBody8, "B's edit stands");
+    }
+
+    [Theory]
+    [InlineData(true, ProposalState.Accepted)]
+    [InlineData(false, ProposalState.Rejected)]
+    public async Task Decide_OnAnUnchangedDraft_WithTheTokenTheAdminWasShown_IsDone(bool accept, ProposalState expected)
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+        var shown = TokenShown(await service.GetAsync(set, default), policy);
+
+        var outcome = await service.DecideAsync(set, policy, accept, shown, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        outcome.Value!.State.Should().Be(expected.ToString());
+        h.Row("sprk_policyversion", version).GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)expected);
+        h.ConditionalCalls.Single().Rows.Single().RowVersion.Should().Be(shown, "the write is conditional on the version the admin saw");
+    }
+
+    [Fact]
+    public async Task Decide_AfterAnyChangeToTheRow_EvenAHeadlineOnlyEdit_IsRefused409_BecauseTheAdminSawTheOldHeadline()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+        var shown = TokenShown(await service.GetAsync(set, default), policy);
+        await service.EditAsync(set, policy, Edit(headline: "A different headline"), default); // keeps the decision, but changes what was shown
+
+        var outcome = await service.DecideAsync(set, policy, accept: true, shown, default);
+
+        outcome.StatusCode.Should().Be(409);
+        h.Row("sprk_policyversion", version).GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Proposed);
+    }
+
+    [Fact]
+    public async Task Decide_AfterAnotherAdminDecided_IsRefused409_SoTheSecondDecisionNeverOverwritesTheFirst()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+        var shownToBoth = TokenShown(await service.GetAsync(set, default), policy);
+        (await service.DecideAsync(set, policy, accept: false, shownToBoth, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+
+        var second = await service.DecideAsync(set, policy, accept: true, shownToBoth, default);
+
+        second.StatusCode.Should().Be(409);
+        h.Row("sprk_policyversion", version).GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Rejected);
+    }
+
+    [Fact]
+    public async Task Decide_WithAStaleToken_IsRefusedBeforeValidation_SoTheAdminIsNotToldAboutContentTheyNeverSaw()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+        var shown = TokenShown(await service.GetAsync(set, default), policy);
+        h.ConcurrentWrite("sprk_policyversion", version,
+            new Dictionary<string, object> { ["sprk_rulebody"] = """{"type":"DailyHoursCap","maxHoursPerDay":0}""" }); // B saved an invalid body
+
+        var outcome = await service.DecideAsync(set, policy, accept: true, shown, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Refused, "a 409, not the 400 validation errors of content the admin was never shown");
+        outcome.StatusCode.Should().Be(409);
+    }
+
+    [Fact]
+    public async Task Decide_WithATokenOfAnotherRow_Or_ATokenThatMatchesNothing_IsRefused409()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var (other, _) = h.Rule(set, "BILL-B");
+        var service = h.Service();
+
+        var otherRows = await service.DecideAsync(set, policy, accept: true, h.WorkingToken(other), default);
+        var invented = await service.DecideAsync(set, policy, accept: true, 1L, default);
+
+        otherRows.StatusCode.Should().Be(409);
+        invented.StatusCode.Should().Be(409);
+        h.Writes.Should().BeEmpty();
+        h.Row("sprk_policyversion", version).GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Proposed);
     }
 
     [Fact]
@@ -1064,7 +1206,7 @@ public sealed class RuleSetServiceTests
             });
         };
 
-        var outcome = await h.Service().DecideAsync(set, policy, accept: true, default);
+        var outcome = await h.Service().DecideAsync(set, policy, accept: true, h.WorkingToken(policy), default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Refused);
         outcome.StatusCode.Should().Be(409);
@@ -1129,7 +1271,7 @@ public sealed class RuleSetServiceTests
         var set = h.RuleSet();
         var (policy, _) = h.Rule(set, body: """{"type":"DailyHoursCap","maxHoursPerDay":0}""", consequence: null);
 
-        var outcome = await h.Service().DecideAsync(set, policy, accept: true, default);
+        var outcome = await h.Service().DecideAsync(set, policy, accept: true, h.WorkingToken(policy), default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Invalid);
         outcome.Errors.Select(e => e.Field).Should().Contain(new[] { "ruleBody", "consequence" });
@@ -1143,8 +1285,8 @@ public sealed class RuleSetServiceTests
         var set = h.RuleSet(RuleSetService.RuleSetPublished);
         var (policy, _) = h.Rule(set, state: ProposalState.Accepted, current: true);
 
-        var accept = await h.Service().DecideAsync(set, policy, true, default);
-        var reject = await h.Service().DecideAsync(set, policy, false, default);
+        var accept = await h.Service().DecideAsync(set, policy, true, h.WorkingToken(policy), default);
+        var reject = await h.Service().DecideAsync(set, policy, false, h.WorkingToken(policy), default);
 
         accept.ErrorCode.Should().Be("ruleset.proposal_in_force");
         reject.ErrorCode.Should().Be("ruleset.proposal_in_force");
@@ -1293,7 +1435,7 @@ public sealed class RuleSetServiceTests
         var service = h.Service();
         var edited = await service.EditAsync(set, policy, Edit(body: CapBody8, template: "Over {{rule.maxHoursPerDay}} hours."), default);
         var v2 = edited.Value!.Proposal.VersionId;
-        await service.DecideAsync(set, policy, accept: true, default);
+        await service.DecideAsync(set, policy, accept: true, h.WorkingToken(policy), default);
         var v1Before = h.Row("sprk_policyversion", v1).Attributes.ToDictionary(a => a.Key, a => a.Value);
 
         var outcome = await service.PublishAsync(set, Effective, default);
@@ -1461,7 +1603,7 @@ public sealed class RuleSetServiceTests
         var (h, service, set, policy, v1, _) = await FailedPointerMoveAsync();
         h.FailBulkFor = null;
 
-        (await service.DecideAsync(set, policy, accept: false, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await service.DecideAsync(set, policy, accept: false, h.WorkingToken(policy), default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
         (await service.PublishAsync(set, Effective, default)).ErrorCode.Should().Be("ruleset.nothing_to_publish");
 
         h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v1);

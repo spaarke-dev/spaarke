@@ -468,25 +468,63 @@ public sealed class RuleSetEndpointsTests
     }
 
     [Fact]
-    public async Task Accept_And_Reject_CallDecideWithTheRightFlag_AndAnOntologyPolicyIs404()
+    public async Task Accept_And_Reject_CallDecideWithTheRightFlag_AndTheVersionTheAdminSaw_AndAnOntologyPolicyIs404()
     {
         await using var host = await Host.StartAsync();
         var ontologyPolicy = Guid.NewGuid();
-        host.Service.Setup(s => s.DecideAsync(SetId, PolicyId, true, It.IsAny<CancellationToken>()))
+        host.Service.Setup(s => s.DecideAsync(SetId, PolicyId, true, 4711L, It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<ProposalView>.Done(Proposal("Accepted")));
-        host.Service.Setup(s => s.DecideAsync(SetId, PolicyId, false, It.IsAny<CancellationToken>()))
+        host.Service.Setup(s => s.DecideAsync(SetId, PolicyId, false, 4711L, It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<ProposalView>.Done(Proposal("Rejected")));
-        host.Service.Setup(s => s.DecideAsync(SetId, ontologyPolicy, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        host.Service.Setup(s => s.DecideAsync(SetId, ontologyPolicy, It.IsAny<bool>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<ProposalView>.Refused(404, RuleSetService.CodeProposalNotFound, "no such rule"));
 
-        var accept = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{PolicyId}/accept"));
-        var reject = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{PolicyId}/reject"));
-        var foreign = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{ontologyPolicy}/accept"));
+        var accept = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{PolicyId}/accept", content: JsonContent.Create(new { rowVersion = "4711" })));
+        var reject = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{PolicyId}/reject", content: JsonContent.Create(new { rowVersion = "4711" })));
+        var foreign = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{ontologyPolicy}/accept", content: JsonContent.Create(new { rowVersion = "4711" })));
 
         (await Json(accept))["state"]!.GetValue<string>().Should().Be("Accepted");
         (await Json(reject))["state"]!.GetValue<string>().Should().Be("Rejected");
         foreign.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await Json(foreign))["errorCode"]!.GetValue<string>().Should().Be("ruleset.proposal_not_found");
+    }
+
+    [Theory]
+    [InlineData("accept")]
+    [InlineData("reject")]
+    public async Task Decide_WithoutTheVersionTheAdminSaw_Is400_AndNeverReachesTheService(string decision)
+    {
+        await using var host = await Host.StartAsync();
+        var url = $"{Base}/{SetId}/proposals/{PolicyId}/{decision}";
+
+        var noBody = await host.Client.SendAsync(Req("POST", url));
+        var emptyObject = await host.Client.SendAsync(Req("POST", url, content: JsonContent.Create(new { })));
+        var blank = await host.Client.SendAsync(Req("POST", url, content: JsonContent.Create(new { rowVersion = " " })));
+        var notANumber = await host.Client.SendAsync(Req("POST", url, content: JsonContent.Create(new { rowVersion = "12ab" })));
+        var negative = await host.Client.SendAsync(Req("POST", url, content: JsonContent.Create(new { rowVersion = "-5" })));
+
+        foreach (var response in new[] { noBody, emptyObject, blank, notANumber, negative })
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            var body = await Json(response);
+            body["errorCode"]!.GetValue<string>().Should().Be("ruleset.invalid");
+            body["errors"]![0]!["field"]!.GetValue<string>().Should().Be("rowVersion");
+        }
+
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Decide_OfARuleThatChangedSinceItWasShown_IsThe409ConcurrentEdit()
+    {
+        await using var host = await Host.StartAsync();
+        host.Service.Setup(s => s.DecideAsync(SetId, PolicyId, true, 4711L, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<ProposalView>.Refused(409, RuleSetService.CodeConcurrentEdit, "changed"));
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{PolicyId}/accept", content: JsonContent.Create(new { rowVersion = "4711" })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ruleset.concurrent_edit");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

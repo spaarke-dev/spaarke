@@ -197,7 +197,10 @@ public sealed class RuleSetServiceDraftTests
         detail.Value.Proposals.Should().OnlyContain(p => p.ValidationErrors.Count == 0, "the drafted wording and rows satisfy the review's own validation");
         detail.Value.Proposals.Select(p => p.ClauseQuote).Should().BeEquivalentTo("Time must be billed in tenth-hour increments.", "Max ten.");
 
-        var accepted = await service.DecideAsync(id, detail.Value.Proposals[0].PolicyId, accept: true, CancellationToken.None);
+        // The version token the page was shown with the rule set read (task 077): the decision names it.
+        var shown = detail.Value.Proposals[0];
+        shown.RowVersion.Should().NotBeNullOrEmpty("a read carries the token the page sends back with Accept and Reject");
+        var accepted = await service.DecideAsync(id, shown.PolicyId, accept: true, long.Parse(shown.RowVersion!), CancellationToken.None);
         accepted.Kind.Should().Be(RuleSetOutcomeKind.Done);
         accepted.Value!.State.Should().Be("Accepted");
     }

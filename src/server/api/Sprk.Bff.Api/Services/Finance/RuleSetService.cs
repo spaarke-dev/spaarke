@@ -68,11 +68,17 @@ public sealed record RuleSetCreated(
 /// <summary>One drafted or published rule (a billing policy) as its WORKING version shows it.</summary>
 /// <param name="InForce">The working version is the policy's current version.</param>
 /// <param name="HasPublishedVersion">The policy has (or had) a version in force, so an edit creates a new version.</param>
+/// <param name="RowVersion">
+/// The working version row's version token (its Dataverse <c>versionnumber</c>, as a decimal string) as it was READ together with the content in
+/// this view. The Rule Review page sends it back with Accept and Reject (<see cref="RuleSetService.DecideAsync"/>), so an admin never decides
+/// content they were not shown. Null in the response to a write (the token after a write is not read back; reload the rule set to decide).
+/// </param>
 public sealed record ProposalView(
     Guid PolicyId, string PolicyCode, string Name, string State, bool InForce, bool HasPublishedVersion,
     Guid VersionId, int VersionNumber, string? RuleType, JsonNode? RuleBody, string? MessageTemplate, string? ShortHeadline,
     string? Consequence, string? DescriptionText, string? DescriptionFormal, string? DescriptionRefusal,
-    string? ClauseQuote, string? ClauseLocation, IReadOnlyList<string> ValidationErrors);
+    string? ClauseQuote, string? ClauseLocation, IReadOnlyList<string> ValidationErrors,
+    string? RowVersion = null);
 
 /// <summary>A rule set with its rules (the Rule Review page's read).</summary>
 public sealed record RuleSetDetail(
@@ -547,7 +553,7 @@ public class RuleSetService
         var views = new List<ProposalView>();
         foreach (var rule in loaded.Rules.OrderBy(r => r.Policy.Code, StringComparer.Ordinal))
         {
-            views.Add(await ViewAsync(rule, ct));
+            views.Add(await ViewAsync(rule, ct, carryRowVersion: true));
         }
 
         JsonNode? notConverted = null;
@@ -1102,7 +1108,14 @@ public class RuleSetService
     }
 
     /// <summary>Accept (validated) or reject a rule's working version. A version in force or ever in force cannot be decided (409).</summary>
-    public virtual async Task<RuleSetOutcome<ProposalView>> DecideAsync(Guid ruleSetId, Guid policyId, bool accept, CancellationToken ct)
+    /// <param name="expectedRowVersion">
+    /// The row version token of the working version the admin was SHOWN (<see cref="ProposalView.RowVersion"/>, task 077). A decision is
+    /// never taken on content the admin did not see: when the row has changed since (an edit, another decision, a publish), the decision is
+    /// refused 409 <see cref="CodeConcurrentEdit"/> before it is validated or written, whatever the change was (a headline edit included,
+    /// because the admin saw the old headline). The write below is also conditional on this same token.
+    /// </param>
+    public virtual async Task<RuleSetOutcome<ProposalView>> DecideAsync(
+        Guid ruleSetId, Guid policyId, bool accept, long expectedRowVersion, CancellationToken ct)
     {
         var found = await FindRuleAsync<ProposalView>(ruleSetId, policyId, ct);
         if (found.Refusal is not null)
@@ -1117,6 +1130,17 @@ public class RuleSetService
             return RuleSetOutcome<ProposalView>.Refused(
                 StatusCodes.Status409Conflict, CodeInForce,
                 "This version is, or has been, in force and cannot be accepted or rejected. Edit the rule to draft a new version.");
+        }
+
+        // What the admin was shown is not what is stored now: refuse before validating (the errors would be about content they never saw)
+        // and before writing. A row with no version token cannot be compared, so it is refused the same way (fail closed).
+        if (work.RowVersion is not { } current || current != expectedRowVersion)
+        {
+            _logger.LogWarning("Rule {PolicyId}: the {Decision} was refused; the admin saw version token {Expected} of {VersionId} but it is {Current}",
+                policyId, accept ? "accept" : "reject", expectedRowVersion, work.Id, work.RowVersion);
+            return RuleSetOutcome<ProposalView>.Refused(
+                StatusCodes.Status409Conflict, CodeConcurrentEdit,
+                "The rule changed after you opened it, so your decision was not saved. Reload the rule, review the change and decide again.");
         }
 
         if (accept)
@@ -1932,7 +1956,11 @@ public class RuleSetService
             ruleCount);
     }
 
-    private async Task<ProposalView> ViewAsync(RuleSetRule rule, CancellationToken ct)
+    /// <param name="carryRowVersion">
+    /// True only for a read (<see cref="GetAsync"/>): the token then belongs to the content in the view. A view built after a write carries
+    /// none, because the row's token after the write was not read back and a stale one would let the next decision pass the check.
+    /// </param>
+    private async Task<ProposalView> ViewAsync(RuleSetRule rule, CancellationToken ct, bool carryRowVersion = false)
     {
         var work = rule.Working;
         var validation = ValidateRule(rule.Policy, work.RuleType?.ToString(CultureInfo.InvariantCulture), work);
@@ -1969,7 +1997,8 @@ public class RuleSetService
             work.Id, work.Number, ruleType, body, work.Template, work.Headline,
             work.Consequence is { } c && Enum.IsDefined(typeof(BillingConsequence), c) ? ((BillingConsequence)c).ToString() : null,
             text, formal, refusal, work.ClauseReference, work.ClauseLocation,
-            validation.Select(e => $"{e.Field}: {e.Message}").ToList());
+            validation.Select(e => $"{e.Field}: {e.Message}").ToList(),
+            carryRowVersion ? work.RowVersion?.ToString(CultureInfo.InvariantCulture) : null);
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────

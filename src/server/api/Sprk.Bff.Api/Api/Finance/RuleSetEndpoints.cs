@@ -15,6 +15,12 @@ public sealed record RuleEditBody(
     string? RuleType, JsonElement? RuleBody, string? MessageTemplate, string? ShortHeadline, string? Consequence,
     string? ClauseReference, string? ClauseLocation);
 
+/// <summary>
+/// Accept or reject a rule. <see cref="RowVersion"/> is the token the Rule Review page was shown for the rule (<c>rowVersion</c> on the
+/// proposal the rule set read returned); the decision is refused 409 when the rule has changed since (task 077, 076 re-check K3).
+/// </summary>
+public sealed record RuleDecisionBody(string? RowVersion);
+
 /// <summary>Publish a rule set from this date.</summary>
 public sealed record RuleSetPublishBody(DateOnly? EffectiveDate);
 
@@ -128,7 +134,7 @@ public static class RuleSetEndpoints
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.DecideRule())
             .RequireEbillingEnabled()
             .WithName("AcceptRuleSetProposal")
-            .WithSummary("Accept a rule (validated)")
+            .WithSummary("Accept a rule (validated; the body names the rowVersion the admin was shown, 409 when it changed since)")
             .Produces<ProposalView>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -141,8 +147,9 @@ public static class RuleSetEndpoints
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.DecideRule())
             .RequireEbillingEnabled()
             .WithName("RejectRuleSetProposal")
-            .WithSummary("Reject a rule")
+            .WithSummary("Reject a rule (the body names the rowVersion the admin was shown)")
             .Produces<ProposalView>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -354,11 +361,32 @@ public static class RuleSetEndpoints
         return Map(await service.EditAsync(ruleSetId, policyId, edit, ct), http);
     }
 
-    private static async Task<IResult> AcceptProposal(Guid ruleSetId, Guid policyId, RuleSetService service, HttpContext http, CancellationToken ct) =>
-        Map(await service.DecideAsync(ruleSetId, policyId, accept: true, ct), http);
+    private static Task<IResult> AcceptProposal(
+        Guid ruleSetId, Guid policyId, RuleDecisionBody? body, RuleSetService service, HttpContext http, CancellationToken ct) =>
+        Decide(ruleSetId, policyId, accept: true, body, service, http, ct);
 
-    private static async Task<IResult> RejectProposal(Guid ruleSetId, Guid policyId, RuleSetService service, HttpContext http, CancellationToken ct) =>
-        Map(await service.DecideAsync(ruleSetId, policyId, accept: false, ct), http);
+    private static Task<IResult> RejectProposal(
+        Guid ruleSetId, Guid policyId, RuleDecisionBody? body, RuleSetService service, HttpContext http, CancellationToken ct) =>
+        Decide(ruleSetId, policyId, accept: false, body, service, http, ct);
+
+    /// <summary>
+    /// The version the admin was shown is required: a decision without it could be taken on content that was never displayed. A missing,
+    /// blank or non-numeric token is a 400 and never reaches the service; a stale one is the service's 409.
+    /// </summary>
+    private static async Task<IResult> Decide(
+        Guid ruleSetId, Guid policyId, bool accept, RuleDecisionBody? body, RuleSetService service, HttpContext http, CancellationToken ct)
+    {
+        if (!long.TryParse(body?.RowVersion, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var expected))
+        {
+            return InvalidProblem(RuleSetService.CodeInvalid, new[]
+            {
+                new RuleSetError(policyId, null, "rowVersion",
+                    "rowVersion is required: send the rowVersion of the rule as the rule set read returned it.", null),
+            });
+        }
+
+        return Map(await service.DecideAsync(ruleSetId, policyId, accept, expected, ct), http);
+    }
 
     private static async Task<IResult> PublishRuleSet(Guid ruleSetId, RuleSetPublishBody body, RuleSetService service, HttpContext http, CancellationToken ct)
     {
