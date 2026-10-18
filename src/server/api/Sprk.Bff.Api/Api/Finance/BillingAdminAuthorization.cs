@@ -17,6 +17,9 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// administration, and every route requires it. A route that writes policy rows ALSO requires the privilege of the table it writes,
 /// so Dataverse's own rights are never bypassed by the application-identity write that follows. Reads of the proposals (clause text,
 /// rule bodies) are admin-only too, so they require the same Write marker, not Read (which every Core User holds).</para>
+/// <para><b>Depth (D-108, owner 2026-10-17).</b> Write at ANY depth counts: there is no Org-depth requirement. The check asks whether the
+/// caller holds the privilege, not at what depth. The role the owner grants carries Org depth in practice, so a Basic-depth Write would
+/// still pass this check; that is accepted.</para>
 /// <para>Privilege names are the live ones (spaarkedev1 <c>privilege</c> table, 2026-10-17): <c>sprk_ruleset</c> is lower case;
 /// <c>sprk_Policy</c> and <c>sprk_PolicyVersion</c> are not (as <c>OntologyAdminAuthoringService.AuthoringPrivilegeName</c>).</para>
 /// </remarks>
