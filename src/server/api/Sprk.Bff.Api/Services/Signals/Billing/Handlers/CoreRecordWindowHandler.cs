@@ -9,9 +9,9 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// (<c>before_open</c>); more than <c>graceDays</c> after the close date (<c>after_close</c>); or the core record is closed and has
 /// no close date, so there is no window to be inside (<c>core_record_closed</c>). A date exactly at a window edge (with the
 /// grace) holds. A date the core record does not have (no open date, no close date) is not a boundary.</para>
-/// <para><b>"Or core record closed" (owner-visible reading).</b> A closed core record with a close date is judged by that date: a
-/// final invoice for work done inside the window is legitimate, so closure alone does not flag lines dated inside it. Closure
-/// without a close date flags every line. If the owner wants any line on a closed core record flagged, it is one condition here.</para>
+/// <para><b>"Or core record closed" (D-111, the owner's reading).</b> A closed core record with a close date is judged by that
+/// date: a line dated after it is flagged, and work dated on or before it and billed later (a final invoice) is not. Closure
+/// without a close date flags every line. The rule's Describe text (<see cref="BillingRuleCatalogue"/>) says exactly this.</para>
 /// <para>With no core record in the fact set nothing is judged (072 does not call this rule then). A line with no date can only
 /// fire on the closed-without-close-date reason.</para>
 /// <para><b>Credit lines are skipped (D-105).</b> A line with negative hours or a negative amount

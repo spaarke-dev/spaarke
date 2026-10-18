@@ -522,6 +522,28 @@ public class BillingRuleCatalogueTests
         second.Description!.Clauses.Single().Should().Be(clause);
     }
 
+    [Fact]
+    public async Task Describer_CoreRecordWindow_SaysWhatTheHandlerDoes_D111()
+    {
+        var result = await Describer().DescribeAsync("""{"type":"CoreRecordWindow","graceDays":30}""", default);
+
+        var text = result.Description!.Clauses.Single().Text;
+        text.Should().Contain("after its close date").And.Contain("before the core record's open date");
+        text.Should().Contain("billed later is not", "earlier work billed later is fine");
+        text.Should().Contain("closed core record with no close date flags every line");
+        text.Should().NotContain("is not closed", "closure alone does not flag a line dated inside the window");
+    }
+
+    [Fact]
+    public async Task Describer_ApprovedTimekeeper_SaysFirmLevel_BecauseTheRosterHasNoCoreRecordScope_D111()
+    {
+        var result = await Describer().DescribeAsync("""{"type":"ApprovedTimekeeper"}""", default);
+
+        var text = result.Description!.Clauses.Single().Text;
+        text.Should().Contain("approved for the firm on the line date");
+        text.Should().NotContainEquivalentOf("core record");
+    }
+
     [Theory]
     [InlineData("""{"type":"Bogus","subject":"sprk_matter","all":[]}""")]
     [InlineData("""{"type":"existence","subject":"sprk_matter","all":[]}""")]

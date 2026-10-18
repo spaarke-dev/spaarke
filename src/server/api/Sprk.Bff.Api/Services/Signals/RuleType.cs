@@ -47,7 +47,7 @@ public enum RuleType
 
     // ── Billing domain (ebilling-r1 task 070; design.md 6.1, FR-24 order) ─────────────────────────────────────
 
-    /// <summary>1. The line's timekeeper is approved for the firm (and core record) on the line date. No parameters.</summary>
+    /// <summary>1. The line's timekeeper is approved for the firm on the line date (the roster has no core-record scope). No parameters.</summary>
     ApprovedTimekeeper = 100000003,
 
     /// <summary>2. Billed rate is at most the approved rate for the timekeeper or classification, plus a tolerance.</summary>

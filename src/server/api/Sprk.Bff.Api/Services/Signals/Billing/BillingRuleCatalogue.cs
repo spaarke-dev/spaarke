@@ -123,7 +123,7 @@ public static class BillingRuleCatalogue
     internal static (string Text, string Formal) Describe(RuleType ruleType, JsonElement root) => ruleType switch
     {
         RuleType.ApprovedTimekeeper => (
-            "Each line's timekeeper is approved for the firm (and core record) on the line date.",
+            "Each line's timekeeper is approved for the firm on the line date.",
             "ApprovedTimekeeper()"),
         RuleType.ApprovedRate => (
             $"Each line's billed rate is at most the approved rate for its timekeeper or classification on the line date, plus {Num(root, "tolerancePercent")} percent.",
@@ -142,7 +142,7 @@ public static class BillingRuleCatalogue
             $"No line is dated more than {Num(root, "maxAgeDays")} days before the invoice date.",
             $"InvoiceAge(maxAgeDays={Num(root, "maxAgeDays")})"),
         RuleType.CoreRecordWindow => (
-            $"Each line is dated within the core record's open and close dates (with {Num(root, "graceDays")} grace days) and the core record is not closed.",
+            $"A line dated before the core record's open date or after its close date (with {Num(root, "graceDays")} grace days) is flagged; work dated on or before the close date and billed later is not; a closed core record with no close date flags every line.",
             $"CoreRecordWindow(graceDays={Num(root, "graceDays")})"),
         RuleType.Duplicate => (
             $"No invoice or line duplicates an earlier one from the firm on {List(root, "matchFields")}.",

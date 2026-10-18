@@ -95,6 +95,23 @@ public class CoreRecordWindowHandlerTests
     }
 
     [Fact]
+    public void D111_AMatterClosedOn30June_FlagsALineDated5July_ButNotEarlierWorkBilledLaterOnASeptemberInvoice()
+    {
+        // The owner's scenario: the matter closed 2026-06-30 and has a close date; the invoice is dated in September.
+        var closed = Core(new DateOnly(2026, 1, 10), new DateOnly(2026, 6, 30), closed: true);
+        var facts = FactsFor(closed, new DateOnly(2026, 6, 15), new DateOnly(2026, 6, 30), new DateOnly(2026, 7, 5)) with
+        {
+            Invoice = Invoice() with { InvoiceDate = new DateOnly(2026, 9, 12) },
+        };
+
+        var findings = Run(Window(), facts);
+
+        var finding = findings.Should().ContainSingle("only the line dated after the close date is flagged").Subject;
+        finding.Subject.Should().Be(BillingSubject.ForLine(2));
+        finding.ReasonCode.Should().Be(BillingReasonCodes.AfterCoreRecordClosed);
+    }
+
+    [Fact]
     public void AClosedCoreRecordWithNoCloseDate_FlagsEveryLine_EvenOneWithNoDate()
     {
         var facts = FactsFor(Core(open: Open, closed: true), Open.AddDays(5), null);
