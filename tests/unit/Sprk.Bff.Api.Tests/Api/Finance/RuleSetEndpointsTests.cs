@@ -82,7 +82,7 @@ public sealed class RuleSetEndpointsTests
                 MockBehavior.Strict,
                 entities, Mock.Of<IDocumentDataverseService>(), spe, Mock.Of<IRecordOwnershipResolver>(), validator,
                 new RuleBodyDescriber(validator, entities, NullLogger<RuleBodyDescriber>.Instance),
-                Mock.Of<IOptionsMonitor<FinanceOptions>>(), Mock.Of<ILogger<RuleSetService>>());
+                Mock.Of<IOptionsMonitor<FinanceOptions>>(), Mock.Of<Spaarke.Scheduling.IScheduledJobLease>(), Mock.Of<ILogger<RuleSetService>>());
             Jobs = new Mock<JobSubmissionService>(
                 MockBehavior.Strict,
                 Microsoft.Extensions.Options.Options.Create(new ServiceBusOptions

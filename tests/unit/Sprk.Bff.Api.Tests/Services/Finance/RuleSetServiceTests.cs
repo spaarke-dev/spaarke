@@ -74,6 +74,9 @@ public sealed class RuleSetServiceTests
         public Func<string, bool>? FailBulkFor;
         public Func<string, bool>? FailUpdateFor;
 
+        /// <summary>The publish claim store the service takes (round 3): the real process-local lease, so a test can hold a claim or watch one released.</summary>
+        public Spaarke.Scheduling.IScheduledJobLease Lease = new Spaarke.Scheduling.ProcessLocalScheduledJobLease();
+
         /// <summary>Runs at the start of every bulk update (after the cancellation check): a test uses it to disconnect the caller mid-write.</summary>
         public Action<string>? OnBulk;
         public readonly List<(LogLevel Level, string Message)> Logs = new();
@@ -264,6 +267,7 @@ public sealed class RuleSetServiceTests
                 Entities.Object, Documents.Object, Spe.Object, Ownership.Object, validator,
                 new RuleBodyDescriber(validator, Entities.Object, NullLogger<RuleBodyDescriber>.Instance),
                 Mock.Of<IOptionsMonitor<FinanceOptions>>(m => m.CurrentValue == Options),
+                Lease,
                 new ListLogger(Logs));
         }
 
@@ -1571,6 +1575,136 @@ public sealed class RuleSetServiceTests
         h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(Utc(2026, 11, 1),
             "v1 really was superseded: its end date stands");
         h.ConditionalCalls.Should().HaveCount(2, "the version write and the refused pointer move; the take-back reads, sees the pointer on v2 and sends nothing");
+    }
+
+    // ── Review round 3 item 3: one publish of a rule set at a time (the take-back race) ──
+
+    [Fact]
+    public async Task Publish_WhileAnotherPublishOfTheSetHoldsTheClaim_Is409PublishInProgress_AndReadsAndWritesNothing()
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+        var held = await h.Lease.TryAcquireAsync(RuleSetService.PublishClaimId(set), null, TimeSpan.FromMinutes(10), default);
+        held.Status.Should().Be(Spaarke.Scheduling.ScheduledJobLeaseStatus.Granted);
+
+        var outcome = await h.Service().PublishAsync(set, Effective, default);
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("ruleset.publish_in_progress");
+        h.Queries.Should().BeEmpty("a refused publish reads nothing");
+        h.Writes.Should().BeEmpty();
+
+        // The claim is per rule set: another set publishes while this one is held.
+        var other = h.RuleSet();
+        h.Rule(other, state: ProposalState.Accepted);
+        (await h.Service().PublishAsync(other, Effective, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+    }
+
+    [Theory]
+    [InlineData("done")]
+    [InlineData("refused")]
+    [InlineData("failed")]
+    [InlineData("throws")]
+    public async Task Publish_ReleasesItsClaim_HoweverItEnds_SoTheNextPublishIsNotRefused(string ending)
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, _) = h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+        if (ending != "refused")
+        {
+            h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+        }
+
+        if (ending == "failed") h.FailBulkFor = entity => entity == "sprk_policy";
+        if (ending == "throws") h.AfterQuery = _ => throw new InvalidOperationException("simulated read failure");
+
+        var act = () => h.Service().PublishAsync(set, Effective, default);
+        if (ending == "throws")
+        {
+            await act.Should().ThrowAsync<InvalidOperationException>();
+        }
+        else
+        {
+            await act();
+        }
+
+        var next = await h.Lease.TryAcquireAsync(RuleSetService.PublishClaimId(set), null, TimeSpan.FromMinutes(10), default);
+        next.Status.Should().Be(Spaarke.Scheduling.ScheduledJobLeaseStatus.Granted, "the claim was released when the publish ended: " + ending);
+    }
+
+    [Fact]
+    public async Task Publish_WhenTheClaimStoreIsUnreachable_FailsClosed_500_AndReadsAndWritesNothing()
+    {
+        var lease = new Mock<Spaarke.Scheduling.IScheduledJobLease>();
+        lease.Setup(l => l.TryAcquireAsync(It.IsAny<string>(), It.IsAny<DateTimeOffset?>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Spaarke.Scheduling.ScheduledJobLeaseUnavailableException("redis down"));
+        var h = new Harness { Lease = lease.Object };
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+
+        var outcome = await h.Service().PublishAsync(set, Effective, default);
+
+        outcome.StatusCode.Should().Be(500);
+        outcome.ErrorCode.Should().Be("ruleset.write_failed");
+        h.Queries.Should().BeEmpty();
+        h.Writes.Should().BeEmpty();
+        lease.Verify(l => l.ReleaseAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never, "there was no claim to release");
+    }
+
+    [Fact]
+    public async Task Publish_WhenASecondPublishStartsWhileTheFirstFailsAtItsPointerMove_NoSupersededVersionIsLeftWithoutAnEndDate()
+    {
+        // The interleaving: P1 stamps v1 and its pointer move fails; P2 (another date) starts, reads v1 stamped, stamps it again and is
+        // about to move the pointer; P1's take-back reads v1 stamped with the pointer unmoved and clears it; P2 moves the pointer.
+        // Unclaimed, v1 ends superseded with no end date, which the in-force rule (072) never evaluates. Claimed, P2 is refused at once.
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, v1) = h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+        var v2 = h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+        var service = h.Service();
+        var second = new DateOnly(2026, 12, 1);
+
+        var parked = new ManualResetEventSlim();
+        var release = new ManualResetEventSlim();
+        Task<RuleSetOutcome<RuleSetPublished>>? p2 = null;
+        var policyCalls = 0;
+        var firstFails = 0;
+        h.OnBulk = entity =>
+        {
+            if (entity != "sprk_policy") return;
+            switch (Interlocked.Increment(ref policyCalls))
+            {
+                case 1: // P1's pointer move is about to fail: P2 starts now and runs until it finishes or is about to move its pointer
+                    p2 = Task.Run(() => service.PublishAsync(set, second, default));
+                    WaitHandle.WaitAny(new[] { parked.WaitHandle, ((IAsyncResult)p2).AsyncWaitHandle }, TimeSpan.FromSeconds(10));
+                    Interlocked.Exchange(ref firstFails, 1);
+                    break;
+                default: // P2's pointer move: wait until P1 has failed and taken back
+                    parked.Set();
+                    release.Wait(TimeSpan.FromSeconds(10));
+                    break;
+            }
+        };
+        h.FailBulkFor = entity => entity == "sprk_policy" && Interlocked.Exchange(ref firstFails, 0) == 1;
+
+        var first = await service.PublishAsync(set, Effective, default);
+        release.Set();
+        var secondOutcome = await p2!;
+
+        first.ErrorCode.Should().Be("ruleset.write_failed");
+        var pointer = h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id;
+        var v1End = h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime?>("sprk_inforceto");
+        (pointer != v1).Should().Be(v1End is not null,
+            "a version the pointer left carries an end date and a version still current carries none (pointer " + (pointer == v2 ? "v2" : "v1") + ", end " + v1End + ")");
+        secondOutcome.StatusCode.Should().Be(409);
+        secondOutcome.ErrorCode.Should().Be("ruleset.publish_in_progress");
+
+        // The failed publish released its claim: the second publish, run again, completes and ends v1 on its date.
+        var retried = await service.PublishAsync(set, second, default);
+        retried.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v2);
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(Utc(2026, 12, 1));
     }
 
     // ── Review round 3 item 1 (F3): a refused pointer move that did not move the pointer ──

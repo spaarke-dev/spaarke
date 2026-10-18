@@ -86,7 +86,7 @@ public sealed class BillingRuleDraftJobHandlerTests
                 MockBehavior.Strict,
                 entities, Mock.Of<IDocumentDataverseService>(), spe, Mock.Of<IRecordOwnershipResolver>(), validator,
                 new RuleBodyDescriber(validator, entities, NullLogger<RuleBodyDescriber>.Instance),
-                Mock.Of<IOptionsMonitor<FinanceOptions>>(), Mock.Of<ILogger<RuleSetService>>());
+                Mock.Of<IOptionsMonitor<FinanceOptions>>(), Mock.Of<Spaarke.Scheduling.IScheduledJobLease>(), Mock.Of<ILogger<RuleSetService>>());
 
             Lock.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => LockAvailable);

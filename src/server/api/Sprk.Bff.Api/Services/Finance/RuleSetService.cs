@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
@@ -237,6 +238,18 @@ public class RuleSetService
     internal const string CodeSourceMissing = "ruleset.source_missing";
     internal const string CodeAlreadyDrafted = "ruleset.already_drafted";
     internal const string CodeConcurrentEdit = "ruleset.concurrent_edit";
+    internal const string CodePublishInProgress = "ruleset.publish_in_progress";
+
+    /// <summary>
+    /// How long the publish claim of a rule set lives if its holder dies without releasing it (the stale-claim timeout). A publish
+    /// is a handful of Dataverse round trips (at most a few thousand rows, 1,000 per transaction), so ten minutes is far past any
+    /// run; a claim that expires early lets a second publish in, which the conditional writes still catch except for the take-back
+    /// race the claim exists to close.
+    /// </summary>
+    internal static readonly TimeSpan PublishClaimLifetime = TimeSpan.FromMinutes(10);
+
+    /// <summary>The lease id of the publish claim of one rule set: one publish of a set at a time, across every BFF instance.</summary>
+    internal static string PublishClaimId(Guid ruleSetId) => $"ruleset-publish:{ruleSetId:D}";
 
     /// <summary>The prefix of a drafted rule's policy code: <c>BRD-{rule set id, 32 hex}-{n, 3 digits}</c> (50 characters at most is the column; this is 40).</summary>
     internal const string DraftCodePrefix = "BRD-";
@@ -294,6 +307,7 @@ public class RuleSetService
     private readonly PolicyVersionValidator _validator;
     private readonly RuleBodyDescriber _describer;
     private readonly IOptionsMonitor<FinanceOptions> _finance;
+    private readonly IScheduledJobLease _lease;
     private readonly ILogger<RuleSetService> _logger;
 
     public RuleSetService(
@@ -304,6 +318,7 @@ public class RuleSetService
         PolicyVersionValidator validator,
         RuleBodyDescriber describer,
         IOptionsMonitor<FinanceOptions> finance,
+        IScheduledJobLease lease,
         ILogger<RuleSetService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -313,6 +328,7 @@ public class RuleSetService
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _describer = describer ?? throw new ArgumentNullException(nameof(describer));
         _finance = finance ?? throw new ArgumentNullException(nameof(finance));
+        _lease = lease ?? throw new ArgumentNullException(nameof(lease));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -1152,7 +1168,56 @@ public class RuleSetService
     /// Puts every Accepted version that is not yet in force into force on <paramref name="effectiveDate"/>, all or nothing. Proposed and
     /// Rejected versions are left as they are and counted in the result.
     /// </summary>
+    /// <remarks>
+    /// <b>One publish of a rule set at a time (review round 3).</b> The publish takes the set's claim (<see cref="PublishClaimId"/>, an
+    /// <see cref="IScheduledJobLease"/>: distributed in the BFF, with an expiry) before its first read and releases it when it ends,
+    /// however it ends. A second publish finds the claim held and is refused 409 <see cref="CodePublishInProgress"/> without reading or
+    /// writing. Without it, one publish's take-back could clear the end date a second publish had just stamped on the same old version
+    /// before the second moved its pointer, leaving a superseded version with no end date, which the in-force rule (072) never evaluates.
+    /// The claim store being unreachable fails closed (500, nothing written).
+    /// </remarks>
     public virtual async Task<RuleSetOutcome<RuleSetPublished>> PublishAsync(Guid ruleSetId, DateOnly effectiveDate, CancellationToken ct)
+    {
+        var claimId = PublishClaimId(ruleSetId);
+        ScheduledJobLeaseGrant grant;
+        try
+        {
+            grant = await _lease.TryAcquireAsync(claimId, occurrenceUtc: null, PublishClaimLifetime, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Rule set {RuleSetId}: the publish claim could not be taken (the lease store is unreachable); nothing was read or written", ruleSetId);
+            return RuleSetOutcome<RuleSetPublished>.Refused(
+                StatusCodes.Status500InternalServerError, CodeWriteFailed,
+                "The rule set could not be published. Publish again; if it keeps failing, contact support.");
+        }
+
+        if (grant.Status != ScheduledJobLeaseStatus.Granted || grant.Token is not { } token)
+        {
+            return RuleSetOutcome<RuleSetPublished>.Refused(
+                StatusCodes.Status409Conflict, CodePublishInProgress,
+                "Another publish of this rule set is in progress. Wait for it to finish, reload the rule set and publish again.");
+        }
+
+        try
+        {
+            return await PublishClaimedAsync(ruleSetId, effectiveDate, ct);
+        }
+        finally
+        {
+            try
+            {
+                await _lease.ReleaseAsync(claimId, token, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                // The claim expires on its own (PublishClaimLifetime); until then a publish of this set is told one is in progress.
+                _logger.LogWarning(ex, "Rule set {RuleSetId}: the publish claim could not be released; it expires in {Minutes} minutes", ruleSetId, PublishClaimLifetime.TotalMinutes);
+            }
+        }
+    }
+
+    private async Task<RuleSetOutcome<RuleSetPublished>> PublishClaimedAsync(Guid ruleSetId, DateOnly effectiveDate, CancellationToken ct)
     {
         var set = await LoadRuleSetAsync(ruleSetId, ct);
         if (set is null)
@@ -1314,6 +1379,9 @@ public class RuleSetService
     /// every rule in force and the set not Published, which the next publish finishes.
     /// </summary>
     /// <remarks>
+    /// <para><b>Claimed (review round 3).</b> Called only with the rule set's publish claim held (<see cref="PublishAsync"/>), so no other
+    /// publish of the set stamps, takes back or moves pointers meanwhile; the take-back can therefore not clear a stamp that belongs to
+    /// another publish. An edit, a decision or an Ontology publish still can run: the conditional writes below catch those.</para>
     /// <para><b>Conditional (review pass 2).</b> Steps 1 and 2 are conditional on the row versions <see cref="LoadRulesAsync"/> read: a row
     /// another admin changed since (a concurrent publish that stamped the same old version or moved the same pointer, an edit, a decision)
     /// makes Dataverse refuse that chunk, which then wrote NOTHING, and the publish stops with <see cref="PublishWrite.Conflict"/>.</para>
