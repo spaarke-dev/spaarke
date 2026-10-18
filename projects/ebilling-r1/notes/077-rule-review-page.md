@@ -26,7 +26,7 @@ Error handling: ProblemDetails title/detail plus the stable `errorCode` are show
 
 1. **Proposals grid is a plain Fluent v9 `DataGrid`, not the Spaarke DataGrid framework.** The framework is driven by a `sprk_gridconfiguration` record and reads rows through `IDataverseClient`; these rows come only from the BFF (rule bodies and clause text must not be read with the caller's own Dataverse reads; the page must not write them: ADR-002, D-76). The shared pieces that fit are used: `PanelSplitter` and `useTwoPanelLayout` for the two panels, `thinScrollbarStyle`, `LookupField` with `searchOrganizationsAsLookup` for the firm choice.
 2. **Typed parameter editor is page-local** (`services/ruleTypes.ts` catalogue plus `components/ParamEditor.tsx`), composed from ordinary Fluent inputs. No shared component is added. The catalogue mirrors the bounds of the 11 `billing-*.schema.json` files only to give quick feedback; the server validates again at edit, accept and publish and its answer is the one shown. A rule type the catalogue does not know is shown read-only as JSON (its consequence, wording and clause can still be edited).
-3. **Reject has no reason.** 076's reject route takes no reason and there is no column to hold one, so a reason field would be thrown away. Reject is a `ConfirmModal`. Owner question below.
+3. **Reject has no reason.** *(Superseded by D-113: see section 8. Reject now takes a required reason.)* 076's reject route takes no reason and there is no column to hold one, so a reason field would be thrown away. Reject is a `ConfirmModal`. Owner question below.
 4. **npm dependencies (NFR-12).** No package new to the repository, but `package.json` lists more than the copied skeleton: `dompurify`, `marked`, `diff`, `d3-force`, `react-window`, `scheduler`, `lexical` and `@lexical/*`, `@hello-pangea/dnd`, `mammoth`, `pdfjs-dist`. They are the transitive imports of the `@spaarke/ui-components` barrel (the skeleton obtains them through `@spaarke/communication-components`, which this page does not use; `@spaarke/ui-components` is aliased to source, so Rollup resolves its bare imports from this project's `node_modules`, as `Reporting` does). `@spaarke/sdap-client` is aliased to source in `vite.config.ts` as in `CreateEventWizard`. Removed from the skeleton: `@spaarke/communication-components`. Test-only dev dependencies added: `jest`, `ts-jest`, `@types/jest`.
 5. **Web resource name and entry point.** `sprk_rulereviewpage`. How admins open it (sitemap subarea or a command on the rule set form) is a solution change that task 079 owns; no entry exists yet.
 6. **Write responses carry no row version** (see section 1).
@@ -65,7 +65,7 @@ The reviewer could not construct a path that saves a stale decision (token read,
 
 ## 6. Owner questions
 
-1. **Reject reason.** FR-28 and the task text say "reject (reason)". The 076 route takes no reason and there is nowhere to store one. Recommendation: leave reject as a confirmation for now; if a reason is wanted, add an optional `reason` to the reject body and a column on the version in a follow-up that 076's owner schedules (a schema change).
+1. **Reject reason.** *(Answered 2026-10-18, D-113: "Add a reason now"; built in section 8.)* FR-28 and the task text say "reject (reason)". The 076 route takes no reason and there is nowhere to store one. Recommendation: leave reject as a confirmation for now; if a reason is wanted, add an optional `reason` to the reject body and a column on the version in a follow-up that 076's owner schedules (a schema change).
 2. **Entry point.** 079 needs to decide how admins open the page (sitemap subarea, or a command on the rule set form).
 
 ## 7. Known limits
@@ -73,3 +73,80 @@ The reviewer could not construct a path that saves a stale decision (token read,
 - The ui-tests and component rendering are unrun (section 4).
 - The not-converted list is shown as returned; when 075 stored a non-JSON string the page shows the raw text.
 - Polling after "Draft rules" stops after five minutes and says so; the run continues server-side and the page can be reopened.
+
+## 8. D-113 reject reason (owner decision 2026-10-18: "Add a reason now")
+
+Supersedes section 2 item 3 ("Reject has no reason") and owner question 1. Base `eec0f3512`.
+
+Commits:
+- `14b85e8a5`: the column's schema script, the data-model doc, the scripts README entry.
+- `103a25a30`: the BFF (reject route and service) and its tests.
+- `b47bed4b5`: the page and its tests.
+
+### What changed
+
+| Piece | Behaviour |
+|---|---|
+| Column | `sprk_policyversion.sprk_rejectionreason`, multiline text, max 2,000, not required. `sprk_policyversion` already holds the draft's decision (`sprk_proposalstatus`: Proposed / Accepted / Rejected), so the reason sits beside it |
+| Script | `scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1` (see "Deviation 1"). Idempotent, check-then-create, `-WhatIf`, solution-scoped to `SpaarkeMaster`, entity-scoped publish only when it wrote. **Not run against dev.** `-WhatIf` was run: it reads metadata, wrote nothing, and reported `WOULD CREATE sprk_rejectionreason (Memo)`, which also confirms the column does not exist on dev |
+| Reject route | `POST .../reject` body `{ rowVersion, reason }`. `reason` is **required**: trimmed, 1 to 2,000 characters, else 400 `ruleset.invalid` with a `reason` field error, before the service is called. `RuleSetService.DecideAsync` applies the same rule again (`TryNormalizeRejectionReason`), so no other caller can store a blank or over-long reason; it refuses before any read |
+| Reject write | The reason and `sprk_proposalstatus = Rejected` are one conditional write (on the row version the admin was shown). A stale `rowVersion` is still 409 `ruleset.concurrent_edit` and stores nothing |
+| Accept | Ignores any `reason` in the body. It clears an earlier reason in the accepting write (`DBNull`), only when the row has one, so an accept of a never-rejected draft writes what it always did |
+| Edit | An edit that returns the draft to Proposed (D-109: type, body, template, consequence, clause text, section reference or location) clears the reason in the same write. A headline-only edit keeps the decision and its reason. An edit that creates a new version has no reason (a new row) |
+| Read | `ProposalView.rejectionReason`: set only while the state is Rejected (a stale value stored on another state is not returned) |
+| Page | Reject opens `RejectModal` (a `FormModal`, see "Deviation 2") with a required Reason field; Reject is disabled until the trimmed reason is 1 to 2,000 characters (or while a decision is in flight). A rejected draft's detail shows "Rejected: reason" and the text (plain text, `pre-wrap`; no HTML). A reload that finds a changed reason lists it in the "what changed" notice |
+
+**Required or optional: required (recommended and built).** "Add a reason" is read as "a rejection carries a reason". An optional reason would leave blank rejections the page cannot tell from old ones, and the reason is the only record of why a rule was thrown away. If the owner wants it optional, the change is: drop the minimum in `TryNormalizeRejectionReason`, store `DBNull` for a blank, and relax `canConfirmReject`.
+
+### Admin-only
+
+The reason is never firm-visible:
+- `GetFirmClauseAsync` selects `sprk_policy`, `sprk_clausereference`, `sprk_clauselocation`, `sprk_inforceto` by name and returns `FirmClauseText(Quote, SectionReference)`; neither carries it. The other readers of `sprk_policyversion` in `src/server` select named columns (checked: `OntologyAdminRulesService`, `BillingRuleCatalogue`, `PolicyScopeResolver`, `BillingFinding`).
+- Test `TheFirmProjection_NeverCarriesTheRejectionReason`: a published version in force that (wrongly) holds a reason yields only the quote and section; the serialised result holds neither the reason nor the word "reason"; `FirmClauseText` has exactly two instance properties; the firm read's column set is neither "all columns" nor contains `sprk_rejectionreason`. It fires: adding the column to the firm read's column set makes it fail.
+- The route is admin-only as before (`BillingAdminAuthorization.DecideRule()`, and the read needs Write on `sprk_ruleset`).
+
+### Section 11 - the new column
+
+- **Existing**: no column of `sprk_policyversion` is usable. Checked in `docs/data-model/sprk_ruleset.md`, the SpaarkeMaster source `Entities/sprk_PolicyVersion/Entity.xml` (its custom columns: `sprk_authoredby`, `sprk_clauselocation`, `sprk_clausereference`, `sprk_confidencethreshold`, `sprk_consequence`, `sprk_decisionplan`, `sprk_inforcefrom`, `sprk_inforceto`, `sprk_messagetemplate`, `sprk_name`, `sprk_policy`, `sprk_proposalstatus`, `sprk_proposedaction`, `sprk_rulebody`, `sprk_ruletype`, `sprk_shortheadline`, `sprk_versionnumber`) and live dev (the `-WhatIf` run found no `sprk_rejectionreason`).
+- **Extension**: nothing can be extended. `sprk_proposedaction` is a required 400-character text that means what the ontology rules propose a human do, not a rationale. `sprk_messagetemplate`, `sprk_shortheadline` and `sprk_clausereference` are firm-facing text (D-66), so a reason stored there would leak. `sprk_decisionplan` is the ontology's decision plan JSON. `sprk_name` is the version's label.
+- **Cost of doing nothing**: D-113 cannot be met: a rejection reason has nowhere to be stored, so the page cannot show it.
+
+### Deploy order and the other tasks
+
+- **Task 079 runs the script on dev; task 053 syncs SpaarkeMaster** (export after the run; the script does not edit the solution source, and this task did not).
+- **Run the script before the BFF build is deployed.** `RuleSetService` selects `sprk_rejectionreason` on every version read (the rule set read, edit, accept, reject, publish), so a BFF without the column faults on them. The same applies to anything that runs the rule set service against a live environment (for example `tests/integration/seam/Finance/BillingRuleDraftSeamTests.cs`) until the column exists.
+- No new route, DI registration or package. The route ledger stays at 137.
+
+### Deviations
+
+1. **Script location.** The brief named `projects/ebilling-r1/scripts/`; every ebilling schema script, and the shared `EbillingSchema.psm1` the script imports, is in `scripts/ebilling/`, which `scripts/README.md` documents. The script is there, following Deploy-EbillingSignalLineSubjectSchema.ps1 (the `sprk_firmreason` memo).
+2. **`FormModal`, not the existing `ConfirmModal`.** `ConfirmModal` takes a message and has no field and no way to disable its confirm button, so it cannot hold a required reason. `RejectModal` is a `FormModal` (ADR-050 form family) with the same title, message and Reject label. `ConfirmModal` is no longer used by the page.
+3. **`DecideAsync` gains an optional trailing `string? rejectionReason = null` after the `CancellationToken`.** Optional only so the accept call sites stay as they were; a reject without a reason is refused.
+4. **The "reject is disabled until a reason is entered" test is a logic test.** The page's suites run in a node environment with no renderer (section 4), so the test covers `canConfirmReject` / `checkRejectionReason`, which the dialog binds to the Reject button (`submitDisabled={!canConfirmReject(text, false)}`), and `decideProposal`, which refuses a reject without a valid reason before any request. The button wiring itself is unrendered (same known limit as section 7).
+
+### Verification
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
+- `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~RuleSet"`: **272 pass / 0 fail** (256 before; +16 test rows: 14 in `RuleSetServiceTests`, 2 in `RuleSetEndpointsTests`, theory rows counted). ArchTests (`tests/Spaarke.ArchTests`): **1175 pass / 0 fail**.
+- Page: `npx jest` **64 pass / 0 fail** (49 before; +15); `npm run typecheck` 0 surface-owned errors (99 pre-existing shared-library errors, as before); `npm run build` succeeds (`dist/sprk_rulereviewpage.html`, 1.31 MB).
+- **Fail-before.** The new tests reference members that did not exist, so against the previous service and endpoint files the test project does not compile (66 errors: no `rejectionReason` parameter, no `ProposalView.RejectionReason`, no `RejectionReasonColumn`). For behaviour, each rule was broken in turn in the finished code and the filtered suite run:
+
+  | Mutation | Failed |
+  |---|---|
+  | reject does not store the reason | 7 (store, replace, 2,000-character, accept-after-reject, both edit rows, headline-edit keeps) |
+  | the reason rule always passes | 5 (3 service no-reason rows, the 2,000 / 2,001 boundary, the endpoint 400 test) |
+  | accept does not clear the reason | 1 (`Accept_AfterAReject_ClearsTheReason...`) |
+  | edit does not clear the reason | 2 (`Edit_ThatReturnsARejectedDraftToProposed_ClearsTheReason`, body and quote) |
+  | the firm read selects the reason column | 1 (`TheFirmProjection_NeverCarriesTheRejectionReason`) |
+  | the read returns a reason on any state | 1 (`Read_ShowsAReasonOnlyForARejectedDraft...`) |
+  | the row version comparison removed | 7 (6 existing 409 tests and `Reject_WithAStaleRowVersion_StillIs409_AndStoresNoReason`) |
+
+  Page: with the previous `reviewActions.ts` and `ruleSetApi.ts` restored, **16 of 64 fail**; restored, 64 of 64 pass.
+- New BFF tests: reject stores the trimmed reason in the same conditional write; no reason (null, empty, white space, over 2,000) is 400 on `reason` with nothing read or written; 2,000 characters after trimming is stored and 2,001 is refused; a stale row version is still 409 and stores nothing; a second reject replaces the reason; accept after reject clears it; accept ignores a reason; an edit that returns a draft to Proposed clears it (body, clause); a headline edit keeps it; the read returns it only for Rejected; the firm projection never carries it; endpoint: 400 for missing / empty / blank / over-long reasons without a service call, and the trimmed reason reaches the service. Existing reject calls pass a reason; the domain-isolation reject case still proves 404 rather than the new 400.
+- Publish size (Release, `-r linux-x64 --self-contained false`, `Compress-Archive` Optimal, `git archive` copies, 192 files each): base `eec0f3512` **39,596,455 B**, head `103a25a30` **39,596,817 B**: delta **+362 B**. No package or project reference changed.
+
+### Known limits
+
+- Reject stays disabled on a draft that is already Rejected, so a reason cannot be reworded in place: edit the rule (which returns it to Proposed), then reject again.
+- The reason is plain text; it is not translated or moderated.
+- The dialog's disabled button is unrendered in tests (deviation 4).
