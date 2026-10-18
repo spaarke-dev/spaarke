@@ -69,7 +69,17 @@ public class ExternalNotificationFeedTests
             // row is projected through the query's $select, so a column the query dropped is absent (r3 task 039, K3).
             .Returns<string, string?, CancellationToken>((_, odata, _) =>
                 Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>(AppOnlySelectProjection.Project(
-                    _messageRows.OrderByDescending(r => r["createdon"].GetDateTimeOffset()), odata)));
+                    AppOnlySelectProjection.WithOpenThread(_messageRows).OrderByDescending(r => r["createdon"].GetDateTimeOffset()), odata)));
+        // Owner decision D7: the feed shows a row only when its thread reads Open. These cases are not about D7, so every row
+        // sits in one Open thread.
+        _appOnly
+            .Setup(q => q.QueryAsync("sprk_communicationthreads", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string?, CancellationToken>((_, odata, _) =>
+                Task.FromResult(AppOnlySelectProjection.OpenThreadAnswer(odata)));
+        // Task 187 x D7 (merge of master into r3): the thread is also a LIVE PARENT of every message (sprk_communicationthread is a
+        // lineage lookup of sprk_communication), so the live-parent walk reads it app-only and withholds the row when the thread
+        // does not come back (fail closed). The shared Open thread therefore exists in the filing world too, filed under nothing.
+        _roots.AddFilingRow("sprk_communicationthread", AppOnlySelectProjection.OpenThreadId);
     }
 
     // ── principals ──────────────────────────────────────────────────────────────────────────────────
@@ -961,6 +971,27 @@ public class ExternalNotificationFeedTests
             .Should().Equal(IdOf(carrier), IdOf(plain));
     }
 
+    // Task 065 (D7) x task 187 (merge of master into r3): the two rules meet on the message's own thread. The thread reads
+    // explicitly OPEN, so the D7 gate admits the message; the thread is also a parent the live-parent rule walks, and this
+    // one is filed under secure matter X. The message is then behind X's wall: not reported to a reader of P alone, reported
+    // to a reader of P and X.
+    [Fact]
+    public async Task AMessageInAnOpenThreadFiledUnderSecureX_IsNotInTheFeedOfAPOnlyReader_ButIsForAPAndXReader()
+    {
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var secure = Guid.NewGuid();
+        _roots.AddSecureRoot(ExternalGrantRootType.Matter, secure);
+        _roots.AddFilingRow("sprk_communicationthread", AppOnlySelectProjection.OpenThreadId, ("sprk_regardingmatter", "sprk_matter", secure));
+        var message = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        _data.Name(project, "Project Alpha");
+        _data.Name(secure, "Matter X");
+
+        Body(await Feed(Ciam(me, project: project))).Value.Should().BeEmpty(
+            "the thread is Open, but it is filed under secure X, which the caller cannot read");
+        Body(await Feed(Ciam(me, project: project, matter: secure))).Value.Select(i => i.Id).Should().Equal(IdOf(message));
+    }
+
     // Main-session decision 2026-10-12: "secure" means EFFECTIVELY secure (UAC-r2 task 174). A stamped work assignment W whose
     // OWN flag is false but which is filed under a secure matter is secure, even when the message carries no stamp for it.
     [Theory]
@@ -993,7 +1024,9 @@ public class ExternalNotificationFeedTests
         _roots.AddOpenRoot(ExternalGrantRootType.WorkAssignment, workAssignment);
         _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter);
         _roots.FileWorkAssignmentUnder(workAssignment, ExternalGrantRootType.Matter, matter);
-        _roots.FilingReadThrows = true;
+        // Only the work assignment's chain (its matter) faults. Every message's thread is now also read by the live-parent walk
+        // (task 187 x D7), so a blanket FilingReadThrows would withhold the plain message too, which is not what this case is about.
+        _roots.FilingFaultEntity = "sprk_matter";
         var caller = Ciam(Guid.NewGuid(), project: project);
         var plain = Message("sprk_regardingproject", project, Now.AddHours(-2));
         var dual = Message("sprk_regardingproject", project, Now.AddHours(-1));
@@ -1032,13 +1065,19 @@ public class ExternalNotificationFeedTests
 
         var query = _queries.Should().ContainSingle().Subject!;
         var select = query[..query.IndexOf('&')];
+        // Task 187 appends the message's non-root parent lookups (ExternalMultiRootRule.LiveParentSelect("sprk_communication"),
+        // ordered by column) after the three root stamps. The thread lookup is one of them; ExternalSelect de-duplicates, so it is
+        // selected once, as D7's column.
         select.Should().Be(
-            "$select=sprk_communicationid,sprk_direction,_sprk_sentby_value,_sprk_createdbycontact_value,createdon," +
-            "sprk_isinternalonly,sprk_privilegeclassification,statuscode,_sprk_regardingproject_value," +
-            "_sprk_regardingmatter_value,_sprk_regardingworkassignment_value" +
-            // Task 187: the message's other parents, whose LIVE roots the rule takes in.
-            ",_sprk_communicationthread_value,_sprk_regardinganalysis_value,_sprk_regardingbudget_value,_sprk_regardingevent_value,_sprk_regardinginvoice_value,_sprk_regardingreportcard_value");
+            "$select=sprk_communicationid,sprk_direction,_sprk_sentby_value,_sprk_createdbycontact_value,_createdby_value,createdon," +
+            "sprk_isinternalonly,sprk_privilegeclassification,statuscode,_sprk_communicationthread_value," +
+            "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value," +
+            "_sprk_regardinganalysis_value,_sprk_regardingbudget_value,_sprk_regardingevent_value," +
+            "_sprk_regardinginvoice_value,_sprk_regardingreportcard_value");
         select.Should().NotContain("sprk_body").And.NotContain("sprk_subject");
+        // Task 062 rework: createdby is expanded to its applicationid + accessmode so the sender-name fallback can tell a
+        // person from the BFF's application user (nothing else of the user is read).
+        query.Should().Contain("&$expand=createdby($select=applicationid,accessmode)&");
     }
 
     [Fact]

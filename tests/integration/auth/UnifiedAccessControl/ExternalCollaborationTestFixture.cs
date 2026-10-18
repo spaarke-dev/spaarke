@@ -11,9 +11,9 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// Test host for the <c>/api/v1/external</c> collaboration group.
 ///
 /// Why this exists (fixture-config-FIRST per bff-extensions.md § F.2): the group is gated by
-/// <see cref="AuthPolicies.ExternalCollaboration"/>, which pins TWO named schemes —
-/// <c>AuthSchemes.Ciam</c> and <c>JwtBearerDefaults.AuthenticationScheme</c>
-/// (AuthorizationModule.cs:278-286). Naming schemes explicitly bypasses the default scheme, so
+/// <see cref="AuthPolicies.ExternalCollaboration"/>, which pins named schemes —
+/// <c>AuthSchemes.Ciam</c>, <c>JwtBearerDefaults.AuthenticationScheme</c> and (r3 task 045)
+/// <c>AuthSchemes.WorkforceHome</c> (AuthorizationModule.cs). Naming schemes explicitly bypasses the default scheme, so
 /// <see cref="WorkspaceTestFixture"/>'s <c>FakeAuthHandler</c> is never consulted on this group.
 /// The real <c>Ciam</c> JwtBearer handler is then asked to validate, and its authority is built from
 /// <c>Ciam:Instance</c> / <c>Ciam:TenantId</c> — config no fixture supplies — yielding a malformed

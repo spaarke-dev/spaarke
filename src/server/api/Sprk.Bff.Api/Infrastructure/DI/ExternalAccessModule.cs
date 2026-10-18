@@ -198,6 +198,11 @@ public static class ExternalAccessModule
         // AI-internal types are injected (broker-only, NFR-02).
         services.AddSingleton<IWorkforcePrincipalResolver, WorkforcePrincipalResolver>();
 
+        // ADR-028 A9 link proof (r3 task 048): validates the link route's body (guest) token with the DEFAULT scheme's own
+        // TokenValidationParameters and signing metadata, read through IOptionsMonitor<JwtBearerOptions> and never changed.
+        // Concrete (ADR-010); singleton (stateless; the options monitor and configuration are singletons).
+        services.AddSingleton<SpaarkeGuestTokenValidator>();
+
         // Standing-grant flag reader (teams-app-r1 task 022 — the task-051 composition seam). Reads the
         // FLS-secured contact.sprk_standinggrant boolean app-only via the already-registered
         // IDataverseService; gates a contact principal's standing-grant runtime membership term.
@@ -450,6 +455,10 @@ public static class ExternalAccessModule
             {
                 "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
                 "sprk_totalamount", "sprk_project", "sprk_matter",
+                // spaarke-SPA-external-access-platform-r3 (owner Partner UAT 2026-10-17, ebilling-r1 task 015 / D-41): NOT
+                // grid-derived. The invoice status is statuscode; the SPA record detail reads it. Transitional:
+                // sprk_invoicestatus stays until ebilling removes it from grid 3ff4102c and from dev.
+                "statuscode",
             },
         });
 

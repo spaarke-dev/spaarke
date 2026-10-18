@@ -931,7 +931,7 @@ public static class CommunicationEndpoints
     /// (edit-preserve). Returns the persisted name. NO Dataverse plugin — this BFF write is the only marker-flip
     /// path.
     /// </summary>
-    private static async Task<IResult> RenameThreadAsync(
+    internal static async Task<IResult> RenameThreadAsync(
         Guid threadId,
         RenameThreadRequest request,
         CommunicationThreadReadService readService,
@@ -972,7 +972,7 @@ public static class CommunicationEndpoints
     /// <see cref="IThreadResolver.SetPinnedAsync"/>. Returns the persisted pinned state. NO Dataverse plugin — this
     /// BFF write is the only pin-state write path.
     /// </summary>
-    private static async Task<IResult> SetThreadPinnedAsync(
+    internal static async Task<IResult> SetThreadPinnedAsync(
         Guid threadId,
         SetThreadPinnedRequest request,
         CommunicationThreadReadService readService,
@@ -1002,7 +1002,7 @@ public static class CommunicationEndpoints
     /// inaccessible thread), then sets statecode/statuscode to Inactive via
     /// <see cref="IThreadResolver.DeactivateThreadAsync"/>. Reversible — no physical delete, no Dataverse plugin.
     /// </summary>
-    private static async Task<IResult> DeactivateThreadAsync(
+    internal static async Task<IResult> DeactivateThreadAsync(
         Guid threadId,
         CommunicationThreadReadService readService,
         IThreadResolver threadResolver,
