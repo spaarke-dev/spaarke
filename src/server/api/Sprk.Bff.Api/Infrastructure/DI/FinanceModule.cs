@@ -82,6 +82,12 @@ public static class FinanceModule
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Billing.BillingFactLoader>();
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Billing.InvoiceComplianceEvaluator>();
 
+        // Submission rejection rule (ebilling-r1 task 073, FR-26, I-5, NFR-06; Processing Pipeline step 5): decides Accepted / Rejected from
+        // the evaluator's findings (consequence Reject, every read field at or above the threshold, reject-eligible type). Concrete (ADR-010:
+        // no interface, one implementation). Singleton: its only dependency is the singleton settings reader and it holds no state; the
+        // threshold is read on every decision, so a change applies at once. Unconditional (flag rule above). Caller: task 049.
+        services.AddSingleton<SubmissionRejectionRule>();
+
         // Invoice lifecycle (ebilling-r1 task 014, FR-06, I-6, ADR-002): the single server-side owner of sprk_invoice
         // statecode / statuscode. Scoped, unconditional (write-path owner; see the flag rule above). Callers: 103, 104, 150, 151.
         services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
