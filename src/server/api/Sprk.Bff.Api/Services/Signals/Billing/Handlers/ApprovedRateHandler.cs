@@ -68,15 +68,20 @@ internal static class ApprovedRateHandler
         HandlerContext context, BillingLineFacts line, decimal billed, decimal approved, decimal limit, RateResolution resolution)
     {
         decimal? reduction = null;
-        if (line.Hours is > 0)
-        {
-            reduction = BillingMath.ToCent((billed - approved) * line.Hours.Value);
-        }
-
         var values = new List<BillingValueRead>
         {
             context.LineField(line, "line.rate", BillingFieldNames.Rate, BillingText.Money(billed)),
-            context.LineHours(line),
+        };
+
+        // The hours are read only when the reduction is computed from them (the read-field contract for task 073).
+        if (line.Hours is > 0)
+        {
+            reduction = BillingMath.ToCent((billed - approved) * line.Hours.Value);
+            values.Add(context.LineHours(line));
+        }
+
+        values.AddRange(
+        [
             context.LineDate(line),
             context.LineTimekeeper(line),
             HandlerContext.Reference("approvedRate", BillingText.Money(approved)),
@@ -85,7 +90,7 @@ internal static class ApprovedRateHandler
             HandlerContext.Reference("approvedRate.scope", resolution.Scope?.ToString()),
             HandlerContext.Reference("rateCard.id", resolution.RateCardId?.ToString("D")),
             HandlerContext.Reference("rateCard.rateId", resolution.RateId?.ToString("D")),
-        };
+        ]);
 
         return context.Finding(
             BillingSubject.ForLine(line.Index),

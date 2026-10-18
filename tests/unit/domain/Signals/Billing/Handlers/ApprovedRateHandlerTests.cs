@@ -225,6 +225,33 @@ public class ApprovedRateHandlerTests
         finding.FactValues.Keys.Should().BeEquivalentTo(BillingRuleCatalogue.TemplateFactFields(RuleType.ApprovedRate));
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData(0.0)]
+    public void WhenTheReductionIsNotComputed_TheHoursAreNotRead_SoALowConfidenceHoursValueCannotHoldAFindingThatNeverUsedIt(double? hours)
+    {
+        var line = Line(700m, hours: (decimal?)hours) with { FieldConfidence = Confidence().With(BillingFieldNames.Hours, 0.20m) };
+
+        var finding = Run(RateRule(), Facts(line)).Single();
+
+        finding.ReadFields.Should().Equal(
+            new FieldRef(0, BillingFieldNames.Rate), new FieldRef(0, BillingFieldNames.Date), new FieldRef(0, BillingFieldNames.TimekeeperAsBilled));
+        finding.ValuesRead.Select(v => v.Name).Should().NotContain("line.hours");
+        finding.ReadsLowConfidenceValue.Should().BeFalse("the low-confidence hours were not used");
+    }
+
+    [Fact]
+    public void WhenTheReductionIsComputed_TheHoursAreRead_AndALowConfidenceHoursValueIsFlagged()
+    {
+        var line = Line(700m, hours: 2m) with { FieldConfidence = Confidence().With(BillingFieldNames.Hours, 0.20m) };
+
+        var finding = Run(RateRule(), Facts(line)).Single();
+
+        finding.ReadFields.Should().Contain(new FieldRef(0, BillingFieldNames.Hours));
+        finding.Value("line.hours").BelowReliabilityThreshold.Should().BeTrue();
+        finding.ReadsLowConfidenceValue.Should().BeTrue();
+    }
+
     [Fact]
     public void ALowConfidenceRate_IsCarriedAndMarkedUnreliable_SoItCannotRejectLater()
     {
