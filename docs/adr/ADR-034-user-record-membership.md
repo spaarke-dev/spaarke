@@ -409,6 +409,19 @@ group) while **`ExternalAccess:ImpersonatedRootSets:Enabled` is `true`**:
   child app-only: Dataverse would otherwise never check the user's Create privilege, and a user MDA refuses could create
   the row here (task 036 fix round 1). `Write` admits an edit; `Delete` admits a delete-own, which also still requires
   the creator stamp.
+- **A WorkforceHome-linked user is confirmed app-only, naming them** (task 036 decision (a), owner 2026-10-18). A
+  systemuser who signed in through WorkforceHome (ADR-028 A9) and was resolved through the stored home link holds a
+  customer-directory token, which cannot be exchanged for a Dataverse token in Spaarke's tenant. For that principal the
+  same two questions are asked app-only, as the BFF application user, naming the resolved systemuser:
+  `RetrievePrincipalAccess` with `Principal = systemusers(<id>)` on the target record
+  (`CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync`, over the existing
+  `DataverseWebApiService.RetrievePrincipalRightsAsync`), and `RetrieveUserSetOfPrivilegesByNames` on that systemuser for
+  the child Create privilege (`PrincipalHoldsPrivilegeAppOnlyAsync`). Both impersonate the user, like the A5 read, and
+  rest on the same trust basis: the id is the one the authenticated identity was resolved to, never client-supplied, and
+  Dataverse answers from that user's own roles, teams and shares. The path is chosen from the resolved principal
+  (`CallerPrincipal.ResolvedThroughHomeLink`), never by trying OBO and falling back; every Spaarke-tenant caller keeps
+  the OBO probe. The same answer drives that user's list `canCreate`, and `/me` says `writeAccessPerRecord: true` for
+  them as for every Dataverse-decided user.
 - **Exempt — a service request's writes** (upload to it, a message on it, deleting one's own request) keep the
   requester rule in both flag states and are not confirmed (task 036 decision e, accepted by the owner). The requester's
   access is explicit access Dataverse cannot see, like the B-17 contact grants: widening could add nothing, and replacing
@@ -451,7 +464,8 @@ Dataverse Read reaches a record through their unit's depth (owner D1).
   equivalent privileges), exactly as in the model-driven app.
 - **MUST** fail closed: a failed impersonated read (a fault, a missing or empty `SystemUserId`, no source) fails the
   composition; a failed, refused or absent rights answer adds no rights. **MUST NOT** fall back to the membership walk, an
-  app-only read or a constant.
+  app-only read or a constant. (The app-only, named-principal confirmation of a WorkforceHome-linked systemuser is not a
+  fallback: it is chosen from how that principal was resolved, and a fault on it adds no rights either.)
 - **MUST NOT** stamp `MembershipTermRights`, or any constant, on a record of a flag-on systemuser composition.
 - **MUST NOT** edit `PlatformOwnershipColumns`, or otherwise narrow A1.1, for the flag-off path.
 - **MUST NOT** turn the flag on in an environment before tasks 142 and 143 are complete there and the task 034 negative
@@ -473,12 +487,13 @@ Dataverse Read reaches a record through their unit's depth (owner D1).
   route's own Dataverse answer and `/me` says `writeAccessPerRecord`, so the SPA offers create/upload, download and the
   to-do status toggle where the routes admit them. Still level-gated for such a user: Invite User and the issued-grants
   list (contact-grant routes refuse a systemuser, so hiding them is correct).
-- **WorkforceHome-linked users (ADR-028 A9) cannot be confirmed.** A customer-directory token cannot be exchanged for a
-  Dataverse token in Spaarke's tenant, so under the flag such a user's writes are refused unless a contact grant allows
-  them (task 036 open question a, with the owner). Turning the flag on in a tenant with such users waits for that
-  decision.
-- **The 5,000 cap has no ordering** (register item C-1): a capped set is flagged, but which records it keeps is an owner
-  decision, escalated by task 036.
+- **WorkforceHome-linked users (ADR-028 A9) are confirmed app-only** (settled, task 036 decision (a), owner 2026-10-18;
+  above). Their writes and their lists' `canCreate` follow Dataverse's answer for their own systemuser, as in the
+  model-driven app, so such a tenant needs nothing beyond the flag's other preconditions.
+- **A capped set keeps the most recently modified records** (register item C-1; settled, task 036 decision (f), owner
+  2026-10-18): the impersonated read orders by `modifiedon desc` before its 5,000-row `$top`, and the cap is still
+  flagged. The flag-off membership walk keeps its own total order (primary id ascending, FR-14), which its page cookies
+  depend on.
 
 ---
 

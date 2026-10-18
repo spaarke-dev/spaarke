@@ -1665,6 +1665,71 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     }
 
     /// <summary>
+    /// Whether <paramref name="principalSystemUserId"/> holds the named table privilege (e.g. <c>prvCreatesprk_Todo</c>) at
+    /// any depth, as Dataverse answers it: <c>systemusers({id})/RetrieveUserSetOfPrivilegesByNames</c> bound to that user
+    /// and asked AS that user (<c>MSCRMCallerID</c>) — the privilege twin of <see cref="RetrievePrincipalRightsAsync"/>, for
+    /// a caller that acts for a user and holds no token of theirs (unified-access-control-r2 task 036 decision (a): a
+    /// WorkforceHome-linked systemuser, whose customer-directory token cannot be exchanged for Dataverse).
+    /// </summary>
+    /// <remarks>
+    /// <para><paramref name="privilegeName"/> is sent exactly as given — Dataverse privilege names are case-sensitive on
+    /// this function. The answer's <c>RolePrivileges</c> are read the way <c>CallerRecordAccessProbe.ResponseGrantsPrivilege</c>
+    /// reads the same function's answer on the OBO path: held when an entry names the privilege; an empty or absent array
+    /// is "not held".</para>
+    /// <para><b>An answer versus a fault.</b> Any non-success status THROWS (an impersonation fault, throttling, a 5xx), and
+    /// an unparseable body throws, so a caller can tell "not held" from a check that could not run; it denies on both.</para>
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="principalSystemUserId"/> is <see cref="Guid.Empty"/>, or
+    /// <paramref name="privilegeName"/> is blank.</exception>
+    /// <exception cref="HttpRequestException">Dataverse did not answer.</exception>
+    public async Task<bool> PrincipalHoldsPrivilegeAsync(
+        Guid principalSystemUserId,
+        string privilegeName,
+        CancellationToken ct = default)
+    {
+        if (principalSystemUserId == Guid.Empty)
+            throw new ArgumentException("A principal systemuserid is required.", nameof(principalSystemUserId));
+        if (string.IsNullOrWhiteSpace(privilegeName))
+            throw new ArgumentException("A privilege name is required.", nameof(privilegeName));
+
+        var names = Uri.EscapeDataString(JsonSerializer.Serialize(new[] { privilegeName }));
+        using var response = await SendGetAsync(
+            $"systemusers({principalSystemUserId:D})/Microsoft.Dynamics.CRM.RetrieveUserSetOfPrivilegesByNames(PrivilegeNames=@p1)?@p1={names}",
+            ct,
+            impersonateSystemUserId: principalSystemUserId);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                $"RetrieveUserSetOfPrivilegesByNames as {principalSystemUserId:D} for {privilegeName} answered "
+                + $"{(int)response.StatusCode} {response.StatusCode}.",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+
+        var body = await response.Content.ReadAsStringAsync(ct);
+        using var document = JsonDocument.Parse(body);
+        if (!document.RootElement.TryGetProperty("RolePrivileges", out var privileges)
+            || privileges.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var privilege in privileges.EnumerateArray())
+        {
+            if (privilege.ValueKind == JsonValueKind.Object
+                && privilege.TryGetProperty("PrivilegeName", out var name)
+                && name.ValueKind == JsonValueKind.String
+                && string.Equals(name.GetString(), privilegeName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Dataverse's error code for an ACCESS-CHECK denial (<c>PrincipalPrivilegeDenied</c> / "SecLib::AccessCheckEx
     /// failed") — the one 403 that is an answer about the principal's rights rather than a fault of the request.
     /// </summary>

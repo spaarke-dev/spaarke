@@ -542,6 +542,31 @@ public class WorkforcePrincipalResolverTests
         AssertNothingWritten(dataverse, identity);
     }
 
+    [Fact(DisplayName = "Task 036 (a): a systemuser resolved through the stored home link is marked so — its writes are confirmed app-only")]
+    public async Task Home_StoredLinkToAnEnabledSystemUser_IsMarkedResolvedThroughTheHomeLink()
+    {
+        AddLinkedSystemUser(TestSystemUserId, HomeTenant, HomeOid);
+        var (sut, _, _) = HomeSut(derivedContact: TestContactId);
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue(result.DenyCode);
+        result.Principal!.ResolvedThroughHomeLink.Should().BeTrue(
+            "its customer-directory token cannot be exchanged for Dataverse, so the principal must say how it signed in");
+    }
+
+    [Fact(DisplayName = "Task 036 (a) twin: a WorkforceHome contact is not marked (it is never a Dataverse-decided caller)")]
+    public async Task Home_WorkforceHomeContact_IsNotMarkedResolvedThroughTheHomeLink()
+    {
+        AddHomeContact(TestContactId, HomeTenant, HomeOid);
+        var (sut, _, _) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue(result.DenyCode);
+        result.Principal!.ResolvedThroughHomeLink.Should().BeFalse();
+    }
+
     [Fact]
     public async Task Home_StoredLinkToADisabledSystemUser_IsDeniedSystemUserDisabled_AndNeverReachesTheContactLookup()
     {

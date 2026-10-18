@@ -1445,6 +1445,221 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         json.TryGetProperty("canCreate", out _).Should().BeFalse();
         _fixture.Probe.Calls.Should().BeEmpty();
     }
+
+    // =====================================================================
+    // Task 036 owner decision (a), 2026-10-18: a WorkforceHome-linked systemuser (ADR-028 A9) signs in with a
+    // customer-directory token, which cannot be exchanged OBO for Dataverse in Spaarke's tenant. Its confirmations ask the
+    // SAME questions app-only, naming its systemuser (CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync /
+    // PrincipalHoldsPrivilegeAppOnlyAsync). The double answers the app-only questions separately from the OBO ones, so an
+    // allow below can only come from the app-only path; before the change the OBO path found nothing and refused.
+    // =====================================================================
+
+    /// <summary><see cref="SystemUserHolding"/>, resolved through the WorkforceHome home link.</summary>
+    private static CallerPrincipal HomeLinkedSystemUserHolding(
+        ExternalDataService.TodoRootKind kind, Guid rootId, AccessRights rights, Guid? systemUserId = null)
+    {
+        var principal = SystemUserHolding(kind, rootId, rights, dataverseDecides: true);
+        return new CallerPrincipal
+        {
+            Plane = principal.Plane,
+            ContactId = principal.ContactId,
+            SystemUserId = systemUserId ?? principal.SystemUserId,
+            Email = principal.Email,
+            ProjectAccess = principal.ProjectAccess,
+            MatterAccess = principal.MatterAccess,
+            WorkAssignmentAccess = principal.WorkAssignmentAccess,
+            DataverseConfirmsWrites = true,
+            ResolvedThroughHomeLink = true,
+        };
+    }
+
+    [Theory(DisplayName = "Task 036 (a): a WorkforceHome-linked systemuser holding Write on the to-do edits it — asked app-only, naming its systemuser; Read only is refused")]
+    [InlineData(AccessRights.Read | AccessRights.Write, HttpStatusCode.NoContent, 1)]
+    [InlineData(AccessRights.Read, HttpStatusCode.Forbidden, 0)]
+    public async Task Fr20a_HomeLinkedSystemUser_PatchTodo_IsConfirmedAppOnlyOnTheTodo(
+        AccessRights dataverse, HttpStatusCode expected, int updates)
+    {
+        _fixture.Reset();
+        _fixture.Principal = HomeLinkedSystemUserHolding(ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read);
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_todos", TodoId, dataverse);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(expected);
+        _fixture.Data.UpdateCallCount.Should().Be(updates);
+        _fixture.Probe.AppOnlyCalls.Should().Equal(new[] { (Fr20SystemUser, "sprk_todos", TodoId) },
+            "the to-do is asked about, app-only, naming the RESOLVED systemuser");
+        _fixture.Probe.Calls.Should().BeEmpty("a customer-directory token is never tried OBO first — no fallback either way");
+    }
+
+    [Theory(DisplayName = "Task 036 (a): a WorkforceHome-linked systemuser with AppendTo plus prvCreatesprk_Todo creates a child to-do; either missing is refused")]
+    [MemberData(nameof(InScopeRoots))]
+    public async Task Fr20a_HomeLinkedSystemUser_CreateTodo_NeedsAppendToAndTheCreatePrivilege_AskedAppOnly(
+        string segment, ExternalDataService.TodoRootKind kind, Guid rootId)
+    {
+        // Both held → created.
+        _fixture.Reset();
+        _fixture.Principal = HomeLinkedSystemUserHolding(kind, rootId, AccessRights.Read);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, EntitySetOf(kind), rootId, AccessRights.Read | AccessRights.AppendTo)
+            .HoldsAppOnly(Fr20SystemUser, TodoCreatePrivilege);
+
+        using (var client = _fixture.CreateAuthenticatedClient())
+        {
+            var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/todos", ValidCreate());
+            response.StatusCode.Should().Be(HttpStatusCode.Created);
+        }
+
+        _fixture.Data.CreateCallCount.Should().Be(1);
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().Equal(new[] { (Fr20SystemUser, TodoCreatePrivilege) },
+            "the exact, case-sensitive privilege name the OBO path asks");
+        _fixture.Probe.Calls.Should().BeEmpty();
+        _fixture.Probe.PrivilegeCalls.Should().BeEmpty();
+
+        // AppendTo without the privilege → refused, nothing written.
+        _fixture.Reset();
+        _fixture.Principal = HomeLinkedSystemUserHolding(kind, rootId, AccessRights.Read);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, EntitySetOf(kind), rootId,
+            AccessRights.Read | AccessRights.Write | AccessRights.AppendTo);
+
+        using (var client = _fixture.CreateAuthenticatedClient())
+        {
+            var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/todos", ValidCreate());
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+
+        _fixture.Data.CreateCallCount.Should().Be(0);
+
+        // The privilege without AppendTo → refused, and the privilege is not even asked.
+        _fixture.Reset();
+        _fixture.Principal = HomeLinkedSystemUserHolding(kind, rootId, AccessRights.Read);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, EntitySetOf(kind), rootId, AccessRights.Read | AccessRights.Write)
+            .HoldsAppOnly(Fr20SystemUser, TodoCreatePrivilege);
+
+        using (var client = _fixture.CreateAuthenticatedClient())
+        {
+            var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/todos", ValidCreate());
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+
+        _fixture.Data.CreateCallCount.Should().Be(0);
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "Task 036 (a) (NFR-01): a fault on the app-only rights or privilege call refuses — no fallback to OBO or a constant")]
+    [InlineData("rights")]
+    [InlineData("privilege")]
+    public async Task Fr20a_HomeLinkedSystemUser_AnAppOnlyFault_Refuses(string faulting)
+    {
+        _fixture.Reset();
+        _fixture.Principal = HomeLinkedSystemUserHolding(ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo)
+            .HoldsAppOnly(Fr20SystemUser, TodoCreatePrivilege);
+        // The OBO path would allow, were it (wrongly) asked after the fault.
+        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo).Holds(TodoCreatePrivilege);
+        if (faulting == "rights")
+        {
+            _fixture.Probe.AppOnlyFault = new HttpRequestException("RetrievePrincipalAccess failed");
+        }
+        else
+        {
+            _fixture.Probe.AppOnlyPrivilegeFault = new HttpRequestException("RetrieveUserSetOfPrivilegesByNames failed");
+        }
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.CreateCallCount.Should().Be(0);
+        _fixture.Probe.Calls.Should().BeEmpty("a fault on the app-only path is never retried OBO");
+        _fixture.Probe.PrivilegeCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Task 036 (a): a WorkforceHome-linked principal with no systemuser id is refused, and asks nothing OBO")]
+    public async Task Fr20a_HomeLinkedPrincipal_WithoutASystemUserId_FailsClosed()
+    {
+        _fixture.Reset();
+        _fixture.Principal = HomeLinkedSystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, systemUserId: Guid.Empty);
+        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo).Holds(TodoCreatePrivilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.CreateCallCount.Should().Be(0);
+        _fixture.Probe.AppOnlyCalls.Should().OnlyContain(c => c.SystemUserId == Guid.Empty,
+            "the empty id reaches the app-only probe, which refuses it — it is never swapped for the caller's token");
+        _fixture.Probe.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Task 036 (a) twin: a Spaarke-tenant systemuser keeps the OBO probe and the app-only path is never called")]
+    public async Task Fr20a_ANormalSystemUser_StillUsesObo_AndNeverTheAppOnlyPath()
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo).Holds(TodoCreatePrivilege);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo)
+            .HoldsAppOnly(Fr20SystemUser, TodoCreatePrivilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        _fixture.Probe.Calls.Should().ContainSingle();
+        _fixture.Probe.PrivilegeCalls.Should().Equal(new[] { TodoCreatePrivilege });
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty("a caller whose token CAN be exchanged is asked OBO, as before");
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Task 036 (a) twin: a contact caller is unaffected — its grants decide and neither path is asked")]
+    public async Task Fr20a_AContactCaller_IsUnaffected()
+    {
+        _fixture.Reset();
+        _fixture.Principal = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = Guid.Parse("99999999-9999-9999-9999-999999999999"),
+            Email = "contact@customer.test",
+            ProjectAccess = new[] { CallerProjectAccess.FromLevel(InScopeProject, ExternalAccessLevel.Collaborate) },
+        };
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read)
+            .HoldsAppOnly(Fr20SystemUser, TodoCreatePrivilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        _fixture.Probe.Calls.Should().BeEmpty();
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty();
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "Task 036 (a): a WorkforceHome-linked systemuser's to-do list canCreate is the create route's app-only answer")]
+    [InlineData(AccessRights.Read | AccessRights.Write | AccessRights.AppendTo, true, true)]
+    [InlineData(AccessRights.Read | AccessRights.Write | AccessRights.AppendTo, false, false)]
+    [InlineData(AccessRights.Read, true, false)]
+    public async Task Fr20a_HomeLinkedSystemUser_TodoList_CanCreate_IsTheAppOnlyAnswer(
+        AccessRights dataverse, bool holdsCreate, bool expected)
+    {
+        _fixture.Reset();
+        _fixture.Principal = HomeLinkedSystemUserHolding(ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, dataverse);
+        if (holdsCreate)
+        {
+            _fixture.Probe.HoldsAppOnly(Fr20SystemUser, TodoCreatePrivilege);
+        }
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var json = await ListJsonAsync(client, $"/api/v1/external/projects/{InScopeProject}/todos");
+
+        json.GetProperty("canCreate").GetBoolean().Should().Be(expected,
+            "the SPA offers exactly what the create route will allow");
+        _fixture.Probe.AppOnlyCalls.Should().ContainSingle("one app-only probe, for the record in hand");
+        _fixture.Probe.Calls.Should().BeEmpty();
+    }
 }
 
 /// <summary>

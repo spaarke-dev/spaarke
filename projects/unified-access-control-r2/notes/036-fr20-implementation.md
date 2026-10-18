@@ -25,7 +25,7 @@ response as `"truncated": true`.
 | CIAM contact | `CiamContact` | grants (unchanged) | grants (unchanged). `DataverseConfirmsWrites` is never set — no probe call |
 | Workforce contact (no licence) | `Workforce`, no `SystemUserId` | grants (unchanged) | unchanged — no probe call |
 | Systemuser | `Workforce` + `SystemUserId` | membership walk at `MembershipTermRights` ∪ linked-contact grants | impersonated set at Read ∪ linked-contact grants; writes confirmed by the probe |
-| WorkforceHome-linked systemuser (ADR-028 A9) | `Workforce` (scheme decides first — the WorkforceHome guard in `DeterminePlane` is untouched) | as systemuser | as systemuser for the read set; **the probe cannot exchange a customer-directory token**, so its writes deny unless grants allow (open question a) |
+| WorkforceHome-linked systemuser (ADR-028 A9) | `Workforce` (scheme decides first — the WorkforceHome guard in `DeterminePlane` is untouched) | as systemuser | as systemuser for the read set. Its customer-directory token cannot be exchanged, so its writes are confirmed **app-only, naming its systemuser** (decision a, owner 2026-10-18; §12) — chosen from `CallerPrincipal.ResolvedThroughHomeLink`, never as a fallback from OBO |
 
 `WorkforcePrincipalStrategy` sets `CallerPrincipal.DataverseConfirmsWrites` from `Sources.ImpersonatedRootSet` (any of
 the three root types; the flag is read once per composition, so the three sets agree — if flags ever become per type,
@@ -270,6 +270,7 @@ after: **10 / 10**.
 | Flag on, each confirmed write (to-do, upload, event, PATCH, message) | +1 RetrievePrincipalAccess as the caller (OBO; the token exchange is MSAL-cached) |
 | Flag on, a child create Dataverse answers AppendTo for (to-do, upload, event, message) — fix round 1 | +1 privilege read as the caller (WhoAmI + `RetrieveUserSetOfPrivilegesByNames`; uncached). Not asked when the answer lacks AppendTo or a contact grant already carries Create |
 | Flag on, delete-own | +1 RPA on the row, after the existing reads |
+| Flag on, a WorkforceHome-linked systemuser (decision a, §12) | The same counts on the app-only path: +1 app-only RPA naming the systemuser per confirmed write (and per single-record view), +1 app-only `RetrieveUserSetOfPrivilegesByNames` on that systemuser when the answer has AppendTo. No WhoAmI and no token exchange; uncached, as on the OBO path |
 | Flag on, a single-record list (documents of X, to-dos of X, a project's events) — fix round 1 | +1 RPA on X, + the privilege read when it answers AppendTo: **+1 probe per single-record view** |
 | Flag on, `/me`, module fetch, multi-record reads | 0 |
 | Flag off; CIAM; workforce contacts | 0 |
@@ -371,9 +372,15 @@ two sizes in `notes/task-034-negative-canary.md`.
 ## 8. Open questions and escalations
 
 Status after fix round 1 (main-session decisions, 2026-10-17): (b), (c), (d), (e), (g) and the enforcement follow-up are
-settled; **(a) and (f) are open with the owner.**
+settled. **(a) and (f) were DECIDED by the owner on 2026-10-18** and are built (§12). Every question is now settled.
 
-- **(a) OPEN — owner. WorkforceHome-linked systemusers can't be probed.** The OBO probe cannot exchange a
+- **(a) DECIDED (owner, 2026-10-18): option 2, built (§12).** A systemuser resolved through the WorkforceHome stored
+  home link is confirmed app-only, naming that systemuser: `RetrievePrincipalAccess` with `Principal =
+  systemusers(<id>)` for the row rights, and `RetrieveUserSetOfPrivilegesByNames` on that systemuser for the child
+  Create privilege. The path is chosen from the resolved principal (`CallerPrincipal.ResolvedThroughHomeLink`), never
+  by trying OBO and falling back; OBO callers are unchanged. It fails closed (fault, missing id, unreadable answer),
+  is uncached, and drives both the write routes and the lists' `canCreate`. The original analysis follows.
+- *(as escalated)* **WorkforceHome-linked systemusers can't be probed.** The OBO probe cannot exchange a
   customer-directory (A9) token for a Dataverse token in Spaarke's tenant, so under the flag such a user's writes deny
   unless contact grants allow — and since fix round 1, their single-record lists report `canCreate: false` (the same
   answer, fail closed). Options:
@@ -384,7 +391,7 @@ settled; **(a) and (f) are open with the owner.**
      systemuser), used only for callers whose token cannot be exchanged. Same trust basis as the A5 impersonated read
      (the BFF application user asks Dataverse about a systemuser the authenticated identity was resolved to), so it adds
      no new trust; Dataverse still answers from that user's own roles, teams and shares. Needs owner + ADR-028 sign-off
-     (it departs from the probe's caller-token design). **Not built here.**
+     (it departs from the probe's caller-token design). **Chosen by the owner; built in §12.**
   3. Keep the flag off for tenants with WorkforceHome-linked users.
 - **(b) Settled.** D3 as revised in fix round 1 (AppendTo + the child Create privilege → Create).
 - **(c) Accepted.** Delete-own needs Dataverse Delete on the row as well as the creator stamp (D5, D15) — MDA parity: a
@@ -396,7 +403,11 @@ settled; **(a) and (f) are open with the owner.**
   the requester's access is explicit access Dataverse cannot see, like the B-17 contact grants. The owner can reverse
   this (requiring a Dataverse answer would refuse requesters whose request is owned by another BU's team). The guard
   lists the three routes as exemptions citing this decision.
-- **(f) OPEN — owner. C-1 ordering.** The impersonated read is `$select=<id>&$top=5000` with no `$orderby`, so which
+- **(f) DECIDED (owner, 2026-10-18): option 2, built (§12).** The impersonated read is now
+  `$select=<id>&$orderby=modifiedon desc&$top=5000`, so a capped set keeps the most recently modified records; the cap
+  is still flagged (Truncated / Capped unchanged). The cache key version is bumped to 2 so no entry from the old query
+  shape is served. The flag-off membership walk keeps primary-id ascending order (§12). The original analysis follows.
+- *(as escalated)* **C-1 ordering.** The impersonated read was `$select=<id>&$top=5000` with no `$orderby`, so which
   5,000 records a capped set keeps is Dataverse's default order. The cap is flagged (`truncated`). Options: (1) leave the
   default order (no extra sort; arbitrary but stable enough for a flagged cap); (2) `$orderby=modifiedon desc` (the most
   recently active records survive a cap — matches what a user expects to see; one index-backed sort per read); (3)
@@ -406,12 +417,11 @@ settled; **(a) and (f) are open with the owner.**
   Event / Upload Document from the record's list `canCreate` for such a caller and keeps the level rule for everyone else
   (§10). Fix round 2 (§11): download and version history are offered wherever the list rendered, and the project to-do
   status toggle is offered with PATCH deciding.
-- **(a) is now an enabling precondition** in the deployment guide (§12.8 precondition 3), the template comment and ADR-034
-  A2's residuals: in a tenant with WorkforceHome-linked systemusers, every write of theirs is refused under the flag until
-  (a) is settled.
+- **WorkforceHome is no longer a precondition.** With (a) built, the deployment guide (§12.8 precondition 3), the template
+  comment and ADR-034 A2 describe the app-only confirmation instead of "refused under the flag until (a) is settled".
 - **(h) Pre-existing, fixed in scope:** flag-off membership `Capped` was silently dropped (D11).
-- **Rollout:** default off; enabled on dev only after the canary passes strictly smaller and 142 and 143 are done, and
-  (a) is decided. No date can be named yet. Flag-off is transitional and does **not** close the flag-off BU over-grant.
+- **Rollout:** default off; enabled on dev only after the canary passes strictly smaller and 142 and 143 are done. No
+  date can be named yet. Flag-off is transitional and does **not** close the flag-off BU over-grant.
 - **Enforcement — built (fix round 1):** `RouteAuthorizationGuardTests.ExternalWrites` (§2.4, D14).
 
 ### Known limits (fix round 1)
@@ -498,4 +508,77 @@ From adversarial passes A and B. Tests and fail-before: §4 "Fix round 2 additio
 - **Ledger line citations drift.** `RouteAuthorizationGuardTests.Ledger.cs` reasons cite `ExternalProjectDataEndpoints.cs`
   lines in prose; they are not asserted and were already stale before this round.
 - Carried from fix round 1: Append not checked; to-do / event create offered only on `ProjectPage`; the invoice document
-  list may 503 like upload; +1 probe per single-record view; (a) and (f) open with the owner.
+  list may 503 like upload; +1 probe per single-record view. ((a) and (f) were open here; decided 2026-10-18, §12.)
+
+## 12. Owner decisions (a) and (f) (2026-10-18) — before → after
+
+| # | Item | Before | After |
+|---|---|---|---|
+| a | A WorkforceHome-linked systemuser's writes under the flag | The OBO probe could not exchange the customer-directory token, so every write was refused unless a contact grant allowed it (service-request writes excepted), and the user's single-record lists said `canCreate: false` | Dataverse is asked app-only, naming the resolved systemuser: `RetrievePrincipalAccess` with `Principal = systemusers(<id>)` for the row (`CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync`, over the existing `DataverseWebApiService.RetrievePrincipalRightsAsync`), and `RetrieveUserSetOfPrivilegesByNames` on that systemuser for the child Create privilege (`PrincipalHoldsPrivilegeAppOnlyAsync`, over the new `DataverseWebApiService.PrincipalHoldsPrivilegeAsync`). The same AppendTo + `prvCreate<child>` / Write / Delete rules apply, and the same answer drives the list `canCreate`; `/me` already said `writeAccessPerRecord` |
+| a | Path choice | — | From the resolved principal: `WorkforcePrincipalResolver.ResolveLinkedHomeSystemUserAsync` marks `WorkforcePrincipal.ResolvedThroughHomeLink`; `WorkforcePrincipalStrategy` carries it to `CallerPrincipal.ResolvedThroughHomeLink` (systemusers only); `ExternalProjectDataEndpoints.CallerRightsReader` / `CallerPrivilegeReader` pick the app-only delegate when it is set (`AppOnlyConfirmationPrincipal`). Never "try OBO, fall back". Every other caller gets the OBO readers exactly as before, and no route call site changed (`ExternalMessageEndpoints` uses the same factories). The WorkforceHome guard stays first in `ResolveAsync` |
+| a | Fail closed | — | A fault, a missing (`Guid.Empty`) systemuser id, a blank entity set or privilege, no client, a non-success response or malformed JSON → no rights (`None` / `false`); the caller's own cancellation is rethrown. Uncached (the OBO probe caches nothing either). Logged as `[DELEGATION] … via app-only-named-principal`, and the route log says `answered via {Path}`; ids only, no tokens or names |
+| f | Which 5,000 records a capped impersonated set keeps | Dataverse's default order (`$select=<id>&$top=5000`) | `$select=<id>&$orderby=modifiedon desc&$top=5000` (`ImpersonatedRootSetSource.cs`): the most recently modified survive. Truncated / Capped unchanged. `CacheVersion` 1 → 2, so no set read under the old shape is served after deploy |
+| f | Flag-off membership cap order | Primary id ascending (`MembershipResolverService.cs:1092-1096`) | **Unchanged, reported.** It is the FR-14 stable total order the paging cookie depends on, in the canonical resolver that AI scoping shares. `modifiedon` is not unique, so switching needs a two-key order, a paging-cookie re-check and resolver-wide test changes: not trivial, so not done here |
+
+**Tests** (fail-before by neutering in place, then restoring and `cmp`-checking all five files):
+
+| Test | Proves | Before |
+|---|---|---|
+| `ExternalTodoScopeTests.Fr20a_HomeLinkedSystemUser_PatchTodo_IsConfirmedAppOnlyOnTheTodo` (Write / no Write) | an edit is allowed with Write and refused without; the app-only RPA is on the to-do; OBO is never called | fail (both) |
+| `…Fr20a_HomeLinkedSystemUser_CreateTodo_NeedsAppendToAndTheCreatePrivilege_AskedAppOnly` (×3 roots) | AppendTo + `prvCreatesprk_Todo`, both asked app-only | fail (all) |
+| `…Fr20a_HomeLinkedSystemUser_AnAppOnlyFault_Refuses` (rights / privilege) | a fault refuses, nothing is written, OBO is never tried | fail (both) |
+| `…Fr20a_HomeLinkedPrincipal_WithoutASystemUserId_FailsClosed` | a missing id is refused with no Dataverse call | fail |
+| `…Fr20a_ANormalSystemUser_StillUsesObo_AndNeverTheAppOnlyPath` | OBO unchanged; the app-only path is never called | pass (twin) |
+| `…Fr20a_AContactCaller_IsUnaffected` | a contact: no probe of either kind | pass (twin) |
+| `…Fr20a_HomeLinkedSystemUser_TodoList_CanCreate_IsTheAppOnlyAnswer` (×3) | the list `canCreate` follows the app-only answer | fail (all) |
+| `CallerPrincipalTests.Me_HomeLinkedDataverseDecidedSystemUser_SaysWriteAccessIsPerRecord` | `/me` says `writeAccessPerRecord` | pass (by design: `/me` asks nothing, D8) |
+| `CallerPrincipalResolverTests.WorkforceStrategy_CarriesTheHomeLink_FromTheResolvedPrincipal` (×3) | the strategy carries the flag for a home-linked systemuser only | 1 fail (home-linked) / 2 pass (twins) |
+| `WorkforcePrincipalResolverTests.Home_StoredLinkToAnEnabledSystemUser_IsMarkedResolvedThroughTheHomeLink` / `Home_WorkforceHomeContact_IsNotMarkedResolvedThroughTheHomeLink` | the resolver marks the home-link branch only | fail / pass (twin) |
+| `CallerRecordAccessProbeAppOnlyTests` (new, 19) | the wire shape over the OfflineService pattern: the URL, `MSCRMCallerID` = the principal, the app-only bearer, the exact privilege name; 7 fail-closed rows each for rights and privilege; cancellation rethrown | 5 fail / 14 pass (the fail-closed rows hold either way) |
+| `ImpersonatedRootSetSourceTests.GetAsync_OrdersByMostRecentlyModified_SoACappedSetKeepsTheNewest` (×3 root types) | the query carries `$orderby=modifiedon desc` before `$top=5000`; `CacheVersion` ≥ 2 | fail (all) |
+
+New tests in all: **41 cases; 21 failed and 20 passed before; 41 pass after.** The 20 that pass before are twins,
+fail-closed rows (they hold on both paths) and the `/me` row.
+
+**Verification:**
+
+- `dotnet build src/server/api/Sprk.Bff.Api/` — 0 warnings, 0 errors.
+- Filtered unit + integration run (the touched classes plus `ExternalAccessContractTests`, `ExternalDeleteOwnTests`,
+  `CallerPrincipalTests`, `AccessibleRecordSetServiceTests`, `ImpersonationNegativeCanaryTests`,
+  `ExternalRecordDocumentRoutesTests`, `ExternalMessageSendTests`, `DataverseRecordShareWireTests`,
+  `CallerPrivilegeCheckTests`, `DelegationProbeFailClosedTests`, `AccessCacheInvalidationTests`,
+  `AccessCacheFaultCachingTests`): **1006 / 1006 passed**.
+- ArchTests `RouteAuthorizationGuard*|TenantIsolation|CallerIdentityGuard|PoaShareClientSingletonGuard|ADR010`:
+  **186 / 186 passed** (`RouteAuthorizationGuardTests.ExternalWrites` included).
+- SPA: not changed, so no vitest run.
+
+**Publish size** (`dotnet publish -c Release -r linux-x64 --self-contained false`, zipped with `Compress-Archive
+-CompressionLevel Optimal`): fresh master `a82578cdc` is 39,190,821 B zipped / 130,852,348 B on disk; this commit is
+39,203,219 B / 130,883,556 B, so **+12,398 B zipped vs master** (+6,501 B is the rest of PR #2078 at `953fd6446`;
++5,897 B is this change). The file list is the same, `deps.json` is identical, and no package was added. The total is
+about 39.2 MB zipped, well under 55 MB.
+
+**Component justification (CLAUDE.md §11):**
+
+1. *Existing* — `CallerRecordAccessProbe` (OBO only), `DataverseWebApiService.RetrievePrincipalRightsAsync` (app-only +
+   impersonation, reused as is), `UserPrivilegeChecker` (Read only, cached 24 h — the wrong cache for a write gate),
+   `IDataverseRecordShareService` (the POA seam, not a privilege reader).
+2. *Extension* — the probe gains two virtual methods and an optional constructor dependency on the existing
+   `DataverseWebApiService` singleton (resolved by `ActivatorUtilities`): **no new interface, no DI registration**.
+   `DataverseWebApiService` gains one privilege read next to its existing RetrievePrincipalAccess wrapper, because no
+   app-only privilege-by-name read existed (the others go through `IDataverseUserClient`, OBO). `WorkforcePrincipal` and
+   `CallerPrincipal` each gain one init property.
+3. *Cost of doing nothing* — under the flag, every write by a WorkforceHome-linked systemuser is refused (except
+   service-request and grant-allowed writes) and their lists say `canCreate: false`, so the flag could not be enabled for
+   a tenant whose internal users sign in through WorkforceHome.
+
+**Known notes:**
+
+- The app-only RetrievePrincipalAccess has no 404 replication-lag retry; the OBO `GetCallerRightsAsync` retries a 404
+  twice. A 404 answers no rights (fail closed), so the effect is at most a spurious refusal right after a record is
+  created.
+- The privilege-response parse exists twice: `Spaarke.Dataverse` cannot reference the BFF's `ResponseGrantsPrivilege`.
+- `modifiedon desc` has no tie-breaker (kept exactly as decided). Ties matter only at the 5,000-row boundary of a set
+  that is already flagged as capped.
+- The concise ADR edits (ADR-034 A2; ADR-028 A5, with an optional A9 pointer) are drafted for the main session in
+  `036-adr-edits-owner-a-f.md`. Edit 5c of `036-adr034-concise-amendment.md` is marked superseded.

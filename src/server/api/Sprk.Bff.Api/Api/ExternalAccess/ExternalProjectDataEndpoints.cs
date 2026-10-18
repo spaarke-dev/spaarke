@@ -946,8 +946,11 @@ public static class ExternalProjectDataEndpoints
 
         logger.LogInformation(
             "[WF-AUTHZ] Dataverse-confirmed write rights for systemuser {SystemUserId} on {EntitySet} {RecordId}: Dataverse " +
-            "{Dataverse} -> {Surface} (composed {Composed}).",
-            caller.SystemUserId, entitySet, recordId, dataverse, surface, composed);
+            "{Dataverse} -> {Surface} (composed {Composed}; answered via {Path}).",
+            caller.SystemUserId, entitySet, recordId, dataverse, surface, composed,
+            AppOnlyConfirmationPrincipal(caller) is null
+                ? CallerRecordAccessProbe.OboPath
+                : CallerRecordAccessProbe.AppOnlyNamedPrincipalPath);
         return composed | surface;
     }
 
@@ -1016,11 +1019,21 @@ public static class ExternalProjectDataEndpoints
 
     /// <summary>
     /// The Dataverse rights reader for <see cref="WithDataverseRightsAsync"/>: the existing
-    /// <see cref="CallerRecordAccessProbe"/> (OBO, as the caller, fail closed) with this request's bearer token.
+    /// <see cref="CallerRecordAccessProbe"/> (OBO, as the caller, fail closed) with this request's bearer token — or, for a
+    /// WorkforceHome-linked systemuser (<see cref="AppOnlyConfirmationPrincipal"/>, task 036 owner decision (a)), the same
+    /// question asked app-only naming that systemuser (<see cref="CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync"/>).
     /// </summary>
+    /// <remarks>The path comes from the request's resolved principal, never from a failed exchange: there is no OBO
+    /// attempt and fallback, so an OBO fault can never become an app-only answer. Every other caller gets the OBO reader
+    /// exactly as before.</remarks>
     internal static Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>> CallerRightsReader(
         CallerRecordAccessProbe probe, HttpContext httpContext)
     {
+        if (AppOnlyConfirmationPrincipal(GetCallerPrincipal(httpContext)) is { } systemUserId)
+        {
+            return (entitySet, recordId, ct) => probe.GetPrincipalRightsAppOnlyAsync(systemUserId, entitySet, recordId, ct);
+        }
+
         var token = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext);
         return (entitySet, recordId, ct) => probe.GetCallerRightsAsync(token, entitySet, recordId, ct);
     }
@@ -1028,14 +1041,30 @@ public static class ExternalProjectDataEndpoints
     /// <summary>
     /// The privilege reader for <see cref="WithDataverseRightsAsync"/> (task 036 fix round 1, F1): the existing
     /// <see cref="CallerRecordAccessProbe.CallerHoldsPrivilegeAsync"/> (OBO, as the caller, uncached, fail closed) with this
-    /// request's bearer token.
+    /// request's bearer token — or, for a WorkforceHome-linked systemuser (task 036 decision (a)), the same privilege asked
+    /// app-only naming that systemuser (<see cref="CallerRecordAccessProbe.PrincipalHoldsPrivilegeAppOnlyAsync"/>).
     /// </summary>
     internal static Func<string, CancellationToken, Task<bool>> CallerPrivilegeReader(
         CallerRecordAccessProbe probe, HttpContext httpContext)
     {
+        if (AppOnlyConfirmationPrincipal(GetCallerPrincipal(httpContext)) is { } systemUserId)
+        {
+            return (privilege, ct) => probe.PrincipalHoldsPrivilegeAppOnlyAsync(systemUserId, privilege, ct);
+        }
+
         var token = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext);
         return (privilege, ct) => probe.CallerHoldsPrivilegeAsync(token, privilege, ct);
     }
+
+    /// <summary>
+    /// The systemuser a write confirmation names app-only for <paramref name="caller"/> (task 036 owner decision (a),
+    /// 2026-10-18), or <c>null</c> when the confirmation stays OBO as the caller. Non-null only for a principal resolved
+    /// through the WorkforceHome home link (<see cref="CallerPrincipal.ResolvedThroughHomeLink"/>): its customer-directory
+    /// token cannot be exchanged for Dataverse in Spaarke's tenant. A missing systemuser id is <see cref="Guid.Empty"/>,
+    /// which the probe refuses (no rights) — never a fall back to OBO.
+    /// </summary>
+    internal static Guid? AppOnlyConfirmationPrincipal(CallerPrincipal? caller) =>
+        caller is { ResolvedThroughHomeLink: true } ? caller.SystemUserId ?? Guid.Empty : null;
 
     /// <summary>
     /// A root's rights for a write route: <see cref="RightsForRoot"/>, confirmed against Dataverse (task 036). A route that

@@ -117,6 +117,10 @@ New:
 
 **5c — the second A2 MUST NOT bullet (line 116): replace**
 
+> **Superseded (2026-10-18).** 5c was applied (the clause is in `.claude/adr/ADR-034-user-record-membership.md`
+> today), and owner decision (a) has since settled the WorkforceHome question. Remove the clause with Edit A1 in
+> `036-adr-edits-owner-a-f.md`.
+
 Old:
 
 ```markdown

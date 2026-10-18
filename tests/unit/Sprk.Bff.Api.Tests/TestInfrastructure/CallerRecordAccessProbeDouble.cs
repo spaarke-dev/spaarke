@@ -55,6 +55,44 @@ public sealed class CallerRecordAccessProbeDouble : CallerRecordAccessProbe
         return this;
     }
 
+    // ── Task 036 owner decision (a): the app-only questions naming a WorkforceHome-linked systemuser. Kept apart from the
+    //    OBO answers on purpose: a test that seeds only these proves the route asked app-only, because the OBO path (whose
+    //    real exchange cannot succeed for a customer-directory token) finds nothing and answers None.
+
+    /// <summary>Dataverse's app-only answer per (named systemuser, entity set, record id).</summary>
+    public ConcurrentDictionary<(Guid SystemUserId, string EntitySet, Guid RecordId), AccessRights> AppOnlyAnswers { get; } = new();
+
+    /// <summary>The privileges each named systemuser holds, asked app-only. Any other pair is not held.</summary>
+    public ConcurrentDictionary<(Guid SystemUserId, string Privilege), bool> AppOnlyHeldPrivileges { get; } = new();
+
+    /// <summary>When set, the app-only rights question throws (an unexpected fault; the real probe answers None).</summary>
+    public Exception? AppOnlyFault { get; set; }
+
+    /// <summary>When set, the app-only privilege question throws (the real probe answers false).</summary>
+    public Exception? AppOnlyPrivilegeFault { get; set; }
+
+    /// <summary>Every app-only rights question asked, in order.</summary>
+    public ConcurrentQueue<(Guid SystemUserId, string EntitySet, Guid RecordId)> AppOnlyCalls { get; } = new();
+
+    /// <summary>Every app-only privilege question asked, in order.</summary>
+    public ConcurrentQueue<(Guid SystemUserId, string Privilege)> AppOnlyPrivilegeCalls { get; } = new();
+
+    public CallerRecordAccessProbeDouble AnswerAppOnly(Guid systemUserId, string entitySet, Guid recordId, AccessRights rights)
+    {
+        AppOnlyAnswers[(systemUserId, entitySet, recordId)] = rights;
+        return this;
+    }
+
+    public CallerRecordAccessProbeDouble HoldsAppOnly(Guid systemUserId, params string[] privileges)
+    {
+        foreach (var privilege in privileges)
+        {
+            AppOnlyHeldPrivileges[(systemUserId, privilege)] = true;
+        }
+
+        return this;
+    }
+
     public void Reset()
     {
         Answers.Clear();
@@ -63,6 +101,38 @@ public sealed class CallerRecordAccessProbeDouble : CallerRecordAccessProbe
         HeldPrivileges.Clear();
         PrivilegeFault = null;
         PrivilegeCalls.Clear();
+        AppOnlyAnswers.Clear();
+        AppOnlyHeldPrivileges.Clear();
+        AppOnlyFault = null;
+        AppOnlyPrivilegeFault = null;
+        AppOnlyCalls.Clear();
+        AppOnlyPrivilegeCalls.Clear();
+    }
+
+    public override Task<AccessRights> GetPrincipalRightsAppOnlyAsync(
+        Guid principalSystemUserId, string entitySet, Guid recordId, CancellationToken ct = default)
+    {
+        AppOnlyCalls.Enqueue((principalSystemUserId, entitySet, recordId));
+        if (AppOnlyFault is not null)
+        {
+            throw AppOnlyFault;
+        }
+
+        return Task.FromResult(AppOnlyAnswers.TryGetValue((principalSystemUserId, entitySet, recordId), out var rights)
+            ? rights
+            : AccessRights.None);
+    }
+
+    public override Task<bool> PrincipalHoldsPrivilegeAppOnlyAsync(
+        Guid principalSystemUserId, string privilegeName, CancellationToken ct = default)
+    {
+        AppOnlyPrivilegeCalls.Enqueue((principalSystemUserId, privilegeName));
+        if (AppOnlyPrivilegeFault is not null)
+        {
+            throw AppOnlyPrivilegeFault;
+        }
+
+        return Task.FromResult(AppOnlyHeldPrivileges.TryGetValue((principalSystemUserId, privilegeName), out var held) && held);
     }
 
     public override Task<bool> CallerHoldsPrivilegeAsync(

@@ -482,8 +482,11 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
             "(derivedContact: {HasContact}, contactUnreadable: {ContactUnreadable})",
             tidText, oidText, systemUserId, derivedContactId is not null, contactUnreadable);
 
+        // Task 036 decision (a): marked, so a Dataverse write confirmation for this principal runs app-only naming the
+        // systemuser — its customer-directory token cannot be exchanged for Dataverse in Spaarke's tenant.
         return WorkforcePrincipalResolution.ForSystemUser(
-            systemUserId, derivedContactId, oidText, tidText, ExtractTokenEmail(home), contactUnreadable: contactUnreadable);
+            systemUserId, derivedContactId, oidText, tidText, ExtractTokenEmail(home), contactUnreadable: contactUnreadable,
+            resolvedThroughHomeLink: true);
     }
 
     private enum SystemUserLookupKind { None, Enabled, Disabled }

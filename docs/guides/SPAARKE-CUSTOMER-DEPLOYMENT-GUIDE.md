@@ -2183,10 +2183,10 @@ contacts and workforce contacts are decided exactly as before in both states.
 | | Off (the default; transitional) | On (the end state) |
 |---|---|---|
 | Records an internal user sees | The BFF's membership rules (ownership, owning team, owning business unit, the "Assigned *" contacts), each at Read / Write / Create | Dataverse's own answer, read AS the user — one id-only read per root type (project, matter, work assignment), cached 2 minutes — each at Read |
-| A write (create to-do, upload, create event, edit to-do, post a message, delete own) | Decided by the rights above | The BFF also asks Dataverse, as the user, for the user's rights on the target record (one call per write). A child (to-do, document, event, message) needs AppendTo on the parent **and** the user's Create privilege on the child table (`prvCreatesprk_Todo`, `prvCreatesprk_Document`, `prvCreatesprk_Event`, `prvCreatesprk_Communication`; a second call); an edit needs Write on the to-do; a delete-own needs Delete on the row as well as the creator stamp. A service request's writes stay the requester rule in both states (accepted, decision e) |
+| A write (create to-do, upload, create event, edit to-do, post a message, delete own) | Decided by the rights above | The BFF also asks Dataverse, as the user, for the user's rights on the target record (one call per write; for a user who signed in through WorkforceHome, the same questions app-only naming their systemuser — precondition 3). A child (to-do, document, event, message) needs AppendTo on the parent **and** the user's Create privilege on the child table (`prvCreatesprk_Todo`, `prvCreatesprk_Document`, `prvCreatesprk_Event`, `prvCreatesprk_Communication`; a second call); an edit needs Write on the to-do; a delete-own needs Delete on the row as well as the creator stamp. A service request's writes stay the requester rule in both states (accepted, decision e) |
 | Contact grants of a user who is also a granted contact | Kept | Kept — Dataverse cannot see them |
 | No Access list, Restricted veto | In force | In force |
-| A root set over 5,000 records | Module data responses carry `"truncated": true` | Same |
+| A root set over 5,000 records | Module data responses carry `"truncated": true` | Same; the 5,000 kept are the most recently modified (task 036 decision (f), owner 2026-10-18) |
 | A Dataverse read that fails | — | The request fails, or the write is refused. There is no fallback to the membership rules |
 
 **Off does not close the business-unit over-grant of the membership rules.** It is the transitional state; on is the end
@@ -2198,13 +2198,17 @@ state.
    users in Dataverse) are complete and deployed to the environment. Without them, turning it on removes internal users'
    "Assigned To *" access and the internal half of the No Access list.
 2. Both Dataverse App Users hold `prvActOnBehalfOfAnotherUser` and are not narrowed (§7.7).
-3. **No internal user signs in through WorkforceHome (ADR-028 A9), or the owner has settled open question (a)** in the
-   task 036 notes. A write is confirmed by asking Dataverse with the user's own token (on-behalf-of), and a token issued by
-   the customer's directory cannot be exchanged for a Dataverse token in Spaarke's tenant. So in a tenant with
-   WorkforceHome-linked systemusers, those users still read under "on", but **every write of theirs is refused** unless a
-   contact grant allows it or it is a service-request write (those keep the requester rule in both states), and their
-   lists offer no create/upload. Until (a) is settled, keep the setting off in such a
-   tenant.
+3. **Internal users who sign in through WorkforceHome (ADR-028 A9) — settled, task 036 decision (a), owner 2026-10-18;
+   nothing to do beyond item 2.** A write is normally confirmed by asking Dataverse with the user's own token
+   (on-behalf-of), and a token issued by the customer's directory cannot be exchanged for a Dataverse token in Spaarke's
+   tenant. For a systemuser resolved through the stored home link, the BFF therefore asks the **same** questions
+   app-only, as the Dataverse App User, naming that systemuser: `RetrievePrincipalAccess` with
+   `Principal = systemusers(<id>)` on the target record, and `RetrieveUserSetOfPrivilegesByNames` on that systemuser for
+   the child table's Create privilege (both impersonating the user, like the read, so item 2's
+   `prvActOnBehalfOfAnotherUser` covers them). Dataverse still answers from the user's own roles, teams and shares, so
+   such a user writes exactly what the same user could write in the model-driven app, and their lists' `canCreate` is the
+   same answer. The path is chosen from how the user signed in, never by trying on-behalf-of first; a failed or
+   unreadable answer refuses the write. Every user who signs in with a Spaarke-tenant token keeps the on-behalf-of check.
 4. **Internal users who write in the SPA or Teams hold Spaarke Core User** (or a role with the same privileges). Under
    "on", Dataverse decides writes from the user's own roles, as the model-driven app does. Spaarke Core User grants
    Create, Write and Delete on `sprk_todo`, `sprk_document`, `sprk_event` and `sprk_communication`. **Spaarke Basic User**
