@@ -33,6 +33,7 @@ public sealed class RuleSetServiceTests
     private static readonly Guid TeamId = Guid.NewGuid();
     private static readonly Guid DocumentId = Guid.NewGuid();
     private static readonly Guid FirmId = Guid.NewGuid();
+    private static readonly Guid OtherFirmId = Guid.NewGuid();
     private static readonly Guid CallerOid = Guid.NewGuid();
     private const string Drive = "b!procedurelibrary";
     private static readonly DateOnly Effective = new(2026, 11, 1);
@@ -549,7 +550,7 @@ public sealed class RuleSetServiceTests
         await service.PublishAsync(set, Effective, default);
         await service.AssignAsync(set, RuleSetScope.ClientDefault, null, default);
         await service.SetVisibilityAsync(set, false, default);
-        await service.GetFirmClauseAsync(version, default);
+        await service.GetFirmClauseAsync(version, FirmId, default);
 
         var reads = h.Queries.Where(q => DomainIsolated.Contains(q.EntityName)).ToList();
         reads.Should().NotBeEmpty();
@@ -575,8 +576,8 @@ public sealed class RuleSetServiceTests
 
         (await service.PublishAsync(set, Effective, default)).ErrorCode.Should().Be("ruleset.nothing_to_publish");
         (await service.GetAsync(set, default)).Value!.Proposals.Should().BeEmpty();
-        (await service.GetFirmClauseAsync(v1, default)).Should().Be(FirmClauseText.None);
-        (await service.GetFirmClauseAsync(v2, default)).Should().Be(FirmClauseText.None);
+        (await service.GetFirmClauseAsync(v1, FirmId, default)).Should().Be(FirmClauseText.None);
+        (await service.GetFirmClauseAsync(v2, FirmId, default)).Should().Be(FirmClauseText.None);
         h.Writes.Should().BeEmpty("nothing about an Ontology policy is written");
     }
 
@@ -1495,14 +1496,69 @@ public sealed class RuleSetServiceTests
         var (_, vOntologySet) = h.Rule(ontologySet, "BILL-OS", ProposalState.Accepted, current: true);
         var service = h.Service();
 
-        (await service.GetFirmClauseAsync(vOn, default)).Should().Be(new FirmClauseText("No timekeeper may bill more than 10 hours a day.", "Section 4.2, p. 7"));
-        (await service.GetFirmClauseAsync(vEnded, default)).Quote.Should().NotBeNull("a superseded published version's clause is still citable");
-        (await service.GetFirmClauseAsync(vOff, default)).Should().Be(FirmClauseText.None, "the flag is off");
-        (await service.GetFirmClauseAsync(vNeverInForce, default)).Should().Be(FirmClauseText.None, "a draft's clause is never shown");
-        (await service.GetFirmClauseAsync(vDraftSet, default)).Should().Be(FirmClauseText.None, "the rule set is not Published");
-        (await service.GetFirmClauseAsync(vOntologyPolicy, default)).Should().Be(FirmClauseText.None, "an Ontology policy has no firm clause");
-        (await service.GetFirmClauseAsync(vOntologySet, default)).Should().Be(FirmClauseText.None, "an Ontology rule set is not a billing rule set");
-        (await service.GetFirmClauseAsync(Guid.NewGuid(), default)).Should().Be(FirmClauseText.None);
+        (await service.GetFirmClauseAsync(vOn, FirmId, default)).Should().Be(new FirmClauseText("No timekeeper may bill more than 10 hours a day.", "Section 4.2, p. 7"));
+        (await service.GetFirmClauseAsync(vEnded, FirmId, default)).Quote.Should().NotBeNull("a superseded published version's clause is still citable");
+        (await service.GetFirmClauseAsync(vOff, FirmId, default)).Should().Be(FirmClauseText.None, "the flag is off");
+        (await service.GetFirmClauseAsync(vNeverInForce, FirmId, default)).Should().Be(FirmClauseText.None, "a draft's clause is never shown");
+        (await service.GetFirmClauseAsync(vDraftSet, FirmId, default)).Should().Be(FirmClauseText.None, "the rule set is not Published");
+        (await service.GetFirmClauseAsync(vOntologyPolicy, FirmId, default)).Should().Be(FirmClauseText.None, "an Ontology policy has no firm clause");
+        (await service.GetFirmClauseAsync(vOntologySet, FirmId, default)).Should().Be(FirmClauseText.None, "an Ontology rule set is not a billing rule set");
+        (await service.GetFirmClauseAsync(Guid.NewGuid(), FirmId, default)).Should().Be(FirmClauseText.None);
+    }
+
+    [Fact]
+    public async Task GetFirmClause_ShowsAFirmsOwnRuleSetToThatFirmOnly_AndTheClientDefaultToEveryFirm()
+    {
+        var h = new Harness();
+        var own = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: (int)RuleSetScope.Firm, firm: FirmId);
+        var other = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: (int)RuleSetScope.Firm, firm: OtherFirmId);
+        var everyone = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: (int)RuleSetScope.ClientDefault);
+        var (_, vOwn) = h.Rule(own, "BILL-OWN", ProposalState.Accepted, current: true);
+        var (_, vOther) = h.Rule(other, "BILL-OTHER", ProposalState.Accepted, current: true);
+        var (_, vEveryone) = h.Rule(everyone, "BILL-ALL", ProposalState.Accepted, current: true);
+        var service = h.Service();
+
+        (await service.GetFirmClauseAsync(vOwn, FirmId, default)).Quote.Should().NotBeNull("a firm sees the clause of a rule set assigned to it");
+        (await service.GetFirmClauseAsync(vOwn, OtherFirmId, default)).Should().Be(FirmClauseText.None, "another firm's rule set is not for this firm");
+        (await service.GetFirmClauseAsync(vOther, FirmId, default)).Should().Be(FirmClauseText.None);
+        (await service.GetFirmClauseAsync(vOther, OtherFirmId, default)).Quote.Should().NotBeNull();
+        (await service.GetFirmClauseAsync(vEveryone, FirmId, default)).Quote.Should().NotBeNull("the client default applies to every firm");
+        (await service.GetFirmClauseAsync(vEveryone, OtherFirmId, default)).Quote.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task GetFirmClause_WithTheFlagOff_ShowsNothingToAnyFirm_EvenTheOneTheRuleSetIsAssignedTo()
+    {
+        var h = new Harness();
+        var own = h.RuleSet(RuleSetService.RuleSetPublished, visible: false, scope: (int)RuleSetScope.Firm, firm: FirmId);
+        var everyone = h.RuleSet(RuleSetService.RuleSetPublished, visible: false, scope: (int)RuleSetScope.ClientDefault);
+        var (_, vOwn) = h.Rule(own, "BILL-OWN", ProposalState.Accepted, current: true);
+        var (_, vEveryone) = h.Rule(everyone, "BILL-ALL", ProposalState.Accepted, current: true);
+        var service = h.Service();
+
+        foreach (var firm in new[] { FirmId, OtherFirmId })
+        {
+            (await service.GetFirmClauseAsync(vOwn, firm, default)).Should().Be(FirmClauseText.None, "D-79: the flag is off");
+            (await service.GetFirmClauseAsync(vEveryone, firm, default)).Should().Be(FirmClauseText.None, "D-79: the flag is off");
+        }
+    }
+
+    [Fact]
+    public async Task GetFirmClause_FailsClosedWhenTheAssignmentIsIncompleteOrNoFirmIsAsking()
+    {
+        var h = new Harness();
+        var firmNoFirm = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: (int)RuleSetScope.Firm);
+        var noScope = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: null, firm: FirmId);
+        var everyone = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: (int)RuleSetScope.ClientDefault);
+        var (_, vFirmNoFirm) = h.Rule(firmNoFirm, "BILL-A", ProposalState.Accepted, current: true);
+        var (_, vNoScope) = h.Rule(noScope, "BILL-B", ProposalState.Accepted, current: true);
+        var (_, vEveryone) = h.Rule(everyone, "BILL-C", ProposalState.Accepted, current: true);
+        var service = h.Service();
+
+        (await service.GetFirmClauseAsync(vFirmNoFirm, FirmId, default)).Should().Be(FirmClauseText.None, "a firm rule set without its firm is for nobody");
+        (await service.GetFirmClauseAsync(vFirmNoFirm, Guid.Empty, default)).Should().Be(FirmClauseText.None);
+        (await service.GetFirmClauseAsync(vNoScope, FirmId, default)).Should().Be(FirmClauseText.None, "a rule set with no scope is not assigned to anyone");
+        (await service.GetFirmClauseAsync(vEveryone, Guid.Empty, default)).Should().Be(FirmClauseText.None, "an empty firm id means the caller has no firm");
     }
 
     [Fact]
@@ -1513,9 +1569,9 @@ public sealed class RuleSetServiceTests
         var (_, version) = h.Rule(set, state: ProposalState.Accepted, current: true);
         var service = h.Service();
 
-        (await service.GetFirmClauseAsync(version, default)).Quote.Should().NotBeNull();
+        (await service.GetFirmClauseAsync(version, FirmId, default)).Quote.Should().NotBeNull();
         await service.SetVisibilityAsync(set, false, default);
 
-        (await service.GetFirmClauseAsync(version, default)).Should().Be(FirmClauseText.None);
+        (await service.GetFirmClauseAsync(version, FirmId, default)).Should().Be(FirmClauseText.None);
     }
 }

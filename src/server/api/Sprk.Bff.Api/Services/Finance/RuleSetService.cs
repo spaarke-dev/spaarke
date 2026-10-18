@@ -1450,12 +1450,19 @@ public class RuleSetService
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// What a firm may be shown of one rule version's clause: resolves the version's billing policy and rule set and applies
-    /// <see cref="RuleSetClauseVisibility.ForFirm"/>. Fails closed: no text when the version, its billing policy or its rule set cannot
-    /// be read, when the rule set is not Published, or when the version was never in force (a draft's clause is never shown).
+    /// What <paramref name="firmId"/> may be shown of one rule version's clause: resolves the version's billing policy and rule set and
+    /// applies <see cref="RuleSetClauseVisibility.ForFirm"/>. A firm sees a rule set assigned to the client default or to itself, never
+    /// another firm's (FR-49). Fails closed: no text when no firm is asking, when the version, its billing policy or its rule set cannot
+    /// be read, when the rule set is not Published or is assigned to no one or to another firm, or when the version was never in force
+    /// (a draft's clause is never shown).
     /// </summary>
-    public virtual async Task<FirmClauseText> GetFirmClauseAsync(Guid policyVersionId, CancellationToken ct)
+    public virtual async Task<FirmClauseText> GetFirmClauseAsync(Guid policyVersionId, Guid firmId, CancellationToken ct)
     {
+        if (firmId == Guid.Empty)
+        {
+            return FirmClauseText.None;
+        }
+
         var versionQuery = new QueryExpression(VersionEntity)
         {
             ColumnSet = new ColumnSet("sprk_policy", "sprk_clausereference", "sprk_clauselocation", "sprk_inforceto"),
@@ -1484,6 +1491,13 @@ public class RuleSetService
 
         var set = await LoadRuleSetAsync(ruleSetId, ct);
         if (set is null || set.GetAttributeValue<OptionSetValue>("statuscode")?.Value != RuleSetPublished)
+        {
+            return FirmClauseText.None;
+        }
+
+        var scope = set.GetAttributeValue<OptionSetValue>("sprk_scope")?.Value;
+        var assignedToThisFirm = scope == (int)RuleSetScope.Firm && set.GetAttributeValue<EntityReference>("sprk_firm")?.Id == firmId;
+        if (scope != (int)RuleSetScope.ClientDefault && !assignedToThisFirm)
         {
             return FirmClauseText.None;
         }
