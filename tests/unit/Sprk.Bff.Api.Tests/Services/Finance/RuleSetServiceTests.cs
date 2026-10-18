@@ -44,6 +44,16 @@ public sealed class RuleSetServiceTests
 
     internal enum Write { Create, Update, BulkUpdate, Delete }
 
+    private sealed class ListLogger(List<(LogLevel Level, string Message)> sink) : ILogger<RuleSetService>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            sink.Add((logLevel, formatter(state, exception)));
+    }
+
     internal sealed class Harness
     {
         public readonly Mock<IGenericEntityService> Entities = new();
@@ -61,6 +71,10 @@ public sealed class RuleSetServiceTests
         public readonly List<string> Order = new();
         public readonly List<(string Entity, int Size)> BulkCalls = new();
         public Func<string, bool>? FailBulkFor;
+
+        /// <summary>Runs at the start of every bulk update (after the cancellation check): a test uses it to disconnect the caller mid-write.</summary>
+        public Action<string>? OnBulk;
+        public readonly List<(LogLevel Level, string Message)> Logs = new();
         public Func<Entity, bool>? FailCreateWhen;
         public bool IgnoreQueryFilters;
         public RecordOwnerResolution OwnerAnswer = RecordOwnerResolution.Owned(TeamId);
@@ -126,16 +140,19 @@ public sealed class RuleSetServiceTests
                     return entity.Id;
                 });
             Entities.Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
-                .Returns((string entity, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
+                .Returns((string entity, Guid id, Dictionary<string, object> fields, CancellationToken ct) =>
                 {
+                    ct.ThrowIfCancellationRequested(); // the real seam honours the caller's token
                     Order.Add("update:" + entity);
                     Writes.Add((Write.Update, entity, id, fields));
                     Apply(entity, id, fields);
                     return Task.CompletedTask;
                 });
             Entities.Setup(e => e.BulkUpdateAsync(It.IsAny<string>(), It.IsAny<List<(Guid id, Dictionary<string, object> fields)>>(), It.IsAny<CancellationToken>()))
-                .Returns((string entity, List<(Guid id, Dictionary<string, object> fields)> updates, CancellationToken _) =>
+                .Returns((string entity, List<(Guid id, Dictionary<string, object> fields)> updates, CancellationToken ct) =>
                 {
+                    ct.ThrowIfCancellationRequested(); // the real seam honours the caller's token
+                    OnBulk?.Invoke(entity);
                     if (FailBulkFor?.Invoke(entity) == true)
                     {
                         throw new InvalidOperationException("simulated transaction failure");
@@ -168,7 +185,7 @@ public sealed class RuleSetServiceTests
                 Entities.Object, Documents.Object, Spe.Object, Ownership.Object, validator,
                 new RuleBodyDescriber(validator, Entities.Object, NullLogger<RuleBodyDescriber>.Instance),
                 Mock.Of<IOptionsMonitor<FinanceOptions>>(m => m.CurrentValue == Options),
-                NullLogger<RuleSetService>.Instance);
+                new ListLogger(Logs));
         }
 
         public IEnumerable<(Write Kind, string Entity, Guid Id, Dictionary<string, object> Fields)> WritesOf(params string[] entities) =>
@@ -1022,6 +1039,8 @@ public sealed class RuleSetServiceTests
         failed.Kind.Should().Be(RuleSetOutcomeKind.Refused);
         failed.ErrorCode.Should().Be("ruleset.write_failed");
         h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v1, "nothing is in force before the pointer moves");
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime?>("sprk_inforceto").Should().BeNull(
+            "the end date and the pointer move together (D-14): the pointer did not move, so the end date the first write made is taken back");
 
         h.FailBulkFor = null;
         var retried = await service.PublishAsync(set, Effective, default);
@@ -1030,6 +1049,161 @@ public sealed class RuleSetServiceTests
         retried.Value!.Published.Single().VersionId.Should().Be(v2);
         h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v2);
         h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(Utc(2026, 11, 1));
+        h.Row("sprk_policyversion", v2).GetAttributeValue<DateTime>("sprk_inforcefrom").Should().Be(Utc(2026, 11, 1));
+    }
+
+    /// <summary>A published rule with a drafted, accepted successor, and a pointer move that fails (review probe 2, 3).</summary>
+    private static async Task<(Harness H, RuleSetService Service, Guid Set, Guid Policy, Guid V1, Guid V2)> FailedPointerMoveAsync(Func<string, bool>? failBulk = null)
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, v1) = h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+        var v2 = h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+        var service = h.Service();
+        h.FailBulkFor = failBulk ?? (entity => entity == "sprk_policy");
+
+        var failed = await service.PublishAsync(set, Effective, default);
+
+        failed.ErrorCode.Should().Be("ruleset.write_failed");
+        return (h, service, set, policy, v1, v2);
+    }
+
+    [Fact]
+    public async Task Publish_AfterAFailedPointerMove_ARetryWithAnotherDate_PutsTheNewDateOnBothVersions_LeavingNoGap()
+    {
+        var (h, service, set, policy, v1, v2) = await FailedPointerMoveAsync();
+        h.FailBulkFor = null;
+
+        var retried = await service.PublishAsync(set, new DateOnly(2026, 12, 1), default);
+
+        retried.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v2);
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(Utc(2026, 12, 1));
+        h.Row("sprk_policyversion", v2).GetAttributeValue<DateTime>("sprk_inforcefrom").Should().Be(Utc(2026, 12, 1),
+            "the old version ends on the day the new one starts");
+    }
+
+    [Fact]
+    public async Task Publish_WhenTheEndDateCannotBeTakenBack_TheFailureIsLoggedAsAnError_AndARetryWithAnotherDateRestampsIt()
+    {
+        var versionWrites = 0;
+        // The first version write (the stamps) lands; the pointer move fails; the take-back (a second version write) fails too.
+        var (h, service, set, policy, v1, v2) = await FailedPointerMoveAsync(e => e == "sprk_policy" || (e == "sprk_policyversion" && ++versionWrites > 1));
+
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(Utc(2026, 11, 1), "the take-back failed");
+        h.Logs.Should().Contain(l => l.Level == LogLevel.Error && l.Message.Contains(v1.ToString()),
+            "an end date that could not be taken back is named in an Error");
+        h.FailBulkFor = null;
+
+        var retried = await service.PublishAsync(set, new DateOnly(2026, 12, 1), default);
+
+        retried.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v2);
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(Utc(2026, 12, 1),
+            "the old version is re-stamped when its end date differs from the new effective date");
+    }
+
+    [Fact]
+    public async Task Publish_AfterAFailedPointerMove_RejectingTheDraftLeavesNoEndDateOnTheVersionInForce()
+    {
+        var (h, service, set, policy, v1, _) = await FailedPointerMoveAsync();
+        h.FailBulkFor = null;
+
+        (await service.DecideAsync(set, policy, accept: false, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await service.PublishAsync(set, Effective, default)).ErrorCode.Should().Be("ruleset.nothing_to_publish");
+
+        h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v1);
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime?>("sprk_inforceto").Should().BeNull(
+            "a rule that stays in force must not carry a permanent end date");
+    }
+
+    [Fact]
+    public async Task Publish_WhenTheVersionWritesFailPartWay_TakesBackTheEndDatesTheEarlierChunkWrote()
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        for (var i = 0; i < 501; i++) // 2 version updates each = 1,002: one chunk of 1,000 and one of 2
+        {
+            var (policy, _) = h.Rule(set, "BILL-" + i, ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+            h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+        }
+
+        var versionWrites = 0;
+        h.FailBulkFor = e => e == "sprk_policyversion" && ++versionWrites == 2;
+
+        var failed = await h.Service().PublishAsync(set, Effective, default);
+
+        failed.ErrorCode.Should().Be("ruleset.write_failed");
+        var numberOf = h.Rows["sprk_policyversion"].ToDictionary(v => v.Id, v => v.GetAttributeValue<int>("sprk_versionnumber"));
+        h.Rows["sprk_policy"].Should().OnlyContain(p => numberOf[((EntityReference)p["sprk_currentversion"]).Id] == 1, "no pointer moved");
+        h.Rows["sprk_policyversion"].Where(v => numberOf[v.Id] == 1).Should()
+            .OnlyContain(v => !v.Contains("sprk_inforceto"), "no version in force keeps an end date after a failed publish");
+    }
+
+    [Fact]
+    public async Task Publish_WhenOnlySomePolicyChunksMove_KeepsTheEndDatesOfTheMovedRules_AndTakesBackTheRest()
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        for (var i = 0; i < 1001; i++) // 1,001 pointer moves: one chunk of 1,000 and one of 1
+        {
+            var (policy, _) = h.Rule(set, "BILL-" + i, ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+            h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+        }
+
+        var policyWrites = 0;
+        h.FailBulkFor = e => e == "sprk_policy" && ++policyWrites == 2;
+        var service = h.Service();
+
+        (await service.PublishAsync(set, Effective, default)).ErrorCode.Should().Be("ruleset.write_failed");
+
+        var numberOf = h.Rows["sprk_policyversion"].ToDictionary(v => v.Id, v => v.GetAttributeValue<int>("sprk_versionnumber"));
+        var oldVersions = h.Rows["sprk_policyversion"].Where(v => numberOf[v.Id] == 1).ToList();
+        var moved = h.Rows["sprk_policy"].Where(p => numberOf[((EntityReference)p["sprk_currentversion"]).Id] == 2).Select(p => p.Id).ToHashSet();
+        moved.Should().HaveCount(1000);
+        foreach (var old in oldVersions)
+        {
+            var policyMoved = moved.Contains(((EntityReference)old["sprk_policy"]).Id);
+            old.GetAttributeValue<DateTime?>("sprk_inforceto").Should().Be(policyMoved ? Utc(2026, 11, 1) : null,
+                "a version that was replaced keeps its end date; one that is still in force gets it taken back");
+        }
+
+        h.FailBulkFor = null;
+        var retried = await service.PublishAsync(set, Effective, default);
+        retried.Value!.Published.Should().HaveCount(1, "the 1,000 that moved are already in force; the retry finishes the last one");
+    }
+
+    [Fact]
+    public async Task Publish_WhenTheCallerDisconnectsDuringTheWrites_StillFinishesAllThreeWrites()
+    {
+        using var cts = new CancellationTokenSource();
+        var h = new Harness { OnBulk = _ => cts.Cancel() }; // the client goes away as the first write starts
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, v1) = h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+        var v2 = h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+
+        var outcome = await h.Service().PublishAsync(set, Effective, cts.Token);
+
+        cts.IsCancellationRequested.Should().BeTrue("the test disconnected the caller during the writes");
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v2);
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(Utc(2026, 11, 1));
+        h.Row("sprk_ruleset", set).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(RuleSetService.RuleSetPublished);
+    }
+
+    [Fact]
+    public async Task Publish_CancelledBeforeAnyWrite_WritesNothing_AndRethrows()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var h = new Harness();
+        var set = h.RuleSet();
+        h.Rule(set, state: ProposalState.Accepted);
+
+        var act = () => h.Service().PublishAsync(set, Effective, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        h.Writes.Should().BeEmpty();
     }
 
     [Theory]

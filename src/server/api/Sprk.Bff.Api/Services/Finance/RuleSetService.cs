@@ -193,8 +193,11 @@ public sealed class RuleSetOutcome<T> where T : class
 /// (<see cref="PolicyVersionValidator.ValidateForSave"/> with <see cref="RuleDomain.Billing"/>, consequence set, headline and template
 /// set) before the first write; one failure refuses the whole publish with per-rule errors and writes nothing. The writes are three
 /// transactions in an order that a retry completes: (1) the versions (the new versions' in-force-from, the predecessors' in-force-to), (2) the
-/// policies (pointer and enabled), (3) the rule set (Published, effective-from). Nothing is in force before step 2. A failure
-/// between steps leaves the old versions in force; a second publish re-derives the same pending set and finishes. Each step is atomic per
+/// policies (pointer and enabled), (3) the rule set (Published, effective-from). Nothing is in force before step 2. The stamp and the
+/// pointer move together (D-14): the writes run with <see cref="CancellationToken.None"/> (a client that disconnects does not leave a half
+/// state), and a failure in step 1 or 2 takes back the end dates written for policies whose pointer did not move, so the old versions
+/// stay in force with no end date. A failure of step 3 leaves every rule in force and the set not Published; the next publish writes the set.
+/// A retry re-stamps an old version whose end date differs from the new effective date, so it leaves no gap. Each step is atomic per
 /// 1,000 rows (the Dataverse transaction cap), the whole is not.</para>
 /// <para><b>Domain.</b> Every read of <c>sprk_policy</c> and <c>sprk_ruleset</c> here carries <c>sprk_domain = Billing</c> in the query
 /// (<see cref="RuleDomains.AddBillingFilter"/>) AND is re-checked per row (<see cref="RuleDomains.IsBillingRow"/>), so an Ontology policy
@@ -1155,16 +1158,50 @@ public class RuleSetService
             return RuleSetOutcome<RuleSetPublished>.Invalid(CodePublishInvalid, errors);
         }
 
+        // The last point at which the caller going away stops the publish. The writes below are not abandoned half way (D-14).
+        ct.ThrowIfCancellationRequested();
+
+        if (!await WritePublishAsync(ruleSetId, set, status, candidates, effectiveStart))
+        {
+            return RuleSetOutcome<RuleSetPublished>.Refused(
+                StatusCodes.Status500InternalServerError, CodeWriteFailed,
+                "The rule set could not be published. Publish again; if it keeps failing, contact support.");
+        }
+
+        var visible = set.GetAttributeValue<bool>("sprk_visibletofirms");
+        _logger.LogInformation("Rule set {RuleSetId} published: {Count} rule version(s) in force from {Effective}", ruleSetId, candidates.Count, effectiveDate);
+        return RuleSetOutcome<RuleSetPublished>.Done(new RuleSetPublished(
+            ruleSetId, "Published", effectiveDate,
+            candidates.Select(c => new PublishedRuleVersion(c.Policy.Id, c.Working.Id, c.Working.Number, c.Predecessor?.Id)).ToList(),
+            proposed, rejected, visible, visible ? VisibleNotice : HiddenNotice));
+    }
+
+    /// <summary>
+    /// The three publish writes, in order, with <see cref="CancellationToken.None"/>: a client that disconnects between them must not leave
+    /// an end date on a version whose pointer never moved (D-14: the stamp and the pointer move together). Returns false when a write
+    /// failed. A failure before the pointer move takes the end dates this publish wrote back (<see cref="TakeBackEndDatesAsync"/>); a
+    /// failure of the last write leaves every rule in force and the set not Published, which the next publish finishes.
+    /// </summary>
+    private async Task<bool> WritePublishAsync(
+        Guid ruleSetId, Entity set, int? status, IReadOnlyList<RuleSetRule> candidates, DateTime effectiveStart)
+    {
+        var ct = CancellationToken.None;
+
+        // The old versions this publish stamps, each as it was read: its in-force-to is the value to restore. An old version that already
+        // ends on the effective date is not stamped again; one that ends on another date (an earlier attempt) is, so a retry with a
+        // different date leaves no gap between the two versions.
+        var stamped = candidates.Where(r => r.Predecessor is { } p && p.InForceTo != effectiveStart).ToList();
+        var stampedPolicies = stamped.Select(r => r.Policy.Id).ToHashSet();
         try
         {
-            // (1) the versions: the new versions' in-force-from, the predecessors' in-force-to (one table, one transaction per chunk).
+            // (1) the versions: the new versions' in-force-from, the old versions' in-force-to (one table, one transaction per chunk).
             var versionUpdates = new List<(Guid id, Dictionary<string, object> fields)>();
             foreach (var rule in candidates)
             {
                 versionUpdates.Add((rule.Working.Id, new Dictionary<string, object> { ["sprk_inforcefrom"] = effectiveStart }));
-                if (rule.Predecessor is { InForceTo: null } predecessor)
+                if (stampedPolicies.Contains(rule.Policy.Id))
                 {
-                    versionUpdates.Add((predecessor.Id, new Dictionary<string, object> { ["sprk_inforceto"] = effectiveStart }));
+                    versionUpdates.Add((rule.Predecessor!.Id, new Dictionary<string, object> { ["sprk_inforceto"] = effectiveStart }));
                 }
             }
 
@@ -1183,38 +1220,97 @@ public class RuleSetService
             {
                 await _entities.BulkUpdateAsync(PolicyEntity, chunk.ToList(), ct);
             }
-
-            // (3) the rule set. Last, so a failure before it leaves a state a second publish finishes.
-            var setFields = new Dictionary<string, object>
-            {
-                ["statecode"] = new OptionSetValue(0),
-                ["statuscode"] = new OptionSetValue(RuleSetPublished),
-            };
-            if (set.GetAttributeValue<DateTime?>("sprk_effectivefrom") is null || status != RuleSetPublished)
-            {
-                setFields["sprk_effectivefrom"] = effectiveStart;
-            }
-
-            await _entities.UpdateAsync(RuleSetEntity, ruleSetId, setFields, ct);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Rule set {RuleSetId} publish failed part-way; publishing again completes it (the set is not Published until the last write)", ruleSetId);
-            return RuleSetOutcome<RuleSetPublished>.Refused(
-                StatusCodes.Status500InternalServerError, CodeWriteFailed,
-                "The rule set could not be published. Publish again; if it keeps failing, contact support.");
+            _logger.LogError(ex, "Rule set {RuleSetId} publish failed before every rule was in force; the old versions stay in force and the end dates this publish wrote are taken back", ruleSetId);
+            await TakeBackEndDatesAsync(ruleSetId, stamped);
+            return false;
         }
 
-        var visible = set.GetAttributeValue<bool>("sprk_visibletofirms");
-        _logger.LogInformation("Rule set {RuleSetId} published: {Count} rule version(s) in force from {Effective}", ruleSetId, candidates.Count, effectiveDate);
-        return RuleSetOutcome<RuleSetPublished>.Done(new RuleSetPublished(
-            ruleSetId, "Published", effectiveDate,
-            candidates.Select(c => new PublishedRuleVersion(c.Policy.Id, c.Working.Id, c.Working.Number, c.Predecessor?.Id)).ToList(),
-            proposed, rejected, visible, visible ? VisibleNotice : HiddenNotice));
+        // (3) the rule set. Last, so a failure before it leaves a state a second publish finishes.
+        return await MarkPublishedAsync(ruleSetId, set, status, effectiveStart);
+    }
+
+    /// <summary>Writes the rule set Published (and its effective-from when it has none or was not yet Published). False on failure, logged.</summary>
+    private async Task<bool> MarkPublishedAsync(Guid ruleSetId, Entity set, int? status, DateTime effectiveStart)
+    {
+        var setFields = new Dictionary<string, object>
+        {
+            ["statecode"] = new OptionSetValue(0),
+            ["statuscode"] = new OptionSetValue(RuleSetPublished),
+        };
+        if (set.GetAttributeValue<DateTime?>("sprk_effectivefrom") is null || status != RuleSetPublished)
+        {
+            setFields["sprk_effectivefrom"] = effectiveStart;
+        }
+
+        try
+        {
+            await _entities.UpdateAsync(RuleSetEntity, ruleSetId, setFields, CancellationToken.None);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Rule set {RuleSetId}: the rules are in force but the set could not be marked Published; publishing again finishes it", ruleSetId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// After a failed publish: puts back the in-force-to every old version held before this publish stamped it, but only where the policy's
+    /// pointer did NOT move (a version that was replaced keeps its end date). Decided from a fresh read, not from which write failed, so a
+    /// partly applied chunk or a write whose outcome is unknown is handled the same way. A version that cannot be put back is logged as an
+    /// Error with its id: until it is cleared, or the set is published again, a version in force carries an end date.
+    /// </summary>
+    private async Task TakeBackEndDatesAsync(Guid ruleSetId, IReadOnlyList<RuleSetRule> stamped)
+    {
+        if (stamped.Count == 0)
+        {
+            return;
+        }
+
+        var restore = new List<(Guid id, Dictionary<string, object> fields)>();
+        try
+        {
+            var now = await LoadRulesAsync(ruleSetId, CancellationToken.None);
+            if (now.Truncated)
+            {
+                throw new InvalidOperationException("The rule set has more rules than can be read in one pass.");
+            }
+
+            var byPolicy = now.Rules.ToDictionary(r => r.Policy.Id);
+            foreach (var rule in stamped)
+            {
+                var old = rule.Predecessor!;
+                if (byPolicy.TryGetValue(rule.Policy.Id, out var current)
+                    && current.Policy.CurrentVersionId == old.Id
+                    && current.Versions.FirstOrDefault(v => v.Id == old.Id) is { } row
+                    && row.InForceTo != old.InForceTo)
+                {
+                    restore.Add((old.Id, new Dictionary<string, object> { ["sprk_inforceto"] = (object?)old.InForceTo ?? DBNull.Value }));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Rule set {RuleSetId}: could not read the rules to take back the end dates of a failed publish. Versions that may carry an end date with no pointer move: {VersionIds}",
+                ruleSetId, string.Join(", ", stamped.Select(r => r.Predecessor!.Id)));
+            return;
+        }
+
+        foreach (var chunk in restore.Chunk(MaxPerTransaction))
+        {
+            try
+            {
+                await _entities.BulkUpdateAsync(VersionEntity, chunk.ToList(), CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Rule set {RuleSetId}: the end date of a failed publish could not be taken back from version(s) {VersionIds}; each is in force with an end date until it is cleared or the rule set is published again",
+                    ruleSetId, string.Join(", ", chunk.Select(c => c.id)));
+            }
+        }
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
