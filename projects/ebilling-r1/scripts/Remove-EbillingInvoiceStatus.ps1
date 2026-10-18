@@ -29,7 +29,10 @@
                              whose external invoices allow-list admits statuscode is live: before that the BFF refuses the
                              grid's fetch; after the column delete without it Dataverse refuses it. NEEDS
                              -BffDeployAttestation (checked against that commit's source, below). The write sends If-Match
-                             with the row's etag, so a row changed since it was read is refused (HTTP 412), not overwritten.
+                             with the row's etag, so a row changed since it was read is not overwritten (HTTP 412): the row is
+                             read again; if it no longer names the column the run reports "already applied" and exits 0,
+                             otherwise it is refused (exit 2). The replace is case-sensitive: a spelling it leaves behind
+                             (other letter case) is refused before any write.
                              Runs even when the column is already gone (a grid row can still be moved then). Cannot be
                              combined with -Delete in one run: the grid blocker would clear partway through the run.
       -Delete                DESTRUCTIVE; needs -OwnerApproval, -BffDeployAttestation and -SpaDeployAttestation. Re-runs the inventory and REFUSES (exit 2, nothing deleted) on
@@ -38,6 +41,11 @@
                              opt-out aiskillconfig. Then: delete that aiskillconfig -> RetrieveDependenciesForDelete on the
                              attribute must be 0 (printed) -> delete the attribute -> the option set's dependencies must be 0
                              (printed) -> delete the global option set -> publish sprk_invoice -> verify both read 404.
+
+    -WhatIf: writes nothing, but it is NOT offline. After the git pre-flight (attestation checks; git only), -WhatIf still
+    performs READ-ONLY GETs against Dataverse (metadata, the inventory queries, RetrieveDependenciesForDelete, the grid row) and
+    signs in to get a token. The same applies to the no-switch report run. The pre-flight runs first, so a refused attestation
+    stops the run before any Dataverse call, with or without -WhatIf.
 
     Idempotent: every step skips work already done; with the column already gone the script reports so and exits 0.
     This script does not edit src/dataverse/solutions/SpaarkeMaster/** (task 015 keeps the source in step by hand; DEF-021).
@@ -53,12 +61,18 @@
       -GridConfig : Infrastructure/DI/ExternalAccessModule.cs lists "statuscode" in the invoices ReadableColumns.
       -Delete     : the same, and Services/Finance/FinanceBaseValues.cs, FinanceRollupService.cs and InvoiceReviewService.cs
                     contain no sprk_invoicestatus, and FinanceBaseValues.cs contains InvoiceStatusCodeColumn (015's readers).
+                    Then a content scan of the whole BFF source: `git grep -il sprk_invoicestatus <sha> -- src/server` must
+                    find nothing, except that ExternalAccessModule.cs may hold the one exact transitional line
+                    ("sprk_invoicestatus", // transitional (015/D-97): remove after the dev column delete). Any other file
+                    (FinanceSummaryService.cs, FinancialCalculationToolHandler.cs, ...), any other line, or a second copy of
+                    the marker line is refused. Keep 015's marker line when merging another branch's allow-list text.
     An unknown sha fails first (git cat-file -e).
 
 .PARAMETER SpaDeployAttestation
     A commit sha: the commit the external SPA deployed to dev was built from. Mandatory for -Delete. Refuses unless
     src/client/external-spa/src/components/detail/RecordDetailModal.tsx and RecordDetailFields.tsx at that commit contain no
-    sprk_invoicestatus (the SPA reads statuscode).
+    sprk_invoicestatus (the SPA reads statuscode). Then `git grep -il sprk_invoicestatus <sha> -- src/client/external-spa/src`
+    must find nothing (tests and comments included).
 
 .EXAMPLE
     pwsh projects/ebilling-r1/scripts/Remove-EbillingInvoiceStatus.ps1
@@ -139,6 +153,35 @@ function Test-InvoicesAllowListHasStatuscode([string]$ModuleSource) {
     return ($body -match '"statuscode"')
 }
 
+# The ONE line that may still name the column in the BFF source at a -Delete attestation (ExternalAccessModule.cs; D-97 transition
+# window). Same text as InvoiceStatusRetirementGuardTests.TransitionalExemptions[0]; compared after trimming.
+$TransitionalModuleLine = '"sprk_invoicestatus", // transitional (015/D-97): remove after the dev column delete'
+
+# Content scan of the whole source tree a deployed artifact was built from (git grep over the attested commit, not a list of known
+# readers: the specific checks below name three files and missed FinanceSummaryService / FinancialCalculationToolHandler, which
+# 9721819ed still has). Refuses on ANY file that names the column, case-insensitively, except the one exact transitional line in
+# ExternalAccessModule.cs (at most once). Throws an EscalationException; returns nothing.
+function Assert-NoRetiredColumnReaders([string]$Sha, [string[]]$Paths, [string]$Parameter) {
+    $files = @(& git -C $RepoRoot grep -il 'sprk_invoicestatus' $Sha -- @Paths 2>&1)
+    if ($LASTEXITCODE -gt 1) { throw [EscalationException]::new("${Parameter} ${Sha}: git grep failed ($($files -join ' ')). Nothing was changed.") }
+    if ($LASTEXITCODE -eq 1 -or $files.Count -eq 0) { return }
+    $names = @($files | ForEach-Object { ([string]$_) -replace '^[^:]+:', '' })       # "<sha>:<path>" -> "<path>"
+    $others = @($names | Where-Object { $_ -ne $BffModulePath })
+    if ($others.Count -gt 0) {
+        throw [EscalationException]::new("${Parameter} ${Sha}: $($others.Count) file(s) under $($Paths -join ', ') still name sprk_invoicestatus at that commit: $($others -join ', '). A build from it breaks when the column is deleted (task 015's readers are not all in that build). Nothing was changed.")
+    }
+    # Only the module is left: every hit must be the exact transitional line, once.
+    $lines = @(& git -C $RepoRoot grep -in 'sprk_invoicestatus' $Sha -- $BffModulePath 2>&1)
+    $bad = [System.Collections.Generic.List[string]]::new(); $exact = 0
+    foreach ($l in $lines) {
+        $m = [regex]::Match([string]$l, '^[^:]+:[^:]+:(?<n>\d+):(?<text>.*)$')
+        if ($m.Success -and $m.Groups['text'].Value.Trim() -ceq $TransitionalModuleLine) { $exact++ } else { $bad.Add("line $($m.Groups['n'].Value): $($m.Groups['text'].Value.Trim())") }
+    }
+    if ($bad.Count -gt 0 -or $exact -gt 1) {
+        throw [EscalationException]::new("${Parameter} ${Sha}: $BffModulePath names sprk_invoicestatus other than as the one exact transitional line ($TransitionalModuleLine): $(if ($bad.Count -gt 0) { $bad -join ' | ' } else { "the exact line occurs $exact times" }). Keep 015's marker line when merging; another branch's text that names the column inline is refused. Nothing was changed.")
+    }
+}
+
 function Assert-BffAttestation([string]$Sha, [bool]$ForDelete) {
     Assert-CommitExists $Sha '-BffDeployAttestation'
     $module = Get-FileAtCommit $Sha $BffModulePath
@@ -153,6 +196,9 @@ function Assert-BffAttestation([string]$Sha, [bool]$ForDelete) {
         if ($text -match '(?i)sprk_invoicestatus') { throw [EscalationException]::new("-BffDeployAttestation ${Sha}: $path still reads sprk_invoicestatus at that commit; a BFF built from it breaks when the column is deleted (task 015's readers are not in that build). Nothing was changed.") }
         if ($path.EndsWith('/FinanceBaseValues.cs') -and $text -notmatch 'InvoiceStatusCodeColumn') { throw [EscalationException]::new("-BffDeployAttestation ${Sha}: $path has no InvoiceStatusCodeColumn at that commit (task 015's readers are not in that build). Nothing was changed.") }
     }
+    # The three files above are the specific checks; this one covers every other BFF source file (FinanceSummaryService,
+    # FinancialCalculationToolHandler, InvoiceLiveFactResolver, ...). The BFF is built from src/server.
+    Assert-NoRetiredColumnReaders $Sha @('src/server') '-BffDeployAttestation'
 }
 
 function Assert-SpaAttestation([string]$Sha) {
@@ -162,6 +208,9 @@ function Assert-SpaAttestation([string]$Sha) {
         if ($null -eq $text) { throw [EscalationException]::new("-SpaDeployAttestation ${Sha}: $path does not exist at that commit. Nothing was changed.") }
         if ($text -match '(?i)sprk_invoicestatus') { throw [EscalationException]::new("-SpaDeployAttestation ${Sha}: $path still reads sprk_invoicestatus at that commit; an SPA built from it breaks when the column is deleted. Nothing was changed.") }
     }
+    # The two files above are the specific checks; this covers every other SPA source file (the SPA is built from
+    # src/client/external-spa/src; its tests and comments are scanned too, as the BFF-side guard scans comments).
+    Assert-NoRetiredColumnReaders $Sha @('src/client/external-spa/src') '-SpaDeployAttestation'
 }
 
 try {
@@ -176,6 +225,9 @@ try {
     }
     if ($GridConfig -or $Delete) { Assert-BffAttestation $BffDeployAttestation ([bool]$Delete) }
     if ($Delete) { Assert-SpaAttestation $SpaDeployAttestation }
+    if ($GridConfig -or $Delete) {
+        Write-Host "Pre-flight (git only, before any Dataverse call) passed: -BffDeployAttestation $BffDeployAttestation$(if ($Delete) { " (allow-list, Finance readers, git grep over src/server), -SpaDeployAttestation $SpaDeployAttestation (SPA readers, git grep over src/client/external-spa/src)" } else { ' (allow-list lists statuscode)' })" -ForegroundColor Green
+    }
 }
 catch [EscalationException] {
     Write-Host ""; Write-Host "ESCALATION - REFUSED: $($_.Exception.Message)" -ForegroundColor Red; exit 2
@@ -249,7 +301,11 @@ function ConvertTo-ViewWithStatuscode([string]$FetchXml, [string]$LayoutXml) {
 # Grid configuration JSON: every mention of the column becomes statuscode (fetch attribute, layout cell, column settings key).
 function ConvertTo-GridConfigWithStatuscode([string]$ConfigJson) {
     if ($ConfigJson -match 'statuscode') { throw [EscalationException]::new("Grid configuration $InvoiceGridConfig already mentions statuscode; edit it by hand.") }
-    return $ConfigJson.Replace($Column, 'statuscode')
+    $new = $ConfigJson.Replace($Column, 'statuscode')     # case-sensitive; the check below catches any other spelling
+    if ($new -match '(?i)sprk_invoicestatus') {
+        throw [EscalationException]::new("Grid configuration $InvoiceGridConfig still names the column after the replace ($([regex]::Matches($new, '(?i)sprk_invoicestatus').Count) mention(s), probably another letter case; the replace is case-sensitive). Edit it by hand. Nothing was written.")
+    }
+    return $new
 }
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -379,10 +435,20 @@ function Invoke-GridConfig {
     # The row belongs to another project (SPA-r3 / uac-r2): the write is conditional on the row being unchanged since it was read.
     $etag = $g.'@odata.etag'
     if ([string]::IsNullOrWhiteSpace($etag)) { throw [EscalationException]::new("Grid configuration $InvoiceGridConfig was read without an @odata.etag, so the write cannot be made conditional (If-Match). Nothing was written.") }
-    if ($DryRun) { Write-Host "  WOULD EDIT grid '$($g.sprk_name)': $Column -> statuscode ($([regex]::Matches($g.sprk_configjson, $Column).Count) mention(s)), If-Match $etag" -ForegroundColor Cyan; return }
+    if ($DryRun) { Write-Host "  WOULD EDIT grid '$($g.sprk_name)': $Column -> statuscode ($([regex]::Matches($g.sprk_configjson, $Column, 'IgnoreCase').Count) mention(s)), If-Match $etag" -ForegroundColor Cyan; return }
     try { Invoke-Dv -Path "sprk_gridconfigurations($InvoiceGridConfig)" -Method PATCH -Body @{ sprk_configjson = $new } -ExtraHeaders @{ 'If-Match' = $etag } | Out-Null }
     catch {
-        if ($_.Exception.Data['Status'] -eq 412) { throw [EscalationException]::new("Grid configuration $InvoiceGridConfig changed after it was read (HTTP 412, If-Match $etag): another session edited it. Nothing was written; re-run to read the current row.") }
+        $failure = $_
+        if ($failure.Exception.Data['Status'] -eq 412) {
+            # The row changed after it was read. If it no longer names the column, the switch is already applied (another run, or
+            # someone did it by hand): report that and stop cleanly. Otherwise the row holds an edit this run has not seen: refuse.
+            $now = Get-DvOrNull "sprk_gridconfigurations($InvoiceGridConfig)?`$select=sprk_name,sprk_configjson"
+            if ($now -and -not [string]::IsNullOrWhiteSpace($now.sprk_configjson) -and $now.sprk_configjson -notmatch '(?i)sprk_invoicestatus') {
+                Write-Host "  already applied  grid '$($g.sprk_name)': the row changed after it was read (HTTP 412, If-Match $etag) and no longer names $Column; nothing to write" -ForegroundColor Yellow
+                return
+            }
+            throw [EscalationException]::new("Grid configuration $InvoiceGridConfig changed after it was read (HTTP 412, If-Match $etag) and it still names the column: another session edited it. Nothing was written; re-run to read the current row.")
+        }
         throw
     }
     Write-Host "  EDITED   grid '$($g.sprk_name)': $Column -> statuscode (If-Match $etag)" -ForegroundColor Green
@@ -443,7 +509,7 @@ function Invoke-Delete($inv) {
 $writes = $Migrate -or $FormsAndViews -or $GridConfig -or $Delete
 Write-Host ""
 Write-Host "eBilling task 015 - retire $Table.$Column" -ForegroundColor Cyan
-Write-Host "Environment: $EnvironmentUrl   Phases: $(@(if ($Migrate) {'Migrate'}; if ($FormsAndViews) {'FormsAndViews'}; if ($GridConfig) {'GridConfig'}; if ($Delete) {'Delete'}) -join ', ' | ForEach-Object { if ($_) { $_ } else { 'REPORT (read-only)' } })$(if ($DryRun) { '   -WhatIf (no writes)' })"
+Write-Host "Environment: $EnvironmentUrl   Phases: $(@(if ($Migrate) {'Migrate'}; if ($FormsAndViews) {'FormsAndViews'}; if ($GridConfig) {'GridConfig'}; if ($Delete) {'Delete'}) -join ', ' | ForEach-Object { if ($_) { $_ } else { 'REPORT (read-only)' } })$(if ($DryRun) { '   -WhatIf (NO WRITES; read-only GETs against Dataverse still run)' })"
 Write-Host ""
 
 try {
@@ -490,5 +556,5 @@ catch {
 }
 
 Write-Host ""
-if ($DryRun) { Write-Host "WhatIf run: nothing was written." -ForegroundColor Cyan }
+if ($DryRun) { Write-Host "WhatIf run: nothing was written (read-only GETs against Dataverse did run, after the git pre-flight)." -ForegroundColor Cyan }
 exit 0
