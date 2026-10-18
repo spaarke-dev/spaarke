@@ -250,6 +250,30 @@ Source: GitHub #2081 (split out by uac-r2 from this task's review: the invoice-f
 
 The baseline is this branch's base commit, not master: the change is the only difference, so the delta is this task's alone. No package was added, so no CVE re-check was needed.
 
+### #2081 fix round 2
+
+Source: uac-r2's re-check of the follow-up (every claim verified; three items). Commits `98a964515`, `490d74259` on top of `ca40c9ba0`. Supersedes the hint wording above.
+
+| # | Item | Change | Mutation proof (the change undone, the tests run) |
+|---|---|---|---|
+| 1 | Check-then-act | `IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync(entity, id, fields, Guid? impersonateSystemUserId, ct)`: `If-Match: *` plus `MSCRMCallerID`; 404 or 412 is `KeyNotFoundException`; an empty caller id is refused before anything is sent. An overload, not an optional parameter, because existing tests set the method up in expression trees. `InvoiceFamilyCoreRecordGuard.UpdateExistingAsync` maps a vanished row to `invoice_family_record_not_found`. The playbook update, the output orchestrator (simple and optimistic paths) and the push write `sprk_invoice` / `sprk_billingevent` through it; every other table keeps its upsert | call sites reverted: 31 fail. Overload ignoring the caller: 2 fail (header, empty id) |
+| 2 | Existence oracle | `CheckGenericUpdateAsync(..., writeIsImpersonated)`: when true, a not-found row (or other invoice) answers `invoice_family_read_failed`. The write-time vanish follows the same flag. The playbook update passes `ImpersonateSystemUserId is not null`. The push keeps `not_found` (ids come from the caller's own query) | mapping disabled: 13 fail. Write-time flag ignored: 3 fail |
+| 3 | Hint wording | "To move an invoice that has lines, or a line of one, detach each line (clear its invoice), move the invoice, move each line to the same matter, project or work assignment, then re-attach the lines to the invoice." Pinned in the guard, the generic paths, the decision route and `CodeOnlyRefusalMessage` tests | old wording restored: 10 fail |
+
+**Deviation (item 2).** The brief lists the output orchestrator among the impersonated writes. It is not: `DataverseUpdateHandler` writes app-only (no `impersonateSystemUserId` anywhere in it), so no access check follows its read and `not_found` hides nothing. It keeps `not_found`. The rule is the flag, so if the orchestrator ever impersonates, it passes `writeIsImpersonated: true`. The playbook update impersonates only when its input carries a caller (the Job B apply seam); the executor path is app-only and keeps `not_found`.
+
+**Still true after this round (known limit).** The D-96 mismatch and multiple-core codes are returned on the impersonated path too. They are decided from rows the app read, so they tell an impersonated caller something about a row they may not read (that its lines sit on another core). D-96 was accepted by the owner on that basis (uniform code, no line named); the hint adds no id.
+
+**Counts.**
+
+| Check | Result |
+|---|---|
+| Focused (InvoiceFamily, SecureChildOwnershipAiToolTests, ActionSeamTests, DecisionRoute, FieldMapping, RecalculateWriteNoCreate) | 751 / 751 |
+| Wide filter (round 1's list plus RecalculateWriteNoCreate, Rollup, Scorecard, Finance, ExternalAccess) | 8,942 passed, 9 skipped, 0 failed |
+| Spaarke.ArchTests | 1,175 / 1,175 |
+| BFF build | 0 warnings, 0 errors |
+| Publish size (same convention as above, fresh worktrees `C:\wt2081m` / `C:\wt2081b`, 192 files each side) | `ca40c9ba0` 39,600,343 B → `490d74259` 39,601,810 B (+1,467 B) |
+
 ## Files
 
 **Ontology-owned (ontology-r1 review requested):**
