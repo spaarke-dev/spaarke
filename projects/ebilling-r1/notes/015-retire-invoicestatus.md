@@ -354,7 +354,7 @@ Not exercised live (the column still exists on dev, and no write was allowed): t
 
 ### 11.5 Follow-up round (2026-10-18): uac-r2 and ontology-r1 re-checks of the fix round
 
-Commits on top of `be1c60e38`: `67e72fe3e` (items 1, 2), `c05e78103` (item 3); this notes update is the last commit. No live writes in this round (the grid switch already ran, section 12); every Dataverse call below is a read-only GET.
+Commits on top of `be1c60e38`: `7965ef68e` (items 1, 2), `6c348fd86` (item 3); this notes update is the last commit. No live writes in this round (the grid switch already ran, section 12); every Dataverse call below is a read-only GET.
 
 | Item | Done | Proof |
 |---|---|---|
@@ -369,14 +369,14 @@ Commits on top of `be1c60e38`: `67e72fe3e` (items 1, 2), `c05e78103` (item 3); t
 
 #### 11.5.1 Script evidence (read-only; the harness is a scratch file, not committed: it loads the script's functions by AST, stubs Dataverse and uses real git; cases A to D)
 
-Final test runs on `c05e78103` (the notes commit changes no code): `dotnet test tests/Spaarke.ArchTests` 1172 passed, 0 failed (the guard family alone, filter `InvoiceStatusRetirement|FinanceBaseValues`: 26 passed); `dotnet test tests/unit/Sprk.Bff.Api.Tests` filter `ExternalModule|Finance`: 1558 passed, 0 failed, 3 skipped.
+Final test runs on `6c348fd86` (the notes commit changes no code): `dotnet test tests/Spaarke.ArchTests` 1172 passed, 0 failed (the guard family alone, filter `InvoiceStatusRetirement|FinanceBaseValues`: 26 passed); `dotnet test tests/unit/Sprk.Bff.Api.Tests` filter `ExternalModule|Finance`: 1558 passed, 0 failed, 3 skipped.
 
 
 - `-Delete -WhatIf`, BFF `9721819ed`: REFUSED, exit 2, at the existing allow-list check (that commit does not list `statuscode`), before the new scan.
 - `Assert-NoRetiredColumnReaders` on `9721819ed` directly (real git): BFF tree REFUSED, 5 files: `FinanceBaseValues.cs`, `FinanceSummaryService.cs`, `InvoiceReviewService.cs`, `Tools/FinancialCalculationToolHandler.cs`, `Signals/PolicyVersionValidator.cs`; SPA tree REFUSED, 2 files: `RecordDetailFields.tsx`, `RecordDetailModal.tsx`. (The new scan catches `FinanceSummaryService.cs` and `FinancialCalculationToolHandler.cs`, which the three named-file checks never looked at.)
-- The same function on this branch's tip (`c05e78103`): BFF tree and SPA tree pass.
+- The same function on the follow-up's code tip (`6c348fd86`): BFF tree and SPA tree pass.
 - Stubbed `git`: nothing found passes; the exact marker line once passes (CRLF-trimmed); the exact line twice, a second module line naming the column, R3's inline text (`a6513cd56:456`), another file in `src/server`, and a git failure each REFUSE.
-- `-Delete -WhatIf -OwnerApproval 'D-97 2026-10-17 owner'`, BFF = SPA = `c05e78103`: pre-flight passes ("Pre-flight (git only, before any Dataverse call) passed"), then the read-only inventory: 3 rows with a value (all ToReview, statuscode 1), 10 invoices at (0, 1), forms / views / grid configurations 0, `DELETE VERDICT: READY`, every step `WOULD ...`, "nothing was written (read-only GETs against Dataverse did run, after the git pre-flight)". The delete itself was not run.
+- `-Delete -WhatIf -OwnerApproval 'D-97 2026-10-17 owner'`, BFF = SPA = `6c348fd86`: pre-flight passes ("Pre-flight (git only, before any Dataverse call) passed"), then the read-only inventory: 3 rows with a value (all ToReview, statuscode 1), 10 invoices at (0, 1), forms / views / grid configurations 0, `DELETE VERDICT: READY`, every step `WOULD ...`, "nothing was written (read-only GETs against Dataverse did run, after the git pre-flight)". The delete itself was not run.
 - `-GridConfig -BffDeployAttestation ebc74b331 -WhatIf`: pre-flight passes; the grid row has no reference ("skipped ... no reference"), as expected after 2026-10-18 03:42:42.
 
 ## 12. Live run log
@@ -387,3 +387,10 @@ Final test runs on `c05e78103` (the notes commit changes no code): `dotnet test 
 | 2026-10-18 03:36:44 | R3 deployed the SPA reading statuscode (run 39094144398) | R3 message |
 | 2026-10-18 03:42:42 | `-GridConfig -BffDeployAttestation ebc74b331`, WhatIf first then live: grid 3ff4102c moved sprk_invoicestatus → statuscode (3 mentions, If-Match W/"21226563") | Read back: 0 old mentions, etag W/"28505656". Delete verdict is still BLOCKED until a BFF with 015's Finance readers is live (R3 merges 015) |
 
+## 13. ontology-r1 re-check of the follow-up (2026-10-18)
+
+Clean apart from these, fixed in the main session:
+- F4: stale pre-cherry-pick hashes. They are replaced above by `7965ef68e` and `6c348fd86`; the patch-ids are identical.
+- K2: the SPA content scan now also covers `src/client/shared/Spaarke.UI.Components/src`, which the SPA bundles through the vite alias `@spaarke/ui-components`. Today's only hit there is a doc comment in `RecordHeader/fields/OptionSetField.tsx:64`, which the SPA does not import.
+- K4: the 412 re-read reports "already applied" only when the row names `statuscode` and not the old column. A row that names neither is refused, and a row that can't be re-read (404) is refused with an accurate message.
+uac-r2's re-check of the same range: PASS, no new findings.

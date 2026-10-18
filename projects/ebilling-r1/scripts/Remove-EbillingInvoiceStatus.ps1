@@ -208,9 +208,10 @@ function Assert-SpaAttestation([string]$Sha) {
         if ($null -eq $text) { throw [EscalationException]::new("-SpaDeployAttestation ${Sha}: $path does not exist at that commit. Nothing was changed.") }
         if ($text -match '(?i)sprk_invoicestatus') { throw [EscalationException]::new("-SpaDeployAttestation ${Sha}: $path still reads sprk_invoicestatus at that commit; an SPA built from it breaks when the column is deleted. Nothing was changed.") }
     }
-    # The two files above are the specific checks; this covers every other SPA source file (the SPA is built from
-    # src/client/external-spa/src; its tests and comments are scanned too, as the BFF-side guard scans comments).
-    Assert-NoRetiredColumnReaders $Sha @('src/client/external-spa/src') '-SpaDeployAttestation'
+    # The two files above are the specific checks; this covers every other SPA source file. The SPA bundle is built from
+    # src/client/external-spa/src plus the shared UI library, which vite.config.ts aliases as @spaarke/ui-components
+    # (ontology-r1 015 re-check K2); tests and comments are scanned too, as the BFF-side guard scans comments.
+    Assert-NoRetiredColumnReaders $Sha @('src/client/external-spa/src', 'src/client/shared/Spaarke.UI.Components/src') '-SpaDeployAttestation'
 }
 
 try {
@@ -442,8 +443,14 @@ function Invoke-GridConfig {
         if ($failure.Exception.Data['Status'] -eq 412) {
             # The row changed after it was read. If it no longer names the column, the switch is already applied (another run, or
             # someone did it by hand): report that and stop cleanly. Otherwise the row holds an edit this run has not seen: refuse.
+            # "Already applied" also needs statuscode in the row (ontology-r1 015 re-check K4): a row that names neither column
+            # was edited some other way, and is refused rather than reported as done.
             $now = Get-DvOrNull "sprk_gridconfigurations($InvoiceGridConfig)?`$select=sprk_name,sprk_configjson"
-            if ($now -and -not [string]::IsNullOrWhiteSpace($now.sprk_configjson) -and $now.sprk_configjson -notmatch '(?i)sprk_invoicestatus') {
+            if (-not $now) { throw [EscalationException]::new("Grid configuration $InvoiceGridConfig changed after it was read (HTTP 412, If-Match $etag) and could not be read again (it may have been deleted). Nothing was written.") }
+            if (-not [string]::IsNullOrWhiteSpace($now.sprk_configjson) -and $now.sprk_configjson -notmatch '(?i)sprk_invoicestatus' -and $now.sprk_configjson -notmatch 'statuscode') {
+                throw [EscalationException]::new("Grid configuration $InvoiceGridConfig changed after it was read (HTTP 412, If-Match $etag) and now names neither $Column nor statuscode: another session edited it another way. Nothing was written.")
+            }
+            if (-not [string]::IsNullOrWhiteSpace($now.sprk_configjson) -and $now.sprk_configjson -notmatch '(?i)sprk_invoicestatus') {
                 Write-Host "  already applied  grid '$($g.sprk_name)': the row changed after it was read (HTTP 412, If-Match $etag) and no longer names $Column; nothing to write" -ForegroundColor Yellow
                 return
             }
