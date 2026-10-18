@@ -1,11 +1,12 @@
 /**
  * ruleWizardTypes - what opens the rule wizard (spaarke-ontology-platform-r1 task 102).
  *
- * A new rule starts empty. A NEW VERSION starts from the rule's page: its identity is fixed, and its wording and plan are carried over
- * as a starting point. The CONDITION is not carried over: the BFF returns no raw rule body (owner decision D-149), so the admin
+ * A new rule starts empty. A NEW VERSION starts from the rule's page: its identity is fixed, and its wording, plan and matter scope
+ * (task 102b) are carried over as a starting point. The CONDITION is not carried over: the BFF returns no raw rule body (owner decision D-149), so the admin
  * rebuilds the condition from the catalog.
  */
 
+import type { ILookupItem } from '../../../types/LookupTypes';
 import type { RuleDetail } from '../Rules/rulesService';
 import type { AuthoringCatalog } from './authoringService';
 import { emptyDraft, QUIET_WINDOW_LANE } from './ruleDraft';
@@ -34,10 +35,26 @@ export interface NewVersionMode {
   priority: number | null;
   countsTowardSuppression: boolean;
   quietWindowDays: number;
-  scope: { tenant: string | null; matter: string | null };
+  /**
+   * The scope the rule has now. `matter` is for display (the matter's name, or its id when the name is not readable); `matterId` is
+   * what a new version starts with and can change (task 102b, D-165).
+   */
+  scope: { tenant: string | null; matter: string | null; matterId: string | null };
 }
 
 export type RuleWizardMode = NewRuleMode | NewVersionMode;
+
+/**
+ * Task 102b (D-165): how the host lets the admin limit a rule to one matter. The host names the subject a matter limit belongs to and
+ * searches matters by name AS THE CALLER (the Console: the shared `searchLookupTarget`); the wizard names no table (D-149) and holds no
+ * matter list. The BFF stays the judge: it refuses a limit on any other subject (`ontology.admin.scope_subject_mismatch`).
+ */
+export interface MatterPicker {
+  /** The rule subject a matter limit applies to; the picker is offered only for a rule about it. */
+  subject: string;
+  /** At most a page of matters whose name contains the text, as the caller can read them. */
+  search: (query: string) => Promise<ILookupItem[]>;
+}
 
 /** The mode that opens the wizard on a new version of the rule a page shows. */
 export function versionModeOf(detail: RuleDetail): NewVersionMode {
@@ -59,7 +76,11 @@ export function versionModeOf(detail: RuleDetail): NewVersionMode {
     priority: detail.scope.priority,
     countsTowardSuppression: detail.noise.countsTowardSuppression,
     quietWindowDays: detail.noise.quietWindowDays,
-    scope: { tenant: detail.scope.tenant, matter: detail.scope.matterName ?? detail.scope.matterId },
+    scope: {
+      tenant: detail.scope.tenant,
+      matter: detail.scope.matterName ?? detail.scope.matterId,
+      matterId: detail.scope.matterId,
+    },
   };
 }
 
@@ -81,5 +102,8 @@ export function initialDraftOf(catalog: AuthoringCatalog, mode: RuleWizardMode):
     actions: [...mode.actions],
     nextSteps: [...mode.nextSteps],
     quietWindowDays: mode.lane === QUIET_WINDOW_LANE ? String(mode.quietWindowDays) : '',
+    // Task 102b: a new version starts with the rule's current scope; publishing it with another (or none) changes the scope.
+    matterId: mode.scope.matterId,
+    matterName: mode.scope.matter,
   };
 }
