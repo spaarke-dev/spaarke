@@ -1827,6 +1827,15 @@ pwsh scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1 -EnvironmentUrl https
 pwsh scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
 ```
 
+### `ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1`
+
+Additive Dataverse metadata script (`ebilling-r1` task 077, D-113) that adds `sprk_rejectionreason` (multiline text, max 2,000, not required) to `sprk_policyversion`: the reason an admin gives when rejecting a drafted billing rule. Written only by the BFF reject route; admin-only, never read by a firm projection. Never deletes or renames; stops with exit 2 if the column exists with another type. Supports `-WhatIf` (reads metadata, writes nothing); a second run reports it as skipped and does not publish. Run it before the BFF build that reads the column is deployed. Column: `docs/data-model/sprk_ruleset.md`.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1
+```
+
 ### `ebilling/Deploy-EbillingSubmissionSchema.ps1`
 
 Additive Dataverse metadata script that creates `sprk_invoicesubmission` (FR-10, D-37), one row per submission attempt: the user-owned table, its tracking-number / channel / processing-status / findings / notice / PO / received-on / correlation columns, the submitter, firm, document, report-document, resulting-invoice and resubmission-of lookups, the ADR-024 `sprk_regardingmatter` / `sprk_regardingproject` / `sprk_regardingworkassignment` / `sprk_regardingrecordtype` lookups and four resolver text fields, and the firm-scoped alternate key `sprk_invoicesubmission_firm_trackingnumber` on (`sprk_vendororg`, `sprk_trackingnumber`) (waits for the index to be Active). Supports `-WhatIf`; never deletes or retypes; stops with exit 2 on a conflicting same-name item; publishes entity-scoped only when it changed something; retries on customization / publish locks and tolerates eventually consistent metadata reads. Columns: `docs/data-model/sprk_invoicesubmission.md`.

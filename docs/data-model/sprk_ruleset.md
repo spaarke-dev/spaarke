@@ -1,8 +1,8 @@
 # sprk_ruleset and the billing columns on the policy store
 
 > **Project**: ebilling-r1, task 019 (FR-09, FR-27, FR-28, D-26, D-66, D-79)
-> **Last Updated**: 2026-10-15
-> **Script**: `scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1` (idempotent, additive; a second run changes nothing)
+> **Last Updated**: 2026-10-18
+> **Scripts**: `scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1` and, for `sprk_rejectionreason` (task 077, D-113), `scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1` (both idempotent, additive; a second run changes nothing)
 > **Owner of the policy tables**: spaarke-ontology-platform-r1 (`Services/Signals/**`). This task only adds columns to them.
 
 Billing rules share the ontology policy store (D-23, D-30): one rules system, two strategies. A **policy** (`sprk_policy`) holds what is stable across versions, a **policy version** (`sprk_policyversion`) holds one immutable published rule body, and the new **rule set** (`sprk_ruleset`) groups the policies drafted from one guideline, rate card or procedure document so that they can be published, scoped to a client default or a firm, cited and shown to firms as a unit (FR-28). Created additively in dev on 2026-10-15; no plugin, business rule or calculated column (ADR-002). Admin forms and views are task 029's.
@@ -70,6 +70,7 @@ Existing columns are unchanged. Added; clause and consequence sit on the version
 | `sprk_clauselocation` | Text (200) | Section and page of the clause. |
 | `sprk_consequence` | Choice (local) | Reject submission = 100000000, Flag = 100000001, Suggest adjustment = 100000002. Empty on ontology rows. A rejection also needs the confidence threshold and a reject-eligible invoice type (FR-26, I-5). |
 | `sprk_proposalstatus` | Choice (local) | Proposed = 100000000, Accepted = 100000001, Rejected = 100000002. State of a rule drafted by the Action (FR-27, FR-28). Empty on ontology rows. |
+| `sprk_rejectionreason` | Multiline text (2,000) | Why an admin rejected the draft (task 077, D-113). Set only by a reject, in the same conditional write as `sprk_proposalstatus = Rejected`; cleared by an accept and by an edit that returns the draft to Proposed. Required (1 to 2,000 characters after trimming) on the reject route, enforced by the BFF, not by schema. **Admin-only**: returned by the Rule Review read, never by a firm projection (`GetFirmClauseAsync` selects its columns by name). Empty on every version that was never rejected. Created by `Deploy-EbillingRuleRejectionReasonSchema.ps1` (task 079 runs it on dev; task 053 syncs SpaarkeMaster). |
 
 The predecessor of a version is its sibling under the same `sprk_policy` with the next-lower `sprk_versionnumber`; there is no extra link column.
 
