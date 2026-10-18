@@ -19,6 +19,10 @@ const BY_CODE: Readonly<Record<string, string>> = {
   'ebilling.submission.firm_invalid': 'The firm for this submission could not be verified.',
   'ebilling.submission.firm_required':
     'Your account is linked to more than one firm and the firm could not be chosen automatically. Contact the team to complete this submission.',
+  'ebilling.submission.firm_not_linked':
+    'The firm you chose is not linked to this record, so an invoice cannot be submitted for it. Choose a record that is linked to the firm.',
+  'ebilling.submission.use_internal_route':
+    'Invoices are submitted from the internal workspace for staff accounts. Use the internal invoice submission instead.',
   'ebilling.submission.firm_unverifiable': 'Your firm could not be verified right now. Try again shortly.',
   'ebilling.submission.storage_not_configured': 'This record has no document storage configured yet.',
   'ebilling.submission.record_unavailable': 'This record is temporarily unavailable. Try again shortly.',

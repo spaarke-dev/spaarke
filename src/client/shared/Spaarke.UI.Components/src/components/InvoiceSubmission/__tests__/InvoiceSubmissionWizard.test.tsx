@@ -106,10 +106,31 @@ describe('InvoiceSubmissionWizard — steps', () => {
   it('Record: the search box narrows the list, and a note says when the list is only a prefix', async () => {
     mount({}, { loadRecords: jest.fn().mockResolvedValue({ records: [MATTER, PROJECT], truncated: true }) });
     await screen.findByRole('radio', { name: /Acme/ });
-    expect(screen.getByText(/Only part of your list is shown/i)).toBeInTheDocument();
+    expect(screen.getByTestId('records-truncated')).toHaveTextContent(/Only the first part of your list is shown/i);
+    expect(screen.getByTestId('records-truncated')).toHaveTextContent(/search box searches only those records/i);
+    expect(screen.queryByTestId('records-partial')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Find a record/i), { target: { value: 'patent' } });
     expect(screen.queryByRole('radio', { name: /Acme/ })).not.toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /Patent portfolio/ })).toBeInTheDocument();
+  });
+
+  it('Record: a source that failed to load is said to the user (partial), apart from a capped list, even when nothing else loaded', async () => {
+    const { unmount } = mount({}, { loadRecords: jest.fn().mockResolvedValue({ records: [MATTER], partial: true }) });
+    await screen.findByRole('radio', { name: /Acme/ });
+    expect(screen.getByTestId('records-partial')).toHaveTextContent(/could not be loaded, so this list is incomplete/i);
+    expect(screen.queryByTestId('records-truncated')).not.toBeInTheDocument();
+    unmount();
+
+    // An empty list from a failed read must not read as "you have no record".
+    mount({}, { loadRecords: jest.fn().mockResolvedValue({ records: [], partial: true }) });
+    expect(await screen.findByTestId('records-partial')).toBeInTheDocument();
+  });
+
+  it('Record: a complete list shows neither warning', async () => {
+    mount();
+    await screen.findByRole('radio', { name: /Acme/ });
+    expect(screen.queryByTestId('records-partial')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('records-truncated')).not.toBeInTheDocument();
   });
 
   it('Record: a failed load shows its message; no records shows an empty state; neither lets the user advance', async () => {
@@ -423,6 +444,167 @@ describe('InvoiceSubmissionWizard — Choose firm step (owner, 2026-10-17: add a
     fireEvent.click(submitButton());
     expect(await screen.findByText(/not allowed to submit invoices for this firm/i)).toBeInTheDocument();
     expect(screen.queryByText('Invoice received')).not.toBeInTheDocument();
+  });
+});
+
+describe('InvoiceSubmissionWizard — the records are those linked to the firm (D-106)', () => {
+  const ALPHA = { firmId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Alpha LLP' };
+  const BETA = { firmId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Beta & Co' };
+
+  /** A host whose records depend on the firm: Alpha is linked to the matter, Beta to the project. */
+  const byFirm = () =>
+    jest.fn().mockImplementation(async (query: { firmId?: string }) => ({
+      records: query.firmId === ALPHA.firmId ? [MATTER] : query.firmId === BETA.firmId ? [PROJECT] : [MATTER, PROJECT],
+    }));
+
+  it('asks for the records of the one firm of a single-firm caller, and still sends no firmId', async () => {
+    const loadRecords = byFirm();
+    const utils = mount({ loadFirms: jest.fn().mockResolvedValue([ALPHA]) }, { loadRecords });
+    expect(await screen.findByRole('radio', { name: /Acme/ })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /Patent portfolio/ })).not.toBeInTheDocument();
+    expect(loadRecords).toHaveBeenCalledTimes(1);
+    expect(loadRecords).toHaveBeenCalledWith({ firmId: ALPHA.firmId });
+    await toDetails(utils);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    await screen.findByText('Invoice received');
+    expect(utils.submit.mock.calls[0][0]).not.toHaveProperty('firmId');
+  });
+
+  it('reads nothing before a firm is chosen (several firms), then only the chosen firm records, and again when the choice changes', async () => {
+    const loadRecords = byFirm();
+    mount({ loadFirms: jest.fn().mockResolvedValue([ALPHA, BETA]) }, { loadRecords });
+    await screen.findByRole('radio', { name: 'Alpha LLP' });
+    expect(loadRecords).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Alpha LLP' }));
+    fireEvent.click(next());
+    expect(await screen.findByRole('radio', { name: /Acme/ })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /Patent portfolio/ })).not.toBeInTheDocument();
+    expect(loadRecords).toHaveBeenLastCalledWith({ firmId: ALPHA.firmId });
+    fireEvent.click(screen.getByRole('radio', { name: /Acme/ }));
+
+    // Back, pick the other firm: the list is Beta's, and the matter picked under Alpha is no longer chosen.
+    fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Beta & Co' }));
+    fireEvent.click(next());
+    expect(await screen.findByRole('radio', { name: /Patent portfolio/ })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /Acme/ })).not.toBeInTheDocument();
+    expect(loadRecords).toHaveBeenLastCalledWith({ firmId: BETA.firmId });
+    expect(next()).toBeDisabled();
+  });
+
+  it.each([
+    ['unknown firms (null)', jest.fn().mockResolvedValue(null)],
+    ['no firm', jest.fn().mockResolvedValue([])],
+    ['a failed firm load', jest.fn().mockRejectedValue(new Error('offline'))],
+    ['no loadFirms', undefined],
+  ])('asks without a firm for %s (the server still checks the link on submit)', async (_name, loadFirms) => {
+    const loadRecords = byFirm();
+    mount({ loadFirms }, { loadRecords });
+    expect(await screen.findByRole('radio', { name: /Acme/ })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Patent portfolio/ })).toBeInTheDocument();
+    expect(loadRecords).toHaveBeenCalledTimes(1);
+    expect(loadRecords).toHaveBeenCalledWith({});
+  });
+
+  it('says so when no record is linked to the firm, apart from having no record at all', async () => {
+    mount(
+      { loadFirms: jest.fn().mockResolvedValue([ALPHA]) },
+      { loadRecords: jest.fn().mockResolvedValue({ records: [] }) }
+    );
+    expect(await screen.findByText(/is linked to this firm/i)).toBeInTheDocument();
+    expect(next()).toBeDisabled();
+  });
+});
+
+describe('InvoiceSubmissionWizard — firm_required brings the Choose firm step in (K1)', () => {
+  const ALPHA = { firmId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Alpha LLP' };
+  const BETA = { firmId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Beta & Co' };
+  const firmRequired = () =>
+    new InvoiceSubmissionError({ statusCode: 400, errorCode: 'ebilling.submission.firm_required' });
+
+  it('reloads the firms after firm_required and inserts the step, keeping the file and the details; then sends the chosen firmId', async () => {
+    const loadFirms = jest.fn().mockResolvedValueOnce(null).mockResolvedValue([ALPHA, BETA]);
+    const submit = jest
+      .fn()
+      .mockRejectedValueOnce(firmRequired())
+      .mockResolvedValue({ submissionId: SUBMISSION_ID, trackingNumber: 'TRK-0001' });
+    const utils = mount({ loadFirms }, { submit });
+    await toDetails(utils);
+    expect(loadFirms).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Choose the firm this invoice is from')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+
+    // The step is now first, with the reason; the submission was refused once and nothing was marked submitted.
+    expect(await screen.findByText('Choose the firm this invoice is from')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/belongs to more than one firm/i);
+    expect(loadFirms).toHaveBeenCalledTimes(2);
+    expect(utils.onSubmitted).not.toHaveBeenCalled();
+    expect(screen.getByText('Step 1 of 4')).toBeInTheDocument();
+
+    // Pick a firm and walk forward: the record, the PDF and the number are still there.
+    fireEvent.click(screen.getByRole('radio', { name: 'Beta & Co' }));
+    fireEvent.click(next());
+    await screen.findByRole('radio', { name: /Acme/ });
+    expect(screen.getByRole('radio', { name: /Acme/ })).toBeChecked();
+    fireEvent.click(next());
+    await waitFor(() => expect(next()).toBeEnabled());
+    expect(screen.getByText('invoice.pdf')).toBeInTheDocument();
+    fireEvent.click(next());
+    expect(await screen.findByLabelText(/Firm invoice number/i)).toHaveValue('INV-9');
+    fireEvent.click(submitButton());
+
+    expect(await screen.findByText('Invoice received')).toBeInTheDocument();
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(submit.mock.calls[0][0]).not.toHaveProperty('firmId');
+    expect(submit.mock.calls[1][0].firmId).toBe(BETA.firmId);
+  });
+
+  it('shows the server message and stays put when the reload still finds no choice to make', async () => {
+    const loadFirms = jest.fn().mockResolvedValue(null);
+    const submit = jest.fn().mockRejectedValue(firmRequired());
+    const utils = mount({ loadFirms }, { submit });
+    await toDetails(utils);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+
+    // The server's sentence is on screen (on the first step, where the user lands), and no firm step appeared.
+    expect(
+      await screen.findByText(/more than one firm and the firm could not be chosen automatically/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Choose the firm this invoice is from')).not.toBeInTheDocument();
+    expect(loadFirms).toHaveBeenCalledTimes(2);
+    expect(utils.onSubmitted).not.toHaveBeenCalled();
+  });
+
+  it('does not reload the firms for any other refusal (control)', async () => {
+    const loadFirms = jest.fn().mockResolvedValue(null);
+    const submit = jest
+      .fn()
+      .mockRejectedValue(
+        new InvoiceSubmissionError({ statusCode: 403, errorCode: 'ebilling.submission.firm_forbidden' })
+      );
+    const utils = mount({ loadFirms }, { submit });
+    await toDetails(utils);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    expect(await screen.findByText(/not allowed to submit invoices for this firm/i)).toBeInTheDocument();
+    expect(loadFirms).toHaveBeenCalledTimes(1);
+  });
+
+  it('has no firm_required reload without a loadFirms callback (a host with no firm concept)', async () => {
+    const submit = jest.fn().mockRejectedValue(firmRequired());
+    const utils = mount({}, { submit });
+    await toDetails(utils);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    expect(
+      await screen.findByText(/more than one firm and the firm could not be chosen automatically/i)
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/Firm invoice number/i)).toHaveValue('INV-9');
   });
 });
 

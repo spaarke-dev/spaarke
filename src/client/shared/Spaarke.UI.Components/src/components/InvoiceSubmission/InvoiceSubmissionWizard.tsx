@@ -9,7 +9,11 @@
  *   0. Firm    — ONLY when `loadFirms` resolves with more than one firm: a required choice of which firm the invoice is
  *                from; the choice goes to `submit` as `firmId`. With one firm (or none, or no `loadFirms`) there is no
  *                step and no `firmId` is sent: the server uses the caller's single firm itself.
- *   1. Record  — choose an accessible core record (matter / project / work assignment), from `loadRecords`.
+ *                When the server answers `firm_required` although no step was shown (the firm list was unknown or stale),
+ *                the wizard asks `loadFirms` again and inserts the step, keeping the file and the details.
+ *   1. Record  — choose an accessible core record (matter / project / work assignment), from `loadRecords`. The host is
+ *                asked for the records linked to the invoice's firm (D-106: the one firm, or the chosen one), and again
+ *                when the choice changes. A capped or partly failed read is said on screen, not hidden.
  *   2. File    — one PDF. Type and size are checked here only as a convenience; the server is the authority.
  *   3. Details — the firm invoice number (REQUIRED, D-91) and an optional PO number. Finish submits.
  *   4. Processing then Result — the success screen mounts {@link InvoiceSubmissionOutcome}, which polls `getStatus`
@@ -44,6 +48,7 @@ import { FileUploadZone, UploadedFileList } from '../FileUpload';
 import type { IFileValidationError, IUploadedFile } from '../FileUpload/fileUploadTypes';
 import { InvoiceSubmissionOutcome } from './InvoiceSubmissionOutcome';
 import { invoiceSubmissionErrorMessage } from './messages';
+import { FIRM_REQUIRED_ERROR_CODE, InvoiceSubmissionError } from './types';
 import type {
   InvoiceCoreRecordKind,
   InvoiceCoreRecordOption,
@@ -60,6 +65,9 @@ export const DEFAULT_MAX_INVOICE_FILE_BYTES = 25 * 1024 * 1024;
 const FIRM_INVOICE_NUMBER_MAX = 89;
 /** The longest PO number the server accepts. */
 const PO_NUMBER_MAX = 100;
+
+/** Shown on the "Choose firm" step when the server's `firm_required` brought it in after the first firm list said there was none to choose. */
+const FIRM_CHOICE_NOTICE = 'Your account belongs to more than one firm. Choose the firm this invoice is from.';
 
 const KIND_LABEL: Readonly<Record<InvoiceCoreRecordKind, string>> = {
   matter: 'Matter',
@@ -193,6 +201,12 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   // for a multi-firm caller it cannot resolve, and that message is shown on submit).
   const [firms, setFirms] = React.useState<InvoiceFirmOption[] | null>(loadFirms ? null : []);
   const [firmId, setFirmId] = React.useState('');
+  // Bumped to ask the host for the firms again (K1: the server answered `firm_required`, so the first answer was wrong or unknown).
+  const [firmsReload, setFirmsReload] = React.useState(0);
+  // The message to show on the first step after a `firm_required` reload: the server's own words when the reload finds no choice to make.
+  const firmRequiredMessage = React.useRef<string | null>(null);
+  // Shown at the top of the first step (a refusal the wizard answered by changing its steps, not by staying on Details).
+  const [notice, setNotice] = React.useState<string | null>(null);
 
   const loadFirmsRef = React.useRef(loadFirms);
   loadFirmsRef.current = loadFirms;
@@ -202,17 +216,23 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     const load = loadFirmsRef.current;
     if (!open || !load) return;
     let cancelled = false;
+    const settle = (result: InvoiceFirmOption[]) => {
+      if (cancelled) return;
+      const pending = firmRequiredMessage.current;
+      if (pending !== null) {
+        firmRequiredMessage.current = null;
+        setNotice(result.length > 1 ? FIRM_CHOICE_NOTICE : pending);
+      }
+      setFirms(result);
+    };
+    // `null` is "unknown", which is not "no firm": it leaves no step, and the server's `firm_required` can still bring the step in.
     load()
-      .then(result => {
-        if (!cancelled) setFirms(result);
-      })
-      .catch(() => {
-        if (!cancelled) setFirms([]);
-      });
+      .then(result => settle(result ?? []))
+      .catch(() => settle([]));
     return () => {
       cancelled = true;
     };
-  }, [open, hasLoadFirms]);
+  }, [open, hasLoadFirms, firmsReload]);
 
   const needsFirmStep = (firms?.length ?? 0) > 1;
   const chosenFirm = needsFirmStep ? (firms?.find(f => f.firmId === firmId) ?? null) : null;
@@ -220,26 +240,36 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   const stepCaption = (n: number): string => `Step ${needsFirmStep ? n + 1 : n} of ${totalSteps}`;
 
   // ── Record step ─────────────────────────────────────────────────────────
+  // The records are those linked to the invoice's firm (D-106): the chosen firm, or the one firm of a single-firm caller.
+  // With several firms none is known until one is chosen, so nothing is loaded before that; with the firms unknown the host is
+  // asked without a firm and the server still checks the link on submit.
   const [records, setRecords] = React.useState<InvoiceCoreRecordOption[] | null>(null);
   const [recordsTruncated, setRecordsTruncated] = React.useState(false);
+  const [recordsPartial, setRecordsPartial] = React.useState(false);
   const [recordsError, setRecordsError] = React.useState<string | null>(null);
   const [recordFilter, setRecordFilter] = React.useState('');
   const [selected, setSelected] = React.useState<InvoiceCoreRecordOption | null>(null);
 
   const loadRecordsRef = React.useRef(loadRecords);
   loadRecordsRef.current = loadRecords;
+  const firmsKnown = firms !== null;
+  const recordFirmId = needsFirmStep ? chosenFirm?.firmId : firms?.length === 1 ? firms[0].firmId : undefined;
 
   React.useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
+    if (!open || !firmsKnown) return;
     setRecords(null);
     setRecordsError(null);
+    if (needsFirmStep && !recordFirmId) return;
+    let cancelled = false;
     loadRecordsRef
-      .current()
+      .current(recordFirmId ? { firmId: recordFirmId } : {})
       .then(result => {
         if (cancelled) return;
         setRecords(result.records);
         setRecordsTruncated(result.truncated === true);
+        setRecordsPartial(result.partial === true);
+        // A record picked under another firm (or no firm) that is not offered now is dropped.
+        setSelected(prev => (prev && result.records.some(r => recordKey(r) === recordKey(prev)) ? prev : null));
       })
       .catch(err => {
         if (cancelled) return;
@@ -248,7 +278,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, firmsKnown, needsFirmStep, recordFirmId]);
 
   const visibleRecords = React.useMemo(() => {
     const needle = recordFilter.trim().toLowerCase();
@@ -291,6 +321,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     // A caller with several firms must have chosen one: never submit without it (the server would answer firm_required).
     if (needsFirmStep && !chosenFirm) return;
 
+    setNotice(null);
     let accepted: InvoiceSubmissionAccepted;
     try {
       accepted = await submit({
@@ -301,8 +332,16 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
         ...(chosenFirm ? { firmId: chosenFirm.firmId } : {}),
       });
     } catch (err) {
+      const message = invoiceSubmissionErrorMessage(err);
+      if (err instanceof InvoiceSubmissionError && err.errorCode === FIRM_REQUIRED_ERROR_CODE && loadFirmsRef.current) {
+        // K1: the server says the caller has several firms although the first answer showed none to choose (unknown, or stale).
+        // Ask again; with several firms the shell is rebuilt with the "Choose firm" step first and the file and details are kept.
+        firmRequiredMessage.current = message;
+        setFirms(null);
+        setFirmsReload(n => n + 1);
+      }
       // WizardShell shows a thrown message above the step and stays on it: the flow does not advance.
-      throw new Error(invoiceSubmissionErrorMessage(err));
+      throw new Error(message);
     }
     onSubmitted?.(accepted);
 
@@ -353,9 +392,21 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
         <Text size={400} weight="semibold">
           Choose the firm this invoice is from
         </Text>
+        {notice && (
+          <MessageBar intent="warning" role="alert">
+            <MessageBarBody>{notice}</MessageBarBody>
+          </MessageBar>
+        )}
         <Text size={300}>Your account belongs to more than one firm. Pick the one that issued this invoice.</Text>
         <div className={styles.recordList}>
-          <RadioGroup aria-label="Firms" value={firmId} onChange={(_e, data) => setFirmId(data.value)}>
+          <RadioGroup
+            aria-label="Firms"
+            value={firmId}
+            onChange={(_e, data) => {
+              setFirmId(data.value);
+              setNotice(null);
+            }}
+          >
             {(firms ?? []).map(firm => (
               <Radio
                 key={firm.firmId}
@@ -384,15 +435,39 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
             Choose the record this invoice is for
           </Text>
 
+          {notice && !needsFirmStep && (
+            <MessageBar intent="warning" role="alert">
+              <MessageBarBody>{notice}</MessageBarBody>
+            </MessageBar>
+          )}
           {recordsError && (
             <MessageBar intent="error" role="alert">
               <MessageBarBody>{recordsError}</MessageBarBody>
             </MessageBar>
           )}
           {!recordsError && records === null && <Spinner size="small" label="Loading your records" />}
+          {records !== null && recordsPartial && (
+            <MessageBar intent="warning" data-testid="records-partial">
+              <MessageBarBody>
+                Some of your records could not be loaded, so this list is incomplete. Try again in a moment.
+              </MessageBarBody>
+            </MessageBar>
+          )}
+          {records !== null && recordsTruncated && (
+            <MessageBar intent="warning" data-testid="records-truncated">
+              <MessageBarBody>
+                Only the first part of your list is shown, and the search box searches only those records. If the record
+                you need is missing, contact your administrator.
+              </MessageBarBody>
+            </MessageBar>
+          )}
           {records !== null && records.length === 0 && (
             <MessageBar intent="info">
-              <MessageBarBody>You do not have a record to submit an invoice against.</MessageBarBody>
+              <MessageBarBody>
+                {recordFirmId
+                  ? 'No record that you can submit an invoice against is linked to this firm.'
+                  : 'You do not have a record to submit an invoice against.'}
+              </MessageBarBody>
             </MessageBar>
           )}
           {records !== null && records.length > 0 && (
@@ -400,11 +475,6 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
               <Field label="Find a record">
                 <Input value={recordFilter} onChange={(_e, data) => setRecordFilter(data.value)} />
               </Field>
-              {recordsTruncated && (
-                <MessageBar intent="warning">
-                  <MessageBarBody>Only part of your list is shown. Use the search box to narrow it.</MessageBarBody>
-                </MessageBar>
-              )}
               <div className={styles.recordList}>
                 <RadioGroup
                   aria-label="Records"

@@ -10,6 +10,7 @@ export { invoiceSubmissionErrorMessage } from './messages';
 export {
   InvoiceSubmissionError,
   EBILLING_DISABLED_ERROR_CODE,
+  FIRM_REQUIRED_ERROR_CODE,
   isEbillingDisabledError,
   isTerminalStatus,
 } from './types';
@@ -17,6 +18,7 @@ export type {
   InvoiceCoreRecordKind,
   InvoiceCoreRecordOption,
   InvoiceCoreRecordList,
+  InvoiceRecordQuery,
   InvoiceFirmOption,
   InvoiceSubmissionInput,
   InvoiceSubmissionAccepted,

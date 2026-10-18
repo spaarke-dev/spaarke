@@ -21,10 +21,24 @@ export interface InvoiceCoreRecordOption {
   number?: string | null;
 }
 
-/** What `loadRecords` resolves with. `truncated` is true when the list is a prefix of the accessible records. */
+/**
+ * What `loadRecords` resolves with. `truncated` is true when the list is a prefix of the accessible records (a row cap
+ * was reached, so a record may be missing and the search box cannot find it). `partial` is true when a source could not be
+ * read at all, so the records of that source are missing (a retry may fix it). The Record step says which.
+ */
 export interface InvoiceCoreRecordList {
   records: InvoiceCoreRecordOption[];
   truncated?: boolean;
+  partial?: boolean;
+}
+
+/**
+ * What the wizard asks `loadRecords` for. `firmId` is set when the firm of the invoice is known (the one firm of a
+ * single-firm caller, or the one chosen in the "Choose firm" step): the host lists only the records linked to that firm
+ * (D-106), because the server refuses a firm that is not linked to the record. Absent when the firms are unknown.
+ */
+export interface InvoiceRecordQuery {
+  firmId?: string;
 }
 
 /** One firm the user can submit for (a row of the "Choose firm" step). */
@@ -80,14 +94,19 @@ export interface InvoiceSubmissionStatusView {
 
 /** The data callbacks a host provides (`loadFirms` is optional). */
 export interface InvoiceSubmissionCallbacks {
-  /** The accessible core records the user may choose from. */
-  loadRecords: () => Promise<InvoiceCoreRecordList>;
   /**
-   * The firms the signed-in user belongs to. The wizard adds a required "Choose firm" step only when this resolves with
-   * MORE THAN ONE firm; with none, one, or a rejection there is no step and no `firmId` is sent (the server picks a
-   * single firm itself, and answers `firm_required` when it cannot). A host with no firm concept omits it.
+   * The accessible core records the user may choose from. Called again when the firm changes; `query.firmId` (when set)
+   * asks for the records linked to that firm only.
    */
-  loadFirms?: () => Promise<InvoiceFirmOption[]>;
+  loadRecords: (query: InvoiceRecordQuery) => Promise<InvoiceCoreRecordList>;
+  /**
+   * The firms the signed-in user belongs to; `null` means UNKNOWN (an older server, eBilling off, a failed read), which
+   * is not "no firm". The wizard adds a required "Choose firm" step only when this resolves with MORE THAN ONE firm;
+   * with none, one, null or a rejection there is no step and no `firmId` is sent (the server picks a single firm itself).
+   * When the server then answers `firm_required` (it could not pick), the wizard calls this again and, if the caller now
+   * has several firms, inserts the step. A host with no firm concept omits it.
+   */
+  loadFirms?: () => Promise<InvoiceFirmOption[] | null>;
   /** Submits the invoice. Rejects with {@link InvoiceSubmissionError} (or any Error) on a refusal. */
   submit: (input: InvoiceSubmissionInput) => Promise<InvoiceSubmissionAccepted>;
   /** Reads one submission's current status from the server. */
@@ -117,6 +136,9 @@ export class InvoiceSubmissionError extends Error {
 
 /** The `errorCode` of a feature-off answer (503). A host hides its submit entry on this code only. */
 export const EBILLING_DISABLED_ERROR_CODE = 'ebilling.disabled';
+
+/** The `errorCode` of "the caller has several firms and none was named" (400). The wizard answers it by asking for the firms again. */
+export const FIRM_REQUIRED_ERROR_CODE = 'ebilling.submission.firm_required';
 
 /** True for the 503 `ebilling.disabled` answer, and for nothing else (an outage 503 carries another code). */
 export function isEbillingDisabledError(err: unknown): boolean {
