@@ -48,13 +48,14 @@ public static class FinanceBaseValues
     public const string BudgetColumn = "sprk_totalbudget";
     public const string UtilizationColumn = "sprk_budgetutilizationpercent";
 
-    /// <summary>The invoice <c>statuscode</c> values whose amount counts as spend: In Review, Approved, Sent to AP and Paid. Rejected,
-    /// Returned to Firm and Cancelled are not counted, so a Signal raised by an invoice that is later rejected can clear. Owner
-    /// decision D-98 (ebilling-r1, 2026-10-17; spec FR-06), which replaces ontology D-137 Q24 ("spend counts only Reviewed").
-    /// The numbers live once, in <see cref="InvoiceStatusCodes"/>.</summary>
+    /// <summary>The invoice <c>statuscode</c> values whose amount counts as spend: Approved, Sent to AP and Paid. In Review is NOT
+    /// counted (it is pending, not actual spend), and neither are Rejected, Returned to Firm and Cancelled, so a Signal raised by an
+    /// invoice that is later rejected can clear. Owner decision D-103 (ebilling-r1, 2026-10-17; the same decision as ontology-r1
+    /// D-166), which supersedes D-98 and replaces ontology D-137 Q24 ("spend counts only Reviewed"). Paid is Inactive and still counts,
+    /// which is why the filter is on <c>statuscode</c>. The numbers live once, in <see cref="InvoiceStatusCodes"/>.</summary>
     public static readonly IReadOnlyList<int> CountedInvoiceStatuses = new[]
     {
-        InvoiceStatusCodes.InReview, InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid,
+        InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid,
     };
 
     /// <summary>Parent ids per grouped query. Matches <c>PredicateCompiler.MaxInListLength</c>: the size of an <c>in</c> list

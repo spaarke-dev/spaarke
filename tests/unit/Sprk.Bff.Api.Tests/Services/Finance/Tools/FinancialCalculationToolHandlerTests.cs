@@ -151,7 +151,7 @@ public class FinancialCalculationToolHandlerTests
         result.Error.Should().NotContain("resolved as ServiceClient");
     }
 
-    // ebilling-r1 task 015 (D-41, D-98; #1771): the invoice query filters statuscode on the counted set, reads the real amount
+    // ebilling-r1 task 015 (D-41, D-103; #1771): the invoice query filters statuscode on the counted set, reads the real amount
     // column, and is the rollup's own query. It once filtered the retired status column on three values, two of which never
     // existed, so Approved / Sent to AP / Paid invoices were never totalled.
     [Theory]

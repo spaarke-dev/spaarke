@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Tests.Seam.Signals;
 /// read back by <see cref="FinanceBaseValues.ReadGroupedSums"/>; task 025b, owner decision D-122). The unit tests build the
 /// FetchXML and feed the reader hand-made rows; only Dataverse can say that this query is accepted, that the alias and group-by
 /// columns come back in the shape the reader expects, and that the counted-status filter selects real <c>statuscode</c> values
-/// (ebilling-r1 task 015, owner decision D-98: In Review, Approved, Sent to AP and Paid, Paid being Inactive).
+/// (ebilling-r1 task 015, owner decision D-103: Approved, Sent to AP and Paid, Paid being Inactive; In Review is not counted).
 /// </summary>
 /// <remarks>
 /// <para>Opt-in exactly like <see cref="SignalWriterSeamTests"/> (same fixture: <c>AzureCliCredential</c>): unless
@@ -55,7 +55,7 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
 
         try
         {
-            // Matter: In Review 300 + Approved 120 + Sent to AP 60 + Paid (Inactive) 20 count; Rejected 9000, Returned to Firm
+            // Matter (D-103): Approved 120 + Sent to AP 60 + Paid (Inactive) 20 count; In Review 300 is pending, not counted; Rejected 9000, Returned to Firm
             // 8000 and Cancelled 5000 (all Inactive) do not.
             await InvoiceAsync(run, "sprk_matter", matter, MatterTypeRef, 300m, InvoiceLifecycleStatus.InReview);
             await InvoiceAsync(run, "sprk_matter", matter, MatterTypeRef, 120m, InvoiceLifecycleStatus.Approved);
@@ -77,8 +77,8 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
 
             var matters = await FinanceBaseValues.ReadAsync(
                 entities.Object, FinanceBaseValues.MatterEntity, new[] { matter, emptyMatter, project }, needSpend: true, needBudget: true, CancellationToken.None);
-            matters[matter].Should().Be((500m, 1500m),
-                "300 + 120 + 60 + 20 counted (Rejected, Returned to Firm and Cancelled are not); budgets 1000 + 500");
+            matters[matter].Should().Be((200m, 1500m),
+                "120 + 60 + 20 counted (In Review, Rejected, Returned to Firm and Cancelled are not); budgets 1000 + 500");
             matters[emptyMatter].Should().Be((0m, 0m), "a matter with no rows has a sum of nothing");
             matters[project].Should().Be((0m, 0m), "a project id is not a matter id: the query groups on the matter lookup");
 
@@ -89,7 +89,7 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
 
             var spendOnly = await FinanceBaseValues.ReadAsync(
                 entities.Object, FinanceBaseValues.MatterEntity, new[] { matter }, needSpend: true, needBudget: false, CancellationToken.None);
-            spendOnly[matter].Should().Be((500m, 0m), "budget was not asked for, so its query is not sent");
+            spendOnly[matter].Should().Be((200m, 0m), "budget was not asked for, so its query is not sent");
         }
         finally
         {

@@ -38,7 +38,7 @@ public class FinancialCalculationToolHandler : IAiToolHandler
     private const string Budget_TotalBudget = "sprk_totalbudget";
 
     // Which invoices count as spend is FinanceBaseValues.CountedInvoiceStatuses, filtered on statuscode (ebilling-r1 task 015,
-    // D-41 / D-98). This handler once filtered the retired invoice-status choice column on 100000001-100000003, two of which it never had
+    // D-41 / D-103). This handler once filtered the retired invoice-status choice column on 100000001-100000003, two of which it never had
     // (it had 100000000 ToReview and 100000001 Reviewed), so its totals counted only "Reviewed" invoices (#1771).
 
     public FinancialCalculationToolHandler(

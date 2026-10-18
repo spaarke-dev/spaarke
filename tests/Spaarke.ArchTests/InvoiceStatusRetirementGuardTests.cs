@@ -4,7 +4,7 @@ using Xunit;
 namespace Spaarke.ArchTests;
 
 /// <summary>
-/// ebilling-r1 task 015 (D-41, owner decisions D-97 / D-98): the invoice status lives on <c>statuscode</c>. The old choice column
+/// ebilling-r1 task 015 (D-41, owner decisions D-97 / D-103): the invoice status lives on <c>statuscode</c>. The old choice column
 /// and its global option set were retired and deleted from dev, so a reader that comes back (a stale branch merged later, a copied
 /// query, a form or view in solution source) would fail at run time against Dataverse, or silently count no spend.
 /// </summary>

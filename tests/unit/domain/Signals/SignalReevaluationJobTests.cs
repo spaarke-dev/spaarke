@@ -1674,10 +1674,12 @@ public partial class SignalReevaluationJobTests
         const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_totalspendtodate","operator":">=","value":50000}}""";
         var h = new Harness().WithThresholdPolicy(body, "Spend to date is {{sprk_totalspendtodate}}.");
         h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId) { ["sprk_matterid"] = MatterId });
-        // ebilling-r1 D-98: counted = statuscode In Review, Approved, Sent to AP, Paid (Paid is Inactive and still counts).
+        // ebilling-r1 D-103 (= ontology D-166): counted = statuscode Approved, Sent to AP, Paid (Paid is Inactive and still counts).
+        // In Review is pending, not actual spend, so it is NOT counted (this is the path through FinanceBaseValues.ReadAsync).
         h.WithInvoice("sprk_matter", MatterId, 30000m, InvoiceStatusCodes.Approved)
             .WithInvoice("sprk_matter", MatterId, 15000m, InvoiceStatusCodes.Paid)
             .WithInvoice("sprk_matter", MatterId, 4000m, InvoiceStatusCodes.SentToAp)
+            .WithInvoice("sprk_matter", MatterId, 950000m, InvoiceStatusCodes.InReview)        // not counted (D-103), ignored
             .WithInvoice("sprk_matter", MatterId, 900000m, InvoiceStatusCodes.Rejected)        // not counted, ignored
             .WithInvoice("sprk_matter", MatterId, 800000m, InvoiceStatusCodes.ReturnedToFirm)  // not counted, ignored
             .WithInvoice("sprk_matter", MatterId, 700000m, InvoiceStatusCodes.Cancelled);      // not counted, ignored
@@ -1687,7 +1689,7 @@ public partial class SignalReevaluationJobTests
         h.Sysadmin.AggregateFetches.Should().ContainSingle().Which.Should().Contain("sprk_invoice");
         h.Org.CreatedPayloads.Should().BeEmpty("30000 + 15000 + 4000 = 49000 is under 50000, and the uncounted rows must not be added");
 
-        h.WithInvoice("sprk_matter", MatterId, 1000m); // In Review (the default): now exactly 50000, at-least is inclusive
+        h.WithInvoice("sprk_matter", MatterId, 1000m); // Approved (the default): now exactly 50000, at-least is inclusive
         h.Org.ResetCounts();
         await h.RunAsync();
         h.Org.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_sentence").Should().Be("Spend to date is 50000.");
@@ -2647,7 +2649,7 @@ public partial class SignalReevaluationJobTests
             return this;
         }
 
-        public Harness WithInvoice(string parent, Guid parentId, decimal amount, int status = InvoiceStatusCodes.InReview)
+        public Harness WithInvoice(string parent, Guid parentId, decimal amount, int status = InvoiceStatusCodes.Approved)
         {
             Sysadmin.InvoiceRows.Add(new Entity("sprk_invoice", Guid.NewGuid())
             {
@@ -3251,6 +3253,10 @@ public partial class SignalReevaluationJobTests
             var lookup = (string)group.Attribute("name")!;
             var sumColumn = (string)sum.Attribute("name")!;
             var conditions = entity.Element("filter")!.Elements("condition").ToList();
+            // A condition this fake does not model would be silently ignored (the rows would be summed as if it were absent), so a
+            // fetch that gains a filter (a status column, a held flag, ...) fails the test instead of passing on a wrong sum.
+            var unknown = conditions.Select(c => (string)c.Attribute("attribute")!).Where(a => a != lookup && a != "statuscode").ToList();
+            if (unknown.Count > 0) throw new InvalidOperationException("The aggregate fake does not model a condition on: " + string.Join(", ", unknown));
             var parents = conditions.Single(c => (string)c.Attribute("attribute")! == lookup && (string)c.Attribute("operator")! == "in")
                 .Elements("value").Select(v => Guid.Parse(v.Value)).ToHashSet();
             var statuses = conditions.SingleOrDefault(c => (string)c.Attribute("attribute")! == "statuscode")

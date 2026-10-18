@@ -19,21 +19,22 @@ public class FinanceBaseValuesTests
     private static readonly Guid MatterB = Guid.Parse("b68299c6-bafb-f011-8407-7c1e520aa4df");
 
     [Fact]
-    public void TheCountedInvoiceStatuses_AreTheFourStatuscodeValues_InReviewThroughPaid()
+    public void TheCountedInvoiceStatuses_AreTheThreeStatuscodeValues_ApprovedThroughPaid_AndNotInReview()
     {
-        // Owner decision D-98 (spec FR-06): In Review, Approved, Sent to AP, Paid - filtered on statuscode (Paid is Inactive).
+        // Owner decision D-103 (= ontology D-166; supersedes D-98): Approved, Sent to AP, Paid - filtered on statuscode (Paid is Inactive).
+        // In Review is pending, not actual spend.
         FinanceBaseValues.CountedInvoiceStatuses.Should().Equal(
-            InvoiceStatusCodes.InReview, InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid);
-        FinanceBaseValues.CountedInvoiceStatuses.Should().Equal(1, 659490000, 659490001, 659490002);   // task 012's live values
+            InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid);
+        FinanceBaseValues.CountedInvoiceStatuses.Should().Equal(659490000, 659490001, 659490002);   // task 012's live values
         FinanceBaseValues.CountedInvoiceStatuses.Should().NotContain(new[]
         {
-            InvoiceStatusCodes.Rejected, InvoiceStatusCodes.ReturnedToFirm, InvoiceStatusCodes.Cancelled,
+            InvoiceStatusCodes.InReview, InvoiceStatusCodes.Rejected, InvoiceStatusCodes.ReturnedToFirm, InvoiceStatusCodes.Cancelled,
         });
         FinanceBaseValues.InvoiceStatusCodeColumn.Should().Be("statuscode");
     }
 
     [Theory]
-    [InlineData(InvoiceStatusCodes.InReview, true)]
+    [InlineData(InvoiceStatusCodes.InReview, false)]         // D-103: pending, not actual spend (both queries must leave it out)
     [InlineData(InvoiceStatusCodes.Approved, true)]
     [InlineData(InvoiceStatusCodes.SentToAp, true)]
     [InlineData(InvoiceStatusCodes.Paid, true)]              // Inactive (statecode 1) and still counted: the filter is statuscode
@@ -53,6 +54,33 @@ public class FinanceBaseValuesTests
         conditions.Should().NotContain(c => (string)c.Attribute("attribute")! == "statecode");
         conditions.Single(c => (string)c.Attribute("attribute")! == "statuscode").Elements("value").Select(v => int.Parse(v.Value))
             .Contains(statusCode).Should().Be(counted);
+    }
+
+    // D-103 (owner; = ontology D-166): In Review is pending, not actual spend. One test per sum path, named for what it proves, so
+    // putting InReview back into CountedInvoiceStatuses fails each path on its own (mutation check recorded in notes/015).
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_project")]
+    public void TheRollupQuery_FinanceRollupService_DoesNotCountAnInReviewInvoice(string parent)
+    {
+        var rollup = FinanceRollupService.BuildInvoiceQuery(MatterA, FinanceBaseValues.ParentLookup(parent));
+
+        var admitted = rollup.Criteria.Conditions.Single(c => c.AttributeName == "statuscode").Values.Cast<int>().ToList();
+        admitted.Should().NotContain(InvoiceStatusCodes.InReview);
+        admitted.Should().BeEquivalentTo(new[] { InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid });
+    }
+
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_project")]
+    public void TheGroupedSumQuery_FinanceBaseValues_DoesNotCountAnInReviewInvoice(string parent)
+    {
+        var grouped = XElement.Parse(FinanceBaseValues.BuildGroupedSumFetchXml(parent, forInvoices: true, new[] { MatterA }));
+
+        var admitted = grouped.Descendants("condition").Single(c => (string)c.Attribute("attribute")! == "statuscode")
+            .Elements("value").Select(v => int.Parse(v.Value)).ToList();
+        admitted.Should().NotContain(InvoiceStatusCodes.InReview);
+        admitted.Should().BeEquivalentTo(new[] { InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid });
     }
 
     [Theory]
