@@ -12,7 +12,10 @@
 // already at or above its target is left alone (numeric compare — an
 // environment at 30 MB is never lowered to 25 MB); the rest go in ONE PATCH
 // of `organizations({organizationid})` with `If-Match: *` (update only, never
-// an upsert).
+// an upsert). A target of -1 (Dataverse's "unlimited" — auditretentionperiodv2
+// = Forever) is met only by -1. After the PATCH a second GET reads the row back
+// and fails the step on any setting that did not take: Dataverse answers 204 to
+// a PATCH whose column it ignores (#2027).
 //
 // IDENTITY: the same as H6's importer and verifier — the FR-39 ordered
 // credential chain (WorkerDataverseCredentialFactory, MI-FIC first: the
@@ -47,6 +50,9 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
 {
     private const string ODataVersion = "4.0";
     private const int DiagnosticTailBudget = 800;
+
+    /// <summary>Dataverse's "unlimited" value for a numeric organization setting (e.g. audit retention Forever).</summary>
+    private const long UnlimitedSetting = -1;
 
     private readonly HttpClient _httpClient;
     private readonly Func<string, string, string, TokenCredential> _credentialFactory;
@@ -209,9 +215,39 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
                 $"{written.Failure} Settings not applied: {string.Join(", ", toWrite.Select(kv => $"{kv.Key}={kv.Value}"))}.");
         }
 
+        // (3) Read the row back: a PATCH of a column Dataverse ignores still returns 204, so success is what the row
+        // now says, not what the PATCH answered (#2027).
+        var readBack = await SendAsync(
+            () => NewRequest(HttpMethod.Get, orgUri, token), "organization read-back GET", request.TargetDataverseUrl,
+            propagationGate, cancellationToken).ConfigureAwait(false);
+        var applied = string.Join(", ", toWrite.Select(kv => $"{kv.Key}={kv.Value}"));
+        if (readBack.Failure is not null)
+        {
+            return new OrgSettingsContractOutcome.Failure(
+                $"The PATCH of {applied} returned success, but reading it back failed: {readBack.Failure}");
+        }
+        if (!TryParseOrganization(readBack.Body, names, out _, out var after, out var readBackFailure))
+        {
+            return new OrgSettingsContractOutcome.Failure(
+                $"The PATCH of {applied} returned success, but the read-back is unusable: {readBackFailure}");
+        }
+        var didNotTake = toWrite
+            .Where(kv => !after.TryGetValue(kv.Key, out var value) || value is null
+                         || !SettingAlreadyAtOrAboveTarget(value, kv.Value))
+            .Select(kv => $"{kv.Key} (target {kv.Value}, reads back " +
+                          $"{(after.TryGetValue(kv.Key, out var value) ? value ?? "null" : "absent")})")
+            .ToArray();
+        if (didNotTake.Length > 0)
+        {
+            return new OrgSettingsContractOutcome.Failure(
+                $"The organization PATCH against '{request.TargetDataverseUrl}' returned success, but the environment " +
+                $"did not take: {string.Join("; ", didNotTake)}. Set it in the Power Platform admin center or find why " +
+                "the column is refused, then resume.");
+        }
+
         foreach (var (name, target) in toWrite)
         {
-            appliedOrAlreadyCorrect[name] = target;
+            appliedOrAlreadyCorrect[name] = after[name] ?? target;
         }
         _logger.LogInformation(
             "H6 org settings applied on env={EnvUrl}: {Applied} (was {Previous})",
@@ -223,13 +259,19 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
 
     /// <summary>
     /// Numeric-first idempotency check: prefer <see cref="long"/> compare (<c>maxuploadfilesize</c> and peers only ever
-    /// go up); otherwise case-insensitive equality. Internal for unit tests.
+    /// go up); otherwise case-insensitive equality. A target of -1 is Dataverse's "unlimited"
+    /// (<c>auditretentionperiodv2</c> = Forever), the top of the range, so only -1 meets it — a 30-day retention is
+    /// below Forever, not above it. Internal for unit tests.
     /// </summary>
     internal static bool SettingAlreadyAtOrAboveTarget(string current, string target)
     {
         if (long.TryParse(current, NumberStyles.Integer, CultureInfo.InvariantCulture, out var currentNumber)
             && long.TryParse(target, NumberStyles.Integer, CultureInfo.InvariantCulture, out var targetNumber))
         {
+            if (targetNumber == UnlimitedSetting || currentNumber == UnlimitedSetting)
+            {
+                return currentNumber == UnlimitedSetting;
+            }
             return currentNumber >= targetNumber;
         }
         return string.Equals(current, target, StringComparison.OrdinalIgnoreCase);

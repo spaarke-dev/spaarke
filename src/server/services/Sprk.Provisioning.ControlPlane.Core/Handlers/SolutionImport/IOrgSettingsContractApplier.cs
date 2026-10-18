@@ -74,15 +74,26 @@ public interface IOrgSettingsContractManifest
 /// <summary>
 /// Static <see cref="IOrgSettingsContractManifest"/> impl. HANDLER-08
 /// (F14 verbatim) canonical set: maxuploadfilesize=25_600_000 (25 MB —
-/// covers the UniversalDocumentUpload PCF bundle size).
+/// covers the UniversalDocumentUpload PCF bundle size). #2027 adds org
+/// auditing: isauditenabled=true and auditretentionperiodv2=-1 (Forever).
 /// </summary>
 public sealed class StaticOrgSettingsContractManifest : IOrgSettingsContractManifest
 {
-    /// <summary>R1 canonical Org Settings — F14 verbatim.</summary>
+    /// <summary>R1 canonical Org Settings — F14 verbatim, plus org auditing (#2027).</summary>
     public static readonly IReadOnlyDictionary<string, string> DefaultOrgSettings =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["maxuploadfilesize"] = "25600000", // 25 MB, F14 verbatim
+
+            // #2027: the per-table and per-column IsAuditEnabled flags SpaarkeMaster carries record nothing while the
+            // organization switch is off, and Microsoft documents no default-on — so a new environment could keep no
+            // audit history at all. The uac-r2 FR-32 interim answer ("who could see record X on date D") IS that
+            // history, and audit cannot be backfilled.
+            ["isauditenabled"] = "true",
+
+            // #2027 owner decision (2026-10-18, relayed by uac-r2): keep audit Forever (-1) — a legal-ops system of
+            // record; the cost is Dataverse log capacity. -1 is satisfied only by -1 (see the applier).
+            ["auditretentionperiodv2"] = "-1",
         };
 
     /// <inheritdoc/>

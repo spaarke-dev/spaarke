@@ -11,6 +11,9 @@
 // with If-Match: * so it never creates a row), no PATCH when satisfied, a
 // higher value never lowered; every refusal (token, GET, PATCH, unparseable
 // row, a non-column name) is a Failure that says nothing was applied.
+// #2027: org auditing (isauditenabled=true, auditretentionperiodv2=-1 Forever)
+// is part of the contract; a -1 target is met only by -1; and the row is read
+// back after the PATCH, so a setting Dataverse silently ignores fails the step.
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -41,12 +44,13 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
 
         outcome.Should().BeOfType<OrgSettingsContractOutcome.Success>()
             .Which.AppliedOrAlreadyCorrect["maxuploadfilesize"].Should().Be("25600000");
-        handler.Requests.Should().HaveCount(2);
+        handler.Requests.Select(r => r.Method).Should().Equal(HttpMethod.Get, HttpMethod.Patch, HttpMethod.Get);
 
         var get = handler.Requests[0];
         get.Method.Should().Be(HttpMethod.Get);
         get.Uri.AbsolutePath.Should().Be("/api/data/v9.2/organizations");
-        Uri.UnescapeDataString(get.Uri.Query).Should().Contain("$select=organizationid,maxuploadfilesize");
+        Uri.UnescapeDataString(get.Uri.Query).Should()
+            .Contain("$select=organizationid,auditretentionperiodv2,isauditenabled,maxuploadfilesize");
         get.Authorization.Should().Be("Bearer fake-dataverse-token");
 
         var patch = handler.Requests[1];
@@ -74,6 +78,92 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
         handler.Requests.Should().ContainSingle("only the GET — nothing to write");
     }
 
+    // ---------- #2027: org auditing ----------
+
+    [Fact]
+    public void Manifest_TurnsOrgAuditingOn_AndKeepsItForever()
+    {
+        StaticOrgSettingsContractManifest.DefaultOrgSettings.Should().Contain("isauditenabled", "true")
+            .And.Contain("auditretentionperiodv2", "-1")
+            .And.Contain("maxuploadfilesize", "25600000");
+    }
+
+    [Fact]
+    public async Task ApplyAsync_FreshEnvironmentWithAuditingOff_TurnsItOnForever_TypedAndReadBack()
+    {
+        var handler = new FakeHandler(OrganizationRow(maxUpload: 25600000, auditEnabled: "false", retention: "null"));
+
+        var outcome = await NewApplier(handler).ApplyAsync(NewRequest(), CancellationToken.None);
+
+        var applied = outcome.Should().BeOfType<OrgSettingsContractOutcome.Success>().Which.AppliedOrAlreadyCorrect;
+        applied["isauditenabled"].Should().Be("true");
+        applied["auditretentionperiodv2"].Should().Be("-1");
+        handler.Requests.Select(r => r.Method).Should().Equal(HttpMethod.Get, HttpMethod.Patch, HttpMethod.Get);
+        using var body = JsonDocument.Parse(handler.Requests[1].Body!);
+        body.RootElement.GetProperty("isauditenabled").ValueKind.Should().Be(JsonValueKind.True);
+        body.RootElement.GetProperty("auditretentionperiodv2").GetInt64().Should().Be(-1);
+        body.RootElement.TryGetProperty("maxuploadfilesize", out _).Should().BeFalse("25 MB is already satisfied");
+    }
+
+    [Theory]
+    [InlineData("30")]      // a finite retention is below Forever — must be raised, not kept as "30 >= -1"
+    [InlineData("2555")]
+    public async Task ApplyAsync_FiniteAuditRetention_IsRaisedToForever(string retention)
+    {
+        var handler = new FakeHandler(OrganizationRow(maxUpload: 25600000, retention: retention));
+
+        var outcome = await NewApplier(handler).ApplyAsync(NewRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<OrgSettingsContractOutcome.Success>()
+            .Which.AppliedOrAlreadyCorrect["auditretentionperiodv2"].Should().Be("-1");
+        using var body = JsonDocument.Parse(handler.Requests.Single(r => r.Method == HttpMethod.Patch).Body!);
+        body.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal("auditretentionperiodv2");
+    }
+
+    [Fact]
+    public async Task ApplyAsync_PatchAnswered204ButTheRowDidNotChange_FailsNamingTheSetting()
+    {
+        // Dataverse returns 204 for a PATCH of a column it ignores: only the read-back can tell.
+        var handler = new FakeHandler(OrganizationRow(
+            maxUpload: 25600000, auditEnabled: "false", retention: "-1", patchTakes: false));
+
+        var outcome = await NewApplier(handler).ApplyAsync(NewRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<OrgSettingsContractOutcome.Failure>()
+            .Which.Diagnostic.Should().Contain("did not take")
+            .And.Contain("isauditenabled (target true, reads back false)");
+        handler.Requests.Select(r => r.Method).Should().Equal(HttpMethod.Get, HttpMethod.Patch, HttpMethod.Get);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_ReadBackRefused_Fails_NeverReportsTheSettingApplied()
+    {
+        var gets = 0;
+        var row = OrganizationRow(maxUpload: 5242880);
+        var handler = new FakeHandler(request => request.Method == HttpMethod.Get && ++gets == 2
+            ? Json(HttpStatusCode.ServiceUnavailable, """{"error":{"message":"busy"}}""")
+            : row(request));
+
+        var outcome = await NewApplier(handler).ApplyAsync(NewRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<OrgSettingsContractOutcome.Failure>()
+            .Which.Diagnostic.Should().Contain("reading it back failed").And.Contain("503");
+    }
+
+    [Theory]
+    [InlineData("-1", "-1", true)]
+    [InlineData("30", "-1", false)]
+    [InlineData("2555", "-1", false)]
+    [InlineData("-1", "25600000", true)]          // unlimited meets any finite target
+    [InlineData("31457280", "25600000", true)]
+    [InlineData("5242880", "25600000", false)]
+    [InlineData("true", "true", true)]
+    [InlineData("false", "true", false)]
+    public void SettingAlreadyAtOrAboveTarget_TreatsMinusOneAsUnlimited(string current, string target, bool expected)
+    {
+        DataverseWebApiOrgSettingsContractApplier.SettingAlreadyAtOrAboveTarget(current, target).Should().Be(expected);
+    }
+
     [Fact]
     public async Task ApplyAsync_GetRefused_FailsAndPatchesNothing()
     {
@@ -91,7 +181,7 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
     public async Task ApplyAsync_PatchRefused_FailsNamingTheSettingNotApplied()
     {
         var handler = new FakeHandler(request => request.Method == HttpMethod.Get
-            ? Json(HttpStatusCode.OK, OrganizationJson(5242880))
+            ? Json(HttpStatusCode.OK, OrganizationJson(5242880, "true", "-1"))
             : Json(HttpStatusCode.Forbidden, """{"error":{"code":"0x80040220","message":"missing prvWriteOrganization"}}"""));
 
         var outcome = await NewApplier(handler).ApplyAsync(NewRequest(), CancellationToken.None);
@@ -142,15 +232,16 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
     public async Task ApplyAsync_FirstGetRefusedWhileTheAppUserPropagates_IsWaitedOut_ThenApplies()
     {
         var gets = 0;
+        var row = OrganizationRow(maxUpload: 5242880);
         var handler = new FakeHandler(request => request.Method == HttpMethod.Get && ++gets <= 2
             ? Json(HttpStatusCode.Forbidden, """{"error":{"message":"principal not found"}}""")
-            : OrganizationRow(maxUpload: 5242880)(request));
+            : row(request));
 
         var outcome = await NewApplier(handler, propagation: Propagation(TimeSpan.FromSeconds(10)))
             .ApplyAsync(NewRequest(), CancellationToken.None);
 
         outcome.Should().BeOfType<OrgSettingsContractOutcome.Success>();
-        gets.Should().Be(3);
+        gets.Should().Be(4, "two refused GETs, the read, then the read-back");
     }
 
     [Fact]
@@ -247,13 +338,48 @@ public sealed class DataverseWebApiOrgSettingsContractApplierTests
                 DataverseAppUserPropagationTimeout = TimeSpan.Zero,
             });
 
-    private static Func<HttpRequestMessage, HttpResponseMessage> OrganizationRow(long maxUpload)
-        => request => request.Method == HttpMethod.Get
-            ? Json(HttpStatusCode.OK, OrganizationJson(maxUpload))
-            : new HttpResponseMessage(HttpStatusCode.NoContent);
+    /// <summary>
+    /// A stateful organization row: GET returns it, PATCH merges its body into it (unless <paramref name="patchTakes"/>
+    /// is false — Dataverse ignoring the column while still answering 204). Audit defaults are already satisfied so a
+    /// test about one setting sees only that setting move. Values are raw JSON (<c>"null"</c> for a null column).
+    /// </summary>
+    private static Func<HttpRequestMessage, HttpResponseMessage> OrganizationRow(
+        long maxUpload, string auditEnabled = "true", string retention = "-1", bool patchTakes = true)
+    {
+        var state = Columns(maxUpload, auditEnabled, retention);
+        return request =>
+        {
+            if (request.Method == HttpMethod.Get)
+            {
+                return Json(HttpStatusCode.OK, OrganizationJson(state));
+            }
+            if (patchTakes)
+            {
+                using var body = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+                foreach (var property in body.RootElement.EnumerateObject())
+                {
+                    state[property.Name] = property.Value.GetRawText();
+                }
+            }
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        };
+    }
 
-    private static string OrganizationJson(long maxUpload)
-        => $$"""{"value":[{"organizationid":"{{OrganizationId}}","maxuploadfilesize":{{maxUpload}}}]}""";
+    private static Dictionary<string, string> Columns(long maxUpload, string auditEnabled, string retention) => new(StringComparer.Ordinal)
+    {
+        ["maxuploadfilesize"] = maxUpload.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        ["isauditenabled"] = auditEnabled,
+        ["auditretentionperiodv2"] = retention,
+    };
+
+    private static string OrganizationJson(long maxUpload, string auditEnabled, string retention)
+        => OrganizationJson(Columns(maxUpload, auditEnabled, retention));
+
+    private static string OrganizationJson(IReadOnlyDictionary<string, string> columns)
+    {
+        var fields = string.Join(",", columns.Select(kv => "\"" + kv.Key + "\":" + kv.Value));
+        return "{\"value\":[{\"organizationid\":\"" + OrganizationId + "\"," + fields + "}]}";
+    }
 
     private static HttpResponseMessage Json(HttpStatusCode status, string json)
         => new(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
