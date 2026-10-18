@@ -2,13 +2,17 @@
 
 > **Status: IN PROGRESS. The dev delete is NOT done.** Code, tests, forms, views, solution source and docs are done. The delete is blocked by a live dependent outside the inventory: the outside-counsel invoices grid configuration `3ff4102c` (SPA-r3 / uac-r2 data, section 3.4). The brief says to stop before any delete when something unexpected turns up, so this run stopped there. The sequence that clears it is in section 3.5.
 > **Date**: 2026-10-17. **Environment**: dev (spaarkedev1). **Script**: `projects/ebilling-r1/scripts/Remove-EbillingInvoiceStatus.ps1` (section 5.1 explains why it lives here).
-> **Commits** (work/ebilling-r1 lineage): `f6b8113a6` readers, `7d5c4ee2e` forms and views, `b0c53eb48` entity source and ArchTest guard, plus the docs / script / notes commit.
+> **Commits** (work/ebilling-r1 lineage): `e0df77339` readers, `b2d8cb6dd` forms and views, `7c474b2c9` entity source and ArchTest guard, `d4e555e38` docs / script / notes. Review fix round (2026-10-17, section 11): D-103 counted spend, transition-window allow-list, delete-script attestations.
 
 ## 1. Owner decisions
 
 **D-97 (2026-10-17), quoted:** "Owner approves task 015 in full, including the destructive step. Migrate `sprk_invoicestatus` to `statuscode`, update all readers, forms and views, then delete the `sprk_invoicestatus` column and option set from spaarkedev1 once nothing references them." (Owner chose "Approve incl. delete".)
 
-**D-98 (2026-10-17):** the owner confirmed the counted-spend set, which replaces ontology D-137 Q24 ("spend counts only Reviewed"). `FinanceBaseValues.CountedInvoiceStatuses` = `statuscode` In Review (1), Approved (659490000), Sent to AP (659490001), Paid (659490002). The filter is on `statuscode`, never `statecode`, because Paid is Inactive and still counts. Rejected, Returned to Firm and Cancelled are not counted. The `FinanceBaseValues` comment cites D-98.
+**D-98 (2026-10-17), SUPERSEDED by D-103:** the owner first confirmed In Review, Approved, Sent to AP and Paid as the counted-spend set (replacing ontology D-137 Q24, "spend counts only Reviewed").
+
+**D-103 (2026-10-17), in force:** counted spend = `statuscode` **Approved (659490000), Sent to AP (659490001) and Paid (659490002)**. **In Review is NOT counted** (it is pending, not actual spend; ebilling's D-104 adds a separate Pending Spend). This is the same decision as ontology-r1 D-166, and it reconciles the two answers the owner gave the two sessions. The filter is on `statuscode`, never `statecode`, because Paid is Inactive and still counts. Rejected, Returned to Firm and Cancelled are not counted. `FinanceBaseValues.CountedInvoiceStatuses` and its comment cite D-103 / ontology D-166. D-102 (held invoices do not count) is satisfied automatically, because a held invoice is In Review.
+
+**D-107 (2026-10-17):** firms see the `statuscode` labels as they are, including "Sent to AP". The external SPA keeps reading `statuscode` and shows its label unchanged.
 
 D-97's condition "once nothing references them" is not yet met on dev (section 3.4), so the delete did not run.
 
@@ -21,8 +25,8 @@ Step 1 grepped for the literal and for the constant names (`InvoiceStatusReviewe
 | Difference from the POML inventory | Handling |
 |---|---|
 | Line numbers in the POML had drifted after the origin/master merge (for example SignalReevaluationJobTests). | Each reader was found by name, not by line. |
-| `PolicyVersionValidator.AuthorableColumns` remark (ontology, task 102a) | Remark now names `sprk_invoice.statuscode (ebilling-r1 D-41 / D-98)`. No code change. |
-| `docs/data-model/sprk_invoice.md`, `docs/architecture/multi-environment-portability-strategy.md:141` | Reworded. `sprk_invoice.md` gains a D-98 "Spend" paragraph. |
+| `PolicyVersionValidator.AuthorableColumns` remark (ontology, task 102a) | Remark now names `sprk_invoice.statuscode (ebilling-r1 D-41 / D-103, ontology D-166)` after the fix round. No other change. |
+| `docs/data-model/sprk_invoice.md`, `docs/architecture/multi-environment-portability-strategy.md:141` | Reworded. `sprk_invoice.md` gains a "Spend" paragraph (D-103 after the fix round). |
 | `scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1:29` (a comment) | Reworded without the literal. |
 | `InvoiceReviewWritePathTests :43-44` in the POML | These are the *document* review-status constants (`sprk_document`), not the invoice column. Left unchanged. The invoice create-payload entry (old :172) was removed, and an assertion now checks that the create keys hold no `statuscode` / `statecode`. |
 | `invoiceStatus` (camel case) in PolicyVersionValidator predicate names and the live-fact key | These are fact or predicate names, not the column. They stay. |
@@ -85,16 +89,23 @@ The XML of both forms and both views was snapshotted before the edit. The seam t
 
 The live external Invoices widget for outside counsel reads `sprk_invoice` through grid configuration `3ff4102c`, which names the column in its fetch. The two possible orders each break something:
 
-- **Patch the grid to `statuscode` before the BFF carrying `f6b8113a6` is deployed:** the deployed BFF's external allow-list does not admit `statuscode`, so it refuses the widget's fetch.
+- **Patch the grid to `statuscode` before a BFF that admits `statuscode` is deployed:** the deployed BFF's external allow-list does not admit `statuscode`, so it refuses the widget's fetch.
 - **Delete the column before patching the grid:** Dataverse refuses the grid's fetch because the attribute no longer exists.
 
 So the grid has to move between the BFF deploy and the delete, and the grid belongs to another project. Both reasons fall under the brief's stop rule ("finds something unexpected (more dependents …) STOP before any delete and report") and the POML escalation trigger (a reader in another project's code or data).
 
-### 3.5 Remaining sequence (main session; owner OK is D-97)
+### 3.5 Remaining sequence (main session; owner OK is D-97), and the live spend facts
 
-1. Deploy the BFF containing `f6b8113a6`, which adds `statuscode` to the external invoices allow-list. Until this deploy, the widget's Status column is the old one, which is harmless.
-2. `pwsh projects/ebilling-r1/scripts/Remove-EbillingInvoiceStatus.ps1 -GridConfig` (try `-WhatIf` first). This moves `3ff4102c` fetch, layout and column settings to `statuscode`. Tell SPA-r3 / uac-r2 first (section 9).
-3. `pwsh projects/ebilling-r1/scripts/Remove-EbillingInvoiceStatus.ps1 -Delete -OwnerApproval 'D-97 2026-10-17 owner' -WhatIf`, then the same command without `-WhatIf`. The script:
+**Sequence.** Shared dev's BFF and external SPA are deployed only by SPA-r3 from its branch (project CLAUDE.md section 6), so every step that depends on a deploy is R3's. The delete script cannot see what is live; the operator passes the commit each deploy was built from, and the script checks that commit's source by content (section 5.6).
+
+1. **R3 deploys a BFF that admits both columns** (candidate `2bda5ebe1`: its invoices allow-list holds the old column and `statuscode`), **then the SPA**. 015's own allow-list is the same union (section 4), so the merge of the two branches stays consistent.
+2. **R3 confirms the deploy is live.**
+3. **`-GridConfig`, `-WhatIf` first:**
+   `pwsh projects/ebilling-r1/scripts/Remove-EbillingInvoiceStatus.ps1 -GridConfig -BffDeployAttestation <the BFF commit from step 1> -WhatIf`, then the same command without `-WhatIf`. It moves `3ff4102c` fetch, layout and column settings to `statuscode`, with `If-Match` on the row's etag. Tell SPA-r3 / uac-r2 first (section 9). It must be a separate run from `-Delete`.
+4. **015 reaches master, and R3's branch merges it.**
+5. **R3 deploys a BFF containing 015's Finance readers** (FinanceBaseValues, FinanceRollupService, InvoiceReviewService on `statuscode`). `2bda5ebe1` does NOT qualify: it admits both columns but still reads the old one in FinanceBaseValues (the script refuses it for `-Delete`, section 5.6).
+6. **`-Delete`, `-WhatIf` first, with `-OwnerApproval 'D-97 2026-10-17 owner'`:**
+   `pwsh projects/ebilling-r1/scripts/Remove-EbillingInvoiceStatus.ps1 -Delete -OwnerApproval 'D-97 2026-10-17 owner' -BffDeployAttestation <step 5 commit> -SpaDeployAttestation <step 1 SPA commit> -WhatIf`, then the same command without `-WhatIf`. The script:
    1. re-checks every blocker;
    2. deletes aiskillconfig `a32ae5a7`;
    3. prints RetrieveDependenciesForDelete(attribute) and refuses unless it is 0;
@@ -103,16 +114,31 @@ So the grid has to move between the BFF deploy and the delete, and the grid belo
    6. deletes the option set;
    7. publishes `sprk_invoice`;
    8. verifies both return 404.
-4. Record the dependency output after the delete (expected 0, then 404) in this file.
+   Record the dependency output after the delete (expected 0, then 404) in this file.
+7. **A follow-up commit removes the transitional allow-list entries** (below).
 
-Until step 3 runs, SpaarkeMaster source is **ahead of dev**: the attribute, option set and root component are already removed (`b0c53eb48`). A full solution import from source before the delete would try to remove them through the import instead.
+**Rule agreed with R3.** After the delete, every dev BFF deploy must contain 015, **checked by content, not ancestry** (a squash merge breaks `merge-base --is-ancestor`). The check: `FinanceBaseValues.cs` has `InvoiceStatusCodeColumn` and none of FinanceBaseValues, FinanceRollupService or InvoiceReviewService names the old column. `Remove-EbillingInvoiceStatus.ps1` runs exactly that check at the attested commit; R3's deploy gate should run the same grep.
+
+**Follow-up (open): remove the transitional entries after the dev column delete.** One commit, after step 6 verified:
+- `Infrastructure/DI/ExternalAccessModule.cs`: the invoices `ReadableColumns` line marked `transitional (015/D-97)`;
+- `tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs`: the `TransitionalInvoiceStatusColumn` constant and its uses (the live-grid row goes back to `statuscode`, the transition tests go, the two list pins drop the entry);
+- `tests/Spaarke.ArchTests/InvoiceStatusRetirementGuardTests.cs`: the `TransitionalExemptions` list and its three controls. The guard has a ratchet for this: `EveryTransitionalExemption_IsStillNeeded` fails as soon as one of the two lines is removed without its exemption.
+The same removal applies to R3's branch (it carries the same union).
+
+**Live spend facts (read on dev 2026-10-17; D-103).**
+- All 10 dev invoices are In Review (statecode 0, statuscode 1), so **counted spend is 0 everywhere** under D-103. In Review is not counted.
+- The seeded `sprk_totalspendtodate` of 25000 on matter `2444af6d-e1f2-f011-8406-7ced8d1dc988` (baseline-finance-pipeline.md) is a stored copy; it is **rewritten to 0 at the next rollup** of that matter. Nothing was written here.
+- **No seeding** of invoices at counted statuses until ontology-r1's owner answers.
+- POL-COMMIT-BUDGET is an **Existence** rule (`sprk_ruletype` Existence, 100000002), not a spend Threshold: its firing does not depend on the counted set. Spend and budget Thresholds, where authored, do.
+
+Until step 6 runs, SpaarkeMaster source is **ahead of dev**: the attribute, option set and root component are already removed (`7c474b2c9`). A full solution import from source before the delete would try to remove them through the import instead.
 
 ## 4. Code changes, by owner
 
 **ebilling-r1:**
 - `Services/Finance/FinanceSummaryService.cs`: reads `FinanceBaseValues.InvoiceStatusCodeColumn`. `BuildRecentInvoicesQuery` and `ToRecentInvoice` were extracted so they can be tested.
 - `Services/Finance/InvoiceReviewService.cs`: the create no longer writes a status, so a new invoice takes the `statuscode` default, In Review.
-- `Services/Finance/Tools/FinancialCalculationToolHandler.cs`: both calculations now use `FinanceRollupService.BuildInvoiceQuery`, the D-98 set on `statuscode`. This fixes the #1771 defect, where the old code filtered on 100000002 / 100000003, values that never existed.
+- `Services/Finance/Tools/FinancialCalculationToolHandler.cs`: both calculations now use `FinanceRollupService.BuildInvoiceQuery`, the D-103 set on `statuscode`. This fixes the #1771 defect, where the old code filtered on 100000002 / 100000003, values that never existed.
 - `Services/Insights/LiveFacts/InvoiceLiveFactResolver.cs`: reads `statuscode` and `sprk_totalamount`. This fixes ISS-001 / #1904, where it read `sprk_status` and `sprk_total`, neither of which exists on `sprk_invoice`.
 - `Spaarke.UI.Components/.../OptionSetField.tsx`: doc example only.
 - `scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1`: comment only.
@@ -127,18 +153,18 @@ Until step 3 runs, SpaarkeMaster source is **ahead of dev**: the attribute, opti
   - InvoiceStatusRetirementGuardTests (new)
 
 **ontology-r1 (ontology-owned; they review before merge):**
-- `Services/Finance/FinanceBaseValues.cs`: `InvoiceStatus` becomes `InvoiceStatusCodeColumn = "statuscode"`. `InvoiceStatusReviewed` is removed. `CountedInvoiceStatuses` holds the four `InvoiceStatusCodes` values (D-98). The grouped FetchXML filters on `statuscode`.
+- `Services/Finance/FinanceBaseValues.cs`: `InvoiceStatus` becomes `InvoiceStatusCodeColumn = "statuscode"`. `InvoiceStatusReviewed` is removed. `CountedInvoiceStatuses` holds Approved, Sent to AP and Paid (D-103; In Review is not counted). The grouped FetchXML filters on `statuscode`.
 - `Services/Finance/FinanceRollupService.cs`: the column set and the condition use `InvoiceStatusCodeColumn`.
-- `Services/Signals/PolicyVersionValidator.cs`: remark only.
-- `tests/unit/domain/Signals/SignalReevaluationJobTests.cs`: the spend test now counts Approved, Paid and Sent to AP and ignores Rejected, Returned to Firm and Cancelled. The harness default is In Review on `statuscode`.
-- `tests/integration/seam/Signals/FinanceBaseValuesSeamTests.cs`: the live seam test has all 7 statuses. The Inactive ones are set through an update with statecode / statuscode. The expected matter sum is 500.
-- `tests/Spaarke.ArchTests/FinanceBaseValuesSingleDefinitionGuardTests.cs`: the literal regex is now `\b65949000[0-4]\b`, and the control copy holds the new values.
+- `Services/Signals/PolicyVersionValidator.cs`: remark only (cites D-103 / ontology D-166).
+- `tests/unit/domain/Signals/SignalReevaluationJobTests.cs`: the spend test counts Approved, Paid and Sent to AP and ignores In Review, Rejected, Returned to Firm and Cancelled. The harness default is Approved on `statuscode`, and the aggregate fake throws on a condition attribute it does not model.
+- `tests/integration/seam/Signals/FinanceBaseValuesSeamTests.cs`: the live seam test has all 7 statuses. The Inactive ones are set through an update with statecode / statuscode. The expected matter sum is **200** (Approved 120 + Sent to AP 60 + Paid 20; the 300 In Review does not count).
+- `tests/Spaarke.ArchTests/FinanceBaseValuesSingleDefinitionGuardTests.cs`: the literal regex is `\b65949000[0-4]\b`, the control copy holds the new values, and `InvoiceStatusCodes.` in the two scanned files is flagged too.
 
 **uac-r2 / SPA-r3 (shared):**
-- `Infrastructure/DI/ExternalAccessModule.cs`: the invoices `ReadableColumns` entry is now `statuscode`.
-- `tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs`: the live grid fetch, the live-derived allow-list and the Task134 allow-lists now use `statuscode`.
-- `src/client/external-spa/src/components/detail/RecordDetailFields.tsx`, `RecordDetailModal.tsx`, `tests/RecordDetailModal.test.tsx`.
-- **Live data, not in the repo:** grid configuration `3ff4102c` (section 3.5 step 2).
+- `Infrastructure/DI/ExternalAccessModule.cs`: the invoices `ReadableColumns` admits `statuscode` AND, during the transition window, the old column (`transitional (015/D-97): remove after the dev column delete`).
+- `tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs`: the live-derived and Task134 allow-lists carry both entries (through one constant, `TransitionalInvoiceStatusColumn`). The LIVE grid row is the current fetch (old column); the post-switch fetch is `TargetInvoicesGridFetchXml`, labelled as the target; new cases prove the current live fetch and the target fetch are both admitted, and that only the invoices module admits the old column.
+- `src/client/external-spa/src/components/detail/RecordDetailFields.tsx`, `RecordDetailModal.tsx`, `tests/RecordDetailModal.test.tsx` (read `statuscode`; unchanged by the fix round).
+- **Live data, not in the repo:** grid configuration `3ff4102c` (section 3.5 step 3).
 
 ## 5. Deviations
 
@@ -147,6 +173,15 @@ Until step 3 runs, SpaarkeMaster source is **ahead of dev**: the attribute, opti
 - **5.3 Main-form RecordHeader field removed, not replaced:** a `statuscode` entry in the header card's layoutJson would be an editable option set. OptionSetField has no read-only mode, so that would let a user set the status without going through the lifecycle service (#1957). Status stays visible in the form header.
 - **5.4 Acceptance criterion 1:** the grep still hits the guard file, which is deliberate and self-excluded, and ACT-004.json until the main session edits it.
 - **5.5 PR, ontology-r1 review record and TASK-INDEX:** these are left to the main session (no push from this agent; the TASK-INDEX edit is forbidden by the brief).
+- **5.6 Delete script attestations (review fix round; ontology-r1 F2, uac-r2 K1/K2):**
+  - `-BffDeployAttestation <sha>` is mandatory for `-GridConfig` and `-Delete`; `-SpaDeployAttestation <sha>` for `-Delete`.
+  - `git cat-file -e` runs first (an unknown or malformed sha fails clearly), then the commit's source is read with `git show <sha>:<path>`:
+    - `-GridConfig`: the external invoices allow-list in `ExternalAccessModule.cs` lists `"statuscode"`;
+    - `-Delete`: also none of `FinanceBaseValues.cs`, `FinanceRollupService.cs`, `InvoiceReviewService.cs` names the old column, and `FinanceBaseValues.cs` has `InvoiceStatusCodeColumn`; and (SPA) `RecordDetailModal.tsx` and `RecordDetailFields.tsx` name no old column.
+  - The checks are git-only, run before any Dataverse call, and also run under `-WhatIf` (exit 2, nothing changed).
+  - `-GridConfig -Delete` in one run is refused (the grid blocker would clear partway through).
+  - K2: the "column already retired" exit no longer skips `-GridConfig`. K1: the grid PATCH sends `If-Match` with the row's etag; a 412 is reported and nothing is overwritten.
+  - Not proven live: the already-retired `-GridConfig` path (the column still exists on dev) and the 412 path. Both are covered by reading the code only.
 
 ## 6. Enforcement
 
@@ -162,7 +197,9 @@ Until step 3 runs, SpaarkeMaster source is **ahead of dev**: the attribute, opti
   - 6 must-not-fire cases: the new `InvoiceStatusCodeColumn`, `CountedInvoiceStatuses`, `InvoiceStatusCodes`, and camel-case `invoiceStatus` fact names.
   - `TheWalk_ReachesEveryScannedRoot`, so the scan cannot pass vacuously.
 
-This is the backstop against a stale ontology branch reintroducing a reader (section 9). There is no ratchet baseline: the scan finds 0 violations today.
+This is the backstop against a stale ontology branch reintroducing a reader (section 9).
+
+**Ratchet (transition window, D-97).** Two exact lines are exempt until the column is deleted from dev: the `"sprk_invoicestatus", // transitional (015/D-97): remove after the dev column delete` entry in `ExternalAccessModule.cs`, and the one `TransitionalInvoiceStatusColumn` constant in `ExternalModuleColumnAllowListTests.cs` (file plus exact trimmed line, compared as text). The list only shrinks: `EveryTransitionalExemption_IsStillNeeded` fails when a line is removed without its exemption, `TheExemptionList_NeverGrows` caps it at two, and the must-fire control `TheDetector_StillFires_OnTheRetiredNameAnywhereElse` proves the name still fails on another line of an exempt file, in another file, and with a changed comment. Real-scan proof: a comment naming the column added to `FinanceSummaryService.cs` made the scan fail with `FinanceSummaryService.cs:536` (and only that line).
 
 **Proposed follow-up (not done here):** an ArchTest that fails on a `statuscode` write to `sprk_invoice` outside `InvoiceLifecycleService` (and the create default). It would turn the lifecycle-only write rule (task 014) into a guard. It is out of 015's scope.
 
@@ -184,6 +221,14 @@ This is the backstop against a stale ontology branch reintroducing a reader (sec
 | H | A private `statuscode` copy of the counted values in FinanceRollupService trips FinanceBaseValuesSingleDefinitionGuardTests | 1 of 4 |
 | SPA | RecordDetailModal / RecordDetailFields reverted | 2 of 47 |
 
+Review fix round (2026-10-17), same rule (each failed with the mutation, passed after restoring):
+
+| Id | Mutation | Failed |
+|---|---|---|
+| A (D-103) | `InvoiceStatusCodes.InReview` put back into `CountedInvoiceStatuses` | 7 of 306 in FinanceBaseValuesTests, SignalReevaluationJobTests and FinancialCalculationToolHandlerTests: the new rollup-query test (2), the new grouped-query test (2), the counted-set test, the `AnInvoice_IsCountedAsSpend` row for In Review, and `Run_SpendThreshold_...OnlyCountsTheCountedStatuses` (the ReadAsync path) |
+| B1 | The module's transitional entry removed | 7 of 136 in ExternalModuleColumnAllowListTests (current-live-fetch case, only-the-invoices-module case, live-grid theory row, live-derivation pin, 3 rule-(b) controls that start from the live fetch) and `EveryTransitionalExemption_IsStillNeeded` |
+| B2 | A comment naming the old column added to FinanceSummaryService.cs | 1 of 18 in the guard class, naming `FinanceSummaryService.cs:536`; the exempt lines did not fire |
+
 **Test counts:** see section 10, which was filled in after the final runs.
 
 ## 8. ACT-004.json (main session; .claude/ is outside a sub-agent's write boundary)
@@ -204,20 +249,20 @@ Line 159 (`"invoiceStatus": "valid"`) stays unchanged.
 
 ### 9.1 ontology-r1
 
-> ebilling-r1 task 015 retires `sprk_invoice.sprk_invoicestatus` (D-41). The owner confirmed the counted-spend set as **D-98**, which supersedes your **D-137 Q24** ("spend counts only Reviewed"). Spend = `statuscode` In Review, Approved, Sent to AP and Paid, filtered on `statuscode` (Paid is Inactive and still counts); Rejected, Returned to Firm and Cancelled are not counted. Please review these ontology-owned files before merge:
+> ebilling-r1 task 015 retires `sprk_invoice.sprk_invoicestatus` (D-41). The owner's final answer is **D-103** (= your D-166), which supersedes our D-98 and your **D-137 Q24** ("spend counts only Reviewed"). Spend = `statuscode` **Approved, Sent to AP and Paid**, filtered on `statuscode` (Paid is Inactive and still counts); **In Review is not counted** (nor Rejected, Returned to Firm, Cancelled). Please review these ontology-owned files before merge:
 >
-> - `src/server/api/Sprk.Bff.Api/Services/Finance/FinanceBaseValues.cs`: `InvoiceStatus` becomes `InvoiceStatusCodeColumn = "statuscode"`; `InvoiceStatusReviewed` is removed; `CountedInvoiceStatuses` = `InvoiceStatusCodes.InReview, Approved, SentToAp, Paid`; the grouped FetchXML filters on `statuscode`.
+> - `src/server/api/Sprk.Bff.Api/Services/Finance/FinanceBaseValues.cs`: `InvoiceStatus` becomes `InvoiceStatusCodeColumn = "statuscode"`; `InvoiceStatusReviewed` is removed; `CountedInvoiceStatuses` = `InvoiceStatusCodes.Approved, SentToAp, Paid`; the grouped FetchXML filters on `statuscode`.
 > - `src/server/api/Sprk.Bff.Api/Services/Finance/FinanceRollupService.cs`: the column set and the condition use `InvoiceStatusCodeColumn`.
 > - `src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs`: an AuthorableColumns remark only.
-> - `tests/unit/domain/Signals/SignalReevaluationJobTests.cs`: the spend test now counts Approved, Paid and Sent to AP and ignores Rejected, Returned to Firm and Cancelled; the harness default is In Review on `statuscode`.
-> - `tests/integration/seam/Signals/FinanceBaseValuesSeamTests.cs`: all seven statuses live; expected matter sum 500.
-> - `tests/Spaarke.ArchTests/FinanceBaseValuesSingleDefinitionGuardTests.cs`: the literal regex is now `\b65949000[0-4]\b` and the control holds the new values.
+> - `tests/unit/domain/Signals/SignalReevaluationJobTests.cs`: the spend test counts Approved, Paid and Sent to AP and ignores In Review, Rejected, Returned to Firm and Cancelled; the harness default is Approved on `statuscode`; the aggregate fake throws on a condition attribute it does not model (your K2).
+> - `tests/integration/seam/Signals/FinanceBaseValuesSeamTests.cs`: all seven statuses live; expected matter sum **200** (the 300 In Review does not count). Not re-run live in this round (it writes test rows).
+> - `tests/Spaarke.ArchTests/FinanceBaseValuesSingleDefinitionGuardTests.cs`: the literal regex is `\b65949000[0-4]\b`, the control holds the new values, and `InvoiceStatusCodes.` in the two scanned files is flagged too (your K2).
 >
 > **Stale branches:** these unmerged branches still carry the pre-master FinanceRollupService that reads the retired column: `task/ontology-070-inquiry`, `-131b`, `-044`, `-039-gate-notes` and `ontology/081-cleanup`. You confirmed none of them will merge. If one ever does, the new ArchTest `InvoiceStatusRetirementGuardTests` fails on the column name and on `FinanceBaseValues.InvoiceStatus`. Your 102a authoring-contract note and D-161 are yours to update. ebilling-r1 did not edit your projects/ files.
 
 ### 9.2 uac-r2 / SPA-r3
 
-> ebilling-r1 task 015 moves the external Invoices status column from the retired `sprk_invoicestatus` to `statuscode`. It touches these shared files:
+> ebilling-r1 task 015 moves the external Invoices status column from the retired `sprk_invoicestatus` to `statuscode`. During the transition window the invoices allow-list admits BOTH (the same union R3's branch carries), each entry marked `transitional (015/D-97): remove after the dev column delete`; a follow-up commit removes them after the dev delete. The run order is in section 3.5 (your BFF with both columns first, then the SPA; `-GridConfig` only after you confirm it is live). It touches these shared files:
 >
 > - `Infrastructure/DI/ExternalAccessModule.cs` (the invoices ReadableColumns)
 > - `tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs`
@@ -227,7 +272,7 @@ Line 159 (`"invoiceStatus": "valid"`) stays unchanged.
 
 ## 10. Final checks
 
-Run on `b0c53eb48` plus this commit's docs, script and notes (no code change after `b0c53eb48`), 2026-10-17.
+Original run on `7c474b2c9` plus the docs, script and notes commit (no code change after `7c474b2c9`), 2026-10-17. The review fix round (section 11) re-ran the same suites; its numbers are in section 11.3.
 
 | Check | Result |
 |---|---|
@@ -235,14 +280,65 @@ Run on `b0c53eb48` plus this commit's docs, script and notes (no code change aft
 | `tests/unit/Sprk.Bff.Api.Tests`, filter `Finance\|Invoice\|Signal\|ExternalModule\|LiveFact\|FinancialCalculation` | 3960 passed, 0 failed, 8 skipped (live-only seams) |
 | `tests/Spaarke.ArchTests` (all; the new guard included) | 1140 passed, 0 failed |
 | `src/client/external-spa` `npx vitest run` | 36 files, 1019 passed. A first run alongside the dotnet runs had 24 load-induced failures (timeouts); two runs alone passed 1019 / 1019. |
-| Live seam `FinanceBaseValuesSeamTests` (spaarkedev1; `SIGNALS_LIVE_CALLER_ID` set) | passed; its rows cleaned up |
+| Live seam `FinanceBaseValuesSeamTests` (spaarkedev1; `SIGNALS_LIVE_CALLER_ID` set) | passed under D-98 (expected sum 500); its rows were cleaned up. NOT re-run for D-103 (it writes test rows; the fix round has no live writes). Expected sum is now 200. |
 
-**Publish size (CLAUDE.md §10 bullet 3).** Both trees come from `git archive` of the base `16c76e7d8` and of `b0c53eb48`, extracted to `C:\tmp\t015\base` / `head`. Each was built with `dotnet publish -c Release -r linux-x64 --self-contained false src/server/api/Sprk.Bff.Api/` and zipped with `Compress-Archive -CompressionLevel Optimal`; both outputs have 192 files.
+**Publish size (CLAUDE.md §10 bullet 3).** Both trees come from `git archive` of the base `16c76e7d8` and of `7c474b2c9`, extracted to `C:\tmp\t015\base` / `head`. Each was built with `dotnet publish -c Release -r linux-x64 --self-contained false src/server/api/Sprk.Bff.Api/` and zipped with `Compress-Archive -CompressionLevel Optimal`; both outputs have 192 files.
 
 | Tree | Compressed |
 |---|---|
 | base `16c76e7d8` | 39,462,216 B = 37.634 MB |
-| head `b0c53eb48` | 39,462,867 B = 37.634 MB |
+| head `7c474b2c9` | 39,462,867 B = 37.634 MB |
 | **Delta** | **+651 B** |
 
 No `*.csproj`, `Directory.Packages.props` or `package.json` changed since the base, so there is no new package and no new CVE source.
+
+## 11. Review fix round (2026-10-17): item map, evidence, open points
+
+Code commits on top of `7c0daf8c9`: `f5be2bbc8` (A), `d28034842` (B, C), `963f03c01` (F, guard), `dec408318` (E); the SignalReevaluationJobTests fake (F) is in `f5be2bbc8`; this notes update is the last commit.
+
+### 11.1 Item to proof
+
+| Item | Done | Proof |
+|---|---|---|
+| A. D-103 | `CountedInvoiceStatuses` = Approved, Sent to AP, Paid; comments, docs, PolicyVersionValidator remark cite D-103 / ontology D-166; harness default and the "exactly 50000" invoice are Approved; seam expected sum 200; one explicit test per path (`TheRollupQuery_FinanceRollupService_DoesNotCountAnInReviewInvoice`, `TheGroupedSumQuery_FinanceBaseValues_DoesNotCountAnInReviewInvoice`) plus the behaviour test `Run_SpendThreshold_...OnlyCountsTheCountedStatuses` (In Review 950000 ignored, ReadAsync path) | Mutation A in section 7: InReview put back fails 7 of 306 |
+| B. Transition window | Module and both test pins admit both columns; each marked `transitional (015/D-97): remove after the dev column delete`; guard exemption names exactly the module line and the test's one constant | Mutations B1 and B2 in section 7; follow-up in 3.5 |
+| C. Live-grid label | The invoices row of `LiveGridFetchXml` is the CURRENT live fetch (old column); the post-switch fetch is `TargetInvoicesGridFetchXml`, labelled target; new cases admit both | `ExternalModuleColumnAllowListTests`: 136 passed; B1 fails 7 of them |
+| D. Notes | Old-worktree shas replaced by `e0df77339`, `b2d8cb6dd`, `7c474b2c9`, `d4e555e38`; runbook rewritten (3.5); the R3 rule recorded (3.5 and project CLAUDE.md section 6) | This file |
+| E. Delete script | Section 5.6 | 11.2 |
+| F. K2s | Single-definition guard flags `InvoiceStatusCodes.` (must-fire and must-not-fire controls); aggregate fake throws on an unmodelled condition | Mutations: private named-constant list in FinanceRollupService fails the guard (1 of 6); an extra `statecode` condition in the grouped query fails 19 of 234 SignalReevaluationJobTests with `The aggregate fake does not model a condition on: statecode` |
+| G. Spend facts | Section 3.5 | Live read-only inventory re-run 2026-10-17 (all 10 invoices at (0, 1)) |
+
+### 11.2 Delete script refusal evidence (`-WhatIf` runs; git-only checks, run before any Dataverse call; no writes)
+
+| Case | Result |
+|---|---|
+| `-GridConfig -Delete` together | REFUSED, exit 2: cannot run together |
+| `-GridConfig` with no `-BffDeployAttestation` | REFUSED, exit 2 |
+| `-Delete` with no `-SpaDeployAttestation` | REFUSED, exit 2 |
+| `-BffDeployAttestation deadbeef12` (unknown) | REFUSED, exit 2: not a commit in this repository (`git cat-file -e` failed) |
+| `-BffDeployAttestation --output=x` | REFUSED, exit 2: not a commit sha |
+| `-GridConfig`, BFF commit `16c76e7d8` (pre-015 allow-list) | REFUSED, exit 2: allow-list does not list `"statuscode"` |
+| `-Delete`, BFF commit `2bda5ebe1` (R3 candidate: both columns admitted, 015's readers absent) | REFUSED, exit 2: `FinanceBaseValues.cs` still reads the old column. This is why runbook step 5 exists. |
+| `-Delete`, SPA commit `16c76e7d8` | REFUSED, exit 2: `RecordDetailModal.tsx` still reads the old column |
+| `-Delete`, BFF commit `16c76e7d8` | REFUSED, exit 2 (allow-list) |
+| `-GridConfig -WhatIf`, BFF commit `2bda5ebe1` | passes the pre-flight; read-only inventory; `WOULD EDIT grid ... If-Match W/"21226563"`; nothing written |
+| `-Delete -WhatIf`, both attestations = this branch's tip | passes the pre-flight; then REFUSED, exit 2, on the live grid blocker (`3ff4102c` not moved yet); nothing deleted |
+
+Not exercised live (the column still exists on dev, and no write was allowed): the already-retired `-GridConfig` path (K2) and the HTTP 412 path (K1). Both were read, not run.
+
+### 11.3 Final runs (after the last commit)
+
+| Check | Result |
+|---|---|
+| `dotnet test tests/unit/Sprk.Bff.Api.Tests`, filter `Finance\|Invoice\|Signal\|ExternalModule\|LiveFact\|FinancialCalculation` | 4492 passed, 0 failed, 8 skipped |
+| `dotnet test tests/Spaarke.ArchTests` (all) | 1166 passed, 0 failed |
+| Build (the test runs build the BFF with warnings as errors) | succeeded |
+| external-spa `npx vitest run` | not run: the fix round touches no SPA file |
+| Publish size, round only (`7c0daf8c9` vs the tip, same procedure as section 10) | 39,554,739 B vs 39,554,767 B = **+28 B**; 192 files each |
+| Live seam `FinanceBaseValuesSeamTests` | not run (writes test rows; no live writes this round) |
+
+### 11.4 Open points and known limits
+
+- Merge with R3: both branches edit the invoices `ReadableColumns` block (R3 puts `statuscode` on its own line with its own comment; 015 adds the old column on its own line with the `transitional` marker). Expect a trivial textual conflict; the resolution is the union, keeping 015's marker comment so the guard's exemption line stays exact. The follow-up commit then removes the old-column line on the merged branch.
+- K-class (no fix): `-Delete`'s attestation checks the three Finance readers the brief names, not every 015 reader (`FinanceSummaryService`, `FinancialCalculationToolHandler`, `InvoiceLiveFactResolver`). They arrive in the same commit as the three, so a build containing the three contains the rest (K4).
+- The seam test's live run for D-103 and the K1/K2 live paths are proven by reading only (11.2, 11.3).
