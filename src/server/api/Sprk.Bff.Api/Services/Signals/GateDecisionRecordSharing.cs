@@ -20,7 +20,8 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <para><b>One routine for both orders.</b> At write (<see cref="ShareAtWriteAsync"/>, called by <see cref="DecisionRecordWriter"/> after the
 /// create) and on every new grant of the communication (<see cref="MirrorCommunicationSharesAsync"/>, called by
 /// <c>DirectThreadAccessService</c>) the same steps run against CURRENT state: the communication is read (unfiled AND user-owned, else nothing is
-/// shared), its POA shares are read (the strict read: a failed read is not "no shares"), the systemusers holding Read are kept, the externals are
+/// shared; "filed" is the ownership resolver's own test, <see cref="RecordOwnershipContext.ParentsOf"/> over the whole row, so a communication
+/// regarding only a contact, an account or an organization is unfiled), its POA shares are read (the strict read: a failed read is not "no shares"), the systemusers holding Read are kept, the externals are
 /// dropped, and each user-owned gate record gets a Read share for each of them except its owner. So whichever of the record and the
 /// communication share comes first, the record ends with the communication's sharees.</para>
 /// <para><b>Internal only</b> (owner, 2026-10-18). A sharee is skipped when it is a team (no flag to read), when its <c>systemuser</c> row is
@@ -30,13 +31,15 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <para><b>Never a team-owned record</b> (D-123). Only a record whose owner is a user is shared, and after each pass's grants the owner is read
 /// again: when the record is now owned by a team (a filing re-owned it in between) or the owner cannot be read, every grant the pass made is
 /// revoked. A communication owned by any team (the Secure Record team, or a category-routed team) is never mirrored.</para>
-/// <para><b>Filing</b> (<see cref="ReownAfterFilingAsync"/>, called by <c>ReconciledEmailFiling</c>). Each user-owned gate record of the
+/// <para><b>Filing</b> (<see cref="ReownAfterFilingAsync"/>, called by <c>SecureChildReconciler.AfterRefileAsync</c>; and at write when the
+/// communication was filed between the writer's owner decision and its create). Each user-owned gate record of the
 /// communication is asked of <see cref="IRecordOwnershipResolver"/> with the gate writer's own question (the communication first, as content
 /// of it, plus the record's live core-ancestor stamps). An ordinary team answer is assigned through the ontology writer's identity
 /// (<c>prvAssignsprk_DecisionRecord</c>, D-33c; it holds no Write on the table), the access caches are evicted, and the owner is read back;
 /// ONLY a read-back naming that team revokes every share on the record. A Secure answer is <see cref="SecureChildReconciler"/>'s (nothing is
 /// assigned or revoked here). Any other outcome keeps the user owner and the shares: the over-share stays bounded to the participants and the
-/// record is never orphaned.</para>
+/// record is never orphaned. A record already owned by the resolver's ORDINARY team that still carries user shares (a revoke that failed
+/// earlier) has them revoked on the next filing; a Secure-team-owned record is never touched here (its shares are the Secure mirror's).</para>
 /// <para><b>Best-effort, fail closed on visibility.</b> No public member throws. A failed read, grant, assign or revoke is logged at Warning
 /// with ids only and counted on <c>ontology.writer.failures</c>; the record stays written and owner-visible, and nothing is shared beyond the
 /// communication's sharees.</para>
@@ -59,7 +62,6 @@ public sealed class GateDecisionRecordSharing
     private const string ConfirmedByColumn = "sprk_confirmedby";
     private const string ExternalFlagColumn = "sprk_isexternal";
     private const string DomainNameColumn = "domainname";
-    private const string PairColumn = "sprk_regardingrecordid";
     private const string ReadAccessRights = "ReadAccess";
 
     /// <summary>Dataverse's <c>AccessRights.ReadAccess</c> bit in a share row's <c>accessrightsmask</c>.</summary>
@@ -70,9 +72,6 @@ public sealed class GateDecisionRecordSharing
 
     /// <summary>The Decision Record's lookup to the communication it is filed under (the shared regarding builder's map, D-133).</summary>
     private static readonly string SubjectLookup = TodoRegardingBuilder.RegardingLookupsByHostTable[Table][CommunicationTable];
-
-    /// <summary>Every column that says what a communication is filed under: the regarding family and the ADR-024 pair.</summary>
-    private static readonly string[] CommunicationFilingColumns = RegardingFieldMap.AllRegardingFields.Append(PairColumn).ToArray();
 
     private readonly IGenericEntityService _entities;
     private readonly IDataverseRecordShareService _shares;
@@ -105,17 +104,35 @@ public sealed class GateDecisionRecordSharing
 
     /// <summary>
     /// After the gate record of an unfiled communication was created owned by <paramref name="ownerUserId"/>: shares it, Read only, with the
-    /// communication's current internal sharees. Never throws; runs on <see cref="CancellationToken.None"/> (the record has landed).
+    /// communication's current internal sharees. When the communication now reads as FILED (a filing landed between the writer's owner decision
+    /// and its create, and that filing's <c>AfterRefileAsync</c> found no record yet), the record is re-owned as a filing would. Never throws;
+    /// runs on <see cref="CancellationToken.None"/> (the record has landed).
     /// </summary>
     public async Task ShareAtWriteAsync(Guid recordId, Guid communicationId, Guid ownerUserId)
     {
+        bool filed;
         try
         {
-            await ShareWithCommunicationShareesAsync(communicationId, [new GateRecord(recordId, ownerUserId, [])]).ConfigureAwait(false);
+            filed = await ShareWithCommunicationShareesAsync(communicationId, [new GateRecord(recordId, ownerUserId, null, [])]).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             ShareFailed(ex, "at write", recordId, communicationId);
+            return;
+        }
+
+        if (!filed)
+            return;
+
+        try
+        {
+            var records = await FindGateRecordsAsync(communicationId, CancellationToken.None).ConfigureAwait(false);
+            foreach (var record in records.Where(r => r.Id == recordId && r.OwnerUserId is not null))
+                await ReownAsync(communicationId, record).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            ReownFailed(ex, "at write, the record of a communication filed before its create could not be re-owned", recordId, communicationId);
         }
     }
 
@@ -127,11 +144,16 @@ public sealed class GateDecisionRecordSharing
     {
         try
         {
-            var records = await FindUserOwnedGateRecordsAsync(communicationId, ct).ConfigureAwait(false);
+            var records = (await FindGateRecordsAsync(communicationId, ct).ConfigureAwait(false)).Where(r => r.OwnerUserId is not null).ToList();
             if (records.Count == 0)
                 return;
 
             await ShareWithCommunicationShareesAsync(communicationId, records).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The caller's own cancellation is not a failure: nothing more is shared, and the next grant brings the records in line.
+            _logger.LogInformation("Communication {CommunicationId}: the gate Decision Record mirror was cancelled by its caller (D-169).", communicationId);
         }
         catch (Exception ex)
         {
@@ -143,15 +165,16 @@ public sealed class GateDecisionRecordSharing
     /// After any re-file of <paramref name="communicationId"/> (<see cref="SecureChildReconciler.AfterRefileAsync"/>, the one step every re-file
     /// writer runs): re-owns each of its gate records still owned by a user to the resolver's ordinary team, reads the owner back, and only then
     /// revokes every share on the record. A Secure answer is left to <see cref="SecureChildReconciler"/>; an unfiled communication (Unchanged)
-    /// keeps its records as they are. Idempotent: a record already team-owned is not found again, so a second call does nothing. Never throws;
-    /// runs on <see cref="CancellationToken.None"/> (the filing has landed).
+    /// keeps its records as they are. A record already owned by the resolver's ordinary team that still carries user shares (a revoke that
+    /// failed before) has them revoked. Idempotent: a team-owned record with no user share costs one share read and changes nothing. Never
+    /// throws; runs on <see cref="CancellationToken.None"/> (the filing has landed).
     /// </summary>
     public async Task ReownAfterFilingAsync(Guid communicationId)
     {
         IReadOnlyList<GateRecord> records;
         try
         {
-            records = await FindUserOwnedGateRecordsAsync(communicationId, CancellationToken.None).ConfigureAwait(false);
+            records = await FindGateRecordsAsync(communicationId, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -163,7 +186,10 @@ public sealed class GateDecisionRecordSharing
         {
             try
             {
-                await ReownAsync(communicationId, record).ConfigureAwait(false);
+                if (record.OwnerUserId is not null)
+                    await ReownAsync(communicationId, record).ConfigureAwait(false);
+                else
+                    await RevokeLeftoverSharesAsync(communicationId, record).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -174,24 +200,28 @@ public sealed class GateDecisionRecordSharing
 
     // ── Share ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private async Task ShareWithCommunicationShareesAsync(Guid communicationId, IReadOnlyList<GateRecord> records)
+    /// <returns><c>true</c> when nothing was shared because the communication is FILED (the caller at write re-owns the record).</returns>
+    private async Task<bool> ShareWithCommunicationShareesAsync(Guid communicationId, IReadOnlyList<GateRecord> records)
     {
         var ct = CancellationToken.None;
-        var communication = await _entities
-            .RetrieveAsync(CommunicationTable, communicationId, CommunicationFilingColumns.Append(OwnerColumn).Append(OwningTeamColumn).ToArray(), ct)
-            .ConfigureAwait(false);
+
+        // The whole row, as the ownership resolver reads a content row's parent (ReadOwnershipParentsOfAsync): what it is filed under is every
+        // ownership-parent lookup it carries, whichever column holds it.
+        var query = new QueryExpression(CommunicationTable) { ColumnSet = new ColumnSet(true), TopCount = 1, NoLock = true };
+        query.Criteria.AddCondition(CommunicationTable + "id", ConditionOperator.Equal, communicationId);
+        var communication = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities.FirstOrDefault();
         if (communication is null)
         {
             ShareFailed(null, "the communication could not be read", recordId: null, communicationId);
-            return;
+            return false;
         }
 
-        if (IsFiled(communication))
+        if (IsFiled(communication, communicationId))
         {
             _logger.LogInformation(
-                "Communication {CommunicationId} is filed; its gate Decision Records take the team-owned path and get no participant share (D-169).",
-                communicationId);
-            return;
+                "Communication {CommunicationId} is filed under an ownership parent; no participant share is added to its gate Decision Records " +
+                "(the filing re-owns them, D-169).", communicationId);
+            return true;
         }
 
         if (communication.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is { } team && team != Guid.Empty
@@ -200,7 +230,7 @@ public sealed class GateDecisionRecordSharing
             _logger.LogInformation(
                 "Communication {CommunicationId} is not owned by a user; its gate Decision Records get no participant share (D-169, D-123).",
                 communicationId);
-            return;
+            return false;
         }
 
         var sharees = (await _shares.GetPrincipalAccessOrThrowAsync(CommunicationTable, communicationId, ct).ConfigureAwait(false))
@@ -217,13 +247,15 @@ public sealed class GateDecisionRecordSharing
         }
 
         if (users.Count == 0)
-            return;
+            return false;
 
         var internals = await InternalUsersAsync(communicationId, users).ConfigureAwait(false);
         foreach (var record in records)
         {
             await GrantAndConfirmAsync(communicationId, record, internals.Where(u => u != record.OwnerUserId).ToList()).ConfigureAwait(false);
         }
+
+        return false;
     }
 
     /// <summary>The internal users among <paramref name="userIds"/>, from one read of their flags (a fault propagates: nothing is shared).</summary>
@@ -296,9 +328,12 @@ public sealed class GateDecisionRecordSharing
             return;
         }
 
-        _logger.LogInformation(
-            "Gate Decision Record {RecordId} is no longer owned by a user (or its owner cannot be read) after its participant grants; the {Count} " +
-            "grant(s) are revoked (D-169, D-123).", record.Id, granted.Count);
+        if (owner is null)
+            ShareFailed(null, "the owner could not be read after the participant grants; they are revoked", record.Id, communicationId);
+        else
+            _logger.LogInformation(
+                "Gate Decision Record {RecordId} is no longer owned by a user after its participant grants; the {Count} grant(s) are revoked " +
+                "(D-169, D-123).", record.Id, granted.Count);
         foreach (var principal in granted)
         {
             try
@@ -314,13 +349,18 @@ public sealed class GateDecisionRecordSharing
 
     // ── Filing ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private async Task ReownAsync(Guid communicationId, GateRecord record)
+    /// <summary>The gate writer's own question: the communication first, as content of it, plus the record's live core-ancestor stamps.</summary>
+    private Task<RecordOwnerResolution> AskOwnerAsync(Guid communicationId, GateRecord record)
     {
         var parents = new List<RecordOwnershipParent?> { new(CommunicationTable, communicationId) };
         parents.AddRange(record.Stamps);
-        var answer = await _ownership
-            .ResolveOwnerAsync(RecordOwnershipContext.ForParents(parents) with { KeepCreatorUnlessTargetIsTeamOwned = true }, CancellationToken.None)
-            .ConfigureAwait(false);
+        return _ownership.ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(parents) with { KeepCreatorUnlessTargetIsTeamOwned = true }, CancellationToken.None);
+    }
+
+    private async Task ReownAsync(Guid communicationId, GateRecord record)
+    {
+        var answer = await AskOwnerAsync(communicationId, record).ConfigureAwait(false);
 
         if (answer.IsSecureOwner)
         {
@@ -397,14 +437,55 @@ public sealed class GateDecisionRecordSharing
             record.Id, communicationId, team, shares.Count);
     }
 
+    /// <summary>
+    /// A record already TEAM-owned that may still carry participant shares (a revoke failed after an earlier re-own): when it holds a user share
+    /// and the resolver's answer is that same ORDINARY team, every user share is revoked. A Secure answer, a refusal or another team leaves the
+    /// record as it is (a Secure-team-owned record's shares are the Secure mirror's).
+    /// </summary>
+    private async Task RevokeLeftoverSharesAsync(Guid communicationId, GateRecord record)
+    {
+        var userShares = (await _shares.GetPrincipalAccessOrThrowAsync(Table, record.Id, CancellationToken.None).ConfigureAwait(false))
+            .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser)
+            .ToList();
+        if (userShares.Count == 0)
+            return;
+
+        var answer = await AskOwnerAsync(communicationId, record).ConfigureAwait(false);
+        if (answer.IsSecureOwner || !answer.IsOwned || answer.OwningTeamId != record.OwnerTeamId)
+        {
+            _logger.LogInformation(
+                "Gate Decision Record {RecordId} of communication {CommunicationId} is team-owned with {Count} user share(s), and its owner is not the " +
+                "resolver's ordinary team; its shares are left as they are (D-169, D-123).", record.Id, communicationId, userShares.Count);
+            return;
+        }
+
+        var team = record.OwnerTeamId!.Value;
+        foreach (var share in userShares)
+        {
+            try
+            {
+                await _shares.RevokeAccessAsync(EntitySet, record.Id, share.Principal, DataversePrincipalRef.Team(team), CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                ReownFailed(ex, "a leftover participant share on the team-owned record could not be revoked", record.Id, communicationId);
+            }
+        }
+
+        _logger.LogInformation(
+            "Gate Decision Record {RecordId} of filed communication {CommunicationId}: {Count} leftover participant share(s) revoked (D-169).",
+            record.Id, communicationId, userShares.Count);
+    }
+
     // ── Reads ───────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The communication's gate records still owned by a user: filed under it, no confirmer (a human review always has one), created by the
-    /// ontology writer (task 153 F1: a person's own row is never touched), with their live core-ancestor stamps. WhoAmI on the writer's
+    /// The communication's gate records: filed under it, no confirmer (a human review always has one), created by the ontology writer (task 153
+    /// F1: a person's own row is never touched), owned by a user or a team, with their live core-ancestor stamps. WhoAmI on the writer's
     /// connection is asked only when a candidate exists. A fault propagates.
     /// </summary>
-    private async Task<IReadOnlyList<GateRecord>> FindUserOwnedGateRecordsAsync(Guid communicationId, CancellationToken ct)
+    private async Task<IReadOnlyList<GateRecord>> FindGateRecordsAsync(Guid communicationId, CancellationToken ct)
     {
         var query = new QueryExpression(Table)
         {
@@ -415,7 +496,6 @@ public sealed class GateDecisionRecordSharing
         };
         query.Criteria.AddCondition(SubjectLookup, ConditionOperator.Equal, communicationId);
         query.Criteria.AddCondition(ConfirmedByColumn, ConditionOperator.Null);
-        query.Criteria.AddCondition(OwningUserColumn, ConditionOperator.NotNull);
         var rows = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities;
         if (rows is null || rows.Count == 0)
             return [];
@@ -423,13 +503,16 @@ public sealed class GateDecisionRecordSharing
         var writerUserId = await _writer.GetWriterUserIdAsync(ct).ConfigureAwait(false);
         return rows
             .Where(r => r.Id != Guid.Empty
-                        && r.GetAttributeValue<EntityReference>(DecisionRecordWriter.CreatedByColumn)?.Id == writerUserId
-                        && r.GetAttributeValue<EntityReference>(OwningTeamColumn) is null)
-            .Select(r => (Row: r, Owner: r.GetAttributeValue<EntityReference>(OwningUserColumn)?.Id))
-            .Where(r => r.Owner is { } owner && owner != Guid.Empty)
+                        && r.GetAttributeValue<EntityReference>(DecisionRecordWriter.CreatedByColumn)?.Id == writerUserId)
+            .Select(r => (
+                Row: r,
+                Team: r.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is { } t && t != Guid.Empty ? t : (Guid?)null,
+                User: r.GetAttributeValue<EntityReference>(OwningUserColumn)?.Id is { } u && u != Guid.Empty ? u : (Guid?)null))
+            .Where(r => r.Team is not null || r.User is not null)
             .Select(r => new GateRecord(
                 r.Row.Id,
-                r.Owner!.Value,
+                r.Team is null ? r.User : null,
+                r.Team,
                 CoreAncestorResolver.CoreAncestorLookups
                     .Select(l => r.Row.GetAttributeValue<EntityReference>(l.LookupAttribute) is { Id: var id } && id != Guid.Empty
                         ? new RecordOwnershipParent(l.EntityType, id)
@@ -460,13 +543,14 @@ public sealed class GateDecisionRecordSharing
         }
     }
 
-    private static bool IsFiled(Entity communication) =>
-        CommunicationFilingColumns.Any(column => communication.Attributes.TryGetValue(column, out var value) && value switch
-        {
-            null => false,
-            string text => !string.IsNullOrWhiteSpace(text),
-            _ => true,
-        });
+    /// <summary>
+    /// Filed exactly as the ownership resolver decides it for a content row's parent (<c>RecordOwnershipResolver</c>, the
+    /// <c>KeepCreatorUnlessTargetIsTeamOwned</c> branch): at least one ownership-parent lookup on the row other than the row itself. A
+    /// communication regarding only a contact, an account or an organization is unfiled.
+    /// </summary>
+    private static bool IsFiled(Entity communication, Guid communicationId) =>
+        RecordOwnershipContext.ParentsOf(communication.Attributes)
+            .Any(parent => parent != new RecordOwnershipParent(CommunicationTable, communicationId));
 
     // ── Failures: Warning, ids only, counted ───────────────────────────────────────────────────────────────────
 
@@ -486,6 +570,6 @@ public sealed class GateDecisionRecordSharing
         OntologyWriterTelemetry.RecordFailure(DecisionRecordRefusalReason.FilingReownFailed);
     }
 
-    /// <summary>One user-owned gate record: its owner and the core-ancestor stamps it carries now.</summary>
-    private sealed record GateRecord(Guid Id, Guid OwnerUserId, IReadOnlyList<RecordOwnershipParent?> Stamps);
+    /// <summary>One gate record: its owning user OR its owning team, and the core-ancestor stamps it carries now.</summary>
+    private sealed record GateRecord(Guid Id, Guid? OwnerUserId, Guid? OwnerTeamId, IReadOnlyList<RecordOwnershipParent?> Stamps);
 }

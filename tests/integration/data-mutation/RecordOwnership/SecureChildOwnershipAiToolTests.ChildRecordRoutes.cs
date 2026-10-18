@@ -928,6 +928,30 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     // ── Ontology task 042b round 2 (D-169, uac-r2 choice A): both re-file paths end in the gate record's re-own ──────────
 
+    [Fact]
+    public async Task CommunicationFiling_IntoASecureMatter_RemovesTheGateDecisionRecordsParticipantShares_D169_042bRound3()
+    {
+        // uac-r2 (042b round 3 K5): a communication whose user-owned gate Decision Record carries D-169 participant shares is re-filed into a
+        // SECURE matter. The gate helper leaves a Secure answer to the engine; the REAL reconciler's pass over the communication's descendants
+        // and the REAL synchronizer (which revokes direct shares outside the mirror) leave none of the participant shares on the record.
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        var gateRecord = Guid.Parse("a2470000-0000-4000-8000-0000000000d5");
+        var participant = Guid.Parse("a2470000-0000-4000-8000-0000000000d6");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        ShareWorld.UserOwnedChild("sprk_decisionrecord", gateRecord, ("sprk_regardingcommunication", "sprk_communication", communication));
+        _shareTable.Seed("sprk_decisionrecord", gateRecord, DataversePrincipalRef.User(participant), 1);
+
+        var result = await RefileCommunication(
+            communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _shareTable.MaskOf("sprk_decisionrecord", gateRecord, DataversePrincipalRef.User(participant)).Should().BeNull(
+            "a participant who is not a sharee of the secure matter keeps no access to the gate record");
+        ShareWorld.OwnerOf("sprk_decisionrecord", gateRecord).Should().Be(DataversePrincipalRef.Team(Directory.SecureNamedTeam),
+            "the record follows its communication into isolation");
+    }
+
     private static readonly Guid GateRecord = Guid.Parse("d0d0d0d0-0000-4000-8000-0000000000e1");
     private static readonly Guid GateSharee = Guid.Parse("a0000000-0000-4000-8000-0000000000e2");
 

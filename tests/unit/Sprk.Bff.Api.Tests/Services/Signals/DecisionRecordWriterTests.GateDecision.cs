@@ -708,4 +708,36 @@ public sealed partial class DecisionRecordWriterTests
 
         h.Created.Should().BeEmpty();
     }
+
+    [Fact]
+    public async Task Gate_AFilingThatLandsBetweenTheOwnerDecisionAndTheCreate_ReownsTheRecordAtWrite_D169_042bRound3()
+    {
+        // 042b round 3 F1-b: the owner is decided while the communication is unfiled (its user); the filing lands before the create, and its
+        // AfterRefileAsync finds no gate record yet; the create lands user-owned. The at-write step sees the communication FILED and re-owns the
+        // record as the filing would, instead of leaving it user-owned and unshared for good.
+        var directory = Standard().WithRecord("sprk_communication", CommunicationId, ChildBu);
+        var world = SharedCommunication();
+        world.OwnerAnswers(RecordOwnerResolution.Owned(ChildTeam));
+        var h = new Harness(realResolver: directory.Resolver(), participantShares: world.Sharing);
+        CommunicationOwnedBy(h, UserRef(CommunicationOwner));
+        var reownsBeforeTheCreate = 0;
+        h.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns((Entity e, CancellationToken _) =>
+            {
+                world.Rows[(GateSharingWorld.Communication, CommunicationId)]["sprk_regardingmatter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+                world.Sharing.ReownAfterFilingAsync(CommunicationId).GetAwaiter().GetResult(); // the filing's hook: no record yet
+                reownsBeforeTheCreate = world.Calls.Count(c => c.StartsWith("assign:", StringComparison.Ordinal));
+                h.Created.Add(e);
+                world.WithGateRecord(h.NewId, CommunicationId, CommunicationOwner);
+                return Task.FromResult(h.NewId);
+            });
+
+        var result = await h.Writer.WriteGateDecisionAsync(Gate());
+
+        reownsBeforeTheCreate.Should().Be(0, "the filing's own hook found no record");
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(UserRef(CommunicationOwner), "decided before the filing");
+        world.Rows[(GateSharingWorld.Record, result.RecordId)].GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(ChildTeam,
+            "re-owned at write to the resolver's team");
+        world.RecordSharees(result.RecordId).Should().BeEmpty("a filed communication's record gets no participant share");
+    }
 }

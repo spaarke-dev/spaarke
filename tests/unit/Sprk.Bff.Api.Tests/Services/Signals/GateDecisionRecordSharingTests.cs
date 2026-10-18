@@ -69,6 +69,8 @@ internal sealed class GateSharingWorld
             {
                 if (query.EntityName == "systemuser" && UserReadFault is { } fault)
                     return Task.FromException<EntityCollection>(fault);
+                if (query.EntityName == Communication && CommunicationReadFault is { } communicationFault)
+                    return Task.FromException<EntityCollection>(communicationFault);
                 var rows = Rows.Values.Where(r => r.LogicalName == query.EntityName && Satisfies(query, r)).Select(Clone)
                     .Take(query.TopCount ?? int.MaxValue).ToList();
                 return Task.FromResult(new EntityCollection(rows));
@@ -660,5 +662,135 @@ public sealed class GateDecisionRecordSharingTests
         world.Org.Verify(o => o.ExecuteAsync(It.IsAny<AssignRequest>(), It.IsAny<CancellationToken>()), Times.Once);
         world.Ownership.Verify(r => r.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Times.Once);
         world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(MatterTeam);
+    }
+
+    // ── 042b round 3 F1-a: "filed" is the ownership resolver's test (ownership-parent lookups only) ──────────────
+
+    [Theory]
+    [InlineData("sprk_regardingperson", "contact", Via.AtWrite)]
+    [InlineData("sprk_regardingperson", "contact", Via.Mirror)]
+    [InlineData("sprk_regardingaccount", "account", Via.AtWrite)]
+    [InlineData("sprk_regardingaccount", "account", Via.Mirror)]
+    [InlineData("sprk_regardingorganization", "sprk_organization", Via.AtWrite)]
+    [InlineData("sprk_regardingorganization", "sprk_organization", Via.Mirror)]
+    public async Task ACommunicationRegardingOnlyAContactAnAccountOrAnOrganization_IsUnfiled_ItsRecordGetsTheParticipantShares(
+        string column, string table, Via path)
+    {
+        var world = UnfiledCommunication().WithGateRecord(RecordId, CommunicationId, Owner);
+        var communication = world.Rows[(GateSharingWorld.Communication, CommunicationId)];
+        communication[column] = new EntityReference(table, Guid.NewGuid());
+        communication["sprk_regardingrecordid"] = Guid.NewGuid().ToString("D"); // the ADR-024 pair is set too
+        communication["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", Guid.NewGuid());
+
+        if (path == Via.AtWrite)
+            await world.Sharing.ShareAtWriteAsync(RecordId, CommunicationId, Owner);
+        else
+            await world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
+
+        world.RecordSharees(RecordId).Should().Equal(new[] { Reader, Editor }.OrderBy(g => g),
+            "the resolver answers Unchanged for a communication filed under no ownership parent, so D-169's shares are the only readers");
+        world.Calls.Should().NotContain(c => c.StartsWith("assign:", StringComparison.Ordinal));
+    }
+
+    // ── 042b round 3 F1-b: a filing that lands between the writer's owner decision and its create ───────────────
+
+    [Fact]
+    public async Task AtWrite_ACommunicationAlreadyFiled_ReownsTheRecordToTheResolversTeam_InsteadOfLeavingItUserOwned()
+    {
+        var world = new GateSharingWorld()
+            .WithCommunication(CommunicationId, Owner, filedUnder: MatterId)
+            .WithUser(Reader)
+            .WithGateRecord(RecordId, CommunicationId, Owner, stampMatter: MatterId)
+            .Share(GateSharingWorld.Communication, CommunicationId, Reader);
+        world.OwnerAnswers(RecordOwnerResolution.Owned(MatterTeam));
+
+        await world.Sharing.ShareAtWriteAsync(RecordId, CommunicationId, Owner);
+
+        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(MatterTeam);
+        world.Calls.Should().NotContain(c => c.StartsWith("grant:", StringComparison.Ordinal));
+        world.RecordSharees(RecordId).Should().BeEmpty();
+    }
+
+    // ── 042b round 3 K2: a share a failed revoke left on the team-owned record goes on the next filing ──────────
+
+    [Fact]
+    public async Task Filing_ARevokeThatFailed_IsRetriedOnTheNextFiling_AndTheLeftoverSharesGo()
+    {
+        var world = FiledWithASharedRecord();
+        world.Shares.FailRevoke = true;
+        await world.Sharing.ReownAfterFilingAsync(CommunicationId);
+        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(MatterTeam);
+        world.RecordSharees(RecordId).Should().Equal(new[] { Reader, Editor }.OrderBy(g => g), "the first refile's revokes failed");
+
+        world.Shares.FailRevoke = false;
+        await world.Sharing.ReownAfterFilingAsync(CommunicationId);
+
+        world.RecordSharees(RecordId).Should().BeEmpty("the next refile removes the leftover participant shares");
+        world.Calls.Count(c => c.StartsWith("assign:", StringComparison.Ordinal)).Should().Be(1, "the record is not re-owned twice");
+    }
+
+    [Fact]
+    public async Task Filing_ASecureTeamOwnedRecordWithUserShares_IsNeverTouched_NorOneOwnedByAnotherTeam()
+    {
+        var secureTeam = Guid.NewGuid();
+        var secure = FiledWithASharedRecord();
+        secure.OwnByTeam(RecordId, secureTeam);
+        secure.OwnerAnswers(RecordOwnerResolution.Owned(secureTeam) with { IsSecureOwner = true });
+        var other = FiledWithASharedRecord();
+        other.OwnByTeam(RecordId, Guid.NewGuid()); // the resolver still answers MatterTeam
+
+        await secure.Sharing.ReownAfterFilingAsync(CommunicationId);
+        await other.Sharing.ReownAfterFilingAsync(CommunicationId);
+
+        foreach (var world in new[] { secure, other })
+        {
+            world.Calls.Should().NotContain(c => c.StartsWith("revoke:", StringComparison.Ordinal) || c.StartsWith("assign:", StringComparison.Ordinal),
+                "a Secure-team row's shares are the Secure mirror's; another team's row is not this filing's");
+            world.RecordSharees(RecordId).Should().Equal(new[] { Reader, Editor }.OrderBy(g => g));
+        }
+    }
+
+    // ── 042b round 3 K4: telemetry ──────────────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Mirror_TheCallersOwnCancellation_IsNotCountedAsAFailure_AnyOtherFaultIs(bool callerCancelled)
+    {
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, reasons) = ListenFailures(scope);
+        using var _ = listener;
+        using var cts = new CancellationTokenSource();
+        if (callerCancelled)
+            cts.Cancel();
+        var world = UnfiledCommunication().WithGateRecord(RecordId, CommunicationId, Owner);
+        world.Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == GateSharingWorld.Record), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException("Test: the read was cancelled."));
+
+        var act = () => world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, cts.Token);
+
+        await act.Should().NotThrowAsync();
+        if (callerCancelled)
+            reasons.Should().NotContain(DecisionRecordRefusalReason.ParticipantShareFailed);
+        else
+            reasons.Should().Contain(DecisionRecordRefusalReason.ParticipantShareFailed, "a cancellation the caller did not ask for is a fault");
+    }
+
+    [Fact]
+    public async Task AnOwnerThatCannotBeReadAfterTheGrants_IsCounted_AndTheGrantsAreRevoked()
+    {
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, reasons) = ListenFailures(scope);
+        using var _ = listener;
+        var world = UnfiledCommunication().WithGateRecord(RecordId, CommunicationId, Owner);
+        world.OwnerReadFault = new InvalidOperationException("Test: the owner read failed.");
+
+        await world.Sharing.ShareAtWriteAsync(RecordId, CommunicationId, Owner);
+
+        reasons.Should().Contain(DecisionRecordRefusalReason.ParticipantShareFailed);
+        world.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.EventId == DecisionRecordEvents.ParticipantShareFailed);
+        world.RecordSharees(RecordId).Should().BeEmpty("fail closed: the grants are revoked");
     }
 }
