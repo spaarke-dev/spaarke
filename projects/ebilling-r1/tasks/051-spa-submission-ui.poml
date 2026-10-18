@@ -4,7 +4,7 @@
     <title>SPA submission UI (shared wizard component)</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Frontend flow over existing shared components and 044's routes; no auth decisions on the client (the server decides).</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -94,6 +94,13 @@ A submission that fails before it is read has no invoice. Two consequences:
     <constraint source="ADR-015">Logs carry submission id, invoice id, counts, timings, reason codes — no extracted values or narratives.</constraint>
     <constraint source="044 K4 (2026-10-16)">A job whose submission row does not exist is Success, not a retry or failure: 044 compensation deletes the row when the enqueue call reports failure even though Service Bus may have accepted the message. Log it with the submission id.</constraint>
     <constraint source="047/048 review (2026-10-16)">When line coding results are persisted, store each line's CodeSetSource / CodeSetNeedsReview (CodingModels.cs) with it, so a line coded under an AI-suggested (unconfirmed) code set stays flagged for review; never persist the suggested set as a mapping.</constraint>
+    <constraint source="ontology-r1, Signal dedupe (option a), 2026-10-18">One Signal per (policy, subject) per evaluation. SignalWriter's dedupe key is policy|subjectEntity|subjectId|episode, and a write to an existing open row only refreshes sprk_lastevaluated and the due date, so a second request with the same key in one run silently drops its reasons. Rules:
+      (1) The 072 mapper aggregates before the write. It sends exactly one request per key, with the reason codes sorted, the strongest consequence winning (Reject over Hold over Flag), and the evidence a union of FieldRefs with each reason's text kept separate.
+      (2) A withheld Duplicate reason (D-112) keeps the withheld template, and no other merged reason or evidence field may mention the hidden prior.
+      (3) Store a reason-set fingerprint (the sorted codes plus the strongest consequence) in the Signal's evidence. On re-evaluation, a different fingerprint closes the open Signal as Superseded and raises episode+1 (the policy-version mechanism, task 031 / D-13). The same fingerprint just refreshes. No reason left means the normal closure.
+      (4) The Decision Record fact snapshot lists every merged reason.
+      (5) D-115's rates-not-checked finding has its own reason code and is flag-only. It must never be merged into a Reject.
+    Required tests: two reasons on one line give one Signal carrying both, with the strongest consequence; a reason added on re-evaluation gives Superseded plus episode+1, and the new Signal carries both; a withheld plus a visible reason leak no hidden detail; a must-fire guard shows the mapper never sends a duplicate key in one evaluation.</constraint>
   </constraints>
 
   <knowledge>
