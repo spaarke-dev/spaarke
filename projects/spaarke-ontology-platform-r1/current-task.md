@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-18 ~05:00Z (main session; sync PR #2088 updated with master, merging). State only — history is in git log,
+> **Last Updated**: 2026-10-18 ~05:30Z (main session; #2088 merged to master `20fb86dc4`; 042b running). State only — history is in git log,
 > task `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path;
 > D-123 secure family; D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-169). Deferred work: one self-contained GitHub issue per item, label
@@ -10,8 +10,8 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No lane in flight. 102b ✅ (PR #2075 merged `4ff829fa5`; live cascade applied and checked 2026-10-18) |
-| **Next Action** | 1) Sync PR #2088 head `ee7469c33` (master #2086 merged in; build + ArchTests 1128 pass); merge script running. After merge: send R3 the master SHA for a dev BFF deploy (fresh owner approval; BFF BEFORE Console, K3); notify word-add-in. 2) ebilling 015 follow-up re-check running (`be1c60e38..009317530`). 3) Draft the #1876 writer side (D-169) for uac-r2. 4) Re-check ebilling 074 and 071 fix ranges when they arrive |
+| **Task** | 042b running (implementer, `C:\wts-042b`, branch `task/ontology-042b`; D-169 internal only). 071 r2 re-check running (`e2288a659..229643893`) |
+| **Next Action** | 1) R3 deploys dev BFF from master (candidate `20e7b71a1` = 20fb86dc4 src); owner approved in this session, R3 asking owner directly. After: verify version, send after-notices (word-add-in, uac-r2). NOT the 015 BFF (no `e0df77339`). 2) 042b result → send uac-r2 the DirectThreadAccessService diff → PR → two adversarial passes. 3) 071 r2 findings → ebilling. 4) uac-r2's #2084 PR (after #2063): two passes |
 
 ## Open owner / peer items
 
@@ -23,7 +23,7 @@
 
 ## ebilling reviews (ontology owns DecisionRecordWriter, FinanceBaseValues, FinanceRollupService)
 
-- **015** (retire `sprk_invoicestatus`; counted = Approved, Sent to AP, Paid on `statuscode`, D-166 = their D-103): fix round re-check CLEAN (`62d51bf2e^..d249e9a50`). The PR #1911 Q24 condition is met. The delete script requires `-BffDeployAttestation`/`-SpaDeployAttestation`. After the delete, every dev BFF must contain `e0df77339` (R3 agreed). **When 015 reaches master:** update `notes/102a-authoring-contract.md` residual row and D-161 to name `statuscode`.
+- **015** ✅ (ebilling; re-checks CLEAN through `ad338f34a`). The PR #1911 Q24 condition is met. The delete script requires `-BffDeployAttestation`/`-SpaDeployAttestation`. After the delete, every dev BFF must contain `e0df77339` (R3 agreed). **When 015 reaches master:** update `notes/102a-authoring-contract.md` residual row and D-161 to name `statuscode`.
 - **074** (`WriteBillingDecisionAsync`, D-100/D-101): pass done; all 7 conditions MET. ebilling is fixing F4-1 fully (resolved Signals' subjects in ownership), F3-1, K2 hash, K3 (no contactId), K4. Consumer obligations are in 049/100/103-105. **Re-check their fix range.** Ours after 074 reaches master: `DecisionRecordContextImmutabilityTests.CreateEntryPoints` + synthetic member + must-fire control; 5 stale writer comments (`DecisionRecordWriter.cs` :556 :1547 :1660 :2164 :2326).
 - **049** (held invoices D-102, Pending Spend D-104): review when sent. The held exclusion must be in both sum paths. Pending Spend needs §11 answers and owner schema approval. If it should be authorable as a Threshold, we add allow-list entries (`PolicyVersionValidator.AuthorableColumns`, `PredicateCompiler`, `RuleBodyDescriber`).
 - **071** (billing rule handlers): pass done; 4 fix-now items sent (read fields after IsCreditLine; D-123 cross-wall Duplicate evidence, with their owner + uac-r2; Describe text vs handler; stale hashes) and K4 purity guard, K1 currency, K1 SubmissionId, K2. Re-check their fix range when it arrives.
@@ -39,8 +39,8 @@
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- BFF `1.0.0+ebc74b331…` (R3, 2026-10-18 03:34Z; = 9721819ed + external SPA invoice statuscode allow-list + UAC #2083). It does NOT contain 102b. External SPA ebc74b331 (03:36Z).
-- Console from master `88b3ecb1f`. **Landing tab = Worklist** (D-164; revert `Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing'`).
+- BFF `1.0.0+ebc74b331…` (R3, 03:34Z); does NOT contain 102b. Deploy from master 20fb86dc4 approved by the owner 2026-10-18 (pending R3). Until then the Console (auto-deployed 20fb86dc4 at 04:36Z) is AHEAD of the BFF: a matter-limited rule would save as all-matters — no scoped authoring on dev.
+- Console from master `20fb86dc4` (04:36Z, run 39097698431). **Landing tab = Worklist** (D-164; revert `Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing'`).
 - **`sprk_policy_matter` CascadeDelete = Cascade** since 2026-10-18 ~03:35Z (D-167; Archive RemoveLink). Live facts: an admin delete removes only the rule; a Core User's matter delete also deletes the matter's rules (no privilege check on the child; audited). See notes/102b "Live on spaarkedev1".
 - Policies: six on, including POL-MATTER-NOBUDGET (D-163); none has a matter.
 - Roles: Ontology Service 58; Ontology Administrator 38 (keeps Signal Assign/Delete, D-162); Console User 21.
