@@ -1,0 +1,150 @@
+using FluentAssertions;
+using Microsoft.Xrm.Sdk;
+using Moq;
+using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Actions;
+using Sprk.Bff.Api.Tests.Services.Signals;
+using Xunit;
+
+namespace Sprk.Bff.Api.Tests.Services.Finance;
+
+/// <summary>
+/// ebilling-r1 task 074 (FR-30; D-75, D-100, D-101): <see cref="BillingDecisionRecorder"/>, the one Finance-side owner of a billing decision's
+/// Decision Record. It runs over the REAL <see cref="DecisionRecordWriter"/> on the writer's test harness (the Dataverse boundary mocked at the
+/// SDK), so each test proves the record the caller gets, not the request the recorder builds.
+/// </summary>
+public sealed class BillingDecisionRecorderTests
+{
+    private static readonly Guid Matter = Guid.Parse("0740c000-0000-4000-8000-0000000000a0");
+    private static readonly Guid Project = Guid.Parse("0740c000-0000-4000-8000-0000000000b0");
+    private static readonly Guid Invoice = Guid.Parse("0740c000-0000-4000-8000-0000000000c0");
+    private static readonly Guid Line = Guid.Parse("0740c000-0000-4000-8000-0000000000d0");
+    private static readonly Guid Reviewer = Guid.Parse("0740c000-0000-4000-8000-0000000000e0");
+    private static readonly Guid ReviewerContact = Guid.Parse("0740c000-0000-4000-8000-0000000000e1");
+
+    private static (DecisionRecordWriterTests.Harness H, BillingDecisionRecorder Recorder) Build()
+    {
+        var h = new DecisionRecordWriterTests.Harness();
+        h.Rows[("sprk_invoice", Invoice)] = new Entity("sprk_invoice", Invoice) { ["sprk_matter"] = new EntityReference("sprk_matter", Matter) };
+        h.Rows[("sprk_billingevent", Line)] = new Entity("sprk_billingevent", Line)
+        {
+            ["sprk_project"] = new EntityReference("sprk_project", Project),
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", Invoice),
+        };
+        return (h, new BillingDecisionRecorder(h.Writer));
+    }
+
+    private static readonly IReadOnlyDictionary<string, object?> Facts = new Dictionary<string, object?> { ["billedTotal"] = 1200m };
+
+    private static BillingDecision Decision(string code, Guid subject, BillingDecider? decider = null, string? reason = null, Guid? id = null,
+        IReadOnlyDictionary<string, object?>? values = null) =>
+        new(id ?? Guid.NewGuid(), code, subject, decider ?? BillingDecider.Human(Reviewer, "Billing reviewer", ReviewerContact), Facts, "Done", reason, values);
+
+    [Theory]
+    [InlineData("approve-invoice", null)]
+    [InlineData("reject-invoice", "duplicate")]
+    [InlineData("return-to-firm", "missing timekeeper")]
+    [InlineData("override-submission", "partner approved")]
+    public async Task EachInvoiceDecision_WritesExactlyOneRecord_FiledUnderTheInvoice_AndARetryWritesNone(string code, string? reason)
+    {
+        var (h, recorder) = Build();
+        var decision = Decision(code, Invoice, reason: reason);
+
+        var first = await recorder.RecordAsync(decision);
+        var retry = await recorder.RecordAsync(decision);
+
+        first.AlreadyRecorded.Should().BeFalse();
+        retry.AlreadyRecorded.Should().BeTrue();
+        retry.RecordId.Should().Be(first.RecordId);
+        first.RecordClass.Should().Be(RecordedDecisionClass.Judgement);
+        h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardinginvoice").Id.Should().Be(Invoice, "D-75, D-101: subject the invoice");
+        h.Row.GetAttributeValue<string>("sprk_actioncode").Should().Be(code);
+    }
+
+    [Theory]
+    [InlineData("accept-line", null)]
+    [InlineData("reduce-line", "rate above card")]
+    [InlineData("disallow-line", "block billing")]
+    public async Task EachLineDecision_IsFiledUnderTheLine_WithTheLinesOwnCore(string code, string? reason)
+    {
+        var (h, recorder) = Build();
+
+        await recorder.RecordAsync(Decision(code, Line, reason: reason, values: new Dictionary<string, object?> { ["approvedAmount"] = 800m }));
+
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline").Id.Should().Be(Line, "D-75: the line is the subject");
+        h.Row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Project.ToString("D"), "the line's own core, never its invoice's matter");
+    }
+
+    [Fact]
+    public async Task ASystemDecision_IsRecordedWithNoConfirmer_AndAnAutomatedDecider()
+    {
+        var (h, recorder) = Build();
+
+        await recorder.RecordAsync(Decision("reject-invoice", Invoice, BillingDecider.Automated("submission pipeline (blocking failure)"), "blocking_failure"));
+
+        h.Row.Contains("sprk_confirmedby").Should().BeFalse();
+        h.Row.Contains("sprk_assignedtointernal").Should().BeFalse();
+        h.Row.Contains("sprk_gatetier").Should().BeFalse();
+        h.Row.GetAttributeValue<string>("sprk_factsnapshot").Should().Contain("automated: submission pipeline (blocking failure)");
+    }
+
+    [Fact]
+    public async Task AHumanDecision_RecordsTheConfirmingUser_AndTheirContact()
+    {
+        var (h, recorder) = Build();
+
+        await recorder.RecordAsync(Decision("approve-invoice", Invoice));
+
+        h.Row.GetAttributeValue<EntityReference>("sprk_confirmedby").Id.Should().Be(Reviewer);
+        h.Row.GetAttributeValue<EntityReference>("sprk_assignedtointernal").Id.Should().Be(ReviewerContact);
+        h.Row.GetAttributeValue<string>("sprk_factsnapshot").Should().Contain("Billing reviewer");
+    }
+
+    [Theory]
+    [InlineData("override-submission")]
+    [InlineData("reject-invoice")]
+    [InlineData("return-to-firm")]
+    public async Task AnOverrideRejectOrReturnWithoutAReason_IsRefusedBeforeAnyWrite_ByPreflightAndByRecord(string code)
+    {
+        var (h, recorder) = Build();
+        var decision = Decision(code, Invoice, reason: null);
+
+        recorder.Invoking(r => r.Preflight(decision)).Should().Throw<DecisionRecordRefusedException>()
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        (await recorder.Invoking(r => r.RecordAsync(decision)).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        h.Entities.Invocations.Should().BeEmpty();
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ASignalsCode_IsRefused_AndNothingIsWritten()
+    {
+        var (h, recorder) = Build();
+
+        (await recorder.Invoking(r => r.RecordAsync(Decision("mark-complete", Invoice))).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.RecordClassUnderivable);
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Preflight_PassesAValidDecision_AndReadsNothing()
+    {
+        var (h, recorder) = Build();
+
+        recorder.Invoking(r => r.Preflight(Decision("approve-invoice", Invoice))).Should().NotThrow();
+        h.Entities.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BillingDecider_Automated_PrefixesTheRole_AndHasNoUser()
+    {
+        var system = BillingDecider.Automated("x");
+
+        system.Role.Should().Be("automated: x");
+        system.SystemUserId.Should().BeNull();
+        system.ContactId.Should().BeNull();
+    }
+}

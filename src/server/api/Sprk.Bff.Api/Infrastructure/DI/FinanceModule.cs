@@ -116,6 +116,11 @@ public static class FinanceModule
         // PDF, create the document and the submission through the allocator, enqueue processing). Concrete (ADR-010: one implementation).
         // Scoped like its scoped dependencies (SpeFileStore, RecordContainerResolver, the allocator); unconditional (flag rule above).
         services.AddScoped<InvoiceSubmissionService>();
+        // Billing Decision Records (ebilling-r1 task 074, FR-30, D-75, D-100, D-101): the one Finance-side owner of a billing decision's record,
+        // over the writer's additive WriteBillingDecisionAsync. Concrete (ADR-010: no interface, one implementation). Singleton: its only
+        // dependency, DecisionRecordWriter, is a singleton (SignalsModule) and it holds no state. Unconditional (flag rule above).
+        // Callers: 049, 100, 103, 104, 105.
+        services.AddSingleton<BillingDecisionRecorder>();
 
         // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)
