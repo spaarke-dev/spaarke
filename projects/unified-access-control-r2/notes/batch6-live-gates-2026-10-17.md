@@ -107,4 +107,18 @@ Also run `GET /api/admin/jobs/demo-expiration/status` as admin.
   - `BaseAddress` is `…/api/data/v9.2` with no trailing slash (`PlaybookSharingService.cs:54-56`), so the relative `teams(…)` at :415 resolves outside `/v9.2`.
   - Admin reads the same team's name directly with 200.
 
-**Verdicts:** G1 PASS · G2 PASS · G3 PASS · G4 **FAIL** (#2049) · G5 PASS for registration, the first run PENDING 2026-10-18 00:00Z · G6 PASS (fixture kept).
+**Verdicts:** G1 PASS · G2 PASS · G3 PASS · G4 **FAIL** (#2049) · G5 PASS for registration, first run PASS (00:00:00Z, success=True) · G6 PASS (fixture kept).
+### G5 first run — RESULT (checked 2026-10-18 03:40Z)
+
+**PASS.** App Insights `spe-insights-dev-67e2xz` (role `spaarke-bff-dev`), the KQL above over 2026-10-17 23:50Z – 2026-10-18 00:40Z:
+- 00:00:00.017Z `Dispatching scheduled job 'demo-expiration' runId=b870265c-… attempt=1/3`;
+- 00:00:00.461Z `scheduled job 'demo-expiration' completed runId=b870265c-… success=True processedItems=0 duration=440ms attempt=1`;
+- **0** `DemoExpirationService` lines and 0 `[Expire]` lines. The old timer is gone.
+
+**The status-route criterion cannot hold after a redeploy, and that is not a defect of #1363.** `GET /api/admin/jobs/demo-expiration/status` at 03:38Z → 200, `enabled true`, `nextScheduledOn 2026-10-19T00:00Z`, but `lastRunStartedOn null`, `recentRuns []`. Why:
+- R3 redeployed the dev BFF at 03:32:53–03:34:49Z (ProductVersion `+ebc74b331`).
+- Run history lives in `Spaarke.Scheduling/InMemoryBackgroundJobStore.cs`, so a restart clears it. `GET /api/admin/jobs` shows the same for every daily job that ran before the restart (02:00, 02:30, 03:30 → `None`), while the 2- and 5-minute jobs show runs from 03:35Z on.
+
+Gotcha for later gates: a job-status check must be read before any redeploy, or taken from App Insights. Durable run history is a ScheduledJobHost design choice, not a UAC defect.
+
+**#1363 closes:** registration (G5) plus the first scheduled run both PASS.
