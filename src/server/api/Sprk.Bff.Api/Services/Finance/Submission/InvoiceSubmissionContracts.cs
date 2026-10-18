@@ -213,6 +213,18 @@ public static class InvoiceSubmissionErrors
     /// <summary>The caller's firm memberships could not be read (a fault, never "no firm"): 503, retry.</summary>
     public const string FirmUnverifiable = "ebilling.submission.firm_unverifiable";
 
+    /// <summary>
+    /// ebilling-r1 task 051 (D-106): the chosen firm is not linked to the chosen core record (it is none of the record's assigned law firms),
+    /// or the record's links could not be read. 403 for a refusal; the reason is this code and nothing else, so no record or firm detail leaves.
+    /// </summary>
+    public const string FirmNotLinked = "ebilling.submission.firm_not_linked";
+
+    /// <summary>
+    /// ebilling-r1 task 051: a workforce systemuser called an EXTERNAL submission route. 403 before any write; internal users submit through
+    /// the internal route (as a systemuser is sent to Manage Access on the contact-side grant routes).
+    /// </summary>
+    public const string UseInternalRoute = "ebilling.submission.use_internal_route";
+
     public const string StorageNotConfigured = "ebilling.submission.storage_not_configured";
     public const string CoreRecordUnavailable = "ebilling.submission.record_unavailable";
     public const string Failed = "ebilling.submission.failed";

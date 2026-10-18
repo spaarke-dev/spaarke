@@ -104,15 +104,17 @@ public static class ExternalUserContextEndpoint
     /// <see cref="ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync"/> — the one definition the submission routes validate
     /// <c>firmId</c> against — so the SPA is never offered a firm the submission would refuse as foreign. Only the caller's own ids are ever
     /// looked up, and only id and name leave.</para>
-    /// <para>Skipped (<c>Firms = null</c>) while eBilling is off: no read, no extra cost for a deployment without the feature. A fault in
-    /// the membership or name read also leaves <c>null</c> — an additive field never fails /me, and "unknown" is not "no firm".</para>
+    /// <para><b>Cost.</b> With eBilling off (<c>Firms = null</c>, omitted from the JSON) the extra work is the flag read and nothing else: the
+    /// firm services are resolved from the request's service provider only AFTER the flag check, so they are not built, and nothing is read.
+    /// With eBilling on, a caller with a contact costs one live contact-state read (remembered for the request: the principal's own composition
+    /// already made it), one membership read, and — when there is at least one firm — ONE query for all the firm names. A workforce systemuser
+    /// costs nothing extra (<c>Firms = []</c>: internal users submit through the internal route). A fault in
+    /// the membership or name read leaves <c>null</c> — an additive field never fails /me, and "unknown" is not "no firm".</para>
     /// </remarks>
     public static async Task<IResult> HandleAsync(
         HttpContext httpContext,
         ILogger<Program> logger,
         Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Configuration.EbillingOptions> ebilling,
-        ExternalParticipationService participations,
-        Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionService submissions,
         CancellationToken ct)
     {
         // Fully qualified: a `using` here would shift the line numbers the route ledger cites (:45, :74).
@@ -124,13 +126,25 @@ public static class ExternalUserContextEndpoint
             return result;
         }
 
+        // A systemuser is refused on the external submission routes (ExternalInvoiceSubmissionAuthorizationFilter), so it is offered no firm.
+        if (ExternalInvoiceSubmissionAuthorizationFilter.IsSystemUser(caller))
+        {
+            return Results.Ok(response with { Firms = Array.Empty<ExternalFirmEntry>() });
+        }
+
         IReadOnlyList<ExternalFirmEntry>? firms = null;
         try
         {
+            // Resolved here, after the flag check: with eBilling off nothing below is built (the services are not parameters of the handler).
+            var participations = httpContext.RequestServices.GetRequiredService<ExternalParticipationService>();
             var (firmIds, unreadable) = await ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync(caller, participations, logger, ct);
             if (!unreadable)
             {
-                var named = firmIds.Count == 0 ? Array.Empty<(Guid FirmId, string Name)>() : await submissions.ReadActiveFirmNamesAsync(firmIds, ct);
+                var named = firmIds.Count == 0
+                    ? Array.Empty<(Guid FirmId, string Name)>()
+                    : await httpContext.RequestServices
+                        .GetRequiredService<Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionService>()
+                        .ReadActiveFirmNamesAsync(firmIds, ct);
                 firms = named?.Select(f => new ExternalFirmEntry(f.FirmId, f.Name)).ToList();
             }
         }

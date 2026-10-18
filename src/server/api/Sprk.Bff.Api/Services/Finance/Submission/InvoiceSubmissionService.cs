@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Jobs;
 
@@ -292,30 +293,39 @@ public class InvoiceSubmissionService
     /// </summary>
     public async Task<IReadOnlyList<(Guid FirmId, string Name)>?> ReadActiveFirmNamesAsync(IReadOnlyCollection<Guid> firmIds, CancellationToken ct)
     {
-        var firms = new List<(Guid FirmId, string Name)>(firmIds.Count);
-        foreach (var firmId in firmIds)
+        var wanted = firmIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (wanted.Count == 0)
         {
-            try
-            {
-                var firm = await _entities.RetrieveAsync(OrganizationEntity, firmId, new[] { "statecode", "sprk_name" }, ct);
-                if (firm is not null && firm.GetAttributeValue<OptionSetValue>("statecode")?.Value == 0)
-                {
-                    var name = firm.GetAttributeValue<string>("sprk_name");
-                    firms.Add((firmId, string.IsNullOrWhiteSpace(name) ? firmId.ToString() : name));
-                }
-            }
-            catch (Exception ex) when (IsNotFound(ex))
-            {
-                // Not a firm any more: not offered.
-            }
-            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
-            {
-                _logger.LogWarning(ex, "Firm list unavailable: firm {FirmId} could not be read", firmId);
-                return null;
-            }
+            return Array.Empty<(Guid FirmId, string Name)>();
         }
 
-        return firms;
+        // ONE query for all the caller's firms (they are few; the bound keeps the IN list well inside Dataverse's limits). The organization's
+        // primary name is sprk_organizationname: sprk_name does not exist on that table, and selecting it is a 400 (RegardingNameFields).
+        var nameColumn = RegardingNameFields.PrimaryNameField(OrganizationEntity)
+            ?? throw new InvalidOperationException("No primary name column is known for sprk_organization.");
+        var found = new Dictionary<Guid, string>();
+        try
+        {
+            foreach (var chunk in wanted.Chunk(MaxInValues))
+            {
+                var query = new QueryExpression(OrganizationEntity) { ColumnSet = new ColumnSet("statecode", nameColumn) };
+                query.Criteria.AddCondition("sprk_organizationid", ConditionOperator.In, chunk.Cast<object>().ToArray());
+                query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+                foreach (var firm in (await _entities.RetrieveMultipleAsync(query, ct)).Entities)
+                {
+                    var name = firm.GetAttributeValue<string>(nameColumn);
+                    found[firm.Id] = string.IsNullOrWhiteSpace(name) ? firm.Id.ToString() : name;
+                }
+            }
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning(ex, "Firm list unavailable: the firms could not be read");
+            return null;
+        }
+
+        // In the order given; a missing or inactive firm (not returned) is not offered.
+        return wanted.Where(found.ContainsKey).Select(id => (id, found[id])).ToList();
     }
 
     // ── Writes, in order, each compensated on a later failure ──

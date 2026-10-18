@@ -18,6 +18,12 @@ public enum ExternalInvoiceSubmissionAccess
 
     /// <summary>GET /invoice-submissions: the caller's firms (the list is then scoped by the caller's readable records).</summary>
     List,
+
+    /// <summary>
+    /// GET /invoice-submissions/firm-records?firmId=: which of the caller's readable core records are linked to one of the caller's firms
+    /// (ebilling-r1 task 051, D-106: the SPA picker lists only those). The firm must be one of the caller's.
+    /// </summary>
+    FirmRecords,
 }
 
 /// <summary>Attaches <see cref="ExternalInvoiceSubmissionAuthorizationFilter"/> to an external invoice submission route.</summary>
@@ -80,11 +86,17 @@ internal sealed record ExternalInvoiceSubmissionScope(
 /// <c>IAccessibleRecordSetService.IsOperationPermittedAsync</c>; it takes a WORKFORCE principal and cannot answer for a CIAM contact.
 /// The principal's rights ARE that service's composed answer, for both planes.)</para>
 /// <para><b>The firm (NFR-10).</b> Derived server-side from the caller contact's CONFERRING organization memberships
-/// (<see cref="ContactGrantorAuthorizationFilter.ReadMembershipsAsync"/>, the one membership read). A <c>firmId</c> query value is
+/// (<see cref="ReadCallerFirmsAsync"/>: an Active contact, then <c>ExternalParticipationService.ReadOrganizationMembershipsAsync</c>, the one
+/// membership read). A <c>firmId</c> query value is
 /// accepted only when it is one of them (else 403 <see cref="InvoiceSubmissionErrors.FirmForbidden"/>). Without one: a single firm is
 /// used; several are 400 <see cref="InvoiceSubmissionErrors.FirmRequired"/> (the server never picks one); none is 403. A membership read
 /// that could not be completed — or a contact that could not be read — is 503 <see cref="InvoiceSubmissionErrors.FirmUnverifiable"/>,
 /// never "no firm".</para>
+/// <para><b>A systemuser (task 051).</b> A workforce systemuser is refused on a submit route before anything is read or written
+/// (403 <see cref="InvoiceSubmissionErrors.UseInternalRoute"/>); internal users submit through the internal route.</para>
+/// <para><b>The firm is linked to the record (D-106, task 051).</b> After the checks above, a submit is accepted only when the chosen firm is one of
+/// the record's assigned law firms (<see cref="IsFirmLinkedAsync"/>); else 403 <see cref="InvoiceSubmissionErrors.FirmNotLinked"/> (code only),
+/// and a link read that faults is 503 <see cref="InvoiceSubmissionErrors.FirmUnverifiable"/>.</para>
 /// <para><b>Reads.</b> One submission is visible only when its firm is one of the caller's and the caller can read its core record;
 /// anything else, including a missing row, is the same 404 (no existence oracle). The list is scoped by the caller's firms here and by
 /// the caller's readable records in the query.</para>
@@ -128,6 +140,7 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
             ExternalInvoiceSubmissionAccess.Submit => await DecideSubmitAsync(http, principal),
             ExternalInvoiceSubmissionAccess.ReadOne => await DecideReadOneAsync(http, principal),
             ExternalInvoiceSubmissionAccess.List => await DecideListAsync(http, principal),
+            ExternalInvoiceSubmissionAccess.FirmRecords => await DecideFirmRecordsAsync(http, principal),
             _ => (null, Deny(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.RecordForbidden, "Unknown route.")),
         };
 
@@ -144,6 +157,18 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
 
     private async Task<(ExternalInvoiceSubmissionScope?, IResult?)> DecideSubmitAsync(HttpContext http, CallerPrincipal principal)
     {
+        // A workforce systemuser is refused before anything is read or written, whatever contact it is linked to: the firm membership a
+        // linked contact carries is a CONTACT's, and an internal user submits through the internal route (the shape of
+        // ContactGrantorAuthorizationFilter's UseManageAccessDenial). /me lists no firms for such a caller, so the SPA never offers it.
+        if (IsSystemUser(principal))
+        {
+            _logger.LogWarning(
+                "[EBILLING-SUBMIT] DENIED: systemuser {SystemUserId} called an external invoice submission route; internal users submit " +
+                "through the internal route.", principal.SystemUserId);
+            return (null, Deny(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.UseInternalRoute,
+                "This is the external invoice submission. As an internal user, submit invoices through the internal route instead."));
+        }
+
         if (!Guid.TryParse(http.Request.RouteValues["id"]?.ToString(), out var recordId) || recordId == Guid.Empty)
         {
             return (null, Deny(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.RecordForbidden, "You cannot submit invoices on this record."));
@@ -195,7 +220,64 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
                 "You belong to more than one firm; name the firm (firmId) the invoice is from."));
         }
 
+        // D-106: the chosen firm must be linked to the chosen record. Last, so the answer says nothing to a caller who failed any check above.
+        if (await DenyUnlinkedFirmAsync(core, firmId, http.RequestAborted) is { } unlinked)
+        {
+            return (null, unlinked);
+        }
+
         return (new ExternalInvoiceSubmissionScope(principal, firms, firmId, core, null), null);
+    }
+
+    /// <summary>True for a workforce systemuser principal (any non-null systemuser id, fail closed: no emptiness test).</summary>
+    internal static bool IsSystemUser(CallerPrincipal principal) => principal.SystemUserId is not null;
+
+    /// <summary>
+    /// D-106: whether <paramref name="firmId"/> is one of the core record's assigned law firms (<c>sprk_assignedlawfirm1/2</c>), through the access
+    /// model's own record-to-organization read (<see cref="ExternalParticipationService.GetReferencedOrganizationIdsAsync"/>, the read the
+    /// ethical-wall veto uses). Null when linked; otherwise the refusal. A record whose links could not be read is a 503, never "linked" and never
+    /// a final "not linked". The refusal carries the code only.
+    /// </summary>
+    private async Task<IResult?> DenyUnlinkedFirmAsync(InvoiceCoreRecord core, Guid firmId, CancellationToken ct)
+    {
+        var (linked, unreadable) = await IsFirmLinkedAsync(_participations, core, firmId, _logger, ct);
+        if (unreadable)
+        {
+            return Unverifiable();
+        }
+
+        if (linked)
+        {
+            return null;
+        }
+
+        _logger.LogInformation("[EBILLING-SUBMIT] Denied: the chosen firm is not linked to {Kind} {RecordId}", core.Kind, core.RecordId);
+        return Deny(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
+            "The firm you chose is not linked to this record, so an invoice cannot be submitted for it.");
+    }
+
+    /// <summary>
+    /// Whether a firm is linked to a core record (D-106), read through the one record-to-organization read. <c>Unreadable</c> is true when the read
+    /// faulted or returned nothing for the record. Shared with the picker route so the list it offers is exactly what the submit accepts.
+    /// </summary>
+    internal static async Task<(bool Linked, bool Unreadable)> IsFirmLinkedAsync(
+        ExternalParticipationService participations, InvoiceCoreRecord core, Guid firmId, ILogger logger, CancellationToken ct)
+    {
+        try
+        {
+            var references = await participations.GetReferencedOrganizationIdsAsync(core.EntityLogicalName, new[] { core.RecordId }, ct);
+            if (!references.TryGetValue(core.RecordId, out var record) || record.Unreadable)
+            {
+                return (false, true);
+            }
+
+            return (record.OrganizationIds.Contains(firmId), false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "[EBILLING-SUBMIT] The assigned firms of {Kind} {RecordId} could not be read; failing closed.", core.Kind, core.RecordId);
+            return (false, true);
+        }
     }
 
     // ── Read one ──
@@ -249,6 +331,36 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
             : (new ExternalInvoiceSubmissionScope(principal, firms, null, null, null), null);
     }
 
+    // ── Firm records (the picker's link read, D-106) ──
+
+    private async Task<(ExternalInvoiceSubmissionScope?, IResult?)> DecideFirmRecordsAsync(HttpContext http, CallerPrincipal principal)
+    {
+        if (IsSystemUser(principal))
+        {
+            return (null, Deny(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.UseInternalRoute,
+                "This is the external invoice submission. As an internal user, submit invoices through the internal route instead."));
+        }
+
+        if (!Guid.TryParse(http.Request.Query["firmId"].ToString(), out var firmId) || firmId == Guid.Empty)
+        {
+            return (null, Deny(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "firmId must be a GUID."));
+        }
+
+        var (firms, firmDenial) = await ReadFirmsAsync(principal, http.RequestAborted);
+        if (firmDenial is not null)
+        {
+            return (null, firmDenial);
+        }
+
+        if (!firms.Contains(firmId))
+        {
+            return (null, Deny(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmForbidden,
+                "You can list records only for your own firm."));
+        }
+
+        return (new ExternalInvoiceSubmissionScope(principal, firms, firmId, null, null), null);
+    }
+
     // ── The firm ──
 
     /// <summary>The caller's conferring firms; empty for a caller with no contact; a 503 when they cannot be read.</summary>
@@ -262,6 +374,8 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
     /// The ONE definition of "the caller's firms": the contact's CONFERRING organization memberships. Shared by this filter and by
     /// <c>GET /api/v1/external/me</c> (ebilling-r1 task 051, which lists them for the firm step), so the list the SPA offers is exactly the set
     /// <c>firmId</c> is validated against. <c>Unreadable</c> is true when the contact or the memberships could not be read (never "no firm").
+    /// A contact that is not Active confers no firms (the UAC task 137 rule, <c>AccessibleRecordSetService</c>: a deactivated contact's grants
+    /// confer nothing), read LIVE and remembered for the request, so it is the read the principal's own composition already made.
     /// </summary>
     internal static async Task<(IReadOnlyList<Guid> Firms, bool Unreadable)> ReadCallerFirmsAsync(
         CallerPrincipal principal, ExternalParticipationService participations, ILogger logger, CancellationToken ct)
@@ -276,7 +390,33 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
             return (Array.Empty<Guid>(), false);
         }
 
-        var memberships = await ContactGrantorAuthorizationFilter.ReadMembershipsAsync(participations, principal.ContactId, logger, ct);
+        switch (await participations.ReadContactStateAsync(principal.ContactId, ct))
+        {
+            case ContactRecordState.Active:
+                break;
+            case ContactRecordState.Inactive:
+                logger.LogWarning(
+                    "[EBILLING-FIRMS] Contact {ContactId} is not Active: it confers no firms (UAC task 137).", principal.ContactId);
+                return (Array.Empty<Guid>(), false);
+            default:
+                return (Array.Empty<Guid>(), true);
+        }
+
+        // The same junction read as ContactGrantorAuthorizationFilter.ReadMembershipsAsync (ExternalParticipationService.ReadOrganizationMembershipsAsync,
+        // task 109), called here so a fault is logged as what it is on THESE paths (the submission routes and /me), not as a refused grant.
+        ActiveOrgMemberships memberships;
+        try
+        {
+            memberships = await participations.ReadOrganizationMembershipsAsync(principal.ContactId, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex,
+                "[EBILLING-FIRMS] The organization memberships of contact {ContactId} could not be read; the caller's firms are unknown.",
+                principal.ContactId);
+            return (Array.Empty<Guid>(), true);
+        }
+
         return memberships.Unreadable
             ? (Array.Empty<Guid>(), true)
             : (memberships.ConferringOrganizationIds.Distinct().ToList(), false);

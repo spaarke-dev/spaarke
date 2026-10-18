@@ -17,15 +17,18 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <param name="Firms">
 /// ebilling-r1 task 051 (additive; the fields above are unchanged). The firms the caller can submit invoices for: the
 /// caller contact's CONFERRING organization memberships, id and name only, the same set the invoice submission routes
-/// resolve <c>firmId</c> from. Empty when the caller belongs to no firm. <see langword="null"/> when it is not known:
-/// eBilling is off (the list is not read at all), or the memberships or names could not be read. A reader treats null as
-/// "ask the server", never as "no firm". Only the caller's own firms are ever listed.
+/// resolve <c>firmId</c> from. Empty when the caller belongs to no firm, and for a workforce systemuser (internal users submit
+/// through the internal route). <see langword="null"/>, and then OMITTED from the JSON (<c>WhenWritingNull</c>, so ordinary /me
+/// responses do not carry <c>"firms":null</c>), when it is not known: eBilling is off (the list is not read at all), or the
+/// memberships or names could not be read. A reader treats an absent field as "eBilling off, not applicable, or unknown",
+/// never as "no firm". Only the caller's own firms are ever listed.
 /// </param>
 public record ExternalUserContextResponse(
     Guid ContactId,
     string Email,
     IReadOnlyList<ProjectAccessEntry> Projects,
     Guid? SystemUserId = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<ExternalFirmEntry>? Firms = null);
 
 /// <summary>One firm the caller belongs to (see <see cref="ExternalUserContextResponse.Firms"/>).</summary>

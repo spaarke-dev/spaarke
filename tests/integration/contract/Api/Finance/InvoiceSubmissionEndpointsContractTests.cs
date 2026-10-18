@@ -56,6 +56,8 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     public InvoiceSubmissionEndpointsContractTests()
     {
         _participations.Firms = new[] { FirmId };
+        // D-106: the firm is one of the matter's assigned law firms (the work-assignment and project below are linked per test).
+        _participations.Links[("sprk_matter", MatterId)] = new[] { FirmId };
         _resolver.Principal = Collaborator(AccessRights.Read | AccessRights.Create | AccessRights.Write);
     }
 
@@ -293,6 +295,324 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // External: a systemuser is refused before any write (ebilling-r1 task 051)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid ProjectId = Guid.NewGuid();
+    private static readonly Guid WorkAssignmentId = Guid.NewGuid();
+    private static readonly Guid SystemUserId = Guid.NewGuid();
+
+    /// <summary>The route segment, table and record id of each core record kind the external submit routes accept.</summary>
+    public static TheoryData<string> CoreSegments => new() { "matters", "projects", "workassignments" };
+
+    private static (string Entity, Guid Id) CoreOf(string segment) => segment switch
+    {
+        "matters" => ("sprk_matter", MatterId),
+        "projects" => ("sprk_project", ProjectId),
+        _ => ("sprk_workassignment", WorkAssignmentId),
+    };
+
+    /// <summary>A caller with Read + Create on a matter, a project and a work assignment; a workforce systemuser when <paramref name="systemUser"/> is set.</summary>
+    private static CallerPrincipal OnEveryRoot(bool systemUser = false) => new()
+    {
+        Plane = systemUser ? CallerPrincipalPlane.Workforce : CallerPrincipalPlane.CiamContact,
+        ContactId = InvoiceSubmissionServiceTests.ContactId,
+        SystemUserId = systemUser ? SystemUserId : null,
+        ProjectAccess = new[] { new CallerProjectAccess { ProjectId = ProjectId, Rights = AccessRights.Read | AccessRights.Create } },
+        MatterAccess = new Dictionary<Guid, AccessRights> { [MatterId] = AccessRights.Read | AccessRights.Create },
+        WorkAssignmentAccess = new Dictionary<Guid, AccessRights> { [WorkAssignmentId] = AccessRights.Read | AccessRights.Create },
+    };
+
+    private void LinkEveryRecordTo(params Guid[] firms)
+    {
+        foreach (var segment in new[] { "matters", "projects", "workassignments" })
+        {
+            _participations.Links[CoreOf(segment)] = firms;
+        }
+    }
+
+    private Task<HttpResponseMessage> PostToAsync(string segment, string query = "") =>
+        SendAsync(HttpMethod.Post, $"/api/v1/external/{segment}/{CoreOf(segment).Id}/invoice-submissions{query}", Form());
+
+    [Theory]
+    [MemberData(nameof(CoreSegments))]
+    public async Task A_systemuser_is_refused_on_each_submit_route_before_any_read_or_write(string segment)
+    {
+        // The systemuser holds the rights, belongs (through its linked contact) to the firm, and the firm is linked to the record: only
+        // the systemuser check can be what refuses it.
+        _resolver.Principal = OnEveryRoot(systemUser: true);
+        LinkEveryRecordTo(FirmId);
+
+        var response = await PostToAsync(segment);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.UseInternalRoute);
+        NothingWritten();
+        _participations.MembershipReads.Should().Be(0, "the refusal comes before the firm is looked up");
+        _participations.LinkReads.Should().BeEmpty("the refusal comes before the record's links are looked up");
+    }
+
+    [Theory]
+    [MemberData(nameof(CoreSegments))]
+    public async Task The_same_caller_without_a_systemuser_id_is_accepted_on_each_submit_route(string segment)
+    {
+        // Control for the systemuser tests above: same rights, same firm, same links; only SystemUserId differs.
+        _resolver.Principal = OnEveryRoot(systemUser: false);
+        LinkEveryRecordTo(FirmId);
+
+        await AssertPastTheFilterAsync(segment, await PostToAsync(segment));
+    }
+
+    /// <summary>
+    /// The route filter let the request through. For a matter the whole submission runs (202, one allocation); for a project or a work assignment
+    /// the shared test service has no record to read, so the request reaches the service and stops at 422 record_unavailable: not at any refusal
+    /// the filter owns.
+    /// </summary>
+    private async Task AssertPastTheFilterAsync(string segment, HttpResponseMessage response)
+    {
+        if (segment == "matters")
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+            _h.Allocations.Should().ContainSingle();
+            return;
+        }
+
+        new[]
+        {
+            InvoiceSubmissionErrors.UseInternalRoute, InvoiceSubmissionErrors.FirmNotLinked, InvoiceSubmissionErrors.FirmForbidden,
+            InvoiceSubmissionErrors.RecordForbidden, InvoiceSubmissionErrors.FirmRequired, InvoiceSubmissionErrors.FirmUnverifiable,
+        }.Should().NotContain(await ErrorCodeAsync(response));
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // External: the firm must be linked to the record (D-106, ebilling-r1 task 051)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    [Theory]
+    [MemberData(nameof(CoreSegments))]
+    public async Task A_firm_not_linked_to_the_record_is_403_firm_not_linked_with_the_code_only_and_nothing_is_written(string segment)
+    {
+        _resolver.Principal = OnEveryRoot();
+        LinkEveryRecordTo(OtherFirmId); // the record belongs to a firm the caller is not (and not to the caller's)
+
+        var response = await PostToAsync(segment);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FirmNotLinked);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain(OtherFirmId.ToString(), "the refusal names no firm").And.NotContain(FirmId.ToString());
+        NothingWritten();
+    }
+
+    [Fact]
+    public async Task A_record_with_no_assigned_firm_is_403_firm_not_linked()
+    {
+        // Fail closed: a record that references no firm links none.
+        _participations.Links.Clear();
+
+        var response = await PostExternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FirmNotLinked);
+        NothingWritten();
+    }
+
+    [Theory]
+    [MemberData(nameof(CoreSegments))]
+    public async Task A_firm_linked_to_the_record_is_accepted(string segment)
+    {
+        _resolver.Principal = OnEveryRoot();
+        LinkEveryRecordTo(FirmId, OtherFirmId); // either assigned-firm slot may hold the caller's firm
+
+        await AssertPastTheFilterAsync(segment, await PostToAsync(segment));
+    }
+
+    [Fact]
+    public async Task A_caller_in_two_firms_may_submit_only_under_the_firm_linked_to_the_record()
+    {
+        _participations.Firms = new[] { FirmId, OtherFirmId };
+        _participations.Links[("sprk_matter", MatterId)] = new[] { OtherFirmId };
+
+        var unlinked = await PostExternalAsync(Form(), $"?firmId={FirmId}");
+        unlinked.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(unlinked)).Should().Be(InvoiceSubmissionErrors.FirmNotLinked);
+        NothingWritten();
+
+        var linked = await PostExternalAsync(Form(), $"?firmId={OtherFirmId}");
+        linked.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        _h.Allocations.Should().ContainSingle().Which.FirmId.Should().Be(OtherFirmId);
+    }
+
+    [Fact]
+    public async Task A_link_read_that_cannot_be_completed_is_503_firm_unverifiable_not_a_deny_and_not_a_pass()
+    {
+        _participations.LinksUnreadable = true;
+
+        var response = await PostExternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FirmUnverifiable);
+        NothingWritten();
+    }
+
+    [Fact]
+    public async Task The_link_is_not_read_for_a_caller_who_failed_an_earlier_check()
+    {
+        _resolver.Principal = Collaborator(AccessRights.Read); // View Only
+
+        var response = await PostExternalAsync(Form());
+
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.RecordForbidden);
+        _participations.LinkReads.Should().BeEmpty();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // External: a deactivated contact confers no firms (UAC task 137)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task A_deactivated_contact_confers_no_firms_so_the_submit_is_403_firm_forbidden_and_the_list_is_empty()
+    {
+        _participations.ContactState = ContactRecordState.Inactive;
+
+        var post = await PostExternalAsync(Form());
+        post.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(post)).Should().Be(InvoiceSubmissionErrors.FirmForbidden);
+        NothingWritten();
+        _participations.MembershipReads.Should().Be(0, "an inactive contact's memberships are not even read");
+
+        var list = await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions");
+        list.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await list.Content.ReadAsStringAsync()).Should().Be("[]");
+    }
+
+    [Fact]
+    public async Task A_contact_whose_state_cannot_be_read_is_503_firm_unverifiable()
+    {
+        _participations.ContactState = ContactRecordState.Unreadable;
+
+        var response = await PostExternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FirmUnverifiable);
+        NothingWritten();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // External: the picker's link read, GET /invoice-submissions/firm-records (D-106)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private Task<HttpResponseMessage> GetFirmRecordsAsync(string query) =>
+        SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/firm-records{query}");
+
+    private static async Task<(string[] Matters, string[] Projects, string[] WorkAssignments, bool Partial)> ReadFirmRecordsAsync(HttpResponseMessage response)
+    {
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        string[] Ids(string name) => doc.RootElement.GetProperty(name).EnumerateArray().Select(e => e.GetString()!).ToArray();
+        return (Ids("matters"), Ids("projects"), Ids("workAssignments"), doc.RootElement.GetProperty("partial").GetBoolean());
+    }
+
+    [Fact]
+    public async Task The_picker_lists_only_the_readable_records_the_firm_is_linked_to_and_a_submit_agrees()
+    {
+        _resolver.Principal = OnEveryRoot();
+        _participations.Links[("sprk_matter", MatterId)] = new[] { FirmId };
+        _participations.Links[("sprk_project", ProjectId)] = new[] { OtherFirmId };         // linked to someone else: must not be offered
+        _participations.Links[("sprk_workassignment", WorkAssignmentId)] = new[] { OtherFirmId, FirmId };
+
+        var response = await GetFirmRecordsAsync($"?firmId={FirmId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var (matters, projects, workAssignments, partial) = await ReadFirmRecordsAsync(response);
+        matters.Should().Equal(MatterId.ToString());
+        projects.Should().BeEmpty("the project is linked to another firm only");
+        workAssignments.Should().Equal(WorkAssignmentId.ToString());
+        partial.Should().BeFalse();
+
+        // The list and the submit are one rule: what is offered is accepted, what is left out is refused.
+        await AssertPastTheFilterAsync("matters", await PostToAsync("matters"));
+        await AssertPastTheFilterAsync("workassignments", await PostToAsync("workassignments"));
+        var unlisted = await PostToAsync("projects");
+        unlisted.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(unlisted)).Should().Be(InvoiceSubmissionErrors.FirmNotLinked);
+    }
+
+    [Fact]
+    public async Task The_picker_reads_only_the_callers_own_readable_records()
+    {
+        _resolver.Principal = OnEveryRoot();
+        var strangerMatter = Guid.NewGuid();
+        _participations.Links[("sprk_matter", strangerMatter)] = new[] { FirmId }; // linked to the firm but not readable by the caller
+
+        var response = await GetFirmRecordsAsync($"?firmId={FirmId}");
+
+        (await ReadFirmRecordsAsync(response)).Matters.Should().NotContain(strangerMatter.ToString());
+        _participations.LinkReads.SelectMany(r => r.Ids).Should().NotContain(strangerMatter);
+    }
+
+    [Fact]
+    public async Task The_picker_leaves_out_records_whose_links_cannot_be_read_and_says_so()
+    {
+        _resolver.Principal = OnEveryRoot();
+        LinkEveryRecordTo(FirmId);
+        _participations.LinksUnreadable = true;
+
+        var response = await GetFirmRecordsAsync($"?firmId={FirmId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var (matters, projects, workAssignments, partial) = await ReadFirmRecordsAsync(response);
+        (matters.Length + projects.Length + workAssignments.Length).Should().Be(0);
+        partial.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task The_picker_refuses_a_firm_that_is_not_the_callers()
+    {
+        var response = await GetFirmRecordsAsync($"?firmId={OtherFirmId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FirmForbidden);
+        _participations.LinkReads.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("?firmId=not-a-guid")]
+    [InlineData("?firmId=00000000-0000-0000-0000-000000000000")]
+    public async Task The_picker_needs_a_valid_firm_id(string query)
+    {
+        var response = await GetFirmRecordsAsync(query);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FirmInvalid);
+    }
+
+    [Fact]
+    public async Task The_picker_refuses_a_systemuser()
+    {
+        _resolver.Principal = OnEveryRoot(systemUser: true);
+        LinkEveryRecordTo(FirmId);
+
+        var response = await GetFirmRecordsAsync($"?firmId={FirmId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.UseInternalRoute);
+        _participations.LinkReads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task The_picker_is_503_when_the_callers_memberships_cannot_be_read()
+    {
+        _participations.Unreadable = true;
+
+        var response = await GetFirmRecordsAsync($"?firmId={FirmId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FirmUnverifiable);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // External: payload refusals, authentication, the kill switch
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -330,6 +650,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     [InlineData("POST", "/api/v1/external/matters/{0}/invoice-submissions")]
     [InlineData("GET", "/api/v1/external/invoice-submissions/{0}")]
     [InlineData("GET", "/api/v1/external/invoice-submissions")]
+    [InlineData("GET", "/api/v1/external/invoice-submissions/firm-records?firmId={1}")]
     [InlineData("POST", "/api/finance/matters/{0}/invoice-submissions?firmId={1}")]
     [InlineData("GET", "/api/finance/invoice-submissions/{0}")]
     public async Task Every_route_is_401_unauthenticated(string method, string route)
@@ -345,6 +666,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     [InlineData("POST", "/api/v1/external/matters/{0}/invoice-submissions")]
     [InlineData("GET", "/api/v1/external/invoice-submissions/{1}")]
     [InlineData("GET", "/api/v1/external/invoice-submissions")]
+    [InlineData("GET", "/api/v1/external/invoice-submissions/firm-records?firmId={2}")]
     [InlineData("POST", "/api/finance/matters/{0}/invoice-submissions?firmId={2}")]
     [InlineData("GET", "/api/finance/invoice-submissions/{1}")]
     public async Task Every_route_is_503_ebilling_disabled_when_the_flag_is_off(string method, string route)
@@ -583,10 +905,41 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
         public bool Unreadable { get; set; }
 
+        /// <summary>The live state every contact answers (an Active contact unless a test says otherwise).</summary>
+        public ContactRecordState ContactState { get; set; } = ContactRecordState.Active;
+
+        /// <summary>The assigned law firms (<c>sprk_assignedlawfirm1/2</c>) of each core record, by (table, id); a record not listed references none.</summary>
+        public Dictionary<(string Entity, Guid Id), Guid[]> Links { get; } = new();
+
+        /// <summary>True when the record-to-organization read cannot be completed (every record comes back unresolved).</summary>
+        public bool LinksUnreadable { get; set; }
+
+        public List<(string Entity, IReadOnlyCollection<Guid> Ids)> LinkReads { get; } = new();
+
+        internal override Task<ContactRecordState> QueryContactStateAsync(Guid contactId, CancellationToken ct) =>
+            Task.FromResult(ContactState);
+
+        public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
+            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+        {
+            LinkReads.Add((entityType, recordIds));
+            IReadOnlyDictionary<Guid, ReferencedOrganizations> answer = recordIds.Distinct().ToDictionary(
+                id => id,
+                id => LinksUnreadable
+                    ? ReferencedOrganizations.Unresolved
+                    : new ReferencedOrganizations(Links.TryGetValue((entityType, id), out var firms) ? firms : Array.Empty<Guid>(), Unreadable: false));
+            return Task.FromResult(answer);
+        }
+
         /// <summary>The memberships of the test contact only; any other contact belongs to no firm (so a filter that read the wrong contact fails).</summary>
-        internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default) =>
-            Task.FromResult(Unreadable ? ActiveOrgMemberships.Failed
+        internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
+        {
+            MembershipReads++;
+            return Task.FromResult(Unreadable ? ActiveOrgMemberships.Failed
                 : contactId == InvoiceSubmissionServiceTests.ContactId ? new ActiveOrgMemberships(Firms, Firms, false)
                 : new ActiveOrgMemberships(Array.Empty<Guid>(), Array.Empty<Guid>(), false));
+        }
+
+        public int MembershipReads { get; private set; }
     }
 }

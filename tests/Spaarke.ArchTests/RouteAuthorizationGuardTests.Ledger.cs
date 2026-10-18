@@ -459,7 +459,10 @@ public partial class RouteAuthorizationGuardTests
             + "group. Each route runs AddExternalInvoiceSubmissionAuthorizationFilter: a submit needs Read and Create on the core "
             + "record (the principal's post-veto rights) and a firm among the caller contact's conferring memberships; a read needs the "
             + "submission's firm to be the caller's and Read on its core record (uniform 404); the list is the caller's firms on the "
-            + "caller's readable records. The eBilling kill switch runs after the filter."),
+            + "caller's readable records. The eBilling kill switch runs after the filter. Task 051 (D-106) adds GET "
+            + "/api/v1/external/invoice-submissions/firm-records under the same filter (the firm must be one of the caller's; it lists "
+            + "only ids from the caller's own readable sets that the firm is linked to), a systemuser refusal on a submit before any "
+            + "write, and the firm-to-record link a submit requires."),
         new GovernedFile("Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs", Scope.GroupGated,
             "GET /api/v1/external/notifications and POST /api/v1/external/notifications/seen "
             + "(spaarke-SPA-external-access-platform-r3 task 037, FR-08) on the COLLABORATION group. Neither takes an id: the "
@@ -2985,8 +2988,10 @@ public partial class RouteAuthorizationGuardTests
             + "shares Read to that colleague (DirectThreadAccessService.cs:62-100). The caller is always a party; "
             + "no other principal's record is read."),
         Permanent("GET /api/v1/external/me", PermanentBasis.CallerScopedOnly, "167",
-            "The resolved caller principal's own access context (ExternalUserContextEndpoint.cs:45, :74 — "
-            + "caller.ReadableProjects). Takes no id."),
+            "The resolved caller principal's own access context: ExternalUserContextEndpoint.HandleAsync (the mapped handler) returns "
+            + "Handle's answer (ExternalUserContextEndpoint.cs:45, :74 — caller.ReadableProjects) plus the caller's own firms "
+            + "(ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync: the caller contact's memberships only, id and name). "
+            + "Takes no id."),
         Permanent("GET /api/v1/external/me/entitlements", PermanentBasis.CallerScopedOnly, "167",
             "The caller principal's own module entitlements (MeEntitlementsEndpoint.cs:32). Takes no id."),
         Permanent("GET /api/v1/external/notifications", PermanentBasis.CallerScopedOnly, "r3-037",

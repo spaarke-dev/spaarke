@@ -12,6 +12,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -72,6 +73,19 @@ public static class ExternalInvoiceSubmissionEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        // D-106 (task 051): the picker's link read. The guid constraint on {id} keeps "firm-records" from matching the read-one route.
+        externalGroup.MapGet("/invoice-submissions/firm-records", FirmRecordsAsync)
+            .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.FirmRecords)
+            .RequireEbillingEnabled()
+            .RequireRateLimiting("dataverse-query")
+            .WithName("ListExternalInvoiceFirmRecords")
+            .WithSummary("Which of the caller's readable matters, projects and work assignments are linked to one of the caller's firms")
+            .Produces<ExternalInvoiceFirmRecords>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         return externalGroup;
     }
 
@@ -113,6 +127,53 @@ public static class ExternalInvoiceSubmissionEndpoints
     private static IResult GetAsync(HttpContext http) =>
         Scope(http) is { Submission: { } view } ? Results.Ok(view) : NoScope();
 
+    /// <summary>
+    /// The caller's readable matters, projects and work assignments that the chosen firm is linked to (D-106: the picker offers only these). The
+    /// link is the same one the submit route checks (<see cref="ExternalInvoiceSubmissionAuthorizationFilter.IsFirmLinkedAsync"/> reads the same
+    /// <c>GetReferencedOrganizationIdsAsync</c>), batched over the caller's own readable ids, so nothing outside the caller's scope is read or named.
+    /// A record whose links could not be read is left out and <c>Partial</c> says so (fail closed).
+    /// </summary>
+    private static async Task<IResult> FirmRecordsAsync(
+        HttpContext http, ExternalParticipationService participations, CancellationToken ct)
+    {
+        if (Scope(http) is not { FirmId: { } firmId } scope)
+        {
+            return NoScope();
+        }
+
+        var principal = scope.Principal;
+        var partial = false;
+
+        async Task<IReadOnlyList<Guid>> LinkedAsync(InvoiceCoreRecordKind kind, IReadOnlyCollection<Guid> readable)
+        {
+            if (readable.Count == 0)
+            {
+                return Array.Empty<Guid>();
+            }
+
+            var references = await participations.GetReferencedOrganizationIdsAsync(new InvoiceCoreRecord(kind, Guid.Empty).EntityLogicalName, readable, ct);
+            var linked = new List<Guid>();
+            foreach (var id in readable)
+            {
+                if (!references.TryGetValue(id, out var record) || record.Unreadable)
+                {
+                    partial = true;
+                }
+                else if (record.OrganizationIds.Contains(firmId))
+                {
+                    linked.Add(id);
+                }
+            }
+
+            return linked;
+        }
+
+        var matters = await LinkedAsync(InvoiceCoreRecordKind.Matter, principal.AccessibleMatterIds);
+        var projects = await LinkedAsync(InvoiceCoreRecordKind.Project, principal.GetAccessibleProjectIds().Distinct().ToList());
+        var workAssignments = await LinkedAsync(InvoiceCoreRecordKind.WorkAssignment, principal.AccessibleWorkAssignmentIds);
+        return Results.Ok(new ExternalInvoiceFirmRecords(firmId, matters, projects, workAssignments, partial));
+    }
+
     private static async Task<IResult> ListAsync(HttpContext http, InvoiceSubmissionService service, CancellationToken ct)
     {
         if (Scope(http) is not { } scope)
@@ -137,3 +198,10 @@ public static class ExternalInvoiceSubmissionEndpoints
         }
     }
 }
+
+/// <summary>
+/// The body of <c>GET /api/v1/external/invoice-submissions/firm-records</c> (ebilling-r1 task 051, D-106): the ids, among the caller's own readable
+/// records, that the named firm is linked to. <paramref name="Partial"/> is true when some record's links could not be read (those are left out).
+/// </summary>
+public sealed record ExternalInvoiceFirmRecords(
+    Guid FirmId, IReadOnlyList<Guid> Matters, IReadOnlyList<Guid> Projects, IReadOnlyList<Guid> WorkAssignments, bool Partial);
