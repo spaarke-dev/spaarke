@@ -65,7 +65,8 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
             return (await _dv.OperatorClient.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault();
         });
         return new DecisionRecordWriter(
-            client, ownership, coreAncestors, sysadmin, recordTypes, TimeProvider.System, NullLogger<DecisionRecordWriter>.Instance);
+            client, ownership, coreAncestors, sysadmin, recordTypes, TimeProvider.System, NullLogger<DecisionRecordWriter>.Instance,
+            new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
     }
 
     /// <summary>Name prefix of the To Do the no-core test creates as its subject; <see cref="DisposeAsync"/> sweeps by it.</summary>

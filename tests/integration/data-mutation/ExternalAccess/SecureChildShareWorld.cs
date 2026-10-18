@@ -503,7 +503,8 @@ internal sealed class SecureChildShareWorld
         Func<SecureChildShareWorld> current, IDataverseRecordShareService shares,
         Spaarke.Dataverse.DataverseWebApiClient webApi, SecureShareNoAccessGuard? noAccessGuard = null,
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
-        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null)
+        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
+        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null)
     {
         var entities = EntitiesOver(current).Object;
         var configuration = Configuration();
@@ -513,6 +514,7 @@ internal sealed class SecureChildShareWorld
             entities, shares, noAccessGuard ?? NobodyWalled(), configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
         return new SecureChildReconciler(
             entities, resolver, synchronizer, webApi, configuration, NullLogger<SecureChildReconciler>.Instance,
+            gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
             accessCacheInvalidator, threads);
     }
 

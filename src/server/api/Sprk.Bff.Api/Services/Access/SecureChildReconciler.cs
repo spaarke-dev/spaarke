@@ -333,6 +333,7 @@ public sealed class SecureChildReconciler
     private readonly ILogger<SecureChildReconciler> _logger;
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator _accessCacheInvalidator;
     private readonly Sprk.Bff.Api.Services.Communication.IThreadResolver? _threads;
+    private readonly Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing _gateDecisionRecords;
 
     /// <param name="accessCacheInvalidator">Batch-4 integration, 148 × 132. Every child OWNER change this pass makes
     /// (provisioning's child pass, the unsecure's Step 3.5 and completion branch, a re-file, <c>SecureChildReconciliationJob</c>)
@@ -342,6 +343,8 @@ public sealed class SecureChildReconciler
     /// (<see cref="Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync"/>) — here, the one step
     /// every re-file writer runs, so it runs once per filing. Optional so the test compositions keep compiling; the host
     /// registers it unconditionally.</param>
+    /// <param name="gateDecisionRecords">Ontology task 042b (D-169, uac-r2 choice A): after a re-filed COMMUNICATION, its gate Decision
+    /// Records still owned by a user are re-owned to the resolver's team (<see cref="AfterRefileAsync"/>).</param>
     public SecureChildReconciler(
         IGenericEntityService dataverse,
         IRecordOwnershipResolver ownership,
@@ -349,10 +352,12 @@ public sealed class SecureChildReconciler
         DataverseWebApiClient webApi,
         IConfiguration configuration,
         ILogger<SecureChildReconciler> logger,
+        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing gateDecisionRecords,
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
         Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null)
     {
         _threads = threads;
+        _gateDecisionRecords = gateDecisionRecords ?? throw new ArgumentNullException(nameof(gateDecisionRecords));
         _dataverse = dataverse;
         _ownership = ownership;
         _shares = shares;
@@ -765,6 +770,29 @@ public sealed class SecureChildReconciler
     /// <param name="ct">Cancellation (writers pass <see cref="CancellationToken.None"/>: the write has landed).</param>
     /// <returns>The descendants' pass, or <c>null</c> when none ran.</returns>
     public async Task<SecureChildReconcileReport?> AfterRefileAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, CancellationToken ct)
+    {
+        var report = await RefileStepsAsync(childLogicalName, childId, wasIsolated, ct).ConfigureAwait(false);
+
+        // Ontology task 042b (D-169, uac-r2 choice A): after UAC's own steps, on EVERY communication re-file, its gate Decision Records
+        // still owned by a user are re-owned to the resolver's team (a Secure answer is left to this engine). Never thrown.
+        if (string.Equals(childLogicalName.Trim(), CommunicationTable, StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                await _gateDecisionRecords.ReownAfterFilingAsync(childId).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but its gate Decision Records were not re-owned.",
+                    CommunicationTable, childId);
+            }
+        }
+
+        return report;
+    }
+
+    private async Task<SecureChildReconcileReport?> RefileStepsAsync(
         string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
