@@ -42,6 +42,7 @@
     <constraint source="ADR-050">Modals through the SprkModal / FormModal shell.</constraint>
     <constraint source="NFR-12">No new npm package; install with npm install --legacy-peer-deps --no-audit --no-fund.</constraint>
     <constraint source="ADR-002">The page previews and calls the server; it never writes Dataverse policy rows directly through Xrm.WebApi.</constraint>
+    <constraint source="076 round-2 re-check K3 (accept/reject staleness)">An admin must never accept or reject draft content they were not shown. Accept and Reject send the version of the draft the page displayed (its row version or modifiedon, whichever 076's read returns). 076's decide endpoint refuses a mismatch with 409 (modifying 076's existing decide surface: add the expected-version input, required from this UI). On 409 the UI reloads the draft and shows what changed. Required tests: admin A loads, admin B edits, admin A accepts: 409, nothing accepted; an unchanged draft accepts.</constraint>
   </constraints>
 
   <knowledge>
