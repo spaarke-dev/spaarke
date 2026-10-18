@@ -1,6 +1,9 @@
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -23,7 +26,18 @@ public sealed class BillingDecisionRecorderTests
     private static readonly Guid Reviewer = Guid.Parse("0740c000-0000-4000-8000-0000000000e0");
     private static readonly Guid ReviewerContact = Guid.Parse("0740c000-0000-4000-8000-0000000000e1");
 
-    private static (DecisionRecordWriterTests.Harness H, BillingDecisionRecorder Recorder) Build()
+    /// <summary>The identity service answering <see cref="Reviewer"/>'s linked contact as <see cref="ReviewerContact"/> (D-129).</summary>
+    private static Mock<IIdentityNormalizationService> Identity(Guid? contact = null)
+    {
+        var identity = new Mock<IIdentityNormalizationService>();
+        identity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid user, CancellationToken _) => new PersonIdentity(user, ContactId: user == Reviewer ? contact ?? ReviewerContact : null));
+        return identity;
+    }
+
+    private static (DecisionRecordWriterTests.Harness H, BillingDecisionRecorder Recorder) Build() => Build(Identity());
+
+    private static (DecisionRecordWriterTests.Harness H, BillingDecisionRecorder Recorder) Build(Mock<IIdentityNormalizationService> identity)
     {
         var h = new DecisionRecordWriterTests.Harness();
         h.Rows[("sprk_invoice", Invoice)] = new Entity("sprk_invoice", Invoice) { ["sprk_matter"] = new EntityReference("sprk_matter", Matter) };
@@ -32,14 +46,14 @@ public sealed class BillingDecisionRecorderTests
             ["sprk_project"] = new EntityReference("sprk_project", Project),
             ["sprk_invoice"] = new EntityReference("sprk_invoice", Invoice),
         };
-        return (h, new BillingDecisionRecorder(h.Writer));
+        return (h, new BillingDecisionRecorder(h.Writer, identity.Object, NullLogger<BillingDecisionRecorder>.Instance));
     }
 
     private static readonly IReadOnlyDictionary<string, object?> Facts = new Dictionary<string, object?> { ["billedTotal"] = 1200m };
 
     private static BillingDecision Decision(string code, Guid subject, BillingDecider? decider = null, string? reason = null, Guid? id = null,
         IReadOnlyDictionary<string, object?>? values = null) =>
-        new(id ?? Guid.NewGuid(), code, subject, decider ?? BillingDecider.Human(Reviewer, "Billing reviewer", ReviewerContact), Facts, "Done", reason, values);
+        new(id ?? Guid.NewGuid(), code, subject, decider ?? BillingDecider.Human(Reviewer, "Billing reviewer"), Facts, "Done", reason, values);
 
     [Theory]
     [InlineData("approve-invoice", null)]
@@ -91,15 +105,68 @@ public sealed class BillingDecisionRecorderTests
     }
 
     [Fact]
-    public async Task AHumanDecision_RecordsTheConfirmingUser_AndTheirContact()
+    public async Task AHumanDecision_RecordsTheConfirmingUser_AndTheContactTheIdentityLookupGives()
     {
-        var (h, recorder) = Build();
+        // ontology-r1 K3: the caller names only the confirming user; the contact (sprk_assignedtointernal, D-129) comes from the identity
+        // lookup of THAT user, never from the caller.
+        var lookedUp = Guid.Parse("0740c000-0000-4000-8000-0000000000e2");
+        var identity = Identity(contact: lookedUp);
+        var (h, recorder) = Build(identity);
 
         await recorder.RecordAsync(Decision("approve-invoice", Invoice));
 
         h.Row.GetAttributeValue<EntityReference>("sprk_confirmedby").Id.Should().Be(Reviewer);
-        h.Row.GetAttributeValue<EntityReference>("sprk_assignedtointernal").Id.Should().Be(ReviewerContact);
+        h.Row.GetAttributeValue<EntityReference>("sprk_assignedtointernal").Id.Should().Be(lookedUp, "the lookup's answer for the confirmer");
         h.Row.GetAttributeValue<string>("sprk_factsnapshot").Should().Contain("Billing reviewer");
+        identity.Verify(i => i.ResolveAsync(Reviewer, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AHumanWithNoLinkedContact_IsRecorded_WithAssignedToInternalEmpty()
+    {
+        var identity = new Mock<IIdentityNormalizationService>();
+        identity.Setup(i => i.ResolveAsync(Reviewer, It.IsAny<CancellationToken>())).ReturnsAsync(new PersonIdentity(Reviewer));
+        var (h, recorder) = Build(identity);
+
+        await recorder.RecordAsync(Decision("approve-invoice", Invoice));
+
+        h.Row.GetAttributeValue<EntityReference>("sprk_confirmedby").Id.Should().Be(Reviewer);
+        h.Row.Contains("sprk_assignedtointernal").Should().BeFalse("the commit route's rule: no contact is not a failure");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ADecidersContactThatCannotBeRead_IsRefused_AndNothingIsWritten(bool serviceThrows)
+    {
+        var identity = new Mock<IIdentityNormalizationService>();
+        if (serviceThrows)
+        {
+            identity.Setup(i => i.ResolveAsync(Reviewer, It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("dataverse slow"));
+        }
+        else
+        {
+            identity.Setup(i => i.ResolveAsync(Reviewer, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PersonIdentity(Reviewer) { Faults = IdentityReadFaults.ContactBinding });
+        }
+
+        var (h, recorder) = Build(identity);
+
+        (await recorder.Invoking(r => r.RecordAsync(Decision("approve-invoice", Invoice))).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.BillingRecordLookupFailed);
+        h.Entities.Invocations.Should().BeEmpty("refused before the writer's first read");
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ASystemDecision_DoesNotLookUpAContact()
+    {
+        var identity = Identity();
+        var (_, recorder) = Build(identity);
+
+        await recorder.RecordAsync(Decision("reject-invoice", Invoice, BillingDecider.Automated("submission pipeline"), "blocking_failure"));
+
+        identity.Verify(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
@@ -108,7 +175,8 @@ public sealed class BillingDecisionRecorderTests
     [InlineData("return-to-firm")]
     public async Task AnOverrideRejectOrReturnWithoutAReason_IsRefusedBeforeAnyWrite_ByPreflightAndByRecord(string code)
     {
-        var (h, recorder) = Build();
+        var identity = Identity();
+        var (h, recorder) = Build(identity);
         var decision = Decision(code, Invoice, reason: null);
 
         recorder.Invoking(r => r.Preflight(decision)).Should().Throw<DecisionRecordRefusedException>()
@@ -116,6 +184,7 @@ public sealed class BillingDecisionRecorderTests
         (await recorder.Invoking(r => r.RecordAsync(decision)).Should().ThrowAsync<DecisionRecordRefusedException>())
             .Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
         h.Entities.Invocations.Should().BeEmpty();
+        identity.Invocations.Should().BeEmpty("an invalid decision is refused before the identity read");
         h.Created.Should().BeEmpty();
     }
 
@@ -145,6 +214,5 @@ public sealed class BillingDecisionRecorderTests
 
         system.Role.Should().Be("automated: x");
         system.SystemUserId.Should().BeNull();
-        system.ContactId.Should().BeNull();
     }
 }

@@ -341,7 +341,8 @@ public static class DecisionRecordRefusalReason
 
     /// <summary>ebilling-r1 task 074 (D-100): a read the billing entry needs before it writes faulted, so nothing was written: whether the
     /// decision's Decision Record already exists (the lookup, or the writer identity it is narrowed by; guessing "none" would risk a second
-    /// record), or the policy version it names. A retry may succeed.</summary>
+    /// record), the policy version it names, or (in the Finance recorder, before it calls this entry) the deciding user's linked contact. A
+    /// retry may succeed.</summary>
     public const string BillingRecordLookupFailed = "decision_billing_lookup_failed";
 }
 

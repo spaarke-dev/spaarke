@@ -1,3 +1,5 @@
+using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
@@ -6,11 +8,10 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// <summary>Who decided a billing decision: a person (who confirmed it) or the system (an automatic decision, D-101).</summary>
 public sealed record BillingDecider
 {
-    private BillingDecider(Guid? systemUserId, string role, Guid? contactId)
+    private BillingDecider(Guid? systemUserId, string role)
     {
         SystemUserId = systemUserId;
         Role = role;
-        ContactId = contactId;
     }
 
     /// <summary>The confirming user (<c>systemuserid</c>); null for a system decision.</summary>
@@ -19,14 +20,12 @@ public sealed record BillingDecider
     /// <summary>The decider's role, recorded in the fact snapshot; <c>automated: &lt;what&gt;</c> for a system decision.</summary>
     public string Role { get; }
 
-    /// <summary>The person's linked internal contact (D-129), when they have one.</summary>
-    public Guid? ContactId { get; }
-
-    /// <summary>A person confirmed the decision.</summary>
-    public static BillingDecider Human(Guid systemUserId, string role, Guid? contactId = null) => new(systemUserId, role, contactId);
+    /// <summary>A person confirmed the decision. Their linked internal contact (D-129) is not taken from the caller: the recorder looks it up
+    /// from <paramref name="systemUserId"/> (ontology-r1 K3), as the commit route does, so a caller cannot name someone else as the decider.</summary>
+    public static BillingDecider Human(Guid systemUserId, string role) => new(systemUserId, role);
 
     /// <summary>The system decided with no person (049's automatic rejection): no confirmer, decider <c>automated: {what}</c>.</summary>
-    public static BillingDecider Automated(string what) => new(null, $"automated: {what}", null);
+    public static BillingDecider Automated(string what) => new(null, $"automated: {what}");
 }
 
 /// <summary>
@@ -76,7 +75,8 @@ public sealed record BillingDecisionRecordResult(Guid RecordId, bool AlreadyReco
 /// <remarks>
 /// <para><b>What it does.</b> It maps a <see cref="BillingDecision"/> to the writer's additive billing entry
 /// (<see cref="DecisionRecordWriter.WriteBillingDecisionAsync"/>, D-100): the subject table from the code (line codes file under the line,
-/// every other code under the invoice), the confirmer and decider role from <see cref="BillingDecider"/>. Every rule (billing codes only, a
+/// every other code under the invoice), the confirmer and decider role from <see cref="BillingDecider"/>, and the deciding person's linked
+/// internal contact (D-129, <c>sprk_assignedtointernal</c>) looked up here from the confirmer, never passed by a caller. Every rule (billing codes only, a
 /// required reason, a null confirmer only for an <c>automated:</c> decider, exactly once per decision id, the 026 filing checks) is the
 /// writer's; the recorder copies none of them. It does not close or link findings: each caller does that with the returned record id.</para>
 /// <para><b>Refuse before your own writes.</b> A caller that changes the invoice before recording calls <see cref="Preflight"/> first: it
@@ -90,18 +90,78 @@ public sealed record BillingDecisionRecordResult(Guid RecordId, bool AlreadyReco
 public sealed class BillingDecisionRecorder
 {
     private readonly DecisionRecordWriter _writer;
+    private readonly IIdentityNormalizationService _identity;
+    private readonly ILogger<BillingDecisionRecorder> _logger;
 
-    public BillingDecisionRecorder(DecisionRecordWriter writer) =>
+    /// <param name="writer">The Decision Record writer's billing entry.</param>
+    /// <param name="identity">The deciding user's linked internal contact (the user's <c>sprk_primarycontact</c>, else the contact bound to
+    /// their Entra oid): the identity service the commit route reads it from (D-129).</param>
+    /// <param name="logger">A decider with no linked contact, or a contact that could not be read.</param>
+    public BillingDecisionRecorder(DecisionRecordWriter writer, IIdentityNormalizationService identity, ILogger<BillingDecisionRecorder> logger)
+    {
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
+        _identity = identity ?? throw new ArgumentNullException(nameof(identity));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
 
     /// <summary>Writes the decision's one Decision Record, or finds the one already written for its decision id.</summary>
-    /// <exception cref="DecisionRecordRefusedException">The writer refused (nothing written; after a create timeout the row may exist).</exception>
+    /// <exception cref="DecisionRecordRefusedException">The writer refused (nothing written; after a create timeout the row may exist), or
+    /// the deciding user's linked contact could not be read (<see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>; nothing
+    /// written: the append-only record must not lose its decider to a fault).</exception>
     /// <exception cref="OperationCanceledException">The caller cancelled.</exception>
     public async Task<BillingDecisionRecordResult> RecordAsync(BillingDecision decision, CancellationToken ct = default)
     {
-        var result = await _writer.WriteBillingDecisionAsync(ToRequest(decision), ct).ConfigureAwait(false);
+        var request = ToRequest(decision);
+        _writer.PreflightBillingDecision(request); // an invalid decision is refused before the identity read
+        var contact = decision.Decider.SystemUserId is { } user && user != Guid.Empty
+            ? await DeciderContactAsync(user, ct).ConfigureAwait(false)
+            : null;
+        var result = await _writer.WriteBillingDecisionAsync(request with { DeciderContactId = contact }, ct).ConfigureAwait(false);
         return new BillingDecisionRecordResult(result.RecordId, result.AlreadyRecorded, result.RecordClass);
     }
+
+    /// <summary>
+    /// ontology-r1 K3 (D-129): the deciding user's linked internal contact, by the commit route's rule (its decider lookup in
+    /// <see cref="DecisionCommitService"/>): the identity service's contact; null, with a warning, when the user genuinely has none (the
+    /// record's Assigned To Internal stays empty and the decision is still recorded); refused when the read FAULTED, because the answer is
+    /// unknown.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the contact could
+    /// not be read. Nothing is written; a retry may succeed.</exception>
+    private async Task<Guid?> DeciderContactAsync(Guid systemUserId, CancellationToken ct)
+    {
+        PersonIdentity identity;
+        try
+        {
+            identity = await _identity.ResolveAsync(systemUserId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Billing decision: the deciding user's linked contact could not be read ({ExceptionType}); refusing before any write.",
+                ex.GetType().Name);
+            throw DeciderUnreadable(ex);
+        }
+
+        if (identity.ContactId is { } contactId && contactId != Guid.Empty)
+        {
+            return contactId;
+        }
+
+        if (identity.ContactUnreadable)
+        {
+            _logger.LogWarning("Billing decision: the deciding user's linked contact could not be read (identity read faults: {Faults}); refusing before any write.",
+                identity.Faults);
+            throw DeciderUnreadable(innerException: null);
+        }
+
+        _logger.LogWarning("Billing decision: the deciding user has no linked internal contact; the Decision Record's Assigned To Internal is left empty.");
+        return null;
+    }
+
+    private static DecisionRecordRefusedException DeciderUnreadable(Exception? innerException) => new(
+        DecisionRecordRefusalReason.BillingRecordLookupFailed,
+        "The deciding user's linked contact could not be read, so the decision was not recorded; nothing was written.",
+        innerException: innerException);
 
     /// <summary>Every refusal <see cref="RecordAsync"/> can give without I/O. Reads and writes nothing.</summary>
     /// <exception cref="DecisionRecordRefusedException">The decision as given would be refused.</exception>
@@ -127,7 +187,7 @@ public sealed class BillingDecisionRecorder
             decision.PolicyVersionId,
             decision.ResolvedSignalIds,
             decision.Written,
-            decision.Decider.ContactId,
+            DeciderContactId: null, // RecordAsync looks it up from the confirmer (K3); never the caller's
             decision.PrivilegeFlagged,
             decision.DecidedOn);
     }
