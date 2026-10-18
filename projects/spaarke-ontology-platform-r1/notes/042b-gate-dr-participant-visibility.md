@@ -175,3 +175,33 @@ Measured in round 1 (fresh worktrees, `dotnet publish -c Release`, zipped with P
 042b vs its base: +32,224 bytes raw, +12,677 zipped, +27,648 on the DLL, no file added. (Head vs master is -226 KB only because the
 branch is cut from the docs branch, not master.) Rounds 2 and 3 add C# methods to existing files and no package or file, so the delta stays
 in the tens of kilobytes; not re-measured (the brief: re-measure only if the code delta is no longer trivial).
+
+## Round 4 (re-check of round 3: four K items, 2026-10-18)
+
+1. **Assign census** (`RecordOwnerAssignmentCensusTests.cs`). The call regex is now
+   `\.\s*AssignAsync\b|\bnew\s+(?:global::)?(?:\w+\s*\.\s*)*AssignRequest\b`: a call, a method group, `this.`, `?.`, a line break after
+   the dot or before `(`, and a `global::`- or namespace-qualified `new`. A regex over call shapes cannot see an alias (`new AssignAlias {…}`)
+   or a target-typed `new()`, so the `AssignRequest` type token is censused too, by member, wherever it appears in code (the alias's
+   declaration, the variable's type). Only `OntologyWriterDataverseClient.AssignAsync` names it today. The negative control seeds every
+   shape (9 must-fire on the call regex; the alias and `new()` must-fire on the token) and 5 must-not-fire members.
+   Known limit: `new OrganizationRequest("Assign")` (the untyped request) is caught by neither; no such code exists.
+2. **Secure end to end** (`SecureChildOwnershipAiToolTests.ChildRecordRoutes.cs`, `CommunicationFiling_IntoASecureMatter_…`). The gate
+   helper is now built over THE SAME share world, share table and real `RecordOwnershipResolver` as the engine
+   (`GateHelperOverTheShareWorld`). Its after-re-file step finds the record (now Secure-team-owned, carrying the mirror's share for the
+   matter's sharee), gets the Secure answer and logs "left as they are"; no Assign, no warning, the mirror's share stays.
+3. **IsFiled with the real resolver** (`GateRecordSharing_OverTheRealResolver_…`): contact-only communication shared at write and kept
+   user-owned on a filing pass (resolver Unchanged); a matter-regarding one gets no participant share and is re-owned at write to the
+   ordinary matter's team.
+4. **Logging.** `ReadOwnerOrNullAsync` returns its fault instead of logging it; the caller's one `ShareFailed`/`ReownFailed` warning
+   carries it (both the Assign's and the read's when both fail, as an `AggregateException`). The leftover log reports
+   `{Count} of {Leftover}` with the count actually revoked. Not changed (outside the brief): `ReownAsync`'s closing "re-owned … {Count}
+   share(s) revoked" still reports the attempted count.
+
+### Round 4 seeding proofs
+
+| Seed | Break | Named test(s) | Seeded | Restored |
+|---|---|---|---|---|
+| 1 | the round-3 call regex | `AssignCallDetector_NegativeControl` | 1 failed | pass |
+| 2 | the leftover pass ignores the Secure answer | `CommunicationFiling_IntoASecureMatter_…` (the round-3 version, over an empty world, did not see it) | 1 failed | pass |
+| 3 | `IsFiled` counts any lookup (a contact too) as filed | `GateRecordSharing_OverTheRealResolver_…` | 1 failed | pass |
+| 4 | the round-3 helper | `AnOwnerThatCannotBeRead_IsLoggedOnce_…` (both), `Filing_ALeftoverRevokeThatFailsAgain_…` | 3 failed | pass |
