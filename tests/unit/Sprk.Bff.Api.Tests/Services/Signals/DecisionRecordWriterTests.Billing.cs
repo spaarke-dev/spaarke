@@ -182,11 +182,15 @@ public sealed partial class DecisionRecordWriterTests
     [Fact]
     public async Task Billing_C3_ARowWithTheSameKeyAndCodeButAnotherCreator_IsNotAlreadyRecorded_AndTheRecordIsWritten()
     {
+        // ontology-r1 F3-1: the forged row carries everything the writer's own record would (the key, the billing code in sprk_actioncode),
+        // so ONLY the createdby condition keeps it from answering as this decision's record. Without sprk_actioncode the code filter
+        // skipped it and the test proved nothing about createdby.
         var h = BillingHarness();
         var forged = new Entity("sprk_decisionrecord", Guid.NewGuid())
         {
             ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", InvoiceId),
             ["sprk_steps"] = $"{{\"reviewId\":\"{BillingDecisionKey.IdOf("sprk_invoice", InvoiceId, BillingDecision):D}\",\"steps\":[{{\"code\":\"approve-invoice\"}}]}}",
+            ["sprk_actioncode"] = "approve-invoice",
             ["createdby"] = new EntityReference("systemuser", ConsoleUser),
             ["sprk_confirmedby"] = new EntityReference("systemuser", Framed),
         };
