@@ -448,12 +448,12 @@ Base `d249e9a50` (branch work/ebilling-r1). Commits:
 
 | Commit | Item |
 |---|---|
-| `be1bc56fa` | F3-1: the other-creator test's forged row carries `sprk_actioncode` |
-| `76aa6a943` | F4-1: resolved Signals' subjects reach the owner question; an unknown policy version is refused |
-| `f3bfc7614` | K2: AlreadyRecorded only for the same content (content hash in `sprk_steps`) |
-| `a49c4cef2` | K3: the recorder looks up the deciding user's contact itself |
-| `6884a42cd` | K4: the existence lookup filters `sprk_actioncode In <billing codes>` |
-| `e5e0dd28d` | F4-1 follow-up: the Signal and policy-version reads go through `RetrieveMultipleAsync` (the D-34 guard in `DecisionRecordContextImmutabilityTests`) |
+| `1b6878da2` | F3-1: the other-creator test's forged row carries `sprk_actioncode` |
+| `5f80278c1` | F4-1: resolved Signals' subjects reach the owner question; an unknown policy version is refused |
+| `2964ca548` | K2: AlreadyRecorded only for the same content (content hash in `sprk_steps`) |
+| `7b7b9b294` | K3: the recorder looks up the deciding user's contact itself |
+| `9e14285b7` | K4: the existence lookup filters `sprk_actioncode In <billing codes>` |
+| `c80877139` | F4-1 follow-up: the Signal and policy-version reads go through `RetrieveMultipleAsync` (the D-34 guard in `DecisionRecordContextImmutabilityTests`) |
 | this commit | notes 8.7, corrected hashes, POML notes |
 
 **F4-1 (D-123, secure-if-any).** When `ResolvedSignalIds` is non-empty the billing entry reads the Signals app-only through the shared
@@ -465,7 +465,7 @@ it. A Signal with no pair id adds none (that rule's own behaviour). A missing Si
 no row is `ReviewInvalid`; a fault on that read is `BillingRecordLookupFailed`. All of these happen after the AlreadyRecorded lookup (a true
 repeat still answers) and before the core derivation and the create. The first version used by-id `RetrieveAsync`; the ArchTest
 `DecisionRecordWriterOnlyCreatesAndReads` holds the writer to `RetrieveMultipleAsync` on that reader, so both reads became queries
-(`e5e0dd28d`). The ArchTest itself was not edited.
+(`c80877139`). The ArchTest itself was not edited.
 
 **F3-1.** See 8.3 M2 (corrected).
 
@@ -513,14 +513,14 @@ ontology-owned, so it stays byte-identical. The billing partial re-answers `Retr
 | Item | Mutation | Before (fails) | After |
 |---|---|---|---|
 | F3-1 | `createdby` condition removed | old test: 1 fail (the other-creator test PASSED, proving nothing); new test: 3 fail | 76 / 76 |
-| F4-1 | the writer before F4-1 (`be1bc56fa`) under the F4-1 tests | 5 fail | 73 / 73 |
+| F4-1 | the writer before F4-1 (`1b6878da2`) under the F4-1 tests | 5 fail | 73 / 73 |
 | F4-1 (query version) | both reads removed | 5 fail (must-fire, missing Signal, undetermined, Signal fault, policy version) | 83 / 83 |
 | K2 | hash comparison disabled | 2 fail (800 then 700; hash-less record) | 76 / 76 |
 | K2 | hash not stored | 6 fail (true repeat, C3 repeat, 4 recorder retries) | 76 / 76 |
 | K3 | contact lookup skipped | 3 fail (lookup contact, fault, unreadable) | 80 / 80 |
 | K4 | `In` condition removed | 2 fail (ten Signals rows hide the billing record; the condition's values) | 82 / 82 |
 
-**Verification (final code, `e5e0dd28d`).**
+**Verification (final code, `c80877139`).**
 
 | Check | Result |
 |---|---|
@@ -534,7 +534,7 @@ No package, csproj, schema or live change. Publish size was not re-measured: thi
 adds no file or package.
 
 **Quality gates.** Self code-review of the fix diff and its direct callers (`CreateAsync` / `OwnershipContextOf` read `SignalSubjects`;
-`Content` writes `ReviewHash`) found one F-class defect, fixed in `e5e0dd28d`: the D-34 ArchTest broke on the by-id reads. Known limits:
+`Content` writes `ReviewHash`) found one F-class defect, fixed in `c80877139`: the D-34 ArchTest broke on the by-id reads. Known limits:
 - K4: an unserialisable object in `Values` now throws from `BillingDecisionHash` before the lookup, rather than from `Content` later. It is
   the same non-refusal exception for internal callers only (8.6).
 - K4: `ResolvedSignalIds` has no count cap on the billing path. The query is bounded by `TopCount = ids.Count`. The commit route caps also-resolve at 25.
