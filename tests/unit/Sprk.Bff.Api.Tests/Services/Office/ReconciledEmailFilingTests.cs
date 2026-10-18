@@ -20,6 +20,7 @@ using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Sprk.Bff.Api.Tests.Domain.Signals;
+using Sprk.Bff.Api.Tests.Services.Signals;
 using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
@@ -111,7 +112,8 @@ public class ReconciledEmailFilingTests
                         ? new CoreAncestorRestamper(Stamps.Service, Stamps.Resolver, restamperLogger)
                         : Stamps.Restamper,
                 NullLogger<ReconciledEmailFiling>.Instance,
-                Trigger?.Object);
+                Trigger?.Object,
+                GateRecords);
 
             var outcome = await capture.CaptureWithOutcomeAsync(request, "user-oid", CancellationToken.None);
             if (outcome is not null && Rewrite is { } rewrite)
@@ -136,6 +138,9 @@ public class ReconciledEmailFilingTests
 
         /// <summary>Ontology D-48 (#1659): the association-confirmed Signal trigger the filing queues; null = none registered.</summary>
         public Mock<SignalEvaluationTrigger>? Trigger { get; set; }
+
+        /// <summary>Ontology task 042b (D-169): the gate Decision Record re-own after the filing; null = none registered.</summary>
+        public GateDecisionRecordSharing? GateRecords { get; set; }
 
         /// <summary>Ontology task 144: logs the real restamper writes to; null = none. A throwing logger breaks the
         /// restamper's never-throws contract, the one way a fault can escape it.</summary>
@@ -694,5 +699,50 @@ public class ReconciledEmailFilingTests
         capture.Should().NotBeNull("thread resolution is best-effort (NFR-02/NFR-04)");
         world.Grants.Verify(g => g.GrantMessageAccessAsync(It.IsAny<Guid>(), It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    // ── Ontology task 042b (D-169): the filed communication's gate Decision Record takes the team-owned path ─────
+
+    private static readonly Guid GateRecord = Guid.Parse("d0d0d0d0-0000-4000-8000-0000000000d1");
+    private static readonly Guid GateOwner = Guid.Parse("a0000000-0000-4000-8000-0000000000d2");
+    private static readonly Guid GateSharee = Guid.Parse("a0000000-0000-4000-8000-0000000000d3");
+    private static readonly Guid MatterTeam = Guid.Parse("e0000000-0000-4000-8000-0000000000d4");
+
+    /// <summary>The reconciled communication's user-owned gate record, shared with its participant, and the resolver's ordinary answer.</summary>
+    private static GateSharingWorld GateRecordOfTheCommunication()
+    {
+        var gate = new GateSharingWorld()
+            .WithGateRecord(GateRecord, CanonicalId, GateOwner)
+            .Share(GateSharingWorld.Record, GateRecord, GateSharee);
+        gate.OwnerAnswers(RecordOwnerResolution.Owned(MatterTeam));
+        return gate;
+    }
+
+    [Fact(DisplayName = "Ontology task 042b (D-169): filing the reconciled communication under an ordinary record re-owns its gate Decision Record to the resolver's team, reads it back, then revokes its participant shares")]
+    public async Task FileIfUnfiled_ReownsTheGateDecisionRecord_ThenRevokesItsShares()
+    {
+        var gate = GateRecordOfTheCommunication();
+        var world = new World(reconciled: true, Unfiled()) { GateRecords = gate.Sharing };
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed);
+        gate.Rows[(GateSharingWorld.Record, GateRecord)].GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(MatterTeam);
+        gate.RecordSharees(GateRecord).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Ontology task 042b (D-169): a gate Decision Record re-own that fails keeps the user owner and the shares, and the filing still succeeds")]
+    public async Task FileIfUnfiled_AFailedGateRecordReown_KeepsItsSharesAndOwner_AndTheFilingStands()
+    {
+        var gate = GateRecordOfTheCommunication();
+        gate.AssignLands = false;
+        gate.AssignFault = new InvalidOperationException("Test: Dataverse refused the Assign.");
+        var world = new World(reconciled: true, Unfiled()) { GateRecords = gate.Sharing };
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed);
+        gate.Rows[(GateSharingWorld.Record, GateRecord)].GetAttributeValue<EntityReference>("owninguser").Id.Should().Be(GateOwner);
+        gate.RecordSharees(GateRecord).Should().Equal(GateSharee);
     }
 }
