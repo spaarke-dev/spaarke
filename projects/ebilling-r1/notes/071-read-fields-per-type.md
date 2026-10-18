@@ -1,7 +1,9 @@
 # Task 071 - Billing rule handlers and the read-field contract (FR-24)
 
-> Rigor FULL. Base `4c1203b42` (070 complete, ontology-r1 re-check clean) on `work/ebilling-r1` `9d24ae7f0`. Executed 2026-10-17.
-> Commits: `eccb1fe6f` handlers and dispatch, `1dbfbbf76` Duplicate remark, `2f13d6697` tests and ArchTest guard.
+> Rigor FULL. Base `4c1203b42` (070 complete, ontology-r1 re-check clean) on `work/ebilling-r1` `9d24ae7f0`; the branch was later rebased, and the first 071 commit sits on `d4e555e38`. Executed 2026-10-17.
+> Commits (range `d4e555e38..d22c8e26d`): `6b99e980f` handlers and dispatch, `ef8d87819` Duplicate remark, `468955dfa` tests and ArchTest guard,
+> `d22c8e26d` these notes. (Before the rebase these were `eccb1fe6f`, `1dbfbbf76`, `2f13d6697`; those hashes are no longer on the branch.)
+> **Review fix round 1** (adversarial review of 071; owner decision D-105): code and tests `1275f38ae..7764c2584` on top of `80daf089f`, then this notes commit. Listed in "Review fix round 1" below.
 
 ## Result
 
@@ -24,6 +26,12 @@ ArchTests ADR-010 test is green).
   the order the handler checks. Every handler test runs the rule twice and asserts equality.
 - **A handler judges every subject of the invoice.** Rule selection and "which rule version is in force on this line's date" are
   072's: keep the findings whose subject the version covers.
+- **Credit lines are not charges (D-105).** A credit line is a line with negative hours or a negative amount, defined once in
+  `BillingMath.IsCreditLine`. ApprovedRate, ExpenseRule, InvoiceAge and CoreRecordWindow skip it entirely; NonBillableActivity
+  still raises its finding on it (the reviewer sees the credit) but with **no** suggested adjustment (never a Disallow of a
+  negative amount). So 072/073 can see no finding at all for a credit line from those four types, and a NonBillableActivity
+  finding with `SuggestedAdjustment == null` is a credit. The other types (TimeIncrement, DailyHoursCap, Duplicate,
+  RequiredData, AiObservation, ApprovedTimekeeper) are not in D-105 and still judge credit lines (see the owner question below).
 - **`BillingFinding`**: rule type, policy id/code, policy version id, clause reference and location, `Subject` (Invoice, or Line
   with the line index), a stable `ReasonCode` (no prose; firm-visible text is composed downstream), `ValuesRead`,
   `SuggestedAdjustment` (ApprovedRate: Reduce; NonBillableActivity: Disallow; else null), `FactValues` (the `{{token}}` values;
@@ -58,8 +66,8 @@ deliberately conservative: a value shown to the firm that is low-confidence stop
 
 | # | Type | Subject | ReadFields (extracted) | Reference values (not read) | Reject-eligible (FR-26, 073's call) |
 |---|---|---|---|---|---|
-| 1 | ApprovedTimekeeper | Line | `TimekeeperAsBilled`, `Date` | `timekeeper.unmatchedReason` | Yes in principle, but never in practice: 046 caps an unmatched timekeeper at 0.80 (D-89), so the finding always reads a low-confidence value |
-| 2 | ApprovedRate | Line | `Rate`, `Hours` (only when the reduction is computed), `Date`, `TimekeeperAsBilled` | `approvedRate`, `approvedRate.limit`, `approvedRate.basis`, `.scope`, rate-card and rate ids | Yes |
+| 1 | ApprovedTimekeeper | Line | `TimekeeperAsBilled`, `Date` | `timekeeper.unmatchedReason` | Not in practice (D-89 "holds, never auto-rejects"). Today that rests on 046's 0.80 cap staying below the 0.90 threshold, which the handler does not enforce; **task 073 enforces D-89** (refuses a Reject consequence for ApprovedTimekeeper at publish, hold-only in the rejection rule, validates `ReferenceMissingCap < ReliabilityThreshold` in settings) |
+| 2 | ApprovedRate | Line | `Rate`, `Hours` (only when the reduction is computed, i.e. Hours > 0; fixed in fix round 1, the handler used to always add it), `Date`, `TimekeeperAsBilled` | `approvedRate`, `approvedRate.limit`, `approvedRate.basis`, `.scope`, rate-card and rate ids | Yes |
 | 3 | TimeIncrement | Line | `Hours`, `Date`, `TimekeeperAsBilled` | - | No (flag) |
 | 4 | DailyHoursCap | Line (first line of the timekeeper-day) | `Hours`, `Date`, `TimekeeperAsBilled` of **every** line in the group | `dailyHours` | No (flag) |
 | 5 | NonBillableActivity | Line | `ActivityCode`, `TaskCode` (AI-assigned, with coding confidence), `Amount`, `Date`, `TimekeeperAsBilled` | - | No (flag + suggested disallow) |
@@ -79,21 +87,25 @@ Reason codes are in `BillingReasonCodes`. "Consequence" is the policy version's,
    `name_incomplete`, `not_on_roster`, `not_approved_on_line_date`, `ambiguous`, `ai_below_threshold`, `ai_not_clearly_ahead`,
    `ai_unavailable`). The confidence is reported unchanged (046's 0.80 cap), so the rule only holds. Nothing maps an unmatched
    name to another timekeeper. Expense lines are skipped.
-2. **ApprovedRate.** Limit = `ToCent(approved x (1 + tolerancePercent/100))`; fires when billed rate is **above** the limit
-   (equal holds). Suggested adjustment: Reduce by `ToCent((billed - approved) x hours)`; null amount when hours are missing or
-   not positive. When 046 found no rate in force / several that disagree / could not look one up, it fires with a distinct reason
+2. **ApprovedRate.** Limit = `ToCent(approved x (1 + tolerancePercent/100))`; the billed rate is first rounded to the cent
+   (`ToCent`), so an extracted 575.004 against 575.00 holds; fires when that rate is **above** the limit (equal holds). A credit
+   line (D-105) is skipped. Suggested adjustment: Reduce by `ToCent((billedCent - approved) x hours)`; null amount when hours are
+   missing or zero (and then `Hours` is not a read field). When 046 found no rate in force / several that disagree / could not look one up, it fires with a distinct reason
    (`no_rate_in_force`, `ambiguous`, `unresolved`, `timekeeper_unmatched`, `line_date_missing`) and suggests nothing. A fee line
    billing no hourly rate is not judged.
 3. **TimeIncrement.** Fee line with hours where `hours % incrementHours != 0` (exact decimal; credits judged too). Flag only.
 4. **DailyHoursCap.** Fee lines with a date and hours, grouped by (timekeeper, date) within the invoice; the timekeeper is the
    roster match, else the normalised billed name. A group total **above** the cap fires once, on the group's first line. Flag only.
 5. **NonBillableActivity.** The AI-assigned activity or task code is in `codes` (case-insensitive), whatever its confidence;
-   low confidence is carried and flagged (NFR-05). Suggested adjustment: Disallow, amount = the rounded line amount (null if none).
+   low confidence is carried and flagged (NFR-05). Suggested adjustment: Disallow, amount = the rounded line amount (null if none);
+   **none for a credit line** (D-105): the finding still fires so the reviewer sees the credit, with `SuggestedAdjustment == null`.
 6. **ExpenseRule.** Expense lines only. `code_not_reimbursable` when the AI expense code is in `nonReimbursableCodes`;
    `amount_over_cap` when the line amount is above `maxAmountPerItem` (item = the expense line; equal holds). A line breaking both gets both, code first.
-7. **InvoiceAge.** Fires when `invoiceDate - lineDate` is more than `maxAgeDays` days (exactly N holds). Nothing is judged without an invoice date.
+   A credit line (a negative amount, e.g. "E109 -50.00"; D-105) is skipped on both checks.
+7. **InvoiceAge.** Fires when `invoiceDate - lineDate` is more than `maxAgeDays` days (exactly N holds). Nothing is judged without an invoice date. A credit line is skipped (D-105): a reversal legitimately carries the old date.
 8. **CoreRecordWindow.** Per line: `before_open` (date < open - graceDays), else `after_close` (date > close + graceDays), else
-   `core_record_closed` when the record is closed and has no close date. Nothing is judged with no core record.
+   `core_record_closed` when the record is closed and has no close date. Nothing is judged with no core record. A credit line is
+   skipped on all three reasons (D-105).
 9. **Duplicate** (FR-36, D-88). Invoice level (when `firmInvoiceNumber` is a match field): the number (whitespace/case ignored)
    equals an **Active** earlier attempt's; Rejected and ReturnedToFirm attempts and the submission itself are ignored; cites the
    lowest-sequence original. Line level (the other match fields): a line whose configured fields all equal an earlier line in an
@@ -125,7 +137,17 @@ None blocked execution (no escalation trigger fired). Each is one line to change
    extend it; a foreign-currency invoice is unsupported in R1 (D-20) however the rule is configured.
 7. **AI codes drive NonBillable and ExpenseRule** (validated, with coding confidence); **firm-billed codes drive RequiredData** (what the invoice carries).
 8. **No `BillingScope` parameter**: handlers judge every subject; 072 filters by the line date the version is in force for (YAGNI, section 11).
-9. `ReadFields` includes every extracted value a finding shows or uses (conservative; see above).
+9. `ReadFields` includes every extracted value a finding shows or uses (conservative; see above). (Fix round 1: ApprovedRate's `Hours`
+   now follows that rule - read only when the reduction is computed from it.)
+10. **Fix round 1, D-105 reading.** "Credit line" is one test for all five rules, `Hours < 0 || Amount < 0` (`BillingMath.IsCreditLine`),
+    where the owner text says "negative hours or a negative amount". The brief named hours for ApprovedRate and amount for
+    ExpenseRule; using the one shared definition for both means a negative amount on a fee line is also skipped by ApprovedRate.
+    A zero amount or zero hours is **not** a credit. CoreRecordWindow skips a credit on all three reasons, the
+    closed-record one included. NonBillableActivity keeps the finding and drops only the adjustment (reading "never suggest
+    disallowing a negative amount" as "do not hide the credit, do not adjust it").
+11. **Fix round 1, sub-cent rate.** ApprovedRate rounds the billed rate to the cent before comparing **and** before computing the
+    reduction (the brief asked only for the comparison), so the rate the finding shows is the rate that was judged and the
+    reduction adds up from the displayed values: 650.004 is shown as 650.00 and reduces by (650.00 - 575.00) x hours.
 
 ## Component justification (CLAUDE.md section 11)
 
@@ -138,16 +160,27 @@ None blocked execution (no escalation trigger fired). Each is one line to change
 
 - (K1) Duplicate compares a rostered line and an unrostered line as different people even when the billed names are equal; the unrostered line is already an ApprovedTimekeeper finding, and a line-level duplicate never rejects.
 - (K2) DailyHoursCap is per invoice (R1; design.md 6.1).
+- (K2) DailyHoursCap can under-count one person across spellings (`DailyHoursCapHandler.TimekeeperKey`): a roster-matched line groups
+  under `id:<timekeeper id>`, an unmatched line under `name:<normalised billed name>`, so a matched line and an unmatched spelling of the
+  same person (for example "Jane Doe" matched and a typo "Jane Dow" unmatched) form separate groups and their hours are **not** added.
+  A person can therefore exceed the cap with no single group above it. It fails closed in the sense that matters: every unmatched
+  line is already an ApprovedTimekeeper finding, which holds the invoice for review, and DailyHoursCap is flag-only. Merging a name
+  group into an id group would need a guess at identity that FR-23 forbids ("nothing maps an unmatched name to another timekeeper").
+- (K4) The purity guard sees only the handlers' own IL call sites. A BCL overload that reads the ambient culture internally, with no
+  `CultureInfo.CurrentCulture` call in our code (`decimal.ToString("F2")`, `ToUpper()`, `string.Format`, `decimal.Parse(string)`), is
+  not detected. Today every number and date in `Handlers/` is formatted with `CultureInfo.InvariantCulture`, `ToUpperInvariant`, `"D"`
+  GUIDs or enum names (grep, fix round 1), and `BillingMathTests` runs the text under de-DE and tr-TR. Closing it needs a guard that
+  flags provider-less `ToString`/`Parse`/`ToUpper`/`Format` calls; not built (scope), named here as the next step.
 - (K3) `EmptyConfidence.Instance` is a shared empty dictionary typed read-only; the purity guard's static-state check covers the handler namespace, not the contracts.
 
 ## Tests
 
 `tests/unit/domain/Signals/Billing/Handlers/` (Maintain-class, ADR-038: pure, no mocks, compiled into `Sprk.Bff.Api.Tests`), namespace `Sprk.Bff.Api.Tests.Domain.Signals.Billing.Handlers`:
 
-- **252 new unit tests** (all pass): one class per type, `BillingRuleHandlersDispatchTests` (enumerates every `RuleType`; non-billing and unknown values refused with `no_handler`; missing parameters refused; token contract; all 11 fire on a fact set that breaks every rule and none fires on a clean one), `BillingMathTests`. Shared `BillingHandlerKit.Run` asserts the per-finding contract and determinism for every finding of every test. Theory data uses text for decimals (no double round trip).
-- **20 new ArchTests** (`tests/Spaarke.ArchTests/BillingHandlerPurityGuardTests.cs`): the handlers and contracts reference no I/O, network, clock, randomness, environment, logging, reflection, expression trees, `Activator`/`Type` late binding; no static registry (only readonly `string[]` tables); the dispatch builds no `Dictionary`/`List`/`HashSet`. 14 must-fire controls (one per forbidden shape), a registry control, a must-not-fire control, and a non-vacuity check. Acceptance greps: no `HttpClient`, `TimeProvider`, `DateTime.Now`, `IGenericEntityService`, reflection or registry in `Handlers/` (the guard covers the compiled IL, stronger than a text grep).
+- **301 unit tests** (all pass; 252 from the task, 49 added in fix round 1): one class per type, `BillingRuleHandlersDispatchTests` (enumerates every `RuleType`; non-billing and unknown values refused with `no_handler`; missing parameters refused; token contract; all 11 fire on a fact set that breaks every rule and none fires on a clean one), `BillingMathTests`. Shared `BillingHandlerKit.Run` asserts the per-finding contract and determinism for every finding of every test. Theory data uses text for decimals (no double round trip).
+- **24 ArchTests** (20 from the task, 4 must-fire controls added in fix round 1; `tests/Spaarke.ArchTests/BillingHandlerPurityGuardTests.cs`): the handlers and contracts reference no I/O, network, clock, randomness (`Guid.NewGuid`, `Guid.CreateVersion7`), ambient culture or time zone (`CultureInfo.CurrentCulture`/`CurrentUICulture`, `TimeZoneInfo.Local`), environment, logging, reflection, expression trees, `Activator`/`Type` late binding; no static registry (only readonly `string[]` tables); the dispatch builds no `Dictionary`/`List`/`HashSet`. 18 must-fire controls (one per forbidden shape), a registry control, a must-not-fire control (extended in fix round 1 to show `CultureInfo.InvariantCulture`, `TimeZoneInfo.Utc` and `Guid.TryParse`/`Guid.Empty` are not flagged), and a non-vacuity check. Acceptance greps: no `HttpClient`, `TimeProvider`, `DateTime.Now`, `IGenericEntityService`, reflection or registry in `Handlers/` (the guard covers the compiled IL, stronger than a text grep).
 - Failed before / pass after: the handler types did not exist before, so the tests cannot run on the old tree (compile failure). The equivalent proof is the mutation table below: 14 of 14 production mutations are killed.
-- Run: new Handlers classes 252 passed / 0 failed; `Sprk.Bff.Api.Tests` filter `Billing|RuleType|PolicyVersion|Signal` 2566 passed, 3 skipped (pre-existing live-environment skips), 0 failed; `Spaarke.ArchTests` full project 1146 passed, 0 failed (includes the new 20 and the ADR-010 ceiling). The whole unit project was not run (45+ min, per the brief). Build: `dotnet build src/server/api/Sprk.Bff.Api/ -m:1` 0 warnings, 0 errors.
+- Run at the end of the task: new Handlers classes 252 passed / 0 failed; `Sprk.Bff.Api.Tests` filter `Billing|RuleType|PolicyVersion|Signal` 2566 passed, 3 skipped (pre-existing live-environment skips), 0 failed; `Spaarke.ArchTests` full project 1146 passed, 0 failed (includes the new 20 and the ADR-010 ceiling). **After fix round 1** (current base): Handlers classes 301 passed / 0 failed; same wider filter 2871 passed, 3 skipped (the same live-environment skips), 0 failed; `Spaarke.ArchTests` full project 1164 passed, 0 failed (24 in the purity class). The whole unit project was not run (45+ min, per the brief). Build: `dotnet build src/server/api/Sprk.Bff.Api/ -m:1` 0 warnings, 0 errors.
 
 ### Mutation proofs (production check broken, must-fire/boundary test fails, then restored with `git checkout`)
 
@@ -161,7 +194,7 @@ None blocked execution (no escalation trigger fired). Each is one line to change
 | M06 | NFR-05: below-threshold flag never set | 12 | `AnObservationAboveTheRulesThreshold_ButBelowTheReliabilityThreshold_IsFlagged_...` |
 | M07 | NFR-05: unknown confidence not flagged | 3 | `ARateWithNoKnownConfidence_IsMarkedUnreliable` |
 | M08 | FR-21: currency check disabled | 6 | `MustFire_ForACurrencyOtherThanUsd_AsAFindingOnTheInvoice_FR21` |
-| M09 | FR-23/D-89: unmatched timekeeper no longer fires | 18 | `AnUnmatchedTimekeeper_OnlyHolds_ItCarries046sCappedConfidence_AndIsMarkedUnreliable_D89` |
+| M09 | FR-23/D-89: unmatched timekeeper no longer fires | 18 | `AnUnmatchedTimekeeper_PassesThrough046sCappedConfidence_AndIsMarkedUnreliable_ThisIsNotTheD89Enforcement` (named `..._OnlyHolds_..._D89` until fix round 1; it proves the 0.80 cap is passed through, not D-89 itself, which task 073 enforces) |
 | M10 | Dispatch: `Duplicate` case removed | 33 | `EveryRuleTypeMember_IsABillingTypeWithAHandlerAndASampleBody_OrIsRefusedFailClosed` |
 | M11 | InvoiceAge `<= maxAgeDays` -> `<` | 1 | `MustNotFire_ForALineDatedExactlyNDaysBeforeTheInvoice` |
 | M12 | CoreRecordWindow: grace days not applied after close | 1 | `TheGraceDaysWidenTheWindowOnBothSides(7, 7, false)` |
@@ -171,10 +204,67 @@ None blocked execution (no escalation trigger fired). Each is one line to change
 (Each mutation was applied to the committed file, the test project rebuilt, the Handlers namespace run, then the file restored
 with `git checkout -- <file>` and touched so the incremental build could not reuse the seeded DLL. The tree was clean after.)
 
+## Review fix round 1 (adversarial review of 071; owner decision D-105)
+
+Base `80daf089f` (the 075 fix commit; 071's own commits are `6b99e980f`..`d22c8e26d`). Nine commits. Each was committed from a green build and test run of the Handlers classes; the three handler commits after `25def05eb` (ExpenseRule, InvoiceAge plus CoreRecordWindow, NonBillableActivity) touch independent files and were built and tested together before being committed one by one.
+
+| Commit | Item | Change |
+|---|---|---|
+| `1275f38ae` | F1 (D-105) | `BillingMath.IsCreditLine`: the one definition (`Hours < 0 \|\| Amount < 0`); tests in `BillingMathTests` |
+| `1f6a69950` | F1 (D-105) | ApprovedRate skips credit lines; the old "negative hours still fires" test now pins must-not-fire |
+| `32f34e201` | F1 low | ApprovedRate compares `ToCent(billed)` against the limit, and computes the reduction from the same rate |
+| `25def05eb` | F4 | ApprovedRate adds `Hours` to the read fields only when Hours > 0 (what this file's table already said) |
+| `727bf4af1` | F1 (D-105) | ExpenseRule skips credit lines (e.g. "E109 -50.00") |
+| `0bcdaf4e5` | F1 (D-105) | InvoiceAge and CoreRecordWindow skip credit lines |
+| `4e3cb370c` | F1 (D-105) | NonBillableActivity: a credit keeps its finding, with no suggested adjustment |
+| `5cd5f3e7f` | K4 | Purity guard forbids `Guid.CreateVersion7`, `CultureInfo.get_CurrentCulture`, `get_CurrentUICulture`, `TimeZoneInfo.get_Local` |
+| `7764c2584` | D-89 wording | The D-89 timekeeper test is renamed and re-described: it proves the cap is passed through; task 073 enforces D-89 |
+
+The notes themselves (F4 stale hashes, K2 limit, contract text, this section) are the commit after these.
+
+**Failed before / pass after.** With the five changed handlers put back to `80daf089f` and the new tests kept, the Handlers classes give
+**30 failed, 271 passed** (301 total); with the fixed handlers **0 failed, 301 passed**. The 30: ApprovedRate 13 (credit x7, sub-cent x4,
+read fields x2), ExpenseRule 4, InvoiceAge 5, CoreRecordWindow 4, NonBillableActivity 4 (names per item are in the commit tests,
+all end `_D105` for the credit rule). The two ApprovedRate tests that pass on both trees are the boundary half of each pair (`575.005`
+fires on both; positive hours still read `Hours`) - the must-not-fire half is what fails before. The D-89 rename and the guard are not
+behaviour changes; the guard's proof is below.
+
+**Purity guard must-fire evidence (K4).** Besides the four permanent control fixtures (`MintsATimeOrderedIdentity`,
+`ReadsTheCurrentCulture`, `ReadsTheCurrentUiCulture`, `ReadsTheLocalTimeZone`, each asserted by name in
+`EveryDetectorFiresOnItsControlFixture`), all four members were injected temporarily into production code (`BillingText` in
+`HandlerContext.cs`: `CultureInfo.CurrentCulture.Name + CultureInfo.CurrentUICulture.Name + TimeZoneInfo.Local.Id + Guid.CreateVersion7()`):
+
+```
+Failed Task 071: the billing handlers and their contracts are pure (no I/O, clock, randomness, logging, reflection) [FAIL]
+BillingText::TemporaryInjection calls System.Globalization.CultureInfo::get_CurrentCulture (System.Globalization.CultureInfo.get_CurrentCulture);
+BillingText::TemporaryInjection calls System.Globalization.CultureInfo::get_CurrentUICulture (System.Globalization.CultureInfo.get_CurrentUICulture);
+BillingText::TemporaryInjection calls System.TimeZoneInfo::get_Local (System.TimeZoneInfo.get_Local);
+BillingText::TemporaryInjection calls System.Guid::CreateVersion7 (System.Guid.CreateVersion7)
+Failed!  - Failed: 1, Passed: 23, Skipped: 0, Total: 24
+```
+
+The injection was then removed (`git checkout -- HandlerContext.cs`, never committed) and the run is green again: **24 passed, 0 failed**.
+The existing must-not-fire control stays and now also covers the invariant siblings, so the new entries are member-specific, not whole-type.
+
+**Quality gates (task-execute Step 9.5).** code-review and adr-check run on the fix scope (the diff, its callers and callees; nothing
+outside `Services/Signals/Billing/` consumes the handlers yet, so there are no other callers). No F-class finding. ADRs considered:
+ADR-010 (no interface or registration added: compliant), ADR-013 (the handlers use `Services/Ai/PublicContracts` types as before: compliant),
+ADR-038 (tests stay under `tests/unit/domain/**` and `tests/Spaarke.ArchTests/**`; one theory row was replaced by its must-not-fire
+counterpart in the same change, nothing deleted without a replacement), ADR-029 (no package change). Build: 0 warnings, 0 errors; the
+pre-commit `dotnet format` ran on every commit. K-class: the two K entries added above.
+
+**Class search (Step 9.5 rule 6).** The pattern is "a charge rule that reads hours or an amount without asking if the line is a credit".
+`grep -E "line\.(Hours|Amount|BilledRate)|IsCreditLine"` over `Handlers/`: nine files; the five D-105 handlers now call `IsCreditLine`;
+TimeIncrement, DailyHoursCap and Duplicate read hours or amounts but are not in D-105 (owner question 5). No `.Hours <`/`.Amount <` sign
+test is repeated outside `BillingMath`. The guard that would catch a sixth hand-written sign test is not built (a source-scan for
+`Hours < 0` in `Handlers/` would be a few lines, but it is a new guard: scope change, owner call).
+
 ## BFF hygiene (CLAUDE.md section 10)
 
 - Placement: in the BFF, `Services/Signals/Billing/` (as 070); pure in-process domain code, no endpoint, no DI, no background work.
-- **Publish size (NFR-01)**: fresh `git archive` exports at short paths (`C:\w71b` = `4c1203b42`, `C:\w71h` = `1dbfbbf76`, the final production tree).
+- **Publish size (NFR-01)**: fresh `git archive` exports at short paths (`C:\w71b` = `4c1203b42`, `C:\w71h` = the final production tree, measured at `1dbfbbf76`, which is `ef8d87819` after the branch rebase; the
+  071 files under `Services/Signals/Billing/` and the tests are identical on both, `git diff --stat` shows only an unrelated one-line
+  `PolicyVersionValidator.cs` difference from the new base).
   Command `dotnet publish src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -c Release -r linux-x64 --self-contained false -p:NuGetAudit=false`
   (framework-dependent linux-x64, Release, **PDBs included**), zipped with `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`,
   **192 files on both sides**.
@@ -182,10 +272,12 @@ with `git checkout -- <file>` and touched so the incremental build could not reu
   | Tree | Zip bytes | MB |
   |---|---|---|
   | base `4c1203b42` | 39,462,574 | 37.63 |
-  | task 071 `1dbfbbf76` | 39,487,585 | 37.66 |
+  | task 071 `ef8d87819` (measured as `1dbfbbf76`) | 39,487,585 | 37.66 |
   | **Delta** | **+25,011** | **+0.024 MB** |
 
   Well under the +5 MB trigger, 55 MB review and 60 MB ceiling. (The absolute figure is lower than the recorded 44.96 baseline; baselines age and this is measured, not recorded.)
+  **Fix round 1 was not re-measured**: it edits six existing files (about 60 changed lines of C#, no new type, no package, no csproj
+  change), so it cannot move the zip beyond noise against the +0.024 MB above. Re-measure at the project-close publish check if the owner wants it.
 - `dotnet list package --vulnerable --include-transitive`: no vulnerable packages. No package or csproj change.
 - ADR-010: no DI registration; the ceiling (166) is unchanged and its ArchTest is green.
 
@@ -194,7 +286,7 @@ with `git checkout -- <file>` and touched so the incremental build could not reu
 No Ontology-owned file is touched (new files only, under `Services/Signals/Billing/`; `RuleType.cs`, `PolicyVersionValidator.cs`,
 `PredicateCompiler.cs`, the Signals jobs and their tests are unchanged), and the Signals tests (the `Signal` filter) pass.
 **Not obtained**: the executing agent cannot message other sessions. Main session: send ontology-r1 the commit range
-`4c1203b42..2f13d6697` (production under `Services/Signals/Billing/` only) and paste the answer here. Question for them: do the new
+`d4e555e38..d22c8e26d` plus the fix round `80daf089f..7764c2584` (production under `Services/Signals/Billing/` only) and paste the answer here. Question for them: do the new
 public names (`BillingFactSet`, `BillingFinding`, `BillingFieldNames`, `BillingReasonCodes`, `BillingRuleHandlers`) collide with
 anything planned on `docs/ontology-platform-design`?
 
@@ -204,6 +296,11 @@ anything planned on `docs/ontology-platform-design`?
 2. No approved rate found: flag with no adjustment (as built) or do not judge? [As built; such a finding holds by D-47.]
 3. Is a same-invoice repeat line a Duplicate (as built, beyond the strict POML)? [Keep.]
 4. Should RequiredData's `fields` vocabulary gain a `currency` member (070 schema change), or is the always-on currency check right for R1? [Always-on for R1; revisit when a second currency is supported.]
+5. D-105 names five rules. TimeIncrement ("credits judged too" - a credit of -0.25 h against a 0.1 h increment is flagged), DailyHoursCap
+   (credits are summed in and offset the day), Duplicate, RequiredData and AiObservation still judge credit lines. TimeIncrement,
+   DailyHoursCap, Duplicate (line level) and AiObservation are flag-only; RequiredData and ApprovedTimekeeper can reject in
+   principle (ApprovedTimekeeper never, D-89). Should a credit also be exempt from any of them? [No: a credit with missing data or
+   a reversal that is itself off-increment is still worth a look, and none of those flags adjusts money. Revisit if reviewers report noise.]
 
 ## Pre-commit hook note
 
