@@ -206,6 +206,50 @@ Source: the ontology-r1 and uac-r2 re-checks of fix-round-1, plus DEF-022.
   - Brief filter: 4,294 passed, 6 skipped, 0 failed.
   - ArchTests: 1,126 / 1,126.
 
+## #2081 follow-up
+
+Source: GitHub #2081 (split out by uac-r2 from this task's review: the invoice-family half). Commits `cece0099d`, `1542eb2e3`, `accbb1084` on top of `e1501dbbc`.
+
+**The defect.** `UpdateRecordFieldsAsync` PATCHes with no `If-Match`, so it is an upsert. A generic path given a stale or deleted `sprk_invoice` / `sprk_billingevent` id, with a patch that touched no guarded lookup (`change.Count == 0` returned null), created an orphan row: no core record (FR-05), owned by the app (UAC D-11), silent.
+
+| # | Item | Change | Fails-before evidence |
+|---|---|---|---|
+| 1 | Orphan upserts | `CheckGenericUpdateAsync` reads the stored row (app-only, by id) for EVERY write of an invoice or line, before looking at the patch. Missing (null or object-does-not-exist) → `invoice_family_record_not_found`. No reader, or a read fault → `invoice_family_read_failed`. A row that exists with a patch touching no guarded lookup is allowed, after one read | 3 paths × 2 tables × null/fault × lookup/text: the 12 text-patch cases fail before; read-fault and no-reader cases fail before for text patches |
+| 2 | `DecisionRouteCores.UpdateChildAsync` | passes `appOnlyEntities: IGenericEntityService` from `RequestServices`, as `ChildRecordEndpoints.RefileAsync` and the chat update tool do. Why they pass it: D-96 counts an invoice's lines as the app; without it an invoice core-lookup move fails closed `read_failed` | reverting only this file fails 2 of the 3 decision-route tests |
+| 3 | D-96 end to end | tests through the three DEF-022 paths (playbook update, output orchestrator, field-mapping push) and the decision route: an invoice moved while a line stays behind is refused; moved with all lines on it is written; a line moved while attached to its invoice is refused | the refusal-with-hint cases fail before (no hint); the decision route cases fail before |
+| 4 | No `IGenericEntityService` | `UpdateRecordActionCore` with an empty service scope: refused `read_failed` with the exact text, nothing written, for a rename or a lookup write on both tables. A table outside the family still writes | the rename cases fail before (they were written unread) |
+| 5 | Detach, move, re-attach | the `invoice_family_line_invoice_core_record_mismatch` refusal carries a fixed hint, in the guard's reason and in `CodeOnlyRefusalMessage` (the generic paths' text) | hint cases fail before |
+| 6 | `ActionSeam` duplicated code | the code leads the message only when the message does not already carry it. Exact message pinned in `ActionSeamTests` | both variants fail before |
+
+**What "the three generic paths" means here.** The brief's wording ("create / update / upsert record actions and the decision route") does not match a create or upsert core: there is none. The paths this note's fix-round-2 named are the three PATCH paths (`UpdateRecordActionCore`, `DataverseUpdateHandler`, the field-mapping push); the decision route is the fourth, now covered separately.
+
+**The hint (item 5).** Text: "To move an invoice that has lines: detach each line (clear its invoice), move the invoice, move each line to the same matter, project or work assignment, then re-attach the lines to the invoice."
+- Source: this note's fix-round-1/2 do not state a sequence. It is derived from D-75 and the guard: a line with no invoice is decided on its own lookup alone, so detaching is allowed; while attached, neither side can move first (the invoice is blocked by D-96, the line by the line/invoice comparison). The generic-path test `D96_ALineDetachedFromItsInvoice_AndMovedInOneWrite_IsWritten` proves the detach-and-move step is accepted.
+- The code stays `invoice_family_line_invoice_core_record_mismatch`. The text names no record and no user data. It is also appended to the line-side reason (a line pointed at an invoice of another core record), where the same sequence applies.
+- Not checked live (no live Dataverse writes): that a caller can clear a line's invoice on the form or in a chat tool. BFF only; no UI text was added.
+
+**Test changes that follow from item 1.**
+- `…NoCoreLookup_IsWritten_AndReadsNothingForTheGuard` (handler, playbook core) → `…AfterTheGuardConfirmsTheRowExists`: they now assert one stored-row read and no line query.
+- The guard unit test "a patch touching no guarded lookup is not checked" is split: another table stays unchecked; an invoice or line is read once.
+- `FieldMappingPushAuthorizationContractTests`: `PushHost` answers the pushed children's stored rows (they come from the caller's own query, so they exist).
+
+**Behaviour change to know about.** One extra app-only `Retrieve` per invoice or line written through these three paths (a rename used to read nothing). `ActionSeam`'s message for an owner refusal also lost its duplicate code prefix ("No owner could be resolved … (code)").
+
+**Still open from #2081 (not this note's):** the general update-only fix for every other table on `UpdateRecordActionCore` and `DataverseUpdateHandler`, and the four other family tables (submission, approval, external identifier, correction), which the guard does not cover on these paths. `SignalEvaluationService.cs:256` was checked: it is a deliberate create-by-upsert of a Signal with an id derived from (matter, signal type), never from a caller's id, so it cannot resurrect a stale id.
+
+**Counts.**
+
+| Check | Result |
+|---|---|
+| Fail-before (new and changed tests against the unfixed source) | 46 failed of 575 in the focused filter |
+| Focused classes (InvoiceFamily, SecureChildOwnershipAiToolTests, ActionSeamTests, DecisionRoute) | 575 / 575 |
+| Wide filter (Invoice, OwnedChild, CoreAncestor, RecordOwnership, FieldMapping, UpdateRecord, DataverseUpdate, ChildRecord, Signal, ActionSeam, DecisionRoute, DecisionAction, SecureChild, BillingEvent, ApplySeam) | 5,138 passed, 6 skipped, 0 failed |
+| Spaarke.ArchTests | 1,175 / 1,175 |
+| BFF build | 0 warnings, 0 errors |
+| Publish size (Release, framework-dependent linux-x64, `Compress-Archive -CompressionLevel Optimal` over `api-publish/*`, PDBs included, 192 files each side, fresh worktrees `C:\wt2081m` / `C:\wt2081b`) | `e1501dbbc` 39,598,563 B → `accbb1084` 39,598,912 B (+349 B) |
+
+The baseline is this branch's base commit, not master: the change is the only difference, so the delta is this task's alone. No package was added, so no CVE re-check was needed.
+
 ## Files
 
 **Ontology-owned (ontology-r1 review requested):**
