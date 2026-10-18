@@ -1238,6 +1238,10 @@ public sealed class DecisionRecordWriter
 
     /// <summary>The subject table a billing code's record is filed under, or null for a code that is not a billing code. The recorder uses
     /// it so a caller names only the record id and can never pair a code with the wrong table.</summary>
+    /// <summary>K4 (ontology-r1): the billing codes, as the "already recorded" lookup's <c>sprk_actioncode In</c> values (ordinal order, so
+    /// the query is stable).</summary>
+    private static readonly object[] BillingLookupCodes = [.. BillingSubjectByCode.Keys.Order(StringComparer.Ordinal)];
+
     internal static string? BillingSubjectEntityOf(string? actionCode) =>
         actionCode is not null && BillingSubjectByCode.TryGetValue(actionCode, out var entity) ? entity : null;
 
@@ -1468,12 +1472,14 @@ public sealed class DecisionRecordWriter
 
     /// <summary>
     /// ebilling-r1 task 074 (D-100): the billing records already written under this key, each with its code, <c>sprk_confirmedby</c> (empty
-    /// when none) and stored content hash (<see cref="BillingDecisionHash"/>, from <c>sprk_steps</c>; null when it cannot be read). Narrowed by the subject's regarding lookup (indexed), then by the key in <c>sprk_steps</c>, and only among records the writer
-    /// itself created (<c>createdby</c> = the writer identity: a row a person created with this key is not this record). The key carries no
-    /// code, so the code is READ (<c>sprk_actioncode</c>, the one taken step's code) rather than filtered on: the caller can then tell "this
-    /// decision, already recorded" from "this decision id, recorded with another billing code". A row whose code is not a billing code is a
-    /// Signals review's record that reused the id (<see cref="Validate"/> never lets one carry a billing code) and is skipped, never matched.
-    /// Read through the shared sysadmin reader, so a record owned by any team is found (a re-owned record keeps its <c>createdby</c>).
+    /// when none) and stored content hash (<see cref="BillingDecisionHash"/>, from <c>sprk_steps</c>; null when it cannot be read). Narrowed
+    /// by the subject's regarding lookup (indexed), then by the key in <c>sprk_steps</c>, only among records the writer itself created
+    /// (<c>createdby</c> = the writer identity: a row a person created with this key is not this record), and only among billing codes
+    /// (<c>sprk_actioncode</c> in <see cref="BillingLookupCodes"/>: a Signals review's record that reused the id never carries one, because
+    /// <see cref="Validate"/> refuses billing codes, and must not use up the row cap). The key carries no code, so the code is READ rather
+    /// than matched to the request's: the caller can then tell "this decision, already recorded" from "this decision id, recorded with
+    /// another billing code". The billing-code check is repeated on each row read, so a row outside the set is never matched. Read through
+    /// the shared sysadmin reader, so a record owned by any team is found (a re-owned record keeps its <c>createdby</c>).
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the lookup (or
     /// the writer identity it is narrowed by) faulted, a timeout surfacing as a cancellation the caller did not ask for included. Nothing is
@@ -1486,14 +1492,17 @@ public sealed class DecisionRecordWriter
             var query = new QueryExpression(Table)
             {
                 ColumnSet = new ColumnSet("sprk_confirmedby", "sprk_actioncode", "sprk_steps"),
-                // Sequential use leaves at most one billing row per key; a concurrent pair (see WriteBillingDecisionAsync) or a Signals review
-                // that reused the id adds one each. Bounded, never a scan.
+                // Sequential use leaves at most one billing row per key; only a concurrent pair (see WriteBillingDecisionAsync) adds another.
+                // Bounded, never a scan.
                 TopCount = BillingLookupTop,
                 NoLock = true,
             };
             query.Criteria.AddCondition(SubjectLookupByEntity[subject.Entity], ConditionOperator.Equal, subject.Id);
             query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"reviewId\":\"{key:D}\"%");
             query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
+            // K4 (ontology-r1): only billing records count against the cap. Signals reviews that reused the id would otherwise fill the 10
+            // rows and hide this decision's record, and a second record would be written.
+            query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.In, BillingLookupCodes);
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
 
             var found = new List<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>();

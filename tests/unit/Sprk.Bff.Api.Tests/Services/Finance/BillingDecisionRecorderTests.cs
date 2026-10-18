@@ -39,7 +39,7 @@ public sealed class BillingDecisionRecorderTests
 
     private static (DecisionRecordWriterTests.Harness H, BillingDecisionRecorder Recorder) Build(Mock<IIdentityNormalizationService> identity)
     {
-        var h = new DecisionRecordWriterTests.Harness();
+        var h = DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness());
         h.Rows[("sprk_invoice", Invoice)] = new Entity("sprk_invoice", Invoice) { ["sprk_matter"] = new EntityReference("sprk_matter", Matter) };
         h.Rows[("sprk_billingevent", Line)] = new Entity("sprk_billingevent", Line)
         {

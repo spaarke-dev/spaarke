@@ -23,10 +23,64 @@ public sealed partial class DecisionRecordWriterTests
     private static readonly Guid BillingDecision = Guid.Parse("0740b111-0000-4000-8000-0000000000d1");
     private static readonly Guid Reviewer = Guid.Parse("0740b111-0000-4000-8000-0000000000e1");
 
+    /// <summary>
+    /// ontology-r1 K4: the billing lookup also filters <c>sprk_actioncode In (billing codes)</c>, an operator the shared harness does not
+    /// evaluate. This re-answers the harness's <c>RetrieveMultipleAsync</c> exactly as it does (what it created, as stored by the writer with
+    /// <c>createdby</c> = the writer's user, then <c>Seeded</c>, then <c>Rows</c>, in that order, capped at <c>TopCount</c>) and evaluates
+    /// <c>In</c> as well, so the shared harness (an ontology-owned file) stays byte-identical. Every billing test harness goes through it.
+    /// </summary>
+    internal static Harness WithBillingLookups(Harness h)
+    {
+        h.Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression query, CancellationToken _) =>
+            {
+                h.Lookups.Add(query);
+                if (h.LookupFault is { } fault)
+                {
+                    return Task.FromException<EntityCollection>(fault);
+                }
+
+                var stored = h.Created.Select(c => StoredByTheWriter(c, c.Id == Guid.Empty ? h.NewId : c.Id))
+                    .Concat(h.Seeded)
+                    .Concat(h.Rows.Values)
+                    .Where(row => row.LogicalName == query.EntityName && query.Criteria.Conditions.All(c => BillingSatisfies(c, row)))
+                    .Take(query.TopCount ?? int.MaxValue)
+                    .ToList();
+                return Task.FromResult(new EntityCollection(stored));
+            });
+        return h;
+
+        static Entity StoredByTheWriter(Entity created, Guid id)
+        {
+            var stored = new Entity(created.LogicalName, id);
+            foreach (var attribute in created.Attributes)
+                stored[attribute.Key] = attribute.Value;
+            stored["createdby"] = new EntityReference("systemuser", WriterUser);
+            return stored;
+        }
+    }
+
+    private static bool BillingSatisfies(ConditionExpression condition, Entity row)
+    {
+        object? actual = condition.AttributeName == row.LogicalName + "id"
+            ? row.Id
+            : row.Contains(condition.AttributeName) ? row[condition.AttributeName] : null;
+        return condition.Operator switch
+        {
+            ConditionOperator.Null => actual is null,
+            ConditionOperator.Equal => actual is EntityReference reference ? reference.Id.Equals(condition.Values.Single()) : Equals(actual, condition.Values.Single()),
+            ConditionOperator.Like => actual is string text && condition.Values.Single() is string pattern
+                && pattern.StartsWith('%') && pattern.EndsWith('%')
+                && text.Contains(pattern.Trim('%'), StringComparison.Ordinal),
+            ConditionOperator.In => condition.Values.Any(v => Equals(actual, v)),
+            _ => throw new NotSupportedException($"Billing test harness: {condition.Operator} is not evaluated."),
+        };
+    }
+
     /// <summary>A harness whose invoice is filed under <see cref="MatterId"/> and whose line under its own project (D-75).</summary>
     private static Harness BillingHarness(Guid? lineProject = null)
     {
-        var h = new Harness();
+        var h = WithBillingLookups(new Harness());
         h.Rows[("sprk_invoice", InvoiceId)] = new Entity("sprk_invoice", InvoiceId) { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) };
         h.Rows[("sprk_billingevent", LineId)] = new Entity("sprk_billingevent", LineId)
         {
@@ -311,6 +365,55 @@ public sealed partial class DecisionRecordWriterTests
         h.Created.Should().BeEmpty();
     }
 
+    // ── ontology-r1 K4: the 10-row lookup counts only billing records ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task Billing_K4_TenSignalsRecordsUnderTheKey_DoNotHideTheBillingRecord()
+    {
+        // Ten writer-created Signals reviews reused this decision id on the invoice; they come back first. Without the sprk_actioncode filter
+        // they fill the cap, the billing record is not seen, and a second record is written.
+        var h = BillingHarness();
+        var key = BillingDecisionKey.IdOf("sprk_invoice", InvoiceId, BillingDecision);
+        for (var i = 0; i < 10; i++)
+        {
+            h.Seeded.Add(new Entity("sprk_decisionrecord", Guid.NewGuid())
+            {
+                ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", InvoiceId),
+                ["sprk_steps"] = $"{{\"reviewId\":\"{key:D}\",\"steps\":[{{\"code\":\"mark-complete\"}}]}}",
+                ["sprk_actioncode"] = "mark-complete",
+                ["createdby"] = new EntityReference("systemuser", WriterUser),
+            });
+        }
+
+        var billingRecord = new Entity("sprk_decisionrecord", Guid.NewGuid())
+        {
+            ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", InvoiceId),
+            ["sprk_steps"] = $"{{\"reviewId\":\"{key:D}\",\"reviewHash\":\"{DecisionRecordWriter.BillingDecisionHash(Billing())}\",\"steps\":[{{\"code\":\"approve-invoice\"}}]}}",
+            ["sprk_actioncode"] = "approve-invoice",
+            ["createdby"] = new EntityReference("systemuser", WriterUser),
+        };
+        h.Seeded.Add(billingRecord);
+
+        var result = await h.Writer.WriteBillingDecisionAsync(Billing());
+
+        result.AlreadyRecorded.Should().BeTrue();
+        result.RecordId.Should().Be(billingRecord.Id);
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Billing_K4_TheLookup_FiltersOnExactlyTheBillingCodes()
+    {
+        var h = BillingHarness();
+
+        await h.Writer.WriteBillingDecisionAsync(Billing());
+
+        var lookup = h.Lookups.Where(q => q.EntityName == "sprk_decisionrecord").Should().ContainSingle().Which;
+        lookup.TopCount.Should().Be(10);
+        lookup.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "sprk_actioncode" && c.Operator == ConditionOperator.In)
+            .Which.Values.Cast<string>().Should().BeEquivalentTo(DecisionActionCatalog.BillingActions.Select(d => d.Code));
+    }
+
     // ── C4: a lookup fault writes nothing ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -433,7 +536,7 @@ public sealed partial class DecisionRecordWriterTests
     public async Task Billing_C6_AnInvoiceOrLineNotFiledUnderExactlyOneCore_IsUnfileable_AndNothingIsWritten(string table, string condition)
     {
         var subjectId = Guid.NewGuid();
-        var h = new Harness();
+        var h = WithBillingLookups(new Harness());
         var row = new Entity(table, subjectId);
         if (table == "sprk_billingevent") row["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId);
         if (condition == "two-roots")
