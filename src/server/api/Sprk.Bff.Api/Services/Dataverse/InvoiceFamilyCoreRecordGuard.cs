@@ -246,7 +246,8 @@ public static class InvoiceFamilyCoreRecordGuard
             ? decided.Refuse(LineInvoiceCoreRecordMismatchCode,
                 $"{decided.EntityLogicalName} would regard {decided.Regarding!.LogicalName}({decided.Regarding.Id:D}) but at least "
                 + "one of its lines names another core record, or none; a line belongs only to an invoice of its own matter, "
-                + "project or work assignment, and lines are never re-filed from their invoice (D-75). Nothing was written.")
+                + "project or work assignment, and lines are never re-filed from their invoice (D-75). Nothing was written. "
+                + DetachMoveReattachHint)
             : decided;
     }
 
@@ -346,9 +347,10 @@ public static class InvoiceFamilyCoreRecordGuard
                 : value; // null clears; an EntityReference is checked against the column's table; anything else is refused
         }
 
-        if (change.Count == 0)
-            return null;
-
+        // #2081 (ebilling-r1 follow-up to uac-r2's 026 review): these paths PATCH with no If-Match, which is an UPSERT, so a
+        // stale or deleted id would CREATE an orphan row (no core record, owned by the app instead of the root's team). The
+        // stored row is therefore read for EVERY write of an invoice or line, whether or not the patch touches a guarded
+        // lookup, and a missing row is refused. No reader, or a read that faults, fails closed.
         if (appOnly is null)
         {
             return InvoiceFamilyCoreRecord.Refused(entity, ReadFailedCode,
@@ -370,6 +372,9 @@ public static class InvoiceFamilyCoreRecordGuard
 
         if (stored is null)
             return InvoiceFamilyCoreRecord.Refused(entity, RecordNotFoundCode, $"{entity}({recordId:D}) does not exist; nothing was written.");
+
+        if (change.Count == 0)
+            return null; // the row exists and the patch moves no guarded lookup: nothing more to decide
 
         object? Effective(string column) =>
             change.TryGetValue(column, out var changed) ? changed
@@ -410,7 +415,18 @@ public static class InvoiceFamilyCoreRecordGuard
     /// the reason can name a record or core record the caller has not read.
     /// </summary>
     public static string CodeOnlyRefusalMessage(string refusalCode) =>
-        $"The invoice-family core-record rule refused this write ({refusalCode}); nothing was written.";
+        $"The invoice-family core-record rule refused this write ({refusalCode}); nothing was written."
+        + (refusalCode == LineInvoiceCoreRecordMismatchCode ? " " + DetachMoveReattachHint : string.Empty);
+
+    /// <summary>
+    /// The supported sequence for moving an invoice that has lines (#2081 follow-up; D-75, D-96), shown with
+    /// <see cref="LineInvoiceCoreRecordMismatchCode"/>. A line is never re-filed from its invoice, and the invoice and its
+    /// lines must always regard one core record, so neither can move first while they are attached. A line with no invoice is
+    /// decided on its own lookup alone, which is what makes the sequence possible. Fixed text: it names no record and no user data.
+    /// </summary>
+    public const string DetachMoveReattachHint =
+        "To move an invoice that has lines: detach each line (clear its invoice), move the invoice, move each line to "
+        + "the same matter, project or work assignment, then re-attach the lines to the invoice.";
 
     /// <summary>The generic update paths' refusal on the existing "throw" contract (<see cref="CodeOnlyRefusalMessage"/>).</summary>
     public static RecordOwnerUnresolvedException RefusalException(string entityLogicalName, string refusalCode) =>
@@ -493,7 +509,8 @@ public static class InvoiceFamilyCoreRecordGuard
                 + (other.Regarding is { } r && !other.IsRefused
                     ? $"regards {r.LogicalName}({r.Id:D})"
                     : $"names no single core record ({other.RefusalCode})")
-                + $"; {rule}. Nothing was written.");
+                + $"; {rule}. Nothing was written."
+                + (mismatchCode == LineInvoiceCoreRecordMismatchCode ? " " + DetachMoveReattachHint : string.Empty));
         }
 
         return decided;

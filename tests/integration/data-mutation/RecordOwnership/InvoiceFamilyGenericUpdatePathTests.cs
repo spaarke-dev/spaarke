@@ -24,7 +24,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// their write when it targets <c>sprk_invoice</c> / <c>sprk_billingevent</c> and touches a guarded lookup, and refuse with
 /// its stable code. A write that touches no guarded lookup, or another table, is unaffected and reads nothing for it.
 /// </summary>
-public class InvoiceFamilyGenericUpdatePathTests
+public partial class InvoiceFamilyGenericUpdatePathTests
 {
     private static readonly Guid Invoice = Guid.Parse("02200000-0000-4000-8000-0000000000a1");
     private static readonly Guid Matter = Guid.Parse("02200000-0000-4000-8000-0000000000a2");
@@ -123,15 +123,17 @@ public class InvoiceFamilyGenericUpdatePathTests
     }
 
     [Fact]
-    public async Task DataverseUpdateHandler_AnInvoiceUpdateTouchingNoCoreLookup_IsWritten_AndReadsNothingForTheGuard()
+    public async Task DataverseUpdateHandler_AnInvoiceUpdateTouchingNoCoreLookup_IsWritten_AfterTheGuardConfirmsTheRowExists()
     {
-        var app = new Mock<IGenericEntityService>(MockBehavior.Strict); // any read would throw
+        var app = InvoiceUnderAMatter(); // strict: the one stored-row read (#2081); a line query would throw
 
         await Handler(app.Object).UpdateAsync(
             "sprk_invoice", Invoice, new Dictionary<string, object?> { ["sprk_name"] = "Renamed" },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
         WrittenOnce("sprk_invoice", Invoice);
+        app.Verify(a => a.RetrieveAsync("sprk_invoice", Invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once);
+        app.Verify(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ── The playbook update: UpdateRecordActionCore ────────────────────────────────────────────────────────────────
@@ -176,9 +178,9 @@ public class InvoiceFamilyGenericUpdatePathTests
     }
 
     [Fact]
-    public async Task UpdateRecordActionCore_AnInvoiceUpdateTouchingNoCoreLookup_IsWritten_AndReadsNothingForTheGuard()
+    public async Task UpdateRecordActionCore_AnInvoiceUpdateTouchingNoCoreLookup_IsWritten_AfterTheGuardConfirmsTheRowExists()
     {
-        var app = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var app = InvoiceUnderAMatter();
 
         await Core(app.Object).UpdateAsync(
             new UpdateRecordActionInput("sprk_invoice", Invoice, FieldMappings: null,
@@ -186,6 +188,8 @@ public class InvoiceFamilyGenericUpdatePathTests
             CancellationToken.None);
 
         WrittenOnce("sprk_invoice", Invoice);
+        app.Verify(a => a.RetrieveAsync("sprk_invoice", Invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once);
+        app.Verify(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ── The field-mapping push: ApplyMappingsToChildRecordsAsync ─────────────────────────────────────────────────

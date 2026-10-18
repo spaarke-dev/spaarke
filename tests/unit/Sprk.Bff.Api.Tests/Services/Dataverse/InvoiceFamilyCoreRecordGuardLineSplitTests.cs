@@ -1,3 +1,4 @@
+using System.ServiceModel;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -165,19 +166,108 @@ public class InvoiceFamilyCoreRecordGuardLineSplitTests
     };
 
     [Fact]
-    public async Task GenericUpdate_ATableOutsideTheTwo_OrAPatchTouchingNoGuardedLookup_IsNotChecked_AndReadsNothing()
+    public async Task GenericUpdate_ATableOutsideTheTwo_IsNotChecked_AndReadsNothing()
     {
         var strict = new Mock<IGenericEntityService>(MockBehavior.Strict);
 
         (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_todo", InvoiceId,
             new Dictionary<string, object?> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) }, strict.Object))
             .Should().BeNull();
-        (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId,
-            new Dictionary<string, object?> { ["sprk_name"] = "Renamed", ["sprk_totalamount"] = 1m }, strict.Object))
-            .Should().BeNull();
-        (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId,
-            new Dictionary<string, object?> { ["sprk_name"] = "Renamed" }, appOnly: null))
-            .Should().BeNull("nothing guarded is written, so no reader is needed");
+        (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_todo", InvoiceId,
+            new Dictionary<string, object?> { ["sprk_name"] = "x" }, appOnly: null))
+            .Should().BeNull("another table is the upsert fix's other half (#2081), not this guard's");
+    }
+
+    // ── #2081 (ebilling-r1 follow-up): the generic paths PATCH with no If-Match, which is an UPSERT. For the invoice family
+    //    the stored row is read for EVERY write, so a stale or deleted id is refused instead of creating an orphan row. ───
+
+    private static FaultException<OrganizationServiceFault> NoSuchRow() =>
+        new(new OrganizationServiceFault { ErrorCode = -2147220969 }, new FaultReason("does not exist"));
+
+    private static Dictionary<string, object?> Plain() => new() { ["sprk_name"] = "Renamed", ["sprk_totalamount"] = 1m };
+
+    private static Dictionary<string, object?> ProjectLookup() => new() { ["sprk_project"] = new EntityReference("sprk_project", ProjectId) };
+
+    public static TheoryData<string, bool, bool> OrphanCases()
+    {
+        var data = new TheoryData<string, bool, bool>();
+        foreach (var table in new[] { "sprk_invoice", "sprk_billingevent" })
+            foreach (var answersNull in new[] { true, false })       // a reader that returns null / one that throws object-does-not-exist
+                foreach (var touchesLookup in new[] { true, false }) // the patch sets a guarded lookup / only text
+                    data.Add(table, answersNull, touchesLookup);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(OrphanCases))]
+    public async Task GenericUpdate_ARowThatDoesNotExist_IsRefusedRecordNotFound_WhateverThePatchTouches(
+        string table, bool answersNull, bool touchesLookup)
+    {
+        var app = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var setup = app.Setup(a => a.RetrieveAsync(table, InvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()));
+        if (answersNull) setup.ReturnsAsync((Entity)null!); else setup.ThrowsAsync(NoSuchRow());
+
+        var result = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(table, InvoiceId, touchesLookup ? ProjectLookup() : Plain(), app.Object);
+
+        result!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.RecordNotFoundCode);
+        app.Verify(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("sprk_invoice")]
+    [InlineData("sprk_billingevent")]
+    public async Task GenericUpdate_ARowThatExists_AndAPatchTouchingNoGuardedLookup_IsAllowed_AfterOneRead(string table)
+    {
+        var app = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        app.Setup(a => a.RetrieveAsync(table, InvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity(table, InvoiceId) { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
+
+        (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(table, InvoiceId, Plain(), app.Object)).Should().BeNull();
+
+        app.Verify(a => a.RetrieveAsync(table, InvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("sprk_invoice", true)]
+    [InlineData("sprk_invoice", false)]
+    [InlineData("sprk_billingevent", true)]
+    [InlineData("sprk_billingevent", false)]
+    public async Task GenericUpdate_WhenTheRowCannotBeRead_FailsClosedReadFailed_EvenForAPatchTouchingNoLookup(string table, bool noReader)
+    {
+        var faulting = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        faulting.Setup(a => a.RetrieveAsync(table, InvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("socket 10.0.0.7"));
+
+        var result = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(table, InvoiceId, Plain(), noReader ? null : faulting.Object);
+
+        result!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode, "a fault is never \"the row exists\"");
+        result.Reason.Should().NotContain("10.0.0.7");
+    }
+
+    // ── The detach, move, re-attach hint (#2081 follow-up): a stable code plus a fixed sentence, no user data ─────────
+
+    private const string HintFragment =
+        "detach each line (clear its invoice), move the invoice, move each line to the same matter, project or work assignment, "
+        + "then re-attach the lines to the invoice.";
+
+    [Fact]
+    public async Task TheLineMismatchRefusals_CarryTheDetachMoveReattachHint_AndTheStableCode()
+    {
+        var invoiceMoved = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId, MoveToProject(),
+            StoredInvoiceUnderMatter([Line(InvoiceId, ("sprk_matter", "sprk_matter", MatterId))]).Object);
+
+        invoiceMoved!.RefusalCode.Should().Be("invoice_family_line_invoice_core_record_mismatch");
+        invoiceMoved.Reason.Should().Contain("Nothing was written.").And.EndWith(HintFragment);
+        InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(invoiceMoved.RefusalCode!).Should().Be(
+            "The invoice-family core-record rule refused this write (invoice_family_line_invoice_core_record_mismatch); "
+            + "nothing was written. To move an invoice that has lines: " + HintFragment);
+    }
+
+    [Fact]
+    public void ACodeOnlyRefusal_OfAnyOtherCode_CarriesNoHint()
+    {
+        InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(InvoiceFamilyCoreRecordGuard.RecordNotFoundCode).Should().Be(
+            "The invoice-family core-record rule refused this write (invoice_family_record_not_found); nothing was written.");
     }
 
     [Fact]

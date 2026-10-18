@@ -604,6 +604,10 @@ public class FieldMappingPushAuthorizationContractTests
             Entities.Setup(e => e.GetEntitySetNameAsync(targetEntity, It.IsAny<CancellationToken>())).ReturnsAsync(targetSet);
             Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
             Entities.Setup(e => e.GetEntitySetNameAsync("contact", It.IsAny<CancellationToken>())).ReturnsAsync("contacts");
+            // ebilling-r1 #2081: the invoice-family guard reads each pushed child's stored row (app-only) and refuses a missing
+            // one, so the children the caller's query found exist here too (no core lookups stored).
+            Entities.Setup(e => e.RetrieveAsync(targetEntity, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id));
             FieldMappings
                 .Setup(f => f.UpdateRecordFieldsAsync(
                     It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
