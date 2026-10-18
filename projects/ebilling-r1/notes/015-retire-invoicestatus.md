@@ -96,6 +96,12 @@ So the grid has to move between the BFF deploy and the delete, and the grid belo
 
 ### 3.5 Remaining sequence (main session; owner OK is D-97), and the live spend facts
 
+**Deploy-order rule (uac-r2's re-check; supersedes the looser wording in 3.4 and the Sequence below where they differ).** The order is:
+1. A BFF that admits `statuscode` in the external allow-lists goes live **before** any SPA that reads `statuscode`. Otherwise invoice details and the project / matter invoice sections get HTTP 400 `ErrorFetchXmlColumnNotPermitted`.
+2. The outside-counsel grid (`3ff4102c`) moves to `statuscode` any time after step 1. **Done 2026-10-18** (section 12).
+3. The column is deleted only after **both** a BFF carrying 015's Finance readers **and** the `statuscode` SPA are live.
+4. Then the transitional entries are removed (the follow-up below).
+
 **Sequence.** Shared dev's BFF and external SPA are deployed only by SPA-r3 from its branch (project CLAUDE.md section 6), so every step that depends on a deploy is R3's. The delete script cannot see what is live; the operator passes the commit each deploy was built from, and the script checks that commit's source by content (section 5.6).
 
 1. **R3 deploys a BFF that admits both columns** (candidate `2bda5ebe1`: its invoices allow-list holds the old column and `statuscode`), **then the SPA**. 015's own allow-list is the same union (section 4), so the merge of the two branches stays consistent.
@@ -294,7 +300,7 @@ No `*.csproj`, `Directory.Packages.props` or `package.json` changed since the ba
 
 ## 11. Review fix round (2026-10-17): item map, evidence, open points
 
-Code commits on top of `7c0daf8c9`: `f5be2bbc8` (A), `d28034842` (B, C), `963f03c01` (F, guard), `dec408318` (E); the SignalReevaluationJobTests fake (F) is in `f5be2bbc8`; this notes update is the last commit.
+Code commits on top of `7c0daf8c9`: `62d51bf2e` (A), `22b95cdf6` (B, C), `450d6969f` (F, guard), `9e49bda82` (E); the SignalReevaluationJobTests fake (F) is in `62d51bf2e`; the notes update is `d249e9a50`. The follow-up round after uac-r2's and ontology-r1's re-checks is section 11.5.
 
 ### 11.1 Item to proof
 
@@ -340,8 +346,36 @@ Not exercised live (the column still exists on dev, and no write was allowed): t
 ### 11.4 Open points and known limits
 
 - Merge with R3: both branches edit the invoices `ReadableColumns` block (R3 puts `statuscode` on its own line with its own comment; 015 adds the old column on its own line with the `transitional` marker). Expect a trivial textual conflict; the resolution is the union, keeping 015's marker comment so the guard's exemption line stays exact. The follow-up commit then removes the old-column line on the merged branch.
+- **Merge note: R3's text in `ExternalAccessModule.cs` names the column inline** (`a6513cd56:456` and `:460`). On merge, keep **015's marker line** (`"sprk_invoicestatus", // transitional (015/D-97): remove after the dev column delete`). Keeping R3's text instead fails `NoReader_OfTheRetiredInvoiceStatusColumn` and `EveryTransitionalExemption_IsStillNeeded` loudly (the exact exempt line is gone and another line names the column), and the `-Delete` pre-flight refuses that commit too (its `git grep` finds a module line that is not the exact marker line).
 - K-class (no fix): `-Delete`'s attestation checks the three Finance readers the brief names, not every 015 reader (`FinanceSummaryService`, `FinancialCalculationToolHandler`, `InvoiceLiveFactResolver`). They arrive in the same commit as the three, so a build containing the three contains the rest (K4).
 - The seam test's live run for D-103 and the K1/K2 live paths are proven by reading only (11.2, 11.3).
+
+### 11.5 Follow-up round (2026-10-18): uac-r2 and ontology-r1 re-checks of the fix round
+
+Commits on top of `be1c60e38`: `67e72fe3e` (items 1, 2), `c05e78103` (item 3); this notes update is the last commit. No live writes in this round (the grid switch already ran, section 12); every Dataverse call below is a read-only GET.
+
+| Item | Done | Proof |
+|---|---|---|
+| uac F2: "never grows" | `TheExemptionList_NeverGrows` asserts the two exact file paths (in order) and that each exempt line contains `transitional (015/D-97)` (`ExemptionListProblem`); it no longer checks a count | Mutation: the test file's entry swapped for the same line in `FinanceSummaryService.cs` (still 2 entries): the test fails with "the exempt files must be exactly [...], found [...FinanceSummaryService.cs]"; the old `Length <= 2` check passed it. Restored. Control `TheExemptionListCheck_FiresOnAnyDeparture` (swapped file, reorder, dropped, extra, unmarked line). |
+| uac K1: duplicate copies | The scan counts exempt hits per entry (`ScanLines`, `ExemptionUsageProblems`) and fails any count above 1 | Mutation: the marker line pasted twice in `ExternalAccessModule.cs`: `NoReader_...` fails with "the exempt line occurs 2 times". Restored. Must-fire control `TheDetector_FiresOnADuplicatedExemptLine`. |
+| uac K2 (grid case) | After the case-sensitive Replace, `(?i)sprk_invoicestatus` still matching refuses (before any write, also under `-WhatIf`) | Harness (below), case C |
+| ontology K4 (412) | On HTTP 412 the row is re-read: no longer naming the column (and not empty) reports "already applied" and returns (exit 0); otherwise the refusal stays | Harness, case D (five re-read outcomes plus a non-412 error rethrown unchanged) |
+| `-Delete` content check | `Assert-NoRetiredColumnReaders`: `git grep -il sprk_invoicestatus <sha> -- src/server` on the BFF sha and `-- src/client/external-spa/src` on the SPA sha; any hit refuses except the one exact transitional line in `ExternalAccessModule.cs` (at most once); the specific checks stay | Section 11.5.1 |
+| `-WhatIf` wording | Help (DESCRIPTION), the run header and the closing line say `-WhatIf` writes nothing but performs read-only GETs against Dataverse after the git pre-flight | Run output below |
+
+**Interpretation, flagged:** the brief's single command covers both paths. Each attested commit is scanned over the tree its artifact is built from: the BFF sha over `src/server`, the SPA sha over `src/client/external-spa/src`. R3 deployed the BFF (03:34) before the SPA (03:36), so scanning the SPA tree at the BFF's commit would refuse a correct BFF attestation.
+
+#### 11.5.1 Script evidence (read-only; the harness is a scratch file, not committed: it loads the script's functions by AST, stubs Dataverse and uses real git; cases A to D)
+
+Final test runs on `c05e78103` (the notes commit changes no code): `dotnet test tests/Spaarke.ArchTests` 1172 passed, 0 failed (the guard family alone, filter `InvoiceStatusRetirement|FinanceBaseValues`: 26 passed); `dotnet test tests/unit/Sprk.Bff.Api.Tests` filter `ExternalModule|Finance`: 1558 passed, 0 failed, 3 skipped.
+
+
+- `-Delete -WhatIf`, BFF `9721819ed`: REFUSED, exit 2, at the existing allow-list check (that commit does not list `statuscode`), before the new scan.
+- `Assert-NoRetiredColumnReaders` on `9721819ed` directly (real git): BFF tree REFUSED, 5 files: `FinanceBaseValues.cs`, `FinanceSummaryService.cs`, `InvoiceReviewService.cs`, `Tools/FinancialCalculationToolHandler.cs`, `Signals/PolicyVersionValidator.cs`; SPA tree REFUSED, 2 files: `RecordDetailFields.tsx`, `RecordDetailModal.tsx`. (The new scan catches `FinanceSummaryService.cs` and `FinancialCalculationToolHandler.cs`, which the three named-file checks never looked at.)
+- The same function on this branch's tip (`c05e78103`): BFF tree and SPA tree pass.
+- Stubbed `git`: nothing found passes; the exact marker line once passes (CRLF-trimmed); the exact line twice, a second module line naming the column, R3's inline text (`a6513cd56:456`), another file in `src/server`, and a git failure each REFUSE.
+- `-Delete -WhatIf -OwnerApproval 'D-97 2026-10-17 owner'`, BFF = SPA = `c05e78103`: pre-flight passes ("Pre-flight (git only, before any Dataverse call) passed"), then the read-only inventory: 3 rows with a value (all ToReview, statuscode 1), 10 invoices at (0, 1), forms / views / grid configurations 0, `DELETE VERDICT: READY`, every step `WOULD ...`, "nothing was written (read-only GETs against Dataverse did run, after the git pre-flight)". The delete itself was not run.
+- `-GridConfig -BffDeployAttestation ebc74b331 -WhatIf`: pre-flight passes; the grid row has no reference ("skipped ... no reference"), as expected after 2026-10-18 03:42:42.
 
 ## 12. Live run log
 
