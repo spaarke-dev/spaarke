@@ -198,7 +198,9 @@ public sealed class RuleSetOutcome<T> where T : class
 /// state), and a failure in step 1 or 2 takes back the end dates written for policies whose pointer did not move, so the old versions
 /// stay in force with no end date. A failure of step 3 leaves every rule in force and the set not Published; the next publish writes the set.
 /// A retry re-stamps an old version whose end date differs from the new effective date, so it leaves no gap. Each step is atomic per
-/// 1,000 rows (the Dataverse transaction cap), the whole is not.</para>
+/// 1,000 rows (the Dataverse transaction cap), the whole is not. Steps 1 and 2, the take-back and an accept / reject are conditional on
+/// the row versions read (review pass 2): a row another admin changed since is refused with 409 <c>ruleset.concurrent_edit</c>, never
+/// overwritten.</para>
 /// <para><b>Domain.</b> Every read of <c>sprk_policy</c> and <c>sprk_ruleset</c> here carries <c>sprk_domain = Billing</c> in the query
 /// (<see cref="RuleDomains.AddBillingFilter"/>) AND is re-checked per row (<see cref="RuleDomains.IsBillingRow"/>), so an Ontology policy
 /// (empty or Ontology domain) is the uniform "not found" for every operation and is never read into a response or written. This service
@@ -234,6 +236,7 @@ public class RuleSetService
     internal const string CodeWriteFailed = "ruleset.write_failed";
     internal const string CodeSourceMissing = "ruleset.source_missing";
     internal const string CodeAlreadyDrafted = "ruleset.already_drafted";
+    internal const string CodeConcurrentEdit = "ruleset.concurrent_edit";
 
     /// <summary>The prefix of a drafted rule's policy code: <c>BRD-{rule set id, 32 hex}-{n, 3 digits}</c> (50 characters at most is the column; this is 40).</summary>
     internal const string DraftCodePrefix = "BRD-";
@@ -257,14 +260,25 @@ public class RuleSetService
     internal const int MaxPerTransaction = 1000;
     internal const int MaxInValues = 500;
 
+    /// <summary>The row version Dataverse advances on every write; the publish and decide writes are conditional on it (review pass 2).</summary>
+    internal const string RowVersionColumn = "versionnumber";
+
+    /// <summary>
+    /// The namespace of the ids of versions an edit creates (RFC 4122 version 5). A constant of this service, generated once; never
+    /// change it: the primary key of version N of a policy is <see cref="VersionIdFor"/> of it, which is what makes two concurrent edits
+    /// of one in-force version collide instead of both creating version N.
+    /// </summary>
+    internal static readonly Guid EditVersionIdNamespace = new("3d7b9c1e-52a4-4f86-b0e3-9a6c2f41d875");
+
     // sprk_policy columns billing needs on a policy that is NOT created here (075 creates them): see the notes for the row shape.
     private static readonly string[] PolicyColumns =
-        { "sprk_name", "sprk_policycode", "sprk_currentversion", "sprk_enabled", "sprk_ruleset", RuleDomains.PolicyDomainColumn };
+        { "sprk_name", "sprk_policycode", "sprk_currentversion", "sprk_enabled", "sprk_ruleset", RuleDomains.PolicyDomainColumn, RowVersionColumn };
 
     private static readonly string[] VersionColumns =
     {
         "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
         "sprk_consequence", "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", "sprk_inforceto",
+        RowVersionColumn,
     };
 
     private static readonly string[] RuleSetColumns =
@@ -877,8 +891,10 @@ public class RuleSetService
     /// <summary>
     /// Edits a rule's working version. A draft (never in force) is edited in place; a version that is, or has been, in force is left
     /// untouched and the edit becomes a NEW Proposed version. The result is validated first: an invalid result writes nothing. An in-place
-    /// edit that changes the type, body, template or consequence of an Accepted or Rejected draft returns it to Proposed, so it is
-    /// accepted again before a publish can put it in force.
+    /// edit that changes the type, body, template, consequence, clause text or clause location returns the draft to Proposed (D-109), so
+    /// it is accepted again before a publish can put it in force. The new version's id is derived from (policy, number)
+    /// (<see cref="VersionIdFor"/>), so two edits of one in-force version that both read number N cannot both create version N+1: the
+    /// second create collides on the primary key and is answered 409 <c>ruleset.concurrent_edit</c> instead of being silently lost.
     /// </summary>
     public virtual async Task<RuleSetOutcome<ProposalEdited>> EditAsync(Guid ruleSetId, Guid policyId, ProposalEdit edit, CancellationToken ct)
     {
@@ -955,12 +971,14 @@ public class RuleSetService
                     fields["sprk_clauselocation"] = merged.ClauseLocation;
                 }
 
-                // What the rule does or says to the firm changed: it is back in review. A decided draft (Accepted or Rejected) otherwise
-                // keeps its decision for content nobody decided on, and publish would put the edit in force. A headline or clause edit,
-                // or an edit that sets the same value, changes nothing the decision was about.
-                if (work.StateOrProposed != ProposalState.Proposed
-                    && (merged.RuleType != work.RuleType || merged.RuleBody != work.RuleBody
-                        || merged.Template != work.Template || merged.Consequence != work.Consequence))
+                // What the rule does, or what the firm is shown of it, changed: it is back in review (D-109: the clause text and its
+                // location count, as the type, body, template and consequence do). The status is written with EVERY content change,
+                // even when this read saw Proposed: an Accept that read the old content may land between this read and this write, and
+                // this write must then take its decision back. The opposite order (this write first, then that Accept) is refused by the
+                // Accept's own row version condition (DecideAsync). A headline edit, or one that sets the same values, keeps the decision.
+                if (merged.RuleType != work.RuleType || merged.RuleBody != work.RuleBody
+                    || merged.Template != work.Template || merged.Consequence != work.Consequence
+                    || merged.ClauseReference != work.ClauseReference || merged.ClauseLocation != work.ClauseLocation)
                 {
                     fields["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Proposed);
                     merged = merged with { State = (int)ProposalState.Proposed };
@@ -979,7 +997,7 @@ public class RuleSetService
             }
 
             var number = rule.Versions.Max(v => v.Number) + 1;
-            var created = new Entity(VersionEntity)
+            var created = new Entity(VersionEntity, VersionIdFor(policyId, number))
             {
                 ["sprk_name"] = $"{rule.Policy.Code} v{number.ToString(CultureInfo.InvariantCulture)}",
                 ["sprk_policy"] = new EntityReference(PolicyEntity, policyId),
@@ -1005,7 +1023,28 @@ public class RuleSetService
             }
 
             owner.ApplyTo(created);
-            var newId = await _entities.CreateAsync(created, ct);
+            Guid newId;
+            try
+            {
+                newId = await _entities.CreateAsync(created, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // Whatever the fault, look again: a version with this number now existing means another edit created it first (the id
+                // is the same, so this create collided with it). Refused as a conflict, never reported as a save, so no edit is lost
+                // silently. Otherwise the create failed for another reason (500 below).
+                if (await VersionNumberExistsAsync(policyId, number))
+                {
+                    _logger.LogWarning(ex, "Rule {PolicyId} of rule set {RuleSetId}: version {Number} was created by another edit first; this edit is refused as a conflict",
+                        policyId, ruleSetId, number);
+                    return RuleSetOutcome<ProposalEdited>.Refused(
+                        StatusCodes.Status409Conflict, CodeConcurrentEdit,
+                        "The rule changed while your edit was being saved: another edit created its next version first. Reload the rule and, if your change is not there, make it again.");
+                }
+
+                throw;
+            }
+
             var newWorking = merged with
             {
                 Id = newId, Number = number, State = (int)ProposalState.Proposed, InForceFrom = null, InForceTo = null,
@@ -1058,14 +1097,24 @@ public class RuleSetService
         var state = accept ? ProposalState.Accepted : ProposalState.Rejected;
         try
         {
-            await _entities.UpdateAsync(VersionEntity, work.Id, new Dictionary<string, object>
+            // Conditional on the row as read: the decision is about the content this read validated. An edit that landed since then
+            // (it changed the content and wrote Proposed) advanced the row version, so this decision is refused instead of putting
+            // content nobody reviewed into the Accepted state (review pass 2).
+            await _entities.BulkUpdateIfRowVersionsMatchAsync(VersionEntity, new List<(Guid id, Dictionary<string, object> fields, long rowVersion)>
             {
-                ["sprk_proposalstatus"] = new OptionSetValue((int)state),
+                (work.Id, new Dictionary<string, object> { ["sprk_proposalstatus"] = new OptionSetValue((int)state) }, RequireRowVersion(work.RowVersion, VersionEntity, work.Id)),
             }, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (System.Data.DBConcurrencyException)
+        {
+            _logger.LogWarning("Rule {PolicyId}: the {State} decision was refused; version {VersionId} changed after it was read", policyId, state, work.Id);
+            return RuleSetOutcome<ProposalView>.Refused(
+                StatusCodes.Status409Conflict, CodeConcurrentEdit,
+                "The rule changed after you opened it, so your decision was not saved. Reload the rule, review it and decide again.");
         }
         catch (Exception ex)
         {
@@ -1170,9 +1219,12 @@ public class RuleSetService
             }
 
             _logger.LogInformation("Rule set {RuleSetId} marked Published: {Count} rule version(s) were already in force from {Effective}", ruleSetId, inForce.Count, startedDate);
+            // The superseded version is the one that carries an end date (the earlier attempt stamped it); a lower-numbered version
+            // without one was never in force (a rejected draft, say) and superseded nothing.
             return RuleSetOutcome<RuleSetPublished>.Done(PublishedResult(
                 set, ruleSetId, startedDate, inForce.Select(r => new PublishedRuleVersion(
-                    r.Policy.Id, r.Working.Id, r.Working.Number, r.Versions.Where(v => v.Number < r.Working.Number).MaxBy(v => v.Number)?.Id)).ToList(),
+                    r.Policy.Id, r.Working.Id, r.Working.Number,
+                    r.Versions.Where(v => v.Id != r.Working.Id && v.InForceTo is not null).MaxBy(v => v.Number)?.Id)).ToList(),
                 proposed, rejected));
         }
 
@@ -1198,11 +1250,17 @@ public class RuleSetService
         // The last point at which the caller going away stops the publish. The writes below are not abandoned half way (D-14).
         ct.ThrowIfCancellationRequested();
 
-        if (!await WritePublishAsync(ruleSetId, set, status, candidates, effectiveStart))
+        switch (await WritePublishAsync(ruleSetId, set, status, candidates, effectiveStart))
         {
-            return RuleSetOutcome<RuleSetPublished>.Refused(
-                StatusCodes.Status500InternalServerError, CodeWriteFailed,
-                "The rule set could not be published. Publish again; if it keeps failing, contact support.");
+            case PublishWrite.Conflict:
+                return RuleSetOutcome<RuleSetPublished>.Refused(
+                    StatusCodes.Status409Conflict, CodeConcurrentEdit,
+                    "A rule in this set changed while it was being published (another publish, edit or decision), so the publish stopped. " +
+                    "Reload the rule set and publish again.");
+            case PublishWrite.Failed:
+                return RuleSetOutcome<RuleSetPublished>.Refused(
+                    StatusCodes.Status500InternalServerError, CodeWriteFailed,
+                    "The rule set could not be published. Publish again; if it keeps failing, contact support.");
         }
 
         _logger.LogInformation("Rule set {RuleSetId} published: {Count} rule version(s) in force from {Effective}", ruleSetId, candidates.Count, effectiveDate);
@@ -1219,60 +1277,123 @@ public class RuleSetService
         return new RuleSetPublished(ruleSetId, "Published", effectiveDate, published, proposed, rejected, visible, visible ? VisibleNotice : HiddenNotice);
     }
 
+    /// <summary>How the publish writes ended.</summary>
+    private enum PublishWrite
+    {
+        Done,
+
+        /// <summary>A write failed (500). The end dates this publish may have written are taken back where the pointer did not move.</summary>
+        Failed,
+
+        /// <summary>A row changed after the publish read it (409). The refused chunk wrote nothing and is not taken back.</summary>
+        Conflict,
+    }
+
     /// <summary>
     /// The three publish writes, in order, with <see cref="CancellationToken.None"/>: a client that disconnects between them must not leave
-    /// an end date on a version whose pointer never moved (D-14: the stamp and the pointer move together). Returns false when a write
-    /// failed. A failure before the pointer move takes the end dates this publish wrote back (<see cref="TakeBackEndDatesAsync"/>); a
-    /// failure of the last write leaves every rule in force and the set not Published, which the next publish finishes.
+    /// an end date on a version whose pointer never moved (D-14: the stamp and the pointer move together). A failure before the pointer
+    /// move takes back the end dates this publish may have written (<see cref="TakeBackEndDatesAsync"/>); a failure of the last write leaves
+    /// every rule in force and the set not Published, which the next publish finishes.
     /// </summary>
-    private async Task<bool> WritePublishAsync(
+    /// <remarks>
+    /// <para><b>Conditional (review pass 2).</b> Steps 1 and 2 are conditional on the row versions <see cref="LoadRulesAsync"/> read: a row
+    /// another admin changed since (a concurrent publish that stamped the same old version or moved the same pointer, an edit, a decision)
+    /// makes Dataverse refuse that chunk, which then wrote NOTHING, and the publish stops with <see cref="PublishWrite.Conflict"/>.</para>
+    /// <para><b>Take-back only for what landed.</b> The chunks of step 1 that landed (or whose outcome is unknown) are taken back for the
+    /// policies whose pointer did not move. A refused step 1 chunk is not: whatever end date its old versions carry is not this
+    /// publish's, and clearing it could clear the end of a version a concurrent publish really superseded. For a refused step 2 chunk the
+    /// stamps step 1 wrote for its policies stand as well: the policy changed under this publish, most likely because another publish
+    /// moved its pointer; an end date on a version still in force fails safe (the pointer decides, K3) and the next publish finishes or
+    /// re-stamps it, where clearing the end date of a version that was superseded would not be put right by anything.</para>
+    /// </remarks>
+    private async Task<PublishWrite> WritePublishAsync(
         Guid ruleSetId, Entity set, int? status, IReadOnlyList<RuleSetRule> candidates, DateTime effectiveStart)
     {
         var ct = CancellationToken.None;
 
-        // The old versions this publish stamps, each as it was read: its in-force-to is the value to restore. An old version that already
-        // ends on the effective date is not stamped again; one that ends on another date (an earlier attempt) is, so a retry with a
-        // different date leaves no gap between the two versions.
+        // The old versions this publish stamps. An old version that already ends on the effective date is not stamped again; one that
+        // ends on another date (an earlier attempt) is, so a retry with a different date leaves no gap between the two versions.
         var stamped = candidates.Where(r => r.Predecessor is { } p && p.InForceTo != effectiveStart).ToList();
-        var stampedPolicies = stamped.Select(r => r.Policy.Id).ToHashSet();
+        var stampedPredecessors = stamped.Select(r => r.Predecessor!.Id).ToHashSet();
+
+        // Every update and the row version it is conditional on, built before the first write: a row read without its row version stops
+        // the publish here, with nothing written.
+        var versionUpdates = new List<(Guid id, Dictionary<string, object> fields, long rowVersion)>();
+        var policyUpdates = new List<(Guid id, Dictionary<string, object> fields, long rowVersion)>();
+        try
+        {
+            foreach (var rule in candidates)
+            {
+                versionUpdates.Add((rule.Working.Id, new Dictionary<string, object> { ["sprk_inforcefrom"] = effectiveStart },
+                    RequireRowVersion(rule.Working.RowVersion, VersionEntity, rule.Working.Id)));
+                if (rule.Predecessor is { } predecessor && stampedPredecessors.Contains(predecessor.Id))
+                {
+                    versionUpdates.Add((predecessor.Id, new Dictionary<string, object> { ["sprk_inforceto"] = effectiveStart },
+                        RequireRowVersion(predecessor.RowVersion, VersionEntity, predecessor.Id)));
+                }
+
+                policyUpdates.Add((rule.Policy.Id, new Dictionary<string, object>
+                {
+                    ["sprk_currentversion"] = new EntityReference(VersionEntity, rule.Working.Id),
+                    ["sprk_enabled"] = true,
+                }, RequireRowVersion(rule.Policy.RowVersion, PolicyEntity, rule.Policy.Id)));
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex, "Rule set {RuleSetId} publish stopped before any write: a row was read without its row version", ruleSetId);
+            return PublishWrite.Failed;
+        }
+
+        var mayHaveStamped = new HashSet<Guid>();   // old versions whose end date a landed (or unknown) step 1 chunk wrote
+        var stampsStand = new HashSet<Guid>();      // policies of a refused step 2 chunk: their stamps are left
         try
         {
             // (1) the versions: the new versions' in-force-from, the old versions' in-force-to (one table, one transaction per chunk).
-            var versionUpdates = new List<(Guid id, Dictionary<string, object> fields)>();
-            foreach (var rule in candidates)
+            foreach (var chunk in versionUpdates.Chunk(MaxPerTransaction))
             {
-                versionUpdates.Add((rule.Working.Id, new Dictionary<string, object> { ["sprk_inforcefrom"] = effectiveStart }));
-                if (stampedPolicies.Contains(rule.Policy.Id))
+                var stampsInChunk = chunk.Where(u => stampedPredecessors.Contains(u.id)).Select(u => u.id).ToList();
+                mayHaveStamped.UnionWith(stampsInChunk); // before the write: a write whose outcome is unknown counts as landed
+                try
                 {
-                    versionUpdates.Add((rule.Predecessor!.Id, new Dictionary<string, object> { ["sprk_inforceto"] = effectiveStart }));
+                    await _entities.BulkUpdateIfRowVersionsMatchAsync(VersionEntity, chunk.ToList(), ct);
+                }
+                catch (System.Data.DBConcurrencyException)
+                {
+                    mayHaveStamped.ExceptWith(stampsInChunk); // refused: this chunk wrote nothing
+                    throw;
                 }
             }
 
-            foreach (var chunk in versionUpdates.Chunk(MaxPerTransaction))
-            {
-                await _entities.BulkUpdateAsync(VersionEntity, chunk.ToList(), ct);
-            }
-
             // (2) the policies: the pointer move is what puts a version in force.
-            var policyUpdates = candidates.Select(rule => (rule.Policy.Id, new Dictionary<string, object>
-            {
-                ["sprk_currentversion"] = new EntityReference(VersionEntity, rule.Working.Id),
-                ["sprk_enabled"] = true,
-            })).ToList();
             foreach (var chunk in policyUpdates.Chunk(MaxPerTransaction))
             {
-                await _entities.BulkUpdateAsync(PolicyEntity, chunk.ToList(), ct);
+                try
+                {
+                    await _entities.BulkUpdateIfRowVersionsMatchAsync(PolicyEntity, chunk.ToList(), ct);
+                }
+                catch (System.Data.DBConcurrencyException)
+                {
+                    stampsStand.UnionWith(chunk.Select(u => u.id));
+                    throw;
+                }
             }
+        }
+        catch (System.Data.DBConcurrencyException ex)
+        {
+            _logger.LogWarning(ex, "Rule set {RuleSetId} publish stopped: a rule changed after the publish read it. The refused chunk wrote nothing; the end dates of the chunks that landed are taken back where the pointer did not move", ruleSetId);
+            await TakeBackEndDatesAsync(ruleSetId, stamped.Where(r => mayHaveStamped.Contains(r.Predecessor!.Id) && !stampsStand.Contains(r.Policy.Id)).ToList());
+            return PublishWrite.Conflict;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Rule set {RuleSetId} publish failed before every rule was in force; the old versions stay in force and the end dates this publish wrote are taken back", ruleSetId);
-            await TakeBackEndDatesAsync(ruleSetId, stamped);
-            return false;
+            await TakeBackEndDatesAsync(ruleSetId, stamped.Where(r => mayHaveStamped.Contains(r.Predecessor!.Id)).ToList());
+            return PublishWrite.Failed;
         }
 
         // (3) the rule set. Last, so a failure before it leaves a state a second publish finishes.
-        return await MarkPublishedAsync(ruleSetId, set, status, effectiveStart);
+        return await MarkPublishedAsync(ruleSetId, set, status, effectiveStart) ? PublishWrite.Done : PublishWrite.Failed;
     }
 
     /// <summary>Writes the rule set Published (and its effective-from when it has none or was not yet Published). False on failure, logged.</summary>
@@ -1301,10 +1422,13 @@ public class RuleSetService
     }
 
     /// <summary>
-    /// After a failed publish: puts back the in-force-to every old version held before this publish stamped it, but only where the policy's
-    /// pointer did NOT move (a version that was replaced keeps its end date). Decided from a fresh read, not from which write failed, so a
-    /// partly applied chunk or a write whose outcome is unknown is handled the same way. A version that cannot be put back is logged as an
-    /// Error with its id: until it is cleared, or the set is published again, a version in force carries an end date.
+    /// After a failed or refused publish: clears the end date of every old version this publish may have stamped whose policy's pointer
+    /// still names it (it is in force, so it has no end; a version that was replaced keeps its end date). Decided from a fresh read, not
+    /// from which write failed, so a partly applied chunk or a write whose outcome is unknown is handled the same way. The value written is
+    /// always "no end date", never the value read before the publish: that value may itself be a stale stamp left by an earlier attempt
+    /// (review pass 2). Each clear is conditional on the row version of the fresh read, so a version another publish (or a late write)
+    /// changed after that read is left as it is. A version not cleared is logged as an Error with its id: until it is cleared, or the set
+    /// is published again, a version in force carries an end date.
     /// </summary>
     private async Task TakeBackEndDatesAsync(Guid ruleSetId, IReadOnlyList<RuleSetRule> stamped)
     {
@@ -1313,7 +1437,7 @@ public class RuleSetService
             return;
         }
 
-        var restore = new List<(Guid id, Dictionary<string, object> fields)>();
+        var restore = new List<(Guid id, Dictionary<string, object> fields, long rowVersion)>();
         try
         {
             var now = await LoadRulesAsync(ruleSetId, CancellationToken.None);
@@ -1328,10 +1452,9 @@ public class RuleSetService
                 var old = rule.Predecessor!;
                 if (byPolicy.TryGetValue(rule.Policy.Id, out var current)
                     && current.Policy.CurrentVersionId == old.Id
-                    && current.Versions.FirstOrDefault(v => v.Id == old.Id) is { } row
-                    && row.InForceTo != old.InForceTo)
+                    && current.Versions.FirstOrDefault(v => v.Id == old.Id) is { InForceTo: not null } row)
                 {
-                    restore.Add((old.Id, new Dictionary<string, object> { ["sprk_inforceto"] = (object?)old.InForceTo ?? DBNull.Value }));
+                    restore.Add((old.Id, new Dictionary<string, object> { ["sprk_inforceto"] = DBNull.Value }, RequireRowVersion(row.RowVersion, VersionEntity, old.Id)));
                 }
             }
         }
@@ -1346,7 +1469,12 @@ public class RuleSetService
         {
             try
             {
-                await _entities.BulkUpdateAsync(VersionEntity, chunk.ToList(), CancellationToken.None);
+                await _entities.BulkUpdateIfRowVersionsMatchAsync(VersionEntity, chunk.ToList(), CancellationToken.None);
+            }
+            catch (System.Data.DBConcurrencyException ex)
+            {
+                _logger.LogError(ex, "Rule set {RuleSetId}: the end date of a failed publish was not taken back from version(s) {VersionIds}: one of them changed after the take-back read it (another publish or a late write). Each keeps its end date; one still in force keeps it until it is cleared or the rule set is published again",
+                    ruleSetId, string.Join(", ", chunk.Select(c => c.id)));
             }
             catch (Exception ex)
             {
@@ -1354,6 +1482,40 @@ public class RuleSetService
                     ruleSetId, string.Join(", ", chunk.Select(c => c.id)));
             }
         }
+    }
+
+    /// <summary>The row version a conditional write needs. Dataverse always returns <c>versionnumber</c> when it is selected; a row read
+    /// without one is not written unconditionally instead (that would defeat the condition): the write fails (500, logged).</summary>
+    private static long RequireRowVersion(long? rowVersion, string entity, Guid id) =>
+        rowVersion ?? throw new InvalidOperationException($"{entity} {id} was read without its row version; it is not written unconditionally.");
+
+    /// <summary>
+    /// The id of version <paramref name="number"/> of <paramref name="policyId"/> when an edit creates it: a version-5 UUID (SHA-1) of the
+    /// name <c>"sprk_policyversion:{policyId:D}:{number}"</c> in <see cref="EditVersionIdNamespace"/>. Two edits that both create the same
+    /// number therefore create the same primary key, and Dataverse refuses the second (the same derivation as
+    /// <c>InquiryDispositionService.TodoIdFor</c> and <c>SignalSuppressionService.ProbeId</c>, which are private to their namespaces).
+    /// </summary>
+    internal static Guid VersionIdFor(Guid policyId, int number)
+    {
+        var name = System.Text.Encoding.UTF8.GetBytes(
+            string.Create(CultureInfo.InvariantCulture, $"sprk_policyversion:{policyId:D}:{number}"));
+        var input = new byte[16 + name.Length];
+        EditVersionIdNamespace.ToByteArray(bigEndian: true).CopyTo(input, 0);
+        name.CopyTo(input, 16);
+
+        var bytes = System.Security.Cryptography.SHA1.HashData(input)[..16];
+        bytes[6] = (byte)((bytes[6] & 0x0F) | 0x50); // version 5
+        bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80); // RFC 4122 variant
+        return new Guid(bytes, bigEndian: true);
+    }
+
+    /// <summary>Whether <paramref name="policyId"/> has a version numbered <paramref name="number"/> (read after a failed create).</summary>
+    private async Task<bool> VersionNumberExistsAsync(Guid policyId, int number)
+    {
+        var query = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet("sprk_versionnumber"), TopCount = 1 };
+        query.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, policyId);
+        query.Criteria.AddCondition("sprk_versionnumber", ConditionOperator.Equal, number);
+        return (await _entities.RetrieveMultipleAsync(query, CancellationToken.None)).Entities.Count > 0;
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -1450,15 +1612,23 @@ public class RuleSetService
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// What <paramref name="firmId"/> may be shown of one rule version's clause: resolves the version's billing policy and rule set and
-    /// applies <see cref="RuleSetClauseVisibility.ForFirm"/>. A firm sees a rule set assigned to the client default or to itself, never
-    /// another firm's (FR-49). Fails closed: no text when no firm is asking, when the version, its billing policy or its rule set cannot
-    /// be read, when the rule set is not Published or is assigned to no one or to another firm, or when the version was never in force
-    /// (a draft's clause is never shown).
+    /// What the invoice's law firm (<paramref name="invoiceFirmId"/>) may be shown of one rule version's clause: resolves the version's
+    /// billing policy and rule set and applies <see cref="RuleSetClauseVisibility.ForFirm"/>. A firm sees a rule set assigned to the
+    /// client default or to itself, never another firm's (FR-49). Fails closed: no text when no firm is given, when the version, its billing
+    /// policy or its rule set cannot be read, when the rule set is not Published or is assigned to no one or to another firm, or when the
+    /// version was never in force (a draft's clause is never shown).
     /// </summary>
-    public virtual async Task<FirmClauseText> GetFirmClauseAsync(Guid policyVersionId, Guid firmId, CancellationToken ct)
+    /// <param name="policyVersionId">The rule version the finding was evaluated against.</param>
+    /// <param name="invoiceFirmId">
+    /// <b>Caller contract (130 / 131 / 133 / 134 / 135).</b> The firm of the INVOICE the finding belongs to: the invoice's
+    /// <c>sprk_vendororg</c>, read server-side, and passed only after the route's own firm-membership check has established that the caller
+    /// may see that invoice. Never a value from the request (body, query or route) and never the SPA identity's firm: a CIAM caller may
+    /// belong to several firms (130), so "the caller's firm" is not one value, and internal callers (131, 133) have no SPA identity at all.
+    /// <see cref="Guid.Empty"/> (the invoice has no firm) returns no text.
+    /// </param>
+    public virtual async Task<FirmClauseText> GetFirmClauseAsync(Guid policyVersionId, Guid invoiceFirmId, CancellationToken ct)
     {
-        if (firmId == Guid.Empty)
+        if (invoiceFirmId == Guid.Empty)
         {
             return FirmClauseText.None;
         }
@@ -1496,7 +1666,7 @@ public class RuleSetService
         }
 
         var scope = set.GetAttributeValue<OptionSetValue>("sprk_scope")?.Value;
-        var assignedToThisFirm = scope == (int)RuleSetScope.Firm && set.GetAttributeValue<EntityReference>("sprk_firm")?.Id == firmId;
+        var assignedToThisFirm = scope == (int)RuleSetScope.Firm && set.GetAttributeValue<EntityReference>("sprk_firm")?.Id == invoiceFirmId;
         if (scope != (int)RuleSetScope.ClientDefault && !assignedToThisFirm)
         {
             return FirmClauseText.None;
@@ -1512,11 +1682,13 @@ public class RuleSetService
     // Reading the rules of one rule set
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
-    internal sealed record PolicyRow(Guid Id, string Code, string Name, Guid? CurrentVersionId);
+    /// <param name="RowVersion">The row's <c>versionnumber</c> as read; the publish's pointer move is conditional on it.</param>
+    internal sealed record PolicyRow(Guid Id, string Code, string Name, Guid? CurrentVersionId, long? RowVersion = null);
 
+    /// <param name="RowVersion">The row's <c>versionnumber</c> as read; the publish and decide writes are conditional on it.</param>
     internal sealed record VersionRow(
         Guid Id, int Number, int? RuleType, string? RuleBody, string? Template, string? Headline, int? Consequence, int? State,
-        string? ClauseReference, string? ClauseLocation, DateTime? InForceFrom, DateTime? InForceTo)
+        string? ClauseReference, string? ClauseLocation, DateTime? InForceFrom, DateTime? InForceTo, long? RowVersion = null)
     {
         public ProposalState StateOrProposed =>
             State is { } s && Enum.IsDefined(typeof(ProposalState), s) ? (ProposalState)s : ProposalState.Proposed;
@@ -1574,7 +1746,8 @@ public class RuleSetService
                 p.Id,
                 p.GetAttributeValue<string>("sprk_policycode") ?? p.Id.ToString(),
                 p.GetAttributeValue<string>("sprk_name") ?? p.GetAttributeValue<string>("sprk_policycode") ?? p.Id.ToString(),
-                p.GetAttributeValue<EntityReference>("sprk_currentversion")?.Id))
+                p.GetAttributeValue<EntityReference>("sprk_currentversion")?.Id,
+                p.GetAttributeValue<long?>(RowVersionColumn)))
             .ToList();
 
         var versionsByPolicy = new Dictionary<Guid, List<VersionRow>>();
@@ -1582,6 +1755,11 @@ public class RuleSetService
         {
             var query = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet(VersionColumns) };
             query.Criteria.AddCondition("sprk_policy", ConditionOperator.In, batch);
+            // A stable order, so the working version (the highest number, MaxBy below) is the same on every read even if two rows ever
+            // share a number (rows created before edits had deterministic ids): the earliest created of them, then the lowest id.
+            query.Orders.Add(new OrderExpression("sprk_versionnumber", OrderType.Ascending));
+            query.Orders.Add(new OrderExpression("createdon", OrderType.Ascending));
+            query.Orders.Add(new OrderExpression("sprk_policyversionid", OrderType.Ascending));
             var versions = await _entities.RetrieveMultipleAsync(query, ct);
             if (versions.MoreRecords)
             {
@@ -1653,7 +1831,8 @@ public class RuleSetService
         v.GetAttributeValue<string>("sprk_clausereference"),
         v.GetAttributeValue<string>("sprk_clauselocation"),
         v.GetAttributeValue<DateTime?>("sprk_inforcefrom"),
-        v.GetAttributeValue<DateTime?>("sprk_inforceto"));
+        v.GetAttributeValue<DateTime?>("sprk_inforceto"),
+        v.GetAttributeValue<long?>(RowVersionColumn));
 
     private static RuleSetSummary Summarize(Entity set, int ruleCount)
     {

@@ -78,6 +78,26 @@ public sealed class RuleSetServiceTests
         public Action<string>? OnBulk;
         public readonly List<(LogLevel Level, string Message)> Logs = new();
         public Func<Entity, bool>? FailCreateWhen;
+
+        /// <summary>Runs at the start of every create, before the duplicate-key check: a test uses it to run a concurrent edit.</summary>
+        public Func<Entity, Task>? BeforeCreate;
+
+        /// <summary>
+        /// Runs after every read has produced its result (the rows the service got are already copied): a test uses it to land another
+        /// admin's write between the service's read and its own write, whichever write method the service uses.
+        /// </summary>
+        public Action<QueryExpression>? AfterQuery;
+
+        /// <summary>Every conditional bulk update as sent: table, ids and the row versions they were conditional on.</summary>
+        public readonly List<(string Entity, IReadOnlyList<(Guid Id, long RowVersion)> Rows)> ConditionalCalls = new();
+
+        /// <summary>Conditional bulk updates the fake refused as a row version mismatch (nothing applied).</summary>
+        public readonly List<(string Entity, IReadOnlyList<Guid> Ids)> Refusals = new();
+
+        /// <summary>The row version (Dataverse <c>versionnumber</c>) of every row: set at seed, advanced by every write.</summary>
+        public readonly Dictionary<Guid, long> RowVersions = new();
+        private readonly Dictionary<Guid, DateTime> _createdOn = new();
+        private long _clock;
         public bool IgnoreQueryFilters;
         public RecordOwnerResolution OwnerAnswer = RecordOwnerResolution.Owned(TeamId);
 
@@ -124,19 +144,42 @@ public sealed class RuleSetServiceTests
                 .ReturnsAsync((QueryExpression q, CancellationToken _) =>
                 {
                     Queries.Add(q);
-                    return new EntityCollection((Rows.GetValueOrDefault(q.EntityName) ?? new List<Entity>())
+                    var matched = (Rows.GetValueOrDefault(q.EntityName) ?? new List<Entity>())
                         .Where(r => IgnoreQueryFilters && q.EntityName != "sprk_organization" ? true : Matches(r, q.Criteria))
-                        .Take(q.TopCount ?? int.MaxValue).Select(Clone).ToList());
+                        .Select(Clone);
+                    IOrderedEnumerable<Entity>? ordered = null;
+                    foreach (var order in q.Orders) // the real query's order, as Dataverse applies it
+                    {
+                        Func<Entity, IComparable?> key = r => OrderKey(r, order.AttributeName);
+                        ordered = ordered is null
+                            ? order.OrderType == OrderType.Ascending ? matched.OrderBy(key) : matched.OrderByDescending(key)
+                            : order.OrderType == OrderType.Ascending ? ordered.ThenBy(key) : ordered.ThenByDescending(key);
+                    }
+
+                    var result = new EntityCollection((ordered ?? matched).Take(q.TopCount ?? int.MaxValue).ToList());
+                    AfterQuery?.Invoke(q);
+                    return result;
                 });
             Entities.Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Entity entity, CancellationToken _) =>
+                .Returns(async (Entity entity, CancellationToken _) =>
                 {
+                    if (BeforeCreate is not null)
+                    {
+                        await BeforeCreate(entity);
+                    }
+
                     if (FailCreateWhen?.Invoke(entity) == true)
                     {
                         throw new InvalidOperationException("simulated Dataverse failure");
                     }
 
-                    entity.Id = Guid.NewGuid();
+                    // A caller-supplied id is the primary key, as in Dataverse: a second create with it is a duplicate-key fault.
+                    if (entity.Id != Guid.Empty && Rows.GetValueOrDefault(entity.LogicalName)?.Any(r => r.Id == entity.Id) == true)
+                    {
+                        throw new InvalidOperationException($"Failed to create {entity.LogicalName} record: Cannot insert duplicate key (0x80040237).");
+                    }
+
+                    entity.Id = entity.Id == Guid.Empty ? Guid.NewGuid() : entity.Id;
                     Writes.Add((Write.Create, entity.LogicalName, entity.Id, entity.Attributes.ToDictionary(a => a.Key, a => a.Value)));
                     Seed(entity);
                     return entity.Id;
@@ -168,6 +211,35 @@ public sealed class RuleSetServiceTests
                     Order.Add("bulk:" + entity);
                     BulkCalls.Add((entity, updates.Count));
                     foreach (var (id, fields) in updates)
+                    {
+                        Writes.Add((Write.BulkUpdate, entity, id, fields));
+                        Apply(entity, id, fields);
+                    }
+
+                    return Task.CompletedTask;
+                });
+            Entities.Setup(e => e.BulkUpdateIfRowVersionsMatchAsync(
+                    It.IsAny<string>(), It.IsAny<List<(Guid id, Dictionary<string, object> fields, long rowVersion)>>(), It.IsAny<CancellationToken>()))
+                .Returns((string entity, List<(Guid id, Dictionary<string, object> fields, long rowVersion)> updates, CancellationToken ct) =>
+                {
+                    // The same transaction as BulkUpdateAsync (one table, all or nothing), each update applied only at its row version.
+                    ct.ThrowIfCancellationRequested();
+                    OnBulk?.Invoke(entity);
+                    ConditionalCalls.Add((entity, updates.Select(u => (u.id, u.rowVersion)).ToList()));
+                    if (FailBulkFor?.Invoke(entity) == true)
+                    {
+                        throw new InvalidOperationException("simulated transaction failure");
+                    }
+
+                    if (updates.Any(u => RowVersions.GetValueOrDefault(u.id) != u.rowVersion))
+                    {
+                        Refusals.Add((entity, updates.Select(u => u.id).ToList()));
+                        throw new System.Data.DBConcurrencyException("simulated row version mismatch: nothing applied");
+                    }
+
+                    Order.Add("bulk:" + entity);
+                    BulkCalls.Add((entity, updates.Count));
+                    foreach (var (id, fields, _) in updates)
                     {
                         Writes.Add((Write.BulkUpdate, entity, id, fields));
                         Apply(entity, id, fields);
@@ -208,8 +280,13 @@ public sealed class RuleSetServiceTests
                 }
 
                 list.Add(row);
+                RowVersions[row.Id] = 1000 + ++_clock;
+                _createdOn[row.Id] = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(_clock);
             }
         }
+
+        /// <summary>Another admin's write to a row (a concurrent edit, decision or publish): applies it and advances its row version.</summary>
+        public void ConcurrentWrite(string entity, Guid id, Dictionary<string, object> fields) => Apply(entity, id, fields);
 
         public Entity Row(string entity, Guid id) => Rows[entity].Single(r => r.Id == id);
 
@@ -285,13 +362,24 @@ public sealed class RuleSetServiceTests
                 if (value is DBNull) row.Attributes.Remove(key);
                 else row[key] = value;
             }
+
+            RowVersions[id] = 1000 + ++_clock; // every write advances the row version, as Dataverse's versionnumber does
         }
 
-        private static Entity Clone(Entity e)
+        /// <summary>A row as a read returns it: its columns plus the system columns the fake keeps aside (versionnumber, createdon).</summary>
+        private Entity Clone(Entity e)
         {
             var c = new Entity(e.LogicalName, e.Id);
             foreach (var a in e.Attributes) c[a.Key] = a.Value;
+            if (RowVersions.TryGetValue(e.Id, out var version)) c["versionnumber"] = version;
+            if (_createdOn.TryGetValue(e.Id, out var createdOn)) c["createdon"] = createdOn;
             return c;
+        }
+
+        private static IComparable? OrderKey(Entity row, string attribute)
+        {
+            var value = attribute == row.LogicalName + "id" ? row.Id : row.Contains(attribute) ? row[attribute] : null;
+            return value switch { OptionSetValue o => o.Value, EntityReference r => r.Id, IComparable c => c, _ => null };
         }
 
         private static bool Matches(Entity row, FilterExpression filter)
@@ -639,7 +727,13 @@ public sealed class RuleSetServiceTests
     [InlineData(ProposalState.Rejected, "template")]
     [InlineData(ProposalState.Rejected, "consequence")]
     [InlineData(ProposalState.Rejected, "type")]
-    public async Task Edit_OfADecidedDraft_ThatChangesTheTypeBodyTemplateOrConsequence_ReturnsItToProposed(ProposalState decided, string member)
+    [InlineData(ProposalState.Accepted, "clauseReference")] // D-109: the clause text and its location are content too
+    [InlineData(ProposalState.Accepted, "clauseLocation")]
+    [InlineData(ProposalState.Rejected, "clauseReference")]
+    [InlineData(ProposalState.Rejected, "clauseLocation")]
+    [InlineData(ProposalState.Proposed, "body")] // review pass 2: written even when the read saw Proposed (an Accept may land in between)
+    [InlineData(ProposalState.Proposed, "clauseReference")]
+    public async Task Edit_OfADraft_ThatChangesItsContent_WritesProposed_WhateverStateItWasReadIn(ProposalState decided, string member)
     {
         var h = new Harness();
         var set = h.RuleSet();
@@ -649,6 +743,8 @@ public sealed class RuleSetServiceTests
             "body" => Edit(body: CapBody8),
             "template" => Edit(template: "Over {{rule.maxHoursPerDay}} hours."),
             "consequence" => Edit(consequence: "Reject"),
+            "clauseReference" => Edit(quote: "A different quote."),
+            "clauseLocation" => Edit(location: "Section 9"),
             _ => Edit(type: "TimeIncrement", body: IncrementBody, template: "Hours must be a multiple of {{rule.incrementHours}}."),
         };
 
@@ -658,14 +754,15 @@ public sealed class RuleSetServiceTests
         outcome.Value.Proposal.State.Should().Be("Proposed");
         h.Row("sprk_policyversion", version).GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Proposed,
             "an edit nobody has re-accepted is not the version that was accepted");
+        h.Writes.Should().ContainSingle().Which.Fields.Should().ContainKey("sprk_proposalstatus",
+            "the content write carries the status itself, so a decision that read the old content cannot outlive it");
     }
 
     [Theory]
     [InlineData("headline")]
-    [InlineData("clauseReference")]
-    [InlineData("clauseLocation")]
     [InlineData("sameBody")]
     [InlineData("sameConsequence")]
+    [InlineData("sameClause")]
     public async Task Edit_OfAnAcceptedDraft_ThatChangesNothingTheRuleDoes_KeepsItAccepted(string member)
     {
         var h = new Harness();
@@ -674,9 +771,8 @@ public sealed class RuleSetServiceTests
         var edit = member switch
         {
             "headline" => Edit(headline: "A new headline"),
-            "clauseReference" => Edit(quote: "A different quote."),
-            "clauseLocation" => Edit(location: "Section 9"),
             "sameBody" => Edit(body: CapBody, headline: "A new headline"),
+            "sameClause" => Edit(quote: "No timekeeper may bill more than 10 hours a day.", location: "Section 4.2, p. 7", headline: "A new headline"),
             _ => Edit(consequence: "Flag", headline: "A new headline"),
         };
 
@@ -748,6 +844,92 @@ public sealed class RuleSetServiceTests
 
         outcome.Value!.CreatedNewVersion.Should().BeTrue();
         h.Writes.Should().NotContain(w => w.Id == v1);
+    }
+
+    [Fact]
+    public async Task Edit_TwoConcurrentEditsOfAVersionInForce_OneCreatesTheNextVersion_TheOtherIs409_NothingIsLostSilently()
+    {
+        // Review pass 2 item 1 (F2): admins A and B both read v1 (in force) and both create "v2". The new version's id is derived from
+        // (policy, number), so the second create collides on the primary key and is answered 409, not 200 with an edit nobody sees.
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, v1) = h.Rule(set, state: ProposalState.Accepted, current: true);
+        var service = h.Service();
+        Task<RuleSetOutcome<ProposalEdited>>? edited = null;
+        h.BeforeCreate = async entity =>
+        {
+            if (entity.LogicalName != "sprk_policyversion") return;
+            h.BeforeCreate = null;
+            edited = service.EditAsync(set, policy, Edit(body: CapBody8), default); // B: reads v1, creates v2 before A's create lands
+            await edited;
+        };
+
+        var a = await service.EditAsync(set, policy, Edit(template: "Over {{rule.maxHoursPerDay}} hours a day."), default);
+        var b = await edited!;
+
+        b.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        b.Value!.CreatedNewVersion.Should().BeTrue();
+        a.Kind.Should().Be(RuleSetOutcomeKind.Refused, "A's edit was not saved and must not be reported as saved");
+        a.StatusCode.Should().Be(409);
+        a.ErrorCode.Should().Be("ruleset.concurrent_edit");
+        var versions = h.Rows["sprk_policyversion"].Where(v => v.GetAttributeValue<EntityReference>("sprk_policy").Id == policy).ToList();
+        versions.Should().HaveCount(2, "exactly one version 2 exists");
+        var v2 = versions.Single(v => v.Id != v1);
+        v2.Id.Should().Be(RuleSetService.VersionIdFor(policy, 2));
+        v2.GetAttributeValue<string>("sprk_rulebody").Should().Be(CapBody8, "B's edit is the one that was saved");
+        v2.GetAttributeValue<string>("sprk_messagetemplate").Should().Be(Template, "A's edit is not merged in silently either");
+    }
+
+    [Fact]
+    public async Task Edit_WhenTheNewVersionCannotBeCreated_AndNoOtherEditCreatedIt_Is500()
+    {
+        var h = new Harness { FailCreateWhen = e => e.LogicalName == "sprk_policyversion" };
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, _) = h.Rule(set, state: ProposalState.Accepted, current: true);
+
+        var outcome = await h.Service().EditAsync(set, policy, Edit(body: CapBody8), default);
+
+        outcome.StatusCode.Should().Be(500, "a create that failed for another reason is not a conflict");
+        outcome.ErrorCode.Should().Be("ruleset.write_failed");
+    }
+
+    [Fact]
+    public void VersionIdFor_IsAVersion5IdOfThePolicyAndTheNumber()
+    {
+        var policy = Guid.Parse("0f8fad5b-d9cb-469f-a165-70867728950e");
+
+        var id = RuleSetService.VersionIdFor(policy, 2);
+
+        RuleSetService.VersionIdFor(policy, 2).Should().Be(id, "the same policy and number always give the same id");
+        RuleSetService.VersionIdFor(policy, 3).Should().NotBe(id);
+        RuleSetService.VersionIdFor(Guid.NewGuid(), 2).Should().NotBe(id);
+        id.ToString("D")[14].Should().Be('5', "an RFC 4122 version 5 (name-based, SHA-1) id");
+        "89ab".Should().Contain(id.ToString("D")[19].ToString(), "the RFC 4122 variant");
+    }
+
+    [Fact]
+    public async Task TheVersionsOfARuleAreReadInAStableOrder_SoTheWorkingVersionIsTheSameOnEveryRead()
+    {
+        // Review pass 2 item 1: two rows with one number (created before edits had derived ids) must not swap as the working version.
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, _) = h.Rule(set, state: ProposalState.Accepted, current: true);
+        var first = h.AddVersion(policy, 2, ProposalState.Proposed, body: CapBody8);
+        var second = h.AddVersion(policy, 2, ProposalState.Proposed, body: IncrementBody, type: "TimeIncrement");
+        var rows = h.Rows["sprk_policyversion"];
+        var firstRow = rows.Single(r => r.Id == first);
+        rows.Remove(firstRow);
+        rows.Add(firstRow); // stored after the later one: a read in storage order would see the later one last
+
+        var outcome = await h.Service().GetAsync(set, default);
+
+        outcome.Value!.Proposals.Single().VersionId.Should().Be(first, "the earliest created of the highest number is the working version");
+        h.Queries.Where(q => q.EntityName == "sprk_policyversion").Should().OnlyContain(q =>
+            q.Orders.Select(o => o.AttributeName + " " + o.OrderType).SequenceEqual(new[]
+            {
+                "sprk_versionnumber Ascending", "createdon Ascending", "sprk_policyversionid Ascending",
+            }));
+        second.Should().NotBe(first);
     }
 
     [Fact]
@@ -852,9 +1034,59 @@ public sealed class RuleSetServiceTests
 
         accepted.Value!.State.Should().Be("Accepted");
         rejected.Value!.State.Should().Be("Rejected");
-        h.Writes.Should().OnlyContain(w => w.Kind == Write.Update && w.Entity == "sprk_policyversion" && w.Id == version);
+        h.Writes.Should().OnlyContain(w => w.Kind == Write.BulkUpdate && w.Entity == "sprk_policyversion" && w.Id == version);
         h.Writes.Should().OnlyContain(w => w.Fields.Keys.Single() == "sprk_proposalstatus");
+        h.ConditionalCalls.Should().HaveCount(2, "each decision is written conditional on the row version it read");
         h.Row("sprk_policy", policy).Contains("sprk_currentversion").Should().BeFalse("deciding never puts anything in force");
+    }
+
+    [Fact]
+    public async Task Accept_ThatReadTheOldContent_IsRefused409_WhenAnEditLandedFirst()
+    {
+        // Review pass 2 item 3, one order: the Accept reads and validates v1; an edit then changes its content (and writes Proposed);
+        // the Accept's write must not put "Accepted" on content nobody reviewed.
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        h.AfterQuery = q =>
+        {
+            if (q.EntityName != "sprk_policyversion") return;
+            h.AfterQuery = null;
+            h.ConcurrentWrite("sprk_policyversion", version, new Dictionary<string, object>
+            {
+                ["sprk_rulebody"] = CapBody8, ["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Proposed),
+            });
+        };
+
+        var outcome = await h.Service().DecideAsync(set, policy, accept: true, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Refused);
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("ruleset.concurrent_edit");
+        h.Row("sprk_policyversion", version).GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Proposed,
+            "the edited content was never reviewed");
+    }
+
+    [Fact]
+    public async Task Edit_ThatReadProposed_TakesBackAnAcceptThatLandedBeforeItsWrite()
+    {
+        // Review pass 2 item 3, the other order: the edit reads v1 Proposed; an Accept of the old content lands; then the edit writes.
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        h.AfterQuery = q =>
+        {
+            if (q.EntityName != "sprk_policyversion") return;
+            h.AfterQuery = null;
+            h.ConcurrentWrite("sprk_policyversion", version, new Dictionary<string, object> { ["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Accepted) });
+        };
+
+        var outcome = await h.Service().EditAsync(set, policy, Edit(body: CapBody8), default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        h.Row("sprk_policyversion", version).GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Proposed,
+            "the Accept was about the old content; publish must not put the edit in force without a new Accept");
+        (await h.Service().PublishAsync(set, Effective, default)).ErrorCode.Should().Be("ruleset.nothing_to_publish");
     }
 
     [Fact]
@@ -1258,6 +1490,162 @@ public sealed class RuleSetServiceTests
         h.FailBulkFor = null;
         var retried = await service.PublishAsync(set, Effective, default);
         retried.Value!.Published.Should().HaveCount(1, "the 1,000 that moved are already in force; the retry finishes the last one");
+    }
+
+    // ── Review pass 2 item 2 (F1): the publish writes are conditional on the rows as read ──
+
+    [Fact]
+    public async Task Publish_WhenAnOldVersionWasStampedByAConcurrentPublish_TheVersionWriteIs409_AndThatEndDateIsNotTakenBack()
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, v1) = h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+        h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+        var theirs = Utc(2026, 10, 1);
+        h.AfterQuery = q =>
+        {
+            if (q.EntityName != "sprk_policyversion") return;
+            h.AfterQuery = null; // another admin's publish stamps v1 right after this publish read it
+            h.ConcurrentWrite("sprk_policyversion", v1, new Dictionary<string, object> { ["sprk_inforceto"] = theirs });
+        };
+
+        var outcome = await h.Service().PublishAsync(set, Effective, default);
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("ruleset.concurrent_edit");
+        h.Refusals.Should().ContainSingle().Which.Entity.Should().Be("sprk_policyversion");
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(theirs,
+            "the refused chunk wrote nothing, so the end date v1 carries is the other publish's and is not taken back");
+        h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v1);
+        h.Writes.Should().NotContain(w => w.Kind == Write.BulkUpdate, "nothing of this publish landed");
+    }
+
+    [Fact]
+    public async Task Publish_WhenThePointerWasMovedByAConcurrentPublish_ThePolicyWriteIs409_AndTheStampsOfThatChunkStand()
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, v1) = h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+        var v2 = h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+        h.OnBulk = entity =>
+        {
+            if (entity != "sprk_policy") return;
+            h.OnBulk = null; // the other publish moved the pointer to v2 between this publish's version write and its pointer move
+            h.ConcurrentWrite("sprk_policy", policy, new Dictionary<string, object> { ["sprk_currentversion"] = new EntityReference("sprk_policyversion", v2) });
+        };
+
+        var outcome = await h.Service().PublishAsync(set, Effective, default);
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("ruleset.concurrent_edit");
+        h.Refusals.Should().ContainSingle().Which.Entity.Should().Be("sprk_policy");
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(Utc(2026, 11, 1),
+            "v1 really was superseded: its end date stands");
+        h.ConditionalCalls.Should().HaveCount(2, "the version write and the refused pointer move; no take-back is sent for the refused chunk");
+    }
+
+    [Fact]
+    public async Task Publish_WhenALaterVersionChunkIsRefused_TakesBackOnlyTheChunkThatLanded_Conditionally()
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var olds = new List<Guid>();
+        for (var i = 0; i < 501; i++) // 2 version updates each = 1,002: one chunk of 1,000 and one of 2 (the last rule's)
+        {
+            var (policy, v1) = h.Rule(set, "BILL-" + i.ToString("D3"), ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+            h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+            olds.Add(v1);
+        }
+
+        var theirs = Utc(2026, 10, 1);
+        var versionWrites = 0;
+        Guid? refusedOld = null;
+        h.OnBulk = entity =>
+        {
+            if (entity != "sprk_policyversion" || ++versionWrites != 2) return;
+            // Before the second chunk lands, another publish stamps the old version that chunk holds.
+            var chunk2 = h.Rows["sprk_policyversion"].Where(v => olds.Contains(v.Id)).Where(v => v.Contains("sprk_inforceto") == false).ToList();
+            refusedOld = chunk2.Single().Id;
+            h.ConcurrentWrite("sprk_policyversion", refusedOld.Value, new Dictionary<string, object> { ["sprk_inforceto"] = theirs });
+        };
+
+        var outcome = await h.Service().PublishAsync(set, Effective, default);
+
+        outcome.StatusCode.Should().Be(409);
+        h.Row("sprk_policyversion", refusedOld!.Value).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(theirs, "the refused chunk is not taken back");
+        h.Rows["sprk_policyversion"].Where(v => olds.Contains(v.Id) && v.Id != refusedOld).Should()
+            .OnlyContain(v => !v.Contains("sprk_inforceto"), "the chunk that landed is taken back: those versions are still in force");
+        var takeBack = h.ConditionalCalls.Last();
+        takeBack.Entity.Should().Be("sprk_policyversion");
+        takeBack.Rows.Should().HaveCount(500).And.NotContain(r => r.Id == refusedOld);
+        h.Entities.Verify(e => e.BulkUpdateAsync(It.IsAny<string>(), It.IsAny<List<(Guid id, Dictionary<string, object> fields)>>(), It.IsAny<CancellationToken>()),
+            Times.Never, "every publish write, the take-back included, is conditional");
+    }
+
+    [Fact]
+    public async Task Publish_TheTakeBackIsConditionalOnItsFreshRead_SoALateStampIsNotOverwritten()
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, v1) = h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+        h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+        h.FailBulkFor = entity => entity == "sprk_policy"; // the pointer move fails, so the end date is taken back
+        var late = Utc(2026, 10, 1);
+        var versionWrites = 0;
+        h.OnBulk = entity =>
+        {
+            if (entity != "sprk_policyversion" || ++versionWrites != 2) return;
+            // Between the take-back's read and its write, another publish's stamp of v1 commits late.
+            h.ConcurrentWrite("sprk_policyversion", v1, new Dictionary<string, object> { ["sprk_inforceto"] = late });
+        };
+
+        var outcome = await h.Service().PublishAsync(set, Effective, default);
+
+        outcome.ErrorCode.Should().Be("ruleset.write_failed");
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(late,
+            "the take-back read v1 before the late write; its clear is refused rather than wiping the other publish's end date");
+        h.Logs.Should().Contain(l => l.Level == LogLevel.Error && l.Message.Contains(v1.ToString()), "a version not taken back is named in an Error");
+    }
+
+    [Fact]
+    public async Task Publish_TheTakeBackLeavesNoEndDate_EvenWhenTheOldVersionCarriedAStaleOneBeforeThePublish()
+    {
+        // Review pass 2 item 4: v1 carries E1 from an earlier failed take-back; a retry with E2 stamps E2, its pointer move fails, and the
+        // take-back must clear v1 (it is in force), not put E1 back.
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, v1) = h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1), to: Utc(2026, 11, 1));
+        h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+        h.FailBulkFor = entity => entity == "sprk_policy";
+
+        var outcome = await h.Service().PublishAsync(set, new DateOnly(2026, 12, 1), default);
+
+        outcome.ErrorCode.Should().Be("ruleset.write_failed");
+        h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v1);
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime?>("sprk_inforceto").Should().BeNull(
+            "v1 is in force; the stale E1 it carried before this publish is not restored");
+    }
+
+    [Fact]
+    public async Task Publish_FinishingASet_ReportsTheVersionThatEnded_NeverARejectedDraftThatWasNeverInForce()
+    {
+        // Review pass 2 item 6: the retry branch reports the superseded version. A lower-numbered version with no end date was never in
+        // force (a rejected draft) and superseded nothing.
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetDraft);
+        var (neverInForce, rejected) = h.Rule(set, "BILL-A", ProposalState.Rejected);
+        var current = h.AddVersion(neverInForce, 2, ProposalState.Accepted, body: CapBody8, from: Utc(2026, 11, 1));
+        h.Row("sprk_policy", neverInForce)["sprk_currentversion"] = new EntityReference("sprk_policyversion", current);
+        var (replaced, ended) = h.Rule(set, "BILL-B", ProposalState.Accepted, from: Utc(2026, 1, 1), to: Utc(2026, 11, 1));
+        var successor = h.AddVersion(replaced, 2, ProposalState.Accepted, body: CapBody8, from: Utc(2026, 11, 1));
+        h.Row("sprk_policy", replaced)["sprk_currentversion"] = new EntityReference("sprk_policyversion", successor);
+
+        var outcome = await h.Service().PublishAsync(set, Effective, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        outcome.Value!.Published.Single(p => p.PolicyId == neverInForce).SupersededVersionId.Should().BeNull(
+            $"version 1 ({rejected}) was rejected and never in force");
+        outcome.Value.Published.Single(p => p.PolicyId == replaced).SupersededVersionId.Should().Be(ended);
     }
 
     [Fact]
