@@ -10,7 +10,10 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// the finding, marked below the reliability threshold when it is: the reviewer sees a doubtful code as doubtful. A code that is
 /// not there is not used at all (a line the AI did not code does not fire); the firm's own code is RequiredData's and the
 /// firm-versus-AI mismatch finding's concern, not this rule's. The codes in the list match without regard to case.</para>
-/// <para><b>Suggested adjustment:</b> disallow, with the line amount to the cent (<c>null</c> if the line has no amount).</para>
+/// <para><b>Suggested adjustment:</b> disallow, with the line amount to the cent (<c>null</c> if the line has no amount).
+/// <b>Never for a credit line (D-105):</b> a line with negative hours or a negative amount (<see cref="BillingMath.IsCreditLine"/>)
+/// still gets its finding, so the reviewer sees the credit, but with no suggested adjustment: disallowing a negative amount would
+/// raise the bill by what the firm credited.</para>
 /// <para><b>Reads:</b> ActivityCode, TaskCode (both examined, with the coding confidence), Amount, Date, TimekeeperAsBilled.</para>
 /// </remarks>
 internal static class NonBillableActivityHandler
@@ -45,8 +48,12 @@ internal static class NonBillableActivityHandler
                 .Add("line.activityCode", activity)
                 .Add("line.taskCode", task);
 
-            var disallow = new BillingSuggestedAdjustment(
-                BillingAdjustmentKind.Disallow, line.Amount is { } amount ? BillingMath.ToCent(amount) : null);
+            // D-105: the finding stays (the reviewer sees a credit booked to a non-billable activity), but a credit is never
+            // disallowed: removing a negative amount would raise the bill by the amount the firm credited.
+            BillingSuggestedAdjustment? disallow = BillingMath.IsCreditLine(line)
+                ? null
+                : new BillingSuggestedAdjustment(
+                    BillingAdjustmentKind.Disallow, line.Amount is { } amount ? BillingMath.ToCent(amount) : null);
 
             findings.Add(context.Finding(BillingSubject.ForLine(line.Index), BillingReasonCodes.NonBillableCode, values, facts, disallow));
         }

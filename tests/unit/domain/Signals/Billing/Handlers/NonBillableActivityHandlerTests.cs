@@ -70,6 +70,43 @@ public class NonBillableActivityHandlerTests
         finding.SuggestedAdjustment.Should().Be(new BillingSuggestedAdjustment(BillingAdjustmentKind.Disallow, null));
     }
 
+    // ── D-105: a credit is never disallowed ─────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("1.0", "-575.00")] // negative amount
+    [InlineData("-1.0", "575.00")] // negative hours
+    [InlineData("-1.0", "-575.00")]
+    public void ACreditOnAListedCode_StillFires_ButSuggestsNoAdjustment_NeverADisallowOfANegativeAmount_D105(string hours, string amount)
+    {
+        var facts = Facts(Fee(0) with { ActivityCode = "A101", Hours = D(hours), Amount = D(amount) });
+
+        var finding = Run(NonBillable, facts).Should().ContainSingle("the credit stays visible to the reviewer").Subject;
+
+        finding.ReasonCode.Should().Be(BillingReasonCodes.NonBillableCode);
+        finding.SuggestedAdjustment.Should().BeNull("disallowing a negative amount would raise the bill");
+    }
+
+    [Fact]
+    public void MustFire_AChargeOnTheSameCode_StillSuggestsTheDisallow_NextToACredit_D105()
+    {
+        var facts = Facts(
+            Fee(0) with { ActivityCode = "A101", Amount = 575m },
+            Fee(1) with { ActivityCode = "A101", Amount = -575m });
+
+        var findings = Run(NonBillable, facts);
+
+        findings.Select(f => f.SuggestedAdjustment).Should().Equal(
+            new BillingSuggestedAdjustment(BillingAdjustmentKind.Disallow, 575m), null);
+    }
+
+    [Fact]
+    public void AZeroAmount_IsNotACredit_AndStillSuggestsTheDisallow_D105()
+    {
+        var finding = Run(NonBillable, Facts(Fee(0) with { ActivityCode = "A101", Amount = 0m })).Single();
+
+        finding.SuggestedAdjustment.Should().Be(new BillingSuggestedAdjustment(BillingAdjustmentKind.Disallow, 0m));
+    }
+
     // ── NFR-05: low-confidence codes are flagged, never silently used ───────────────────────────────────────────
 
     [Fact]
