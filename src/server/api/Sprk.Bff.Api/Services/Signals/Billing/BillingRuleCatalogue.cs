@@ -61,6 +61,24 @@ public static class BillingRuleCatalogue
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
+    /// <summary>
+    /// The text of the embedded body schema of a billing type (what <see cref="RuleBodySchemaValidator"/> validates against), for a caller that
+    /// must show a type's parameters to someone else (the rule drafting Action, task 075).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
+    /// <exception cref="InvalidOperationException">The embedded resource is missing.</exception>
+    internal static string SchemaText(RuleType ruleType)
+    {
+        var suffix = SchemaResourceSuffix(ruleType);
+        var assembly = typeof(BillingRuleCatalogue).Assembly;
+        var resourceName = assembly.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith(suffix, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException($"Embedded resource ending in '{suffix}' was not found in assembly '{assembly.FullName}'.");
+        using var stream = assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException($"Could not open embedded resource stream '{resourceName}'.");
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
     /// <summary>The <c>{{field}}</c> tokens a billing <c>sprk_messagetemplate</c> of this type may name.</summary>
     /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
     public static IReadOnlySet<string> TemplateFactFields(RuleType ruleType) => ruleType switch

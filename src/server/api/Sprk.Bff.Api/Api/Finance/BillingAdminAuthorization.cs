@@ -27,6 +27,7 @@ public static class BillingAdminAuthorization
     public const string CreatePolicyVersionPrivilege = "prvCreatesprk_PolicyVersion";
     public const string WritePolicyVersionPrivilege = "prvWritesprk_PolicyVersion";
     public const string WritePolicyPrivilege = "prvWritesprk_Policy";
+    public const string CreatePolicyPrivilege = "prvCreatesprk_Policy";
 
     private const string Source = "billing admin";
 
@@ -55,6 +56,16 @@ public static class BillingAdminAuthorization
         FinanceAuthorizationTargets.Authorize(
             Check(WriteRuleSetPrivilege, "sprk_rulesets"),
             Check(WritePolicyVersionPrivilege, "sprk_policyversions"));
+
+    /// <summary>
+    /// Start the rule drafting job (task 075): the job creates policies and versions (as the application) and writes the rule set's
+    /// not-converted list, so the caller must hold Create on both policy tables and Write on the rule set marker.
+    /// </summary>
+    public static FinanceAuthorizationTargets DraftRules() =>
+        FinanceAuthorizationTargets.Authorize(
+            Check(WriteRuleSetPrivilege, "sprk_rulesets"),
+            Check(CreatePolicyPrivilege, "sprk_policies"),
+            Check(CreatePolicyVersionPrivilege, "sprk_policyversions"));
 
     /// <summary>Publish a rule set: puts versions in force.</summary>
     public static FinanceAuthorizationTargets Publish() =>

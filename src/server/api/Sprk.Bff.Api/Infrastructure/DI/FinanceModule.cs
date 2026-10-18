@@ -86,6 +86,11 @@ public static class FinanceModule
         // Concrete (ADR-010: no interface, no second implementation). Scoped: holds the scoped SPE facade and ownership resolver; it uses the
         // singleton PolicyVersionValidator and RuleBodyDescriber (SignalsModule). Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<RuleSetService>();
+
+        // Rule drafting job (ebilling-r1 task 075, FR-27): ADR-004 IJobHandler, the same shape as the other Finance handlers. Reads the rule
+        // set's source document, asks IInvoiceAi.DraftRulesAsync (which has its Null peer, so AI-off is a clear Poisoned outcome, not a
+        // missing registration), and stores validated proposals through RuleSetService. §11: no new interface (ADR-010).
+        services.AddScoped<IJobHandler, BillingRuleDraftJobHandler>();
         // Invoice Review context panel (ebilling-r1 task 106, FR-33): read-only, deterministic assembly of five independent sections for
         // one invoice (core record, budget rollups, other invoices, disallow history, rate history). Concrete (ADR-010: no interface, no second
         // implementation). Scoped: per-request, holds the (singleton) generic Dataverse client. Unconditional (flag rule above); the route carries the kill switch.

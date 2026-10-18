@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using FluentAssertions;
+using Azure.Messaging.ServiceBus;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -21,6 +22,8 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
@@ -52,11 +55,13 @@ public sealed class RuleSetEndpointsTests
         { "POST", $"{Base}/{SetId}/publish" },
         { "PUT", $"{Base}/{SetId}/assignment" },
         { "PUT", $"{Base}/{SetId}/visibility" },
+        { "POST", $"{Base}/{SetId}/draft" },
     };
 
     internal sealed class Host : IAsyncDisposable
     {
         public readonly Mock<RuleSetService> Service;
+        public readonly Mock<JobSubmissionService> Jobs;
         public readonly FinAuth.RecordingAccessDataSource Access = new();
         public readonly FinAuth.RecordingPrivilegeProbe Probe = new();
         private WebApplication _app = null!;
@@ -78,6 +83,16 @@ public sealed class RuleSetEndpointsTests
                 entities, Mock.Of<IDocumentDataverseService>(), spe, Mock.Of<IRecordOwnershipResolver>(), validator,
                 new RuleBodyDescriber(validator, entities, NullLogger<RuleBodyDescriber>.Instance),
                 Mock.Of<IOptionsMonitor<FinanceOptions>>(), Mock.Of<ILogger<RuleSetService>>());
+            Jobs = new Mock<JobSubmissionService>(
+                MockBehavior.Strict,
+                Microsoft.Extensions.Options.Options.Create(new ServiceBusOptions
+                {
+                    QueueName = "test-jobs",
+                    CommunicationQueueName = "test-comms",
+                    ConnectionString = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=k;SharedAccessKey=v",
+                }),
+                Mock.Of<ILogger<JobSubmissionService>>(),
+                new Mock<ServiceBusClient>().Object);
         }
 
         public static async Task<Host> StartAsync(bool ebillingEnabled = true, int maxMb = 25, bool admin = true)
@@ -103,6 +118,7 @@ public sealed class RuleSetEndpointsTests
             builder.Services.AddScoped<AuthorizationService>();
             builder.Services.AddSingleton<CallerRecordAccessProbe>(host.Probe);
             builder.Services.AddSingleton(host.Service.Object);
+            builder.Services.AddSingleton(host.Jobs.Object);
             if (admin)
             {
                 host.GrantAdmin();
@@ -125,7 +141,7 @@ public sealed class RuleSetEndpointsTests
             {
                 BillingAdminAuthorization.CreateRuleSetPrivilege, BillingAdminAuthorization.WriteRuleSetPrivilege,
                 BillingAdminAuthorization.CreatePolicyVersionPrivilege, BillingAdminAuthorization.WritePolicyVersionPrivilege,
-                BillingAdminAuthorization.WritePolicyPrivilege,
+                BillingAdminAuthorization.WritePolicyPrivilege, BillingAdminAuthorization.CreatePolicyPrivilege,
             })
             {
                 Probe.Hold(p);
@@ -227,6 +243,9 @@ public sealed class RuleSetEndpointsTests
     [InlineData("POST", "{set}/publish", BillingAdminAuthorization.WritePolicyVersionPrivilege)]
     [InlineData("POST", "{set}/publish", BillingAdminAuthorization.WritePolicyPrivilege)]
     [InlineData("POST", "{set}/publish", BillingAdminAuthorization.WriteRuleSetPrivilege)]
+    [InlineData("POST", "{set}/draft", BillingAdminAuthorization.WriteRuleSetPrivilege)]
+    [InlineData("POST", "{set}/draft", BillingAdminAuthorization.CreatePolicyPrivilege)]
+    [InlineData("POST", "{set}/draft", BillingAdminAuthorization.CreatePolicyVersionPrivilege)]
     [InlineData("GET", "{set}", BillingAdminAuthorization.WriteRuleSetPrivilege)]
     [InlineData("GET", "", BillingAdminAuthorization.WriteRuleSetPrivilege)]
     [InlineData("PUT", "{set}/assignment", BillingAdminAuthorization.WriteRuleSetPrivilege)]
@@ -565,5 +584,84 @@ public sealed class RuleSetEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ruleset.retired");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Draft (task 075, FR-27): queue the rule drafting job
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static DraftSource Source(bool drafted = false) =>
+        new(SetId, "Acme OCG", Guid.NewGuid(), "b!lib", "item-1", "ocg.pdf", drafted);
+
+    [Fact]
+    public async Task Draft_QueuesTheJob_AndReturns202WithTheRuleSetReadAsItsLocation()
+    {
+        await using var host = await Host.StartAsync();
+        host.Service.Setup(s => s.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>())).ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source()));
+        JobContract? queued = null;
+        host.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+            .Callback((JobContract job, CancellationToken _) => queued = job)
+            .Returns(Task.CompletedTask);
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        response.Headers.Location!.ToString().Should().Be($"{Base}/{SetId}");
+        var body = await Json(response);
+        body["ruleSetId"]!.GetValue<Guid>().Should().Be(SetId);
+        body["statusUrl"]!.GetValue<string>().Should().Be($"{Base}/{SetId}");
+        body["jobId"]!.GetValue<Guid>().Should().Be(queued!.JobId);
+
+        queued.JobType.Should().Be(BillingRuleDraftJobHandler.JobTypeName);
+        queued.SubjectId.Should().Be(SetId.ToString());
+        queued.IdempotencyKey.Should().Be(SetId.ToString());
+        var payload = queued.Payload!.RootElement;
+        payload.GetProperty("ruleSetId").GetGuid().Should().Be(SetId);
+        payload.GetProperty("callerObjectId").GetGuid().Should().Be(Guid.Parse(FinanceAuthzTestAuthHandler.CallerObjectId),
+            "the caller's id is server-derived from the token, never from a body");
+        host.Jobs.Verify(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(404, "ruleset.not_found")]
+    [InlineData(409, "ruleset.retired")]
+    [InlineData(422, "ruleset.source_missing")]
+    public async Task Draft_ARefusedSource_IsReportedNow_AndNoJobIsQueued(int status, string code)
+    {
+        await using var host = await Host.StartAsync();
+        host.Service.Setup(s => s.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Refused(status, code, "refused"));
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft"));
+
+        ((int)response.StatusCode).Should().Be(status);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(code);
+        host.Jobs.Verify(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Draft_AFinishedRun_Is409AlreadyDrafted_AndNoJobIsQueued()
+    {
+        await using var host = await Host.StartAsync();
+        host.Service.Setup(s => s.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>())).ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source(drafted: true)));
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ruleset.already_drafted");
+        host.Jobs.Verify(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Draft_WhenTheQueueIsDown_Is503WithItsCode_NotAnUnhandled500()
+    {
+        await using var host = await Host.StartAsync();
+        host.Service.Setup(s => s.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>())).ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source()));
+        host.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("bus down"));
+
+        var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/draft"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ruleset.draft_not_queued");
     }
 }

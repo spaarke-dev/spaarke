@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Finance;
@@ -91,6 +92,22 @@ public sealed record PublishedRuleVersion(Guid PolicyId, Guid VersionId, int Ver
 public sealed record RuleSetPublished(
     Guid RuleSetId, string Status, DateOnly EffectiveDate, IReadOnlyList<PublishedRuleVersion> Published,
     int NotPublishedProposed, int NotPublishedRejected, bool ClauseQuotesVisibleToFirms, string ClauseVisibilityNotice);
+
+/// <summary>
+/// What the rule drafting job reads (ebilling-r1 task 075): the rule set's source document in the Procedure Library, found server-side.
+/// <see cref="AlreadyDrafted"/> is the idempotency marker (the rule set's <c>sprk_notconverted</c> list is written last, even when empty).
+/// </summary>
+public sealed record DraftSource(Guid RuleSetId, string RuleSetName, Guid DocumentId, string DriveId, string ItemId, string FileName, bool AlreadyDrafted);
+
+/// <summary>One rule the drafting job proposes: a flat rule body (type plus parameters) and the columns a version needs (task 075).</summary>
+public sealed record DraftedRule(
+    string RuleType, string RuleBody, string MessageTemplate, string ShortHeadline, string Consequence, string ClauseQuote, string? ClauseLocation);
+
+/// <summary>Text of the source that did not become a rule, and why. Stored in the rule set's <c>sprk_notconverted</c> list.</summary>
+public sealed record NotConvertedClause(string Text, string? Location, string Reason);
+
+/// <summary>The result of adding drafted rules: how many were stored, how many were already there, and the full not-converted list.</summary>
+public sealed record DraftsAdded(int Stored, int AlreadyPresent, IReadOnlyList<NotConvertedClause> NotConverted);
 
 /// <summary>One problem with one field of one rule (or of the request when <see cref="PolicyId"/> is null).</summary>
 public sealed record RuleSetError(Guid? PolicyId, string? RuleName, string Field, string Message, string? Reason);
@@ -212,6 +229,20 @@ public class RuleSetService
     internal const string CodeContainerNotConfigured = "ruleset.container_not_configured";
     internal const string CodeResultTruncated = "ruleset.result_truncated";
     internal const string CodeWriteFailed = "ruleset.write_failed";
+    internal const string CodeSourceMissing = "ruleset.source_missing";
+    internal const string CodeAlreadyDrafted = "ruleset.already_drafted";
+
+    /// <summary>The prefix of a drafted rule's policy code: <c>BRD-{rule set id, 32 hex}-{n, 3 digits}</c> (50 characters at most is the column; this is 40).</summary>
+    internal const string DraftCodePrefix = "BRD-";
+
+    /// <summary>The most rules one drafting run stores; the rest are listed as not converted.</summary>
+    internal const int MaxDraftedRules = 500;
+
+    // sprk_notconverted holds 100,000 characters; leave room for the overflow entry.
+    private const int MaxNotConvertedJsonChars = 95_000;
+    private const int MaxClauseQuoteChars = 4000;
+    private const int MaxClauseLocationChars = 200;
+    private const int DraftPolicyPriority = 500;
 
     /// <summary>The notice a publish carries when the flag is on (FR-28, D-66).</summary>
     internal const string VisibleNotice = "Clause quotes will be visible to firms.";
@@ -501,6 +532,339 @@ public class RuleSetService
 
         return RuleSetOutcome<RuleSetDetail>.Done(new RuleSetDetail(
             Summarize(set, loaded.Rules.Count), set.GetAttributeValue<EntityReference>("sprk_sourcedocument")?.Id, notConverted, views));
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+    // Drafting (task 075): the job reads the source, then adds Proposed rules through the same validation and row shape as an edit
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Finds the source document of a rule set for the drafting job and trigger. The document must be in the Procedure Library
+    /// container this environment is configured with (D-63): a row that points elsewhere is refused, so the job's application-identity
+    /// download never follows a pointer into another container. <see cref="DraftSource.AlreadyDrafted"/> is true once a drafting run has
+    /// finished for this rule set.
+    /// </summary>
+    public virtual async Task<RuleSetOutcome<DraftSource>> GetDraftSourceAsync(Guid ruleSetId, CancellationToken ct)
+    {
+        var set = await LoadRuleSetAsync(ruleSetId, ct);
+        if (set is null)
+        {
+            return RuleSetOutcome<DraftSource>.Refused(StatusCodes.Status404NotFound, CodeNotFound, "The rule set was not found.");
+        }
+
+        if (set.GetAttributeValue<OptionSetValue>("statuscode")?.Value == RuleSetRetired)
+        {
+            return RuleSetOutcome<DraftSource>.Refused(StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed.");
+        }
+
+        if (set.GetAttributeValue<EntityReference>("sprk_sourcedocument")?.Id is not { } documentId || documentId == Guid.Empty)
+        {
+            return RuleSetOutcome<DraftSource>.Refused(
+                StatusCodes.Status422UnprocessableEntity, CodeSourceMissing, "The rule set has no source document to draft rules from.");
+        }
+
+        var document = await _documents.GetDocumentAsync(documentId.ToString(), ct);
+        var container = _finance.CurrentValue.ProcedureLibraryContainerId;
+        if (document is null
+            || string.IsNullOrWhiteSpace(document.GraphDriveId)
+            || string.IsNullOrWhiteSpace(document.GraphItemId)
+            || string.IsNullOrWhiteSpace(container)
+            || !string.Equals(document.GraphDriveId, container, StringComparison.OrdinalIgnoreCase))
+        {
+            return RuleSetOutcome<DraftSource>.Refused(
+                StatusCodes.Status422UnprocessableEntity, CodeSourceMissing,
+                "The source document of the rule set is missing or is not in the Procedure Library.");
+        }
+
+        return RuleSetOutcome<DraftSource>.Done(new DraftSource(
+            ruleSetId,
+            set.GetAttributeValue<string>("sprk_name") ?? string.Empty,
+            documentId,
+            document.GraphDriveId!,
+            document.GraphItemId!,
+            document.FileName ?? "source",
+            AlreadyDrafted: !string.IsNullOrWhiteSpace(set.GetAttributeValue<string>("sprk_notconverted"))));
+    }
+
+    /// <summary>
+    /// Stores the drafted rules of a rule set as Proposed rules (a Billing-domain policy, Off, with no current version, and its version 1)
+    /// and writes the not-converted list LAST, which marks the run complete. Model output is a proposal: every rule passes the one
+    /// validation of this service (<see cref="PolicyVersionValidator.ValidateForSave"/> with <see cref="RuleDomain.Billing"/>, plus the
+    /// required columns) before anything is written, and a rule that fails it is not dropped: it is added to the not-converted list with
+    /// the reason. Re-running is safe: a rule whose type, body and clause equal one already in the rule set is skipped, and a run after
+    /// the marker is written is refused (409 <c>ruleset.already_drafted</c>).
+    /// </summary>
+    public virtual async Task<RuleSetOutcome<DraftsAdded>> AddDraftsAsync(
+        Guid ruleSetId, IReadOnlyList<DraftedRule> rules, IReadOnlyList<NotConvertedClause> notConverted, Guid? callerObjectId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+        ArgumentNullException.ThrowIfNull(notConverted);
+
+        var set = await LoadRuleSetAsync(ruleSetId, ct);
+        if (set is null)
+        {
+            return RuleSetOutcome<DraftsAdded>.Refused(StatusCodes.Status404NotFound, CodeNotFound, "The rule set was not found.");
+        }
+
+        if (set.GetAttributeValue<OptionSetValue>("statuscode")?.Value == RuleSetRetired)
+        {
+            return RuleSetOutcome<DraftsAdded>.Refused(StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(set.GetAttributeValue<string>("sprk_notconverted")))
+        {
+            return RuleSetOutcome<DraftsAdded>.Refused(
+                StatusCodes.Status409Conflict, CodeAlreadyDrafted, "Rules have already been drafted for this rule set.");
+        }
+
+        // 1. Validate everything before the first write. A refusal is listed, never dropped.
+        var listed = new List<NotConvertedClause>(notConverted);
+        var valid = new List<(DraftedRule Rule, int RuleType, int Consequence)>();
+        foreach (var (rule, index) in rules.Select((r, i) => (r, i)))
+        {
+            if (index >= MaxDraftedRules)
+            {
+                listed.Add(new NotConvertedClause(
+                    rule.ClauseQuote, rule.ClauseLocation, $"Not stored: a drafting run stores at most {MaxDraftedRules} rules."));
+                continue;
+            }
+
+            var problem = CheckDraft(rule, out var ruleType, out var consequence);
+            if (problem is not null)
+            {
+                listed.Add(new NotConvertedClause(rule.ClauseQuote, rule.ClauseLocation, problem));
+                continue;
+            }
+
+            valid.Add((rule, ruleType, consequence));
+        }
+
+        try
+        {
+            var stored = 0;
+            var present = 0;
+            if (valid.Count > 0)
+            {
+                var owner = await _ownership.ResolveOwnerAsync(OwnerContext(callerObjectId), ct);
+                if (!owner.IsOwned)
+                {
+                    return RuleSetOutcome<DraftsAdded>.OwnerRefused(owner);
+                }
+
+                var existing = await LoadDraftedFingerprintsAsync(ruleSetId, ct);
+                if (existing is null)
+                {
+                    return RuleSetOutcome<DraftsAdded>.Refused(
+                        StatusCodes.Status422UnprocessableEntity, CodeResultTruncated, "The rule set has more rules than can be read in one pass.");
+                }
+
+                var next = existing.NextIndex;
+                foreach (var (rule, ruleType, consequence) in valid)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (!existing.Fingerprints.Add(Fingerprint(ruleType, rule.RuleBody, rule.ClauseQuote)))
+                    {
+                        present++;
+                        continue;
+                    }
+
+                    var code = $"{DraftCodePrefix}{ruleSetId:N}-{next++.ToString("D3", CultureInfo.InvariantCulture)}";
+                    await CreateDraftRuleAsync(ruleSetId, code, rule, ruleType, consequence, owner, ct);
+                    stored++;
+                }
+            }
+
+            // 2. The marker, last. After it, the job is a no-op and the trigger answers 409.
+            var json = BuildNotConvertedJson(listed);
+            await _entities.UpdateAsync(RuleSetEntity, ruleSetId, new Dictionary<string, object> { ["sprk_notconverted"] = json }, ct);
+
+            _logger.LogInformation(
+                "Rule set {RuleSetId}: drafting stored {Stored} rule(s), skipped {Present} already present, listed {NotConverted} as not converted",
+                ruleSetId, stored, present, listed.Count);
+            return RuleSetOutcome<DraftsAdded>.Done(new DraftsAdded(stored, present, listed));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Rows already written stay (Proposed, Off, in force nowhere); the marker is not written, so a re-run adds the rest.
+            _logger.LogError(ex, "Rule set {RuleSetId}: drafting could not store its rules; the run can be repeated", ruleSetId);
+            return RuleSetOutcome<DraftsAdded>.Refused(
+                StatusCodes.Status500InternalServerError, CodeWriteFailed, "The drafted rules could not be saved. Try again; if it keeps failing, contact support.");
+        }
+    }
+
+    /// <summary>The one validation of a drafted rule. Returns a plain-sentence reason, or null when it is valid.</summary>
+    private string? CheckDraft(DraftedRule rule, out int ruleTypeValue, out int consequenceValue)
+    {
+        ruleTypeValue = 0;
+        consequenceValue = 0;
+        if (!TryParseConsequence(rule.Consequence, out var consequence))
+        {
+            return "Not stored: the consequence was not Reject, Flag or SuggestAdjustment.";
+        }
+
+        consequenceValue = (int)consequence;
+        if (string.IsNullOrWhiteSpace(rule.ClauseQuote) || rule.ClauseQuote.Length > MaxClauseQuoteChars)
+        {
+            return $"Not stored: the clause quote is missing or longer than {MaxClauseQuoteChars} characters.";
+        }
+
+        var errors = ValidateRule(
+            new PolicyRow(Guid.Empty, "draft", rule.ShortHeadline, null),
+            rule.RuleType,
+            new VersionRow(Guid.Empty, 1, null, rule.RuleBody, rule.MessageTemplate, rule.ShortHeadline, consequenceValue, null, null, null, null, null));
+        if (errors.Count > 0)
+        {
+            return "Not stored: the drafted rule was not valid (" + string.Join("; ", errors.Select(e => $"{e.Field}: {e.Message}")) + ").";
+        }
+
+        // Valid: the type parses and is a billing type (ValidateForSave with the Billing domain), so this cannot fail.
+        RuleBodySchemaValidator.TryParseRuleType(rule.RuleType, out var ruleType);
+        ruleTypeValue = (int)ruleType;
+        return null;
+    }
+
+    private sealed record DraftedFingerprints(HashSet<string> Fingerprints, int NextIndex);
+
+    private static string Fingerprint(int ruleType, string ruleBody, string clauseQuote) =>
+        string.Create(CultureInfo.InvariantCulture, $"{ruleType}\n{ruleBody}\n{clauseQuote}");
+
+    /// <summary>The rules already in the rule set (for skipping repeats) and the next free index of the drafted-code sequence. Null when truncated.</summary>
+    private async Task<DraftedFingerprints?> LoadDraftedFingerprintsAsync(Guid ruleSetId, CancellationToken ct)
+    {
+        var policies = await _entities.RetrieveMultipleAsync(PolicyQuery("sprk_ruleset", ConditionOperator.Equal, new object[] { ruleSetId }), ct);
+        if (policies.MoreRecords)
+        {
+            return null;
+        }
+
+        var rows = policies.Entities
+            .Where(p => RuleDomains.IsBillingRow(p) && p.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id == ruleSetId)
+            .ToList();
+
+        var prefix = $"{DraftCodePrefix}{ruleSetId:N}-";
+        var next = 1;
+        foreach (var code in rows.Select(p => p.GetAttributeValue<string>("sprk_policycode")))
+        {
+            if (code is not null && code.StartsWith(prefix, StringComparison.Ordinal)
+                && int.TryParse(code.AsSpan(prefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var n))
+            {
+                next = Math.Max(next, n + 1);
+            }
+        }
+
+        var fingerprints = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var batch in rows.Select(p => (object)p.Id).Chunk(MaxInValues))
+        {
+            var query = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet(VersionColumns) };
+            query.Criteria.AddCondition("sprk_policy", ConditionOperator.In, batch);
+            var versions = await _entities.RetrieveMultipleAsync(query, ct);
+            if (versions.MoreRecords)
+            {
+                return null;
+            }
+
+            foreach (var v in versions.Entities)
+            {
+                var row = ToVersion(v);
+                if (row.RuleType is { } type && row.RuleBody is not null && row.ClauseReference is not null)
+                {
+                    fingerprints.Add(Fingerprint(type, row.RuleBody, row.ClauseReference));
+                }
+            }
+        }
+
+        return new DraftedFingerprints(fingerprints, next);
+    }
+
+    private async Task CreateDraftRuleAsync(
+        Guid ruleSetId, string code, DraftedRule rule, int ruleType, int consequence, RecordOwnerResolution owner, CancellationToken ct)
+    {
+        var policy = new Entity(PolicyEntity)
+        {
+            ["sprk_name"] = rule.ShortHeadline,
+            ["sprk_policycode"] = code,
+            ["sprk_enabled"] = false, // a drafted rule is Off until an administrator publishes it
+            ["sprk_priority"] = DraftPolicyPriority,
+            ["sprk_lane"] = new OptionSetValue((int)DecisionLane.Decide),
+            [RuleDomains.PolicyDomainColumn] = new OptionSetValue(RuleDomains.PolicyDomainBilling),
+            ["sprk_ruleset"] = new EntityReference(RuleSetEntity, ruleSetId),
+        };
+        owner.ApplyTo(policy);
+        var policyId = await _entities.CreateAsync(policy, ct);
+
+        try
+        {
+            var version = new Entity(VersionEntity)
+            {
+                ["sprk_name"] = $"{code} v1",
+                ["sprk_policy"] = new EntityReference(PolicyEntity, policyId),
+                ["sprk_versionnumber"] = 1,
+                ["sprk_ruletype"] = new OptionSetValue(ruleType),
+                ["sprk_rulebody"] = rule.RuleBody,
+                ["sprk_messagetemplate"] = rule.MessageTemplate,
+                ["sprk_shortheadline"] = rule.ShortHeadline,
+                ["sprk_consequence"] = new OptionSetValue(consequence),
+                ["sprk_proposedaction"] = ProposedActionText(consequence),
+                ["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Proposed),
+                ["sprk_clausereference"] = rule.ClauseQuote,
+                // Required column; provisional until publish sets the effective date. No reader treats a non-current version as in force.
+                ["sprk_inforcefrom"] = DateTime.UtcNow,
+            };
+            if (!string.IsNullOrWhiteSpace(rule.ClauseLocation))
+            {
+                version["sprk_clauselocation"] = rule.ClauseLocation.Length > MaxClauseLocationChars
+                    ? rule.ClauseLocation[..MaxClauseLocationChars]
+                    : rule.ClauseLocation;
+            }
+
+            owner.ApplyTo(version);
+            await _entities.CreateAsync(version, ct);
+        }
+        catch
+        {
+            // A policy with no version is invisible to the review and counts as a rule: remove it, then let the run fail and be repeated.
+            try
+            {
+                await _entities.DeleteAsync(PolicyEntity, policyId, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Drafted policy {PolicyId} has no version and could not be removed; it is Off and in force nowhere", policyId);
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>The not-converted list as the JSON stored on the rule set. Never empty text: an empty list is <c>[]</c>. Capped under the column size.</summary>
+    internal static string BuildNotConvertedJson(IReadOnlyList<NotConvertedClause> clauses)
+    {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var kept = new List<NotConvertedClause>();
+        var size = 2;
+        foreach (var clause in clauses)
+        {
+            var length = JsonSerializer.Serialize(clause, options).Length + 1;
+            if (size + length > MaxNotConvertedJsonChars)
+            {
+                break;
+            }
+
+            kept.Add(clause);
+            size += length;
+        }
+
+        if (kept.Count < clauses.Count)
+        {
+            kept.Add(new NotConvertedClause(
+                string.Empty, null, $"{clauses.Count - kept.Count} more clause(s) were not listed because the list reached its size limit."));
+        }
+
+        return JsonSerializer.Serialize(kept, options);
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────

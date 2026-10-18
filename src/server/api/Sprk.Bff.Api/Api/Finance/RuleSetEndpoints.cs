@@ -5,6 +5,8 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Api.Finance;
 
@@ -21,6 +23,9 @@ public sealed record RuleSetAssignmentBody(string? Scope, Guid? FirmId);
 
 /// <summary>Turn "visible to firms" on or off.</summary>
 public sealed record RuleSetVisibilityBody(bool? VisibleToFirms);
+
+/// <summary>The rule drafting job was queued. <see cref="StatusUrl"/> is the rule set read: a finished run has its not-converted list.</summary>
+public sealed record RuleDraftAccepted(Guid RuleSetId, Guid JobId, string StatusUrl);
 
 /// <summary>
 /// The rule set API behind the Rule Review page (ebilling-r1 task 076, FR-28), ADR-001 (Minimal API), ADR-008 (endpoint filters) and
@@ -41,6 +46,7 @@ public static class RuleSetEndpoints
 {
     internal const string Route = "/api/finance/rulesets";
     internal const string CodeFileTooLarge = "ruleset.file_too_large";
+    internal const string CodeDraftNotQueued = "ruleset.draft_not_queued";
 
     public static IEndpointRouteBuilder MapRuleSetEndpoints(this IEndpointRouteBuilder app)
     {
@@ -62,6 +68,25 @@ public static class RuleSetEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        // POST /api/finance/rulesets/{id}/draft — start the rule drafting job (ADR-004) for a rule set's source document (task 075, FR-27)
+        group.MapPost("/{ruleSetId:guid}/draft", DraftRules)
+            .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.DraftRules())
+            .RequireEbillingEnabled()
+            .WithName("DraftRuleSetRules")
+            .WithSummary("Start drafting the rule set's rules from its source document (a background job)")
+            .WithDescription(
+                "Returns 202 with a Location (the rule set read) once the job is queued. The job proposes rules from the closed list of eleven " +
+                "billing rule types; each is validated before it is stored as a Proposed rule, and text that cannot be converted is listed on the " +
+                "rule set. Poll the rule set read: a finished run has its not-converted list (an empty list is []). 409 ruleset.already_drafted " +
+                "when a run has finished.")
+            .Produces<RuleDraftAccepted>(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapGet("/", ListRuleSets)
@@ -256,6 +281,41 @@ public static class RuleSetEndpoints
         return outcome.Kind == RuleSetOutcomeKind.Done
             ? Results.Created($"{Route}/{outcome.Value!.RuleSetId}", outcome.Value)
             : Map(outcome, http);
+    }
+
+    private static async Task<IResult> DraftRules(
+        Guid ruleSetId, RuleSetService service, JobSubmissionService jobs, HttpContext http, ILogger<RuleSetService> logger, CancellationToken ct)
+    {
+        // The source, the rule set's state and a finished run are decided here, so the admin hears 404 / 409 / 422 now, not from a dead-lettered job.
+        var found = await service.GetDraftSourceAsync(ruleSetId, ct);
+        if (found.Kind != RuleSetOutcomeKind.Done)
+        {
+            return Map(found, http);
+        }
+
+        if (found.Value!.AlreadyDrafted)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict, detail: "Rules have already been drafted for this rule set.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = RuleSetService.CodeAlreadyDrafted });
+        }
+
+        var jobId = Guid.NewGuid();
+        var statusUrl = $"{Route}/{ruleSetId}";
+        try
+        {
+            await jobs.SubmitJobAsync(BillingRuleDraftJobHandler.BuildJob(jobId, ruleSetId, CallerOid(http), http.TraceIdentifier), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Rule set {RuleSetId}: the drafting job could not be queued ({ExceptionType})", ruleSetId, ex.GetType().Name);
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable, detail: "The drafting job could not be queued. Try again shortly.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = CodeDraftNotQueued });
+        }
+
+        logger.LogInformation("Rule set {RuleSetId}: drafting job {JobId} queued", ruleSetId, jobId);
+        return Results.Accepted(statusUrl, new RuleDraftAccepted(ruleSetId, jobId, statusUrl));
     }
 
     private static async Task<IResult> ListRuleSets(RuleSetService service, HttpContext http, CancellationToken ct) =>
