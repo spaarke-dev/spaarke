@@ -711,7 +711,8 @@ public sealed class RuleSetServiceTests
         outcome.Value.Proposal.VersionId.Should().Be(version);
         outcome.Value.Proposal.Consequence.Should().Be("Reject");
         h.Writes.Should().ContainSingle().Which.Should().Match<(Write Kind, string Entity, Guid Id, Dictionary<string, object> Fields)>(
-            w => w.Kind == Write.Update && w.Entity == "sprk_policyversion" && w.Id == version);
+            w => w.Kind == Write.BulkUpdate && w.Entity == "sprk_policyversion" && w.Id == version);
+        h.ConditionalCalls.Should().ContainSingle("the in-place edit is conditional on the row it read (review round 2)");
         var row = h.Row("sprk_policyversion", version);
         row.GetAttributeValue<string>("sprk_rulebody").Should().Be(CapBody8);
         row.GetAttributeValue<string>("sprk_clauselocation").Should().Be("Section 9");
@@ -797,7 +798,8 @@ public sealed class RuleSetServiceTests
 
         refused.ErrorCode.Should().Be("ruleset.nothing_to_publish");
         h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v1);
-        h.Writes.Should().NotContain(w => w.Kind == Write.BulkUpdate, "nothing was published");
+        h.WritesOf("sprk_policy", "sprk_ruleset").Should().BeEmpty("nothing was published");
+        h.Writes.Should().NotContain(w => w.Fields.ContainsKey("sprk_inforcefrom") || w.Fields.ContainsKey("sprk_inforceto"), "nothing was published");
 
         await service.DecideAsync(set, policy, accept: true, default);
         var published = await service.PublishAsync(set, Effective, default);
@@ -1068,9 +1070,10 @@ public sealed class RuleSetServiceTests
     }
 
     [Fact]
-    public async Task Edit_ThatReadProposed_TakesBackAnAcceptThatLandedBeforeItsWrite()
+    public async Task Edit_ThatReadProposed_IsRefused409_WhenAnAcceptLandedBeforeItsWrite_SoTheEditIsNeverAccepted()
     {
         // Review pass 2 item 3, the other order: the edit reads v1 Proposed; an Accept of the old content lands; then the edit writes.
+        // The edit's write is conditional on the row it read, so it is refused: the Accepted content is the content that was reviewed.
         var h = new Harness();
         var set = h.RuleSet();
         var (policy, version) = h.Rule(set);
@@ -1083,10 +1086,36 @@ public sealed class RuleSetServiceTests
 
         var outcome = await h.Service().EditAsync(set, policy, Edit(body: CapBody8), default);
 
-        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
-        h.Row("sprk_policyversion", version).GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Proposed,
-            "the Accept was about the old content; publish must not put the edit in force without a new Accept");
-        (await h.Service().PublishAsync(set, Effective, default)).ErrorCode.Should().Be("ruleset.nothing_to_publish");
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("ruleset.concurrent_edit");
+        var row = h.Row("sprk_policyversion", version);
+        row.GetAttributeValue<string>("sprk_rulebody").Should().Be(CapBody, "the edit was not applied");
+        row.GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Accepted,
+            "what is Accepted is exactly what the reviewer saw");
+    }
+
+    [Fact]
+    public async Task Edit_OfADraftAPublishHasStartedToPutInForce_IsRefused409_SoUnreviewedContentIsNeverPublished()
+    {
+        // Review round 2, Step 9.5: a publish has written this Accepted draft's start date (its step 1) after the edit read it, and is
+        // about to move the pointer to it. The in-place edit must not land on the row going into force.
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, v1) = h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+        var v2 = h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+        h.AfterQuery = q =>
+        {
+            if (q.EntityName != "sprk_policyversion") return;
+            h.AfterQuery = null;
+            h.ConcurrentWrite("sprk_policyversion", v2, new Dictionary<string, object> { ["sprk_inforcefrom"] = Utc(2026, 11, 1) });
+        };
+
+        var outcome = await h.Service().EditAsync(set, policy, Edit(body: CapBody), default);
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("ruleset.concurrent_edit");
+        h.Row("sprk_policyversion", v2).GetAttributeValue<string>("sprk_rulebody").Should().Be(CapBody8, "the accepted content is what goes into force");
+        v1.Should().NotBe(v2);
     }
 
     [Fact]

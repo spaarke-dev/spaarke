@@ -973,9 +973,10 @@ public class RuleSetService
 
                 // What the rule does, or what the firm is shown of it, changed: it is back in review (D-109: the clause text and its
                 // location count, as the type, body, template and consequence do). The status is written with EVERY content change,
-                // even when this read saw Proposed: an Accept that read the old content may land between this read and this write, and
-                // this write must then take its decision back. The opposite order (this write first, then that Accept) is refused by the
-                // Accept's own row version condition (DecideAsync). A headline edit, or one that sets the same values, keeps the decision.
+                // even when this read saw Proposed (a no-op then), so the content and "not yet reviewed" always travel in one write. The
+                // races are closed by row versions: an Accept that lands between this read and this write makes this write refused
+                // (below), and one that read the old content before this write landed is refused itself (DecideAsync). A headline edit,
+                // or one that sets the same values, keeps the decision.
                 if (merged.RuleType != work.RuleType || merged.RuleBody != work.RuleBody
                     || merged.Template != work.Template || merged.Consequence != work.Consequence
                     || merged.ClauseReference != work.ClauseReference || merged.ClauseLocation != work.ClauseLocation)
@@ -984,7 +985,24 @@ public class RuleSetService
                     merged = merged with { State = (int)ProposalState.Proposed };
                 }
 
-                await _entities.UpdateAsync(VersionEntity, work.Id, fields, ct);
+                // Conditional on the row as read (review round 2, Step 9.5): a publish that has already written this draft's start date
+                // (its step 1) is about to put THIS row in force, and an unconditional write here would put content nobody accepted
+                // in force with it. Another admin's edit or decision since the read is refused the same way, never overwritten.
+                try
+                {
+                    await _entities.BulkUpdateIfRowVersionsMatchAsync(VersionEntity, new List<(Guid id, Dictionary<string, object> fields, long rowVersion)>
+                    {
+                        (work.Id, fields, RequireRowVersion(work.RowVersion, VersionEntity, work.Id)),
+                    }, ct);
+                }
+                catch (System.Data.DBConcurrencyException)
+                {
+                    _logger.LogWarning("Rule {PolicyId}: the edit of draft version {VersionId} was refused; it changed after it was read", policyId, work.Id);
+                    return RuleSetOutcome<ProposalEdited>.Refused(
+                        StatusCodes.Status409Conflict, CodeConcurrentEdit,
+                        "The rule changed after you opened it (another edit, a decision or a publish), so your edit was not saved. Reload the rule and make your change again.");
+                }
+
                 rule = rule with { Working = merged };
                 return RuleSetOutcome<ProposalEdited>.Done(new ProposalEdited(await ViewAsync(rule, ct), CreatedNewVersion: false));
             }
