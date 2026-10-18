@@ -4,7 +4,7 @@
     <title>Retire sprk_invoicestatus — data, readers, forms, views, docs; notify ontology-r1</title>
     <phase>1 Data model (WP1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Cross-cutting migration across BFF, tests, external SPA, solution source and an ontology-owned file; tagged deletion.</rigor-reason>
     <model-tier>opus</model-tier>
