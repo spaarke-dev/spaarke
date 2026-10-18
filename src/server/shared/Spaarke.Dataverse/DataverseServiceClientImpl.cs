@@ -2614,6 +2614,29 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
+    private System.Runtime.CompilerServices.StrongBox<Guid>? _currentIdentityId;
+
+    /// <summary>
+    /// <see cref="IGenericEntityService.GetCurrentIdentityIdAsync"/>: <c>WhoAmI</c> on this ServiceClient, cached after the first answer
+    /// (an identity does not change for a connection's life). A fault or an empty id is thrown and never cached.
+    /// </summary>
+    public async Task<Guid> GetCurrentIdentityIdAsync(CancellationToken ct = default)
+    {
+        if (Volatile.Read(ref _currentIdentityId) is { } cached)
+        {
+            return cached.Value;
+        }
+
+        var response = (Microsoft.Crm.Sdk.Messages.WhoAmIResponse)await _serviceClient.ExecuteAsync(new Microsoft.Crm.Sdk.Messages.WhoAmIRequest(), ct);
+        if (response.UserId == Guid.Empty)
+        {
+            throw new InvalidOperationException("WhoAmI named no user, so the identity of this Dataverse connection is unknown.");
+        }
+
+        Volatile.Write(ref _currentIdentityId, new System.Runtime.CompilerServices.StrongBox<Guid>(response.UserId));
+        return response.UserId;
+    }
+
     public async Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default)
     {
         try

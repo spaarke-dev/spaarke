@@ -119,6 +119,19 @@ public interface IGenericEntityService
     Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default);
 
     /// <summary>
+    /// The <c>systemuserid</c> of the identity this connection authenticates as (Dataverse <c>WhoAmI</c>): the id Dataverse stamps in the
+    /// <c>createdby</c> of every row this service creates without impersonation. A caller that later has to recognise its own rows (the
+    /// rule drafting job's retry compensation, ebilling-r1 task 075) matches <c>createdby</c> against it.
+    /// </summary>
+    /// <remarks>
+    /// A fault, or an empty id, is thrown and never cached, so the caller fails closed. The default body throws: only the ServiceClient
+    /// implementation (<c>DataverseServiceClientImpl</c>) can answer, so a substitute that does not model identities fails loudly instead
+    /// of letting a caller treat every row as foreign (or as its own).
+    /// </remarks>
+    Task<Guid> GetCurrentIdentityIdAsync(CancellationToken ct = default) =>
+        throw new NotSupportedException("GetCurrentIdentityIdAsync is implemented by DataverseServiceClientImpl only; a substitute must model identities.");
+
+    /// <summary>
     /// Associates a primary entity with one or more related entities via a many-to-many
     /// relationship. Each <paramref name="relatedEntities"/> entry must reference an
     /// existing row of the related entity type used in the relationship.
