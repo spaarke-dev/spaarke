@@ -124,7 +124,18 @@ const RuleForm: React.FC<FormProps> = ({ proposal, canWrite, editable, busy, onA
     if (location !== (proposal.clauseLocation ?? '') && location.trim()) e.clauseLocation = location;
     return e;
   }, [built, consequence, headline, template, quote, location, proposal]);
-  const dirty = Object.keys(edit).length > 0;
+  // A text field emptied by hand cannot be sent (the server keeps the stored text), but it IS an unsaved change: it keeps Accept off
+  // and Discard on, and Save says why nothing was sent.
+  const blanked = React.useMemo<Record<string, string>>(() => {
+    const b: Record<string, string> = {};
+    const emptied = (now: string, stored: string | null): boolean => !now.trim() && !!stored?.trim();
+    if (emptied(headline, proposal.shortHeadline)) b.headline = 'The headline cannot be empty.';
+    if (emptied(template, proposal.messageTemplate)) b.template = 'The message cannot be empty.';
+    if (emptied(quote, proposal.clauseQuote)) b.quote = 'The quote cannot be empty.';
+    if (emptied(location, proposal.clauseLocation)) b.location = 'The location cannot be empty.';
+    return b;
+  }, [headline, template, quote, location, proposal]);
+  const dirty = Object.keys(edit).length > 0 || Object.keys(blanked).length > 0;
   const clauseEdited = edit.clauseReference !== undefined || edit.clauseLocation !== undefined;
 
   const reset = (): void => {
@@ -138,8 +149,8 @@ const RuleForm: React.FC<FormProps> = ({ proposal, canWrite, editable, busy, onA
   };
 
   const save = async (): Promise<void> => {
-    if (built && !built.ok) {
-      setErrors(built.errors);
+    if ((built && !built.ok) || Object.keys(blanked).length > 0) {
+      setErrors({ ...(built && !built.ok ? built.errors : {}), ...blanked });
       return;
     }
 
@@ -222,10 +233,14 @@ const RuleForm: React.FC<FormProps> = ({ proposal, canWrite, editable, busy, onA
             </Field>
           )}
 
-          <Field label="Headline">
+          <Field label="Headline" validationMessage={errors.headline} validationState={errors.headline ? 'error' : 'none'}>
             <Input value={headline} disabled={!mayEdit} onChange={(_, d) => setHeadline(d.value)} data-testid="edit-headline" />
           </Field>
-          <Field label="Message shown with a finding" hint="Placeholders such as {{rule.maxHoursPerDay}} are filled in from the parameters.">
+          <Field
+            label="Message shown with a finding"
+            validationMessage={errors.template}
+            validationState={errors.template ? 'error' : 'none'}
+            hint="Placeholders such as {{rule.maxHoursPerDay}} are filled in from the parameters.">
             <Textarea
               resize="vertical"
               value={template}
@@ -242,10 +257,10 @@ const RuleForm: React.FC<FormProps> = ({ proposal, canWrite, editable, busy, onA
           </Text>
           {mayEdit ? (
             <>
-              <Field label="Quote" hint="The verbatim text of the guideline.">
+              <Field label="Quote" hint="The verbatim text of the guideline." validationMessage={errors.quote} validationState={errors.quote ? 'error' : 'none'}>
                 <Textarea resize="vertical" rows={6} value={quote} onChange={(_, d) => setQuote(d.value)} data-testid="edit-quote" />
               </Field>
-              <Field label="Location" hint="Section or page.">
+              <Field label="Location" hint="Section or page." validationMessage={errors.location} validationState={errors.location ? 'error' : 'none'}>
                 <Input value={location} onChange={(_, d) => setLocation(d.value)} data-testid="edit-location" />
               </Field>
               {clauseEdited && (

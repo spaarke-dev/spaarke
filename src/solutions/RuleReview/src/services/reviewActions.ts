@@ -102,7 +102,8 @@ export async function decideProposal(
     return { kind: 'decided', decided: result.value, detail: reloaded.ok ? reloaded.value : null };
   }
 
-  if (!isStale(result.failure)) {
+  // Any 409 means the rule is no longer what the page showed (changed, decided, or put in force by a publish): reload and show it.
+  if (result.failure.status !== 409) {
     return { kind: 'failed', failure: result.failure };
   }
 
@@ -179,6 +180,11 @@ export async function runDraft(api: RuleSetApi, ruleSetId: string, options: Poll
   const deadline = now() + timeoutMs;
   let last: RuleSetDetail | null = null;
   for (;;) {
+    // Checked before the read as well as after it, so a page that was left mid-wait does not issue one more request.
+    if (isCancelled?.()) {
+      return { kind: 'timeout', detail: last };
+    }
+
     const read = await api.get(ruleSetId);
     if (!read.ok) {
       return { kind: 'failed', failure: read.failure };

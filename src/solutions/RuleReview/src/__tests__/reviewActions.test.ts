@@ -79,9 +79,23 @@ describe('decideProposal (076 re-check K3)', () => {
     expect((await decideProposal(api, SET_ID, proposal(), true)).kind).toBe('decided');
   });
 
-  it('other 409s (proposal in force) are failures, not a reload', async () => {
+  it('a stale decision on a rule that was published meanwhile (409 proposal_in_force) also reloads, so the page shows it in force', async () => {
     const api = mockApi();
-    api.accept.mockResolvedValue(fail(409, 'ruleset.proposal_in_force'));
+    api.reject.mockResolvedValue(fail(409, 'ruleset.proposal_in_force'));
+    api.get.mockResolvedValue(ok(detail([proposal({ state: 'Accepted', inForce: true, rowVersion: '5000' })])));
+
+    const outcome = await decideProposal(api, SET_ID, proposal({ rowVersion: '4711' }), false);
+
+    expect(outcome.kind).toBe('stale');
+    if (outcome.kind === 'stale') {
+      expect(outcome.detail.proposals[0].inForce).toBe(true);
+      expect(outcome.changes.map(c => c.field)).toContain('Status');
+    }
+  });
+
+  it('a non-409 failure (500) is a failure and does not reload', async () => {
+    const api = mockApi();
+    api.accept.mockResolvedValue(fail(500, null));
 
     const outcome = await decideProposal(api, SET_ID, proposal(), true);
 
@@ -206,13 +220,22 @@ describe('runDraft', () => {
     expect(outcome.kind).toBe('timeout');
   });
 
-  it('stops polling when cancelled', async () => {
+  it('stops polling when cancelled while waiting, without one more read', async () => {
     const api = mockApi();
     api.draft.mockResolvedValue(ok({ ruleSetId: SET_ID, jobId: 'j', statusUrl: '/s' }));
     api.get.mockResolvedValue(ok(detail([], { notConverted: null })));
-    const outcome = await runDraft(api, SET_ID, { ...instant, isCancelled: () => true });
+    let cancelled = false;
+    const outcome = await runDraft(api, SET_ID, { intervalMs: 1, sleep: async () => { cancelled = true; }, isCancelled: () => cancelled });
     expect(outcome.kind).toBe('timeout');
     expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('a page that was left before the first read issues no read', async () => {
+    const api = mockApi();
+    api.draft.mockResolvedValue(ok({ ruleSetId: SET_ID, jobId: 'j', statusUrl: '/s' }));
+    const outcome = await runDraft(api, SET_ID, { ...instant, isCancelled: () => true });
+    expect(outcome.kind).toBe('timeout');
+    expect(api.get).not.toHaveBeenCalled();
   });
 });
 

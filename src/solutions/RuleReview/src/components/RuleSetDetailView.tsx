@@ -377,7 +377,7 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
             proposal={proposal}
             canWrite={canWrite}
             editable={!retired}
-            busy={busy || drafting}
+            busy={busy || drafting || loading}
             onAccept={p => void decide(p, true)}
             onReject={p => setRejecting(p)}
             onSave={save}
