@@ -1620,3 +1620,4 @@ The full record is in `notes/185-invite-code-design.md` §11.
 7. **Model 1 `Set-ExternalFlagForB2BGuests.ps1 -Apply`:** NOT yet a go. The owner replied "if this follows what you recommended then ok". UAC re-explains the effect (flagged guests lose direct shares on every Restricted record) and needs an explicit go plus the customer tenant ids.
 8. **ebilling:** firms may see every invoice status, including Sent to AP (matches ebilling D-107). Relayed.
 9. **External CIAM user UAT:** the owner reports it PASSED UAC's checklist. Recorded for wrap-up 090's UAT section.
+10. **#1876 follow-up (owner, via ontology-r1, 2026-10-18):** gate Decision Records are visible to INTERNAL participants only. They are never shared with `sprk_isexternal` users or B2B guests, and a principal whose flag cannot be read is skipped (fail closed). This is ontology task 042b; UAC reviews its DirectThreadAccessService diff before the PR.
