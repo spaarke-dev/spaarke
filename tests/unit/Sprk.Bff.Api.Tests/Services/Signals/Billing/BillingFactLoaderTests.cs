@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
@@ -11,6 +12,7 @@ using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
+using Sprk.Bff.Api.Telemetry;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Signals.Billing;
@@ -149,13 +151,15 @@ public class BillingFactLoaderTests
         }).ToList(),
     };
 
+    private ILogger<BillingFactLoader> _loaderLogger = NullLogger<BillingFactLoader>.Instance;
+
     private BillingFactLoader Loader()
     {
         var settings = new Mock<IEbillingSettingsReader>(MockBehavior.Strict);
         settings.Setup(s => s.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new EbillingSettings { ReliabilityThreshold = 0.85m });
         var configuration = SecureChildShareWorld.Configuration();
         var walker = new SecureChildShareSynchronizer(_entities.Object, null!, null!, configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
-        return new BillingFactLoader(_entities.Object, settings.Object, walker, configuration, NullLogger<BillingFactLoader>.Instance);
+        return new BillingFactLoader(_entities.Object, settings.Object, walker, configuration, new FinanceTelemetry(), _loaderLogger);
     }
 
     private InvoiceComplianceEvaluator Evaluator() =>
@@ -517,6 +521,36 @@ public class BillingFactLoaderTests
         loaded.InvoiceSecureRoots.Should().BeNull("one fault leaves every set unresolved");
         loaded.PriorSubmissions.Should().ContainSingle().Which.SecureRoots.Should().BeNull();
         finding.DetailWithheld.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ARootSetReadFailure_IsLoggedAsAnError_AndCounted_B3()
+    {
+        var project = Guid.NewGuid();
+        DuplicateRule();
+        _world.SecureRoot("sprk_matter", MatterA).SecureRoot("sprk_project", project).FailingQueriesOf("sprk_project");
+        PriorWithInvoice("INV-100.1", ("sprk_project", "sprk_project", project), secureOwned: true);
+        var logger = new Mock<ILogger<BillingFactLoader>>();
+        _loaderLogger = logger.Object;
+        long faults = 0;
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == "Sprk.Bff.Api.Finance" && instrument.Name == "finance.billing.secure_root_walk.faults")
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, value, _, _) => Interlocked.Add(ref faults, value));
+        listener.Start();
+
+        await Loader().LoadAsync(Request(MatterA), CancellationToken.None);
+
+        logger.Verify(l => l.Log(LogLevel.Error, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once());
+        logger.Verify(l => l.Log(LogLevel.Warning, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Never());
+        Interlocked.Read(ref faults).Should().BeGreaterThanOrEqualTo(1);
     }
 
     [Fact]

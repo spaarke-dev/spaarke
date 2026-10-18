@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Signals.Billing;
 
@@ -214,6 +215,7 @@ public sealed class BillingFactLoader
     private readonly IEbillingSettingsReader _settings;
     private readonly SecureChildShareSynchronizer _secureRoots;
     private readonly IConfiguration _configuration;
+    private readonly FinanceTelemetry _telemetry;
     private readonly ILogger<BillingFactLoader> _logger;
 
     public BillingFactLoader(
@@ -221,12 +223,14 @@ public sealed class BillingFactLoader
         IEbillingSettingsReader settings,
         SecureChildShareSynchronizer secureRoots,
         IConfiguration configuration,
+        FinanceTelemetry telemetry,
         ILogger<BillingFactLoader> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _secureRoots = secureRoots ?? throw new ArgumentNullException(nameof(secureRoots));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -658,8 +662,10 @@ public sealed class BillingFactLoader
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            // uac-r2 condition (3): a thrown Dataverse fault is unresolved; the Duplicate finding still fires.
-            _logger.LogWarning(
+            // uac-r2 condition (3): a thrown Dataverse fault is unresolved; the Duplicate finding still fires. 072 review B3: an
+            // Error and a metric, not a Warning: it is a fault (Dataverse or walker), and while it lasts no prior's detail is shown.
+            _telemetry.RecordBillingSecureRootWalkFault();
+            _logger.LogError(
                 ex,
                 "Billing evaluation of submission {SubmissionId}: the secure roots could not be read; every set is unresolved and Duplicate shows no prior's detail.",
                 request.SubmissionId);

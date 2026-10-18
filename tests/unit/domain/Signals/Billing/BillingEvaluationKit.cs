@@ -107,6 +107,7 @@ internal static class BillingEvaluationKit
             new Mock<IEbillingSettingsReader>(MockBehavior.Strict).Object,
             new SecureChildShareSynchronizer(entities.Object, null!, null!, configuration, NullLogger<SecureChildShareSynchronizer>.Instance),
             configuration,
+            new Sprk.Bff.Api.Telemetry.FinanceTelemetry(),
             NullLogger<BillingFactLoader>.Instance);
     }
 
