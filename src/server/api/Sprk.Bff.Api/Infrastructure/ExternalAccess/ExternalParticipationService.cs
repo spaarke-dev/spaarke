@@ -1281,9 +1281,9 @@ public class ExternalParticipationService
                 {
                     result[id] = byId.TryGetValue(id, out var row) && row.EveryLookupReturned
                         ? new ReferencedOrganizations(row.ReferencedOrganizationIds(), Unreadable: false)
-                        // Asked about, not returned - or returned WITHOUT one of its org-lookup columns (a column the reading identity cannot
-                        // read is left out of the row; an empty one is an explicit null). Neither can be told from an unreadable row, and an
-                        // org slot that was not read must not read as an empty one: that would be "references no organization" (D-110).
+                        // Asked about, not returned - or returned WITHOUT one of its org-lookup properties (a property absent from the response; an
+                        // empty lookup is an explicit null). Neither can be told from an unreadable row, and an org slot that was not read must
+                        // not read as an empty one: that would be "references no organization" (D-110).
                         : ReferencedOrganizations.Unresolved;
                 }
             }
@@ -1439,8 +1439,9 @@ public class ExternalParticipationService
         }
 
         // The setters run for a property that is PRESENT in the JSON, a null value included (live, spaarkedev1, 2026-10-17: an empty lookup
-        // is returned as an explicit null). A property that is ABSENT was not returned at all (what column security does to a column the
-        // reading identity may not read), which is not "this slot is empty" (ebilling-r1 task 051, D-110).
+        // is returned as an explicit null). A property that is ABSENT from the response was not returned at all, which is not "this slot
+        // is empty" (ebilling-r1 task 051, D-110). The reader is app-only, so this does not rest on any column-security behaviour: it only
+        // refuses to read an absent property as an empty lookup.
         [JsonIgnore]
         public bool AssignedLawFirm1Returned { get; private set; }
 

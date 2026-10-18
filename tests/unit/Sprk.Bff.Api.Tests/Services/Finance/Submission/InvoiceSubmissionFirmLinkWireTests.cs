@@ -26,9 +26,9 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 /// The sibling <see cref="InvoiceSubmissionServiceTests"/> double the record-to-organization read, which proves the service's decision but not
 /// what the wire does. The two claims here are about the wire: (1) <c>sprk_assignedlawfirm1</c> and <c>sprk_assignedlawfirm2</c> are the ONLY
 /// source of "linked" - a firm that holds an org-level grant on the record and is in neither slot is refused; (2) a slot that cannot be read
-/// is never an empty slot - a lookup column left out of the row (what column security does to a column the reading identity may not read), a
-/// failed read, a record that did not come back, each fails CLOSED (503), while an explicit <c>null</c> (what Dataverse returns for an empty
-/// lookup; probed live 2026-10-17) is a slot that holds no firm and never matches.
+/// is never an empty slot - a lookup property absent from the response, a failed read, a record that did not come back, each fails
+/// CLOSED (503), while an explicit <c>null</c> (what Dataverse returns for an empty lookup; probed live 2026-10-17) is a slot that holds no
+/// firm and never matches. The reader is app-only; nothing here depends on column-security behaviour.
 /// </para>
 /// <para>
 /// The transport is an in-memory ASP.NET Core server (<c>UseTestServer</c>) standing in for the Dataverse Web API - the replacement ADR-038 names for
@@ -39,7 +39,7 @@ public sealed class InvoiceSubmissionFirmLinkWireTests
 {
     private const string FakeServiceUrl = "https://fake-dataverse.crm.dynamics.com";
 
-    /// <summary>A lookup column that the row does not carry at all.</summary>
+    /// <summary>A lookup property that is absent from the response.</summary>
     private const string Omitted = "<omitted>";
 
     private static readonly Guid FirmId = InvoiceSubmissionServiceTests.FirmId;
@@ -330,7 +330,7 @@ public sealed class InvoiceSubmissionFirmLinkWireTests
             await _app.DisposeAsync();
         }
 
-        /// <summary>The test matter's row: each slot a raw JSON value (<c>"guid"</c>, <c>null</c>) or <see cref="Omitted"/> for a column the row lacks.</summary>
+        /// <summary>The test matter's row: each slot a raw JSON value (<c>"guid"</c>, <c>null</c>) or <see cref="Omitted"/> for a property absent from the response.</summary>
         public void Matter(string slot1, string slot2) => Row("sprk_matters", "sprk_matterid", MatterId, slot1, slot2);
 
         public void Row(string collection, string idAttribute, Guid id, string slot1, string slot2)
