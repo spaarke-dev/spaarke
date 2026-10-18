@@ -531,6 +531,7 @@ public sealed class BillingFactLoader
             var prior = new BillingPriorSubmission
             {
                 SubmissionId = submission.Id,
+                // None allocated: empty, and Duplicate cites such a prior with the generic withheld text, never "duplicates ." (B4).
                 TrackingNumber = submission.GetAttributeValue<string>("sprk_trackingnumber") ?? string.Empty,
                 Sequence = submission.GetAttributeValue<int?>("sprk_submissionsequence") ?? 0,
                 FirmInvoiceNumber = submission.GetAttributeValue<string>("sprk_firminvoicenumber"),

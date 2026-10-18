@@ -475,6 +475,26 @@ public class BillingFactLoaderTests
     }
 
     [Fact]
+    public async Task AVisiblePriorWithNoTrackingNumber_IsCitedWithTheGenericText_NeverAnEmptyNumber_B4()
+    {
+        DuplicateRule(DuplicateByLine);
+        _world.OrdinaryRoot("sprk_matter", OrdinaryMatter);
+        var prior = PriorWithInvoice(trackingNumber: null, ("sprk_matter", "sprk_matter", OrdinaryMatter));
+        var priorInvoice = _world.ValueOf<EntityReference>("sprk_invoicesubmission", prior, "sprk_invoice")!.Id;
+        _world.Add("sprk_billingevent", Guid.NewGuid(), ("sprk_invoice", Ref("sprk_invoice", priorInvoice)), ("sprk_linesequence", 1),
+            ("sprk_costtype", new OptionSetValue(100000000)), ("sprk_quantity", 1m), ("sprk_timekeeper", "Jane Doe"),
+            ("sprk_eventdate", new DateTime(2026, 3, 2)));
+
+        var result = await Evaluator().EvaluateAsync(Request(OrdinaryMatter), CancellationToken.None);
+
+        var duplicates = result.Findings.Where(f => f.RuleType == RuleType.Duplicate).ToList();
+        duplicates.Select(f => f.ReasonCode).Should().BeEquivalentTo(
+            [BillingReasonCodes.DuplicateInvoiceNumber, BillingReasonCodes.DuplicateOfPriorSubmissionLine]);
+        duplicates.Should().OnlyContain(f => f.DetailWithheld && f.FactValues.Count == 0);
+        duplicates.SelectMany(f => f.ValuesRead).Should().NotContain(v => v.Name == "duplicateOf.trackingNumber");
+    }
+
+    [Fact]
     public async Task ASecurePrior_OnAnOrdinaryInvoice_IsHidden_D112()
     {
         DuplicateRule();

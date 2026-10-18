@@ -69,10 +69,12 @@ internal static class DuplicateHandler
     /// root above the prior is also above the invoice (the prior's set is a subset of the invoice's). Each Secure record is its own
     /// wall, so a prior under {A, B} on an invoice under {A} is hidden, and a prior under {A} on an invoice under {A, B} is shown;
     /// an ordinary prior (the empty set) is shown on any resolved invoice; a secure prior on an ordinary invoice is hidden. An
-    /// unresolved set on either side fails closed.
+    /// unresolved set on either side fails closed. 072 review B4: a prior with no tracking number cannot be cited ("duplicates ."), so
+    /// it is reported with the withheld template's generic text and no detail, like a prior across the wall.
     /// </summary>
     private static bool MayShowDetail(BillingFactSet facts, BillingPriorSubmission prior) =>
-        facts.Invoice.SecureRoots is { } invoiceRoots && prior.SecureRoots is { } priorRoots && priorRoots.IsSubsetOf(invoiceRoots);
+        !string.IsNullOrWhiteSpace(prior.TrackingNumber)
+        && facts.Invoice.SecureRoots is { } invoiceRoots && prior.SecureRoots is { } priorRoots && priorRoots.IsSubsetOf(invoiceRoots);
 
     private static void InvoiceLevel(HandlerContext context, List<BillingPriorSubmission> priors, List<BillingFinding> findings)
     {
