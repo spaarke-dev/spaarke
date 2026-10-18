@@ -43,6 +43,26 @@
             "command": "bash scripts/quality/post-edit-lint.sh"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/scripts/quality/context-checkpoint.py\" warn",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/scripts/quality/context-checkpoint.py\" warn",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "Stop": [
@@ -55,6 +75,17 @@
         ]
       }
     ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/scripts/quality/context-checkpoint.py\" precompact",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "compact",
@@ -62,6 +93,11 @@
           {
             "type": "command",
             "command": "pwsh -NoProfile -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/reinject-project-state.ps1\""
+          },
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/scripts/quality/context-checkpoint.py\" reinject",
+            "timeout": 10
           }
         ]
       },
