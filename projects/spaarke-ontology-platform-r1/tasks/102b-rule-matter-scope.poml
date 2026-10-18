@@ -4,7 +4,7 @@
     <title>Rule scope in R1: author a matter scope in the wizard, evaluate matter-scoped rules, and make the dry run count within the scope</title>
     <phase>10 Ontology admin (D-22)</phase>
     <gate>102, 102a complete</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tenant-isolation and record-scope sensitive: a scoped rule must never raise or close a Signal outside its scope. Changes the evaluator, the authoring routes and the wizard.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -115,4 +115,5 @@
   <notes>D-165 (owner 2026-10-17: "include scope added to the backend in r1"); closes DI-62 #1647 and DI-112 #2069; review: two adversarial passes (tenant-isolation) and uac-r2, whose stated focus is tenant from the token never the body, server-side scope in the evaluator, no Signal outside the matter scope, and must-fire / must-not-fire tests.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion date="2026-10-18">PR #2075 merged into docs `4ff829fa5` after 5 fix rounds (adversarial passes 1-3 + uac-r2 each round; re-checks clean). D-165, D-166, D-167. Live 2026-10-18: `sprk_policy_matter` CascadeDelete=Cascade on spaarkedev1 (owner-approved); admin delete removes only the rule; a Core User matter delete also deletes the matter's rules (not refused; owner accepted, D-167). Closed #1647, #2069. Known limits DI-115 #2084 (owner decision), DI-116 #2085, archive. Notes: notes/102b-rule-matter-scope.md. BFF code reaches dev with the next docs->master sync + R3 deploy (BFF before Console).</completion>
 </task>

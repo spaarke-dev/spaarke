@@ -408,14 +408,34 @@ nobody knows whether `Restrict` is accepted there.
 `sprk_matter` link, and the rule would **widen to all matters**. Revisit this before retention is enabled on `sprk_matter` or
 `sprk_policy`.
 
-### Open item: privileges for the matter delete
+### Privileges for the matter delete (RESOLVED live, 2026-10-18: NOT refused)
 
-The `DeleteRequest` remarks say a cascade delete checks the caller's Delete privilege on each child, and if any check is
-refused, the whole matter delete fails (probably `0x80040220`, not verified). So a user without Delete on `sprk_policy` cannot
-delete a matter that a rule names. For that user it behaves as Restrict: an Ontology Administrator deletes the rule, or removes
-its matter limit (which widens it to all matters), first. Retiring does NOT free the matter: a retired rule keeps its matter link
-(corrected in fix round 4). Nobody gains the right to delete rules through this change. *The main session confirms this live on
-dev.*
+~~The `DeleteRequest` remarks say a cascade delete checks the caller's Delete privilege on each child, so a user without Delete on
+`sprk_policy` cannot delete a matter that a rule names.~~ **Wrong on dev.** The live check showed the cascade runs without that
+privilege: a Core User's matter delete also deletes the rules limited to that matter. The owner accepted this (D-167). See
+"Live on spaarkedev1" below.
+
+### Live on spaarkedev1 (2026-10-18, main session; owner-approved)
+
+- **Metadata.** `sprk_policy_matter` CascadeDelete changed RemoveLink -> Cascade by `PUT RelationshipDefinitions` (full body from a
+  GET, `MSCRM.MergeLabels`), then `PublishXml` for `sprk_matter` and `sprk_policy` only. Read back: Delete=Cascade; Archive
+  RemoveLink; Assign, Merge, Reparent, Share, Unshare, RollupView NoCascade (unchanged).
+- **Check A, non-admin (observed platform fact; contradicts the DeleteRequest remark).** Call path: admin token plus
+  `MSCRMCallerID` = `# UAC Child BU Test User` (d6f8f439, BU1; Spaarke Basic User + Core User, which hold NO privilege on
+  `sprk_policy`). `DELETE sprk_matters(M1)` returned **204**. The matter AND the disabled rule naming it were deleted; the audit
+  records both deletes under that user (03:36:47Z). So Dataverse ran the cascaded child delete without the caller's
+  `prvDeletesprk_Policy`. **Anyone who can delete a matter (Spaarke Core User, Deep) also deletes the rules limited to that
+  matter**, and nothing else: no rule on another matter, no all-matters rule. Owner accepted this (D-167, option 1, 2026-10-18).
+- **Check B, admin.** `DELETE sprk_matters(M2)` returned 204. Only rule P2 was deleted. Its version V2 and Signal S2 survive with
+  `_sprk_policy_value` null; S2 keeps its version link. A Decision Record references the version, so it is untouched.
+- **Cleanup.** Every `zz-102b` row deleted (0 matters, policies, versions, Signals); BU1 matter count back to 59 (uac-r2 canary).
+- **Expected afterwards.** A Signal like S2 (policy null, code matching no policy) is closed by the nightly sweep as
+  PolicyRetired and its stored evidence redacted (fix rounds 3-4). That closure is the design, not a bug. It needs the 102b BFF
+  code, which reaches dev with the next docs->master sync and R3 deploy.
+- **Orphaned versions (known limit).** After a cascade, the rule's `sprk_policyversion` rows survive with no policy link, holding
+  the rule text; nothing cleans them up. A version has no matter column (`VersionPayload`), so it exposes a matter only through
+  text an administrator typed into the template, headline or action. Console User reads versions at Deep. Recorded on #2084.
+- Scripts: session scratchpad `live/cascade_meta.py`, `live/cascade_check.py`.
 
 ### `SignalSuppressionService` retrieves of `sprk_policy` (checked)
 
@@ -622,11 +642,11 @@ Deep Read on `sprk_policy` still sees it.
 
 ### Known limits after fix round 4
 
-- **K1.** Ontology Administrator `prvDeletesprk_Policy` is Deep. A matter delete whose cascade reaches a rule in another business
-  unit is refused as a whole, so it fails closed: the matter is not deleted and the rule survives.
-- **K2.** The cascade refusal (a user without Delete on `sprk_policy` cannot delete a matter a rule names) is to be confirmed live by
-  the main session on dev.
-- **K3.** The refusal UX is the raw platform privilege dialog. There is no Spaarke message naming the rule.
+- **K1 (superseded 2026-10-18).** ~~A cross-BU cascade is refused as a whole.~~ The live check showed the cascade does not check
+  the caller's privilege on `sprk_policy`, so a depth refusal is not expected either (not separately tested).
+- **K2 (resolved 2026-10-18).** Not refused: anyone who can delete the matter deletes its rules; audited under that user; owner
+  accepted (D-167).
+- **K3 (void).** There is no refusal, so no refusal UX.
 - **Archive.** Set `CascadeArchive` on `sprk_policy_matter` (today RemoveLink, which would widen the rule to all matters) before
   long-term retention is enabled on `sprk_matter` or `sprk_policy`.
 - A stored scope that later becomes Secure or Restricted is not re-checked (item 4 above, with its proposed handling).
