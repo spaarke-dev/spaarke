@@ -4,7 +4,7 @@
     <title>Billing actions in DecisionActionCatalog</title>
     <phase>3 Rules (WP3) — wave W3-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the ontology's closed action catalog and the append-only Decision Record path; FR-30 requires exactly one record per approve / reject / return / override (NFR-09 attribution).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -113,7 +113,10 @@ Gaps against the spec: an invoice approve with no findings has no policy version
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Parallel group P3-B with 071, 075, 076: this task alone edits DecisionActionCatalog.cs and DecisionRecordWriter.cs. FinanceModule.cs is a shared append point: re-read before editing, add only this task's line. Consumers: 100 (line decisions), 103 (approve), 104 (reject, return), 105 (override), 049 (automatic rejection if F-9 / ontology agree it is recorded).</notes>
+  <notes>Parallel group P3-B with 071, 075, 076: this task alone edits DecisionActionCatalog.cs and DecisionRecordWriter.cs. FinanceModule.cs is a shared append point: re-read before editing, add only this task's line. Consumers: 100 (line decisions), 103 (approve), 104 (reject, return), 105 (override), 049 (automatic rejection if F-9 / ontology agree it is recorded).
+
+COMPLETION 2026-10-17 (FULL): part one (catalog billing set, action table, F-9 answer) as recorded in notes/074-billing-actions.md sections 1 to 7. Part two under owner decisions D-100 (section 6.5 path B) and D-101: additive DecisionRecordWriter.WriteBillingDecisionAsync + PreflightBillingDecision (9c9f47cb8) and Services/Finance/BillingDecisionRecorder registered in AddFinanceModule (0eac6d2aa); 0 lines removed from any pre-existing file against 62a1ec56b. Fix rounds: code-review F2, a system decision naming a deciding contact (1ca994acc); adversarial F1 transient core fault classed permanent, F2 same decision id with another billing code wrote a second record, K4 lookup timeout escaped raw (92b18d3bb). Conditions C1 to C7, their tests and the seeding proofs: notes section 8.2 and 8.3. Tests: writer and recorder billing set 68/68; unit filter 1,354/1,354; ArchTests 47/47 (earlier full ArchTests 1,160/1,160). Publish size +8,732 B for the task, 39.55 MB total; no package change, no HIGH CVE. ADR-010 ceiling (166) and route ledger (137) unchanged. Not done: the live seam test DecisionRecordWriterBillingSeamTests was not run (no live writes); DecisionRecordContextImmutabilityTests.CreateEntryPoints and two pre-existing writer comments are left for ontology-r1 (C7); the condition 2 reading awaits ontology-r1's confirmation; caller obligation for 049/100/103/104/105: record under per-invoice serialisation (notes 8.6 K1). TASK-INDEX.md and current-task.md not edited by this agent (main session).
+rework: fix-round-2 task 074</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
