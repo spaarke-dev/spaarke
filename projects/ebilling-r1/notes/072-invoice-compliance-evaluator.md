@@ -150,8 +150,10 @@ or project file changed; `dotnet list package --vulnerable --include-transitive`
 5. **A disabled or inactive policy is not evaluated** (076 publish sets `sprk_enabled`; a proposal stays disabled until then).
 6. **A refused firm version does not suppress the client default** (fails toward the stricter check).
 7. **No-date subjects use the current version** (no date to choose by; RequiredData must still report the missing date).
-8. **Prior lines are not narrowed** (D-112 says do not restrict the loader): all lines of all the firm's non-failed priors are read, in
-   pages, two queries per 500 invoices. Known limit: a firm with very many prior invoices makes this read large (perf, not correctness).
+8. **Prior lines are read only when needed** (review B1; D-112 still loads priors from both sides of the wall): only when a Duplicate
+   version that can be in force names a line match field, and only for Active priors (the only ones Duplicate compares). The test
+   is a superset of the versions the evaluator selects (no narrowing by date or precedence), and an unreadable body counts as naming
+   one. Known limit: a firm with very many Active prior invoices under a line-comparing rule still makes this read large.
 9. **"Inherited-secure core record takes its root's set"** is implemented as the uac-r2 walker defines roots: the walk stops at the
    first Secure-team-owned project / matter / work assignment, so a work assignment secure through its matter has the set {itself},
    whatever its own `sprk_issecure` says. Tested: such a core record with `sprk_issecure = false` resolves to {itself} and a prior filed
@@ -208,3 +210,60 @@ or project file changed; `dotnet list package --vulnerable --include-transitive`
   The index pass found nothing else in scope. The ArchTests are green, including the owner-assignment census: the probe is a
   two-argument `new Entity(table, id)`, which is not a create site.
 - Adversarial review (one pass per task): not run by this agent. The caller schedules it.
+
+## 10. Review fix round, part L (loader and secure roots)
+
+Split of the review fix round (072 + 071 round 3): part L = A1, A2, B1, B3, B4 and B5's secure-root docs; part E = A3, B2, A4, A5;
+part W = A6, A7, A8 and the rest of B5. Worktree `C:\wt072L`, branch `fix/ebilling-r1-072-L`, base `7b7b9b2940` (`work/ebilling-r1`);
+the main session cherry-picks. The first commit adds `BillingEvaluationRequest.ReceivedOn` (required `DateOnly`) for part E's A3; the
+evaluator does not read it in part L.
+
+| Item | Commit | Change | Fail-before / mutation evidence |
+|---|---|---|---|
+| (prep) | `94de0f3c4` | `ReceivedOn` on the request; the two test builders set it | Build only (no behaviour) |
+| A1 (F1) | `1a398b1c6` | Each prior is walked from its invoice AND submission rows (each read with its lineage lookups and owner columns), sets unioned; a walked row owned by the Secure team whose set is empty makes that prior `null`. Fixture: an ordinary prior is owned by an ordinary team | Old loader + new tests: 3 failed (the three A1 tests). Mutation "drop (b)": 2 failed. Mutation "walk the invoice row only": 1 failed (submission-under-secure-root test). New loader + old fixture (every prior invoice Secure-owned): `AnOrdinaryPrior_OnASecureInvoice_KeepsItsDetail_D112` failed, which shows the old fixture asserted the leak |
+| A2 (F3) | `3889850c0` | Test: an ambiguous Secure owner team leaves the invoice set and every prior set `null`; the Duplicate is withheld | Mutation "return empty sets instead of null" on the Failed path: the A2 test failed |
+| B1 | `3797922d0` | Prior lines read only when a Duplicate version that can be in force names a line match field (`BillingFactLoader.ComparesLines`; vocabulary `DuplicateHandler.LineFieldOrder`, now internal), and only for Active priors | Read-count test: no `sprk_billingevent` query for a number-only rule, one for a line rule, a Rejected prior's lines not read. Mutation "always read lines": 1 failed. Mutation "lines of every prior": 2 failed |
+| B3 | `e6ad8aac5` | Walk fault logged at Error and counted (`finance.billing.secure_root_walk.faults`, `FinanceTelemetry`) | Mutation "LogWarning": 1 failed. Mutation "no metric": 1 failed |
+| B4 | `b37e8168c` | A prior with no tracking number is cited like a prior across the wall (`DuplicateHandler.MayShowDetail`): the withheld template, no detail | Mutation "drop the tracking-number check": the B4 test failed |
+| B5 (part) | `c7a5e7091` | `BillingFactSet` SecureRoots docs and the 071 notes: the walk starts from child rows, never a root table; Failed / NotApplicable / Undetermined per uac-r2's conditions. 071 notes: the "hashes below are the fix-round worktree's own" clause deleted | Docs |
+
+**Judgment calls.**
+
+1. **A1 (b) is applied per row, before the union.** The walk runs one group per row in one run (shared read cache), and the loader
+   unions each prior's rows; that equals walking the rows as one group, and it gives each row its own answer, which (b) needs. So a
+   Secure-owned invoice with a cleared lookup is unresolved even when its submission names a root: the invoice is secure, but its
+   own wall is unknown (it may have been re-filed). This fails closed more often than "(b) on the union" would.
+2. **A1 (b) reads the row's `owningteam` only.** A user-owned row is looked through by the walk (the ownership resolver's rule), so
+   it is not treated as secure by itself.
+3. **A walk that answers a different number of groups** than asked now throws inside the guarded block, so it fails closed to
+   unresolved (it was silently tolerated before).
+4. **B1 reads "in force" as "can be in force"** (`CanBeInForce`, every loaded version): the loader has no judging date per subject,
+   and over-reading only costs a query.
+5. **B4 uses `DetailWithheld`**, so a visible prior with no tracking number also loses its line values in the finding. The judged
+   line's values are not secret, but citing a prior without its number would read "duplicates ."; the withheld template is the
+   one generic text that exists. 073 reads a withheld finding's fields with their confidence and no value text, as for the wall.
+6. **B3 counts only the fault path**, as the review asked. The ambiguous-team path stays a Warning: it is a configuration state that
+   the provisioning checks own, and the A2 test pins its outcome.
+7. **B3 adds a counter to `FinanceTelemetry`** (CLAUDE.md section 11). Existing: `FinanceTelemetry`, the Finance meter, registered as
+   an unconditional singleton. Extension: yes, one counter and one method. Cost of doing nothing: a lasting walk fault hides every
+   prior's detail on every submission, and nothing alerts on it. The loader's constructor takes `FinanceTelemetry`; DI already
+   registers it, and the two test builders pass a new instance.
+
+**Files outside the brief's list.** `Handlers/DuplicateHandler.cs` (B1 makes `LineFieldOrder` internal; B4 changes `MayShowDetail`),
+`Telemetry/FinanceTelemetry.cs` (B3), and `tests/unit/domain/Signals/Billing/BillingEvaluationKit.cs` (`ReceivedOn`; the loader's
+new constructor argument). None is a part E file.
+
+**Tests.** `BillingFactLoaderTests`: 19 before, 27 after (8 new: three A1, one A2, two B1 of which one is a 5-case theory, one B3,
+one B4). Filtered suite (`Billing|Compliance|Rejection|RuleSet|Finance|Signals`): 4,527 passed, 5 skipped, 0 failed. API build: 0
+warnings, 0 errors.
+
+**ArchTests: 1,174 passed, 1 failed, and the failure is not caused by this part.** `DecisionRecordContextImmutabilityTests.DecisionRecordWriterOnlyCreatesAndReads`
+("D-34: DecisionRecordWriter may use the shared entity service only to declare it, assign it in the constructor and call
+RetrieveMultipleAsync") fails at base `7b7b9b2940`. That base carries 074's `DecisionRecordWriter` change (`7b7b9b294`, "the recorder
+looks up the deciding user's contact itself"), and this part does not touch the file. It is reported to the main session.
+
+**Publish delta.** `dotnet publish -c Release` of `Sprk.Bff.Api` from fresh worktrees at short paths, zipped with `Compress-Archive`, 192 files each. Fresh master `1473b34c6`: 39,215,553 bytes. Base `7b7b9b2940`: 39,645,670 bytes. Part L tip `c7a5e7091`: 39,647,528 bytes. Part L delta: +1,858 bytes against its base. The whole `work/ebilling-r1` branch with part L is +431,975 bytes (+0.41 MB) against master. Both are under the +5 MB trigger, and about 37.8 MiB total is under 55 MB.
+
+**For 049 (constraints, not code).** 049 supplies `ReceivedOn` from the submission's received date (data, never a clock read).
+
