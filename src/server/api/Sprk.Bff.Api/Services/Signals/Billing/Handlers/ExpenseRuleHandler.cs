@@ -13,6 +13,8 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// divided by a quantity. An amount equal to the cap holds; a line with no amount is not checked against the cap. The listed codes
 /// match without regard to case, and the code read is the AI's validated expense code (task 047), carried with its coding
 /// confidence (NFR-05).</para>
+/// <para><b>Credit lines are skipped (D-105).</b> A line with a negative amount (<see cref="BillingMath.IsCreditLine"/>), for
+/// example a credit "E109 -50.00", is judged on neither check: it is a refund of a charge, not a charge.</para>
 /// <para><b>Reads:</b> ExpenseCode, Amount, Date (extracted).</para>
 /// </remarks>
 internal static class ExpenseRuleHandler
@@ -32,7 +34,9 @@ internal static class ExpenseRuleHandler
         var findings = new List<BillingFinding>();
         foreach (var line in context.Facts.Lines)
         {
-            if (line.LineType != InvoiceLineType.Expense)
+            // A credit (a refund or reversal of an expense, D-105) is never judged as a charge: a non-reimbursable code on a
+            // credit is money coming back, not an expense to refuse, and a negative amount is not over any cap. It stays visible.
+            if (line.LineType != InvoiceLineType.Expense || BillingMath.IsCreditLine(line))
             {
                 continue;
             }

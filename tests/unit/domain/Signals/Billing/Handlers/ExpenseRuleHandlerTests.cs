@@ -77,6 +77,45 @@ public class ExpenseRuleHandlerTests
         Run(Both, Facts(Fee(0) with { ExpenseCode = "E109", Amount = 99999m })).Should().BeEmpty();
     }
 
+    // ── D-105: a credit line is never judged as a charge ────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("E109", "-50.00")] // a refund of a non-reimbursable expense
+    [InlineData("E110", "-0.01")]
+    [InlineData("e109", "-900.00")]
+    public void MustNotFire_ForACreditOnANonReimbursableCode_D105(string code, string amount)
+    {
+        Run(Both, Facts(Expense(0) with { ExpenseCode = code, Amount = D(amount) })).Should().BeEmpty("a credit is a refund, not a charge");
+        Run(CodesOnly, Facts(Expense(0) with { ExpenseCode = code, Amount = D(amount) })).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void MustNotFire_ForACreditUnderTheCapOnlyRule_D105()
+    {
+        Run(CapOnly, Facts(Expense(0) with { Amount = -5000m })).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void MustFire_ForTheChargeLinesAroundACredit_TheCreditIsSkippedAndTheRestAreStillJudged_D105()
+    {
+        var facts = Facts(
+            Expense(0) with { ExpenseCode = "E109", Amount = 50m },
+            Expense(1) with { ExpenseCode = "E109", Amount = -50m },
+            Expense(2) with { ExpenseCode = "E101", Amount = 600m });
+
+        var findings = Run(Both, facts);
+
+        findings.Select(f => (f.Subject.LineIndex, f.ReasonCode)).Should().Equal(
+            (0, BillingReasonCodes.ExpenseCodeNotReimbursable), (2, BillingReasonCodes.ExpenseAmountOverCap));
+    }
+
+    [Fact]
+    public void AZeroAmountOnANonReimbursableCode_IsNotACredit_AndStillFires_D105()
+    {
+        Run(Both, Facts(Expense(0) with { ExpenseCode = "E109", Amount = 0m })).Should().ContainSingle()
+            .Which.ReasonCode.Should().Be(BillingReasonCodes.ExpenseCodeNotReimbursable);
+    }
+
     [Fact]
     public void ReadFields_AreTheExpenseCode_TheAmountAndTheDate()
     {
