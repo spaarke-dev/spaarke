@@ -228,7 +228,7 @@ A Grep for a wrong-name-column read on `sprk_organization` (the class of F1) fou
 
 ## 9. Fix round 2 (owner D-110, coordinator additions). Rigor FULL (auth)
 
-Base `be1c60e38`. Commits: server `850b325d3`, shared reader `e2c7f4fd8`, SPA `d704f49d0`; this note follows. No live writes, nothing under `.claude/`, `TASK-INDEX.md` and `current-task.md` untouched.
+Base `be1c60e38`. Commits: server `254d06045`, shared reader `a93d97c49`, SPA `b7519d388`; this note follows. No live writes, nothing under `.claude/`, `TASK-INDEX.md` and `current-task.md` untouched.
 
 ### 9.1 D-110: the link holds on every channel
 
@@ -285,7 +285,7 @@ The widget reads `/me` once; a failed `/me` read now hides the widget's Submit a
 
 ## 10. Fix round 3 (a deleted record gets 422 again, comment wording). Rigor FULL (auth)
 
-Base `dd5c19602` (the tip of `work/ebilling-r1` at the start of the round). Commits: item 1 `519951c8e` (server, tests, I-20 row), item 2 `56553a7dd` (comments); this note follows. uac-r2 accepted the org-reference reader change (`a93d97c49`) as shaped; this round does not touch it beyond comments. No live writes, nothing under `.claude/`, `TASK-INDEX.md` and `current-task.md` untouched.
+Base `dd5c19602` (the tip of `work/ebilling-r1` at the start of the round). Commits: item 1 `d3b6eced6` (server, tests, I-20 row), item 2 `39e6a431f` (comments); this note follows. uac-r2 accepted the org-reference reader change (`a93d97c49`) as shaped; this round does not touch it beyond comments. No live writes, nothing under `.claude/`, `TASK-INDEX.md` and `current-task.md` untouched.
 
 ### 10.1 Item 1: a just-deleted record answered 503 "try again shortly"
 

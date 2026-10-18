@@ -6,8 +6,8 @@ Rigor: FULL (the POML says STANDARD; raised because the task changes BFF code an
 
 | Piece | Where |
 |---|---|
-| Decide contract change (076 re-check K3): Accept and Reject name the row version the admin was shown; a mismatch is refused 409 `ruleset.concurrent_edit`, nothing written | `Api/Finance/RuleSetEndpoints.cs`, `Services/Finance/RuleSetService.cs` (commit `0bcf0bf3a`) |
-| The page | `src/solutions/RuleReview/` (commit `ebf4b5225`); web resource `sprk_rulereviewpage`, build output `dist/sprk_rulereviewpage.html` (single file, 1.3 MB) |
+| Decide contract change (076 re-check K3): Accept and Reject name the row version the admin was shown; a mismatch is refused 409 `ruleset.concurrent_edit`, nothing written | `Api/Finance/RuleSetEndpoints.cs`, `Services/Finance/RuleSetService.cs` (commit `ca40c9ba0`) |
+| The page | `src/solutions/RuleReview/` (commit `2e0bf4909`); web resource `sprk_rulereviewpage`, build output `dist/sprk_rulereviewpage.html` (single file, 1.3 MB) |
 
 ### The decide change (076's surface)
 
@@ -79,9 +79,9 @@ The reviewer could not construct a path that saves a stale decision (token read,
 Supersedes section 2 item 3 ("Reject has no reason") and owner question 1. Base `eec0f3512`.
 
 Commits:
-- `14b85e8a5`: the column's schema script, the data-model doc, the scripts README entry.
-- `103a25a30`: the BFF (reject route and service) and its tests.
-- `b47bed4b5`: the page and its tests.
+- `bd0ee4b77`: the column's schema script, the data-model doc, the scripts README entry.
+- `340640b4a`: the BFF (reject route and service) and its tests.
+- `9f0359eac`: the page and its tests.
 
 ### What changed
 
@@ -143,7 +143,7 @@ The reason is never firm-visible:
 
   Page: with the previous `reviewActions.ts` and `ruleSetApi.ts` restored, **16 of 64 fail**; restored, 64 of 64 pass.
 - New BFF tests: reject stores the trimmed reason in the same conditional write; no reason (null, empty, white space, over 2,000) is 400 on `reason` with nothing read or written; 2,000 characters after trimming is stored and 2,001 is refused; a stale row version is still 409 and stores nothing; a second reject replaces the reason; accept after reject clears it; accept ignores a reason; an edit that returns a draft to Proposed clears it (body, clause); a headline edit keeps it; the read returns it only for Rejected; the firm projection never carries it; endpoint: 400 for missing / empty / blank / over-long reasons without a service call, and the trimmed reason reaches the service. Existing reject calls pass a reason; the domain-isolation reject case still proves 404 rather than the new 400.
-- Publish size (Release, `-r linux-x64 --self-contained false`, `Compress-Archive` Optimal, `git archive` copies, 192 files each): base `eec0f3512` **39,596,455 B**, head `103a25a30` **39,596,817 B**: delta **+362 B**. No package or project reference changed.
+- Publish size (Release, `-r linux-x64 --self-contained false`, `Compress-Archive` Optimal, `git archive` copies, 192 files each): base `eec0f3512` **39,596,455 B**, head `340640b4a` **39,596,817 B**: delta **+362 B**. No package or project reference changed.
 
 ### Known limits
 

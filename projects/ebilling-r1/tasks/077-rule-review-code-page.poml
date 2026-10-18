@@ -4,7 +4,7 @@
     <title>Rule Review code page</title>
     <phase>3 Rules (WP3) — wave W3-3</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Frontend over 076's API; authorization and validation are enforced server-side, so the page is presentation and workflow.</rigor-reason>
     <model-tier>sonnet</model-tier>

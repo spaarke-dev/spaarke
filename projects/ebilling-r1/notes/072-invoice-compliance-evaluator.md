@@ -119,7 +119,7 @@ Publish (`dotnet publish -c Release -r linux-x64 --self-contained false`, zipped
 |---|---|---|---|
 | master `20fb86dc4` | 39,208,013 B (37.39 MB) | 192 | 19,651,584 |
 | base `98a65eb66` | 39,602,143 B (37.77 MB) | 192 | 20,636,672 |
-| tip `e28ebc8a4` | 39,629,979 B (37.79 MB) | 192 | 20,702,208 |
+| tip `d4d11cb71` | 39,629,979 B (37.79 MB) | 192 | 20,702,208 |
 
 Task delta: **+27,836 B (+0.03 MB)** against base; branch against master +0.40 MB. Total 37.79 MB (< 55 MB review line). No package
 or project file changed; `dotnet list package --vulnerable --include-transitive`: no vulnerable packages.
