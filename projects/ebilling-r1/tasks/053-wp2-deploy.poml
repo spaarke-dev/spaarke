@@ -59,6 +59,7 @@
     <constraint source="ADR-039">Seed the Bindings before deploying the BFF that lists their consumer types in ConsumerTypes.All, so /healthz never goes Unhealthy.</constraint>
     <constraint source="git">Pushing the branch for the SPA workflow needs operator OK; no force push; never bare git stash.</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">Record the deployed BFF publish size against the fresh master build.</constraint>
+    <constraint source="D-116 (owner)">SpaarkeMaster must carry the owner-created global option set sprk_billingstatus, the sprk_billingstatus column on sprk_matter, sprk_project and sprk_workassignment, and sprk_workassignment's sprk_openeddate and sprk_closeddate (all created live on dev 2026-10-18). Add them to the solution and the data-model docs. Do not re-create them.</constraint>
   </constraints>
 
   <knowledge>
