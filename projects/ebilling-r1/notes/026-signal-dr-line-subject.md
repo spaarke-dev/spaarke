@@ -208,7 +208,7 @@ Source: the ontology-r1 and uac-r2 re-checks of fix-round-1, plus DEF-022.
 
 ## #2081 follow-up
 
-Source: GitHub #2081 (split out by uac-r2 from this task's review: the invoice-family half). Commits `cece0099d`, `1542eb2e3`, `accbb1084` on top of `e1501dbbc`.
+Source: GitHub #2081 (split out by uac-r2 from this task's review: the invoice-family half). Commits `dcbf7edc1`, `c528cc6d0`, `c99f0cb10` on top of `e1501dbbc`.
 
 **The defect.** `UpdateRecordFieldsAsync` PATCHes with no `If-Match`, so it is an upsert. A generic path given a stale or deleted `sprk_invoice` / `sprk_billingevent` id, with a patch that touched no guarded lookup (`change.Count == 0` returned null), created an orphan row: no core record (FR-05), owned by the app (UAC D-11), silent.
 
@@ -246,7 +246,7 @@ Source: GitHub #2081 (split out by uac-r2 from this task's review: the invoice-f
 | Wide filter (Invoice, OwnedChild, CoreAncestor, RecordOwnership, FieldMapping, UpdateRecord, DataverseUpdate, ChildRecord, Signal, ActionSeam, DecisionRoute, DecisionAction, SecureChild, BillingEvent, ApplySeam) | 5,138 passed, 6 skipped, 0 failed |
 | Spaarke.ArchTests | 1,175 / 1,175 |
 | BFF build | 0 warnings, 0 errors |
-| Publish size (Release, framework-dependent linux-x64, `Compress-Archive -CompressionLevel Optimal` over `api-publish/*`, PDBs included, 192 files each side, fresh worktrees `C:\wt2081m` / `C:\wt2081b`) | `e1501dbbc` 39,598,563 B → `accbb1084` 39,598,912 B (+349 B) |
+| Publish size (Release, framework-dependent linux-x64, `Compress-Archive -CompressionLevel Optimal` over `api-publish/*`, PDBs included, 192 files each side, fresh worktrees `C:\wt2081m` / `C:\wt2081b`) | `e1501dbbc` 39,598,563 B → `c99f0cb10` 39,598,912 B (+349 B) |
 
 The baseline is this branch's base commit, not master: the change is the only difference, so the delta is this task's alone. No package was added, so no CVE re-check was needed.
 
