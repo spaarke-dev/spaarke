@@ -1598,3 +1598,25 @@ The full record is in `notes/185-invite-code-design.md` §11.
 - **Rejected.**
   - (B) Skip the date for existing live grants: it keeps the divergence the owner wants corrected.
   - (C) Server never shortens in default mode: out of scope, and against the model.
+
+## Round 102 (2026-10-18): OWNER — decisions batch
+1. **099b (#2063):** owner approves the Secure Record Owner role change and signs off.
+   - The change adds `prvReadsprk_ExternalRecordAccess` at Basic via `scripts/Set-SecureRecordOwnerRolePrivileges.ps1`.
+   - The owner asked whether UAC can apply it. Round 101's "the owner edits the role" stands until the owner explicitly says "apply it".
+2. **186 (#2061):** owner approves the Workforce role edit (round 101 item 2's privileges) and signs off. Same question, same rule.
+3. **036 (#2078):**
+   - (a) option 2: app-only `RetrievePrincipalAccess` and privilege read naming the systemuser, only for callers whose token can't be exchanged (WorkforceHome / A9).
+   - (f) `$orderby=modifiedon desc`, so a capped set keeps the most recently modified records.
+   - The owner approves R3 flipping `ExternalAccess:ImpersonatedRootSets:Enabled` on dev after 036 merges and deploys. R3 requires the owner to confirm that directly in R3's session.
+4. **#2084:** adopt the UAC fix, so a rule scoped to a matter that later becomes Secure follows it.
+   - Lineage entries for `sprk_policy` (via `sprk_matter`) and `sprk_policyversion` (via `sprk_policy`).
+   - Secure Record Owner Read on both tables.
+   - Builds after 099b merges.
+   - Ontology review, 2026-10-18:
+     - versions published after the flip must also be owned at create via RecordOwnershipResolver; the 2-minute recent-changes pass is only the net;
+     - the uniqueness-key existence oracle on a hidden rule's code is accepted as a known limit.
+5. **#2027 (provisioning):** audit retention is Forever (`-1`). Relayed to provisioning.
+6. **#1876 (ontology):** Decision Records from a communication filed to no record are visible to whoever the communication is associated with (its participants, through per-participant shares). Once the communication is filed, the team-owned path applies. Relayed to ontology-r1.
+7. **Model 1 `Set-ExternalFlagForB2BGuests.ps1 -Apply`:** NOT yet a go. The owner replied "if this follows what you recommended then ok". UAC re-explains the effect (flagged guests lose direct shares on every Restricted record) and needs an explicit go plus the customer tenant ids.
+8. **ebilling:** firms may see every invoice status, including Sent to AP (matches ebilling D-107). Relayed.
+9. **External CIAM user UAT:** the owner reports it PASSED UAC's checklist. Recorded for wrap-up 090's UAT section.
