@@ -209,6 +209,7 @@ public sealed partial class DecisionRecordWriterTests
         {
             ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", InvoiceId),
             ["sprk_steps"] = $"{{\"reviewId\":\"{BillingDecisionKey.IdOf("sprk_invoice", InvoiceId, BillingDecision):D}\",\"steps\":[{{\"code\":\"mark-complete\"}}]}}",
+            ["sprk_actioncode"] = "mark-complete",
             ["createdby"] = new EntityReference("systemuser", WriterUser),
         });
 
@@ -216,6 +217,26 @@ public sealed partial class DecisionRecordWriterTests
 
         result.AlreadyRecorded.Should().BeFalse();
         h.Created.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Billing_C3_TheSameDecisionIdWithAnotherBillingCode_IsRefused_AndNoSecondRecordIsWritten()
+    {
+        // Adversarial F2: the key is (subject, decision id), with no code. A retry that changed its mind after a create timeout (reject, then
+        // return-to-firm under the same id) would otherwise write a second, contradictory record under one key.
+        var h = BillingHarness();
+        var first = await h.Writer.WriteBillingDecisionAsync(Billing("reject-invoice", reason: "Duplicate of INV-0001"));
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing("return-to-firm", reason: "Please resubmit")))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        first.AlreadyRecorded.Should().BeFalse();
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        ex.Message.Should().Contain("another billing action", "refused by the lookup, not by validation");
+        h.Lookups.Where(q => q.EntityName == "sprk_decisionrecord").Should().HaveCount(2, "both calls reached the lookup");
+        h.Created.Should().ContainSingle("the first decision's record only")
+            .Which.GetAttributeValue<string>("sprk_actioncode").Should().Be("reject-invoice");
+        h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -257,6 +278,22 @@ public sealed partial class DecisionRecordWriterTests
         (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing())).Should().ThrowAsync<DecisionRecordRefusedException>())
             .Which.Reason.Should().Be(DecisionRecordRefusalReason.BillingRecordLookupFailed);
         h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Billing_C4_ALookupTimeoutSurfacingAsACancellationTheCallerDidNotAskFor_IsTheLookupRefusal_AndWritesNothing()
+    {
+        // Adversarial K4: an HTTP timeout surfaces as TaskCanceledException with the caller's token NOT cancelled. The writer's contract is
+        // "DecisionRecordRefusedException, or OperationCanceledException only when the caller cancelled".
+        var h = BillingHarness();
+        h.LookupFault = new TaskCanceledException("http timeout");
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing(), CancellationToken.None))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.BillingRecordLookupFailed);
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty();
     }
 
     // ── C5: a null confirmer only for an automated decider ────────────────────────────────────────────────────────
@@ -355,6 +392,28 @@ public sealed partial class DecisionRecordWriterTests
 
         ex.Reason.Should().Be(DecisionRecordRefusalReason.SubjectUnfileable);
         ex.Message.Should().NotContain(subjectId.ToString("D"), "the refusal names no record");
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Billing_C6_AFirstDerivationThatFaults_IsAFilingFault_NotAPermanentRefusal_EvenWhenARereadWouldSucceed()
+    {
+        // Adversarial F1: the first core derivation is throttled, a re-read a moment later succeeds. Handing "no core" on let the filing
+        // step's own derivation succeed and the 026 core check refuse with SubjectUnfileable, a reason callers treat as "a retry won't
+        // change this". A fault is FilingFailed (a retry may succeed), and nothing is written.
+        var h = BillingHarness();
+        var invoice = h.Rows[("sprk_invoice", InvoiceId)];
+        var reads = 0;
+        h.Entities.Setup(e => e.RetrieveAsync("sprk_invoice", InvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns(() => Interlocked.Increment(ref reads) == 1
+                ? Task.FromException<Entity>(new TimeoutException("throttled"))
+                : Task.FromResult(invoice));
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing()))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.FilingFailed);
         h.Created.Should().BeEmpty();
         h.OwnerAsks.Should().BeEmpty();
     }

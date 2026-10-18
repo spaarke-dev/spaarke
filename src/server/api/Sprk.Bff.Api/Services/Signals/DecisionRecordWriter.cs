@@ -1217,11 +1217,17 @@ public sealed class DecisionRecordWriter
     /// decider roles carry it. The only case a billing record may have no confirmer.</summary>
     private const string AutomatedDeciderPrefix = "automated:";
 
+    /// <summary>The most rows the billing "already recorded" lookup reads (see <see cref="FindBillingRecordsAsync"/>).</summary>
+    private const int BillingLookupTop = 10;
+
     /// <summary>
     /// The billing entry's OWN allowed subjects, one table per billing code: the line for the three line codes, the invoice for every other
     /// (D-75; D-101: an override and an automatic rejection file under the invoice the submission created). This list is consulted by
     /// <see cref="WriteBillingDecisionAsync"/> only; <see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/> neither reads nor
-    /// changes it. Built from the catalog's billing set, so a billing code with no subject cannot exist (static initialisation throws).
+    /// changes it. Built from the catalog's billing set, so every billing code has a subject; but a NEW line-level code that is not named in
+    /// the literal below silently maps to the invoice. Nothing throws for that: the guard is the exact-set test
+    /// <c>DecisionRecordWriterTests.Billing_C2_TheBillingEntrysSubjects_AreTheLineForLineCodes_AndTheInvoiceForEveryOther</c>, which fails
+    /// when the billing set changes, so a new code's table is decided there.
     /// </summary>
     private static readonly FrozenDictionary<string, string> BillingSubjectByCode = DecisionActionCatalog.BillingActions
         .ToFrozenDictionary(
@@ -1236,7 +1242,11 @@ public sealed class DecisionRecordWriter
 
     /// <summary>
     /// ebilling-r1 task 074 (spec FR-30, FR-19, FR-35 to FR-37; D-75, D-100, D-101): writes the ONE Decision Record of a billing decision,
-    /// human or system, exactly once per (subject, decision id). An additive entry point beside <see cref="WriteGateDecisionAsync"/> and
+    /// human or system, exactly once per (subject, decision id) for retries made one after another: a second call with the same decision id
+    /// and code returns the first record, and with the same decision id but ANOTHER billing code is refused
+    /// (<see cref="DecisionRecordRefusalReason.ReviewInvalid"/>). Two CONCURRENT calls can both write (lookup then create, no unique key, as on
+    /// the gate path), so a caller serialises its decisions per invoice (its status check-and-set). An additive entry point beside
+    /// <see cref="WriteGateDecisionAsync"/> and
     /// <see cref="WriteConditionClearedAsync"/>: <see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/>, <see cref="Validate"/>
     /// and the existing request shapes are unchanged, and below the request it is the SAME code: <see cref="Content"/> (D-34 context),
     /// <see cref="FiledAndOwnedAsync"/> (the subject filed through the shared regarding builder, the core-ancestor stamp, the ebilling-r1 026
@@ -1266,7 +1276,19 @@ public sealed class DecisionRecordWriter
         {
             var plan = ValidateBilling(request);
             var key = BillingDecisionKey.IdOf(request.Subject.Entity, request.Subject.Id, request.DecisionId);
-            if (await FindBillingRecordAsync(request.Subject, key, request.ActionCode, ct).ConfigureAwait(false) is { } existing)
+            var recorded = await FindBillingRecordsAsync(request.Subject, key, ct).ConfigureAwait(false);
+            if (recorded.Count > 0 && !recorded.Any(r => string.Equals(r.Code, request.ActionCode, StringComparison.Ordinal)))
+            {
+                // The key carries no code, so one decision id can only ever be one billing decision on its subject: another code under
+                // it (a retry that changed its mind after a create timeout) would be a second, contradictory record. Refused; a retry
+                // does not change it.
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.ReviewInvalid,
+                    "This decision id is already recorded on its subject with another billing action; nothing was written.");
+            }
+
+            var existing = recorded.FirstOrDefault(r => string.Equals(r.Code, request.ActionCode, StringComparison.Ordinal));
+            if (existing.Id != Guid.Empty)
             {
                 _logger.LogInformation(
                     "Billing decision {DecisionId} ({ActionCode}) already recorded as Decision Record {RecordId}; nothing written.",
@@ -1392,35 +1414,49 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>
-    /// ebilling-r1 task 074 (D-100): the billing record already written for this key, with its <c>sprk_confirmedby</c>, or null. Narrowed by the
-    /// subject's regarding lookup (indexed), then by the key in <c>sprk_steps</c> and by the billing code (a Signals review's record can never
-    /// carry one: <see cref="Validate"/> refuses it, so a client-chosen review id equal to the key cannot hide this record), and only among
-    /// records the writer itself created (<c>createdby</c> = the writer identity: a row a person created with this key is not this record). Read
-    /// through the shared sysadmin reader, so a record owned by any team is found (a re-owned record keeps its <c>createdby</c>).
+    /// ebilling-r1 task 074 (D-100): the billing records already written under this key, each with its code and <c>sprk_confirmedby</c> (empty
+    /// when none). Narrowed by the subject's regarding lookup (indexed), then by the key in <c>sprk_steps</c>, and only among records the writer
+    /// itself created (<c>createdby</c> = the writer identity: a row a person created with this key is not this record). The key carries no
+    /// code, so the code is READ (<c>sprk_actioncode</c>, the one taken step's code) rather than filtered on: the caller can then tell "this
+    /// decision, already recorded" from "this decision id, recorded with another billing code". A row whose code is not a billing code is a
+    /// Signals review's record that reused the id (<see cref="Validate"/> never lets one carry a billing code) and is skipped, never matched.
+    /// Read through the shared sysadmin reader, so a record owned by any team is found (a re-owned record keeps its <c>createdby</c>).
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the lookup (or
-    /// the writer identity it is narrowed by) faulted. Nothing is written: guessing "none" would risk a second record; a retry may succeed.</exception>
-    private async Task<(Guid Id, Guid? ConfirmedBy)?> FindBillingRecordAsync(DecisionRecordRef subject, Guid key, string actionCode, CancellationToken ct)
+    /// the writer identity it is narrowed by) faulted, a timeout surfacing as a cancellation the caller did not ask for included. Nothing is
+    /// written: guessing "none" would risk a second record; a retry may succeed.</exception>
+    private async Task<IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code)>> FindBillingRecordsAsync(
+        DecisionRecordRef subject, Guid key, CancellationToken ct)
     {
         try
         {
             var query = new QueryExpression(Table)
             {
-                ColumnSet = new ColumnSet("sprk_confirmedby"),
-                TopCount = 1,
+                ColumnSet = new ColumnSet("sprk_confirmedby", "sprk_actioncode"),
+                // Sequential use leaves at most one billing row per key; a concurrent pair (see WriteBillingDecisionAsync) or a Signals review
+                // that reused the id adds one each. Bounded, never a scan.
+                TopCount = BillingLookupTop,
                 NoLock = true,
             };
             query.Criteria.AddCondition(SubjectLookupByEntity[subject.Entity], ConditionOperator.Equal, subject.Id);
             query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"reviewId\":\"{key:D}\"%");
-            // Billing codes are kebab-case (no '_' or '%'), so the code is matched literally.
-            query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"code\":\"{actionCode}\"%");
             query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            return rows?.Entities?.FirstOrDefault() is { } row && row.Id != Guid.Empty
-                ? (row.Id, row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id)
-                : null;
+
+            var found = new List<(Guid Id, Guid? ConfirmedBy, string Code)>();
+            foreach (var row in rows?.Entities ?? Enumerable.Empty<Entity>())
+            {
+                if (row.Id != Guid.Empty
+                    && row.GetAttributeValue<string>("sprk_actioncode") is { } code
+                    && BillingSubjectByCode.ContainsKey(code))
+                {
+                    found.Add((row.Id, row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id, code));
+                }
+            }
+
+            return found;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             throw new DecisionRecordRefusedException(
                 DecisionRecordRefusalReason.BillingRecordLookupFailed,
@@ -1431,18 +1467,26 @@ public sealed class DecisionRecordWriter
 
     /// <summary>
     /// D-34 / D-75: the core record of a billing subject, derived from the subject's OWN core lookups by <see cref="CoreAncestorResolver"/> (a
-    /// line's core is never its invoice's). Only a single derived core is a core here; anything else (a failed derivation, none, several) is
-    /// returned as no core, and the shared filing step (<see cref="FileUnderSubjectAsync"/>, ebilling-r1 026) refuses it with its classified
-    /// reason. The derivation is handed to that step, so it is not paid for twice.
+    /// line's core is never its invoice's). Only a single derived core is a core here; none or several is returned as no core, and the shared
+    /// filing step (<see cref="FileUnderSubjectAsync"/>, ebilling-r1 026) refuses it (SubjectUnfileable). The derivation is handed to that
+    /// step, so it is not paid for twice. A FAILED derivation is refused here with its own class: a fault is FilingFailed (a retry may
+    /// succeed), a data condition SubjectUnfileable.
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.FilingFailed"/>: the record-type catalog read
-    /// faulted, or it has no row for the core (the record could not carry its core pair, which an invoice-family subject requires).</exception>
+    /// faulted, or it has no row for the core (the record could not carry its core pair, which an invoice-family subject requires), or the
+    /// derivation faulted. <see cref="DecisionRecordRefusalReason.SubjectUnfileable"/>: the derivation failed on a data condition.</exception>
     private async Task<(DecisionRecordCore? Core, CoreAncestorResult? Derived)> ResolveBillingCoreAsync(DecisionRecordRef subject, CancellationToken ct)
     {
         var derived = await _coreAncestors.ResolveStampsAsync(subject.Entity, subject.Id, ct).ConfigureAwait(false);
         if (!derived.Succeeded)
         {
-            return (null, null); // the filing step derives again and classifies the failure
+            // Classified HERE, as the filing step classifies its own (FileUnderSubjectAsync): handing no core on would let a second
+            // derivation that succeeds reach the 026 core check with no core, a permanent refusal for a transient fault (adversarial F1).
+            throw derived.IsPermanent
+                ? new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.SubjectUnfileable,
+                    "The decision's subject cannot be filed: the records it sits under conflict, or it no longer exists; nothing was written.")
+                : FilingFailed(subject, derived.Error);
         }
 
         if (derived.Stamps is not [var own])
