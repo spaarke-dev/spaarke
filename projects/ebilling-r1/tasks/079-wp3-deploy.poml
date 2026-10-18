@@ -46,6 +46,9 @@
     <constraint source="project">No destructive Dataverse change. Option values and rows are additive; -WhatIf first where the script supports it.</constraint>
     <constraint source="project">This serial deploy task may edit SpaarkeMaster solution source (project CLAUDE.md §3): additive sitemap / navigation entries for the Rule Review page and any WP3 columns or tables added after 029 (e.g. 070's rule-type option values, 019 / 076 additions), using 029's export-to-temp procedure, verified with Import-SolutionScoped.ps1 -PlanOnly. Anything non-additive follows the escalation.</constraint>
     <constraint source="project">Never delete the owner-created containers or evaluation-set documents.</constraint>
+    <constraint source="D-114 (owner)">The Rule Review page (web resource sprk_rulereviewpage, from 077) gets two entry points: a "Rule Review" subarea in the Spaarke Administration app's sitemap, and a command on the sprk_ruleset main form that opens the page for that rule set (pass the rule set id). Both go in solution-scoped through scripts/Import-SolutionScoped.ps1. Verify both open the page on dev.</constraint>
+    <constraint source="D-113 (owner)">Before the BFF that reads it is deployed, run the 077 follow-up's idempotent schema script for the rejection-reason column (WhatIf first). 053 must already have synced it into SpaarkeMaster.</constraint>
+    <constraint source="076 re-check K2">Before relying on 076's conditional publish, make one probe on dev, with the owner's OK for the live write. It confirms that IfRowVersionMatches inside ExecuteTransactionRequest is honoured per inner request and that the mismatch fault carries 0x80060882.</constraint>
   </constraints>
 
   <knowledge>

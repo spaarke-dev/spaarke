@@ -1,7 +1,7 @@
 # Task 075 - Rule drafting Action BILLING-RULE-DRAFT@v1 and job (FR-27)
 
 Rigor: **FULL** (POML said STANDARD; the task edits `.cs` files and is tagged `bff`, `ai`, `jps`, `jobs`, so the decision tree raises it). Step 9.5 code-review and adr-check ran.
-Base `62a1ec56b`; commits `d5075081a` (Action, mirrors, Binding, `ConsumerTypes.All`), `841695dd7` (job, route, write path) and a third commit with the review fixes below.
+Base `62a1ec56b`; commits `4d7a8a8f0` (Action, mirrors, Binding, `ConsumerTypes.All`), `a42d6ec66` (job, route, write path) and a third commit with the review fixes below.
 
 ## What was built
 
@@ -106,7 +106,7 @@ A policy with no version (a run that died between the two creates and could not 
 
 | Criterion | Proof |
 |---|---|
-| `ConsumerTypes.All` entry added with its Binding row; /healthz stays Healthy | Both in `d5075081a`. `BillingRuleDraftActionContractTests` pins the row; with the `All` entry removed 2 tests failed (`ConsumerTypesKey_...`, `GoldenUtteranceEvalSuiteTests.DispatchCases_...`), restored 48 passed. Live /healthz after seeding: **not run** (no live writes). |
+| `ConsumerTypes.All` entry added with its Binding row; /healthz stays Healthy | Both in `4d7a8a8f0`. `BillingRuleDraftActionContractTests` pins the row; with the `All` entry removed 2 tests failed (`ConsumerTypesKey_...`, `GoldenUtteranceEvalSuiteTests.DispatchCases_...`), restored 48 passed. Live /healthz after seeding: **not run** (no live writes). |
 | Action passes validation; schema restricts ruleType (11 names) and consequence; mirror matches | `BillingRuleDraftActionContractTests`: tier, code, prompt content, examples through `InvoiceAiOutputParser.ParseDraftRules`, ruleType enum equals `BillingRuleCatalogue`, `parameters` union equals the 11 body schemas, input schema. Mirror vs dev row: **not run** (live seeding held, below). |
 | Unknown type or schema-invalid parameters not written, listed with a reason | `BillingRuleDraftTranslatorTests` (exact-name match, mutant case-insensitive match killed), `RuleSetServiceDraftTests` (validator refusal listed, not stored), seam test `TheJob_StoresTheValidProposals_AsProposedOffRules_AndListsEveryRefusalWithTheClauseThatCausedIt`. |
 | Valid proposals written as Draft with quote and location; none Published or in force | `AddDrafts_StoresEachRuleAsAProposedOffBillingRule_InForceNowhere_AndWritesTheMarkerLast`, seam test above. |
@@ -157,15 +157,15 @@ Release, `-r linux-x64 --self-contained false`, `Compress-Archive` Optimal, shor
 |---|---|
 | master tip `9b72ea2c8` | 38,977,352 |
 | branch base `62a1ec56b` | 39,545,337 |
-| branch head `841695dd7` | 39,565,610 |
+| branch head `a42d6ec66` | 39,565,610 |
 
 Task 075 delta (measured on the first two commits; the review fixes add no package or file) **+20,273 B** (+0.019 MB), total 37.73 MiB. Under the +5 MB, 55 MB and 60 MB thresholds. (Head minus master is +588,258 B, which is all of ebilling-r1's wave so far, not this task.) No PackageReference change. `dotnet list package --vulnerable --include-transitive`: none.
 
 ## Open questions and holds
 
-1. **Job status store.** ADR-017 calls for persisted status transitions; it is Proposed, so none was added. Smallest addition if wanted: a status option and a started/finished timestamp on `sprk_ruleset` (or a cache key with a TTL), written by the handler. Owner decision.
+1. **Job status store (accepted as a known limit, 2026-10-18).** ADR-017 is Proposed, not accepted, so it does not bind and there is no ADR conflict. The 077 page polls the rule set read, which shows drafting progress; failures go to the logs and the DLQ. ADR-017 calls for persisted status transitions; none was added. Smallest addition if wanted: a status option and a started/finished timestamp on `sprk_ruleset` (or a cache key with a TTL), written by the handler. Owner decision.
 2. **Live seeding held.** The Action mirror and Binding row are in the repo but not deployed (no live writes in this run). Order: `Deploy-ActionMirrors.ps1`, then `Seed-PlaybookConsumers.ps1`, then verify /healthz. A constant in `ConsumerTypes.All` without a Binding row makes `RoutingConsumerTypeHealthCheck` report **Degraded** (forward-declared constant); an orphan row or handler is Unhealthy. Until the row is seeded the job would end Poisoned on its final delivery with the Binding-missing reason. Deploy the Binding with or before the BFF. This belongs with task 053's deploy order.
-3. **Privilege name unverified.** `prvCreatesprk_Policy` follows the verified Write-privilege names by analogy; confirm against the live role before the first admin test.
+3. **Privilege name (closed 2026-10-18).** `prvCreatesprk_Policy` and `prvWritesprk_ruleset` were both checked to exist on spaarkedev1 by the main session.
 4. **`sprk_subjecttype` left unset** on drafted policies (076 notes listed it; the data-model doc says only the lane is required). Lane = Decide and priority = 500 are my choices.
 5. **Consequence eligibility** per type (task 073) does not exist yet, so Reject is accepted for any type here; 073 should tighten `CheckDraft`.
 6. **Retry with different model output: CLOSED.** The proposed fix was applied, with the owner-decision parts settled as recorded in "Retry compensation": untouched drafts of the earlier run are deleted before drafting again; a draft an admin worked on is kept and its clause is not drafted a second time. No schema addition.
@@ -176,7 +176,7 @@ Task 075 delta (measured on the first two commits; the review fixes add no packa
 
 ## Review (Step 9.5)
 
-One adversarial review (Opus, read-only) of `62a1ec56b..841695dd7`; adr-check by hand against ADR-004, 010, 013, 015, 017, 019, 039 and 043 (no conflict; ADR-017's status store is the open question above).
+One adversarial review (Opus, read-only) of `62a1ec56b..a42d6ec66`; adr-check by hand against ADR-004, 010, 013, 015, 017, 019, 039 and 043 (no conflict; ADR-017's status store is the open question above).
 
 | Finding | Class | Outcome |
 |---|---|---|
