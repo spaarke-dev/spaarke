@@ -2257,7 +2257,8 @@ public class RuleSetService
     /// <summary>
     /// The one validation of a billing rule version, for accept, edit and publish: <see cref="PolicyVersionValidator.ValidateForSave"/>
     /// with <see cref="RuleDomain.Billing"/> (never <c>ValidateForAuthoring</c>, which is the Ontology admin's), then the required
-    /// columns (consequence, headline, template).
+    /// columns (consequence, headline, template). Task 073 (FR-26, I-5, D-89): the validator also gets the consequence, so a rule whose
+    /// type may not carry it (Reject on an AiObservation rule, say) is refused on every one of these paths, publish included.
     /// </summary>
     private List<RuleSetError> ValidateRule(PolicyRow policy, string? ruleTypeRaw, VersionRow version)
     {
@@ -2265,19 +2266,23 @@ public class RuleSetService
         void Add(string field, string message, string? reason = null) =>
             errors.Add(new RuleSetError(policy.Id, policy.Name, field, message, reason));
 
+        // A missing or unknown value is reported once below; only a defined one goes to the validator for the per-type check.
+        int? definedConsequence = version.Consequence is { } stated && Enum.IsDefined(typeof(BillingConsequence), stated) ? stated : null;
+
         if (string.IsNullOrWhiteSpace(version.RuleBody))
         {
             Add("ruleBody", "The rule body is required.");
         }
         else
         {
-            var result = _validator.ValidateForSave(ruleTypeRaw, version.RuleBody, version.Template, RuleDomain.Billing);
+            var result = _validator.ValidateForSave(ruleTypeRaw, version.RuleBody, version.Template, RuleDomain.Billing, definedConsequence);
             if (!result.IsValid)
             {
                 var field = result.Reason switch
                 {
                     OntologyWriterFailureReason.RuleTypeUnsupported or OntologyWriterFailureReason.RuleTypeWrongDomain => "ruleType",
                     OntologyWriterFailureReason.TemplateMalformed or OntologyWriterFailureReason.TemplateTokenOutsideReadSet => "messageTemplate",
+                    OntologyWriterFailureReason.ConsequenceNotAllowed => "consequence",
                     _ => "ruleBody",
                 };
                 foreach (var message in result.Errors)

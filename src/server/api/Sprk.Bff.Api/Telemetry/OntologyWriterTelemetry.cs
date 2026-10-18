@@ -409,6 +409,13 @@ public static class OntologyWriterFailureReason
     /// <see cref="RuleTypeUnsupported"/>, which means the type is unknown or the consumer cannot evaluate it at all.</summary>
     public const string RuleTypeWrongDomain = "rule_type_wrong_domain";
 
+    /// <summary>ebilling-r1 task 073 (FR-26, I-5, D-89): a billing version's <c>sprk_consequence</c> is one its rule type may not carry
+    /// (Reject on a type that is not reject-eligible or holds only, or a value outside the defined three). Returned by
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.ValidateForSave"/> when it is given the consequence (the
+    /// publish path), and by <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.TryPrepareBillingRule"/> for a stored row
+    /// (logged and metered on <c>billing.rule.invalid</c>).</summary>
+    public const string ConsequenceNotAllowed = "consequence_not_allowed";
+
     /// <summary>The <c>sprk_rulebody</c> exceeds
     /// <see cref="Sprk.Bff.Api.Services.Signals.RuleBodySchemaValidator.MaxRuleBodyLength"/> characters. Refused
     /// by length alone, BEFORE any parse or schema evaluation (task 022 rework round 2, finding F2), so it is its

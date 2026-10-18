@@ -56,7 +56,7 @@ public sealed class BillingRuleDraftSeamTests
     // What a model returns for the document above: two good rules, one the validator refuses (99 hours), one with a parameter the type lacks.
     private static readonly string ModelReply =
         "{\"proposals\":[" +
-        "{\"ruleType\":\"TimeIncrement\",\"parameters\":" + Params("incrementHours", "0.1") + ",\"consequence\":\"Reject\",\"clauseQuote\":\"4.2 Time is billed in tenth-hour increments.\",\"clauseLocation\":\"Section 4.2\"}," +
+        "{\"ruleType\":\"TimeIncrement\",\"parameters\":" + Params("incrementHours", "0.1") + ",\"consequence\":\"Flag\",\"clauseQuote\":\"4.2 Time is billed in tenth-hour increments.\",\"clauseLocation\":\"Section 4.2\"}," +
         "{\"ruleType\":\"DailyHoursCap\",\"parameters\":" + Params("maxHoursPerDay", "99") + ",\"consequence\":\"Flag\",\"clauseQuote\":\"5.1 No timekeeper may bill over 99 hours a day.\",\"clauseLocation\":\"Section 5.1\"}," +
         "{\"ruleType\":\"ApprovedRate\",\"parameters\":" + Params("tolerancePercent", "0", ("incrementHours", "0.5")) + ",\"consequence\":\"SuggestAdjustment\",\"clauseQuote\":\"6.3 Hourly rates are capped at the agreed rate card.\",\"clauseLocation\":null}" +
         "],\"notConverted\":[{\"text\":\"9.3 Staff sensibly.\",\"location\":\"Section 9.3\",\"reason\":\"No offered rule type checks this.\"}]}";

@@ -30,7 +30,7 @@ public sealed class RuleSetServiceDraftTests
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────
 
     private static DraftedRule Increment(string quote = "Time must be billed in tenth-hour increments.", string? location = "Section 4.2") =>
-        Drafted("TimeIncrement", """{"type":"TimeIncrement","incrementHours":0.1}""", "Reject", quote, location);
+        Drafted("TimeIncrement", """{"type":"TimeIncrement","incrementHours":0.1}""", "Flag", quote, location); // task 073: TimeIncrement may not reject (FR-26)
 
     private static DraftedRule Cap(int hours, string quote) =>
         Drafted("DailyHoursCap", $$"""{"type":"DailyHoursCap","maxHoursPerDay":{{hours}}}""", "Flag", quote, "Section 5");
@@ -163,11 +163,11 @@ public sealed class RuleSetServiceDraftTests
         first.GetAttributeValue<int>("sprk_versionnumber").Should().Be(1);
         first.GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Proposed);
         first.GetAttributeValue<OptionSetValue>("sprk_ruletype").Value.Should().Be((int)RuleType.TimeIncrement);
-        first.GetAttributeValue<OptionSetValue>("sprk_consequence").Value.Should().Be((int)BillingConsequence.Reject);
+        first.GetAttributeValue<OptionSetValue>("sprk_consequence").Value.Should().Be((int)BillingConsequence.Flag);
         first.GetAttributeValue<string>("sprk_clausereference").Should().Be("Time must be billed in tenth-hour increments.");
         first.GetAttributeValue<string>("sprk_clauselocation").Should().Be("Section 4.2");
         first.GetAttributeValue<string>("sprk_rulebody").Should().Be("""{"type":"TimeIncrement","incrementHours":0.1}""");
-        first.GetAttributeValue<string>("sprk_proposedaction").Should().Be("billing-reject");
+        first.GetAttributeValue<string>("sprk_proposedaction").Should().Be("billing-flag");
         first.GetAttributeValue<DateTime?>("sprk_inforcefrom").Should().NotBeNull();
         first.Contains("sprk_inforceto").Should().BeFalse();
 

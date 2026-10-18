@@ -162,8 +162,11 @@ public sealed class InvoiceComplianceEvaluator
         var accepted = new Dictionary<Guid, BillingRuleDefinition>();
         foreach (var candidate in candidates.Where(c => selectedBySubject.Any(s => s.Versions.Contains(c))))
         {
+            // Task 073 (FR-26, I-5, D-89): the stored consequence goes through the gate too, so a row authored directly in Dataverse
+            // with a consequence its type may not carry (Reject on an AiObservation rule) is refused here, not only at publish.
             var snapshot = new PolicyVersionSnapshot(
-                candidate.PolicyVersionId, candidate.PolicyCode, candidate.RuleType, candidate.RuleBody, candidate.MessageTemplate);
+                candidate.PolicyVersionId, candidate.PolicyCode, candidate.RuleType, candidate.RuleBody, candidate.MessageTemplate,
+                candidate.Consequence);
             if (_gate.TryPrepareBillingRule(snapshot, out var definition))
             {
                 accepted[candidate.PolicyVersionId] = definition;

@@ -33,7 +33,7 @@ public sealed class RuleSetServiceCompensationTests
     private static IReadOnlyList<NotConvertedClause> None => Array.Empty<NotConvertedClause>();
 
     private static DraftedRule Increment(string quote = Q1) =>
-        Drafted("TimeIncrement", """{"type":"TimeIncrement","incrementHours":0.1}""", "Reject", quote, "Section 4.2");
+        Drafted("TimeIncrement", """{"type":"TimeIncrement","incrementHours":0.1}""", "Flag", quote, "Section 4.2"); // task 073: TimeIncrement may not reject (FR-26)
 
     private static DraftedRule Cap(int hours, string quote = Q2) =>
         Drafted("DailyHoursCap", $$"""{"type":"DailyHoursCap","maxHoursPerDay":{{hours}}}""", "Flag", quote, "Section 5");

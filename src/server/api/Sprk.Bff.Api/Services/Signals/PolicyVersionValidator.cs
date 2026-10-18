@@ -37,8 +37,12 @@ public sealed record PolicyVersionValidationResult(bool IsValid, IReadOnlyList<s
 /// else about the row (e.g. <c>sprk_inforcefrom</c>, policy scope) belongs here — that is
 /// <see cref="PolicyScopeResolver"/>'s job, not this validator's.
 /// </summary>
+/// <param name="Consequence">Billing only (ebilling-r1 task 073): the version's <c>sprk_consequence</c> option value, so the billing gate
+/// (<see cref="PolicyVersionValidator.TryPrepareBillingRule"/>) can refuse a stored consequence its type does not allow. <c>null</c> =
+/// not stated: nothing is checked (every Ontology caller, which has no consequence), and the submission decider treats a billing
+/// version without one as a Flag. The Ontology gate ignores it.</param>
 public sealed record PolicyVersionSnapshot(
-    Guid PolicyVersionId, string PolicyCode, string? RuleType, string? RuleBody, string? MessageTemplate);
+    Guid PolicyVersionId, string PolicyCode, string? RuleType, string? RuleBody, string? MessageTemplate, int? Consequence = null);
 
 /// <summary>
 /// What <see cref="PolicyVersionValidator.ValidateForAuthoring"/> decided (task 102a): the validation result, plus the fields a
@@ -223,11 +227,17 @@ public sealed class PolicyVersionValidator
     /// passes <see cref="RuleDomain.Ontology"/>, a billing one <see cref="RuleDomain.Billing"/>, so a billing type cannot be saved
     /// onto an Ontology policy (or the reverse) and only be caught later by a reader's gate. An unknown type is still
     /// <c>rule_type_unsupported</c>. Omitted (<c>null</c>): behaviour is unchanged, any closed-set member is validated as its own domain.</param>
+    /// <param name="billingConsequence">Billing only (ebilling-r1 task 073, FR-26, D-89): the version's <c>sprk_consequence</c> option
+    /// value. When given for a billing type, a value that type may not carry (Reject on TimeIncrement, DailyHoursCap, NonBillableActivity,
+    /// AiObservation or ApprovedTimekeeper; any value outside the three defined) is refused with
+    /// <see cref="OntologyWriterFailureReason.ConsequenceNotAllowed"/>. <c>null</c>: the consequence is not checked here (the caller
+    /// reports a missing one itself). Ignored for an Ontology type.</param>
     public PolicyVersionValidationResult ValidateForSave(
-        string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate, RuleDomain? expectedDomain = null)
+        string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate, RuleDomain? expectedDomain = null, int? billingConsequence = null)
     {
         var (result, _) = ValidateInternal(
-            ruleTypeRaw, ruleBodyJson, messageTemplate, subjectId: null, forOntologyEvaluation: false, expectedDomain, authoring: false);
+            ruleTypeRaw, ruleBodyJson, messageTemplate, subjectId: null, forOntologyEvaluation: false, expectedDomain, authoring: false,
+            billingConsequence);
         return result;
     }
 
@@ -379,7 +389,9 @@ public sealed class PolicyVersionValidator
     /// reason only; the message names it a billing policy version), meters <see cref="OntologyWriterTelemetry.RecordBillingRuleInvalid"/>
     /// (<c>billing.rule.invalid</c>, NOT <c>ontology.policy.invalid</c>), sets <paramref name="definition"/> to
     /// null and returns false. An Ontology type, an unknown, blank or combined type, an invalid body and an oversized body
-    /// are all refused. Never throws for the row's content.
+    /// are all refused. Task 073 (FR-26, I-5, D-89): a row whose <see cref="PolicyVersionSnapshot.Consequence"/> its type may not
+    /// carry is refused too, with <see cref="OntologyWriterFailureReason.ConsequenceNotAllowed"/>, because a row authored directly in
+    /// Dataverse never passed the publish check. Never throws for the row's content.
     /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="pv"/> is null (a caller bug).</exception>
     public bool TryPrepareBillingRule(PolicyVersionSnapshot pv, [NotNullWhen(true)] out BillingRuleDefinition? definition)
@@ -402,7 +414,7 @@ public sealed class PolicyVersionValidator
             }
             else
             {
-                result = ValidateBilling(ruleType, pv.RuleBody, pv.MessageTemplate);
+                result = ValidateBilling(ruleType, pv.RuleBody, pv.MessageTemplate, pv.Consequence);
                 if (result.IsValid)
                 {
                     definition = BillingRuleDefinition.FromValidatedBody(pv.PolicyVersionId, pv.PolicyCode, ruleType, pv.RuleBody!);
@@ -446,7 +458,7 @@ public sealed class PolicyVersionValidator
     /// token must be in <see cref="BillingRuleCatalogue.TemplateFactFields"/> for the type, the static set of values the
     /// type's handler (task 071) supplies for a finding.
     /// </summary>
-    private PolicyVersionValidationResult ValidateBilling(RuleType ruleType, string? ruleBodyJson, string? messageTemplate)
+    private PolicyVersionValidationResult ValidateBilling(RuleType ruleType, string? ruleBodyJson, string? messageTemplate, int? consequence)
     {
         if (ruleBodyJson is not null && ruleBodyJson.Length > RuleBodySchemaValidator.MaxRuleBodyLength)
         {
@@ -479,6 +491,13 @@ public sealed class PolicyVersionValidator
             }
         }
 
+        // Task 073 (FR-26, I-5, D-89): the consequence belongs to the type. Not stated (null) = not checked here.
+        if (consequence is { } stated && !BillingRuleCatalogue.IsConsequenceAllowed(ruleType, stated))
+        {
+            return PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.ConsequenceNotAllowed,
+                BillingRuleCatalogue.ConsequenceRefusal(ruleType, stated));
+        }
+
         return PolicyVersionValidationResult.Success();
     }
 
@@ -494,7 +513,7 @@ public sealed class PolicyVersionValidator
     /// eligible fields. <see cref="TryPrepareForEvaluation"/> discards it on any refusal.</remarks>
     private (PolicyVersionValidationResult Result, CompiledPredicate? Compiled) ValidateInternal(
         string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate, Guid? subjectId, bool forOntologyEvaluation,
-        RuleDomain? expectedDomain, bool authoring)
+        RuleDomain? expectedDomain, bool authoring, int? billingConsequence = null)
     {
         try
         {
@@ -527,7 +546,7 @@ public sealed class PolicyVersionValidator
                         "not evaluate it (FR-24: a consumer that cannot evaluate a type refuses it)."), null);
                 }
 
-                return (ValidateBilling(ruleType, ruleBodyJson, messageTemplate), null);
+                return (ValidateBilling(ruleType, ruleBodyJson, messageTemplate, billingConsequence), null);
             }
 
             if (ruleType == RuleType.Switch)

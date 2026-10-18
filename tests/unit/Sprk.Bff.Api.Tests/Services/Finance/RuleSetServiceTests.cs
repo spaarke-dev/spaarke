@@ -747,21 +747,23 @@ public sealed class RuleSetServiceTests
     {
         var h = new Harness();
         var set = h.RuleSet();
-        var (policy, version) = h.Rule(set);
+        // Task 073 (FR-26): a DailyHoursCap rule may only Flag, so the consequence edit goes from a stored Reject (a row that predates the
+        // check, or was written around it) to Flag.
+        var (policy, version) = h.Rule(set, consequence: (int)BillingConsequence.Reject);
 
-        var outcome = await h.Service().EditAsync(set, policy, Edit(body: CapBody8, consequence: "reject", location: "Section 9"), default);
+        var outcome = await h.Service().EditAsync(set, policy, Edit(body: CapBody8, consequence: "flag", location: "Section 9"), default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         outcome.Value!.CreatedNewVersion.Should().BeFalse();
         outcome.Value.Proposal.VersionId.Should().Be(version);
-        outcome.Value.Proposal.Consequence.Should().Be("Reject");
+        outcome.Value.Proposal.Consequence.Should().Be("Flag");
         h.Writes.Should().ContainSingle().Which.Should().Match<(Write Kind, string Entity, Guid Id, Dictionary<string, object> Fields)>(
             w => w.Kind == Write.BulkUpdate && w.Entity == "sprk_policyversion" && w.Id == version);
         h.ConditionalCalls.Should().ContainSingle("the in-place edit is conditional on the row it read (review round 2)");
         var row = h.Row("sprk_policyversion", version);
         row.GetAttributeValue<string>("sprk_rulebody").Should().Be(CapBody8);
         row.GetAttributeValue<string>("sprk_clauselocation").Should().Be("Section 9");
-        row.GetAttributeValue<string>("sprk_proposedaction").Should().Be("billing-reject");
+        row.GetAttributeValue<string>("sprk_proposedaction").Should().Be("billing-flag");
     }
 
     [Theory]
@@ -783,12 +785,13 @@ public sealed class RuleSetServiceTests
     {
         var h = new Harness();
         var set = h.RuleSet();
-        var (policy, version) = h.Rule(set, state: decided);
+        // Task 073 (FR-26): a DailyHoursCap rule may only Flag, so the "consequence" edit goes from a stored Reject to Flag.
+        var (policy, version) = h.Rule(set, state: decided, consequence: member == "consequence" ? (int)BillingConsequence.Reject : (int)BillingConsequence.Flag);
         var edit = member switch
         {
             "body" => Edit(body: CapBody8),
             "template" => Edit(template: "Over {{rule.maxHoursPerDay}} hours."),
-            "consequence" => Edit(consequence: "Reject"),
+            "consequence" => Edit(consequence: "Flag"),
             "clauseReference" => Edit(quote: "A different quote."),
             "clauseLocation" => Edit(location: "Section 9"),
             _ => Edit(type: "TimeIncrement", body: IncrementBody, template: "Hours must be a multiple of {{rule.incrementHours}}."),

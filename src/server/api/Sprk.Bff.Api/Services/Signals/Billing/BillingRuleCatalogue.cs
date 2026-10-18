@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Text.Json;
+using Sprk.Bff.Api.Services.Finance;
 
 namespace Sprk.Bff.Api.Services.Signals.Billing;
 
@@ -117,6 +118,76 @@ public static class BillingRuleCatalogue
     };
 
     /// <summary>
+    /// FR-26 reject-eligibility (ebilling-r1 task 073): catalogue positions 1, 2 and 6 to 10, that is ApprovedTimekeeper, ApprovedRate,
+    /// ExpenseRule, InvoiceAge, CoreRecordWindow, Duplicate and RequiredData. TimeIncrement, DailyHoursCap, NonBillableActivity and
+    /// AiObservation (I-5) are not. Eligibility is one of the three conditions of a rejection; it is not the whole of "may reject"
+    /// (see <see cref="IsHoldOnly"/>, and Duplicate rejects at invoice level only).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
+    public static bool IsRejectEligible(RuleType ruleType) => ruleType switch
+    {
+        RuleType.ApprovedTimekeeper or RuleType.ApprovedRate or RuleType.ExpenseRule or RuleType.InvoiceAge
+            or RuleType.CoreRecordWindow or RuleType.Duplicate or RuleType.RequiredData => true,
+        RuleType.TimeIncrement or RuleType.DailyHoursCap or RuleType.NonBillableActivity or RuleType.AiObservation => false,
+        _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
+    };
+
+    /// <summary>
+    /// D-89 ("ApprovedTimekeeper holds, never auto-rejects"): a type that is reject-eligible under FR-26 but whose findings only ever
+    /// send the invoice to review. A Reject consequence is refused for it at publish and at the evaluation gate, and the rejection rule
+    /// never rejects on its findings. Enforced by name here, not by 046's confidence cap staying below the threshold.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
+    public static bool IsHoldOnly(RuleType ruleType) => IsRejectEligible(ruleType) && ruleType == RuleType.ApprovedTimekeeper;
+
+    /// <summary>
+    /// The consequences a billing admin may choose for a rule of this type (design.md 6.1 "Allowed consequences", narrowed by D-89 and
+    /// I-5): Reject only where the type is reject-eligible and not hold-only; Suggest adjustment only where a handler suggests one
+    /// (ApprovedRate, NonBillableActivity); Flag always.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
+    public static IReadOnlySet<BillingConsequence> AllowedConsequences(RuleType ruleType) => ruleType switch
+    {
+        RuleType.ApprovedTimekeeper => Consequences(BillingConsequence.Flag),
+        RuleType.ApprovedRate => Consequences(BillingConsequence.Reject, BillingConsequence.Flag, BillingConsequence.SuggestAdjustment),
+        RuleType.TimeIncrement => Consequences(BillingConsequence.Flag),
+        RuleType.DailyHoursCap => Consequences(BillingConsequence.Flag),
+        RuleType.NonBillableActivity => Consequences(BillingConsequence.Flag, BillingConsequence.SuggestAdjustment),
+        RuleType.ExpenseRule => Consequences(BillingConsequence.Reject, BillingConsequence.Flag),
+        RuleType.InvoiceAge => Consequences(BillingConsequence.Reject, BillingConsequence.Flag),
+        RuleType.CoreRecordWindow => Consequences(BillingConsequence.Reject, BillingConsequence.Flag),
+        RuleType.Duplicate => Consequences(BillingConsequence.Reject, BillingConsequence.Flag),
+        RuleType.RequiredData => Consequences(BillingConsequence.Reject, BillingConsequence.Flag),
+        RuleType.AiObservation => Consequences(BillingConsequence.Flag),
+        _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
+    };
+
+    /// <summary>True when <paramref name="consequence"/> is one of the three defined values and <see cref="AllowedConsequences"/> lists it for the type.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
+    public static bool IsConsequenceAllowed(RuleType ruleType, int consequence) =>
+        Enum.IsDefined(typeof(BillingConsequence), consequence) && AllowedConsequences(ruleType).Contains((BillingConsequence)consequence);
+
+    /// <summary>The sentence a save-time caller shows when <see cref="IsConsequenceAllowed"/> is false. Names no rule content.</summary>
+    internal static string ConsequenceRefusal(RuleType ruleType, int consequence)
+    {
+        var allowed = string.Join(", ", AllowedConsequences(ruleType).OrderBy(c => (int)c).Select(c => c.ToString()));
+        if (!Enum.IsDefined(typeof(BillingConsequence), consequence))
+        {
+            return $"consequence {consequence} is not one of Reject, Flag or SuggestAdjustment. A {ruleType} rule may use: {allowed}.";
+        }
+
+        var chosen = (BillingConsequence)consequence;
+        var why = ruleType switch
+        {
+            RuleType.AiObservation => "an AI observation never rejects a submission (I-5)",
+            RuleType.ApprovedTimekeeper when chosen == BillingConsequence.Reject => "an unapproved timekeeper holds the invoice for review and never rejects it (D-89)",
+            _ when chosen == BillingConsequence.Reject => "this rule type may not reject a submission (FR-26)",
+            _ => "this rule type does not suggest adjustments (design.md 6.1)",
+        };
+        return $"A {ruleType} rule may not have the consequence {chosen}: {why}. Allowed: {allowed}.";
+    }
+
+    /// <summary>
     /// One deterministic sentence and formal form for a body that <see cref="PolicyVersionValidator.ValidateForSave"/> has
     /// accepted for <paramref name="ruleType"/>. Same body, same text; no lookup is read.
     /// </summary>
@@ -190,6 +261,8 @@ public static class BillingRuleCatalogue
     private static string Suffix(string name) => $"Services.Signals.Schemas.billing-{name}.schema.json";
 
     private static IReadOnlySet<string> Fields(params string[] names) => names.ToFrozenSet(StringComparer.Ordinal);
+
+    private static IReadOnlySet<BillingConsequence> Consequences(params BillingConsequence[] values) => values.ToFrozenSet();
 
     private static string Num(JsonElement root, string name) => root.GetProperty(name).GetRawText();
 
