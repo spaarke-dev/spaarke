@@ -101,6 +101,10 @@ A submission that fails before it is read has no invoice. Two consequences:
       (4) The Decision Record fact snapshot lists every merged reason.
       (5) D-115's rates-not-checked finding has its own reason code and is flag-only. It must never be merged into a Reject.
     Required tests: two reasons on one line give one Signal carrying both, with the strongest consequence; a reason added on re-evaluation gives Superseded plus episode+1, and the new Signal carries both; a withheld plus a visible reason leak no hidden detail; a must-fire guard shows the mapper never sends a duplicate key in one evaluation.</constraint>
+    <constraint source="072 review fix round (2026-10-18)">Three caller obligations from 072's evaluator and mapper:
+- Supply BillingEvaluationRequest.ReceivedOn: the submission's received date (sprk_submission createdon, as a DateOnly). Rule versions in force and the D-111 / D-116 window checks are judged on that date, not on the date the job runs, so a retry or a late re-evaluation gives the same result.
+- Own the Signal lifecycle that option (a) needs: compare the reason-set fingerprint with the open Signal's; on a change, close the open one as Superseded and write episode n+1; on the same fingerprint, refresh only. The mapper produces the fingerprint; it does not supersede.
+- Read the header currency confidence from HeaderConfidence["Currency"] under exactly that key, and normalise "$" to USD before the currency check. A missing currency, or one read at low confidence, counts as non-USD (flag-only; 072's currency_not_usd template).</constraint>
   </constraints>
 
   <knowledge>
