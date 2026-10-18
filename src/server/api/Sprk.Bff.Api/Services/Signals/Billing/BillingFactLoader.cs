@@ -160,7 +160,8 @@ public sealed record BillingLoadedFacts
 /// </summary>
 /// <remarks>
 /// <para><b>Bounded.</b> A fixed set of queries per submission, none per line of the judged invoice: rule sets, policies, versions,
-/// the core record, prior submissions, prior invoices and prior lines (the last three only when a Duplicate rule can be in force), and
+/// the core record, prior submissions and prior invoices (only when a Duplicate rule can be in force), prior lines (only when such a
+/// rule names a line match field, and only of Active priors: 072 review B1), and
 /// the secure-root walk (one run of <see cref="SecureChildShareSynchronizer.SecureRootsAboveEachAsync"/> for the invoice and every
 /// prior). Id lists are chunked at <see cref="MaxInValues"/>; each query pages.</para>
 /// <para><b>Rules.</b> <c>sprk_ruleset</c> rows with domain Billing, status Published, and scope Client default or Firm with
@@ -245,7 +246,7 @@ public sealed class BillingFactLoader
         IReadOnlySet<Guid>? invoiceRoots = null;
         if (rules.Any(r => IsRuleType(r, Signals.RuleType.Duplicate)))
         {
-            var read = await LoadPriorsAsync(request, ct).ConfigureAwait(false);
+            var read = await LoadPriorsAsync(request, ComparesLines(rules), ct).ConfigureAwait(false);
             var roots = await SecureRootsAsync(request, read, ct).ConfigureAwait(false);
             invoiceRoots = roots[0];
             priors = read.Select((p, i) => p.Prior with { SecureRoots = roots[i + 1] }).ToList();
@@ -437,7 +438,37 @@ public sealed class BillingFactLoader
     /// </summary>
     private sealed record PriorRead(BillingPriorSubmission Prior, IReadOnlyList<(Entity Row, ColumnSet ReadWith)> Rows);
 
-    private async Task<List<PriorRead>> LoadPriorsAsync(BillingEvaluationRequest request, CancellationToken ct)
+    /// <summary>
+    /// 072 review B1: true when a Duplicate version that can be in force names a line match field (<see cref="DuplicateHandler"/>'s
+    /// line vocabulary), so prior lines are worth reading. A superset of the versions the evaluator selects (it does not narrow by
+    /// date or precedence): reading lines a selected rule ignores costs a query, missing lines one needs would miss duplicates. A body
+    /// that does not parse counts as naming one (the gate refuses it anyway; this only decides whether to read).
+    /// </summary>
+    internal static bool ComparesLines(IEnumerable<BillingRuleCandidate> rules) =>
+        rules.Any(r => IsRuleType(r, Signals.RuleType.Duplicate) && NamesALineMatchField(r.RuleBody));
+
+    private static bool NamesALineMatchField(string? body)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(body ?? string.Empty);
+            if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("matchFields", out var fields)
+                || fields.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                return true;
+            }
+
+            return fields.EnumerateArray().Any(f => f.ValueKind == System.Text.Json.JsonValueKind.String
+                && Handlers.DuplicateHandler.LineFieldOrder.Contains(f.GetString(), StringComparer.Ordinal));
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return true;
+        }
+    }
+
+    private async Task<List<PriorRead>> LoadPriorsAsync(BillingEvaluationRequest request, bool readLines, CancellationToken ct)
     {
         var submissionColumns = WalkColumns(SubmissionEntity)
             .Concat(["sprk_trackingnumber", "sprk_submissionsequence", "sprk_firminvoicenumber", "sprk_processingstatus"])
@@ -471,19 +502,28 @@ public sealed class BillingFactLoader
             }
         }
 
-        var lines = await LoadPriorLinesAsync(invoices.Keys.Order().ToList(), ct).ConfigureAwait(false);
-
-        var priors = new List<PriorRead>();
+        var kept = new List<(Entity Submission, Entity? Invoice, BillingPriorStatus Status)>();
         foreach (var submission in submissions)
         {
             var invoice = submission.GetAttributeValue<EntityReference>("sprk_invoice") is { } link && invoices.TryGetValue(link.Id, out var found)
                 ? found
                 : null;
-            if (StatusOf(submission, invoice) is not { } status)
+            if (StatusOf(submission, invoice) is { } status)
             {
-                continue; // a Cancelled invoice never reached the firm as a payable one
+                kept.Add((submission, invoice, status)); // a Cancelled invoice never reached the firm as a payable one
             }
+        }
 
+        // 072 review B1: lines only when a Duplicate rule compares lines, and only of Active priors (the only ones Duplicate compares).
+        var lines = readLines
+            ? await LoadPriorLinesAsync(
+                kept.Where(k => k.Status == BillingPriorStatus.Active && k.Invoice is not null)
+                    .Select(k => k.Invoice!.Id).Distinct().Order().ToList(), ct).ConfigureAwait(false)
+            : new Dictionary<Guid, IReadOnlyList<BillingPriorLine>>();
+
+        var priors = new List<PriorRead>();
+        foreach (var (submission, invoice, status) in kept)
+        {
             var prior = new BillingPriorSubmission
             {
                 SubmissionId = submission.Id,

@@ -87,7 +87,9 @@ public class BillingFactLoaderTests
 
     private const string DuplicateByNumber = """{"type":"Duplicate","matchFields":["firmInvoiceNumber"]}""";
 
-    private void DuplicateRule() => Policy(RuleSet(RuleSetScope.ClientDefault), "CD-DUPLICATE", RuleType.Duplicate, DuplicateByNumber);
+    private const string DuplicateByLine = """{"type":"Duplicate","matchFields":["firmInvoiceNumber","timekeeper","lineDate","hours"]}""";
+
+    private void DuplicateRule(string body = DuplicateByNumber) => Policy(RuleSet(RuleSetScope.ClientDefault), "CD-DUPLICATE", RuleType.Duplicate, body);
 
     private static EntityReference OrdinaryTeam => new("team", SecureChildShareWorld.GeneralTeam);
 
@@ -253,7 +255,7 @@ public class BillingFactLoaderTests
     [Fact]
     public async Task Priors_AreEverySubmissionOfThisFirm_ThisOneExcluded_WithTheirStatusAndLines()
     {
-        DuplicateRule();
+        DuplicateRule(DuplicateByLine);
         Submission("INV-100.2", invoice: null, id: SubmissionId);                                                  // this one
         var active = PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", OrdinaryMatter));
         var rejected = PriorWithInvoice("INV-101.1", null, invoiceStatus: InvoiceStatusCodes.Rejected);
@@ -271,8 +273,12 @@ public class BillingFactLoaderTests
             ("sprk_costtype", new OptionSetValue(100000000)), ("sprk_quantity", 1.5m), ("sprk_timekeeper", "Jane Doe"),
             ("sprk_amount", new Money(862.5m)), ("sprk_eventdate", new DateTime(2026, 2, 2)), ("sprk_description", "Draft motion"));
 
+        var rejectedInvoice = _world.ValueOf<EntityReference>("sprk_invoicesubmission", rejected, "sprk_invoice")!.Id;
+        _world.Add("sprk_billingevent", Guid.NewGuid(), ("sprk_invoice", Ref("sprk_invoice", rejectedInvoice)), ("sprk_linesequence", 1));
+
         var loaded = await Loader().LoadAsync(Request(null), CancellationToken.None);
 
+        loaded.PriorSubmissions.Single(p => p.SubmissionId == rejected).Lines.Should().BeEmpty("B1: Duplicate compares only Active priors' lines");
         loaded.PriorSubmissions.Select(p => (p.SubmissionId, p.Status)).Should().BeEquivalentTo(new[]
         {
             (active, BillingPriorStatus.Active), (rejected, BillingPriorStatus.Rejected), (returned, BillingPriorStatus.ReturnedToFirm),
@@ -288,7 +294,7 @@ public class BillingFactLoaderTests
     [Fact]
     public async Task TheReads_AreBounded_WhateverTheNumberOfLines()
     {
-        DuplicateRule();
+        DuplicateRule(DuplicateByLine);
         var prior = PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", OrdinaryMatter));
         var priorInvoice = _world.ValueOf<EntityReference>("sprk_invoicesubmission", prior, "sprk_invoice")!.Id;
         _world.SecureRoot("sprk_matter", MatterA);
@@ -307,6 +313,51 @@ public class BillingFactLoaderTests
 
         _world.QueriedTables.Should().Equal(few, "150 lines on the invoice and 150 on a prior take the same reads as one");
         loaded.PriorSubmissions.Single().Lines.Should().HaveCount(150);
+    }
+
+    [Fact]
+    public async Task PriorLines_AreReadOnlyWhenADuplicateRuleComparesLines_AndOnlyForActivePriors_B1()
+    {
+        DuplicateRule(); // firm invoice number only: no line is compared
+        var active = PriorWithInvoice("INV-100.1", null);
+        var rejected = PriorWithInvoice("INV-101.1", null, invoiceStatus: InvoiceStatusCodes.Rejected);
+        foreach (var submission in new[] { active, rejected })
+        {
+            var invoice = _world.ValueOf<EntityReference>("sprk_invoicesubmission", submission, "sprk_invoice")!.Id;
+            _world.Add("sprk_billingevent", Guid.NewGuid(), ("sprk_invoice", Ref("sprk_invoice", invoice)), ("sprk_linesequence", 1));
+        }
+
+        var byNumber = await Loader().LoadAsync(Request(null), CancellationToken.None);
+        var byNumberLineReads = _world.QueriedTables.Count(t => t == "sprk_billingevent");
+        _world.QueriedTables.Clear();
+        Policy(RuleSet(RuleSetScope.Firm, FirmId), "FIRM-DUPLICATE", RuleType.Duplicate, DuplicateByLine);
+        var byLine = await Loader().LoadAsync(Request(null), CancellationToken.None);
+
+        byNumberLineReads.Should().Be(0, "no Duplicate rule names a line field");
+        byNumber.PriorSubmissions.Should().HaveCount(2).And.OnlyContain(p => p.Lines.Count == 0);
+        _world.QueriedTables.Count(t => t == "sprk_billingevent").Should().Be(1, "one chunk of Active invoices");
+        byLine.PriorSubmissions.Single(p => p.SubmissionId == active).Lines.Should().ContainSingle();
+        byLine.PriorSubmissions.Single(p => p.SubmissionId == rejected).Lines.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("""{"type":"Duplicate","matchFields":["firmInvoiceNumber"]}""", false)]
+    [InlineData("""{"type":"Duplicate","matchFields":["narrative"]}""", true)]
+    [InlineData("""{"type":"Duplicate","matchFields":[]}""", false)]
+    [InlineData("""{"type":"Duplicate"}""", true)]
+    [InlineData("not json", true)]
+    public void ComparesLines_IsTrueWhenADuplicateBodyNamesALineField_OrCannotBeRead_B1(string body, bool expected)
+    {
+        var rule = new BillingRuleCandidate
+        {
+            PolicyId = Guid.NewGuid(), PolicyCode = "D", PolicyVersionId = Guid.NewGuid(), RuleSetId = Guid.NewGuid(),
+            Scope = RuleSetScope.ClientDefault, RuleType = ((int)RuleType.Duplicate).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            RuleBody = body, IsCurrent = true,
+        };
+
+        BillingFactLoader.ComparesLines([rule]).Should().Be(expected);
+        BillingFactLoader.ComparesLines([rule with { RuleType = ((int)RuleType.TimeIncrement).ToString(System.Globalization.CultureInfo.InvariantCulture) }])
+            .Should().BeFalse("only a Duplicate rule compares prior lines");
     }
 
     // ── D-112 secure roots, end to end ───────────────────────────────────────────────────────────────────────────

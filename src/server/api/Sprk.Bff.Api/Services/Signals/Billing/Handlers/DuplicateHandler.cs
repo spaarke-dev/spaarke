@@ -30,7 +30,8 @@ internal static class DuplicateHandler
     private const char KeySeparator = '\u001F';
 
     // The vocabulary of 070's schema, in a fixed order, so the same rule gives the same comparison whatever order its body lists.
-    private static readonly string[] LineFieldOrder = ["timekeeper", "lineDate", "hours", "narrative", "amount"];
+    // Internal: the loader reads prior lines only when a Duplicate rule names one of these (072 review B1).
+    internal static readonly string[] LineFieldOrder = ["timekeeper", "lineDate", "hours", "narrative", "amount"];
 
     internal static IReadOnlyList<BillingFinding> Evaluate(HandlerContext context)
     {
