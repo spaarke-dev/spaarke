@@ -71,6 +71,7 @@ public sealed class RuleSetServiceTests
         public readonly List<string> Order = new();
         public readonly List<(string Entity, int Size)> BulkCalls = new();
         public Func<string, bool>? FailBulkFor;
+        public Func<string, bool>? FailUpdateFor;
 
         /// <summary>Runs at the start of every bulk update (after the cancellation check): a test uses it to disconnect the caller mid-write.</summary>
         public Action<string>? OnBulk;
@@ -143,6 +144,11 @@ public sealed class RuleSetServiceTests
                 .Returns((string entity, Guid id, Dictionary<string, object> fields, CancellationToken ct) =>
                 {
                     ct.ThrowIfCancellationRequested(); // the real seam honours the caller's token
+                    if (FailUpdateFor?.Invoke(entity) == true)
+                    {
+                        throw new InvalidOperationException("simulated update failure");
+                    }
+
                     Order.Add("update:" + entity);
                     Writes.Add((Write.Update, entity, id, fields));
                     Apply(entity, id, fields);
@@ -1189,6 +1195,66 @@ public sealed class RuleSetServiceTests
         h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v2);
         h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(Utc(2026, 11, 1));
         h.Row("sprk_ruleset", set).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(RuleSetService.RuleSetPublished);
+    }
+
+    [Theory]
+    [InlineData(11, 1)] // the same date
+    [InlineData(12, 1)] // another date: the rules were put in force on the first, which the set then shows
+    public async Task Publish_WhenTheLastWriteFails_ARetryMarksTheSetPublished_AndWritesNothingElse(int month, int day)
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetDraft);
+        var (policy, v1) = h.Rule(set, state: ProposalState.Accepted);
+        var service = h.Service();
+        h.FailUpdateFor = entity => entity == "sprk_ruleset";
+
+        (await service.PublishAsync(set, Effective, default)).ErrorCode.Should().Be("ruleset.write_failed");
+
+        h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v1, "the rules are in force");
+        h.Row("sprk_ruleset", set).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(RuleSetService.RuleSetDraft);
+        h.FailUpdateFor = null;
+        var writesBefore = h.Writes.Count;
+
+        var retried = await service.PublishAsync(set, new DateOnly(2026, month, day), default);
+
+        retried.Kind.Should().Be(RuleSetOutcomeKind.Done, "the set is finished, not refused as having nothing to publish");
+        retried.Value!.Status.Should().Be("Published");
+        retried.Value.EffectiveDate.Should().Be(new DateOnly(2026, 11, 1));
+        retried.Value.Published.Should().ContainSingle().Which.VersionId.Should().Be(v1);
+        var row = h.Row("sprk_ruleset", set);
+        row.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(RuleSetService.RuleSetPublished);
+        row.GetAttributeValue<DateTime>("sprk_effectivefrom").Should().Be(Utc(2026, 11, 1));
+        h.Writes.Skip(writesBefore).Should().ContainSingle().Which.Entity.Should().Be("sprk_ruleset", "only the rule set is written");
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforcefrom").Should().Be(Utc(2026, 11, 1));
+    }
+
+    [Fact]
+    public async Task Publish_OfADraftSetWithARuleInForceAndAProposedOne_FinishesTheSet_AndCountsTheProposedOne()
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetDraft);
+        h.Rule(set, "BILL-LIVE", ProposalState.Accepted, current: true, from: Utc(2026, 11, 1));
+        var (proposed, _) = h.Rule(set, "BILL-NEXT", ProposalState.Proposed);
+
+        var outcome = await h.Service().PublishAsync(set, Effective, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        outcome.Value!.NotPublishedProposed.Should().Be(1);
+        h.Row("sprk_policy", proposed).Contains("sprk_currentversion").Should().BeFalse("a Proposed rule is never put in force");
+        h.Row("sprk_ruleset", set).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(RuleSetService.RuleSetPublished);
+    }
+
+    [Fact]
+    public async Task Publish_OfAPublishedSetWithEverythingInForce_HasNothingToPublish_AndWritesNothing()
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        h.Rule(set, state: ProposalState.Accepted, current: true);
+
+        var outcome = await h.Service().PublishAsync(set, Effective, default);
+
+        outcome.ErrorCode.Should().Be("ruleset.nothing_to_publish");
+        h.Writes.Should().BeEmpty();
     }
 
     [Fact]

@@ -1135,8 +1135,32 @@ public class RuleSetService
 
         if (candidates.Count == 0 && setErrors.Count == 0)
         {
-            return RuleSetOutcome<RuleSetPublished>.Refused(
-                StatusCodes.Status400BadRequest, CodeNothingToPublish, "No accepted rule is waiting to be published. Accept at least one rule first.");
+            // A publish whose last write failed left every rule in force and the set not Published, with nothing left to put in force.
+            // The retry writes the set: refusing it as "nothing to publish" would leave the set Draft for good.
+            var inForce = status == RuleSetPublished
+                ? new List<RuleSetRule>()
+                : loaded.Rules.Where(r => r.Policy.CurrentVersionId == r.Working.Id).ToList();
+            if (inForce.Count == 0)
+            {
+                return RuleSetOutcome<RuleSetPublished>.Refused(
+                    StatusCodes.Status400BadRequest, CodeNothingToPublish, "No accepted rule is waiting to be published. Accept at least one rule first.");
+            }
+
+            // The rules came into force on the date the earlier attempt stamped; the set shows that date, not the one in this request.
+            var startedOn = inForce.Where(r => r.Working.InForceFrom is not null).Select(r => r.Working.InForceFrom!.Value).DefaultIfEmpty(ToUtcDate(effectiveDate)).Min();
+            var startedDate = DateOnly.FromDateTime(startedOn);
+            if (!await MarkPublishedAsync(ruleSetId, set, status, ToUtcDate(startedDate)))
+            {
+                return RuleSetOutcome<RuleSetPublished>.Refused(
+                    StatusCodes.Status500InternalServerError, CodeWriteFailed,
+                    "The rule set could not be published. Publish again; if it keeps failing, contact support.");
+            }
+
+            _logger.LogInformation("Rule set {RuleSetId} marked Published: {Count} rule version(s) were already in force from {Effective}", ruleSetId, inForce.Count, startedDate);
+            return RuleSetOutcome<RuleSetPublished>.Done(PublishedResult(
+                set, ruleSetId, startedDate, inForce.Select(r => new PublishedRuleVersion(
+                    r.Policy.Id, r.Working.Id, r.Working.Number, r.Versions.Where(v => v.Number < r.Working.Number).MaxBy(v => v.Number)?.Id)).ToList(),
+                proposed, rejected));
         }
 
         // Every candidate is validated BEFORE the first write; one failure refuses the whole publish.
@@ -1168,12 +1192,18 @@ public class RuleSetService
                 "The rule set could not be published. Publish again; if it keeps failing, contact support.");
         }
 
-        var visible = set.GetAttributeValue<bool>("sprk_visibletofirms");
         _logger.LogInformation("Rule set {RuleSetId} published: {Count} rule version(s) in force from {Effective}", ruleSetId, candidates.Count, effectiveDate);
-        return RuleSetOutcome<RuleSetPublished>.Done(new RuleSetPublished(
-            ruleSetId, "Published", effectiveDate,
+        return RuleSetOutcome<RuleSetPublished>.Done(PublishedResult(
+            set, ruleSetId, effectiveDate,
             candidates.Select(c => new PublishedRuleVersion(c.Policy.Id, c.Working.Id, c.Working.Number, c.Predecessor?.Id)).ToList(),
-            proposed, rejected, visible, visible ? VisibleNotice : HiddenNotice));
+            proposed, rejected));
+    }
+
+    private static RuleSetPublished PublishedResult(
+        Entity set, Guid ruleSetId, DateOnly effectiveDate, IReadOnlyList<PublishedRuleVersion> published, int proposed, int rejected)
+    {
+        var visible = set.GetAttributeValue<bool>("sprk_visibletofirms");
+        return new RuleSetPublished(ruleSetId, "Published", effectiveDate, published, proposed, rejected, visible, visible ? VisibleNotice : HiddenNotice);
     }
 
     /// <summary>
