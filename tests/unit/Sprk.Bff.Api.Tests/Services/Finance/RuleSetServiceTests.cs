@@ -100,7 +100,21 @@ public sealed class RuleSetServiceTests
         /// <summary>The row version (Dataverse <c>versionnumber</c>) of every row: set at seed, advanced by every write.</summary>
         public readonly Dictionary<Guid, long> RowVersions = new();
         private readonly Dictionary<Guid, DateTime> _createdOn = new();
+        private readonly Dictionary<Guid, DateTime> _modifiedOn = new();
+        private readonly Dictionary<Guid, Guid> _createdBy = new();
         private long _clock;
+
+        /// <summary>The application identity the fake writes as: <c>GetCurrentIdentityIdAsync</c> answers it and every row a service creates carries it as <c>createdby</c> (task 075).</summary>
+        public Guid Identity = Guid.NewGuid();
+
+        /// <summary>Makes <c>GetCurrentIdentityIdAsync</c> fault (a WhoAmI that failed).</summary>
+        public bool FailIdentity { get; set; }
+
+        /// <summary>Runs at the start of every delete: a returned exception is thrown and the row stays (a delete fault, or a row that is already gone).</summary>
+        public Func<string, Guid, Exception?>? OnDelete;
+
+        /// <summary>Every delete the service attempted, whether or not it succeeded.</summary>
+        public readonly List<(string Entity, Guid Id)> DeleteAttempts = new();
         public bool IgnoreQueryFilters;
         public RecordOwnerResolution OwnerAnswer = RecordOwnerResolution.Owned(TeamId);
 
@@ -185,6 +199,7 @@ public sealed class RuleSetServiceTests
                     entity.Id = entity.Id == Guid.Empty ? Guid.NewGuid() : entity.Id;
                     Writes.Add((Write.Create, entity.LogicalName, entity.Id, entity.Attributes.ToDictionary(a => a.Key, a => a.Value)));
                     Seed(entity);
+                    _createdBy[entity.Id] = Identity;
                     return entity.Id;
                 });
             Entities.Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
@@ -250,9 +265,17 @@ public sealed class RuleSetServiceTests
 
                     return Task.CompletedTask;
                 });
+            Entities.Setup(e => e.GetCurrentIdentityIdAsync(It.IsAny<CancellationToken>()))
+                .Returns(() => FailIdentity ? throw new InvalidOperationException("simulated WhoAmI failure") : Task.FromResult(Identity));
             Entities.Setup(e => e.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .Returns((string entity, Guid id, CancellationToken _) =>
                 {
+                    DeleteAttempts.Add((entity, id));
+                    if (OnDelete?.Invoke(entity, id) is { } fault)
+                    {
+                        throw fault;
+                    }
+
                     Writes.Add((Write.Delete, entity, id, new Dictionary<string, object>()));
                     Rows.GetValueOrDefault(entity)?.RemoveAll(r => r.Id == id);
                     return Task.CompletedTask;
@@ -298,6 +321,9 @@ public sealed class RuleSetServiceTests
         public long WorkingToken(Guid policyId) => RowVersions[
             Rows["sprk_policyversion"].Where(v => v.GetAttributeValue<EntityReference>("sprk_policy").Id == policyId)
                 .OrderBy(v => v.GetAttributeValue<int>("sprk_versionnumber")).Last().Id];
+
+        /// <summary>Records who created a seeded row (rows a service creates already carry <see cref="Identity"/>).</summary>
+        public void SetCreatedBy(Guid rowId, Guid user) => _createdBy[rowId] = user;
 
         public Guid RuleSet(
             int status = RuleSetService.RuleSetDraft, bool visible = true, int? scope = (int)RuleSetScope.ClientDefault, Guid? firm = null,
@@ -373,6 +399,10 @@ public sealed class RuleSetServiceTests
             }
 
             RowVersions[id] = 1000 + ++_clock; // every write advances the row version, as Dataverse's versionnumber does
+            if (_createdOn.TryGetValue(id, out var createdOn))
+            {
+                _modifiedOn[id] = createdOn.AddSeconds(_clock); // and moves modifiedon off createdon
+            }
         }
 
         /// <summary>A row as a read returns it: its columns plus the system columns the fake keeps aside (versionnumber, createdon).</summary>
@@ -381,7 +411,13 @@ public sealed class RuleSetServiceTests
             var c = new Entity(e.LogicalName, e.Id);
             foreach (var a in e.Attributes) c[a.Key] = a.Value;
             if (RowVersions.TryGetValue(e.Id, out var version)) c["versionnumber"] = version;
-            if (_createdOn.TryGetValue(e.Id, out var createdOn)) c["createdon"] = createdOn;
+            if (_createdOn.TryGetValue(e.Id, out var createdOn))
+            {
+                c["createdon"] = createdOn;
+                c["modifiedon"] = _modifiedOn.GetValueOrDefault(e.Id, createdOn); // equal to createdon until the row is written again
+            }
+
+            if (_createdBy.TryGetValue(e.Id, out var createdBy)) c["createdby"] = new EntityReference("systemuser", createdBy);
             return c;
         }
 

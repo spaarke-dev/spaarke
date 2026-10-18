@@ -18,8 +18,11 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// <remarks>
 /// <para><b>Idempotency (ADR-004; delivery is at least once).</b> The rule set's not-converted list is written LAST and is the completion
 /// marker: a redelivery after it finds <see cref="DraftSource.AlreadyDrafted"/> and completes without calling the model. A redelivery
-/// after a crash BEFORE the marker re-asks the model and the store skips every rule whose type, body and clause it already holds, so
-/// no rule is stored twice. No row is written until every model call has returned.</para>
+/// after a crash BEFORE the marker first removes the earlier run's untouched drafts (<see cref="RuleSetService.RemoveUntouchedDraftsAsync"/>:
+/// created by this identity, Proposed, Off, never modified, never published), because the model is asked again and its output is not
+/// deterministic, so a second set would otherwise sit beside the first. A draft an administrator worked on is kept, and the store does not
+/// store a second rule for a clause such a rule already covers. A compensation fault fails the run before the model is asked. The store
+/// also skips every rule whose type, body and clause it already holds. No row is written until every model call has returned.</para>
 /// <para><b>One run at a time.</b> The queue does not de-duplicate and a run can outlast the message lock, so the run holds a processing
 /// lock keyed on the rule set (ADR-004); a delivery that cannot take it fails and is retried, finds the marker, and ends as a no-op. The
 /// model's clause quotes are checked against the document text before anything is stored.</para>
@@ -126,14 +129,38 @@ public class BillingRuleDraftJobHandler : IJobHandler
                 return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
             }
 
-            // 2. The text.
+            // 2. Retry compensation. No marker means no finished run, but an earlier run may have died midway and left drafts. The model is
+            //    asked again below and its output is not deterministic, so the earlier run's UNTOUCHED drafts are removed first (the store
+            //    decides what untouched means; a draft an administrator worked on is kept). A fault fails the run before the model is
+            //    asked, and the next delivery compensates again.
+            var compensated = await _ruleSets.RemoveUntouchedDraftsAsync(ruleSetId, ct);
+            if (compensated.Kind != RuleSetOutcomeKind.Done)
+            {
+                if (compensated.ErrorCode == RuleSetService.CodeAlreadyDrafted)
+                {
+                    // A concurrent delivery finished between the check above and here.
+                    _logger.LogInformation("Billing rule draft job {JobId}: rule set {RuleSetId} was drafted by another delivery; nothing to do", job.JobId, ruleSetId);
+                    return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+                }
+
+                return Refused(job, compensated.ErrorCode, compensated.StatusCode, stopwatch);
+            }
+
+            if (compensated.Value!.Removed > 0)
+            {
+                _logger.LogInformation(
+                    "Billing rule draft job {JobId}: removed {Removed} untouched draft(s) of an earlier run of rule set {RuleSetId}; {Kept} other rule(s) kept",
+                    job.JobId, compensated.Value.Removed, ruleSetId, compensated.Value.Kept);
+            }
+
+            // 3. The text.
             var extracted = await ReadTextAsync(job, source, stopwatch, ct);
             if (extracted.Outcome is not null)
             {
                 return extracted.Outcome;
             }
 
-            // 3. The model, piece by piece. Nothing is written until every piece has returned.
+            // 4. The model, piece by piece. Nothing is written until every piece has returned.
             var pieces = BillingRuleDraftTranslator.Split(
                 extracted.Text!, BillingRuleDraftTranslator.ChunkChars, BillingRuleDraftTranslator.MaxChunks, out var unreadFrom);
             var options = BillingRuleDraftTranslator.RuleTypeOptions();
@@ -169,7 +196,7 @@ public class BillingRuleDraftJobHandler : IJobHandler
                     $"The document is longer than one drafting run reads: the text after its first {unreadFrom} characters was not read. Split the document and create a rule set for the rest."));
             }
 
-            // 4. The proposals become drafted rules; the store validates every one and writes them, then the marker.
+            // 5. The proposals become drafted rules; the store validates every one and writes them, then the marker.
             var translated = BillingRuleDraftTranslator.Translate(proposals, extracted.Text);
             notConverted.AddRange(translated.Refused);
             var added = await _ruleSets.AddDraftsAsync(ruleSetId, translated.Rules, notConverted, payload.CallerObjectId, ct);

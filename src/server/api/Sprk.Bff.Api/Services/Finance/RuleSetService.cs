@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -115,6 +116,9 @@ public sealed record NotConvertedClause(string Text, string? Location, string Re
 
 /// <summary>The result of adding drafted rules: how many were stored, how many were already there, and the full not-converted list.</summary>
 public sealed record DraftsAdded(int Stored, int AlreadyPresent, IReadOnlyList<NotConvertedClause> NotConverted);
+
+/// <summary>The result of the retry compensation (task 075): earlier untouched drafts removed, and rules of the rule set that were kept.</summary>
+public sealed record DraftsCompensated(int Removed, int Kept);
 
 /// <summary>One problem with one field of one rule (or of the request when <see cref="PolicyId"/> is null).</summary>
 public sealed record RuleSetError(Guid? PolicyId, string? RuleName, string Field, string Message, string? Reason);
@@ -626,6 +630,175 @@ public class RuleSetService
     }
 
     /// <summary>
+    /// Retry compensation for the drafting job (ebilling-r1 task 075, review finding F1). A run that died midway left drafts but no
+    /// completion marker; the model is asked again on the retry and its output is not deterministic, so the new set would sit beside the
+    /// old one. Before drafting again the job removes the earlier run's UNTOUCHED drafts through this method. A rule is untouched only when
+    /// ALL of these hold, and a row failing any one is never deleted (fail closed):
+    /// <list type="bullet">
+    /// <item>its policy was created by the identity this service writes as (<c>createdby</c> equals
+    /// <see cref="IGenericEntityService.GetCurrentIdentityIdAsync"/>), and so was every version of it;</item>
+    /// <item>it belongs to this rule set (the lookup, and the drafted code prefix <c>BRD-{rule set}-</c>);</item>
+    /// <item>the policy is Off, every version is Proposed, and no version has been in force (no <c>sprk_inforceto</c>);</item>
+    /// <item>the policy and each version have <c>modifiedon</c> equal to <c>createdon</c>: nobody has edited, accepted, rejected or
+    /// published them (an administrator's edit of a draft is in place, so it moves <c>modifiedon</c>);</item>
+    /// <item>the policy has no current version: it was never published.</item>
+    /// </list>
+    /// A policy with no version at all (a run that died between the two creates and could not remove it) is untouched when the policy
+    /// itself is. Versions are deleted before their policy, so a death between the two deletes leaves a version-less policy that the next
+    /// pass removes. A row that is already gone counts as deleted (idempotent). Any other fault returns 500 <c>ruleset.write_failed</c>:
+    /// the job fails without drafting, and its next delivery compensates again. A rule set with the completion marker is refused (409
+    /// <c>ruleset.already_drafted</c>) and nothing is deleted: a finished run is never compensated.
+    /// </summary>
+    public virtual async Task<RuleSetOutcome<DraftsCompensated>> RemoveUntouchedDraftsAsync(Guid ruleSetId, CancellationToken ct)
+    {
+        var set = await LoadRuleSetAsync(ruleSetId, ct);
+        if (set is null)
+        {
+            return RuleSetOutcome<DraftsCompensated>.Refused(StatusCodes.Status404NotFound, CodeNotFound, "The rule set was not found.");
+        }
+
+        if (set.GetAttributeValue<OptionSetValue>("statuscode")?.Value == RuleSetRetired)
+        {
+            return RuleSetOutcome<DraftsCompensated>.Refused(StatusCodes.Status409Conflict, CodeRetired, "A retired rule set cannot be changed.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(set.GetAttributeValue<string>("sprk_notconverted")))
+        {
+            return RuleSetOutcome<DraftsCompensated>.Refused(
+                StatusCodes.Status409Conflict, CodeAlreadyDrafted, "Rules have already been drafted for this rule set.");
+        }
+
+        try
+        {
+            var identity = await _entities.GetCurrentIdentityIdAsync(ct);
+            if (identity == Guid.Empty)
+            {
+                throw new InvalidOperationException("The identity the drafted rules were written as is unknown.");
+            }
+
+            var policyQuery = PolicyQuery("sprk_ruleset", ConditionOperator.Equal, new object[] { ruleSetId });
+            policyQuery.ColumnSet.AddColumns(AuditColumns);
+            var policies = await _entities.RetrieveMultipleAsync(policyQuery, ct);
+            if (policies.MoreRecords)
+            {
+                return RuleSetOutcome<DraftsCompensated>.Refused(
+                    StatusCodes.Status422UnprocessableEntity, CodeResultTruncated, "The rule set has more rules than can be read in one pass.");
+            }
+
+            var rows = policies.Entities
+                .Where(p => RuleDomains.IsBillingRow(p) && p.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id == ruleSetId)
+                .ToList();
+
+            var versionsByPolicy = new Dictionary<Guid, List<Entity>>();
+            foreach (var batch in rows.Select(p => (object)p.Id).Chunk(MaxInValues))
+            {
+                var query = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet(VersionColumns) };
+                query.ColumnSet.AddColumns(AuditColumns);
+                query.Criteria.AddCondition("sprk_policy", ConditionOperator.In, batch);
+                var versions = await _entities.RetrieveMultipleAsync(query, ct);
+                if (versions.MoreRecords)
+                {
+                    return RuleSetOutcome<DraftsCompensated>.Refused(
+                        StatusCodes.Status422UnprocessableEntity, CodeResultTruncated, "The rule set has more rules than can be read in one pass.");
+                }
+
+                foreach (var v in versions.Entities)
+                {
+                    if (v.GetAttributeValue<EntityReference>("sprk_policy")?.Id is { } policyId)
+                    {
+                        if (!versionsByPolicy.TryGetValue(policyId, out var list))
+                        {
+                            versionsByPolicy[policyId] = list = new List<Entity>();
+                        }
+
+                        list.Add(v);
+                    }
+                }
+            }
+
+            var codePrefix = $"{DraftCodePrefix}{ruleSetId:N}-";
+            var removable = rows
+                .Where(p => IsUntouchedDraft(p, versionsByPolicy.GetValueOrDefault(p.Id) ?? new List<Entity>(), identity, codePrefix))
+                .ToList();
+
+            var removed = 0;
+            foreach (var policy in removable)
+            {
+                ct.ThrowIfCancellationRequested();
+                foreach (var version in versionsByPolicy.GetValueOrDefault(policy.Id) ?? new List<Entity>())
+                {
+                    await DeleteIfPresentAsync(VersionEntity, version.Id, ct);
+                }
+
+                await DeleteIfPresentAsync(PolicyEntity, policy.Id, ct);
+                removed++;
+            }
+
+            _logger.LogInformation(
+                "Rule set {RuleSetId}: retry compensation removed {Removed} untouched draft(s) of an earlier run and kept {Kept} other rule(s)",
+                ruleSetId, removed, rows.Count - removed);
+            return RuleSetOutcome<DraftsCompensated>.Done(new DraftsCompensated(removed, rows.Count - removed));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Rows already deleted stay deleted and nothing is drafted; the next delivery compensates again.
+            _logger.LogError(ex, "Rule set {RuleSetId}: the earlier run's drafts could not be cleared; nothing was drafted", ruleSetId);
+            return RuleSetOutcome<DraftsCompensated>.Refused(
+                StatusCodes.Status500InternalServerError, CodeWriteFailed, "The earlier drafts could not be cleared. Try again; if it keeps failing, contact support.");
+        }
+    }
+
+    // Who created a row and when it was last changed: what "untouched" is decided on. Read only by the compensation.
+    private static readonly string[] AuditColumns = { "createdby", "createdon", "modifiedon" };
+
+    private static bool IsUntouchedDraft(Entity policy, IReadOnlyList<Entity> versions, Guid identity, string codePrefix) =>
+        policy.GetAttributeValue<string>("sprk_policycode") is { } code
+        && code.StartsWith(codePrefix, StringComparison.Ordinal)
+        && policy.GetAttributeValue<bool?>("sprk_enabled") == false
+        && policy.GetAttributeValue<EntityReference>("sprk_currentversion") is null
+        && CreatedByAndNeverModified(policy, identity)
+        && versions.All(v =>
+            CreatedByAndNeverModified(v, identity)
+            && v.GetAttributeValue<OptionSetValue>("sprk_proposalstatus")?.Value == (int)ProposalState.Proposed
+            && v.GetAttributeValue<DateTime?>("sprk_inforceto") is null);
+
+    private static bool CreatedByAndNeverModified(Entity row, Guid identity) =>
+        row.GetAttributeValue<EntityReference>("createdby")?.Id == identity
+        && row.GetAttributeValue<DateTime?>("createdon") is { } created
+        && row.GetAttributeValue<DateTime?>("modifiedon") is { } modified
+        && created == modified;
+
+    /// <summary>Deletes a row; a row that is already gone counts as deleted (a repeated compensation, or an administrator removed it).</summary>
+    private async Task DeleteIfPresentAsync(string entity, Guid id, CancellationToken ct)
+    {
+        try
+        {
+            await _entities.DeleteAsync(entity, id, ct);
+        }
+        catch (Exception ex) when (IsRowGone(ex))
+        {
+            // Idempotent: nothing left to delete.
+        }
+    }
+
+    private static bool IsRowGone(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (RecordContainerResolver.IsRecordNotFound(e))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Stores the drafted rules of a rule set as Proposed rules (a Billing-domain policy, Off, with no current version, and its version 1)
     /// and writes the not-converted list LAST, which marks the run complete. Model output is a proposal: every rule passes the one
     /// validation of this service (<see cref="PolicyVersionValidator.ValidateForSave"/> with <see cref="RuleDomain.Billing"/>, plus the
@@ -707,6 +880,16 @@ public class RuleSetService
                         continue;
                     }
 
+                    // A rule that survived the retry compensation was worked on by an administrator (edited, accepted, rejected or
+                    // published). The model's second wording of the same clause is not stored beside it; it is listed instead.
+                    if (existing.CoveredClauses.Contains(BillingRuleDraftTranslator.NormaliseForQuoteCheck(rule.ClauseQuote)))
+                    {
+                        listed.Add(new NotConvertedClause(
+                            rule.ClauseQuote, rule.ClauseLocation,
+                            "Not stored: a rule already in this rule set, from an earlier drafting run, covers this clause."));
+                        continue;
+                    }
+
                     var code = $"{DraftCodePrefix}{ruleSetId:N}-{next++.ToString("D3", CultureInfo.InvariantCulture)}";
                     await CreateDraftRuleAsync(ruleSetId, code, rule, ruleType, consequence, owner, ct);
                     stored++;
@@ -766,7 +949,7 @@ public class RuleSetService
         return null;
     }
 
-    private sealed record DraftedFingerprints(HashSet<string> Fingerprints, int NextIndex);
+    private sealed record DraftedFingerprints(HashSet<string> Fingerprints, int NextIndex, HashSet<string> CoveredClauses);
 
     private static string Fingerprint(int ruleType, string ruleBody, string clauseQuote) =>
         string.Create(CultureInfo.InvariantCulture, $"{ruleType}\n{ruleBody}\n{clauseQuote}");
@@ -796,6 +979,7 @@ public class RuleSetService
         }
 
         var fingerprints = new HashSet<string>(StringComparer.Ordinal);
+        var covered = new HashSet<string>(StringComparer.Ordinal);
         foreach (var batch in rows.Select(p => (object)p.Id).Chunk(MaxInValues))
         {
             var query = new QueryExpression(VersionEntity) { ColumnSet = new ColumnSet(VersionColumns) };
@@ -813,10 +997,15 @@ public class RuleSetService
                 {
                     fingerprints.Add(Fingerprint(type, row.RuleBody, row.ClauseReference));
                 }
+
+                if (!string.IsNullOrWhiteSpace(v.GetAttributeValue<string>("sprk_clausereference")))
+                {
+                    covered.Add(BillingRuleDraftTranslator.NormaliseForQuoteCheck(v.GetAttributeValue<string>("sprk_clausereference")!));
+                }
             }
         }
 
-        return new DraftedFingerprints(fingerprints, next);
+        return new DraftedFingerprints(fingerprints, next, covered);
     }
 
     private async Task CreateDraftRuleAsync(

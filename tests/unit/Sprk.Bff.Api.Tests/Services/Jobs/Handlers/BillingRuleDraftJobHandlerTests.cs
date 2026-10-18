@@ -70,6 +70,7 @@ public sealed class BillingRuleDraftJobHandlerTests
         public IReadOnlyList<DraftedRule>? Stored;
         public IReadOnlyList<NotConvertedClause>? StoredNotConverted;
         public Guid? StoredCaller;
+        public readonly List<string> Calls = new();
 
         public Rig()
         {
@@ -94,6 +95,12 @@ public sealed class BillingRuleDraftJobHandlerTests
 
             RuleSets.Setup(r => r.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(new DraftSource(SetId, "Acme", DocId, "b!lib", "item-1", "ocg.pdf", false)));
+            RuleSets.Setup(r => r.RemoveUntouchedDraftsAsync(SetId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() =>
+                {
+                    Calls.Add("compensate");
+                    return RuleSetOutcome<DraftsCompensated>.Done(new DraftsCompensated(0, 0));
+                });
             Spe.Setup(s => s.DownloadFileAsync("b!lib", "item-1", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => new MemoryStream(new byte[] { 1 }));
             Text.Setup(t => t.ExtractAsync(It.IsAny<Stream>(), "ocg.pdf", It.IsAny<CancellationToken>()))
@@ -102,6 +109,7 @@ public sealed class BillingRuleDraftJobHandlerTests
                 .ReturnsAsync((BillingRuleDraftRequest r, CancellationToken _) =>
                 {
                     AiRequests.Add(r);
+                    Calls.Add("ask");
                     return new BillingRuleDraftResult
                     {
                         Proposals = new[]
@@ -121,6 +129,7 @@ public sealed class BillingRuleDraftJobHandlerTests
             RuleSets.Setup(r => r.AddDraftsAsync(SetId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Guid _, IReadOnlyList<DraftedRule> rules, IReadOnlyList<NotConvertedClause> nc, Guid? caller, CancellationToken _) =>
                 {
+                    Calls.Add("store");
                     Stored = rules;
                     StoredNotConverted = nc;
                     StoredCaller = caller;
@@ -264,6 +273,70 @@ public sealed class BillingRuleDraftJobHandlerTests
         var outcome = await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
 
         outcome.Status.Should().Be(JobStatus.Completed);
+    }
+
+    // ── retry compensation (the earlier run's untouched drafts go before the model is asked again) ──
+
+    [Fact]
+    public async Task Process_ClearsTheEarlierRunsUntouchedDrafts_BeforeTheModelIsAsked_AndBeforeAnythingIsStored()
+    {
+        var rig = new Rig();
+        rig.RuleSets.Setup(r => r.RemoveUntouchedDraftsAsync(SetId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                rig.Calls.Add("compensate");
+                return RuleSetOutcome<DraftsCompensated>.Done(new DraftsCompensated(3, 1));
+            });
+
+        var outcome = await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        rig.Calls.Should().Equal("compensate", "ask", "store");
+    }
+
+    [Theory]
+    [InlineData(1, JobStatus.Failed)]
+    [InlineData(5, JobStatus.Poisoned)]
+    public async Task Process_ACompensationFault_FailsTheRun_WithoutAskingTheModelOrDrafting_SoTheNextDeliveryCompensatesAgain(int delivery, JobStatus expected)
+    {
+        var rig = new Rig();
+        rig.RuleSets.Setup(r => r.RemoveUntouchedDraftsAsync(SetId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftsCompensated>.Refused(500, RuleSetService.CodeWriteFailed, "could not clear"));
+
+        var outcome = await rig.Handler().ProcessAsync(Job(delivery: delivery), CancellationToken.None);
+
+        outcome.Status.Should().Be(expected);
+        outcome.ErrorMessage.Should().Be(RuleSetService.CodeWriteFailed);
+        rig.Spe.VerifyNoOtherCalls();
+        rig.Ai.VerifyNoOtherCalls();
+        rig.RuleSets.Verify(r => r.AddDraftsAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Process_WhenTheCompensationFindsTheMarker_AnotherDeliveryFinishedFirst_TheJobCompletes_AndAsksNothing()
+    {
+        var rig = new Rig();
+        rig.RuleSets.Setup(r => r.RemoveUntouchedDraftsAsync(SetId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftsCompensated>.Refused(409, RuleSetService.CodeAlreadyDrafted, "done"));
+
+        var outcome = await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        rig.Ai.VerifyNoOtherCalls();
+        rig.Spe.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Process_ARuleSetThatIsAlreadyDrafted_NeverRunsTheCompensation()
+    {
+        var rig = new Rig();
+        rig.RuleSets.Setup(r => r.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(new DraftSource(SetId, "Acme", DocId, "b!lib", "item-1", "ocg.pdf", AlreadyDrafted: true)));
+
+        await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
+
+        rig.Calls.Should().BeEmpty("a finished run is never compensated");
+        rig.RuleSets.Verify(r => r.RemoveUntouchedDraftsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ── which failures retry and which are poison ───────────────────────────────────────────────
