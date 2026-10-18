@@ -5,7 +5,7 @@ namespace Spaarke.ArchTests;
 
 /// <summary>
 /// ebilling-r1 task 015 (D-41, owner decisions D-97 / D-103): the invoice status lives on <c>statuscode</c>. The old choice column
-/// and its global option set were retired and deleted from dev, so a reader that comes back (a stale branch merged later, a copied
+/// and its global option set are retired (deleted from dev by 015's guarded -Delete step), so a reader that comes back (a stale branch merged later, a copied
 /// query, a form or view in solution source) would fail at run time against Dataverse, or silently count no spend.
 /// </summary>
 /// <remarks>
@@ -14,6 +14,9 @@ namespace Spaarke.ArchTests;
 /// that read it indirectly (<c>FinanceBaseValues.InvoiceStatus</c>, <c>InvoiceStatusReviewed</c>, <c>InvoiceStatusToReview</c>,
 /// <c>InvInvoiceStatus</c>): the 2026-10-17 code check found readers that a literal grep alone missed. Comments are scanned too:
 /// a comment that names the column sends the next reader to it.</para>
+/// <para>Transition window (D-97): two exact lines are exempt until the column is deleted from dev, the external invoices allow-list
+/// entry and the one constant the allow-list test spells the name with (<c>TransitionalExemptions</c>, a ratchet that only shrinks).
+/// Every other mention still fails, including the same text on another line or in another file.</para>
 /// <para>Excluded: <c>projects/**</c> (task history, not scanned at all), this file (it must spell what it looks for), and build
 /// output / dependencies (<c>bin</c>, <c>obj</c>, <c>node_modules</c>, <c>dist</c>, <c>coverage</c>, <c>.git</c>).</para>
 /// <para>Controls: <see cref="TheDetector_FiresOnEachRetiredName"/> (must fire) and
@@ -47,6 +50,30 @@ public class InvoiceStatusRetirementGuardTests
 
     internal static IReadOnlyList<string> Violations(string text) =>
         Detectors.Where(d => d.Pattern.IsMatch(text)).Select(d => d.Description).ToList();
+
+    /// <summary>
+    /// The TRANSITION-WINDOW exemption (ratchet baseline; D-97 / uac-r2 review F1). Until the retired column is deleted from dev, the
+    /// live outside-counsel invoices grid (3ff4102c) still names it, so the BFF's external invoices allow-list admits it next to
+    /// <c>statuscode</c>. Each entry is ONE exact line in ONE exact file (compared after trimming, comment included): the production
+    /// allow-list entry, and the single constant the allow-list test file spells the name with. Nothing else is exempt, and the
+    /// list only shrinks: <see cref="EveryTransitionalExemption_IsStillNeeded"/> fails when an entry is removed from its file
+    /// without removing it here, and <see cref="TheExemptionList_NeverGrows"/> fails when one is added. Remove both entries (and
+    /// this list) in the follow-up commit after the dev column delete.
+    /// </summary>
+    private static readonly (string File, string Line)[] TransitionalExemptions =
+    {
+        ("src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs",
+            "\"sprk_invoicestatus\", // transitional (015/D-97): remove after the dev column delete"),
+        ("tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs",
+            "private const string TransitionalInvoiceStatusColumn = \"sprk_invoicestatus\"; // transitional (015/D-97): remove after the dev column delete"),
+    };
+
+    private static bool IsExempt(string relativePath, string line) =>
+        TransitionalExemptions.Any(e => e.File == relativePath.Replace('\\', '/') && e.Line == line.Trim());
+
+    /// <summary>Violations on one line of one file: <see cref="Violations(string)"/> minus the exact transition-window entries.</summary>
+    internal static IReadOnlyList<string> Violations(string relativePath, string line) =>
+        IsExempt(relativePath, line) ? Array.Empty<string>() : Violations(line);
 
     /// <summary>Text files under <c>{repo}/{root}</c>, pruning <see cref="ExcludedDirectoryNames"/> before descending (copied from
     /// <c>ADR002_PluginTests.Walk</c>).</summary>
@@ -91,7 +118,7 @@ public class InvoiceStatusRetirementGuardTests
             var lines = File.ReadAllLines(file);
             for (var i = 0; i < lines.Length; i++)
             {
-                foreach (var why in Violations(lines[i]))
+                foreach (var why in Violations(SourceScan.Relative(file), lines[i]))
                 {
                     found.Add($"{SourceScan.Relative(file)}:{i + 1}: {why}");
                 }
@@ -120,6 +147,47 @@ public class InvoiceStatusRetirementGuardTests
     [InlineData("private const string PredicateInvoiceStatus = \"invoiceStatus\";")]
     [InlineData("<attribute name='sprk_invoicenumber'/><attribute name='sprk_invoicedate'/>")]
     public void TheDetector_StaysQuietOnTheStatuscodeReplacements(string text) => Assert.Empty(Violations(text));
+
+    [Fact(DisplayName = "ebilling-r1 015 transition: every exempt line still exists in its file (a leftover exemption fails)")]
+    public void EveryTransitionalExemption_IsStillNeeded()
+    {
+        foreach (var (file, line) in TransitionalExemptions)
+        {
+            var path = Path.Combine(SourceScan.RepoRoot, file.Replace('/', Path.DirectorySeparatorChar));
+            Assert.True(File.Exists(path), $"{file}: the exempt file is gone; remove its entry from TransitionalExemptions.");
+            Assert.True(File.ReadAllLines(path).Any(l => l.Trim() == line),
+                $"{file}: the exempt line is gone (the transition window is over?); remove its entry from TransitionalExemptions.");
+        }
+    }
+
+    [Fact(DisplayName = "ebilling-r1 015 transition: the exemption list holds the two named entries and nothing more")]
+    public void TheExemptionList_NeverGrows() => Assert.True(TransitionalExemptions.Length <= 2,
+        "Only the external invoices allow-list entry and the allow-list test's one constant are exempt (D-97 transition window).");
+
+    [Fact(DisplayName = "ebilling-r1 015 transition control: the exact exempt entries do not fire")]
+    public void TheDetector_StaysQuietOnTheExactTransitionalEntries() =>
+        Assert.All(TransitionalExemptions, e => Assert.Empty(Violations(e.File, "            " + e.Line)));
+
+    [Fact(DisplayName = "ebilling-r1 015 transition control: the old column name anywhere else still fires")]
+    public void TheDetector_StillFires_OnTheRetiredNameAnywhereElse()
+    {
+        var module = TransitionalExemptions[0].File;
+        var tests = TransitionalExemptions[1].File;
+        var entry = TransitionalExemptions[0].Line;
+
+        // another file, even with the exact exempt line
+        Assert.NotEmpty(Violations("src/server/api/Sprk.Bff.Api/Services/Finance/FinanceSummaryService.cs", entry));
+        Assert.NotEmpty(Violations("src/client/external-spa/src/components/detail/RecordDetailFields.tsx", entry));
+        Assert.NotEmpty(Violations(tests, entry));
+        // an exempt file, another line naming the column (a second reader next to the allow-list entry)
+        Assert.NotEmpty(Violations(module, "var status = row[\"sprk_invoicestatus\"];"));
+        Assert.NotEmpty(Violations(module, "\"sprk_invoicestatus\","));
+        Assert.NotEmpty(Violations(module, "\"sprk_invoicestatus\", // transitional (015/D-97)"));
+        Assert.NotEmpty(Violations(module, "\"sprk_invoicestatus\", \"sprk_name\", // transitional (015/D-97): remove after the dev column delete"));
+        Assert.NotEmpty(Violations(tests, "private const string Other = \"sprk_invoicestatus\";"));
+        // the retired constants stay forbidden in the exempt files
+        Assert.NotEmpty(Violations(module, "FinanceBaseValues.InvoiceStatus"));
+    }
 
     [Fact(DisplayName = "ebilling-r1 015 control: the walk reaches code, solution source, the SPA and scripts, and skips its own file")]
     public void TheWalk_ReachesEveryScannedRoot()

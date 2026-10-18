@@ -444,14 +444,17 @@ public static class ExternalAccessModule
             },
             // Grid 3ff4102c. Primary name = sprk_name (not on the grid; admitted for the /record default
             // projection). Task 157 dropped (rule (b) only): sprk_visibilitystate, modifiedon, statecode.
-            // ebilling-r1 task 015 (D-41): the invoice status is statuscode; the retired status choice column it replaces
-            // is gone, and grid 3ff4102c's status column is moved to statuscode in the same change.
+            // ebilling-r1 task 015 (D-41): the invoice status is statuscode, and grid 3ff4102c's status column is moved to
+            // it. TRANSITION WINDOW: until the retired status column is deleted from dev (015 -Delete, owner D-97), the
+            // live grid configuration still names it, so this list admits BOTH. The second entry goes in the follow-up
+            // commit after the dev delete.
             SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_name",
             ReadableColumns = new HashSet<string>
             {
                 "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "statuscode",
                 "sprk_totalamount", "sprk_project", "sprk_matter",
+                "sprk_invoicestatus", // transitional (015/D-97): remove after the dev column delete
             },
         });
 
