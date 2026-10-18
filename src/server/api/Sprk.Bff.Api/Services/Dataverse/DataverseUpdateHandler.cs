@@ -14,10 +14,12 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     private readonly IRecordOwnershipResolver _ownership;
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
     private readonly ILogger<DataverseUpdateHandler> _logger;
-    private readonly Sprk.Bff.Api.Services.Communication.IThreadResolver? _threads;
+    private readonly Sprk.Bff.Api.Services.Access.SecureChildReconciler _children;
 
-    /// <param name="threads">Spaarkeai-word-add-in-r1 task 129: the thread reconcile after a re-filed communication.
-    /// Optional so the test compositions keep compiling; the host registers it unconditionally.</param>
+    /// <param name="children">#2091: the ONE step after a re-file (<see cref="Sprk.Bff.Api.Services.Access.SecureChildReconciler.AfterRefileAsync"/>).
+    /// REQUIRED: without it a re-file into a Secure record would silently leave the row business-unit readable. Scoped, like
+    /// this handler (ExternalAccessModule registers it unconditionally). It also lets a re-filed communication's thread follow
+    /// the filing (spaarkeai-word-add-in-r1 task 129), which this handler used to ask the thread resolver for itself.</param>
     public DataverseUpdateHandler(
         IFieldMappingDataverseService fieldMappingService,
         IGenericEntityService genericEntityService,
@@ -25,9 +27,9 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         ILogger<DataverseUpdateHandler> logger,
-        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null)
+        Sprk.Bff.Api.Services.Access.SecureChildReconciler children)
     {
-        _threads = threads;
+        _children = children ?? throw new ArgumentNullException(nameof(children));
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _restamper = restamper ?? throw new ArgumentNullException(nameof(restamper));
@@ -38,8 +40,9 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
 
     /// <inheritdoc />
     /// <exception cref="RecordOwnerUnresolvedException">
-    /// The update re-files a child record (an <see cref="Microsoft.Xrm.Sdk.EntityReference"/> value onto a parent)
-    /// whose new owner cannot be resolved. Nothing was written (task 146).
+    /// The update re-files a child record (an <see cref="Microsoft.Xrm.Sdk.EntityReference"/> value or an <c>@odata.bind</c>
+    /// onto a parent) whose new owner cannot be resolved, or binds a filing lookup to something that names no row of its
+    /// target. Nothing was written (task 146; #2091 round 3).
     /// </exception>
     public async Task UpdateAsync(
         string entityLogicalName,
@@ -56,16 +59,32 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             throw new RecordOwnerUnresolvedException(entityLogicalName, rootRefusal);
         }
 
-        // Task 146: an EntityReference value onto a parent FILES a child table under a record — a reparent. The child's
-        // owner is re-derived over every parent it will have (secure-if-any) BEFORE the write, and reassigned when it
-        // moves. A root's own lookups never reassign it (provisioning owns a root's ownership).
+        // Task 146: an EntityReference value or an @odata.bind onto a parent FILES a child table under a record — a reparent.
+        // The child's owner is re-derived over every parent it will have (secure-if-any) BEFORE the write, and reassigned when
+        // it moves. A root's own lookups never reassign it (provisioning owns a root's ownership). A filing lookup bound to
+        // something that names no row of its target is refused here, before anything is read or written (#2091 round 3).
         //
         // A NULL value may CLEAR a lookup — moving the child OUT of a parent — so every null is passed as a candidate
         // clear (verifier item 8). This handler cannot tell a lookup from a text column; the resolver reads the row and
         // treats a null for a column that holds no parent as no parent change (the write then decides no owner).
         var parentChanges = RecordOwnershipResolver.IsReparentableChild(entityLogicalName)
-            ? RecordReparent.ParentChangesWithClearsIn(fields)
+            ? RecordReparent.ParentChangesWithClearsIn(entityLogicalName, fields)
             : new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>();
+
+        // #2091: a write that may re-file the row (the ONE predicate, RecordReparent.MayRefile) runs the ONE step after a
+        // re-file (SecureChildReconciler.AfterRefileAsync), as every other re-file writer does. Whether the row was isolated
+        // is read BEFORE the write (once more after a fault — a timeout included — then handed to the step as a fault): a move
+        // OUT releases only from a row that was. Only the caller's own cancellation ends the write here.
+        var refiledTable = entityLogicalName.Trim().ToLowerInvariant();
+        var mayRefile = RecordReparent.MayRefile(refiledTable, parentChanges);
+        var wasIsolated = mayRefile
+            ? await Sprk.Bff.Api.Services.Access.RefileIsolationRead.BeforeWriteAsync(_children, refiledTable, recordId, ct)
+                .ConfigureAwait(false)
+            : null;
+
+        // #2091 round 4: the reparent reads the row; a change that moves none of its parents (a rebind onto the parent it
+        // holds) is written and is no re-file, so the step does not run.
+        var refiled = false;
         if (parentChanges.Count == 0)
         {
             await WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, ct);
@@ -85,6 +104,8 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             {
                 throw new RecordOwnerUnresolvedException(entityLogicalName, reparent);
             }
+
+            refiled = !reparent.ParentsUnchanged;
         }
 
         // Task 156 (owner round 4 item 5, option b): this generic update can write what a to-do / event / communication /
@@ -98,13 +119,12 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // incomplete securing is logged and the secure-root inheritance job completes it).
         await _rootFiling.SecureAfterWriteAsync(entityLogicalName, recordId, fields.Keys, traceId: null);
 
-        // Spaarkeai-word-add-in-r1 task 129: a re-filed communication's thread follows the filing, so it shows on the record's
-        // Messages panel. This handler's re-file does not run SecureChildReconciler.AfterRefileAsync (the step the other
-        // re-file writers share, which reconciles), so it reconciles here — once. Never throws.
-        if (parentChanges.Count > 0 && _threads is not null
-            && string.Equals(entityLogicalName, "sprk_communication", StringComparison.OrdinalIgnoreCase))
+        // #2091, AFTER the re-stamp (the stamps on the rows filed under it are lookups the ownership rule reads): the re-filed
+        // row's mirror and the pass over everything filed under it — and a communication's thread follows the filing (task
+        // 129). Never throws; the write stands.
+        if (refiled && wasIsolated is not null)
         {
-            await _threads.ReconcileThreadForFilingAsync(recordId, CancellationToken.None).ConfigureAwait(false);
+            await _children.AfterRefileAsync(refiledTable, recordId, wasIsolated, CancellationToken.None).ConfigureAwait(false);
         }
     }
 

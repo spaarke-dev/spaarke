@@ -43,6 +43,7 @@ public class RefilePathRestampTests
         var services = new ServiceCollection()
             .AddSingleton(world.Restamper)
             .AddSingleton<IRecordOwnershipResolver>(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble())
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
             .BuildServiceProvider();
         var core = new UpdateRecordActionCore(
             new Mock<IFieldMappingDataverseService>().Object,
@@ -85,7 +86,8 @@ public class RefilePathRestampTests
         var handler = new DataverseUpdateHandler(
             new Mock<IFieldMappingDataverseService>().Object, world.Service, world.Restamper,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance);
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureChildReconcilerFixtures.OverEmptyWorld());
 
         await handler.UpdateAsync(
             "sprk_communication", Communication,
@@ -211,7 +213,7 @@ public class RefilePathRestampTests
             new Mock<IFieldMappingDataverseService>().Object, world.Service, world.Restamper,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
-            threads.Object);
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureChildReconcilerFixtures.OverEmptyWorld(threads.Object));
 
         await handler.UpdateAsync(
             "sprk_communication", Communication,
@@ -235,6 +237,7 @@ public class RefilePathRestampTests
                 .AddSingleton(world.Restamper)
                 .AddSingleton(ownership)
                 .AddSingleton(threads)
+                .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
                 .BuildServiceProvider()
                 .GetRequiredService<IServiceScopeFactory>(),
             NullLogger.Instance);

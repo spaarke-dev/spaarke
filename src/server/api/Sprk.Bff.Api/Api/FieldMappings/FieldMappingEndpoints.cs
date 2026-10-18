@@ -1013,6 +1013,27 @@ public static class FieldMappingEndpoints
         var failed = 0;
         var skipped = 0;
 
+        // #2091 round 4: on a reparentable child, a lookup rule writes the column it NAMES or nothing. Its bind is planned by
+        // the referenced table's navigation property, which can be another lookup to the same table — a filing move the rule
+        // never asked for. Refused per rule, like any other unplannable lookup. Keyed by the rule INSTANCE, as the plan is
+        // (round 5): two rules can be equal by value, and the record's value equality would throw on the second.
+        if (lookupBinds is not null && Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(targetEntity))
+        {
+            var checkedBinds = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance);
+            foreach (var (rule, plan) in lookupBinds)
+            {
+                checkedBinds[rule] = plan.BindKey is { } bindKey
+                                     && !string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(bindKey),
+                                         rule.TargetField?.Trim(), StringComparison.OrdinalIgnoreCase)
+                    ? LookupBindPlan.Refused(
+                        $"'{rule.TargetField}' on '{targetEntity}' would be written through '{bindKey}', a different lookup; "
+                        + "the lookup was not copied.")
+                    : plan;
+            }
+
+            lookupBinds = checkedBinds;
+        }
+
         foreach (var childRecordId in childRecordIds)
         {
             ct.ThrowIfCancellationRequested();
@@ -1055,10 +1076,72 @@ public static class FieldMappingEndpoints
                         }
                     }
 
+                    // #2091 round 3: a rule that writes a filing lookup (`{nav}@odata.bind`) onto a reparentable child RE-FILES
+                    // it — its owner is re-derived before the write and the ONE step after a re-file runs after it, as on
+                    // every other re-file writer. A malformed bind, an owner that cannot be decided, or a host that cannot
+                    // re-own refuses THIS child only (per-row, like every other failure here).
+                    var parentChanges = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(targetEntity)
+                        ? Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesWithClearsIn(targetEntity, updatePayload)
+                        : new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>();
+                    var mayRefile = Sprk.Bff.Api.Services.Dataverse.RecordReparent.MayRefile(targetEntity, parentChanges);
+                    using var refileScope = mayRefile ? scopes?.CreateScope() : null;
+                    var children = refileScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureChildReconciler>();
+                    var ownership = refileScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+
                     // Task 166: written AS THE CALLER (MSCRMCallerID) — Dataverse applies their Write on the child,
                     // so no app-only child write remains on this route.
-                    await dataverseService.UpdateRecordFieldsAsync(
-                        targetEntity, childRecordId, updatePayload, ct, impersonateSystemUserId: callerSystemUserId);
+                    Task Write(CancellationToken token) => dataverseService.UpdateRecordFieldsAsync(
+                        targetEntity, childRecordId, updatePayload, token, impersonateSystemUserId: callerSystemUserId);
+                    Func<Task<bool>>? wasIsolated = null;
+                    var refiled = false;
+                    if (!mayRefile)
+                    {
+                        await Write(ct);
+                    }
+                    else if (children is null || ownership is null)
+                    {
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = "Not written: this push moves what the record is filed under, and its owner cannot be re-derived here.",
+                        });
+                        continue;
+                    }
+                    else
+                    {
+                        wasIsolated = await Sprk.Bff.Api.Services.Access.RefileIsolationRead.BeforeWriteAsync(
+                            children, targetEntity.Trim().ToLowerInvariant(), childRecordId, ct);
+
+                        var reparent = await ownership.ReparentAsync(
+                            new Sprk.Bff.Api.Services.Dataverse.RecordReparent
+                            {
+                                EntityLogicalName = targetEntity,
+                                RecordId = childRecordId,
+                                ParentChanges = parentChanges,
+                                CallerSystemUserId = callerSystemUserId,
+                                // A move out of a secure root (owner round 10 item 7) is asked of the person this push acts as.
+                                SecureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
+                                    callerSystemUserId,
+                                    refileScope!.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>()),
+                            },
+                            Write,
+                            ct);
+                        if (reparent.IsRefused)
+                        {
+                            failed++;
+                            errors.Add(new PushFieldMappingsError
+                            {
+                                RecordId = childRecordId,
+                                Error = $"Not written: {reparent.Reason} ({reparent.RefusalCode}).",
+                            });
+                            continue;
+                        }
+
+                        // #2091 round 4: a rule that re-binds the parent the child already holds moves nothing — no step.
+                        refiled = !reparent.ParentsUnchanged;
+                    }
+
                     updated++;
 
                     // Task 156 (owner round 4 item 5, option b): a mapping rule can write a lookup — including what this
@@ -1071,6 +1154,14 @@ public static class FieldMappingEndpoints
                     // thrown; an incomplete securing is logged and the secure-root inheritance job completes it).
                     if (rootFiling is not null)
                         await rootFiling.SecureAfterWriteAsync(targetEntity, childRecordId, updatePayload.Keys, traceId: null);
+
+                    // #2091, AFTER the re-stamp: the re-filed child's mirror and the pass over everything filed under it.
+                    // Never throws; the child's update stands.
+                    if (refiled && children is not null && wasIsolated is not null)
+                    {
+                        await children.AfterRefileAsync(
+                            targetEntity.Trim().ToLowerInvariant(), childRecordId, wasIsolated, CancellationToken.None);
+                    }
 
                     // Task 142 (L1): a push that wrote a ROOT's "Assigned *" column (a project/matter/work assignment
                     // child of the source) materializes its Assigned-To access now. A non-root target or a non-registry
