@@ -319,7 +319,7 @@ public sealed class GateDecisionRecordSharing
         if (granted.Count == 0)
             return;
 
-        var owner = await ReadOwnerOrNullAsync(record.Id).ConfigureAwait(false);
+        var (owner, ownerReadFault) = await ReadOwnerOrNullAsync(record.Id).ConfigureAwait(false);
         if (owner is { Kind: DataversePrincipalKind.SystemUser })
         {
             _logger.LogInformation(
@@ -329,7 +329,7 @@ public sealed class GateDecisionRecordSharing
         }
 
         if (owner is null)
-            ShareFailed(null, "the owner could not be read after the participant grants; they are revoked", record.Id, communicationId);
+            ShareFailed(ownerReadFault, "the owner could not be read after the participant grants; they are revoked", record.Id, communicationId);
         else
             _logger.LogInformation(
                 "Gate Decision Record {RecordId} is no longer owned by a user after its participant grants; the {Count} grant(s) are revoked " +
@@ -400,10 +400,14 @@ public sealed class GateDecisionRecordSharing
             .InvalidateRecordOwnerChangeAsync(Table, EntitySet, record.Id, $"gate-dr-reown:{record.Id:D}", CancellationToken.None)
             .ConfigureAwait(false);
 
-        var owner = await ReadOwnerOrNullAsync(record.Id).ConfigureAwait(false);
+        var (owner, ownerReadFault) = await ReadOwnerOrNullAsync(record.Id).ConfigureAwait(false);
         if (owner != DataversePrincipalRef.Team(team))
         {
-            ReownFailed(assignFault, "the re-own did not read back; the user owner and the shares are kept", record.Id, communicationId);
+            // One warning carries every fault: the Assign's, the owner read's, or both.
+            var fault = assignFault is not null && ownerReadFault is not null
+                ? new AggregateException(assignFault, ownerReadFault)
+                : assignFault ?? ownerReadFault;
+            ReownFailed(fault, "the re-own did not read back; the user owner and the shares are kept", record.Id, communicationId);
             return;
         }
 
@@ -460,12 +464,14 @@ public sealed class GateDecisionRecordSharing
         }
 
         var team = record.OwnerTeamId!.Value;
+        var revoked = 0;
         foreach (var share in userShares)
         {
             try
             {
                 await _shares.RevokeAccessAsync(EntitySet, record.Id, share.Principal, DataversePrincipalRef.Team(team), CancellationToken.None)
                     .ConfigureAwait(false);
+                revoked++;
             }
             catch (Exception ex)
             {
@@ -474,8 +480,8 @@ public sealed class GateDecisionRecordSharing
         }
 
         _logger.LogInformation(
-            "Gate Decision Record {RecordId} of filed communication {CommunicationId}: {Count} leftover participant share(s) revoked (D-169).",
-            record.Id, communicationId, userShares.Count);
+            "Gate Decision Record {RecordId} of filed communication {CommunicationId}: {Count} of {Leftover} leftover participant share(s) revoked " +
+            "(D-169).", record.Id, communicationId, revoked, userShares.Count);
     }
 
     // ── Reads ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -522,8 +528,11 @@ public sealed class GateDecisionRecordSharing
             .ToList();
     }
 
-    /// <summary>The record's owner now, or <c>null</c> when it cannot be read (the caller then fails closed).</summary>
-    private async Task<DataversePrincipalRef?> ReadOwnerOrNullAsync(Guid recordId)
+    /// <summary>
+    /// The record's owner now, or <c>null</c> when it cannot be read (the caller then fails closed). The read's fault is returned, not logged:
+    /// the caller's one failure warning carries it (042b round 4).
+    /// </summary>
+    private async Task<(DataversePrincipalRef? Owner, Exception? Fault)> ReadOwnerOrNullAsync(Guid recordId)
     {
         try
         {
@@ -531,15 +540,14 @@ public sealed class GateDecisionRecordSharing
                 .RetrieveAsync(Table, recordId, [OwningUserColumn, OwningTeamColumn], CancellationToken.None)
                 .ConfigureAwait(false);
             if (row?.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is { } team && team != Guid.Empty)
-                return DataversePrincipalRef.Team(team);
+                return (DataversePrincipalRef.Team(team), null);
             if (row?.GetAttributeValue<EntityReference>(OwningUserColumn)?.Id is { } user && user != Guid.Empty)
-                return DataversePrincipalRef.User(user);
-            return null;
+                return (DataversePrincipalRef.User(user), null);
+            return (null, null);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Gate Decision Record {RecordId}: its owner could not be read.", recordId);
-            return null;
+            return (null, ex);
         }
     }
 

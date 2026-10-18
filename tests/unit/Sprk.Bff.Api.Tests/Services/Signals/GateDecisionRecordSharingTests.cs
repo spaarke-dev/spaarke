@@ -219,6 +219,7 @@ internal sealed class GateSharingWorld
         public HashSet<Guid> FailGrantFor { get; } = [];
         public HashSet<string> FailReadFor { get; } = [];
         public bool FailRevoke { get; set; }
+        public HashSet<Guid> FailRevokeFor { get; } = [];
 
         private static string Table(string name) => name.EndsWith('s') ? name[..^1] : name;
 
@@ -245,7 +246,7 @@ internal sealed class GateSharingWorld
         private Task Revoke(string entitySetName, Guid recordId, DataversePrincipalRef principal)
         {
             world.Calls.Add($"revoke:{Table(entitySetName)}:{recordId:D}:{principal.Id:D}");
-            if (FailRevoke)
+            if (FailRevoke || FailRevokeFor.Contains(principal.Id))
                 return Task.FromException(new InvalidOperationException("Test: the revoke failed."));
             world.SharesOf(Table(entitySetName), recordId).Remove(principal);
             return Task.CompletedTask;
@@ -792,5 +793,50 @@ public sealed class GateDecisionRecordSharingTests
         reasons.Should().Contain(DecisionRecordRefusalReason.ParticipantShareFailed);
         world.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.EventId == DecisionRecordEvents.ParticipantShareFailed);
         world.RecordSharees(RecordId).Should().BeEmpty("fail closed: the grants are revoked");
+    }
+
+    // ── 042b round 4: an unreadable owner is ONE warning carrying its fault; the leftover log counts what was revoked ─────
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AnOwnerThatCannotBeRead_IsLoggedOnce_AsTheFailureWarning_CarryingTheReadFault_042bRound4(bool atWrite)
+    {
+        var fault = new InvalidOperationException("Test: the owner read failed.");
+        GateSharingWorld world;
+        if (atWrite)
+        {
+            world = UnfiledCommunication().WithGateRecord(RecordId, CommunicationId, Owner);
+            world.OwnerReadFault = fault;
+            await world.Sharing.ShareAtWriteAsync(RecordId, CommunicationId, Owner);
+        }
+        else
+        {
+            // The filing's re-own: the Assign lands and the read-back throws.
+            world = FiledWithASharedRecord();
+            world.OwnerReadFault = fault;
+            await world.Sharing.ReownAfterFilingAsync(CommunicationId);
+        }
+
+        var expected = atWrite ? DecisionRecordEvents.ParticipantShareFailed : DecisionRecordEvents.FilingReownFailed;
+        world.Log.Entries.Where(e => e.Level >= LogLevel.Warning).Should().ContainSingle("the read's fault is logged once, by the failure warning")
+            .Which.Should().Match<LogEntry>(e => e.EventId == expected && ReferenceEquals(e.Exception, fault));
+    }
+
+    [Fact]
+    public async Task Filing_ALeftoverRevokeThatFailsAgain_IsNotCountedAsRevoked_042bRound4()
+    {
+        var world = FiledWithASharedRecord();
+        world.Shares.FailRevoke = true;
+        await world.Sharing.ReownAfterFilingAsync(CommunicationId);
+        world.Shares.FailRevoke = false;
+        world.Shares.FailRevokeFor.Add(Reader);
+        world.Log.Entries.Clear();
+
+        await world.Sharing.ReownAfterFilingAsync(CommunicationId);
+
+        world.RecordSharees(RecordId).Should().Equal(Reader);
+        world.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Information && e.Message.Contains("leftover", StringComparison.Ordinal))
+            .Which.Fields["Count"].Should().Be(1, "one of the two leftover shares was revoked; the other's revoke failed");
     }
 }
