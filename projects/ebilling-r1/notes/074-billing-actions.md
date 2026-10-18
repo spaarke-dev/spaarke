@@ -284,8 +284,9 @@ Part two (section 8):
 
 ## 8. Part two: the writer entry and the recorder (D-100, D-101; 2026-10-17)
 
-Base `62a1ec56b`. Commits `9c9f47cb8` (writer entry), `0eac6d2aa` (recorder), `1ca994acc` (code-review F2), `92b18d3bb` (adversarial
-round, 8.6).
+Base `62a1ec56b`. Commits `cd44dbcca` (writer entry), `b8e8bba27` (recorder), `df0f2a173` (code-review F2), `134e2738b` (adversarial
+round, 8.6). (These were first recorded under their pre-cherry-pick hashes 9c9f47cb8, 0eac6d2aa, 1ca994acc and 92b18d3bb.) The
+ontology-r1 fix round is section 8.7.
 
 ### 8.1 What was built
 
@@ -335,13 +336,13 @@ Each mutation was applied to one file, the billing tests were run, the file was 
 | Mutation | Result |
 |---|---|
 | **M1 (C4, the requested proof): the lookup's fault handler returns "none found" instead of refusing** | 2 fail: `Billing_C4_ALookupFault_WritesNothing` and `Billing_C4_AWriterIdentityFault_WritesNothing` (a record is created) |
-| M2 (C3): the `createdby` condition removed from the lookup | 2 fail: the other-creator test and the createdby-condition test |
+| M2 (C3): the `createdby` condition removed from the lookup | Corrected in the ontology-r1 fix round (F3-1). As first recorded ("2 fail") only the createdby-condition test failed: the other-creator test's forged row had no `sprk_actioncode`, so the code filter skipped it and it passed with the condition removed (re-run: 1 fail). The forged row now carries `sprk_actioncode = approve-invoice` and this decision's content hash; with the condition removed 3 fail (the other-creator test, the createdby-condition test, the writer-identity-fault test, since no WhoAmI is made), restored 76 / 76 |
 | M3 (C2): the subject-table check removed | 10 fail (every C2 case) |
 | M4 (C5): the null-confirmer check removed | 3 fail (every C5 refusal case) |
 | M5 (C1): the billing entry also accepts Signals codes | 3 fail (the Signals catalog codes) |
 | Recorder: every decision filed under the invoice | 3 fail (the line-decision tests) |
 | Base writer and no recorder (`62a1ec56b`) under the new tests | Do not compile: CS0246 for `BillingDecisionRecordRequest`, `BillingDecisionRecorder`, `BillingDecision` and `BillingDecider` |
-| Adversarial round: the `1ca994acc` writer under the `92b18d3bb` tests | 3 fail (the F1, F2 and K4 tests above); 50 pass. The fixed writer restored: 68 / 68 |
+| Adversarial round: the `df0f2a173` writer under the `134e2738b` tests | 3 fail (the F1, F2 and K4 tests above); 50 pass. The fixed writer restored: 68 / 68 |
 
 ### 8.4 Verification
 
@@ -351,7 +352,7 @@ Each mutation was applied to one file, the billing tests were run, the file was 
 | Unit filter: Decision, Billing, InvoiceFamily, E026, CoreAncestor, Signal, OntologyAdminAuthoring | 3,361 passed, 3 skipped, 0 failed (before the F2 fix; the writer and recorder tests re-ran after it, 248 / 248) |
 | Unit filter: DiGraphValidation, EbillingEnabledFilter, Services.Finance | 624 / 624 |
 | Spaarke.ArchTests | 1,160 / 1,160 |
-| After the adversarial round (`92b18d3bb`): unit filter DecisionRecord, DecisionActionCatalog, Billing, FinanceModule, InvoiceFamily, CoreAncestor | 1,354 / 1,354 |
+| After the adversarial round (`134e2738b`): unit filter DecisionRecord, DecisionActionCatalog, Billing, FinanceModule, InvoiceFamily, CoreAncestor | 1,354 / 1,354 |
 | After the adversarial round: ArchTests DecisionRecordContextImmutability, RecordOwnerAssignmentCensus, ADR010 | 47 / 47 |
 | After the adversarial round: `git diff --numstat 62a1ec56b -- src/ tests/` | 0 removed lines in every file (C7) |
 | Seam `DecisionRecordWriterBillingSeamTests` (new file, one live billing case) | Compiles; NOT run live, because this task makes no live writes. Opt-in like the other writer seams |
@@ -374,7 +375,7 @@ worktree; it is the same tree.
 | Branch over master | +428,151 B | — |
 | Total | 39.55 MB | 55 MB triggers review; 60 MB is a hard stop |
 
-The two fix commits (`1ca994acc`, `92b18d3bb`) change method bodies in the same assembly and add no file or package; they were not
+The two fix commits (`df0f2a173`, `134e2738b`) change method bodies in the same assembly and add no file or package; they were not
 re-measured. Their size is a few hundred bytes of IL against the +5 MB per-task threshold.
 
 ### 8.5 Component justification (CLAUDE.md section 11)
@@ -398,7 +399,7 @@ re-measured. Their size is a few hundred bytes of IL against the +5 MB per-task 
 
 ### 8.6 Quality gates
 
-**code-review.** One F-class finding, fixed in `1ca994acc`: a system decision could name a deciding contact (F2, D-129). Known limits:
+**code-review.** One F-class finding, fixed in `df0f2a173`: a system decision could name a deciding contact (F2, D-129). Known limits:
 - K1: the new entry is not listed in `DecisionRecordContextImmutabilityTests.CreateEntryPoints`. The one-create-site rule still holds and
   is pinned. The list is an existing ontology test kept byte-identical, so ontology-r1 should add the name when it reviews.
 - K4: `approvedAmount` is checked for presence, not range; consumer 100 owns the amount rule.
@@ -414,8 +415,8 @@ re-measured. Their size is a few hundred bytes of IL against the +5 MB per-task 
 - ADR-044 / ADR-024: the shared `Content` and regarding builder.
 - ADR-038: tests added, none deleted.
 
-**adversarial-reviewer (Opus; two passes over `62a1ec56b..1ca994acc`; both found all seven conditions hold).** Fixed in `92b18d3bb`, each
-with a test that fails against `1ca994acc`:
+**adversarial-reviewer (Opus; two passes over `62a1ec56b..df0f2a173`; both found all seven conditions hold).** Fixed in `134e2738b`, each
+with a test that fails against `df0f2a173`:
 - F1: a transient fault in the first core derivation handed "no core" on. When the filing step's re-derivation succeeded, the 026 check
   refused `SubjectUnfileable` (permanent) for a transient fault. It is now classified at once: a fault is `FilingFailed`, a data condition
   `SubjectUnfileable`.
@@ -440,3 +441,106 @@ Known limits (none is a confirmed defect on a path that exists today):
 - K, doc drift in pre-existing lines left unchanged to keep C7: the `Plan.NoRequester` comment ("only for a condition-cleared closure")
   and the constructor's `entities` comment. For ontology-r1, with `CreateEntryPoints` (K1 above).
 - Invalid caller input is logged at Error and counted in `ontology.writer.failures`, as `WriteAsync`'s is. Callers run `Preflight` first.
+
+### 8.7 ontology-r1 fix round (2026-10-17/18)
+
+Base `d249e9a50` (branch work/ebilling-r1). Commits:
+
+| Commit | Item |
+|---|---|
+| `be1bc56fa` | F3-1: the other-creator test's forged row carries `sprk_actioncode` |
+| `76aa6a943` | F4-1: resolved Signals' subjects reach the owner question; an unknown policy version is refused |
+| `f3bfc7614` | K2: AlreadyRecorded only for the same content (content hash in `sprk_steps`) |
+| `a49c4cef2` | K3: the recorder looks up the deciding user's contact itself |
+| `6884a42cd` | K4: the existence lookup filters `sprk_actioncode In <billing codes>` |
+| `e5e0dd28d` | F4-1 follow-up: the Signal and policy-version reads go through `RetrieveMultipleAsync` (the D-34 guard in `DecisionRecordContextImmutabilityTests`) |
+| this commit | notes 8.7, corrected hashes, POML notes |
+
+**F4-1 (D-123, secure-if-any).** When `ResolvedSignalIds` is non-empty the billing entry reads the Signals app-only through the shared
+sysadmin reader in one query (`sprk_signalid In ids`) and passes their subjects as `SignalSubjects`, so each is a parent of the owner
+question beside the core. The rule is the commit route's, REUSED without editing ontology lines: `DecisionCommitService.ToRow` (internal
+static) derives the subject from the lookup that repeats the pair id, and `DecisionCommitService.SignalSubjectsOf` (internal static) keeps
+it. A Signal with no pair id adds none (that rule's own behaviour). A missing Signal or an undetermined subject is refused `OwnerRefused`
+(`ParentUndetermined`); a read fault is `OwnerResolutionFailed` (retryable, as the commit route classes it). A `PolicyVersionId` that names
+no row is `ReviewInvalid`; a fault on that read is `BillingRecordLookupFailed`. All of these happen after the AlreadyRecorded lookup (a true
+repeat still answers) and before the core derivation and the create. The first version used by-id `RetrieveAsync`; the ArchTest
+`DecisionRecordWriterOnlyCreatesAndReads` holds the writer to `RetrieveMultipleAsync` on that reader, so both reads became queries
+(`e5e0dd28d`). The ArchTest itself was not edited.
+
+**F3-1.** See 8.3 M2 (corrected).
+
+**K2.** `BillingDecisionHash` covers the code, the subject, the confirmer, the role, the values (key-ordered), the outcome, the reason, the
+policy version and the resolved Signals (ordered). It is stored through the review path's existing `DecisionRecordRequest.ReviewHash` slot
+(`Content` writes it right after `reviewId`), so no ontology line changed. It leaves out the fact snapshot, the decision time, the written
+rows, the contact and the privilege flag: an honest retry may differ in these. The same id and code with a different hash, or a stored
+record whose hash cannot be read, is refused `ReviewInvalid`. It is never answered as AlreadyRecorded and never written over. No billing
+record exists live (no live writes; the seam test was not run), so there are no hash-less legacy rows.
+
+**K3.** `BillingDecider.Human(systemUserId, role)`; the contact input and `BillingDecider.ContactId` are removed. `RecordAsync` first runs
+`Preflight`, so an invalid decision is refused before any read. It then resolves the confirmer's contact through
+`IIdentityNormalizationService`, by the commit route's rule (`DecisionCommitService` decider lookup): the contact when there is one; none,
+with a warning, when the user has none (the column stays empty and the decision is recorded); refused `BillingRecordLookupFailed` before any
+write when the read faulted or `ContactUnreadable`. A system decision does no lookup. ADR-013 reading (Path C, comply): the recorder
+injects `Services.Ai.Membership.IIdentityNormalizationService`, an identity service that lives under the Ai namespace. It is not an AI
+capability (no model, playbook or capability invocation), and `Services/Signals`, `Office`, `ExternalAccess` and `Api/Events` already use
+it directly. `ADR013_AiBoundaryTests` is green. ontology-r1 / the reviewer should confirm this reading.
+
+**K4.** The existence lookup adds `sprk_actioncode In <billing codes>` (ordinal order), so Signals reviews that reused the id cannot fill the
+10-row cap and hide the billing record. The in-memory billing-code check stays.
+
+**C7 (additive only).** `git diff --numstat 62a1ec56b HEAD -- src/ tests/` (before this notes commit), the 074 files:
+
+| File | Added | Removed |
+|---|---|---|
+| `Services/Signals/DecisionRecordWriter.cs` | 556 | 0 |
+| `Services/Finance/BillingDecisionRecorder.cs` | 194 | 0 |
+| `Infrastructure/DI/FinanceModule.cs` | 11 | 0 |
+| `tests/.../Signals/DecisionRecordWriterTests.Billing.cs` | 805 | 0 |
+| `tests/.../Finance/BillingDecisionRecorderTests.cs` | 218 | 0 |
+| `tests/integration/seam/Signals/DecisionRecordWriterBillingSeamTests.cs` | 133 | 0 |
+
+Every other file with removed lines in that range belongs to another task on the branch (015, 075 and earlier rounds), not 074:
+`ExternalAccessModule.cs` 5/2, `ConsumerTypes.cs` 4/2, `FinanceBaseValues.cs` 6/5, `FinancialCalculationToolHandler.cs` 1/1,
+`PolicyVersionValidator.cs` 1/1, `FinanceBaseValuesSingleDefinitionGuardTests.cs` 17/2, `InvoiceStatusRetirementGuardTests.cs` 71/3,
+`RouteAuthorizationGuardTests.Ledger.cs` 2/1, `ExternalModuleColumnAllowListTests.cs` 66/7, `FinanceBaseValuesSeamTests.cs` 5/5,
+`RuleSetEndpointsTests.cs` 99/1, `FinanceBaseValuesTests.cs` 34/6, `FinancialCalculationToolHandlerTests.cs` 1/1,
+`SignalReevaluationJobTests.cs` 9/3. The shared writer harness (`DecisionRecordWriterTests.cs`) does not evaluate `In`. It is
+ontology-owned, so it stays byte-identical. The billing partial re-answers `RetrieveMultipleAsync` the same way plus `In`
+(`WithBillingLookups`), and every billing and recorder harness goes through it.
+
+**Seeding proofs (this round; mutate, run, restore).**
+
+| Item | Mutation | Before (fails) | After |
+|---|---|---|---|
+| F3-1 | `createdby` condition removed | old test: 1 fail (the other-creator test PASSED, proving nothing); new test: 3 fail | 76 / 76 |
+| F4-1 | the writer before F4-1 (`be1bc56fa`) under the F4-1 tests | 5 fail | 73 / 73 |
+| F4-1 (query version) | both reads removed | 5 fail (must-fire, missing Signal, undetermined, Signal fault, policy version) | 83 / 83 |
+| K2 | hash comparison disabled | 2 fail (800 then 700; hash-less record) | 76 / 76 |
+| K2 | hash not stored | 6 fail (true repeat, C3 repeat, 4 recorder retries) | 76 / 76 |
+| K3 | contact lookup skipped | 3 fail (lookup contact, fault, unreadable) | 80 / 80 |
+| K4 | `In` condition removed | 2 fail (ten Signals rows hide the billing record; the condition's values) | 82 / 82 |
+
+**Verification (final code, `e5e0dd28d`).**
+
+| Check | Result |
+|---|---|
+| Billing writer and recorder tests | 83 / 83 |
+| Unit filter DecisionRecord, BillingDecisionRecorder, DecisionActionCatalog, InvoiceFamily, CoreAncestor | 802 / 802 |
+| ArchTests DecisionRecordContextImmutability, RecordOwnerAssignmentCensus, ADR010 | 47 / 47 |
+| Spaarke.ArchTests (full) | 1,166 / 1,166 |
+| BFF build (no-incremental) | 0 warnings, 0 errors |
+
+No package, csproj, schema or live change. Publish size was not re-measured: this round changes method bodies in the same assembly and
+adds no file or package.
+
+**Quality gates.** Self code-review of the fix diff and its direct callers (`CreateAsync` / `OwnershipContextOf` read `SignalSubjects`;
+`Content` writes `ReviewHash`) found one F-class defect, fixed in `e5e0dd28d`: the D-34 ArchTest broke on the by-id reads. Known limits:
+- K4: an unserialisable object in `Values` now throws from `BillingDecisionHash` before the lookup, rather than from `Content` later. It is
+  the same non-refusal exception for internal callers only (8.6).
+- K4: `ResolvedSignalIds` has no count cap on the billing path. The query is bounded by `TopCount = ids.Count`. The commit route caps also-resolve at 25.
+
+**Adversarial pass: pending - main session runs it.** The Opus adversarial-reviewer launched for this round produced no output, so no
+full adversarial pass over `d249e9a50..HEAD` is recorded here.
+
+**Left for ontology-r1 (unchanged by brief):** `DecisionRecordContextImmutabilityTests.CreateEntryPoints` and the five stale ontology
+writer comments. The POML stays `in-progress` for ontology-r1's re-check.
