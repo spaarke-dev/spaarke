@@ -226,6 +226,51 @@ public sealed class RefileWriterAfterRefileHookTests
         AssertTheStepRanOnceForTheCommunication();
     }
 
+    // ── #2091 round 5: the retry faults too — a FAULTED wasIsolated, and nothing is released ─────────────────────────
+
+    [Fact(DisplayName = "#2091 r5: an UpdateRecord node whose isolation read faults on the retry too still writes, and the step releases nothing")]
+    public async Task UpdateRecordActionCore_AnIsolationReadThatFaultsTwice_IsAFault_NothingIsReleased()
+    {
+        var faults = TheIsolationReadFaultsTwice();
+
+        await Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null, LegacyFields: null,
+                Lookups: [new RenderedLookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter.ToString())]),
+            CancellationToken.None);
+
+        faults().Should().Be(2, "the read, then its one retry");
+        AssertTheWriteStoodAndNothingWasReleased();
+    }
+
+    [Fact(DisplayName = "#2091 r5: the output orchestrator's update whose isolation read faults on the retry too still writes, and the step releases nothing")]
+    public async Task DataverseUpdateHandler_AnIsolationReadThatFaultsTwice_IsAFault_NothingIsReleased()
+    {
+        var faults = TheIsolationReadFaultsTwice();
+
+        await Handler().UpdateAsync(
+            "sprk_communication", Communication,
+            new Dictionary<string, object?> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter) },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        faults().Should().Be(2, "the read, then its one retry");
+        AssertTheWriteStoodAndNothingWasReleased();
+    }
+
+    /// <summary>The isolation read faults on the read and on its retry, then heals; answers how many faults were thrown.</summary>
+    private Func<int> TheIsolationReadFaultsTwice()
+    {
+        var faults = 0;
+        _world.QueryFault = () =>
+        {
+            if (++faults == 2)
+                _world.ClearQueryFaults();
+            return new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout of 100 seconds elapsing.");
+        };
+        _world.FailingQueriesOf("sprk_communication");
+        return () => faults;
+    }
+
     private void TheIsolationReadFaultsOnce()
     {
         _world.QueryFault = () =>

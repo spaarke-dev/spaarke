@@ -1015,18 +1015,23 @@ public static class FieldMappingEndpoints
 
         // #2091 round 4: on a reparentable child, a lookup rule writes the column it NAMES or nothing. Its bind is planned by
         // the referenced table's navigation property, which can be another lookup to the same table — a filing move the rule
-        // never asked for. Refused per rule, like any other unplannable lookup.
+        // never asked for. Refused per rule, like any other unplannable lookup. Keyed by the rule INSTANCE, as the plan is
+        // (round 5): two rules can be equal by value, and the record's value equality would throw on the second.
         if (lookupBinds is not null && Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(targetEntity))
         {
-            lookupBinds = lookupBinds.ToDictionary(
-                b => b.Key,
-                b => b.Value.BindKey is { } bindKey
-                     && !string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(bindKey),
-                         b.Key.TargetField?.Trim(), StringComparison.OrdinalIgnoreCase)
+            var checkedBinds = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance);
+            foreach (var (rule, plan) in lookupBinds)
+            {
+                checkedBinds[rule] = plan.BindKey is { } bindKey
+                                     && !string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(bindKey),
+                                         rule.TargetField?.Trim(), StringComparison.OrdinalIgnoreCase)
                     ? LookupBindPlan.Refused(
-                        $"'{b.Key.TargetField}' on '{targetEntity}' would be written through '{bindKey}', a different lookup; "
+                        $"'{rule.TargetField}' on '{targetEntity}' would be written through '{bindKey}', a different lookup; "
                         + "the lookup was not copied.")
-                    : b.Value);
+                    : plan;
+            }
+
+            lookupBinds = checkedBinds;
         }
 
         foreach (var childRecordId in childRecordIds)

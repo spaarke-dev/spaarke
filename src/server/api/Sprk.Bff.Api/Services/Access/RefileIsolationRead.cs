@@ -3,11 +3,12 @@
 //
 // Component Justification (CLAUDE.md §11):
 //   (1) Existing — SecureChildReconciler.IsSecureTeamOwnedAsync is the read; the playbook update node, the output
-//       orchestrator's update and the field-mapping push each called it inline with the same fault capture.
+//       orchestrator's update, the field-mapping push and the chat update tool (round 5) each called it inline with the same
+//       fault capture.
 //   (2) Extension — SecureChildReconciler itself is the natural home, but it is held unchanged until ontology 042b (which
-//       restructures AfterRefileAsync) merges; this is the writers' side of the call, one copy instead of three.
+//       restructures AfterRefileAsync) merges; this is the writers' side of the call, one copy instead of four.
 //   (3) Cost of doing nothing — one transient fault on the read before a move OUT of Secure answers "unknown", so nothing is
-//       released and the Secure sharees keep Collaborate on a now-ordinary row with no job to remove it; three inline copies
+//       released and the Secure sharees keep Collaborate on a now-ordinary row with no job to remove it; four inline copies
 //       of the retry drift.
 
 namespace Sprk.Bff.Api.Services.Access;

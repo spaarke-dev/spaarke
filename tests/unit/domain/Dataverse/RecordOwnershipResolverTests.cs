@@ -1081,6 +1081,64 @@ public class RecordOwnershipResolverTests
     }
 
     [Fact]
+    public async Task Reparent_ThatRebindsOneParentItHolds_AndSetsAnother_IsAParentChange()
+    {
+        // #2091 round 5: one unchanged column does not make the whole change a no-op.
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_matter", MatterId, ChildBu)
+            .WithRecord("sprk_document", documentId, SecureBu, owningTeam: SecureNamedTeam,
+                extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) });
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = RecordReparent.ParentChangesWithClearsIn("sprk_document",
+                    new Dictionary<string, object?>
+                    {
+                        ["sprk_Project@odata.bind"] = $"/sprk_projects({SecureProjectId})",
+                        ["sprk_Matter@odata.bind"] = $"/sprk_matters({MatterId})",
+                    }),
+            },
+            _ => Task.CompletedTask,
+            CancellationToken.None);
+
+        resolution.ParentsUnchanged.Should().BeFalse("the matter column moved, so the step after a re-file runs");
+        resolution.IsRefused.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Reparent_ThatClearsAFilingLookupAlreadyNull_WritesIt_AndSaysNothingMoved()
+    {
+        // #2091 round 5: a clear of a filing lookup the row does not hold moves nothing.
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_document", documentId, SecureBu, owningTeam: SecureNamedTeam,
+                extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) });
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = RecordReparent.ParentChangesWithClearsIn("sprk_document",
+                    new Dictionary<string, object?> { ["sprk_Matter@odata.bind"] = null }),
+            },
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        applied.Should().BeTrue();
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.ParentsUnchanged.Should().BeTrue("the matter column was already empty");
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Reparent_WhenTheChangeOnlyClearsColumnsThatHoldNoParent_WritesIt_AndDecidesNoOwner()
     {
         var documentId = Guid.NewGuid();

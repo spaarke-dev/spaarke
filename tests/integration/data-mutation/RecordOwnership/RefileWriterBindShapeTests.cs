@@ -51,6 +51,12 @@ public sealed class RefileWriterBindShapeTests
     private static readonly DataversePrincipalRef General = DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam);
 
     private SecureChildShareWorld _world = SecureChildShareWorld.Standard();
+
+    /// <summary>The core-ancestor re-stamp's own Dataverse: the communication, and a to-do filed under it that carries no
+    /// copy of its matter yet — so a re-stamp after a filing write (whether or not it moved a parent) patches the to-do.</summary>
+    private readonly StampWorld _stamps = new StampWorld()
+        .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", OrdinaryMatter)])
+        .Row("sprk_todo", TodoUnderCommunication, [("sprk_regardingcommunication", "sprk_communication", Communication)]);
     private readonly FakeRecordShareTable _shares = new();
     private readonly Mock<IThreadResolver> _threads = new();
     private readonly Mock<IFieldMappingDataverseService> _write = new(MockBehavior.Strict);
@@ -349,6 +355,118 @@ public sealed class RefileWriterBindShapeTests
         _world.OwnerOf("sprk_communication", Communication).Should().Be(General);
     }
 
+    // ── #2091 round 5: a re-bind of the held parent at the node and the handler; a mix; a clear of an empty lookup ─────
+
+    [Fact(DisplayName = "#2091 r5: an UpdateRecord node that re-binds the parent the communication already holds runs no step after a re-file, and still re-stamps")]
+    public async Task UpdateRecordActionCore_ThatRebindsTheParentTheRowHolds_RunsNoStep_AndStillReStamps()
+    {
+        ASecureCommunication();
+
+        await Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { [MatterBind] = $"/sprk_matters({SecureMatter})" }, Lookups: null,
+                ImpersonateSystemUserId: ConfirmingUser),
+            CancellationToken.None);
+
+        AssertNoStepButReStamped();
+    }
+
+    [Fact(DisplayName = "#2091 r5: the output orchestrator's update that re-binds the parent the communication already holds runs no step after a re-file, and still re-stamps")]
+    public async Task DataverseUpdateHandler_ThatRebindsTheParentTheRowHolds_RunsNoStep_AndStillReStamps()
+    {
+        ASecureCommunication();
+
+        _writesAs = null;
+        await Handler().UpdateAsync(
+            "sprk_communication", Communication,
+            new Dictionary<string, object?> { [MatterBind] = $"/sprk_matters({SecureMatter})" },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        AssertNoStepButReStamped();
+    }
+
+    [Fact(DisplayName = "#2091 r5: an UpdateRecord node that re-binds the held matter AND sets a project is a re-file: the step runs")]
+    public async Task UpdateRecordActionCore_AnUnchangedAndAChangedFilingLookup_IsARefile_TheStepRuns()
+    {
+        ASecureCommunication();
+
+        await Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?>
+                {
+                    [MatterBind] = $"/sprk_matters({SecureMatter})",
+                    ["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({OrdinaryProject})",
+                },
+                Lookups: null,
+                ImpersonateSystemUserId: ConfirmingUser),
+            CancellationToken.None);
+
+        _writes.Should().ContainSingle();
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<CancellationToken>()), Times.Once,
+            "one column moved, so the step after a re-file ran (it reconciles a communication's thread)");
+        _world.OwnerOf("sprk_communication", Communication).Should().Be(Secure, "the secure matter is still held");
+        _world.OwnerOf("sprk_todo", TodoUnderCommunication).Should().Be(Secure);
+    }
+
+    [Fact(DisplayName = "#2091 r5: the output orchestrator's update clearing a filing lookup the communication does not hold runs no step after a re-file")]
+    public async Task DataverseUpdateHandler_AClearOfAnEmptyFilingLookup_RunsNoStep()
+    {
+        ASecureCommunication();
+
+        _writesAs = null;
+        await Handler().UpdateAsync(
+            "sprk_communication", Communication,
+            new Dictionary<string, object?> { ["sprk_RegardingProject@odata.bind"] = null },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        _writes.Should().ContainSingle();
+        _world.OwnerWrites.Should().BeEmpty("nothing moved, so nothing is re-owned");
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
+    }
+
+    // ── #2091 round 5: two rules equal by value (a record) are two rules, never a 500 ───────────────────────────────
+
+    [Fact(DisplayName = "#2091 r5: a field-mapping push with two lookup rules equal by value applies both and fails nothing")]
+    public async Task FieldMappingPush_TwoValueEqualLookupRules_AreTwoRules()
+    {
+        AnOrdinaryCommunication();
+        var first = new FieldMappingRuleDto
+        {
+            SourceField = "sprk_lookupsource", TargetField = "sprk_regardingmatter",
+            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+        };
+        var second = first with { };
+        var plans = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance)
+        {
+            [first] = new(MatterBind, $"/sprk_matters({SecureMatter})", null),
+            [second] = new(MatterBind, $"/sprk_matters({SecureMatter})", null),
+        };
+
+        var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            _write.Object, Restamper(), [first, second],
+            new Dictionary<string, object?> { ["sprk_lookupsource"] = Guid.NewGuid() },
+            "sprk_communication", [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
+            Scopes(), rootFiling: null, lookupBinds: plans);
+
+        errors.Should().BeEmpty();
+        (updated, failed).Should().Be((1, 0));
+        AssertMovedIntoSecure();
+    }
+
+    private void AssertNoStepButReStamped()
+    {
+        _writes.Should().ContainSingle();
+        _world.OwnerWrites.Should().BeEmpty("nothing moved, so nothing is re-owned");
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the step after a re-file did not run (it reconciles a communication's thread)");
+        _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
+        _stamps.PatchesTo("sprk_todo", TodoUnderCommunication).Should().NotBeEmpty(
+            "the core-ancestor re-stamp after a filing write is not the step, and still ran");
+    }
+
     // ── worlds ────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>An ordinary communication under the ordinary matter, an ordinary to-do under it; the secure matter's sharee.</summary>
@@ -440,8 +558,7 @@ public sealed class RefileWriterBindShapeTests
     private SecureChildReconciler Reconciler() =>
         SecureChildShareWorld.ReconcilerOver(() => _world, _shares, null!, threads: _threads.Object);
 
-    private static CoreAncestorRestamper Restamper() =>
-        new StampWorld().Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", OrdinaryMatter)]).Restamper;
+    private CoreAncestorRestamper Restamper() => _stamps.Restamper;
 
     /// <summary>The confirming user holds Full Access on every record (F3 permits the move out of Secure).</summary>
     private static IDataverseRecordShareService FullAccessRights()

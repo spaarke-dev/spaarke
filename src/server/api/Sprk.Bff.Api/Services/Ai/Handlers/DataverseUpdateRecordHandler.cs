@@ -267,22 +267,14 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             // Task 147 r1c: a write that may move a CHILD row into or out of a secure record reads, BEFORE it, whether the
             // row is isolated — so a move OUT also takes the secure record's mirrored shares off (owner round 22) and
             // releases what is filed under it, exactly as the browser re-file routes do. One implementation:
-            // SecureChildReconciler.AfterRefileAsync (round 36).
+            // SecureChildReconciler.AfterRefileAsync (round 36). #2091 round 5: the one read every re-file writer makes
+            // (RefileIsolationRead — once more after a fault, a timeout included).
             using var shareScope = MayRefile(tablename, mapped.Item!) ? _scopes?.CreateScope() : null;
             var children = shareScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureChildReconciler>();
-            Exception? isolationReadFault = null;
-            var isolatedBefore = false;
-            if (children is not null)
-            {
-                try
-                {
-                    isolatedBefore = await children.IsSecureTeamOwnedAsync(tablename, recordId, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    isolationReadFault = ex;
-                }
-            }
+            var wasIsolated = children is not null
+                ? await Sprk.Bff.Api.Services.Access.RefileIsolationRead.BeforeWriteAsync(children, tablename, recordId, cancellationToken)
+                    .ConfigureAwait(false)
+                : null;
 
             // Ontology D-48 / #1659: the matter a communication is filed to BEFORE this write (for the Signal trigger below).
             var matterBefore = IsCommunication(tablename) && MayRefile(tablename, mapped.Item!)
@@ -345,12 +337,9 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 
             // Task 147 r1c (round 36), AFTER the re-stamp (the stamps on the rows filed under it are lookups the ownership rule
             // reads): the re-filed row's mirror and task 148's pass over everything filed under it.
-            if (refile.Written && children is not null)
+            if (refile.Written && children is not null && wasIsolated is not null)
             {
-                await children.AfterRefileAsync(
-                    tablename, recordId,
-                    () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
-                    CancellationToken.None).ConfigureAwait(false);
+                await children.AfterRefileAsync(tablename, recordId, wasIsolated, CancellationToken.None).ConfigureAwait(false);
             }
 
             // Ontology D-48 / #1659 (owner decision D-125, every server-side filing path): a communication this tool re-filed
