@@ -26,9 +26,13 @@
                              (1). Publishes sprk_invoice only (never PublishAll).
       -GridConfig            Moves the outside-counsel invoices grid (sprk_gridconfiguration 3ff4102c, SPA-r3 / uac-r2 owned)
                              from the column to statuscode (fetch, layout, column settings). Run it ONLY right after a BFF
-                             whose external invoices allow-list admits statuscode is live (task 015 commit): before that the
-                             BFF refuses the grid's fetch; after the column delete without it Dataverse refuses it.
-      -Delete                DESTRUCTIVE; needs -OwnerApproval. Re-runs the inventory and REFUSES (exit 2, nothing deleted) on
+                             whose external invoices allow-list admits statuscode is live: before that the BFF refuses the
+                             grid's fetch; after the column delete without it Dataverse refuses it. NEEDS
+                             -BffDeployAttestation (checked against that commit's source, below). The write sends If-Match
+                             with the row's etag, so a row changed since it was read is refused (HTTP 412), not overwritten.
+                             Runs even when the column is already gone (a grid row can still be moved then). Cannot be
+                             combined with -Delete in one run: the grid blocker would clear partway through the run.
+      -Delete                DESTRUCTIVE; needs -OwnerApproval, -BffDeployAttestation and -SpaDeployAttestation. Re-runs the inventory and REFUSES (exit 2, nothing deleted) on
                              any blocker: a row not at In Review, a form / view / grid configuration / personal view / workflow
                              / chart still naming the column, or a dependency other than the platform's Copilot form-fill
                              opt-out aiskillconfig. Then: delete that aiskillconfig -> RetrieveDependenciesForDelete on the
@@ -42,12 +46,26 @@
     Dataverse environment URL. Defaults to $env:DATAVERSE_URL, else dev. Writes refuse an environment that came from
     $env:DATAVERSE_URL unless it is spaarkedev1 (pass -EnvironmentUrl explicitly). Dev only in R1.
 
+.PARAMETER BffDeployAttestation
+    A commit sha: the commit the BFF deployed to dev was built from. Mandatory for -GridConfig and -Delete. The script reads
+    that commit's source (git show <sha>:<path>) and refuses unless it holds what the phase needs (a content check, not
+    ancestry: a squash merge breaks ancestry checks, and project CLAUDE.md section 6 requires the check by content).
+      -GridConfig : Infrastructure/DI/ExternalAccessModule.cs lists "statuscode" in the invoices ReadableColumns.
+      -Delete     : the same, and Services/Finance/FinanceBaseValues.cs, FinanceRollupService.cs and InvoiceReviewService.cs
+                    contain no sprk_invoicestatus, and FinanceBaseValues.cs contains InvoiceStatusCodeColumn (015's readers).
+    An unknown sha fails first (git cat-file -e).
+
+.PARAMETER SpaDeployAttestation
+    A commit sha: the commit the external SPA deployed to dev was built from. Mandatory for -Delete. Refuses unless
+    src/client/external-spa/src/components/detail/RecordDetailModal.tsx and RecordDetailFields.tsx at that commit contain no
+    sprk_invoicestatus (the SPA reads statuscode).
+
 .EXAMPLE
     pwsh projects/ebilling-r1/scripts/Remove-EbillingInvoiceStatus.ps1
     pwsh projects/ebilling-r1/scripts/Remove-EbillingInvoiceStatus.ps1 -Migrate -FormsAndViews -WhatIf
     pwsh projects/ebilling-r1/scripts/Remove-EbillingInvoiceStatus.ps1 -Migrate -FormsAndViews
-    pwsh projects/ebilling-r1/scripts/Remove-EbillingInvoiceStatus.ps1 -GridConfig          # after the BFF deploy
-    pwsh projects/ebilling-r1/scripts/Remove-EbillingInvoiceStatus.ps1 -Delete -OwnerApproval 'D-97 2026-10-17 owner' -WhatIf
+    pwsh projects/ebilling-r1/scripts/Remove-EbillingInvoiceStatus.ps1 -GridConfig -BffDeployAttestation <bff-sha> -WhatIf   # after the BFF + SPA deploy
+    pwsh projects/ebilling-r1/scripts/Remove-EbillingInvoiceStatus.ps1 -Delete -OwnerApproval 'D-97 2026-10-17 owner' -BffDeployAttestation <bff-sha> -SpaDeployAttestation <spa-sha> -WhatIf
 
 .NOTES
     Project: ebilling-r1, task 015. Exit codes: 0 = done / report, 1 = error, 2 = refused (blocker or unexpected state).
@@ -62,7 +80,9 @@ param(
     [switch]$FormsAndViews,
     [switch]$GridConfig,
     [switch]$Delete,
-    [string]$OwnerApproval
+    [string]$OwnerApproval,
+    [string]$BffDeployAttestation,
+    [string]$SpaDeployAttestation
 )
 
 $ErrorActionPreference = 'Stop'
@@ -81,6 +101,85 @@ $MatterContextView = 'b9f6d045-9a5e-f111-ab0c-7c1e521545d7'
 $ReviewQueueView = '1ad5e8f3-4408-f111-8406-7c1e525abd8b'
 $KnownViews = @{ $MatterContextView = 'Invoice - Matter Context'; $ReviewQueueView = 'Invoice Review Queue Projects' }
 $InvoiceGridConfig = '3ff4102c-1092-f111-b8dc-7ced8ddc4a05'
+
+# ---------------------------------------------------------------------------------------------------------------
+# Pre-flight: deploy attestations (git only; runs before any Dataverse call, and also under -WhatIf)
+# ---------------------------------------------------------------------------------------------------------------
+# The dev BFF and external SPA are deployed only by SPA-r3, from its branch, so this script cannot see what is live. The operator
+# attests the commit each was built from; the script checks that commit's SOURCE (content, not ancestry: a squash merge breaks
+# ancestry checks). Project CLAUDE.md section 6.
+
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+$BffModulePath = 'src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs'
+$FinanceDir = 'src/server/api/Sprk.Bff.Api/Services/Finance'
+$BffFinanceReaders = @("$FinanceDir/FinanceBaseValues.cs", "$FinanceDir/FinanceRollupService.cs", "$FinanceDir/InvoiceReviewService.cs")
+$SpaDetailDir = 'src/client/external-spa/src/components/detail'
+$SpaReaders = @("$SpaDetailDir/RecordDetailModal.tsx", "$SpaDetailDir/RecordDetailFields.tsx")
+
+# Throws an EscalationException unless $Sha names a commit in this repository. `git cat-file -e` first, so an unknown sha fails clearly.
+function Assert-CommitExists([string]$Sha, [string]$Parameter) {
+    if ($Sha -notmatch '^[0-9a-fA-F]{7,40}$') { throw [EscalationException]::new("$Parameter '$Sha' is not a commit sha (7 to 40 hex characters). Nothing was changed.") }
+    $null = & git -C $RepoRoot cat-file -e "${Sha}^{commit}" 2>&1
+    if ($LASTEXITCODE -ne 0) { throw [EscalationException]::new("$Parameter '$Sha' is not a commit in this repository (git cat-file -e failed): fetch it, or pass the right sha. Nothing was changed.") }
+}
+
+# The text of $Path at commit $Sha, or $null when the commit has no such file.
+function Get-FileAtCommit([string]$Sha, [string]$Path) {
+    $out = & git -C $RepoRoot show "${Sha}:${Path}" 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return ($out -join "`n")
+}
+
+# True when the invoices module's ReadableColumns (the HashSet that holds "sprk_invoiceid") lists "statuscode". Comments are removed
+# first, so a comment that spells the word does not count.
+function Test-InvoicesAllowListHasStatuscode([string]$ModuleSource) {
+    $m = [regex]::Match($ModuleSource, '(?s)ReadableColumns\s*=\s*new\s+HashSet<string>\s*\{(?<body>[^}]*"sprk_invoiceid"[^}]*)\}')
+    if (-not $m.Success) { return $false }
+    $body = [regex]::Replace($m.Groups['body'].Value, '//[^\r\n]*', '')
+    return ($body -match '"statuscode"')
+}
+
+function Assert-BffAttestation([string]$Sha, [bool]$ForDelete) {
+    Assert-CommitExists $Sha '-BffDeployAttestation'
+    $module = Get-FileAtCommit $Sha $BffModulePath
+    if ($null -eq $module) { throw [EscalationException]::new("-BffDeployAttestation ${Sha}: $BffModulePath does not exist at that commit. Nothing was changed.") }
+    if (-not (Test-InvoicesAllowListHasStatuscode $module)) {
+        throw [EscalationException]::new("-BffDeployAttestation ${Sha}: the external invoices allow-list in $BffModulePath does not list ""statuscode"" at that commit, so a BFF built from it refuses the grid's statuscode fetch. Deploy a BFF that admits both columns first. Nothing was changed.")
+    }
+    if (-not $ForDelete) { return }
+    foreach ($path in $BffFinanceReaders) {
+        $text = Get-FileAtCommit $Sha $path
+        if ($null -eq $text) { throw [EscalationException]::new("-BffDeployAttestation ${Sha}: $path does not exist at that commit. Nothing was changed.") }
+        if ($text -match '(?i)sprk_invoicestatus') { throw [EscalationException]::new("-BffDeployAttestation ${Sha}: $path still reads sprk_invoicestatus at that commit; a BFF built from it breaks when the column is deleted (task 015's readers are not in that build). Nothing was changed.") }
+        if ($path.EndsWith('/FinanceBaseValues.cs') -and $text -notmatch 'InvoiceStatusCodeColumn') { throw [EscalationException]::new("-BffDeployAttestation ${Sha}: $path has no InvoiceStatusCodeColumn at that commit (task 015's readers are not in that build). Nothing was changed.") }
+    }
+}
+
+function Assert-SpaAttestation([string]$Sha) {
+    Assert-CommitExists $Sha '-SpaDeployAttestation'
+    foreach ($path in $SpaReaders) {
+        $text = Get-FileAtCommit $Sha $path
+        if ($null -eq $text) { throw [EscalationException]::new("-SpaDeployAttestation ${Sha}: $path does not exist at that commit. Nothing was changed.") }
+        if ($text -match '(?i)sprk_invoicestatus') { throw [EscalationException]::new("-SpaDeployAttestation ${Sha}: $path still reads sprk_invoicestatus at that commit; an SPA built from it breaks when the column is deleted. Nothing was changed.") }
+    }
+}
+
+try {
+    if ($GridConfig -and $Delete) {
+        throw [EscalationException]::new("-GridConfig and -Delete cannot run together: the grid blocker would clear partway through the run, so the delete verdict could not be judged on the state the operator approved. Run -GridConfig, then -Delete as separate runs. Nothing was changed.")
+    }
+    if (($GridConfig -or $Delete) -and [string]::IsNullOrWhiteSpace($BffDeployAttestation)) {
+        throw [EscalationException]::new("$(if ($Delete) { '-Delete' } else { '-GridConfig' }) needs -BffDeployAttestation <commit sha>: the commit the BFF deployed to dev was built from (see the parameter help). Nothing was changed.")
+    }
+    if ($Delete -and [string]::IsNullOrWhiteSpace($SpaDeployAttestation)) {
+        throw [EscalationException]::new("-Delete needs -SpaDeployAttestation <commit sha>: the commit the external SPA deployed to dev was built from. Nothing was changed.")
+    }
+    if ($GridConfig -or $Delete) { Assert-BffAttestation $BffDeployAttestation ([bool]$Delete) }
+    if ($Delete) { Assert-SpaAttestation $SpaDeployAttestation }
+}
+catch [EscalationException] {
+    Write-Host ""; Write-Host "ESCALATION - REFUSED: $($_.Exception.Message)" -ForegroundColor Red; exit 2
+}
 
 $null = Initialize-EbillingSchema -EnvironmentUrl $EnvironmentUrl -SolutionUniqueName 'SpaarkeMaster' -DryRun:$DryRun -Entity $Table
 
@@ -277,9 +376,16 @@ function Invoke-GridConfig {
     if (-not $g) { Write-Host "  skipped  grid configuration $InvoiceGridConfig not found" -ForegroundColor Yellow; return }
     if ($g.sprk_configjson -notmatch $Column) { Write-Host "  skipped  grid '$($g.sprk_name)': no reference" -ForegroundColor Yellow; return }
     $new = ConvertTo-GridConfigWithStatuscode $g.sprk_configjson
-    if ($DryRun) { Write-Host "  WOULD EDIT grid '$($g.sprk_name)': $Column -> statuscode ($([regex]::Matches($g.sprk_configjson, $Column).Count) mention(s))" -ForegroundColor Cyan; return }
-    Invoke-Dv -Path "sprk_gridconfigurations($InvoiceGridConfig)" -Method PATCH -Body @{ sprk_configjson = $new } | Out-Null
-    Write-Host "  EDITED   grid '$($g.sprk_name)': $Column -> statuscode" -ForegroundColor Green
+    # The row belongs to another project (SPA-r3 / uac-r2): the write is conditional on the row being unchanged since it was read.
+    $etag = $g.'@odata.etag'
+    if ([string]::IsNullOrWhiteSpace($etag)) { throw [EscalationException]::new("Grid configuration $InvoiceGridConfig was read without an @odata.etag, so the write cannot be made conditional (If-Match). Nothing was written.") }
+    if ($DryRun) { Write-Host "  WOULD EDIT grid '$($g.sprk_name)': $Column -> statuscode ($([regex]::Matches($g.sprk_configjson, $Column).Count) mention(s)), If-Match $etag" -ForegroundColor Cyan; return }
+    try { Invoke-Dv -Path "sprk_gridconfigurations($InvoiceGridConfig)" -Method PATCH -Body @{ sprk_configjson = $new } -ExtraHeaders @{ 'If-Match' = $etag } | Out-Null }
+    catch {
+        if ($_.Exception.Data['Status'] -eq 412) { throw [EscalationException]::new("Grid configuration $InvoiceGridConfig changed after it was read (HTTP 412, If-Match $etag): another session edited it. Nothing was written; re-run to read the current row.") }
+        throw
+    }
+    Write-Host "  EDITED   grid '$($g.sprk_name)': $Column -> statuscode (If-Match $etag)" -ForegroundColor Green
 }
 
 function Invoke-Delete($inv) {
@@ -349,6 +455,8 @@ try {
     $inv = Get-Inventory
     if (-not $inv.Attribute) {
         Write-Host "$Table.$Column does not exist (already retired). Option set: $(if ($inv.OptionSet) { "STILL PRESENT ($($inv.OptionSet.MetadataId))" } else { 'gone' })." -ForegroundColor Yellow
+        # The grid move does not depend on the column: a grid row that still names it can be moved after the column is gone.
+        if ($GridConfig) { Write-Host ""; Write-Host "Outside-counsel invoices grid" -ForegroundColor Cyan; Invoke-GridConfig }
         if ($inv.OptionSet -and $Delete) { throw [EscalationException]::new("The column is gone but the option set remains; delete it after checking RetrieveDependenciesForDelete(ObjectId=$($inv.OptionSet.MetadataId),ComponentType=9).") }
         exit 0
     }
@@ -365,7 +473,8 @@ try {
         Write-Host ""; Write-Host "Delete (owner approval: $OwnerApproval)" -ForegroundColor Cyan
         # Re-read after any earlier phase of this run, so the verdict is about the live state (a -WhatIf run changed nothing, so
         # its earlier phases' items still block: run them for real first).
-        if ($FormsAndViews -or $GridConfig -or $Migrate) { $inv = Get-Inventory; $blockers = @(Get-DeleteBlockers $inv) }
+        # (-GridConfig never runs in the same run as -Delete: the pre-flight refuses that, because this re-read would clear the grid blocker.)
+        if ($FormsAndViews -or $Migrate) { $inv = Get-Inventory; $blockers = @(Get-DeleteBlockers $inv) }
         if ($blockers.Count -gt 0) { throw [EscalationException]::new("Refusing the delete: $($blockers.Count) blocker(s): $($blockers -join '; '). Nothing was deleted.") }
         Invoke-Delete $inv
     }
