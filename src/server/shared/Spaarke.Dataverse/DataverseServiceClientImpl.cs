@@ -2727,10 +2727,99 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     }
 
     /// <summary>
+    /// <see cref="BulkUpdateAsync"/> with every update conditional on its row version — see
+    /// <see cref="IGenericEntityService.BulkUpdateIfRowVersionsMatchAsync"/> for the contract.
+    /// </summary>
+    /// <remarks>
+    /// Sends the transaction <see cref="BuildBulkUpdateTransaction"/> builds with a row version per update. A mismatch is
+    /// recognised by <see cref="IsRowVersionMismatch"/> and thrown as <see cref="System.Data.DBConcurrencyException"/> (the
+    /// transaction rolled back: nothing applied), the precedent of <c>DataverseWebApiService.UpdateRecordFieldsIfUnchangedAsync</c>.
+    /// </remarks>
+    public async Task BulkUpdateIfRowVersionsMatchAsync(
+        string entityLogicalName,
+        List<(Guid id, Dictionary<string, object> fields, long rowVersion)> updates,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(updates);
+        var plain = updates.Select(u => (u.id, u.fields)).ToList();
+        var transaction = BuildBulkUpdateTransaction(entityLogicalName, plain, updates.Select(u => (long?)u.rowVersion).ToList());
+
+        try
+        {
+            await _serviceClient.ExecuteAsync(transaction, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (IsRowVersionMismatch(ex))
+            {
+                _logger.LogWarning(
+                    "[DATAVERSE] Conditional bulk update of {RecordCount} {EntityLogicalName} records refused: a row changed since it was read; nothing was applied",
+                    updates.Count,
+                    entityLogicalName);
+                throw new System.Data.DBConcurrencyException(
+                    $"A {entityLogicalName} record changed since it was read; the transaction was rolled back and no update was applied.", ex);
+            }
+
+            var failure = DescribeBulkUpdateFailure(entityLogicalName, plain, ex);
+            _logger.LogError(
+                ex,
+                "[DATAVERSE] Conditional bulk update of {RecordCount} {EntityLogicalName} records failed: {BulkUpdateFailure}",
+                updates.Count,
+                entityLogicalName,
+                failure);
+            throw new InvalidOperationException(failure, ex);
+        }
+
+        _logger.LogInformation(
+            "[DATAVERSE] Bulk updated {RecordCount} {EntityLogicalName} records in one transaction, each at its expected row version",
+            updates.Count,
+            entityLogicalName);
+    }
+
+    /// <summary>Dataverse's <c>ConcurrencyVersionMismatch</c> error code (a conditional write found the row at another version).</summary>
+    public const int ConcurrencyVersionMismatch = unchecked((int)0x80060882);
+
+    /// <summary>
+    /// Pure: whether <paramref name="failure"/> is a row version mismatch — an <see cref="OrganizationServiceFault"/> anywhere in
+    /// the exception chain (or its inner faults) carrying <see cref="ConcurrencyVersionMismatch"/>, or, where the SDK surfaces only
+    /// text, a message naming it (the same text test as <c>DataverseUpdateHandler</c>).
+    /// </summary>
+    public static bool IsRowVersionMismatch(Exception failure)
+    {
+        for (var current = failure; current is not null; current = current.InnerException)
+        {
+            if (current is FaultException<OrganizationServiceFault> faultException)
+            {
+                for (var fault = faultException.Detail; fault is not null; fault = fault.InnerFault)
+                {
+                    if (fault.ErrorCode == ConcurrencyVersionMismatch)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            if (current.Message is { } message
+                && (message.Contains("0x80060882", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("ConcurrencyVersionMismatch", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Pure (no-I/O) builder for <see cref="BulkUpdateAsync"/>: ONE <c>ExecuteTransactionRequest</c> holding
     /// one <c>UpdateRequest</c> per row, in input order. A C# <c>null</c> field value is skipped, so only
     /// the fields supplied are written; <see cref="DBNull.Value"/> CLEARS the column (the attribute is set to null),
     /// exactly as <c>UpdateAsync</c> treats it (task 140, 2026-10-04 — it used to be rejected).
+    ///
+    /// <para><paramref name="rowVersions"/> (optional, one entry per update, in the same order): a non-null entry makes that
+    /// update conditional on the row's <c>versionnumber</c> (<c>Entity.RowVersion</c> plus
+    /// <c>ConcurrencyBehavior.IfRowVersionMatches</c>); a null entry, or no list, leaves it unconditional
+    /// (<see cref="BulkUpdateIfRowVersionsMatchAsync"/>, ebilling-r1 task 076).</para>
     ///
     /// <para>Exposed <c>public static</c> for direct testability — the <c>ServiceClient</c> is built from
     /// configuration inside this class and <c>ServiceClient.Execute</c> cannot be overridden, so the request
@@ -2739,13 +2828,17 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// </summary>
     public static Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest BuildBulkUpdateTransaction(
         string entityLogicalName,
-        IReadOnlyList<(Guid id, Dictionary<string, object> fields)> updates)
+        IReadOnlyList<(Guid id, Dictionary<string, object> fields)> updates,
+        IReadOnlyList<long?>? rowVersions = null)
     {
         if (string.IsNullOrEmpty(entityLogicalName))
             throw new ArgumentNullException(nameof(entityLogicalName));
 
         if (updates is null || updates.Count == 0)
             throw new ArgumentException("Updates list cannot be null or empty", nameof(updates));
+
+        if (rowVersions is not null && rowVersions.Count != updates.Count)
+            throw new ArgumentException("rowVersions must hold exactly one entry per update.", nameof(rowVersions));
 
         var transaction = new Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest
         {
@@ -2772,7 +2865,14 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 entity[field.Key] = field.Value is DBNull ? null : field.Value;
             }
 
-            transaction.Requests.Add(new Microsoft.Xrm.Sdk.Messages.UpdateRequest { Target = entity });
+            var request = new Microsoft.Xrm.Sdk.Messages.UpdateRequest { Target = entity };
+            if (rowVersions?[index] is { } rowVersion)
+            {
+                entity.RowVersion = rowVersion.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                request.ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches;
+            }
+
+            transaction.Requests.Add(request);
         }
 
         return transaction;

@@ -66,6 +66,28 @@ public interface IGenericEntityService
     /// implied nothing had happened.</para>
     /// </remarks>
     Task BulkUpdateAsync(string entityLogicalName, List<(Guid id, Dictionary<string, object> fields)> updates, CancellationToken ct = default);
+
+    /// <summary>
+    /// <see cref="BulkUpdateAsync"/> where every update is applied only while its row is still at <c>rowVersion</c> (the row's
+    /// <c>versionnumber</c> as the caller read it; Dataverse optimistic concurrency, <c>ConcurrencyBehavior.IfRowVersionMatches</c>).
+    /// All-or-nothing, as <see cref="BulkUpdateAsync"/>: one row changed since it was read rolls the whole transaction back.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Failure.</b> A row version mismatch (<c>ConcurrencyVersionMismatch</c>, 0x80060882) throws
+    /// <see cref="System.Data.DBConcurrencyException"/>: NO update was applied. Any other failure throws as
+    /// <see cref="BulkUpdateAsync"/> does. Cancellation surfaces as <see cref="OperationCanceledException"/>.</para>
+    /// <para>Added for ebilling-r1 task 076 (review pass 2): the rule set publish writes as the application identity and must not
+    /// overwrite a version or policy row another admin changed after the publish read it. Same seam and identity as
+    /// <see cref="BulkUpdateAsync"/>; the existing conditional writes are single-row and run on other identities
+    /// (<c>IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync</c>, the Ontology writer's own connection).</para>
+    /// <para>The default body throws: only the ServiceClient implementation (<c>DataverseServiceClientImpl</c>) sends it, so a
+    /// substitute that does not model row versions fails loudly instead of writing unconditionally.</para>
+    /// </remarks>
+    Task BulkUpdateIfRowVersionsMatchAsync(
+        string entityLogicalName, List<(Guid id, Dictionary<string, object> fields, long rowVersion)> updates, CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "BulkUpdateIfRowVersionsMatchAsync is implemented by DataverseServiceClientImpl only; a substitute must model row versions.");
+
     Task<Entity> RetrieveByAlternateKeyAsync(string entityLogicalName, KeyAttributeCollection alternateKeyValues, string[]? columns = null, CancellationToken ct = default);
     Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default);
     Task<LookupNavigationMetadata> GetLookupNavigationAsync(string childEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default);

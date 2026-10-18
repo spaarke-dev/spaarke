@@ -158,4 +158,64 @@ public class BulkUpdateTransactionTests
         message.Should().NotContain("NO updates were applied",
             "a timeout can land after the commit — claiming nothing was applied would be false");
     }
+
+    /// <summary>
+    /// ebilling-r1 task 076 (review pass 2): a row version per update makes THAT update conditional
+    /// (<c>Entity.RowVersion</c> + <c>IfRowVersionMatches</c>) inside the same one transaction; an update without one, or a call
+    /// with no list, is sent as before.
+    /// </summary>
+    [Fact]
+    public void BuildBulkUpdateTransaction_WithRowVersions_MakesExactlyThoseUpdatesConditional()
+    {
+        var transaction = DataverseServiceClientImpl.BuildBulkUpdateTransaction(Table, ThreeRows(), new long?[] { 41, null, 7 });
+
+        var requests = transaction.Requests.Cast<UpdateRequest>().ToList();
+        requests.Should().HaveCount(3, "still ONE transaction with one update per row");
+        requests[0].ConcurrencyBehavior.Should().Be(ConcurrencyBehavior.IfRowVersionMatches);
+        requests[0].Target.RowVersion.Should().Be("41");
+        requests[1].ConcurrencyBehavior.Should().Be(ConcurrencyBehavior.Default, "a null entry leaves that update unconditional");
+        requests[1].Target.RowVersion.Should().BeNull();
+        requests[2].ConcurrencyBehavior.Should().Be(ConcurrencyBehavior.IfRowVersionMatches);
+        requests[2].Target.RowVersion.Should().Be("7");
+
+        DataverseServiceClientImpl.BuildBulkUpdateTransaction(Table, ThreeRows()).Requests.Cast<UpdateRequest>()
+            .Should().OnlyContain(r => r.ConcurrencyBehavior == ConcurrencyBehavior.Default && r.Target.RowVersion == null,
+                "without row versions the transaction is exactly the unconditional one");
+
+        var mismatchedCount = () => DataverseServiceClientImpl.BuildBulkUpdateTransaction(Table, ThreeRows(), new long?[] { 1 });
+        mismatchedCount.Should().Throw<ArgumentException>("a row version list that does not line up with the updates is refused before any I/O");
+    }
+
+    [Fact]
+    public void IsRowVersionMismatch_RecognisesTheConcurrencyFault_DirectWrappedOrAsTheTransactionsInnerFault()
+    {
+        var direct = new FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = DataverseServiceClientImpl.ConcurrencyVersionMismatch, Message = "The version of the existing record doesn't match" },
+            new FaultReason("mismatch"));
+        var inTransaction = new FaultException<OrganizationServiceFault>(
+            new ExecuteTransactionFault
+            {
+                FaultedRequestIndex = 0,
+                Message = "transaction failed",
+                InnerFault = new OrganizationServiceFault { ErrorCode = DataverseServiceClientImpl.ConcurrencyVersionMismatch },
+            },
+            new FaultReason("transaction failed"));
+
+        DataverseServiceClientImpl.IsRowVersionMismatch(direct).Should().BeTrue();
+        DataverseServiceClientImpl.IsRowVersionMismatch(new InvalidOperationException("wrapped", direct)).Should().BeTrue();
+        DataverseServiceClientImpl.IsRowVersionMismatch(inTransaction).Should().BeTrue();
+        DataverseServiceClientImpl.IsRowVersionMismatch(new InvalidOperationException("Error code 0x80060882 ConcurrencyVersionMismatch")).Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsRowVersionMismatch_IsFalseForEveryOtherFailure()
+    {
+        var accessDenied = new FaultException<OrganizationServiceFault>(
+            new ExecuteTransactionFault { FaultedRequestIndex = 1, ErrorCode = unchecked((int)0x80040220), Message = "Principal lacks write access" },
+            new FaultReason("Principal lacks write access"));
+
+        DataverseServiceClientImpl.IsRowVersionMismatch(accessDenied).Should().BeFalse();
+        DataverseServiceClientImpl.IsRowVersionMismatch(new TimeoutException("The request channel timed out")).Should().BeFalse(
+            "an unknown outcome is not a refusal: the caller must not treat it as 'nothing landed'");
+    }
 }
