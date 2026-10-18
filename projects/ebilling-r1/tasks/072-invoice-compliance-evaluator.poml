@@ -41,6 +41,7 @@
   </context>
 
   <constraints>
+    <constraint source="076 adversarial review K3">"In force on a line's date" means sprk_inforcefrom &lt;= date AND (sprk_inforceto is null OR date &lt; sprk_inforceto), applied only to versions that are the rule's current version OR carry an end date (sprk_inforceto). A version created by an edit gets sprk_inforcefrom = UtcNow and no end date, so it would otherwise count as in force while still a draft or rejected. Required tests: a draft, and a rejected version, with no end date are never evaluated.</constraint>
     <constraint source="spec MUST">Only published versions in force on the line date (in-force-from at or before the date, in-force-to after it or empty) are evaluated; Draft or unpublished rows never are.</constraint>
     <constraint source="spec FR-24, project">Rule rows reach handlers only through 070's billing gate; a refused row is logged and metered there and produces no finding, and the run continues with the other rules.</constraint>
     <constraint source="D-39">For one line, when both the client-default rule set and the line's firm rule set hold the same rule type, only the firm's rule is evaluated.</constraint>

@@ -40,6 +40,12 @@
   </context>
 
   <constraints>
+    <constraint source="D-89, 071 adversarial review F1">D-89 ("ApprovedTimekeeper holds, never auto-rejects") must be enforced in 073, not left to a confidence coincidence.
+- Today it rests on 046's ReferenceMissingCap (0.80) staying below ReliabilityThreshold. Both are tunable, and with threshold = 0.80 the comparison at HandlerContext.cs:136 lets an ApprovedTimekeeper Reject rule reject.
+- Refuse a Reject consequence for ApprovedTimekeeper at publish, as for AiObservation. The rejection rule also treats ApprovedTimekeeper findings as hold-only.
+- Add an EbillingSettingsReader validation that ReferenceMissingCap is below ReliabilityThreshold, so an out-of-range save is refused.
+- The same applies to 071 judgment call 2: ApprovedRate with no approved rate holds.
+- Must-fire tests: threshold 0.80 with an ApprovedTimekeeper Reject rule never rejects; publishing that rule is refused.</constraint>
     <constraint source="spec FR-26, I-5">Reject requires all three conditions; any one false gives Accepted plus a Flag finding. AiObservation never rejects, even if a stored row claims Reject (defence in depth beyond publish validation).</constraint>
     <constraint source="project">Eligibility and allowed consequences are code on the closed catalogue keyed by RuleType, not Dataverse option values and not configuration.</constraint>
     <constraint source="project">Fail-closed on missing data: a read field with no confidence, a threshold that cannot be read, or an unknown consequence value is treated as "not reliable", so the outcome is Accepted plus Flag, never Rejected.</constraint>
