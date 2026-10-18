@@ -119,9 +119,16 @@ internal static class BillingHandlerKit
         FieldConfidence = Confidence(),
     };
 
+    /// <summary>An ordinary record: no secure root above it (D-112).</summary>
+    internal static readonly IReadOnlySet<Guid> Ordinary = new HashSet<Guid>();
+
+    /// <summary>The secure roots above a record (D-112); each one is its own wall.</summary>
+    internal static IReadOnlySet<Guid> Roots(params Guid[] roots) => new HashSet<Guid>(roots);
+
     internal static BillingInvoiceFacts Invoice() => new()
     {
         SubmissionId = Guid.Parse("07100000-0000-4000-8000-0000000000b1"),
+        SecureRoots = Ordinary,
         TrackingNumber = "INV-100.2",
         FirmInvoiceNumber = "INV-100",
         InvoiceDate = InvoiceDate,
@@ -143,6 +150,7 @@ internal static class BillingHandlerKit
         params BillingPriorLine[] lines) => new()
     {
         SubmissionId = Guid.NewGuid(),
+        SecureRoots = Ordinary,
         TrackingNumber = trackingNumber,
         FirmInvoiceNumber = firmInvoiceNumber,
         Sequence = sequence,
@@ -174,7 +182,7 @@ internal static class BillingHandlerKit
             finding.ReasonCode.Should().NotBeNullOrWhiteSpace();
             finding.ValuesRead.Should().NotBeEmpty();
             finding.FactValues.Keys.Should().BeSubsetOf(tokens, "a template may name only the fact fields task 070 defined for the type");
-            finding.FactValues.Values.Should().OnlyContain(v => !string.IsNullOrWhiteSpace(v), "a null fact is not evidence");
+            finding.FactValues.Values.Any(string.IsNullOrWhiteSpace).Should().BeFalse("a null fact is not evidence (a withheld finding, D-112, has none at all)");
 
             if (finding.Subject.Kind == BillingSubjectKind.Invoice)
             {

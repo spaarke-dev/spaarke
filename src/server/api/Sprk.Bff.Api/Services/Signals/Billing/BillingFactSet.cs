@@ -76,6 +76,13 @@ public sealed record BillingFactSet
     /// The firm's earlier submissions that Duplicate compares against (task 072 chooses and loads them: this firm, this
     /// submission excluded). Attempts that never produced a payable invoice and are not Rejected or Returned (a Failed
     /// processing run, a Cancelled invoice) should not be loaded at all.
+    /// <para><b>Priors come from both sides of the secure wall (D-112).</b> Restricting the load to the invoice's own side would
+    /// let double billing across the wall go unflagged, so 072 loads secure and ordinary priors and sets each prior's
+    /// <see cref="BillingPriorSubmission.SecureRoots"/> (and the invoice's <see cref="BillingInvoiceFacts.SecureRoots"/>) app-only
+    /// from <c>SecureChildShareSynchronizer.SecureRootsAboveAsync</c>, walking up from the core record. Duplicate then shows a
+    /// prior's tracking number and line detail only when both sets are resolved and the prior's roots are a subset of the
+    /// invoice's; in every other case the finding still fires but withholds them (fail closed). 071 does not call the
+    /// synchronizer.</para>
     /// </summary>
     public IReadOnlyList<BillingPriorSubmission> PriorSubmissions { get; init; } = [];
 
@@ -94,6 +101,13 @@ public sealed record BillingInvoiceFacts
     /// compare the submission against its own earlier attempt row and flag it as its own duplicate (task 072 always has the id).
     /// </summary>
     public required Guid SubmissionId { get; init; }
+
+    /// <summary>
+    /// The ids of the secure roots above this submission's core record (D-112): every Secure record is its own wall. An ordinary
+    /// record has the empty set. <c>null</c> = the set could not be read (unresolved), which Duplicate treats as unknown and fails
+    /// closed on: no prior's detail is shown. Required, so a caller states which of the three it means.
+    /// </summary>
+    public required IReadOnlySet<Guid>? SecureRoots { get; init; }
 
     /// <summary>This submission's tracking number (<c>{invoice}.{n}</c>, task 045), when allocated.</summary>
     public string? TrackingNumber { get; init; }
@@ -199,7 +213,7 @@ public sealed record BillingPriorSubmission
 {
     public required Guid SubmissionId { get; init; }
 
-    /// <summary>The tracking number (<c>{invoice}.{n}</c>), cited in a Duplicate finding.</summary>
+    /// <summary>The tracking number (<c>{invoice}.{n}</c>), cited in a Duplicate finding unless the prior is across the wall (D-112).</summary>
     public required string TrackingNumber { get; init; }
 
     /// <summary>The attempt number <c>n</c>; the lowest active one is the "original" a duplicate is reported against.</summary>
@@ -208,6 +222,13 @@ public sealed record BillingPriorSubmission
     public string? FirmInvoiceNumber { get; init; }
 
     public BillingPriorStatus Status { get; init; }
+
+    /// <summary>
+    /// The secure roots above the prior's core record (D-112); the empty set for an ordinary record; <c>null</c> = unresolved.
+    /// Its tracking number and line detail are shown on a Duplicate finding only when this set and the invoice's are both
+    /// resolved and this one is a subset of the invoice's. Required, so a caller states which of the three it means.
+    /// </summary>
+    public required IReadOnlySet<Guid>? SecureRoots { get; init; }
 
     public IReadOnlyList<BillingPriorLine> Lines { get; init; } = [];
 }

@@ -98,6 +98,25 @@ public static class BillingRuleCatalogue
     };
 
     /// <summary>
+    /// The message of a Duplicate finding whose matching prior is across the secure wall, or whose wall could not be established
+    /// (D-112, <see cref="BillingFinding.DetailWithheld"/>). It names no token: the finding carries no tracking number, no
+    /// invoice or line detail. The variant of the Duplicate template (see <c>BillingRuleDraftTranslator.Wording</c>), which names
+    /// <c>{{duplicateOf.trackingNumber}}</c>; a message composer uses this text, not the policy version's template, for such a finding.
+    /// </summary>
+    public const string WithheldDuplicateTemplate = "This matches an earlier submission.";
+
+    /// <summary>
+    /// The <c>{{field}}</c> tokens of a withheld finding's message (D-112): none. A withheld Duplicate finding is built against this
+    /// set, not <see cref="TemplateFactFields"/>, so it cannot name the tracking number or a line value.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Not a type with a withheld variant (only Duplicate has one).</exception>
+    public static IReadOnlySet<string> WithheldTemplateFactFields(RuleType ruleType) => ruleType switch
+    {
+        RuleType.Duplicate => Fields(),
+        _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Only Duplicate has a withheld-detail variant."),
+    };
+
+    /// <summary>
     /// One deterministic sentence and formal form for a body that <see cref="PolicyVersionValidator.ValidateForSave"/> has
     /// accepted for <paramref name="ruleType"/>. Same body, same text; no lookup is read.
     /// </summary>

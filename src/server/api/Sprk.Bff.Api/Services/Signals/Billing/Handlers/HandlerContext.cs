@@ -84,14 +84,17 @@ internal sealed class HandlerContext
         string reasonCode,
         IReadOnlyList<BillingValueRead> values,
         FactValues factValues,
-        BillingSuggestedAdjustment? adjustment = null)
+        BillingSuggestedAdjustment? adjustment = null,
+        bool detailWithheld = false)
     {
+        // A withheld finding (D-112) is built against the withheld variant's token set, which names no detail at all.
+        var allowed = detailWithheld ? BillingRuleCatalogue.WithheldTemplateFactFields(Rule.RuleType) : _tokens;
         foreach (var token in factValues.Tokens)
         {
-            if (!_tokens.Contains(token))
+            if (!allowed.Contains(token))
             {
                 throw new InvalidOperationException(
-                    $"Handler for {Rule.RuleType} used template token '{token}', which is not in its fact-field set (task 070).");
+                    $"Handler for {Rule.RuleType} used template token '{token}', which is not in its {(detailWithheld ? "withheld " : string.Empty)}fact-field set (task 070).");
             }
         }
 
@@ -108,6 +111,7 @@ internal sealed class HandlerContext
             ValuesRead = values,
             SuggestedAdjustment = adjustment,
             FactValues = factValues.ToDictionary(),
+            DetailWithheld = detailWithheld,
         };
     }
 

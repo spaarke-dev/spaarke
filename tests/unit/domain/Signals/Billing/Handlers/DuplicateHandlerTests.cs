@@ -285,4 +285,177 @@ public class DuplicateHandlerTests
 
         Run(LinesOnly, facts).Single().FactValues.Keys.Should().BeEquivalentTo(BillingRuleCatalogue.TemplateFactFields(RuleType.Duplicate));
     }
+
+    // ── D-112: a prior across the secure wall is flagged, never described ────────────────────────────────────────
+
+    private static readonly Guid RootA = Guid.Parse("07100000-0000-4000-8000-00000000a0a1");
+    private static readonly Guid RootB = Guid.Parse("07100000-0000-4000-8000-00000000a0b2");
+    private const string PriorTracking = "SECRET-777.1";
+    private const string PriorNarrative = "Privileged strategy memo on the Orion acquisition";
+
+    private static BillingPriorSubmission WalledInvoicePrior(IReadOnlySet<Guid>? roots) =>
+        Prior(PriorTracking, "INV-100", 1) with { SecureRoots = roots };
+
+    private static BillingPriorSubmission WalledLinePrior(IReadOnlySet<Guid>? roots) =>
+        Prior(PriorTracking, "INV-099", 1, BillingPriorStatus.Active, new BillingPriorLine
+        {
+            Date = LineDate, TimekeeperId = Matched().TimekeeperId, TimekeeperName = "Jane Doe", Hours = 1.5m, Narrative = PriorNarrative,
+        }) with { SecureRoots = roots };
+
+    private static BillingLineFacts MatchingLine() => Entry(0, narrative: PriorNarrative);
+
+    private static BillingFactSet InvoiceUnder(IReadOnlySet<Guid>? roots, BillingFactSet facts) =>
+        facts with { Invoice = facts.Invoice with { SecureRoots = roots } };
+
+    /// <summary>Substitutes the finding's token values into the message the composer would use for it.</summary>
+    private static string Render(BillingFinding finding)
+    {
+        var text = finding.DetailWithheld
+            ? BillingRuleCatalogue.WithheldDuplicateTemplate
+            : "Invoice {{invoice.firmInvoiceNumber}}, the line dated {{line.date}} for {{line.timekeeperName}}, duplicates {{duplicateOf.trackingNumber}}.";
+        return finding.FactValues.Aggregate(text, (t, kv) => t.Replace("{{" + kv.Key + "}}", kv.Value, StringComparison.Ordinal));
+    }
+
+    /// <summary>Everything a reader of the finding could see: every value, every token value, the rendered message.</summary>
+    private static string Everything(BillingFinding finding) => string.Join(
+        "|", finding.ValuesRead.Select(v => $"{v.Name}={v.Value}").Concat(finding.FactValues.Select(kv => $"{kv.Key}={kv.Value}")).Append(Render(finding)));
+
+    private static void ShouldBeWithheld(BillingFinding finding)
+    {
+        finding.DetailWithheld.Should().BeTrue();
+        finding.FactValues.Should().BeEmpty("no token: not the tracking number, not a line value");
+        finding.ValuesRead.Select(v => v.Name).Should().NotContain("duplicateOf.trackingNumber").And.NotContain("duplicateOf.lineIndex");
+        Render(finding).Should().Be(BillingRuleCatalogue.WithheldDuplicateTemplate).And.Contain("matches an earlier submission");
+        var everything = Everything(finding);
+        everything.Should().NotContain(PriorTracking).And.NotContain("SECRET").And.NotContain(PriorNarrative)
+            .And.NotContain("Jane Doe").And.NotContain("2026-03-02").And.NotContain("1.5");
+    }
+
+    private static void ShouldShowDetail(BillingFinding finding, string tracking)
+    {
+        finding.DetailWithheld.Should().BeFalse();
+        finding.FactValues.Should().Contain("duplicateOf.trackingNumber", tracking);
+        Render(finding).Should().Contain(tracking);
+    }
+
+    public static TheoryData<string, bool> DetailShownCases => new()
+    {
+        // case, shown. Roots of the prior / roots of the invoice are named by the case; see ResolveRoots.
+        { "ordinary prior, ordinary invoice", true },
+        { "same secure root", true },
+        { "ordinary prior on a secure invoice", true },
+        { "secure prior on an ordinary invoice", false },
+        { "two different secure roots", false },
+        { "prior under {A,B}, invoice under {A}", false },
+        { "prior under {A}, invoice under {A,B}", true },
+        { "prior unresolved", false },
+        { "invoice unresolved", false },
+        { "both unresolved", false },
+    };
+
+    private static (IReadOnlySet<Guid>? Prior, IReadOnlySet<Guid>? Invoice) ResolveRoots(string name) => name switch
+    {
+        "ordinary prior, ordinary invoice" => (Ordinary, Ordinary),
+        "same secure root" => (Roots(RootA), Roots(RootA)),
+        "ordinary prior on a secure invoice" => (Ordinary, Roots(RootA)),
+        "secure prior on an ordinary invoice" => (Roots(RootA), Ordinary),
+        "two different secure roots" => (Roots(RootA), Roots(RootB)),
+        "prior under {A,B}, invoice under {A}" => (Roots(RootA, RootB), Roots(RootA)),
+        "prior under {A}, invoice under {A,B}" => (Roots(RootA), Roots(RootA, RootB)),
+        "prior unresolved" => (null, Roots(RootA)),
+        "invoice unresolved" => (Roots(RootA), null),
+        "both unresolved" => (null, null),
+        _ => throw new ArgumentOutOfRangeException(nameof(name), name, null),
+    };
+
+    [Theory]
+    [MemberData(nameof(DetailShownCases))]
+    public void InvoiceLevel_TheFindingAlwaysFires_AndCitesThePriorOnlyWhenItsWallIsWithinTheInvoicesWall_D112(string name, bool shown)
+    {
+        var (priorRoots, invoiceRoots) = ResolveRoots(name);
+        var facts = InvoiceUnder(invoiceRoots, Header(WalledInvoicePrior(priorRoots)));
+
+        var finding = Run(InvoiceNumberOnly, facts).Should().ContainSingle(name).Subject;
+
+        finding.ReasonCode.Should().Be(BillingReasonCodes.DuplicateInvoiceNumber);
+        finding.Subject.Should().Be(BillingSubject.ForInvoice());
+        if (shown) ShouldShowDetail(finding, PriorTracking); else ShouldBeWithheld(finding);
+    }
+
+    [Theory]
+    [MemberData(nameof(DetailShownCases))]
+    public void LineLevel_TheFindingAlwaysFires_AndCitesThePriorOnlyWhenItsWallIsWithinTheInvoicesWall_D112(string name, bool shown)
+    {
+        var (priorRoots, invoiceRoots) = ResolveRoots(name);
+        var facts = InvoiceUnder(invoiceRoots, WithPriors(Facts(MatchingLine()), WalledLinePrior(priorRoots)));
+
+        var finding = Run(LinesOnly, facts).Should().ContainSingle(name).Subject;
+
+        finding.ReasonCode.Should().Be(BillingReasonCodes.DuplicateOfPriorSubmissionLine);
+        finding.Subject.Should().Be(BillingSubject.ForLine(0));
+        if (shown) ShouldShowDetail(finding, PriorTracking); else ShouldBeWithheld(finding);
+    }
+
+    [Fact]
+    public void AWithheldFinding_StillListsEveryFieldItRead_SoTask073SeesTheirConfidence_D112()
+    {
+        var facts = InvoiceUnder(Roots(RootB), WithPriors(Facts(MatchingLine()), WalledLinePrior(Roots(RootA))));
+        var shown = InvoiceUnder(Roots(RootA), WithPriors(Facts(MatchingLine()), WalledLinePrior(Roots(RootA))));
+
+        var withheld = Run(LinesOnly, facts).Single();
+        var visible = Run(LinesOnly, shown).Single();
+
+        withheld.ReadFields.Should().Equal(visible.ReadFields);
+        withheld.ValuesRead.Where(v => v.IsExtracted).Select(v => v.Confidence).Should().OnlyContain(c => c == 0.95m);
+        withheld.ValuesRead.Where(v => v.Name.StartsWith("line.", StringComparison.Ordinal)).Should().OnlyContain(v => v.Value == null);
+    }
+
+    [Fact]
+    public void WhenTheMatchExistsInAPriorTheViewerMaySeeAndOneAcrossTheWall_TheVisibleOneIsCited_D112()
+    {
+        var hidden = Prior("HIDDEN-5.1", "INV-100", 1) with { SecureRoots = Roots(RootB) };
+        var visible = Prior("INV-100.4", "INV-100", 4) with { SecureRoots = Ordinary };
+        var facts = InvoiceUnder(Roots(RootA), Header(hidden, visible));
+
+        ShouldShowDetail(Run(InvoiceNumberOnly, facts).Single(), "INV-100.4");
+
+        var hiddenLine = WalledLinePrior(Roots(RootB)) with { TrackingNumber = "HIDDEN-5.1" };
+        var visibleLine = WalledLinePrior(Ordinary) with { TrackingNumber = "INV-099.4", Sequence = 4 };
+        var lineFacts = InvoiceUnder(Roots(RootA), WithPriors(Facts(MatchingLine()), hiddenLine, visibleLine));
+
+        ShouldShowDetail(Run(LinesOnly, lineFacts).Single(), "INV-099.4");
+    }
+
+    [Fact]
+    public void ALineThatRepeatsAnEarlierLineOfTheSameInvoice_IsUnchangedByTheWall_D112()
+    {
+        var facts = InvoiceUnder(null, Facts(Entry(0), Entry(1)));
+
+        var finding = Run(LinesOnly, facts).Should().ContainSingle().Subject;
+
+        ShouldShowDetail(finding, "INV-100.2");
+        finding.Value("duplicateOf.lineIndex").Value.Should().Be("0");
+    }
+
+    [Fact]
+    public void ThePriorRootsAndTheInvoiceRoots_AreRequiredMembers_SoACallerMustStateOrdinaryUnresolvedOrTheRoots_D112()
+    {
+        foreach (var type in new[] { typeof(BillingInvoiceFacts), typeof(BillingPriorSubmission) })
+        {
+            var property = type.GetProperty("SecureRoots")!;
+            property.PropertyType.Should().Be(typeof(IReadOnlySet<Guid>));
+            property.IsDefined(typeof(System.Runtime.CompilerServices.RequiredMemberAttribute), inherit: false).Should().BeTrue();
+        }
+    }
+
+    [Fact]
+    public void TheWithheldVariant_NamesNoTokenAtAll_AndOnlyDuplicateHasOne_D112()
+    {
+        BillingRuleCatalogue.WithheldTemplateFactFields(RuleType.Duplicate).Should().BeEmpty();
+        BillingRuleCatalogue.WithheldDuplicateTemplate.Should().NotContain("{{").And.Contain("matches an earlier submission");
+        BillingRuleCatalogue.TemplateFactFields(RuleType.Duplicate).Should().Contain("duplicateOf.trackingNumber");
+
+        var act = () => BillingRuleCatalogue.WithheldTemplateFactFields(RuleType.InvoiceAge);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
 }

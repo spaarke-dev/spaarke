@@ -111,6 +111,15 @@ public sealed record BillingFinding
     public required IReadOnlyDictionary<string, string> FactValues { get; init; }
 
     /// <summary>
+    /// True for a Duplicate finding whose matching prior is across the secure wall or whose wall could not be established
+    /// (D-112): it carries no tracking number, no tracking-number token and no line detail, and its message is
+    /// <see cref="BillingRuleCatalogue.WithheldDuplicateTemplate"/> (the composer uses that, not the policy version's template,
+    /// which names the withheld token). Its <see cref="ValuesRead"/> still list the fields the match read, with the value text
+    /// left out, so task 073 still sees every read field and its confidence.
+    /// </summary>
+    public bool DetailWithheld { get; init; }
+
+    /// <summary>
     /// The extracted fields the finding read (task 073): one entry per extracted value, whether or not it was the one that
     /// failed. Reference values are not listed: they have no extraction confidence to check.
     /// </summary>
