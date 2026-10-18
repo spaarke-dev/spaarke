@@ -11,7 +11,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. 42/79 complete (026 newly). Agents running from base 7c0daf8c9+: 075 (finishing mutation proofs), 015 fix round, 051 fix round, 076 fix round. Queued for the next free slots: 071 fix round; 026 follow-up for #2081 (invoice family) |
+| **Task** | Parallel mode. 42/79 complete (026 newly). Agents running from base 7c0daf8c9+: 075 (finishing mutation proofs), 015 fix round, 051 fix round, 076 fix round. 071 fix round running. 075 is on the branch (4d7a8a8f0..80daf089f) with one open defect. Queued: the 075 retry fix; the 026 follow-up for #2081 (invoice family) |
 | **Step** | All on the local branch, not pushed: 015, 051, 071, 076 and 074 (cd44dbcca..0bc6a7ad9). ADR-010 ceiling 166; route ledger 137. Build 0/0; ArchTests 1160; targeted 2349; SPA vitest 1044; shared jest 38 |
 | **Status** | in-progress (parallel mode) |
 | **Next Action** | As each agent reports: review, cherry-pick (trailer rewrite), build and targeted tests, then send the fix range to the reviewer. 015 fix → ontology-r1 and uac-r2. 051 fix → uac-r2 and R3 (DEF-004 answers). 076 fix → adversarial pass 2 (auth). 074 → waiting on ontology-r1's adversarial pass. Mark 015 / 051 / 071 / 074 / 076 ✅ after their reviews clear. Next launches: 071 fix round (brief below); #2081 follow-up; then 072 (needs 071 ✅) and 077 (needs 076 ✅) |
@@ -31,6 +31,15 @@
   - a test for UpdateRecordActionCore with no IGenericEntityService;
   - a code-safe hint for detach → move → re-attach;
   - ActionSeam.cs:163 prints the code twice.
+
+- **075 retry fix (open F-class defect).** A run that dies midway and is retried asks the model again. Its output is not deterministic, so both runs' drafts remain. Chosen fix: compensation, not schema. On a re-run with no completion marker, delete the earlier run's untouched drafts first, then draft again. Untouched means all of these:
+  - created by the job identity;
+  - created for this rule set;
+  - still Proposed and Off;
+  - modifiedon equals createdon;
+  - no current version.
+  Must-fire test: a rerun after a partial run leaves exactly one set. Must-not-fire test: a draft an admin edited or accepted is never deleted.
+- **053 deploy order (from 075):** run Deploy-ActionMirrors.ps1 and Seed-PlaybookConsumers.ps1 (the BILLING-RULE-DRAFT Binding) before or with the BFF, then check /healthz. `prvCreatesprk_Policy` and `prvWritesprk_ruleset` both exist live (checked).
 
 ### Critical Context
 - **Decisions this session:**
