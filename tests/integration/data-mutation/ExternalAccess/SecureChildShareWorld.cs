@@ -150,6 +150,10 @@ internal sealed class SecureChildShareWorld
         => Add(table, id, lookups.Select(l => (l.Column, (object)new EntityReference(l.Target, l.TargetId)))
             .Prepend(owner).ToArray());
 
+    /// <summary>#2091 round 3: what a query of a <see cref="FailingQueriesOf"/> table throws instead of the Dataverse fault
+    /// (a <see cref="TaskCanceledException"/> models an HttpClient timeout).</summary>
+    public Func<Exception>? QueryFault { get; set; }
+
     /// <summary>Makes every query of one table throw (a Dataverse fault).</summary>
     public SecureChildShareWorld FailingQueriesOf(string table)
     {
@@ -604,7 +608,7 @@ internal sealed class SecureChildShareWorld
     {
         QueriedTables.Add(query.EntityName);
         if (_failingTables.Contains(query.EntityName))
-            throw new InvalidOperationException($"Test: {query.EntityName} cannot be read.");
+            throw QueryFault?.Invoke() ?? new InvalidOperationException($"Test: {query.EntityName} cannot be read.");
         if (query.Criteria.Conditions.Any(c =>
                 c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.Equal
                 && c.Values.Single() is Guid id && _failingRowReads.Contains((query.EntityName, id))))

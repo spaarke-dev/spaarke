@@ -1055,10 +1055,75 @@ public static class FieldMappingEndpoints
                         }
                     }
 
+                    // #2091 round 3: a rule that writes a filing lookup (`{nav}@odata.bind`) onto a reparentable child RE-FILES
+                    // it — its owner is re-derived before the write and the ONE step after a re-file runs after it, as on
+                    // every other re-file writer. A malformed bind, an owner that cannot be decided, or a host that cannot
+                    // re-own refuses THIS child only (per-row, like every other failure here).
+                    var parentChanges = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(targetEntity)
+                        ? Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesWithClearsIn(targetEntity, updatePayload)
+                        : new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>();
+                    var mayRefile = Sprk.Bff.Api.Services.Dataverse.RecordReparent.MayRefile(targetEntity, parentChanges);
+                    using var refileScope = mayRefile ? scopes?.CreateScope() : null;
+                    var children = refileScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureChildReconciler>();
+                    var ownership = refileScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+
                     // Task 166: written AS THE CALLER (MSCRMCallerID) — Dataverse applies their Write on the child,
                     // so no app-only child write remains on this route.
-                    await dataverseService.UpdateRecordFieldsAsync(
-                        targetEntity, childRecordId, updatePayload, ct, impersonateSystemUserId: callerSystemUserId);
+                    Task Write(CancellationToken token) => dataverseService.UpdateRecordFieldsAsync(
+                        targetEntity, childRecordId, updatePayload, token, impersonateSystemUserId: callerSystemUserId);
+                    Exception? isolationReadFault = null;
+                    var isolatedBefore = false;
+                    if (!mayRefile)
+                    {
+                        await Write(ct);
+                    }
+                    else if (children is null || ownership is null)
+                    {
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = "Not written: this push moves what the record is filed under, and its owner cannot be re-derived here.",
+                        });
+                        continue;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            isolatedBefore = await children.IsSecureTeamOwnedAsync(targetEntity.Trim().ToLowerInvariant(), childRecordId, ct);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                        {
+                            isolationReadFault = ex;
+                        }
+
+                        var reparent = await ownership.ReparentAsync(
+                            new Sprk.Bff.Api.Services.Dataverse.RecordReparent
+                            {
+                                EntityLogicalName = targetEntity,
+                                RecordId = childRecordId,
+                                ParentChanges = parentChanges,
+                                CallerSystemUserId = callerSystemUserId,
+                                // A move out of a secure root (owner round 10 item 7) is asked of the person this push acts as.
+                                SecureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
+                                    callerSystemUserId,
+                                    refileScope!.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>()),
+                            },
+                            Write,
+                            ct);
+                        if (reparent.IsRefused)
+                        {
+                            failed++;
+                            errors.Add(new PushFieldMappingsError
+                            {
+                                RecordId = childRecordId,
+                                Error = $"Not written: {reparent.Reason} ({reparent.RefusalCode}).",
+                            });
+                            continue;
+                        }
+                    }
+
                     updated++;
 
                     // Task 156 (owner round 4 item 5, option b): a mapping rule can write a lookup — including what this
@@ -1071,6 +1136,16 @@ public static class FieldMappingEndpoints
                     // thrown; an incomplete securing is logged and the secure-root inheritance job completes it).
                     if (rootFiling is not null)
                         await rootFiling.SecureAfterWriteAsync(targetEntity, childRecordId, updatePayload.Keys, traceId: null);
+
+                    // #2091, AFTER the re-stamp: the re-filed child's mirror and the pass over everything filed under it.
+                    // Never throws; the child's update stands.
+                    if (children is not null)
+                    {
+                        await children.AfterRefileAsync(
+                            targetEntity.Trim().ToLowerInvariant(), childRecordId,
+                            () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
+                            CancellationToken.None);
+                    }
 
                     // Task 142 (L1): a push that wrote a ROOT's "Assigned *" column (a project/matter/work assignment
                     // child of the source) materializes its Assigned-To access now. A non-root target or a non-registry

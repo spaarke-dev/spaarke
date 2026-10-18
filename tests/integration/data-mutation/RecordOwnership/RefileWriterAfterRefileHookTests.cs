@@ -69,6 +69,8 @@ public sealed class RefileWriterAfterRefileHookTests
                     throw new HttpRequestException("0x80040220 the caller lacks Write on the record", null, System.Net.HttpStatusCode.Forbidden);
 
                 _writes.Add(fields);
+                // A transient read fault (the timeout tests) has cleared by the time the write lands.
+                _world.ClearQueryFaults();
                 // Dataverse as it stands once the re-file landed: the lookup moved, and the owner the reparent decided
                 // (the ordinary matter's business-unit team) is assigned.
                 if (fields.Keys.Any(k => SecureRootInheritanceColumn(k) == "sprk_regardingmatter"))
@@ -164,6 +166,50 @@ public sealed class RefileWriterAfterRefileHookTests
         AssertTheStepDidNotRun(readsAllowed: true);
     }
 
+    // ── #2091 round 3: a timeout on the read before the write is a FAULTED wasIsolated, never a cancellation ────────
+
+    [Fact(DisplayName = "#2091 r3: an UpdateRecord node whose isolation read times out (not the caller's cancellation) still writes, and the step releases nothing")]
+    public async Task UpdateRecordActionCore_AnIsolationReadTimeout_IsAFault_TheWriteStands()
+    {
+        TheIsolationReadTimesOut();
+
+        await Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null, LegacyFields: null,
+                Lookups: [new RenderedLookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter.ToString())]),
+            CancellationToken.None);
+
+        AssertTheWriteStoodAndNothingWasReleased();
+    }
+
+    [Fact(DisplayName = "#2091 r3: the output orchestrator's update whose isolation read times out (not the caller's cancellation) still writes, and the step releases nothing")]
+    public async Task DataverseUpdateHandler_AnIsolationReadTimeout_IsAFault_TheWriteStands()
+    {
+        TheIsolationReadTimesOut();
+
+        await Handler().UpdateAsync(
+            "sprk_communication", Communication,
+            new Dictionary<string, object?> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter) },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        AssertTheWriteStoodAndNothingWasReleased();
+    }
+
+    private void TheIsolationReadTimesOut()
+    {
+        _world.QueryFault = () => new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout of 100 seconds elapsing.");
+        _world.FailingQueriesOf("sprk_communication");
+    }
+
+    private void AssertTheWriteStoodAndNothingWasReleased()
+    {
+        _writes.Should().ContainSingle("an HttpClient timeout is not the caller cancelling the update");
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<CancellationToken>()), Times.Once,
+            "the step after the re-file still ran, handed the faulted read");
+        _world.OwnerOf("sprk_todo", TodoUnderCommunication).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam),
+            "whether the row WAS isolated is unknown, so nothing is released");
+    }
+
     // ── assertions ───────────────────────────────────────────────────────────────────────────────────────────────
 
     private void AssertTheStepRanOnceForTheCommunication()
@@ -221,5 +267,5 @@ public sealed class RefileWriterAfterRefileHookTests
         new(
             _write.Object, new Mock<IGenericEntityService>().Object, Restamper(), new RecordOwnershipResolverDouble(),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
-            Reconciler(), _threads.Object);
+            Reconciler());
 }

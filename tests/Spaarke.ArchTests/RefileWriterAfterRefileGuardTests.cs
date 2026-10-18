@@ -28,8 +28,16 @@ namespace Spaarke.ArchTests;
 /// attributes a lambda, local function or async state machine to its outermost type — so a hook called inside a closure
 /// counts, and a comment, string or <c>nameof</c> does not.</para>
 /// <para><b>Granularity and limits.</b> Per TYPE, as #2091 states the rule: a type that runs the hook on one path and
-/// skips it on another passes (code review). A writer that moves a filing lookup with a plain update and no seam (no owner
-/// re-derivation) is not seen; every BFF re-file today re-derives the owner, so it goes through a seam.</para>
+/// skips it on another passes (code review). A writer that moves a filing lookup with a plain update and NO seam (no owner
+/// re-derivation) is NOT seen, and cannot be from IL: which table and column an update writes are runtime values — a
+/// <c>{nav}@odata.bind</c> key built from metadata or playbook configuration, or a payload a caller hands in — so "writes a
+/// lineage lookup" is not a property of the compiled code. The heuristic (a generic update call plus the literal
+/// <c>@odata.bind</c>) flags every create and every non-filing bind, and misses the pass-through writers: the playbook
+/// update node, the output orchestrator's update and the field-mapping push, which #2091 round 3 found writing filing binds
+/// with no seam. That class is closed instead by the ONE payload reader every generic writer uses,
+/// <see cref="RecordReparent.ParentChangesWithClearsIn{TValue}"/>: it turns a filing bind into a parent change (or refuses
+/// it), so those writers re-file through <see cref="IRecordOwnershipResolver.ReparentAsync"/> and are held here. A new
+/// generic writer that bypasses the reader is a code-review item.</para>
 /// <para><b>Controls.</b> <see cref="Detector_MustFireAndMustNotFire"/> runs the same detector over
 /// the <c>RefileGuardControl*</c> fixtures below: a reparent with only a comment and a <c>nameof</c> of the hook, and a
 /// thread join without it, are found; a reparent whose hook runs inside a lambda, and a writer that re-files nothing, are
@@ -58,16 +66,16 @@ public class RefileWriterAfterRefileGuardTests
     private static readonly IReadOnlyList<KnownViolation> KnownViolations = new[]
     {
         new KnownViolation(typeof(ThreadResolver),
-            "#2091 (open owner decision): the thread JOIN and the filing reconcile's move to a record's default thread. " +
-            "AfterRefileAsync runs the communication's filing-thread reconcile, which can move a message straight back out of " +
+            "UAC technical follow-up (#2091): AfterRefileAsync option to skip the thread reconcile, after ontology 042b. " +
+            "The thread JOIN and the filing reconcile's move to a record's default thread: AfterRefileAsync runs the communication's filing-thread reconcile, which can move a message straight back out of " +
             "the thread it just joined (an unfiled reply in a record thread goes to its owner's master thread) and leaves the " +
             "join's grant audience stale; the reconcile itself runs INSIDE AfterRefileAsync, so a call there re-enters it."),
         new KnownViolation(typeof(CommunicationService),
-            "#2091 (open owner decision): respond-into-thread (AssignToThreadReconcilingOwnerAsync) — the same question as " +
-            "ThreadResolver's join."),
+            "UAC technical follow-up (#2091): AfterRefileAsync option to skip the thread reconcile, after ontology 042b. " +
+            "Respond-into-thread (AssignToThreadReconcilingOwnerAsync) — the same case as ThreadResolver's join."),
         new KnownViolation(typeof(InvoiceReviewService),
             "Found by this guard (#2091 review): a document filed under an invoice is re-parented (ReparentAsync, inherited " +
-            "matter) without AfterRefileAsync. Not in #2091's scope; reported for a follow-up issue."),
+            "matter) without AfterRefileAsync. Not in #2091's scope; follow-up #2095."),
     };
 
     private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());

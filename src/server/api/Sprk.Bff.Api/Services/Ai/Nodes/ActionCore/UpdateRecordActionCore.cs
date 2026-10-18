@@ -164,13 +164,29 @@ internal sealed class UpdateRecordActionCore
                 throw new RecordOwnerUnresolvedException(input.EntityLogicalName, refusal);
         }
 
-        // #2091: a write that moves one of the table's filing lookups (SecureChildLineage) is a RE-FILE, so it runs the ONE step
-        // after a re-file (SecureChildReconciler.AfterRefileAsync), as every other re-file writer does. Whether the row was
-        // isolated is read BEFORE the write: a move OUT releases only from a row that was. The reconciler is scoped and this
-        // core's constructor is frozen (task 031), so it comes from a scope; a host without it skips the step.
+        // A filing lookup bound to something that names no row of its target is refused here, before anything is read or
+        // written (#2091 round 3; RecordOwnerUnresolvedException, like an unresolved owner).
+        var parentChanges = ParentChangesOf(input, updatePayload);
+
+        // #2091: a write that may re-file the row (the ONE predicate, RecordReparent.MayRefile) runs the ONE step after a
+        // re-file (SecureChildReconciler.AfterRefileAsync), as every other re-file writer does. Whether the row was isolated
+        // is read BEFORE the write: a move OUT releases only from a row that was. A read that fails — a timeout included — is
+        // handed to the step as a fault; only the caller's own cancellation ends the write here. The reconciler is scoped and
+        // this core's constructor is frozen (task 031), so it comes from a scope.
         var refiledTable = input.EntityLogicalName.Trim().ToLowerInvariant();
-        using var refileScope = WritesALineageLookup(refiledTable, updatePayload.Keys) ? _scopeFactory.CreateScope() : null;
+        var mayRefile = RecordReparent.MayRefile(refiledTable, parentChanges);
+        using var refileScope = mayRefile ? _scopeFactory.CreateScope() : null;
         var children = refileScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureChildReconciler>();
+        if (mayRefile && children is null)
+        {
+            // Every host registers it (ExternalAccessModule); a composition without it leaves a re-filed row's sharing as it
+            // was, so say so loudly rather than skip it silently.
+            _logger.LogError(
+                "UpdateRecord re-filed {EntityType} {RecordId} but no SecureChildReconciler is registered: its sharing and the rows "
+                + "filed under it were NOT reconciled after the move (#2091)",
+                refiledTable, input.RecordId);
+        }
+
         Exception? isolationReadFault = null;
         var isolatedBefore = false;
         if (children is not null)
@@ -179,13 +195,12 @@ internal sealed class UpdateRecordActionCore
             {
                 isolatedBefore = await children.IsSecureTeamOwnedAsync(refiledTable, input.RecordId, cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 isolationReadFault = ex;
             }
         }
 
-        var parentChanges = ParentChangesOf(input, updatePayload);
         if (parentChanges.Count == 0)
         {
             await Patch(cancellationToken);
@@ -233,8 +248,8 @@ internal sealed class UpdateRecordActionCore
                 () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
                 CancellationToken.None).ConfigureAwait(false);
         }
-        // Spaarkeai-word-add-in-r1 task 129: a re-file that did not run the step above (no filing lookup moved, or a host
-        // without the reconciler) still lets a re-filed communication's thread follow the filing — once. Never throws.
+        // Spaarkeai-word-add-in-r1 task 129: a re-file that could not run the step above (a host without the reconciler, logged
+        // above) still lets a re-filed communication's thread follow the filing — once. Never throws.
         else if (parentChanges.Count > 0)
         {
             await ReconcileThreadAfterRefileAsync(input.EntityLogicalName, input.RecordId).ConfigureAwait(false);
@@ -248,14 +263,6 @@ internal sealed class UpdateRecordActionCore
 
         return updatePayload.Keys.ToArray();
     }
-
-    /// <summary>
-    /// #2091: whether the write moves a filing lookup of <paramref name="table"/> — a column of its entry in the ONE lineage
-    /// map (<see cref="Sprk.Bff.Api.Services.Access.SecureChildLineage"/>), as a value or an <c>@odata.bind</c>.
-    /// </summary>
-    private static bool WritesALineageLookup(string table, IEnumerable<string> writtenKeys) =>
-        Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(table, out var lineage)
-        && writtenKeys.Any(k => lineage.Lookups.ContainsKey(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k)));
 
     /// <summary>
     /// Task 129: after a written re-file of a <c>sprk_communication</c>, its thread follows the filing
@@ -298,11 +305,11 @@ internal sealed class UpdateRecordActionCore
     /// lookup's attribute name, lower-cased (the navigation-property spelling the bind uses differs only in case).
     /// </summary>
     /// <remarks>
-    /// Every value the PATCH writes as <c>null</c> is a candidate CLEAR (task 146 verifier item 8): a field mapping can
-    /// clear a lookup (<c>"sprk_Matter@odata.bind": null</c>, or an empty rendered value), which moves the child OUT of
-    /// that parent and must re-derive its owner like a move to another parent. This core cannot tell a cleared lookup
-    /// from a cleared text column, so it passes them all; the resolver reads the row and ignores a null for a column
-    /// that holds no parent.
+    /// The node's own <see cref="UpdateRecordActionInput.Lookups"/> are read as typed references. Everything else the PATCH
+    /// writes — field mappings and legacy fields, which can carry a <c>"sprk_RegardingMatter@odata.bind": "/sprk_matters(id)"</c>
+    /// or a clear — goes through the ONE payload reading, <see cref="RecordReparent.ParentChangesWithClearsIn{TValue}"/>
+    /// (#2091 round 3): a bound filing lookup is a parent change, a malformed or mismatched bind refuses the write, and every
+    /// <c>null</c> is a candidate CLEAR (task 146 verifier item 8) that the resolver ignores for a column holding no parent.
     /// </remarks>
     private static IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?> ParentChangesOf(
         UpdateRecordActionInput input, IReadOnlyDictionary<string, object?> payload)
@@ -311,25 +318,21 @@ internal sealed class UpdateRecordActionCore
         if (!RecordOwnershipResolver.IsReparentableChild(input.EntityLogicalName))
             return changes;
 
+        var lookupKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var lookup in input.Lookups ?? [])
         {
-            if (RecordOwnershipResolver.IsOwnershipParent(lookup.TargetEntity)
-                && Guid.TryParse(lookup.RenderedTargetId, out var targetId) && targetId != Guid.Empty)
-            {
-                changes[lookup.Field.ToLowerInvariant()] = new Microsoft.Xrm.Sdk.EntityReference(lookup.TargetEntity, targetId);
-            }
-        }
-
-        const string bindSuffix = "@odata.bind";
-        foreach (var (key, value) in payload)
-        {
-            if (value is not null || string.IsNullOrWhiteSpace(key))
+            if (!Guid.TryParse(lookup.RenderedTargetId, out var targetId))
                 continue;
 
-            var column = key.EndsWith(bindSuffix, StringComparison.OrdinalIgnoreCase)
-                ? key[..^bindSuffix.Length]
-                : key;
-            changes.TryAdd(column.ToLowerInvariant(), null);
+            lookupKeys.Add($"{lookup.Field}@odata.bind");
+            if (RecordOwnershipResolver.IsOwnershipParent(lookup.TargetEntity) && targetId != Guid.Empty)
+                changes[lookup.Field.ToLowerInvariant()] = new Microsoft.Xrm.Sdk.EntityReference(lookup.TargetEntity, targetId);
+        }
+
+        foreach (var (column, parent) in RecordReparent.ParentChangesWithClearsIn(
+                     input.EntityLogicalName, payload.Where(p => !lookupKeys.Contains(p.Key))))
+        {
+            changes.TryAdd(column, parent);
         }
 
         return changes;

@@ -549,11 +549,11 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     /// <summary>
     /// Task 147 r1c: whether the update could be a RE-FILE of a child row (a set or cleared lookup on a reparentable child
     /// table) — the case <see cref="OwnedChildWrite.RefileAsync"/> decides, and the only one worth the pre-write isolation read.
+    /// The ONE predicate every re-file writer shares (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordReparent.MayRefile(string, IEnumerable{string}, bool)"/>, #2091 round 3).
     /// </summary>
     private static bool MayRefile(string tablename, DataverseWriteItemMapper.MappedItem item) =>
-        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(tablename)
-        && (item.Lookups.Any(l => Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(l.RelatedTable))
-            || item.ClearedColumns.Count > 0);
+        Sprk.Bff.Api.Services.Dataverse.RecordReparent.MayRefile(
+            tablename, item.Lookups.Select(l => l.RelatedTable), item.ClearedColumns.Count > 0);
 
     private ToolResult LogOutcome(ChatInvocationContext context, string tablename, Guid recordId, ToolResult result, Stopwatch stopwatch)
     {

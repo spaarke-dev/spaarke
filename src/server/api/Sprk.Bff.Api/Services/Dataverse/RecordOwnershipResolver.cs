@@ -498,26 +498,119 @@ public sealed record RecordReparent
     }
 
     /// <summary>
-    /// <see cref="ParentChangesIn{TValue}"/> plus every column the payload CLEARS: a <c>null</c> value is entered as a
-    /// <c>null</c> change, because a generic update cannot tell a cleared lookup from a cleared text column — the row
-    /// can (<see cref="IRecordOwnershipResolver.ReparentAsync"/> reads it, and a null for a column that holds no parent
-    /// is no parent change). Task 146 verifier item 8: a child moved OUT of its secure parent by clearing the lookup
-    /// must be re-owned like one moved by setting another.
+    /// Every parent change a generic update payload to <paramref name="entityLogicalName"/> makes, keyed by the column's
+    /// logical name (<c>@odata.bind</c> and <c>_x_value</c> spellings normalized): an <see cref="EntityReference"/> onto an
+    /// ownership parent; an <c>@odata.bind</c> (<c>"sprk_RegardingMatter@odata.bind": "/sprk_matters(&lt;id&gt;)"</c>) on one
+    /// of the table's filing lookups (<see cref="Sprk.Bff.Api.Services.Access.SecureChildLineage"/>) whose target is an
+    /// ownership parent — the ONLY shape a Web API write can set a lookup in (#2091 round 3); and every column the payload
+    /// CLEARS. A <c>null</c> value is entered as a <c>null</c> change, because a generic update cannot tell a cleared lookup
+    /// from a cleared text column — the row can (<see cref="IRecordOwnershipResolver.ReparentAsync"/> reads it, and a null
+    /// for a column that holds no parent is no parent change). Task 146 verifier item 8: a child moved OUT of its secure
+    /// parent by clearing the lookup must be re-owned like one moved by setting another.
     /// </summary>
+    /// <exception cref="RecordOwnerUnresolvedException">A filing lookup is bound to something that does not name one row of
+    /// its target table (<c>/&lt;target entity set&gt;(&lt;id&gt;)</c>): the new parent cannot be read, so the write is refused
+    /// (fail closed) — written, it would move the row with no owner re-derived.</exception>
     public static IReadOnlyDictionary<string, EntityReference?> ParentChangesWithClearsIn<TValue>(
-        IEnumerable<KeyValuePair<string, TValue>> fields)
+        string entityLogicalName, IEnumerable<KeyValuePair<string, TValue>> fields)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
         ArgumentNullException.ThrowIfNull(fields);
-        var pairs = fields.ToArray();
-        var changes = new Dictionary<string, EntityReference?>(ParentChangesIn(pairs), StringComparer.OrdinalIgnoreCase);
-        foreach (var (column, value) in pairs)
+        var table = entityLogicalName.Trim().ToLowerInvariant();
+        Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(table, out var lineage);
+        var changes = new Dictionary<string, EntityReference?>(StringComparer.OrdinalIgnoreCase);
+        var clears = new List<string>();
+        foreach (var (key, raw) in fields)
         {
-            if (value is null && !string.IsNullOrWhiteSpace(column) && !changes.ContainsKey(column))
-                changes[column] = null;
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+
+            var column = Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key);
+            object? value = raw is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined }
+                ? null
+                : raw;
+            if (value is EntityReference reference)
+            {
+                if (RecordOwnershipResolver.IsOwnershipParent(reference.LogicalName))
+                    changes[column] = reference.Id == Guid.Empty ? null : reference;
+            }
+            else if (value is null)
+            {
+                clears.Add(column);
+            }
+            else if (key.EndsWith(BindSuffix, StringComparison.OrdinalIgnoreCase)
+                && lineage is not null
+                && lineage.Lookups.TryGetValue(column, out var target)
+                && RecordOwnershipResolver.IsOwnershipParent(target))
+            {
+                changes[column] = new EntityReference(target, BoundIdOf(table, column, target, value));
+            }
         }
+
+        foreach (var column in clears)
+            changes.TryAdd(column, null);
 
         return changes;
     }
+
+    /// <summary>
+    /// #2091 round 3: whether an update to <paramref name="entityLogicalName"/> that makes <paramref name="parentChanges"/>
+    /// could be a RE-FILE — a set or cleared lookup on a reparentable child table
+    /// (<see cref="RecordOwnershipResolver.IsReparentableChild"/>). The ONE predicate every re-file writer uses to decide
+    /// whether it reads isolation before the write and runs <c>SecureChildReconciler.AfterRefileAsync</c> after it.
+    /// </summary>
+    public static bool MayRefile(string entityLogicalName, IReadOnlyDictionary<string, EntityReference?> parentChanges)
+    {
+        ArgumentNullException.ThrowIfNull(parentChanges);
+        return MayRefile(entityLogicalName, parentChanges.Values.OfType<EntityReference>().Select(r => r.LogicalName),
+            parentChanges.Values.Any(v => v is null));
+    }
+
+    /// <summary><see cref="MayRefile(string, IReadOnlyDictionary{string, EntityReference?})"/> over the lookup targets an
+    /// update sets and whether it clears any column.</summary>
+    public static bool MayRefile(string entityLogicalName, IEnumerable<string> lookupTargets, bool clearsAColumn)
+    {
+        ArgumentNullException.ThrowIfNull(lookupTargets);
+        return RecordOwnershipResolver.IsReparentableChild(entityLogicalName)
+            && (clearsAColumn || lookupTargets.Any(RecordOwnershipResolver.IsOwnershipParent));
+    }
+
+    private const string BindSuffix = "@odata.bind";
+
+    /// <summary>The id an <c>@odata.bind</c> on a filing lookup names: exactly <c>/&lt;target entity set&gt;(&lt;id&gt;)</c>
+    /// (the leading slash optional). Anything else refuses the write.</summary>
+    private static Guid BoundIdOf(string table, string column, string target, object value)
+    {
+        var entitySet = EntitySetOf(target);
+        var path = (value switch
+        {
+            string text => text,
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element => element.GetString(),
+            _ => null,
+        })?.Trim();
+        if (path is not null && entitySet is not null)
+        {
+            var start = path.StartsWith('/') ? 1 : 0;
+            var open = path.IndexOf('(', start);
+            if (open > start && path.EndsWith(')')
+                && string.Equals(path[start..open], entitySet, StringComparison.OrdinalIgnoreCase)
+                && Guid.TryParse(path[(open + 1)..^1], out var id) && id != Guid.Empty)
+            {
+                return id;
+            }
+        }
+
+        throw new RecordOwnerUnresolvedException(table, RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved,
+            $"the {column} lookup is bound to something that does not name one {target} row (expected /{entitySet ?? target}(<id>)), "
+            + "so the record it would be filed under cannot be read and the update was not written"));
+    }
+
+    /// <summary>A lineage target's Web API entity set: a secure root's from the ONE root table, a child's from the lineage
+    /// map. <c>null</c> for a table neither knows (the bind is then refused).</summary>
+    private static string? EntitySetOf(string target) =>
+        Sprk.Bff.Api.Services.Access.SecureChildLineage.IsRoot(target)
+            ? Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(target)
+            : Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(target, out var child) ? child.EntitySet : null;
 
     /// <summary>
     /// The parent lookups a <c>sprk_document</c> update WRITES, as <c>sprk_document</c> columns — the same column/target
