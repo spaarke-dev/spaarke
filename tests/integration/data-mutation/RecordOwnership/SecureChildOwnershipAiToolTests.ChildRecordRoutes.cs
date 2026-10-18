@@ -96,11 +96,62 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// platform-cascade rows, so it needs no Web API client.
     /// </summary>
     private SecureChildReconciler Children(Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null) =>
-        SecureChildShareWorld.ReconcilerOver(() => ShareWorld, _shareTable, null!, threads: threads, gateDecisionRecords: _gate.Sharing);
+        SecureChildShareWorld.ReconcilerOver(
+            () => ShareWorld, _shareTable, null!, threads: threads, gateDecisionRecords: _gateOverShareWorld ?? _gate.Sharing);
 
     /// <summary>Ontology task 042b round 2 (D-169): the gate Decision Records the reconciler's after-re-file step re-owns (empty unless a
     /// test seeds it).</summary>
     private readonly Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld _gate = new();
+
+    /// <summary>Ontology task 042b round 4: when set, the reconciler's gate helper is <see cref="GateHelperOverTheShareWorld"/>'s.</summary>
+    private Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? _gateOverShareWorld;
+
+    /// <summary>The ontology writer's systemuser in <see cref="GateHelperOverTheShareWorld"/> (WhoAmI): the gate records' creator.</summary>
+    private static readonly Guid GateWriter = Guid.Parse("a2470000-0000-4000-8000-0000000000d7");
+
+    /// <summary>
+    /// Ontology task 042b round 4: the REAL gate helper over THE SAME share world and share table as the engine — its reads are this world's
+    /// queries and single-row reads, the REAL <see cref="RecordOwnershipResolver"/> over the same rows answers its owner question, and its
+    /// Assign moves the owner here. Only the writer's connection (WhoAmI, the Assign) and the cache eviction are doubles.
+    /// </summary>
+    private (Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing Sharing,
+        Moq.Mock<Microsoft.PowerPlatform.Dataverse.Client.IOrganizationServiceAsync2> Org,
+        Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing> Log)
+        GateHelperOverTheShareWorld()
+    {
+        var entities = SecureChildShareWorld.EntitiesOver(() => ShareWorld);
+        entities
+            .Setup(e => e.RetrieveAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<Guid>(), Moq.It.IsAny<string[]>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) => Task.FromResult(ShareWorld.Retrieve(table, id, columns)));
+        var org = new Moq.Mock<Microsoft.PowerPlatform.Dataverse.Client.IOrganizationServiceAsync2>();
+        org.Setup(o => o.ExecuteAsync(Moq.It.IsAny<Microsoft.Crm.Sdk.Messages.WhoAmIRequest>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult<OrganizationResponse>(
+                new Microsoft.Crm.Sdk.Messages.WhoAmIResponse { Results = { ["UserId"] = GateWriter } }));
+        org.Setup(o => o.ExecuteAsync(Moq.It.IsAny<Microsoft.Crm.Sdk.Messages.AssignRequest>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns((OrganizationRequest request, CancellationToken _) =>
+            {
+                var assign = (Microsoft.Crm.Sdk.Messages.AssignRequest)request;
+                ShareWorld.MoveOwner(assign.Target.LogicalName, assign.Target.Id, DataversePrincipalRef.Team(assign.Assignee.Id));
+                return Task.FromResult(new OrganizationResponse());
+            });
+        var log = new Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing>();
+        var sharing = new Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing(
+            entities.Object,
+            _shareTable,
+            new Sprk.Bff.Api.Services.Signals.OntologyWriterDataverseClient(
+                () => org.Object, NullLogger<Sprk.Bff.Api.Services.Signals.OntologyWriterDataverseClient>.Instance),
+            new RecordOwnershipResolver(entities.Object, SecureChildShareWorld.Configuration(), NullLogger<RecordOwnershipResolver>.Instance),
+            Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator>(),
+            log);
+        return (sharing, org, log);
+    }
+
+    /// <summary>A user-owned gate record of <paramref name="communication"/> in the share world, created by <see cref="GateWriter"/>.</summary>
+    private void ShareWorldGateRecord(Guid record, Guid communication)
+    {
+        ShareWorld.UserOwnedChild("sprk_decisionrecord", record, ("sprk_regardingcommunication", "sprk_communication", communication));
+        ShareWorld.Set("sprk_decisionrecord", record, "createdby", new EntityReference("systemuser", GateWriter));
+    }
 
     // ── Create (G5) ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -932,14 +983,18 @@ public sealed partial class SecureChildOwnershipAiToolTests
     public async Task CommunicationFiling_IntoASecureMatter_RemovesTheGateDecisionRecordsParticipantShares_D169_042bRound3()
     {
         // uac-r2 (042b round 3 K5): a communication whose user-owned gate Decision Record carries D-169 participant shares is re-filed into a
-        // SECURE matter. The gate helper leaves a Secure answer to the engine; the REAL reconciler's pass over the communication's descendants
-        // and the REAL synchronizer (which revokes direct shares outside the mirror) leave none of the participant shares on the record.
+        // SECURE matter. The REAL reconciler's pass over the communication's descendants and the REAL synchronizer (which revokes direct shares
+        // outside the mirror) leave none of the participant shares on the record. Round 4: the gate helper runs over THE SAME world (its
+        // after-re-file step finds the record, now Secure-team-owned and carrying the mirror's user share), asks the REAL resolver, gets the
+        // Secure answer and leaves the record and its shares to the engine.
+        var (gate, gateOrg, gateLog) = GateHelperOverTheShareWorld();
+        _gateOverShareWorld = gate;
         var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
         var gateRecord = Guid.Parse("a2470000-0000-4000-8000-0000000000d5");
         var participant = Guid.Parse("a2470000-0000-4000-8000-0000000000d6");
         _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
         ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
-        ShareWorld.UserOwnedChild("sprk_decisionrecord", gateRecord, ("sprk_regardingcommunication", "sprk_communication", communication));
+        ShareWorldGateRecord(gateRecord, communication);
         _shareTable.Seed("sprk_decisionrecord", gateRecord, DataversePrincipalRef.User(participant), 1);
 
         var result = await RefileCommunication(
@@ -950,6 +1005,58 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "a participant who is not a sharee of the secure matter keeps no access to the gate record");
         ShareWorld.OwnerOf("sprk_decisionrecord", gateRecord).Should().Be(DataversePrincipalRef.Team(Directory.SecureNamedTeam),
             "the record follows its communication into isolation");
+        _shareTable.MaskOf("sprk_decisionrecord", gateRecord, DataversePrincipalRef.User(Sharee)).Should().NotBeNull(
+            "the secure matter's sharee keeps the mirror's share: the gate helper does not revoke a Secure-team-owned record's shares");
+        gateLog.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Information
+                                              && e.Message.Contains($"Gate Decision Record {gateRecord}", StringComparison.Ordinal)
+                                              && e.Message.Contains("left as they are", StringComparison.Ordinal),
+            "the helper saw the record, asked the real resolver and skipped it on the Secure answer");
+        gateOrg.Verify(o => o.ExecuteAsync(Moq.It.IsAny<Microsoft.Crm.Sdk.Messages.AssignRequest>(), Moq.It.IsAny<CancellationToken>()),
+            Moq.Times.Never, "the helper never re-owns a record of a secure matter");
+        gateLog.Entries.Should().NotContain(e => e.Level >= Microsoft.Extensions.Logging.LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task GateRecordSharing_OverTheRealResolver_AContactOnlyCommunicationIsUnfiledAndShared_AMatterOneIsFiledAndReowned_D169_042bRound4()
+    {
+        // 042b round 4: the helper's "filed" test (IsFiled) paired with the REAL RecordOwnershipResolver over the same rows. A communication
+        // regarding only a contact is unfiled for both: its record is shared at write, and the resolver's answer on a filing pass keeps it
+        // user-owned and shared. One regarding an ordinary matter is filed for both: no participant share, and the record is re-owned at write
+        // to the matter's team.
+        var (gate, gateOrg, gateLog) = GateHelperOverTheShareWorld();
+        var contactOnly = Guid.Parse("a2470000-0000-4000-8000-0000000000e3");
+        var matterFiled = Guid.Parse("a2470000-0000-4000-8000-0000000000e4");
+        var contactRecord = Guid.Parse("a2470000-0000-4000-8000-0000000000e5");
+        var matterRecord = Guid.Parse("a2470000-0000-4000-8000-0000000000e6");
+        var participant = Guid.Parse("a2470000-0000-4000-8000-0000000000e7");
+        var owner = SecureChildShareWorld.SomeUser;
+        ShareWorld.User(participant, SecureChildShareWorld.GeneralBu); // no external flag: internal
+        ShareWorld.UserOwnedChild("sprk_communication", contactOnly, ("sprk_regardingperson", "contact", Guid.NewGuid()));
+        ShareWorld.UserOwnedChild("sprk_communication", matterFiled, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+        foreach (var communication in new[] { contactOnly, matterFiled })
+        {
+            ShareWorld.Set("sprk_communication", communication, "ownerid", new EntityReference("systemuser", owner));
+            _shareTable.Seed("sprk_communication", communication, DataversePrincipalRef.User(participant), 1);
+        }
+
+        ShareWorldGateRecord(contactRecord, contactOnly);
+        ShareWorldGateRecord(matterRecord, matterFiled);
+
+        await gate.ShareAtWriteAsync(contactRecord, contactOnly, owner);
+        await gate.ShareAtWriteAsync(matterRecord, matterFiled, owner);
+        await gate.ReownAfterFilingAsync(contactOnly);
+
+        _shareTable.MaskOf("sprk_decisionrecord", contactRecord, DataversePrincipalRef.User(participant)).Should().Be(1,
+            "unfiled: the record is shared Read with the communication's internal sharee");
+        ShareWorld.OwnerOf("sprk_decisionrecord", contactRecord).Should().Be(DataversePrincipalRef.User(owner),
+            "the real resolver answers Unchanged for a communication regarding only a contact");
+        ShareWorld.OwnerOf("sprk_decisionrecord", matterRecord).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam),
+            "filed: the real resolver answers the ordinary matter's team and the record is re-owned at write");
+        _shareTable.MaskOf("sprk_decisionrecord", matterRecord, DataversePrincipalRef.User(participant)).Should().BeNull(
+            "a filed communication's record gets no participant share");
+        gateOrg.Verify(o => o.ExecuteAsync(Moq.It.IsAny<Microsoft.Crm.Sdk.Messages.AssignRequest>(), Moq.It.IsAny<CancellationToken>()),
+            Moq.Times.Once);
+        gateLog.Entries.Should().NotContain(e => e.Level >= Microsoft.Extensions.Logging.LogLevel.Warning);
     }
 
     private static readonly Guid GateRecord = Guid.Parse("d0d0d0d0-0000-4000-8000-0000000000e1");
