@@ -137,6 +137,22 @@ public class InvoiceComplianceEvaluatorTests
     }
 
     [Fact]
+    public void IsInForceOn_AVersionThatIsNotCurrentAndHasNoEndDate_IsNeverInForce_OnAnyDate_K3()
+    {
+        // The second K3 layer on its own: whatever the loader returns, such a version never applies.
+        var draft = Increment("CD-INCREMENT", "0.5", from: RulesFrom, to: null, current: false, number: 2);
+        var ended = draft with { InForceTo = MidMarch };
+        var current = draft with { IsCurrent = true };
+
+        new[] { RulesFrom, EarlyLine, LateLine, new DateOnly(2030, 1, 1) }.Should().OnlyContain(d => !draft.IsInForceOn(d));
+        draft.CanBeInForce.Should().BeFalse();
+        ended.IsInForceOn(EarlyLine).Should().BeTrue();
+        ended.IsInForceOn(MidMarch).Should().BeFalse("the end date is exclusive");
+        current.IsInForceOn(LateLine).Should().BeTrue();
+        current.IsInForceOn(RulesFrom.AddDays(-1)).Should().BeFalse("not before its in-force-from");
+    }
+
+    [Fact]
     public void TheCurrentVersion_StillApplies_WhenAFailedPublishLeftAnEndDateOnIt()
     {
         var current = Increment("CD-INCREMENT", "0.5", to: new DateOnly(2026, 2, 1), current: true);
