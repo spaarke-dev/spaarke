@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="102b" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Rule scope in R1: author a matter scope in the wizard, evaluate matter-scoped rules, and make the dry run count within the scope</title>
+    <phase>10 Ontology admin (D-22)</phase>
+    <gate>102, 102a complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tenant-isolation and record-scope sensitive: a scoped rule must never raise or close a Signal outside its scope. Changes the evaluator, the authoring routes and the wizard.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting (authoring BFF, the one evaluator, the dry run, the wizard) with scope-isolation semantics; the closure and supersede rules must stay exact.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>No other lane is running in these files.</parallel-reason>
+    <deps>102, 102a</deps>
+    <tags>bff-api,tenant-isolation,security,admin,endpoints,frontend,worker</tags>
+    <estimated-effort>1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>Owner decision D-165 (2026-10-17): rule scope is in R1. Let an admin give a rule a MATTER scope in the wizard, make the nightly evaluator and the publish re-evaluation evaluate a matter-scoped rule within that matter only, and make the dry run's counts use the same scope. Tenant scope stays blank (every environment is single-tenant).</prompt>
+  <role>SPAARKE full-stack developer (BFF + React). Scope is enforced server-side; the client only chooses a matter.</role>
+  <goal>A matter-scoped rule is authored, tested and published from the wizard; it raises, supersedes and closes Signals for its own matter only, never for another matter; the dry run's counts equal what publishing does; an unscoped rule behaves exactly as today.</goal>
+
+  <context>
+    <background>
+      Today: `sprk_policy.sprk_tenant` (string) and `sprk_policy.sprk_matter` (lookup) exist, but (1) the save route takes neither, so the wizard shows scope read-only (task 102 deviation 1); (2) the nightly `SignalReevaluationJob` skips any scoped policy (`IsScoped`, ~line 176; counted `ScopedNotEvaluated`, logged Warning, makes the run not-successful: DI-62 #1647); (3) the dry run builds the policy with no scope (`OntologyAdminAuthoringService.cs` ~407), so a scoped rule's counts overstate (DI-112 #2069; task 102 added a warning sentence on the publish confirmation). Both DI items are pulled into R1 by D-165 and are closed by this task.
+      Precedent for the semantics: `CommunicationRuleGate.cs` (~131-190): blank tenant = all tenants, empty matter = all matters; tenant is null at runtime because each environment is single-tenant (~274).
+      The evaluator already takes a subject scope: `EvaluatePolicyAsync(..., SubjectScope? scope)` with `SubjectScope(string Entity, Guid Id)` (`SignalReevaluationJob.cs` ~174, ~973), used by the event hooks (task 032).
+      R1 decision on the shape (D-165): a matter scope is allowed only when the policy's subject type is `sprk_matter`; the scoped evaluation is the existing subject-scoped evaluation with Subject = that matter. A non-matter subject with a matter scope is refused at save and publish with its own reasonCode. Tenant stays blank: a non-blank tenant on the request is refused; the tenant is never read from the request body.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringModels.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ontology/OntologyAdminAuthoringSignalEngine.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ontology/OntologyAdminAuthoringEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/RuleWizard/</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/102a-authoring-contract.md</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/102-ontology-admin-rule-wizard.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-165): every authoring route that writes a policy or a version (save, publish) and the dry run and validate accept an optional matter id. The BFF reads the matter AS THE CALLER and refuses (uniform not-found, no oracle) a matter the caller cannot read. The tenant is never taken from the request; a non-blank tenant value is refused.</constraint>
+    <constraint source="owner">Scope (D-165): a matter scope requires subject type `sprk_matter`; otherwise refuse with a new reasonCode `ontology.admin.scope_subject_mismatch` on save, publish, dry run and validate alike (one shared check, like 102a's allow-list).</constraint>
+    <constraint source="project">Scope (evaluator, DI-62): `SignalReevaluationJob` evaluates a matter-scoped policy with `SubjectScope("sprk_matter", matterId)` instead of skipping it. It must never write, supersede or close a Signal whose subject is outside that scope. `ScopedNotEvaluated` remains only for a policy that is still unevaluable (a non-blank tenant, or a matter scope on a non-matter subject written outside the BFF), and such a policy is refused visibly as today.</constraint>
+    <constraint source="project">Scope (dry run, DI-112): the dry run evaluates with the same SubjectScope, so `wouldSupersede` and `wouldReraise` equal what the publish-time re-evaluation does. Remove the wizard's "counts are worked out without the rule's scope" sentence once the counts are exact.</constraint>
+    <constraint source="project">Scope (changing scope): if publish changes an existing policy's matter scope, Signals of that policy whose subject is now outside the scope are closed in the same publish with an existing closure reason. If no existing reason fits, STOP and escalate (escalation trigger 2).</constraint>
+    <constraint source="project">Scope (wizard): the Scope and noise step lets the admin pick one matter or "All matters", using an existing shared picker (search `PolymorphicPicker`, `LookupField` and the matter lookup used by other Console wizards in `Spaarke.UI.Components`). The client holds no list of matters. A matter scope is offered only when the subject is a matter. New version shows the policy's current scope and can change it.</constraint>
+    <constraint source="ADR-028">Scope: every new read on the authoring routes runs as the caller (the existing 101/102a pattern); the evaluator keeps its own identity. No route gains a new authorization rule; the ledger entries stay HandlerDecision.</constraint>
+    <constraint source="project">Scope (comment fix): update `PolicyVersionValidator.cs`'s "Residual (open, pending the owner's decision ...)" remarks to say the tension is re-signed by the owner (D-161, option A), and the same in `notes/102a-authoring-contract.md` if not already done.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement stays in the existing Ontology admin service and endpoints file (no new endpoint file, no new DI registration unless justified); measure the publish-size delta against a fresh master build at short paths; full `dotnet test tests/Spaarke.ArchTests` before pushing; never run the unfiltered `Sprk.Bff.Api.Tests`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Rule scope</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor, load the knowledge files, read the issues #1647 and #2069, and record a short design (scope check, evaluator change, dry run, closure on scope change) in notes/102b-rule-matter-scope.md before code.</step>
+    <step order="1">Models and the shared scope check (save, publish, dry run, validate).</step>
+    <step order="2">Persist the matter scope on save and publish (lookup bind), read as the caller.</step>
+    <step order="3">Evaluator: scoped evaluation in the nightly job and at publish; closure on scope change.</step>
+    <step order="4">Dry run with the scope; exact counts.</step>
+    <step order="5">Wizard: matter picker in Scope and noise; New version shows and changes the scope; remove the counts-without-scope sentence.</step>
+    <step order="6">Tests (see acceptance criteria), ArchTests, publish-size delta, filtered BFF tests, jest.</step>
+    <step order="7">Set this POML status to in-progress and the TASK-INDEX row to 🔄 [wip]; the main session closes them after review.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a matter-scoped evaluation cannot be confined to the matter by the existing SubjectScope path (for example a supersede or closure query that would touch other matters' Signals), STOP and escalate before writing a new query shape.</trigger>
+    <trigger>If changing an existing policy's scope needs a new closure reason or a new Signal state, STOP and escalate (root CLAUDE.md §6).</trigger>
+    <trigger>If no shared matter picker exists that works in the Console wizard host, STOP and report; do not hand-build a matter list in the client.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`sprk_policy.sprk_matter`/`sprk_tenant` columns, `CommunicationRuleGate` scope semantics, `SignalReevaluationJob`'s SubjectScope path, the 101/102a authoring routes and the 102 wizard all exist.</existing>
+    <extension>Every change extends those; no new endpoint, table, column or service.</extension>
+    <cost-of-doing-nothing>A rule cannot be limited to a matter (owner D-165), a scoped policy written by any other path is never evaluated and makes every nightly run unhealthy (DI-62), and a scoped rule's publish counts are wrong (DI-112).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build, filtered BFF tests, ArchTests, publish</tool>
+    <tool name="npm">Spaarke.UI.Components jest and tsc</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Authoring BFF scope check and persistence; evaluator scoped evaluation; dry-run scope; wizard matter picker</output>
+    <output type="notes">projects/spaarke-ontology-platform-r1/notes/102b-rule-matter-scope.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a matter-subject draft with matter M the caller can read, when saved and published, then the policy row has sprk_matter = M and sprk_tenant blank, and the publish re-evaluation raises Signals only for M.</criterion>
+    <criterion testable="true">Given a published rule scoped to M, when the nightly job runs, then it is evaluated (not counted ScopedNotEvaluated), Signals are written or closed only for M, a qualifying subject on another matter N gets NO Signal (must-not-fire), and the run is successful.</criterion>
+    <criterion testable="true">Given a rule scoped to M, when the dry run runs, then wouldSupersede and wouldReraise equal the counts the publish re-evaluation produces for the same data (one test that runs both over the same fake data).</criterion>
+    <criterion testable="true">Negative: a matter the caller cannot read gives the same refusal as a matter that does not exist; a matter scope on a non-matter subject gives `ontology.admin.scope_subject_mismatch` on save, publish, dry run and validate; a request carrying a tenant value is refused; an unscoped rule's save, dry run, publish and nightly evaluation are unchanged (existing tests still pass).</criterion>
+    <criterion testable="true">Given publish changes a policy's scope from all matters to M (or from M to N), then its open Signals outside the new scope are closed in that publish, and none inside it are.</criterion>
+    <criterion testable="true">The wizard offers a matter scope only for a matter subject, uses an existing shared picker, sends only the matter id, shows the scope on New version, maps `scope_subject_mismatch` to the scope field, and no longer shows the counts-without-scope sentence.</criterion>
+    <criterion testable="true">Seeding proof for the must-not-fire guard: remove the scope confinement in the evaluator, the cross-matter test fails; restore. Record it in the notes.</criterion>
+    <criterion testable="true">Tests cover the stated contract and the negative cases above; anything beyond needs a one-line justification in the notes. ArchTests pass in full; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+
+  <notes>D-165 (owner 2026-10-17: "include scope added to the backend in r1"); closes DI-62 #1647 and DI-112 #2069; review: two adversarial passes (tenant-isolation) and uac-r2, whose stated focus is tenant from the token never the body, server-side scope in the evaluator, no Signal outside the matter scope, and must-fire / must-not-fire tests.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion date="2026-10-18">PR #2075 merged into docs `4ff829fa5` after 5 fix rounds (adversarial passes 1-3 + uac-r2 each round; re-checks clean). D-165, D-166, D-167. Live 2026-10-18: `sprk_policy_matter` CascadeDelete=Cascade on spaarkedev1 (owner-approved); admin delete removes only the rule; a Core User matter delete also deletes the matter's rules (not refused; owner accepted, D-167). Closed #1647, #2069. Known limits DI-115 #2084 (owner decision), DI-116 #2085, archive. Notes: notes/102b-rule-matter-scope.md. BFF code reaches dev with the next docs->master sync + R3 deploy (BFF before Console).</completion>
+</task>

@@ -188,7 +188,8 @@ public sealed class OntologyAdminAuthoringLiveTests
             {
                 await scope.ServiceProvider.GetRequiredService<ITenantCache>().SetAsync("live", OntologyAdminAuthoringService.DryRunProofResource,
                     OntologyAdminAuthoringService.ProofKey(consoleUser, null, DecisionLane.Decide, "Existence", body, Template),
-                    OntologyAdminAuthoringService.DryRunProofVersion, DateTimeOffset.UtcNow, TimeSpan.FromMinutes(5));
+                    OntologyAdminAuthoringService.DryRunProofVersion, new OntologyAdminAuthoringService.DryRunProof(DateTimeOffset.UtcNow, null),
+                    TimeSpan.FromMinutes(5));
             }
 
             var before = await CountZzPoliciesAsync(dv);
