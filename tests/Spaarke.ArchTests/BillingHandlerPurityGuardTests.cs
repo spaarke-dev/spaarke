@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Sprk.Bff.Api.Services.Signals.Billing;
@@ -41,12 +42,18 @@ public sealed class BillingHandlerPurityGuardTests
         "System.TimeProvider", "System.Random", "System.Environment", "System.Activator", "System.Console", "System.AppContext",
     ];
 
-    /// <summary>Single members: the ambient clock and a fresh identity are impure; <c>Type.GetTypeFromHandle</c> (a <c>typeof</c>) is not.</summary>
+    /// <summary>
+    /// Single members: the ambient clock, a fresh identity (<c>NewGuid</c> and the time-ordered <c>CreateVersion7</c>), the
+    /// machine's current culture and time zone are impure (the same input would give different findings on another machine);
+    /// <c>Type.GetTypeFromHandle</c> (a <c>typeof</c>), <c>CultureInfo.InvariantCulture</c> and <c>TimeZoneInfo.Utc</c> are not.
+    /// </summary>
     private static readonly (string Type, string Member)[] ForbiddenMembers =
     [
-        ("System.Guid", "NewGuid"),
+        ("System.Guid", "NewGuid"), ("System.Guid", "CreateVersion7"),
         ("System.DateTime", "get_Now"), ("System.DateTime", "get_UtcNow"), ("System.DateTime", "get_Today"),
         ("System.DateTimeOffset", "get_Now"), ("System.DateTimeOffset", "get_UtcNow"),
+        ("System.Globalization.CultureInfo", "get_CurrentCulture"), ("System.Globalization.CultureInfo", "get_CurrentUICulture"),
+        ("System.TimeZoneInfo", "get_Local"),
     ];
 
     private static readonly Type[] ContractTypes =
@@ -127,6 +134,10 @@ public sealed class BillingHandlerPurityGuardTests
     [InlineData(nameof(BillingHandlerPurityControlFixtures.ReadsAProvider), "TimeProvider")]
     [InlineData(nameof(BillingHandlerPurityControlFixtures.DrawsRandomness), "Random")]
     [InlineData(nameof(BillingHandlerPurityControlFixtures.MintsAnIdentity), "Guid")]
+    [InlineData(nameof(BillingHandlerPurityControlFixtures.MintsATimeOrderedIdentity), "System.Guid.CreateVersion7")]
+    [InlineData(nameof(BillingHandlerPurityControlFixtures.ReadsTheCurrentCulture), "System.Globalization.CultureInfo.get_CurrentCulture")]
+    [InlineData(nameof(BillingHandlerPurityControlFixtures.ReadsTheCurrentUiCulture), "System.Globalization.CultureInfo.get_CurrentUICulture")]
+    [InlineData(nameof(BillingHandlerPurityControlFixtures.ReadsTheLocalTimeZone), "System.TimeZoneInfo.get_Local")]
     [InlineData(nameof(BillingHandlerPurityControlFixtures.ReadsAFile), "System.IO")]
     [InlineData(nameof(BillingHandlerPurityControlFixtures.CallsTheNetwork), "System.Net")]
     [InlineData(nameof(BillingHandlerPurityControlFixtures.ReadsTheEnvironment), "Environment")]
@@ -235,6 +246,14 @@ internal static class BillingHandlerPurityControlFixtures
 
     internal static Guid MintsAnIdentity() => Guid.NewGuid();
 
+    internal static Guid MintsATimeOrderedIdentity() => Guid.CreateVersion7();
+
+    internal static CultureInfo ReadsTheCurrentCulture() => CultureInfo.CurrentCulture;
+
+    internal static CultureInfo ReadsTheCurrentUiCulture() => CultureInfo.CurrentUICulture;
+
+    internal static TimeZoneInfo ReadsTheLocalTimeZone() => TimeZoneInfo.Local;
+
     internal static string ReadsAFile() => File.ReadAllText("rules.json");
 
     internal static HttpClient CallsTheNetwork() => new();
@@ -259,6 +278,13 @@ internal static class BillingHandlerPurityControlFixtures
     {
         internal static string Judge(decimal hours, decimal increment) =>
             (hours % increment) == 0m ? "holds" : decimal.Round(hours, 2, MidpointRounding.AwayFromZero).ToString("0.##");
+
+        /// <summary>The ambient-state siblings a handler MAY use: the invariant culture, UTC, a parsed or empty identity. The
+        /// forbidden members are member-specific, so none of these is flagged.</summary>
+        internal static string InvariantAndDeterministic(decimal value, string id) =>
+            value.ToString("F2", CultureInfo.InvariantCulture)
+            + TimeZoneInfo.Utc.Id
+            + (Guid.TryParse(id, out var parsed) ? parsed : Guid.Empty);
     }
 
     /// <summary>A registry of handlers: a static dictionary keyed by rule type. The guard must fire on it.</summary>
