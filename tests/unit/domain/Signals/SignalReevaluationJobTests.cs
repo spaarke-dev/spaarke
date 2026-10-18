@@ -2593,7 +2593,7 @@ public partial class SignalReevaluationJobTests
                 new Ownership.CoreAncestorResolver(Sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
                 Sysadmin,
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
-                Clock, Logger<DecisionRecordWriter>());
+                Clock, Logger<DecisionRecordWriter>(), new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
             Job = new SignalReevaluationJob(Evaluator, Writer, Suppression, Closure, Records, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
             Sysadmin.Stub(new Entity("sprk_matter", MatterId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
             Sysadmin.Stub(new Entity("sprk_project", ProjectId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });

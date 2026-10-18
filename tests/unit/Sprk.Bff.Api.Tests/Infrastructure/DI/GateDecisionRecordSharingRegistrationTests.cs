@@ -11,7 +11,7 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.DI;
 
 /// <summary>
 /// Ontology task 042b round 2 (D-169, uac-r2): <see cref="GateDecisionRecordSharing"/> is registered unconditionally and is a REQUIRED dependency
-/// of <see cref="DirectThreadAccessService"/> (a singleton) and <see cref="SecureChildReconciler"/> (scoped). Built from the REAL host
+/// of <see cref="DirectThreadAccessService"/> and <see cref="DecisionRecordWriter"/> (singletons) and <see cref="SecureChildReconciler"/> (scoped). Built from the REAL host
 /// composition (<see cref="CustomWebAppFactory"/>, which replaces only the network-bound services), so a missing registration or a captive
 /// scoped dependency fails here instead of at the first request.
 /// </summary>
@@ -30,9 +30,11 @@ public sealed class GateDecisionRecordSharingRegistrationTests : IClassFixture<C
         var threads = scope.ServiceProvider.GetRequiredService<IDirectThreadAccessService>()
             .Should().BeOfType<DirectThreadAccessService>().Subject;
         var reconciler = scope.ServiceProvider.GetRequiredService<SecureChildReconciler>();
+        var writer = scope.ServiceProvider.GetRequiredService<DecisionRecordWriter>();
 
         GateOf(threads).Should().BeSameAs(gate, "one helper for the host");
         GateOf(reconciler).Should().BeSameAs(gate);
+        GateOf(writer).Should().BeSameAs(gate, "042b round 3: the writer's share-at-write takes it as a required dependency too");
     }
 
     [Fact]
@@ -45,9 +47,11 @@ public sealed class GateDecisionRecordSharingRegistrationTests : IClassFixture<C
         var threads = validating.Services.GetRequiredService<IDirectThreadAccessService>();
         using var scope = validating.Services.CreateScope();
         var reconciler = scope.ServiceProvider.GetRequiredService<SecureChildReconciler>();
+        var writer = validating.Services.GetRequiredService<DecisionRecordWriter>();
 
         GateOf(threads).Should().BeSameAs(gate);
         GateOf(reconciler).Should().BeSameAs(gate);
+        GateOf(writer).Should().BeSameAs(gate);
     }
 
     private static object? GateOf(object consumer) => consumer.GetType()

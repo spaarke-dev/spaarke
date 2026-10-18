@@ -1582,7 +1582,8 @@ public class SignalWriterTests
             resolver,
             new Ownership.CoreAncestorResolver(sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
             sysadmin,
-            new RecordTypeCatalogStub(RecordTypeCatalogStub.SpaarkeDev1), new FakeTimeProvider(FirstRun), NullLogger<DecisionRecordWriter>.Instance);
+            new RecordTypeCatalogStub(RecordTypeCatalogStub.SpaarkeDev1), new FakeTimeProvider(FirstRun), NullLogger<DecisionRecordWriter>.Instance,
+            new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
         var review = new DecisionRecordRequest(Guid.NewGuid(), PolicyVersionId,
             filed ? new DecisionRecordCore("sprk_matter", MatterId, Guid.NewGuid()) : null,
             new Sprk.Bff.Api.Services.Signals.Actions.DecisionRecordRef("sprk_todo", TodoId), TestInfrastructure.OwnershipDirectory.CallerUserId,

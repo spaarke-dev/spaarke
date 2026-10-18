@@ -73,7 +73,7 @@ public static class SignalsModule
         // when any re-file of the communication runs SecureChildReconciler.AfterRefileAsync. Registered unconditionally, singleton over
         // singletons (the shared sysadmin reader, the POA seam, the writer client above, the resolver, the cache invalidator), so the
         // scoped SecureChildReconciler and the singleton DirectThreadAccessService take it as a REQUIRED dependency with no captive
-        // scope (GateDecisionRecordSharingRegistrationTests). DecisionRecordWriter takes it as an optional last parameter. CLAUDE.md section 11: Existing: the writer (create-only, guarded), uac-r2's
+        // scope (GateDecisionRecordSharingRegistrationTests). DecisionRecordWriter takes it as a REQUIRED last parameter too. CLAUDE.md section 11: Existing: the writer (create-only, guarded), uac-r2's
         // DirectThreadAccessService and SecureChildReconciler.ReownOrdinaryRowAsync (refuses a user-owned row). Extension: the writer cannot
         // assign without breaking its create-only guard; the other two are uac-r2's. Cost of doing nothing: D-169 fails (owner-only record).
         services.AddSingleton<GateDecisionRecordSharing>();

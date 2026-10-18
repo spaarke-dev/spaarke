@@ -503,7 +503,7 @@ public sealed class DecisionRecordWriter
     private readonly TodoRegardingBuilder _regarding;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<DecisionRecordWriter> _logger;
-    private readonly GateDecisionRecordSharing? _participantShares;
+    private readonly GateDecisionRecordSharing _participantShares;
 
     /// <param name="writerClient">The ontology writer identity: the record's ONLY create, and the secure-owner read-back.</param>
     /// <param name="ownership">uac-r2's owner resolver (contract C3).</param>
@@ -514,8 +514,7 @@ public sealed class DecisionRecordWriter
     /// <param name="timeProvider">The decision time when the review gives none.</param>
     /// <param name="logger">Refusals and the secure-owner read-back.</param>
     /// <param name="participantShares">Task 042b (D-169): shares an unfiled communication's gate record, Read only, with the communication's
-    /// internal sharees after the create (best-effort, never throws). Registered in production; null only where a test builds the writer
-    /// without it, and then no participant share is made (the record stays owner-only).</param>
+    /// internal sharees after the create (best-effort, never throws). Required (042b round 3, as uac-r2 required for its two consumers).</param>
     public DecisionRecordWriter(
         OntologyWriterDataverseClient writerClient,
         IRecordOwnershipResolver ownership,
@@ -524,9 +523,9 @@ public sealed class DecisionRecordWriter
         ICommunicationDataverseService recordTypes,
         TimeProvider timeProvider,
         ILogger<DecisionRecordWriter> logger,
-        GateDecisionRecordSharing? participantShares = null)
+        GateDecisionRecordSharing participantShares)
     {
-        _participantShares = participantShares;
+        _participantShares = participantShares ?? throw new ArgumentNullException(nameof(participantShares));
         _writerClient = writerClient ?? throw new ArgumentNullException(nameof(writerClient));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
@@ -1244,7 +1243,7 @@ public sealed class DecisionRecordWriter
         // Task 042b (D-169): a gate record owned by an unfiled communication's own user (the only record with a Principal owner, D-144) is
         // also readable by the communication's internal sharees. After the create, never before; never throws (the record has landed). A
         // team-owned record never reaches this (D-123).
-        if (recordOwner.Principal is { LogicalName: "systemuser", Id: var ownerUserId } && _participantShares is not null)
+        if (recordOwner.Principal is { LogicalName: "systemuser", Id: var ownerUserId })
         {
             await _participantShares.ShareAtWriteAsync(recordId, SubjectOf(request).Id, ownerUserId).ConfigureAwait(false);
         }
