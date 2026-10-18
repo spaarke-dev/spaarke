@@ -400,6 +400,26 @@ public class BillingFactLoaderTests
     }
 
     [Fact]
+    public async Task AnAmbiguousSecureOwnerTeam_LeavesEverySetUnresolved_AndTheDuplicateIsWithheld_UacR2Condition3_A2()
+    {
+        // Two owner teams of the Secure Record BU carry the configured name: the walk cannot tell which rows are secure (Failed).
+        // Empty sets here (the mutation that survived review) would read every record as ordinary and show the prior's detail.
+        _world.Team(Guid.NewGuid(), SecureChildShareWorld.SecureBu, SecureChildShareWorld.SecureOwnerTeamName, isDefault: false, teamType: 0);
+        DuplicateRule();
+        _world.OrdinaryRoot("sprk_matter", OrdinaryMatter);
+        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", OrdinaryMatter));
+        PriorWithInvoice("INV-100.3", null);
+
+        var loaded = await Loader().LoadAsync(Request(OrdinaryMatter), CancellationToken.None);
+        var finding = await TheDuplicateFindingAsync(OrdinaryMatter);
+
+        loaded.InvoiceSecureRoots.Should().BeNull();
+        loaded.PriorSubmissions.Should().HaveCount(2).And.OnlyContain(p => p.SecureRoots == null);
+        finding.DetailWithheld.Should().BeTrue();
+        finding.FactValues.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ASecurePrior_OnAnOrdinaryInvoice_IsHidden_D112()
     {
         DuplicateRule();
