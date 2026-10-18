@@ -89,8 +89,11 @@ public sealed record BillingFactSet
 /// <summary>The header of the submission.</summary>
 public sealed record BillingInvoiceFacts
 {
-    /// <summary>This submission's id, so Duplicate never counts the submission against itself. <c>null</c> = not known.</summary>
-    public Guid? SubmissionId { get; init; }
+    /// <summary>
+    /// This submission's id, so Duplicate never counts the submission against itself. Required: a fact set without it would
+    /// compare the submission against its own earlier attempt row and flag it as its own duplicate (task 072 always has the id).
+    /// </summary>
+    public required Guid SubmissionId { get; init; }
 
     /// <summary>This submission's tracking number (<c>{invoice}.{n}</c>, task 045), when allocated.</summary>
     public string? TrackingNumber { get; init; }

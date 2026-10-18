@@ -81,10 +81,21 @@ public class DuplicateHandlerTests
     [Fact]
     public void TheSubmissionItself_IsNeverItsOwnDuplicate()
     {
-        var self = Invoice().SubmissionId!.Value;
+        var self = Invoice().SubmissionId;
         var prior = Prior("INV-100.2", "INV-100", 2) with { SubmissionId = self };
 
         Run(InvoiceNumberOnly, Header(prior)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TheInvoiceFactsSubmissionId_IsARequiredNonNullableGuid_K1()
+    {
+        // Without it Duplicate cannot exclude the submission's own earlier attempt row. A nullable, optional id let a fact set skip
+        // that exclusion silently; 072 always has the id, so the type now demands it.
+        var property = typeof(BillingInvoiceFacts).GetProperty(nameof(BillingInvoiceFacts.SubmissionId))!;
+
+        property.PropertyType.Should().Be(typeof(Guid));
+        property.IsDefined(typeof(System.Runtime.CompilerServices.RequiredMemberAttribute), inherit: false).Should().BeTrue();
     }
 
     [Fact]

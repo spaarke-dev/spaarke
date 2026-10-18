@@ -51,7 +51,7 @@ internal static class DuplicateHandler
     {
         var self = facts.Invoice.SubmissionId;
         return facts.PriorSubmissions
-            .Where(p => p.Status == BillingPriorStatus.Active && (self is null || p.SubmissionId != self.Value))
+            .Where(p => p.Status == BillingPriorStatus.Active && p.SubmissionId != self)
             .OrderBy(p => p.Sequence)
             .ThenBy(p => p.TrackingNumber, StringComparer.Ordinal)
             .ToList();
