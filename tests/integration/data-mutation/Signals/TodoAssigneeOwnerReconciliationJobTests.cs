@@ -545,7 +545,7 @@ public class TodoAssigneeOwnerReconciliationJobTests
         var synchronizer = new SecureChildShareSynchronizer(entities.Object, new FakeRecordShareTable(),
             SecureChildShareWorld.NobodyWalled(), configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
         var reconciler = new SecureChildReconciler(entities.Object, ownership, synchronizer, _webApi, configuration,
-            NullLogger<SecureChildReconciler>.Instance);
+            NullLogger<SecureChildReconciler>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
         var probe = SecureChildShareWorld.ColumnProbe();
         CoreAncestorResolver.EntityColumnProbe columns = (table, ct) => table == failingProbeOf
             ? throw new InvalidOperationException($"Test: the column metadata of {table} is unavailable.")

@@ -140,9 +140,11 @@ public sealed class GateDecisionRecordSharing
     }
 
     /// <summary>
-    /// After an Office save filed <paramref name="communicationId"/>: re-owns each of its gate records still owned by a user to the resolver's
-    /// ordinary team, reads the owner back, and only then revokes every share on the record. A Secure answer is left to
-    /// <see cref="SecureChildReconciler"/>. Never throws; runs on <see cref="CancellationToken.None"/> (the filing has landed).
+    /// After any re-file of <paramref name="communicationId"/> (<see cref="SecureChildReconciler.AfterRefileAsync"/>, the one step every re-file
+    /// writer runs): re-owns each of its gate records still owned by a user to the resolver's ordinary team, reads the owner back, and only then
+    /// revokes every share on the record. A Secure answer is left to <see cref="SecureChildReconciler"/>; an unfiled communication (Unchanged)
+    /// keeps its records as they are. Idempotent: a record already team-owned is not found again, so a second call does nothing. Never throws;
+    /// runs on <see cref="CancellationToken.None"/> (the filing has landed).
     /// </summary>
     public async Task ReownAfterFilingAsync(Guid communicationId)
     {

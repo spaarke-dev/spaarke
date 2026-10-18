@@ -96,7 +96,11 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// platform-cascade rows, so it needs no Web API client.
     /// </summary>
     private SecureChildReconciler Children(Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null) =>
-        SecureChildShareWorld.ReconcilerOver(() => ShareWorld, _shareTable, null!, threads: threads);
+        SecureChildShareWorld.ReconcilerOver(() => ShareWorld, _shareTable, null!, threads: threads, gateDecisionRecords: _gate.Sharing);
+
+    /// <summary>Ontology task 042b round 2 (D-169): the gate Decision Records the reconciler's after-re-file step re-owns (empty unless a
+    /// test seeds it).</summary>
+    private readonly Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld _gate = new();
 
     // ── Create (G5) ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -920,6 +924,55 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         result.Success.Should().BeFalse();
         threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
+    }
+
+    // ── Ontology task 042b round 2 (D-169, uac-r2 choice A): both re-file paths end in the gate record's re-own ──────────
+
+    private static readonly Guid GateRecord = Guid.Parse("d0d0d0d0-0000-4000-8000-0000000000e1");
+    private static readonly Guid GateSharee = Guid.Parse("a0000000-0000-4000-8000-0000000000e2");
+
+    /// <summary>The communication's user-owned gate record, shared with a participant, and the ordinary matter's team as the answer.</summary>
+    private void SeedGateRecordOf(Guid communication)
+    {
+        _gate.WithGateRecord(GateRecord, communication, Caller).Share(Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld.Record, GateRecord, GateSharee);
+        _gate.OwnerAnswers(RecordOwnerResolution.Owned(Directory.ChildTeam));
+    }
+
+    private void TheGateRecordIsTeamOwnedAndUnshared()
+    {
+        _gate.Rows[(Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld.Record, GateRecord)]
+            .GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(Directory.ChildTeam);
+        _gate.RecordSharees(GateRecord).Should().BeEmpty("its participant shares are revoked once the team owner reads back");
+    }
+
+    [Fact]
+    public async Task CommunicationFiling_UnderAnOrdinaryMatter_ReownsTheGateDecisionRecord_AndRevokesItsShares_D169()
+    {
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+        SeedGateRecordOf(communication);
+
+        var result = await RefileCommunication(
+            communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        TheGateRecordIsTeamOwnedAndUnshared();
+    }
+
+    [Fact]
+    public async Task UpdateTool_ReFilingACommunication_ReownsTheGateDecisionRecord_AndRevokesItsShares_D169()
+    {
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+        SeedGateRecordOf(communication);
+
+        var result = await UpdateRecordWithShares(
+            "sprk_communication", communication, Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        TheGateRecordIsTeamOwnedAndUnshared();
     }
 
     [Fact]

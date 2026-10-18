@@ -98,12 +98,13 @@ public class ReconciledEmailFilingTests
             var entities = new Mock<IGenericEntityService>();
             var configuration = new ConfigurationBuilder().Build();
             var children = Isolation is { } isolation
-                ? SecureChildShareWorld.ReconcilerOver(() => isolation, new FakeRecordShareTable(), null!)
+                ? SecureChildShareWorld.ReconcilerOver(() => isolation, new FakeRecordShareTable(), null!, gateDecisionRecords: GateRecords)
                 : new SecureChildReconciler(
                 entities.Object, Ownership,
                 new SecureChildShareSynchronizer(entities.Object, Mock.Of<IDataverseRecordShareService>(), null!, configuration,
                     NullLogger<SecureChildShareSynchronizer>.Instance),
-                null!, configuration, NullLogger<SecureChildReconciler>.Instance, threads: Threads.Object);
+                null!, configuration, NullLogger<SecureChildReconciler>.Instance, GateRecords ?? new GateSharingWorld().Sharing,
+                threads: Threads.Object);
             var filing = new ReconciledEmailFiling(
                 resolver, Dataverse.Object, Probe.Object, children,
                 Isolation is { } stamped && !RestampOverStamps
@@ -112,8 +113,7 @@ public class ReconciledEmailFilingTests
                         ? new CoreAncestorRestamper(Stamps.Service, Stamps.Resolver, restamperLogger)
                         : Stamps.Restamper,
                 NullLogger<ReconciledEmailFiling>.Instance,
-                Trigger?.Object,
-                GateRecords);
+                Trigger?.Object);
 
             var outcome = await capture.CaptureWithOutcomeAsync(request, "user-oid", CancellationToken.None);
             if (outcome is not null && Rewrite is { } rewrite)
@@ -139,7 +139,8 @@ public class ReconciledEmailFilingTests
         /// <summary>Ontology D-48 (#1659): the association-confirmed Signal trigger the filing queues; null = none registered.</summary>
         public Mock<SignalEvaluationTrigger>? Trigger { get; set; }
 
-        /// <summary>Ontology task 042b (D-169): the gate Decision Record re-own after the filing; null = none registered.</summary>
+        /// <summary>Ontology task 042b (D-169): the gate Decision Record helper the reconciler's after-re-file step calls; null = a double over an
+        /// empty world.</summary>
         public GateDecisionRecordSharing? GateRecords { get; set; }
 
         /// <summary>Ontology task 144: logs the real restamper writes to; null = none. A throwing logger breaks the
@@ -744,5 +745,14 @@ public class ReconciledEmailFilingTests
         result.Should().Be(ReconciledFilingResult.Filed);
         gate.Rows[(GateSharingWorld.Record, GateRecord)].GetAttributeValue<EntityReference>("owninguser").Id.Should().Be(GateOwner);
         gate.RecordSharees(GateRecord).Should().Equal(GateSharee);
+    }
+    [Fact(DisplayName = "Ontology task 042b round 2 (D-169): a gate Decision Record helper fault after the filing leaves the filing standing")]
+    public async Task FileIfUnfiled_AGateHelperFault_LeavesTheFilingStanding()
+    {
+        var world = new World(reconciled: true, Unfiled()) { GateRecords = GateSharingWorld.Faulting() };
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed, "the reconciler's after-re-file step isolates the gate helper's fault");
     }
 }

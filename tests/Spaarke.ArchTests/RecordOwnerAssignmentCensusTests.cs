@@ -334,7 +334,8 @@ public class RecordOwnerAssignmentCensusTests
 
         // ── spaarke-ontology-platform-r1 task 042b (D-169): the gate Decision Record follows its communication's filing ──────
         new UnscannedWriter("GateDecisionRecordSharing.cs", "AssignRequest re-own of a filed communication's gate Decision Record",
-            "ReownAfterFilingAsync asks IRecordOwnershipResolver over the communication and the record's core stamps "
+            "Called once per communication re-file from SecureChildReconciler.AfterRefileAsync (after UAC's own steps; 042b round 2). "
+            + "ReownAfterFilingAsync asks IRecordOwnershipResolver over the communication and the record's core stamps "
             + "(KeepCreatorUnlessTargetIsTeamOwned); a secure answer is left to SecureChildReconciler, Unchanged or a refusal "
             + "keeps the user owner and its shares. The assign is read back before any share is revoked."),
     };

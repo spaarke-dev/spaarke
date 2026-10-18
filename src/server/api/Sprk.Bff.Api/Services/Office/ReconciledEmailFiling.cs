@@ -75,13 +75,9 @@ public sealed class ReconciledEmailFiling
     private readonly CoreAncestorRestamper _restamper;
     private readonly ILogger<ReconciledEmailFiling> _logger;
     private readonly SignalEvaluationTrigger? _signalTrigger;
-    private readonly GateDecisionRecordSharing? _gateDecisionRecords;
 
     /// <param name="signalTrigger">Ontology D-48 (#1659): queues the matter's Signal re-evaluation once a classified communication
     /// is filed to it. Registered in production; null only where a test builds the filing without it.</param>
-    /// <param name="gateDecisionRecords">Ontology task 042b (D-169): re-owns the filed communication's user-owned gate Decision Records to
-    /// the resolver's team, then revokes their participant shares. Registered in production; null only where a test builds the filing
-    /// without it.</param>
     public ReconciledEmailFiling(
         IncomingAssociationResolver associationResolver,
         IGenericEntityService dataverse,
@@ -89,10 +85,8 @@ public sealed class ReconciledEmailFiling
         SecureChildReconciler children,
         CoreAncestorRestamper restamper,
         ILogger<ReconciledEmailFiling> logger,
-        SignalEvaluationTrigger? signalTrigger = null,
-        GateDecisionRecordSharing? gateDecisionRecords = null)
+        SignalEvaluationTrigger? signalTrigger = null)
     {
-        _gateDecisionRecords = gateDecisionRecords;
         _associationResolver = associationResolver ?? throw new ArgumentNullException(nameof(associationResolver));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _accessProbe = accessProbe ?? throw new ArgumentNullException(nameof(accessProbe));
@@ -179,25 +173,6 @@ public sealed class ReconciledEmailFiling
                     ? _children.IsSecureOwnerTeamAsync(team, CancellationToken.None)
                     : Task.FromResult(false),
                 CancellationToken.None).ConfigureAwait(false);
-
-            // Ontology task 042b (D-169): an unfiled communication's gate Decision Record was owned by the communication's user and shared
-            // with its participants; filed, it takes the team-owned path. After the step above, which owns a move into a SECURE record (the
-            // helper leaves that answer alone). Re-owned, read back, and only then unshared; a failure keeps the user owner and the shares.
-            // Never throws by contract; a fault is still caught here, because the filing has landed (task 144 review K's pattern).
-            if (_gateDecisionRecords is not null)
-            {
-                try
-                {
-                    await _gateDecisionRecords.ReownAfterFilingAsync(communicationId).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(
-                        ex,
-                        "Office save filed communication {CommunicationId}, but re-owning its gate Decision Records faulted; the filing stands " +
-                        "(ontology task 042b).", communicationId);
-                }
-            }
 
             _logger.LogInformation(
                 "Office save filed the unfiled communication {CommunicationId} it reconciled to under {EntityType} {EntityId} " +

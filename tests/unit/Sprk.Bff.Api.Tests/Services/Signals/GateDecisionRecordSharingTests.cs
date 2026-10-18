@@ -164,6 +164,25 @@ internal sealed class GateSharingWorld
     public void OwnerAnswers(RecordOwnerResolution answer) =>
         Ownership.Setup(r => r.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>())).ReturnsAsync(answer);
 
+    /// <summary>
+    /// 042b round 2: a helper a fault escapes (its gate-record read fails and its own failure log throws), for the callers' fault isolation.
+    /// </summary>
+    public static GateDecisionRecordSharing Faulting()
+    {
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Test: the gate records could not be read."));
+        var logger = new Mock<ILogger<GateDecisionRecordSharing>>();
+        logger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+        logger.Setup(l => l.Log(It.IsAny<LogLevel>(), It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
+            .Throws(new InvalidOperationException("Test: the gate helper faulted."));
+        return new GateDecisionRecordSharing(
+            entities.Object, Mock.Of<IDataverseRecordShareService>(),
+            new OntologyWriterDataverseClient(() => Mock.Of<IOrganizationServiceAsync2>(), NullLogger<OntologyWriterDataverseClient>.Instance),
+            Mock.Of<IRecordOwnershipResolver>(), Mock.Of<IMembershipCacheInvalidator>(), logger.Object);
+    }
+
     // ── The evaluating reader ────────────────────────────────────────────────────────────────────────────────────
 
     private static Entity Clone(Entity source)
@@ -608,5 +627,38 @@ public sealed class GateDecisionRecordSharingTests
             "the reconciler re-owns a record that moved under a secure record, and its mirror replaces the shares");
         world.Org.Verify(o => o.ExecuteAsync(It.IsAny<AssignRequest>(), It.IsAny<CancellationToken>()), Times.Never);
         world.RecordSharees(RecordId).Should().Equal(new[] { Reader, Editor }.OrderBy(g => g));
+    }
+    // ── 042b round 2 (uac-r2): the mirror needs the COMMUNICATION unfiled; the re-own is idempotent ─────────────
+
+    [Fact]
+    public async Task AGrantOnACommunicationWhoseFilingCannotBeRead_AddsNoShare_FailClosed()
+    {
+        var world = new GateSharingWorld()
+            .WithCommunication(CommunicationId, Owner)
+            .WithUser(Reader)
+            .WithGateRecord(RecordId, CommunicationId, Owner)
+            .Share(GateSharingWorld.Communication, CommunicationId, Reader);
+        world.CommunicationReadFault = new InvalidOperationException("Test: the communication could not be read.");
+
+        var act = () => world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        world.RecordSharees(RecordId).Should().BeEmpty("a communication whose filing state cannot be read is not known to be unfiled");
+        world.Calls.Should().NotContain(c => c.StartsWith("grant:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Filing_ASecondCall_OnARecordAlreadyTeamOwned_DoesNothing()
+    {
+        var world = FiledWithASharedRecord();
+        await world.Sharing.ReownAfterFilingAsync(CommunicationId);
+        var afterFirst = world.Calls.Count;
+
+        await world.Sharing.ReownAfterFilingAsync(CommunicationId);
+
+        world.Calls.Skip(afterFirst).Should().BeEmpty("a team-owned record is not found again: no Assign, read-back or revoke");
+        world.Org.Verify(o => o.ExecuteAsync(It.IsAny<AssignRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        world.Ownership.Verify(r => r.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Times.Once);
+        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(MatterTeam);
     }
 }
