@@ -140,3 +140,78 @@ traces | where timestamp > datetime(2026-10-16T06:03:13Z) and cloud_RoleName == 
 - **Import:** `Import-SolutionScoped.ps1 -ZipPath …TrackingFieldTrioSolution_v1.0.54.zip` at about 07:47Z. The scoped publish covered 2 web resources; there was no tenant-wide publish. The source in C:/wt099c is byte-identical to master 883e415c0 for TrackingFieldTrio and AccessGrantModal.
 - **Served bundle:** `/WebResources/cc_Spaarke.Controls.TrackingFieldTrio/bundle.js` → 200, 1,066,484 B, sha256 `39bdc0b1d74a268abd870cd37cf84a154461229dfcbc455a835b23009cf94a62`. It equals the committed bundle, version 1.0.54, with 0 `context.webAPI` grant reads and `record-grants` ×1. **PASS.**
 - **Behaviour:** covered by 253 AccessGrantModal tests: the Expiration display and divergence, Apply → `/set-record-share-expiry`, every add sending the record date, the Apply/add race, and the lapsed case. The interactive check (pick a date, Apply, add a contact) writes live grant expiries, so it goes to the owner's UAT checklist rather than an agent write.
+
+## #2094 live gate (2026-10-18)
+
+**Scope.** Server-side gate for PR #2094 (issue #2091, master `1473b34c6`), plus a #2083 smoke. Run 22:33–22:52Z against spaarke-bff-dev and spaarkedev1, as admin only (the default `az` login, systemuser `1d02f31c…`).
+- Tokens: BFF `api://1e40baad…/.default`, Dataverse, App Insights REST (appId `6a76b012…`), and ARM for Kudu VFS reads. No token or secret was printed or written.
+- No Entra, Key Vault, app-setting, role or tenant-config write. No SPE container was touched. Secure fixture project `a9e04977…` was used only as a filing target; `65a3fab2…` was not touched.
+- Scripts and logs: session scratchpad `gate2094/` (`g.log`, `g0.py`, `s1.py`, `s2.py`, `s4.py`, `s5.py`, `c0.py`, `c1.py`, `q_*.kql`, `ai.py`).
+
+### Deploy evidence (fallback i): PASS
+- **Build.** Kudu VFS `Sprk.Bff.Api.dll` (19,662,336 B, sha256 `7553a9e3…`) has InformationalVersion **`1.0.0+ad0e9e1a72dff82bd662b9d750a65956733dca6d`**. `git merge-base --is-ancestor 1473b34c6 ad0e9e1a7` holds. The previous build, `ebc74b331` (deployed 03:33Z), does **not** contain `1473b34c6`.
+- **#2094 literals in the deployed DLL:**
+  - user strings: the push's "Not written: this push moves what the record is filed under…", "would be written through", and the malformed-bind refusal "…so the record it would be filed under cannot be read and the update was not written";
+  - metadata names: `RefileIsolationRead`, `ParentChangesWithClearsIn`, `MayRefile`, `ParentsUnchanged`.
+- **Deployment.** OneDeploy `02002f7a…`, 22:30:01–22:30:05Z.
+- **App start.** One instance, `39ab6951…`. At 22:30:24Z `ScheduledJobHost refreshed — 18 job(s) … 20 handler(s)`; at 22:30:26Z `Application started`. `healthz` 200.
+- **Not a sha source.** App Insights `application_Version` is empty, and `/status` returns a fixed `1.0.2`.
+
+### Can the four changed writers be reached for a positive re-file? No, not without new config, so none was created.
+
+| Writer | Route | Why no positive re-file |
+|---|---|---|
+| Field-mapping push (`FieldMappingEndpoints`) | `POST /api/v1/field-mappings/push` | Dev has 4 profiles (`sprk_matter` → event, invoice, report card, work assignment). Every rule maps an `sprk_assigned*` contact or organization lookup (and, for the work assignment, one Lookup→Text rule). **No rule binds a filing lookup**, so a filing move needs a new rule. |
+| Playbook update node (`UpdateRecordActionCore`) | `POST /api/ai/playbooks/{id}/execute` | Dev has 2 `sprk_playbooknode` rows with executor type 22: "Update Record Document Profile" (`sprk_document` profile text fields) and `persistEnvelope` (matter-health fields on `sprk_matter`). Neither writes a filing lookup. |
+| Output orchestrator (`DataverseUpdateHandler`) | — | Its only caller is `InvoiceExtractionJobHandler` (Service Bus). No admin HTTP route reaches it. |
+| Chat update tool (`DataverseUpdateRecordHandler`) | Chat sessions route | The `sprk_analysistool` row "SYS-Dataverse Update Record" has `sprk_availableadhoc` false and side-effect class Write (confirmation gate). It needs a chat playbook that carries the tool, and an LLM-driven turn, so it is not deterministic. For this writer #2094 changed only the isolation read. |
+
+**App Insights since the deploy:** 0 traces from `UpdateRecordNodeExecutor`, `DataverseUpdateHandler`, `DataverseUpdateRecordHandler` or the output orchestrator. The only push was this gate's.
+
+### Gate table
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| R1 | **Positive live re-file into Secure and back out**, through the event filing route `PATCH /api/v1/events/{id}/filing`. It runs the same `IRecordOwnershipResolver.ReparentAsync` that #2094 changed (no-op rebind → `ParentsUnchanged`), then `SecureChildReconciler.AfterRefileAsync`. It is **not** one of the four writers (see above). | **PASS** | **Setup.** Ordinary project P `da2b8239-45cb-f111-a05d-0022482913fc` ("UAC-GATE-2094 20261018-224239Z", Web API, owner admin, root BU). Event E `b68d5239-45cb-f111-a05d-3833c5e9614d` created under P with `POST /api/v1/events` → **201**. E was owned by team "Spaarke" `09fbf21c…`, BU Spaarke, with 0 POA rows. Its event log `b98d5239…` had the same owner.<br>**In** (22:43:07Z): bind `sprk_RegardingProject` → `/sprk_projects(a9e04977…)` plus the ADR-024 regarding fields → **204**.<br>• E's owner became **Secure Record Owners `6eabc7f9-13be-f111-a05b-0022482913fc`**, BU **Secure Record**.<br>• POA: **1 row**, admin (the fixture's only sharee), `Read, Write, Append, AppendTo, Share`, the same mask the fixture holds.<br>• The descendant event log `b98d5239…` was also moved to Secure Record Owners and mirrored (1 POA row, admin).<br>• App Insights: `Re-filed sprk_event b68d5239… owner reassigned to team 6eabc7f9…`; `[SECURE-CHILD-SHARES] … granted=1` (event and log); `[SECURE-CHILD-RECONCILE] reassign: sprk_eventlog … -> team 6eabc7f9…`; `root=sprk_event … isolated=True … changed=1 … refused=0 failed=0`.<br>**No-op rebind** (22:43:43Z): the same body again → **204**. The owner, BU, POA and log were all unchanged. No "owner reassigned" line was logged, which is the `ParentsUnchanged` path. The step still ran on this route: `alreadyCorrect=1 changed=0`, shares `unchanged=1`.<br>**Out** (22:44:03Z), as admin (E's creator, holding Read/Write/Append/AppendTo/Share on the fixture): bind back to P → **204**.<br>• E's owner was back to team **"Spaarke" `09fbf21c…`**, BU Spaarke, **POA 0 rows (released)**.<br>• The event log was also back to "Spaarke" with 0 POA rows.<br>• That request's telemetry was dropped by ingestion sampling, so the Dataverse state is the evidence. |
+| R2 (ii) | App Insights: errors from the changed components, after vs before | **PASS** | Windows on role `spaarke-bff-dev`: C = 22:30:26 → 22:52Z (after), B = the same length just before, A = the 24 h before. Query `q_ii.kql`: exceptions whose type, message, details or problemId, and traces at severity ≥ Warning whose message or dimensions, mention `RecordReparent`, `RefileIsolationRead`, `AfterRefileAsync`, `FieldMappingEndpoints`, `DataverseUpdateHandler`, `UpdateRecordActionCore`, `UpdateRecordNodeExecutor`, `DataverseUpdateRecordHandler`, `RecordOwnershipResolver`, `ReparentAsync`, `record_owner_parent_unresolved` or `[SECURE-CHILD-RECONCILE]`. Result: **0 rows in A, B and C**.<br>Control (`q_h.kql`): `[SECURE-CHILD-RECONCILE]` lines do appear (1,423 in A, 22 in B, 28 in C), **all at Information**.<br>Health:<br>• **0 × 5xx** in every window (requests: 2,831 in A, 62 in B, 67 in C).<br>• Exceptions in C are only known ones: 3 × `ODataError "Invalid hostname for this tenancy"` (#1352/#1830; 283 in A) and 20 × `sprk_userentityassociation` alternate-key not-found (833 in A).<br>• Error traces in C are only known ones: `[SECURE-CENSUS] HumanPrincipalReachesSecureBusinessUnit` (84), IDX40001 CIAM issuer (32), IDX10214 audience (14). All are also present before. |
+| R3 (iii) | No-op push smoke: a push on a reparentable child that writes no filing lookup still succeeds | **PASS** | Test matter M `fdafd99b-45cb-f111-a05d-0022482913fc` (Web API, `sprk_assignedattorney1` = admin's own contact `8e9918a9…`). Event E2 `dc383a9c-45cb-f111-a05d-3833c5e9614d` created under M with `POST /api/v1/events` → 201.<br>`POST /api/v1/field-mappings/push` {sprk_matter, M, sprk_event} → **200**: `success true`, total 1, updated 1, failed 0, skipped 0, errors []. `sprk_assignedattorney1` **Mapped**; the other 7 rules Skipped ("Source value is null").<br>E2 after: attorney1 = `8e9918a9…`; the owner is unchanged (team "Spaarke"), `sprk_regardingmatter` is unchanged, and there are 0 POA rows.<br>No reconcile line in that operation, as expected (`MayRefile` false). Reverted to null (204) before the delete. |
+| #2083 | Admin `GET /api/v1/external-access/assigned-access?recordType=matter&recordId=042f4462-860e-f111-8342-7c1e520aa4df` | **PASS** | **200**, 4 entries.<br>• Both organization entries carry names: **Morrison Foerster LLP** `67577f8c…` (access row `9aed8ab9…`) and **Spaarke Inc** `a5999fcc…` (access row `7959257b…`).<br>• The 2 contact entries are both "Ralph Schroeder" (`8e9918a9…` with systemuser `1d02f31c…`, and `2e419a4f…`).<br>• `residualAccessTerms` [] on all 4. |
+| — | Positive re-file through one of #2094's four writers | **NOT REACHABLE without new config** | See the table above. Covered offline by #2094's `RefileWriterBindShapeTests`, `RefileWriterAfterRefileHookTests` and `RefileWriterReconcilerRegistrationTests`. The malformed-bind refusal (`record_owner_parent_unresolved`) was not exercised live, because no reachable writer parses bind strings without a filing rule or node. |
+
+### Created and deleted (all as admin)
+
+| Row | Id | Delete | Read-back |
+|---|---|---|---|
+| `sprk_eventlog` (E's create log) | `b98d5239-45cb-f111-a05d-3833c5e9614d` | 204 | 404 |
+| `sprk_eventlog` (E2's create log) | `de383a9c-45cb-f111-a05d-3833c5e9614d` | 204 | 404 |
+| `sprk_event` E | `b68d5239-45cb-f111-a05d-3833c5e9614d` | 204 | 404 |
+| `sprk_event` E2 | `dc383a9c-45cb-f111-a05d-3833c5e9614d` | 204 | 404 |
+| `sprk_matter` M | `fdafd99b-45cb-f111-a05d-0022482913fc` | 204 | 404 |
+| `sprk_project` P | `da2b8239-45cb-f111-a05d-0022482913fc` | 204 | 404 |
+
+- **The admin POA rows the mirror granted** on E and its log were revoked by the move out (0 rows) before the deletes.
+- **Final sweep, 22:47Z:**
+  - 0 `UAC-GATE-2094*` projects, matters or events;
+  - 0 event logs on E or E2;
+  - 0 `sprk_assignedaccess` or `sprk_externalrecordaccess` rows on P or M;
+  - 0 appnotifications for admin since 22:42Z.
+- **Secure fixture `a9e04977…`, re-read at 22:50Z, is unchanged:**
+  - `modifiedon` 2026-10-17T03:19:05Z;
+  - owner Secure Record Owners;
+  - BU Secure Record;
+  - same container id;
+  - POA admin only, same mask.
+
+### Observations (no defect filed)
+
+- **No-op rebind on the event filing route.** It still runs `AfterRefileAsync`: `ChildRecordEndpoints.UpdateAsync` calls it whenever `outcome.Written`, and a `ParentsUnchanged` result maps to `Written`. That cost about 5 s and 2 share reads, with nothing changed. It is idempotent and correct. #2094's "no step when no parent moved" applies only to the push, the node and the output orchestrator; this route was out of #2094's scope. This is cost only.
+- **The move into Secure took 19.4 s.** That covers the owner reassignment, the mirror, and the descendant pass over the event log. It is a pre-existing cost profile, not a #2094 change.
+- **Sampling hides some requests.** Ingestion sampling dropped two of this run's 7 requests (E2's create and the move-out PATCH). Gate evidence for re-files should keep coming from Dataverse state, not from request telemetry alone.
+
+**Verdicts:**
+- Deploy (i): PASS.
+- R1, a positive live re-file into and out of Secure through the shared changed resolver: PASS.
+- R2 (ii) App Insights: PASS.
+- R3 (iii) no-op push: PASS.
+- #2083: PASS.
+- A positive re-file through the four #2094 writers is NOT REACHABLE live without creating config (none was created).
