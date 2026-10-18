@@ -16,9 +16,12 @@ namespace Spaarke.ArchTests;
 /// </remarks>
 public class FinanceBaseValuesSingleDefinitionGuardTests
 {
-    // ebilling-r1 task 015 (D-41, D-98): the counted set is statuscode In Review (1), Approved, Sent to AP, Paid. The publisher-range
-    // values 659490000..659490004 are what a private copy would spell (a bare 1 is undetectable and is never spelled alone).
+    // ebilling-r1 task 015 (D-41, D-103): the counted set is statuscode Approved, Sent to AP, Paid (In Review is not counted). The
+    // publisher-range values 659490000..659490004 are what a private copy would spell (a bare 1 is undetectable and is never spelled
+    // alone). A private list built from the named constants (InvoiceStatusCodes.X) is the same copy by another spelling, so it is
+    // flagged too: both consumers take the set from FinanceBaseValues.CountedInvoiceStatuses and name no status themselves.
     private static readonly Regex CountedStatusLiteral = new(@"\b65949000[0-4]\b", RegexOptions.Compiled);
+    private static readonly Regex CountedStatusConstant = new(@"\bInvoiceStatusCodes\.", RegexOptions.Compiled);
     private static readonly Regex PercentFormula = new(@"\*\s*100m?\b", RegexOptions.Compiled);
 
     internal static IReadOnlyList<string> Violations(string code)
@@ -26,6 +29,7 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
         var found = new List<string>();
         if (!code.Contains("FinanceBaseValues.", StringComparison.Ordinal)) found.Add("does not call FinanceBaseValues");
         if (CountedStatusLiteral.IsMatch(code)) found.Add("spells an invoice statuscode (659490000-659490004) instead of FinanceBaseValues.CountedInvoiceStatuses");
+        if (CountedStatusConstant.IsMatch(code)) found.Add("names an InvoiceStatusCodes value instead of using FinanceBaseValues.CountedInvoiceStatuses");
         if (PercentFormula.IsMatch(code)) found.Add("multiplies by 100 itself instead of FinanceBaseValues.UtilizationPercent");
         return found;
     }
@@ -51,7 +55,18 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
         Assert.Equal(3, Violations(copy).Count);
     }
 
+    [Fact(DisplayName = "ebilling-r1 015 control: the detector fires on a private list of InvoiceStatusCodes constants")]
+    public void TheDetector_FiresOnAPrivateListOfNamedStatusConstants()
+    {
+        var copy = "var s = new[] { InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid }; var c = FinanceBaseValues.X;";
+        Assert.Equal(new[] { "names an InvoiceStatusCodes value instead of using FinanceBaseValues.CountedInvoiceStatuses" }, Violations(copy));
+    }
+
     [Fact(DisplayName = "Task 025b control: the detector stays quiet on the shared call")]
     public void TheDetector_StaysQuietOnTheSharedCall() =>
         Assert.Empty(Violations("var u = FinanceBaseValues.UtilizationPercent(spend, budget);"));
+
+    [Fact(DisplayName = "ebilling-r1 015 control: the detector stays quiet on the shared status set, and on a name that only resembles the constants")]
+    public void TheDetector_StaysQuietOnTheSharedStatusSet() =>
+        Assert.Empty(Violations("var s = FinanceBaseValues.CountedInvoiceStatuses.Cast<object>().ToArray(); var t = MyInvoiceStatusCodes.X;"));
 }
