@@ -133,13 +133,33 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         else
         {
             // Simple update - last write wins
-            await _fieldMappingService.UpdateRecordFieldsAsync(
-                entityLogicalName, recordId, fields, ct);
+            await PatchAsync(entityLogicalName, recordId, fields, ct);
 
             _logger.LogInformation(
                 "Updated {EntityType} {RecordId} with {FieldCount} fields (no concurrency control)",
                 entityLogicalName, recordId, fields.Count);
         }
+    }
+
+    /// <summary>
+    /// The write. An invoice or line is written UPDATE-ONLY (If-Match: *): the guard at the top of <see cref="UpdateAsync"/>
+    /// checked that the row exists, and a row deleted since must not be re-created by the upsert (ebilling-r1 #2081). It is
+    /// refused like the guard, nothing created. This handler writes app-only, so there is no user whose access it hides.
+    /// </summary>
+    private async Task PatchAsync(string entityLogicalName, Guid recordId, Dictionary<string, object?> fields, CancellationToken ct)
+    {
+        if (InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(entityLogicalName))
+        {
+            if (await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
+                    _fieldMappingService, entityLogicalName, recordId, fields, impersonateSystemUserId: null, notFoundAsReadFailed: false, ct) is { } gone)
+            {
+                throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, gone);
+            }
+
+            return;
+        }
+
+        await _fieldMappingService.UpdateRecordFieldsAsync(entityLogicalName, recordId, fields, ct);
     }
 
     /// <summary>
@@ -189,8 +209,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                 };
 
                 // 3. Update with version check
-                await _fieldMappingService.UpdateRecordFieldsAsync(
-                    entityLogicalName, recordId, fieldsWithVersion, ct);
+                await PatchAsync(entityLogicalName, recordId, fieldsWithVersion, ct);
 
                 _logger.LogInformation(
                     "Updated {EntityType} {RecordId} with optimistic concurrency (version {Version}, {FieldCount} fields)",

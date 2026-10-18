@@ -397,6 +397,8 @@ public class FieldMappingPushAuthorizationContractTests
              (string?)FieldMappingPushLookups.RelationshipMetadataQuery, CallerSystemUserId),
             "the referenced table of the source lookup comes from its relationship metadata, read as the caller");
         host.Writes.Should().HaveCount(2);
+        host.UpdateOnlyWrites.Should().HaveCount(2).And.OnlyContain(w => w.Table == "sprk_invoice" && w.ImpersonatedAs == CallerSystemUserId,
+            "an invoice is pushed update-only (a deleted child is never re-created) and still AS THE CALLER");
         host.Writes.Should().AllSatisfy(w => w.Payload.Should().BeEquivalentTo(new Dictionary<string, object?>
         {
             ["sprk_AssignedToAttorney1@odata.bind"] = $"/contacts({AttorneyId:D})",
@@ -614,6 +616,16 @@ public class FieldMappingPushAuthorizationContractTests
                 .Callback((string _, Guid id, Dictionary<string, object?> payload, CancellationToken _, Guid? _) =>
                     Writes.Add((id, new Dictionary<string, object?>(payload))))
                 .Returns(Task.CompletedTask);
+            // ebilling-r1 #2081: an invoice or line is pushed UPDATE-ONLY (If-Match: *), still as the caller.
+            FieldMappings
+                .Setup(f => f.UpdateExistingRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .Callback((string table, Guid id, Dictionary<string, object?> payload, Guid? caller, CancellationToken _) =>
+                {
+                    Writes.Add((id, new Dictionary<string, object?>(payload)));
+                    UpdateOnlyWrites.Add((table, id, caller));
+                })
+                .Returns(Task.CompletedTask);
 
             // The SOURCE row, as the caller reads it (task 166 r2): a field-secured column the caller cannot read comes
             // back null; a source the caller cannot read comes back as no row.
@@ -697,6 +709,9 @@ public class FieldMappingPushAuthorizationContractTests
 
         /// <summary>Every child PATCH, with a copy of its payload.</summary>
         public List<(Guid Id, Dictionary<string, object?> Payload)> Writes { get; } = new();
+
+        /// <summary>The writes that went through the update-only overload (<c>If-Match: *</c>), with the user they acted as.</summary>
+        public List<(string Table, Guid Id, Guid? ImpersonatedAs)> UpdateOnlyWrites { get; } = new();
 
         internal static FieldMappingRuleEntity Rule(string sourceField, int sourceType, string targetField, int targetType) => new()
         {

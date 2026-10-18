@@ -319,12 +319,30 @@ public static class InvoiceFamilyCoreRecordGuard
     /// <c>{navigation}@odata.bind</c> → <c>/{set}({id})</c> or null. Any other value of a guarded column is
     /// <see cref="LookupNotACoreRecordCode"/>.</param>
     /// <param name="appOnly">The path's app-only reader; null fails closed (<see cref="ReadFailedCode"/>) when a check is due.</param>
+    /// <param name="writeIsImpersonated">The write will run AS a Dataverse user. The guard reads as the APP, before any check
+    /// of that user's access, so "<see cref="RecordNotFoundCode"/>" here versus the later privilege error would tell the
+    /// caller whether a GUID names a row they cannot read. With this set, a row (or other invoice) that is not found is
+    /// <see cref="ReadFailedCode"/>, the same answer as a row that cannot be read (#2081 fix round 2).</param>
     public static async Task<InvoiceFamilyCoreRecord?> CheckGenericUpdateAsync(
         string entityLogicalName,
         Guid recordId,
         IEnumerable<KeyValuePair<string, object?>> patch,
         IGenericEntityService? appOnly,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool writeIsImpersonated = false)
+    {
+        var decided = await CheckGenericUpdateCoreAsync(entityLogicalName, recordId, patch, appOnly, ct).ConfigureAwait(false);
+        return writeIsImpersonated && decided is { RefusalCode: RecordNotFoundCode }
+            ? decided.Refuse(ReadFailedCode, $"What this {decided.EntityLogicalName} is filed under could not be read; nothing was written.")
+            : decided;
+    }
+
+    private static async Task<InvoiceFamilyCoreRecord?> CheckGenericUpdateCoreAsync(
+        string entityLogicalName,
+        Guid recordId,
+        IEnumerable<KeyValuePair<string, object?>> patch,
+        IGenericEntityService? appOnly,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(patch);
         var entity = entityLogicalName?.Trim().ToLowerInvariant() ?? string.Empty;
@@ -419,14 +437,51 @@ public static class InvoiceFamilyCoreRecordGuard
         + (refusalCode == LineInvoiceCoreRecordMismatchCode ? " " + DetachMoveReattachHint : string.Empty);
 
     /// <summary>
-    /// The supported sequence for moving an invoice that has lines (#2081 follow-up; D-75, D-96), shown with
+    /// The supported sequence for moving an invoice that has lines, or a line of one (#2081 follow-up; D-75, D-96), shown with
     /// <see cref="LineInvoiceCoreRecordMismatchCode"/>. A line is never re-filed from its invoice, and the invoice and its
     /// lines must always regard one core record, so neither can move first while they are attached. A line with no invoice is
     /// decided on its own lookup alone, which is what makes the sequence possible. Fixed text: it names no record and no user data.
     /// </summary>
     public const string DetachMoveReattachHint =
-        "To move an invoice that has lines: detach each line (clear its invoice), move the invoice, move each line to "
+        "To move an invoice that has lines, or a line of one, detach each line (clear its invoice), move the invoice, move each line to "
         + "the same matter, project or work assignment, then re-attach the lines to the invoice.";
+
+    /// <summary>
+    /// True for the tables the generic update paths write UPDATE-ONLY (<c>If-Match: *</c>): the guard checked that the row
+    /// exists, and the write itself must not re-create it if it was deleted since (#2081 fix round 2). Only the two tables
+    /// <see cref="CheckGenericUpdateAsync"/> covers; every other table keeps its write unchanged.
+    /// </summary>
+    public static bool IsUpdateOnlyTarget(string entityLogicalName) =>
+        !string.IsNullOrWhiteSpace(entityLogicalName) && (IsInvoice(entityLogicalName) || IsLine(entityLogicalName));
+
+    /// <summary>
+    /// The update-only write of an invoice or line. Null when written. A row that is gone now (the platform refused the
+    /// precondition) writes nothing and answers <see cref="RecordNotFoundCode"/>, or <see cref="ReadFailedCode"/> when
+    /// <paramref name="notFoundAsReadFailed"/> (the caller's id did not come from a query the user read, so "not found" would
+    /// tell them whether it names a row they cannot read — the reasoning of <c>writeIsImpersonated</c> in
+    /// <see cref="CheckGenericUpdateAsync"/>). Any other fault propagates.
+    /// </summary>
+    public static async Task<string?> UpdateExistingAsync(
+        IFieldMappingDataverseService records,
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        Guid? impersonateSystemUserId,
+        bool notFoundAsReadFailed,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        try
+        {
+            await records.UpdateExistingRecordFieldsAsync(entityLogicalName, recordId, fields, impersonateSystemUserId, ct)
+                .ConfigureAwait(false);
+            return null;
+        }
+        catch (KeyNotFoundException)
+        {
+            return notFoundAsReadFailed ? ReadFailedCode : RecordNotFoundCode;
+        }
+    }
 
     /// <summary>The generic update paths' refusal on the existing "throw" contract (<see cref="CodeOnlyRefusalMessage"/>).</summary>
     public static RecordOwnerUnresolvedException RefusalException(string entityLogicalName, string refusalCode) =>

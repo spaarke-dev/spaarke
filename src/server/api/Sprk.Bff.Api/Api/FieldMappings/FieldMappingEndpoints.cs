@@ -1075,8 +1075,28 @@ public static class FieldMappingEndpoints
 
                     // Task 166: written AS THE CALLER (MSCRMCallerID) — Dataverse applies their Write on the child,
                     // so no app-only child write remains on this route.
-                    await dataverseService.UpdateRecordFieldsAsync(
-                        targetEntity, childRecordId, updatePayload, ct, impersonateSystemUserId: callerSystemUserId);
+                    // ebilling-r1 #2081: an invoice or line is written UPDATE-ONLY (If-Match: *, still as the caller). The
+                    // guard above read its row; one deleted since must not be re-created by the upsert.
+                    if (Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(targetEntity))
+                    {
+                        if (await Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
+                                dataverseService, targetEntity, childRecordId, updatePayload, callerSystemUserId, notFoundAsReadFailed: false, ct) is { } goneCode)
+                        {
+                            failed++;
+                            errors.Add(new PushFieldMappingsError
+                            {
+                                RecordId = childRecordId,
+                                Error = $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(goneCode)}"
+                            });
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        await dataverseService.UpdateRecordFieldsAsync(
+                            targetEntity, childRecordId, updatePayload, ct, impersonateSystemUserId: callerSystemUserId);
+                    }
+
                     updated++;
 
                     // Task 156 (owner round 4 item 5, option b): a mapping rule can write a lookup — including what this

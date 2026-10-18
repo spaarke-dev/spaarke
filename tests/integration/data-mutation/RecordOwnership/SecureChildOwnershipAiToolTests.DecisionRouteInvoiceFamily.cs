@@ -50,7 +50,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         reply.Status.Should().Be(StatusCodes.Status400BadRequest, reply.Detail);
         reply.ReasonCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode,
             "D-96 through the decision route, not a read failure for want of the app-only reader");
-        reply.Detail.Should().Contain("detach each line").And.Contain("re-attach the lines to the invoice");
+        reply.Detail.Should().Contain("To move an invoice that has lines, or a line of one, detach each line").And.Contain("re-attach the lines to the invoice");
         _user.Patches.Should().BeEmpty();
     }
 
@@ -81,7 +81,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         reply.Status.Should().Be(StatusCodes.Status400BadRequest, reply.Detail);
         reply.ReasonCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
-        reply.Detail.Should().Contain("detach each line");
+        reply.Detail.Should().Contain("or a line of one, detach each line");
         _user.Patches.Should().BeEmpty();
     }
 }

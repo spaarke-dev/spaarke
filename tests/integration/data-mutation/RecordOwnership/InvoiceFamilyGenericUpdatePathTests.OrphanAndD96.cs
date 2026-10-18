@@ -57,7 +57,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     private async Task<PathOutcome> RunAsync(
         GenericPath path, string table, Guid id,
         IReadOnlyDictionary<string, EntityReference?> lookups, IReadOnlyDictionary<string, object?> plain,
-        IGenericEntityService? app)
+        IGenericEntityService? app, Guid? playbookActsAs = null)
     {
         switch (path)
         {
@@ -92,7 +92,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                 try
                 {
                     await CoreOver(app).UpdateAsync(
-                        new UpdateRecordActionInput(table, id, FieldMappings: null, LegacyFields: legacy, Lookups: rendered),
+                        new UpdateRecordActionInput(table, id, FieldMappings: null, LegacyFields: legacy, Lookups: rendered,
+                            ImpersonateSystemUserId: playbookActsAs),
                         CancellationToken.None);
                     return new PathOutcome(null, null);
                 }
@@ -277,7 +278,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     private static readonly Guid StrayLine = Guid.Parse("02200000-0000-4000-8000-0000000000c1");
 
     private const string DetachMoveReattachHint =
-        "detach each line (clear its invoice), move the invoice, move each line to the same matter, project or work assignment, "
+        "To move an invoice that has lines, or a line of one, detach each line (clear its invoice), move the invoice, move each line to the same matter, project or work assignment, "
         + "then re-attach the lines to the invoice.";
 
     /// <summary>
@@ -372,6 +373,6 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         outcome.Message.Should().Be(
             "The invoice-family core-record rule refused this write (invoice_family_line_invoice_core_record_mismatch); nothing was written. "
-            + "To move an invoice that has lines: " + DetachMoveReattachHint);
+            + DetachMoveReattachHint);
     }
 }

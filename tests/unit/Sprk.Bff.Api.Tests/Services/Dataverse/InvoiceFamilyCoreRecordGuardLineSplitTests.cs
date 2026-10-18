@@ -244,10 +244,92 @@ public class InvoiceFamilyCoreRecordGuardLineSplitTests
         result.Reason.Should().NotContain("10.0.0.7");
     }
 
+    // ── #2081 fix round 2: the existence oracle. The guard reads as the APP before any check of the user a write acts as,
+    //    so for a write that runs impersonated "not found" must look like "cannot be read". ─────────────────────────────
+
+    [Theory]
+    [MemberData(nameof(OrphanCases))]
+    public async Task GenericUpdate_ForAnImpersonatedWrite_ARowThatDoesNotExist_IsReadFailed_NotNotFound(
+        string table, bool answersNull, bool touchesLookup)
+    {
+        var app = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var setup = app.Setup(a => a.RetrieveAsync(table, InvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()));
+        if (answersNull) setup.ReturnsAsync((Entity)null!); else setup.ThrowsAsync(NoSuchRow());
+
+        var impersonated = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
+            table, InvoiceId, touchesLookup ? ProjectLookup() : Plain(), app.Object, writeIsImpersonated: true);
+        var appOnly = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
+            table, InvoiceId, touchesLookup ? ProjectLookup() : Plain(), app.Object);
+
+        impersonated!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        impersonated.Reason.Should().NotContain(InvoiceId.ToString("D"));
+        appOnly!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.RecordNotFoundCode, "an app-only write hides nothing");
+    }
+
+    [Fact]
+    public async Task GenericUpdate_ForAnImpersonatedWrite_TheOtherInvoiceNotFound_IsReadFailed_AndAnyOtherRefusalIsUnchanged()
+    {
+        var app = StoredInvoiceUnderMatter();
+        app.Setup(a => a.RetrieveAsync("sprk_invoice", OtherInvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(NoSuchRow());
+        var supersedes = new Dictionary<string, object?> { ["sprk_SupersedesInvoice@odata.bind"] = $"/sprk_invoices({OtherInvoiceId:D})" };
+
+        var impersonated = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
+            "sprk_invoice", InvoiceId, supersedes, app.Object, writeIsImpersonated: true);
+        var second = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
+            "sprk_invoice", InvoiceId, ProjectLookup(), app.Object, writeIsImpersonated: true);
+
+        impersonated!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        second!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+    }
+
+    // ── #2081 fix round 2: check-then-act. The write itself is update-only, and a vanished row is a refusal ─────────────
+
+    [Theory]
+    [InlineData(false, false, InvoiceFamilyCoreRecordGuard.RecordNotFoundCode)]
+    [InlineData(true, false, InvoiceFamilyCoreRecordGuard.RecordNotFoundCode)]
+    [InlineData(true, true, InvoiceFamilyCoreRecordGuard.ReadFailedCode)]
+    public async Task UpdateExisting_ARowGoneBetweenTheCheckAndTheWrite_IsACodeNotACreate(bool asUser, bool hide, string expected)
+    {
+        var records = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        Guid? caller = asUser ? Guid.NewGuid() : null;
+        records.Setup(r => r.UpdateExistingRecordFieldsAsync("sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), caller, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new KeyNotFoundException());
+
+        var code = await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(records.Object, "sprk_invoice", InvoiceId, Plain(), caller, hide, default);
+
+        code.Should().Be(expected);
+        records.Verify(r => r.UpdateRecordFieldsAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(),
+            It.IsAny<CancellationToken>(), It.IsAny<Guid?>()), Times.Never, "the upsert is never the fallback");
+    }
+
+    [Fact]
+    public async Task UpdateExisting_AWrittenRow_IsNull_AndAnyOtherFaultPropagates()
+    {
+        var records = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        records.SetupSequence(r => r.UpdateExistingRecordFieldsAsync("sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), null, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask)
+            .ThrowsAsync(new TimeoutException());
+
+        (await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(records.Object, "sprk_invoice", InvoiceId, Plain(), null, false, default)).Should().BeNull();
+        var act = () => InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(records.Object, "sprk_invoice", InvoiceId, Plain(), null, false, default);
+
+        await act.Should().ThrowAsync<TimeoutException>("a fault is not \"gone\"");
+    }
+
+    [Theory]
+    [InlineData("sprk_invoice", true)]
+    [InlineData("SPRK_BILLINGEVENT", true)]
+    [InlineData("sprk_todo", false)]
+    [InlineData("sprk_invoicesubmission", false)]
+    [InlineData("", false)]
+    public void IsUpdateOnlyTarget_IsTheTwoGuardedTables_AndNoOther(string table, bool expected) =>
+        InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(table).Should().Be(expected);
+
     // ── The detach, move, re-attach hint (#2081 follow-up): a stable code plus a fixed sentence, no user data ─────────
 
     private const string HintFragment =
-        "detach each line (clear its invoice), move the invoice, move each line to the same matter, project or work assignment, "
+        "To move an invoice that has lines, or a line of one, detach each line (clear its invoice), move the invoice, move each line to the same matter, project or work assignment, "
         + "then re-attach the lines to the invoice.";
 
     [Fact]
@@ -260,7 +342,7 @@ public class InvoiceFamilyCoreRecordGuardLineSplitTests
         invoiceMoved.Reason.Should().Contain("Nothing was written.").And.EndWith(HintFragment);
         InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(invoiceMoved.RefusalCode!).Should().Be(
             "The invoice-family core-record rule refused this write (invoice_family_line_invoice_core_record_mismatch); "
-            + "nothing was written. To move an invoice that has lines: " + HintFragment);
+            + "nothing was written. " + HintFragment);
     }
 
     [Fact]

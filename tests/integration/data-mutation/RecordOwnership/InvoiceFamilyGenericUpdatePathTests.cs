@@ -84,13 +84,28 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         return app;
     }
 
-    private void NothingWritten() =>
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(It.IsAny<string>(), It.IsAny<Guid>(),
-            It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()), Times.Never);
+    private IEnumerable<(string Method, string Table, Guid Id, Guid? As)> Sent() =>
+        _writes.Invocations
+            .Where(i => i.Method.Name is nameof(IFieldMappingDataverseService.UpdateRecordFieldsAsync)
+                or nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync))
+            .Select(i => (i.Method.Name, (string)i.Arguments[0], (Guid)i.Arguments[1],
+                i.Method.Name == nameof(IFieldMappingDataverseService.UpdateRecordFieldsAsync)
+                    ? (Guid?)i.Arguments[4]
+                    : (Guid?)i.Arguments[3]));
 
-    private void WrittenOnce(string table, Guid id) =>
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(table, id,
-            It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()), Times.Once);
+    /// <summary>Neither the upsert nor the update-only write was sent: nothing was created or changed.</summary>
+    private void NothingWritten() => Sent().Should().BeEmpty();
+
+    /// <summary>One write of the row. An invoice or line goes UPDATE-ONLY (If-Match: *, #2081); any other table keeps the upsert.</summary>
+    private void WrittenOnce(string table, Guid id)
+    {
+        var sent = Sent().Where(w => w.Table == table && w.Id == id).ToList();
+        sent.Should().ContainSingle();
+        sent[0].Method.Should().Be(InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(table)
+            ? nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync)
+            : nameof(IFieldMappingDataverseService.UpdateRecordFieldsAsync));
+        Sent().Should().ContainSingle("only that one write");
+    }
 
     // ── The output orchestrator: DataverseUpdateHandler ────────────────────────────────────────────────────────────
 
