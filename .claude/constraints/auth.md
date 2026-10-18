@@ -64,7 +64,7 @@ Load when:
 Terms: **Spaarke tenant** = Spaarke's Entra directory; **customer's home directory** = the customer's own Entra directory. Never write a bare "tenant" for the second.
 
 - ✅ **MUST** treat a Model 1 **licensed core user** as a **B2B guest in the Spaarke tenant** who authenticates in their customer's home directory: the stamp token carries `tid` = Spaarke, `acct = 1`, `idp` = home-directory issuer (ADR-028 A8).
-- ✅ **MUST** sign a Model 1 **workforce contact** in to the browser SPA with their company account, through one multitenant Spaarke SPA client at their customer's home directory. The BFF accepts the token only when `iss` exactly matches `https://login.microsoftonline.com/{tid}/v2.0`, `tid` is in that stamp's `WorkforceIdentity:CustomerTenantIds`, `aud` is that stamp's BFF app, it is a user token and `acct` = 0. Identity is keyed on (`tid`, `oid`). Workforce contacts are **not** B2B guests (ADR-028 A9).
+- ✅ **MUST** sign a Model 1 **workforce contact** in to the browser SPA and the Teams host with their company account, through one multitenant Spaarke SPA client at their customer's home directory. The BFF accepts the token only when `iss` exactly matches `https://login.microsoftonline.com/{tid}/v2.0`, `tid` is in that stamp's `WorkforceIdentity:CustomerTenantIds`, `aud` is that stamp's BFF app, it is a user token and `acct` = 0. Identity is keyed on (`tid`, `oid`). Workforce contacts are **not** B2B guests (ADR-028 A9).
 - ✅ **MUST** resolve a licensed core user who opens the browser SPA with their company account to their `systemuser` only through the stored link home (`tid`, `oid`) → `systemuserid` — never by email or UPN (A9).
 - ✅ **MUST** key workforce membership on the customer's home directory id(s) in `WorkforceIdentity:CustomerTenantIds` — **never** on `AzureAd:TenantId` (= Spaarke on Model 1), an email domain or a `#EXT#` UPN.
   - **Scope (owner 2026-10-13, §6.5 path B; word-add-in-r1 task 126):** this governs what the BFF accepts or binds from a sign-in token, as ADR-028 A9 states it (validated `iss`/`tid`).
@@ -74,7 +74,7 @@ Terms: **Spaarke tenant** = Spaarke's Entra directory; **customer's home directo
     - is reviewed as a dry run;
     - never writes a guest it cannot place.
   - Workforce contacts never reach it. They are contacts, not systemusers, and their plane is `contact.sprk_identityplane`, written at sign-in.
-- ❌ **MUST NOT** use a multitenant / `common` / `organizations` authority for Model 1 licensed-user sign-in (model-driven apps, Office add-ins, Teams) — the guest lands in the home directory with a different `oid` (A8). The **only** exception is the A9 workforce-contact browser-SPA client.
+- ❌ **MUST NOT** use a multitenant / `common` / `organizations` authority for Model 1 licensed-user sign-in to model-driven apps or the Office add-ins — the guest lands in the home directory with a different `oid` (A8). The **only** exception is the A9 multitenant SPA client, used by the browser SPA and the Teams host for both populations. Licensed users there resolve through the stored link.
 - Full explanation and where each value lives: [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §6.5.2 "Model 1: why a customer has a home tenant at all"](../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md). Code: `WorkforceIdentityOptions.cs` `WorkforceMembershipTest`.
 
 ### SPE File Access — broker-only byte identity (binding — task 171, 2026-10-06; supersedes Pattern 4's writer-identity rule)

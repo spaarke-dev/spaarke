@@ -309,4 +309,13 @@ public sealed record ThreadResolutionRequest
     /// no-op (the resolver skips rather than creating an ungroupable thread).
     /// </summary>
     public string? AcsThreadId { get; init; }
+
+    /// <summary>
+    /// Owner decision D8 (external-access r3 task 065 fix round 6, 2026-10-14). True only for a partner's portal post. The
+    /// fallback ladder's per-record (and per-user) default-thread lookup then joins a default thread ONLY when it is
+    /// EXPLICITLY Open, and otherwise finds-or-creates a new Open default thread, so a post is never filed into a Private
+    /// default thread the partner cannot read back. False (the default) keeps the lookup exactly as it was for every
+    /// internal caller.
+    /// </summary>
+    public bool RequireOpenDefaultThread { get; init; }
 }

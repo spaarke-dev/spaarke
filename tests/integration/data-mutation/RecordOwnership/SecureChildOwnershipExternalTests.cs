@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using Azure.Core;
+using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
@@ -9,15 +10,18 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Xunit;
 using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
@@ -298,6 +302,20 @@ public sealed class ExternalChildOwnershipTestFixture : ExternalCollaborationTes
                     null, false, "https://contoso.example/brief.pdf", "b!secure-project-container"));
             services.RemoveAll<ISpeFileOperations>();
             services.AddSingleton(files.Object);
+
+            // Task 063: an upload now queues indexing and the document profile. The job queue is a module boundary too;
+            // the real one retries against the host's unreachable Service Bus for ~20 s per upload.
+            var serviceBusOptions = new Mock<IOptions<ServiceBusOptions>>();
+            serviceBusOptions.Setup(o => o.Value).Returns(new ServiceBusOptions { QueueName = "test-jobs" });
+            var jobs = new Mock<JobSubmissionService>(
+                MockBehavior.Loose,
+                serviceBusOptions.Object,
+                NullLogger<JobSubmissionService>.Instance,
+                new Mock<ServiceBusClient>().Object);
+            jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            services.RemoveAll<JobSubmissionService>();
+            services.AddSingleton(jobs.Object);
         });
     }
 

@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-13 (ADR-028 A9 applied; PR #1810 open with auto-merge)
+> **Last Updated**: 2026-10-17 (048 complete and on dev; dev BFF = d5401cf2d)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Cross-project: ADR-028 **A9** (workforce contacts sign in with their customer's home directory), owner-approved 2026-10-13. R3 owns it end to end (SPA client + BFF token acceptance + registration + stored link); UAC owns only baseline role access. 038: A+B done (R3 live on dev via `99ec749cd`); phase C-W done except C-W6 (intake 403, owner fix pending) and C-W8b; C-C waits on the SPA deploy. 040 SPA deploy HELD: superseded by the A9 re-plan |
-| **Step** | A9 applied to ADR-028 (+A1/A2/A8 notes), `.claude/adr/INDEX.md`, `.claude/constraints/auth.md`; coordination note + draft updated; project CLAUDE.md §2-§4 updated. Commit `7a1b8b4e2` pushed; **PR #1810** to master, auto-merge on (also carries `78e7b16d6` A8 CIAM-audience clarification + 038/040 records + research). Per-project messages sent 2026-10-13 to UAC `-1d`, word-add-in `-46`, provisioning `-b2`, asking each to record it in its notes + CLAUDE.md and confirm |
-| **Status** | PR #1810 waiting on CI. Uncommitted: project CLAUDE.md + this file (commit next). Main checkout `C:\code_files\spaarke` NOT synced (another session's work); leftover folders to delete by hand: `C:\code_files\spaarke\.claude\worktreesgent-af842f88050a4b5b9`, `...gent-ae8f4415f1670de13`, `C:\wt039bz` |
-| **Next Action** | Watch PR #1810 merge; collect the three confirmations; then re-plan tasks (040 multitenant browser client + DEF for Teams; 041 home directory id; 056 profile form; withdraw 012/060; new BFF tasks: token acceptance, registration endpoint, stored link) and a BFF design note for owner sign-off |
+| **Task** | ADR-028 **A9** build (`notes/a9-bff-design.md`). 044–048 done; next **058** (SPA multitenant sign-in) |
+| **Step** | 048 complete (`notes/task-048-notes.md`: two Opus passes, code-review and adr-check, publish size +0.06 MB). Master `e702c3401` merged as `d5401cf2d`. The route ledger count is 131 (master 129 + R3 047/048) |
+| **Status** | **Dev BFF live = R3 `9721819ed`.** Deployed 2026-10-17 14:30:28–14:32:19Z; the owner approved this deploy. Contents: R3 plus master `1df4ee12d`: ontology #2073 (`88b3ecb1f`: 063, 102, 102a), UAC #2074 (test fakes for isdisabled, fixes #2072) and UAC #2062/099c. Checks: SHA-256 verified, `/healthz` 200, CORS origins present, MIs `mi-bff-api-dev` and `mi-ontology-writer-dev` still assigned, no app settings changed. Before the deploy the live build was `28720f997`, an ancestor. Confirmations: UAC, word-add-in, provisioning, ebilling, and ontology (the requester). Never delivered (held, then expired): SPE-admin-r2, assistant-enhancements, project-coordination. Tests: ArchTests 1121/1121. Unit tests: 24,598 passed, 22 skipped; the 16 host timeouts under load all pass in isolation (198/198). The route ledger count is 132. Dev external SPA = R3 `88697cfc1` (run `39004032735`, 2026-10-17 04:51Z, owner-approved; UAC, ontology and provisioning confirmed; local typecheck, build and check:dist pass; 19 vitest timeouts under load, and all 10 files pass with a 300 s timeout). Master `901c7eeed` (UAC #2052) is merged and waits for the next BFF deploy, together with UAC #2025 and #2035 once they merge. **Owner 2026-10-17:** an interim R3 → master PR opens after the owner UAT round passes (UAT script given in chat); UAC 186 is a draft cut from our branch and waits for it |
+| **Next Action** | The owner runs UAT on dev. If it passes: `/conflict-check`, a code-review pass, then the interim PR (send UAC the PR number). The next BFF deploy needs owner approval (#2052, #2025, #2035). Then task 058 via task-execute. Then 075, 076, 074; 070–072; the R3 PR (`/conflict-check` first). Uncommitted researcher agent-memory files await the owner |
 
 ### Critical Context
 - **Parallel pattern:** BFF tasks run in isolated worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-*` (`git reset --hard <R3 sha>` first), commit there, main session merges `--no-ff`; after a merge re-verify ledger line cites (the guard only checks format). SPA tasks run in this worktree, uncommitted; the main session commits by explicit path. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
@@ -24,28 +24,35 @@
 Option B; no delete after close; invoice upload = invoice rights only; team-access and renewal bell items wanted; contact owned by the customer's primary BU; intake (department from contact, Invention partners behind a flag, incidents simple, fixed lists, NDA review + issue); grid views from Dataverse views; 060 shared service OK if Model 1 allows; dev dispatch "ok"; 060 tenant-wide group permission approved if it cannot be scoped. Deferred: DEF-001 #1736 NDA generation, DEF-002 #1737 incident alerting.
 
 ## Open owner questions
-1. **Intake 403 (038 C-W6):** BU1 owning team lacks `prvReadsprk_ServiceRequest`. Fix by role (Workforce role / UAC baseline), Basic User, or code-side ownership?
-2. **S0a:** has the CIAM API app `4a4d5126` got the `user_impersonation` scope? (instructions given)
-3. **Licensing approach** (6 questions in `notes/2026-10-13-option-a-identity-and-licensing-research.md` §2): not decided.
-4. **Mechanical guard** (coordination note §4.5): an ArchTest for `organizations`/`common` outside the A9 client: yes/no?
-5. **Grid views:** (a) "assigned resolver" = the shared membership resolver? (b) views per entity = External Active / My / Inactive? (c) log the internal "My" views as an issue?
-6. **Bell items:** team access A/B; renewals A/B.
-7. **ISS-005:** option A, `ExternalAccess:CustomerBusinessUnitId` from provisioning H4b.
-8. **052:** Service Requests as a partner default tab or library-only? Accept no intake idempotency key as a known limit?
-9. **053:** optional "classes" field on Trademark?
-(060's questions lapsed: 060 withdrawn under A9.)
+1. Owner deletes probe message `b38f0ab7-03c7-f111-a05c-0022482913fc` by hand.
+2. Owner test for 067: create a service request; expect an RQST number other than RQST-0001 (dev next value read 3).
+5. 065 DONE: merged `bbcb80659`. Owner decisions D1-D9 are in notes/task-065-notes.md. ISS-009 #1859 is closed. ISS-010 #1864 (Internal Only not enforced by Dataverse security for licensed users flagged external) is filed for an owner/UAC decision. Task 068 (the switch) is now startable.
+4. 065 leftover: (d) the ACS endpoint has a read-only check before deploy.
+6. 044: option A; the owner approved the dev dry run 2026-10-14 and it was clean (it would create 1 option, 5 columns, 1 key and FLS on 3 columns; nothing written). Next: the owner approves -Apply, then -Verify, then notes/task-044-schema-record.md.
+3. Owner decisions 2026-10-13 (resolved, recorded in POMLs): 045 = option A (contact-grants reachable; census pins routes); 065 = explicit false for emails too, fix Message→Email mapping (explain how the Message path works); 062 = createdby only when a person; 067 = run (done).
+
+## Owner check 3 (CIAM partner, 2026-10-13): findings
+- #1 documents "could not be loaded": `sprk_documenttype` is a choice (number) but `DocumentRow` maps it as a string, so any typed document fails the whole list (App Insights: 4x InvalidOperationException on `$.value[n].sprk_documenttype`) → **task 064**.
+- #2/#3 no preview / no download in the Documents grid: grid config 3af4102c has `selectionMode: none`; no download action → **task 066**; preview → **DEF-003 #1828** (R4).
+- #4 "+New": record detail is read-only by design; Invoice create → **DEF-004 #1829** (invoice intake project, ontology-r1).
+- #5 partner does not see MDA messages: the MDA send leaves `sprk_isinternalonly` null, and a null flag is hidden from contacts (fail closed) → **task 065** (owner: default No, sender can tick Internal only; old dev rows not corrected).
+- Upload 409s in the logs = same-name file already exists (ConflictBehavior.Fail by design). Message POST 403 on an invoice = the access level lacks Create (by design).
+- Found in the logs: **ISS-006 #1830**, UAC's JIT revocation sweep logs one failing record every 5 min on dev. UAC triaged it as non-urgent and not a security gap (per-record catch verified at `SpeContainerMembershipSync.cs:356-377`).
 
 ## Option B known limits (notes/task-039-notes.md §12.11) (notes/task-039-notes.md §12.11)
 Messages and feed give no "incomplete" signal; `Truncated` may over-report; a project pair naming a deleted matter stays secure permanently; `IGenericEntityService` filing seam is DI-supplied (drop = over-hide, not leak).
 
 ## Next actions (in order)
-1. PR #1810 merges (auto). Then sync: the worktree is current with master.
-2. Collect confirmations from UAC, word-add-in, provisioning; record any objection.
-3. A9 re-plan via task-create: 040, 041, 056, withdraw 012/060, new BFF tasks; DEF for Teams-for-workforce-contacts via `/project-defer-issue-tracking`.
-4. BFF design note (A9-cited) for owner sign-off (auth code; two adversarial passes).
-5. Grid views task once question 5 is answered.
+1. 058 → 075 → 076 → 074 (074 and 059 are live and owner-gated).
+2. 070/071/072; then the R3 PR to master after `/conflict-check`.
 
 ## Dependencies tracked elsewhere
+- **ebilling 015 retires `sprk_invoice.sprk_invoicestatus` on dev (deploy gate).** R3 `a6513cd56` admits `statuscode` beside it (transitional). Ebilling runs `Remove-EbillingInvoiceStatus.ps1 -GridConfig` only after R3 confirms a BFF admitting statuscode is live. It runs `-Delete` only after a dev BFF containing its Finance readers (`e0df77339`) is live; the script requires R3's deploy attestation. **From the delete on, every dev BFF deploy first checks by CONTENT (not ancestry: PR #1911 may be squash-merged): in the candidate, `Services/Finance/FinanceBaseValues.cs`, `FinanceRollupService.cs` and `InvoiceReviewService.cs` contain no `sprk_invoicestatus` (`git show <sha>:<path> | grep -c sprk_invoicestatus` = 0), and FinanceBaseValues contains `InvoiceStatusCodeColumn`.** Without that commit, the BFF reads and writes the deleted column, which breaks invoice create, finance rollup, recent invoices, the finance AI tool and the external invoices widget. After the delete, remove `sprk_invoicestatus` from the external ReadableColumns and its test arrays. **Deploy order:** the R3 SPA from `a6513cd56` on reads only `statuscode`, and BFF `9721819ed` admits only `sprk_invoicestatus`. So deploy the BFF before the SPA, never deploy the SPA if the BFF deploy failed or was rolled back, and roll back the SPA (to `88697cfc1`) BEFORE the BFF. **Merge note (UAC):** when ebilling 015 merges into R3, the ExternalAccessModule invoice block conflicts. Keep ebilling's retirement-marker line; its ArchTest exempts only that line.
+- **UAC 036 (branch feat/uac-036-fr20-flag-gated-swap, cut from R3 `5b2375f6f`): flag-gated impersonated root sets + CallerRecordAccessProbe on every external write route.** Merge order agreed 2026-10-17: R3 interim PR → #2061 (186) → 036. **Before writing any BFF change to the external write routes (to-do create, upload, event create; ExternalProjectDataEndpoints.cs) or ExternalAccessModule.cs / AccessibleRecordSetService.cs, tell UAC first.** UAC resolves the ExternalProjectDataEndpoints.cs conflict on its branch.
+- **UAC 186 (draft PR #2061): workforce ceiling.** R3 reviewed the diff 2026-10-17: two `.ExemptFromWorkforceCeiling` lines on the 047/048 routes, OK, with a wording fix asked for on registration. Once 186 is on master, every new R3 `/api/v1/external` route declares exactly one of a requirement, a handler check or an exemption (`Api/ExternalAccess/WorkforceCeilingEndpointFilter.cs`). Otherwise the coverage ArchTest fails, and the route is denied to workforce contacts at runtime. For UAT afterwards, the owner adds the missing Workforce-role privileges on dev (all four on sprk_servicerequest).
+
+- UAC task 185 = PR #1827 (head `df4ce6825`, one fix pending). Changes `ContactBindingDecision`, `ContactIdentityStore` (`BindOidAndConsumeInviteAsync`), `ContactIdentityBinder`, `CallerPrincipalResolver` (CIAM invite-code header), `CorsModule`; SPA `invite-code.ts`, `bff-client.ts`, `BffAccessState`, `WorkspaceHomePage`, `App.tsx`. Merge master into R3 when it lands, BEFORE 046/047/058 start. UAC will notify.
+- Provisioning PR #1823 (`ef24853ec`) adds `sprk_decisionrecord` / `sprk_decisionrecords` / `sprk_regardingservicerequest` to `ExternalDataService.ServiceRequestRelations` (SpaarkeMaster 1.2.2.0 1:N `sprk_decisionrecord_regsvcreq`; pinned test counts 8 -> 9). Merge master into R3 after #1823 merges; re-run `ExternalDeleteServiceRequestTests` and the relationship pin test.
 - ISS-001 (#1623), ISS-002 (#1633), ISS-003 (#1636), ISS-004, ISS-005 (#1673).
 - Copilot agent still uses `access_as_user` on `1e40baad`.
 - Operator: `mailbox-central@spaarke.com` + Exchange RBAC scoping for the stamp UAMI (H14a); BFF app user needs `prvDelete` on `sprk_servicerequest` (verify live).

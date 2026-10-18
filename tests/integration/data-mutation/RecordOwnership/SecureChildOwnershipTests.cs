@@ -611,7 +611,7 @@ public class SecureChildOwnershipTests
         var handler = new DataverseUpdateHandler(
             fields.Object, Mock.Of<IGenericEntityService>(), new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper, ownership,
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
-            NullLogger<DataverseUpdateHandler>.Instance);
+            NullLogger<DataverseUpdateHandler>.Instance, Sprk.Bff.Api.Tests.TestInfrastructure.SecureChildReconcilerFixtures.OverEmptyWorld());
         return (handler, writes);
     }
 
@@ -645,6 +645,7 @@ public class SecureChildOwnershipTests
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection()
             .AddSingleton(ownership)
             .AddSingleton<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>(rights)
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
             // Batch 4 integration (task 156): a re-file re-stamps after the write — an in-memory restamper, empty world.
             .AddSingleton(new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper)
             .BuildServiceProvider();

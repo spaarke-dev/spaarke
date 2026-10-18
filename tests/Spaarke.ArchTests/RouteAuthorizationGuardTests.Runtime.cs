@@ -50,7 +50,8 @@ namespace Spaarke.ArchTests;
 /// whether a group is mapped is ON (<see cref="BootedBff"/>); a route gated on a setting no test sets would be absent from
 /// both boots, and the agreement test then reports it as scanned but not mapped.</para>
 /// </summary>
-public partial class RouteAuthorizationGuardTests : IClassFixture<BootedBff>
+[Collection(BootedBffCollection.Name)]
+public partial class RouteAuthorizationGuardTests
 {
     private readonly BootedBff _booted;
 
@@ -315,7 +316,7 @@ public partial class RouteAuthorizationGuardTests : IClassFixture<BootedBff>
 
     /// <summary>Every policy NAME registered in <paramref name="options"/> — <c>AddPolicy</c>, the AuthorizationBuilder forms,
     /// any spelling — read from the options' own policy map (a private member; this fails loudly if the framework renames it).</summary>
-    private static IReadOnlyList<string> RegisteredPolicyNames(AuthorizationOptions options)
+    internal static IReadOnlyList<string> RegisteredPolicyNames(AuthorizationOptions options)
     {
         var maps = typeof(AuthorizationOptions)
             .GetMembers(BindingFlags.Instance | BindingFlags.NonPublic)
@@ -342,7 +343,7 @@ public partial class RouteAuthorizationGuardTests : IClassFixture<BootedBff>
     /// its <c>IAuthorizeData</c> and <c>AuthorizationPolicy</c> metadata combined through the policy provider — which applies
     /// the DEFAULT policy for a bare <c>RequireAuthorization()</c> and the FALLBACK policy when the endpoint declares nothing —
     /// then its <c>IAuthorizationRequirementData</c> requirements added.</summary>
-    private static async Task<AuthorizationPolicy?> MiddlewarePolicyAsync(IAuthorizationPolicyProvider provider, Endpoint endpoint)
+    internal static async Task<AuthorizationPolicy?> MiddlewarePolicyAsync(IAuthorizationPolicyProvider provider, Endpoint endpoint)
     {
         var policy = await AuthorizationPolicy.CombineAsync(
             provider, endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>(), endpoint.Metadata.GetOrderedMetadata<AuthorizationPolicy>());

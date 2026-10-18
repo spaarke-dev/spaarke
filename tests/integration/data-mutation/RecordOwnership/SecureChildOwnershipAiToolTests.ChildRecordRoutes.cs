@@ -1107,6 +1107,41 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().BeNull();
     }
 
+    [Theory(DisplayName = "#2091 r5: the chat update tool shares the writers' isolation read — one fault is retried and the move out releases; a second is a faulted answer that releases nothing")]
+    [InlineData(1, true)]
+    [InlineData(2, false)]
+    public async Task UpdateTool_MovingAToDoOutOfASecureMatter_RetriesTheIsolationReadOnce(int faultsBeforeItHeals, bool released)
+    {
+        _world.WithRecord("sprk_todo", Todo, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        });
+        ShareWorld.SecureChild("sprk_todo", Todo, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        _shareTable.Seed("sprk_todo", Todo, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+        ShareWorld.Set("sprk_todo", Todo, "sprk_regardingmatter", new EntityReference("sprk_matter", OrdinaryMatter));
+        var faults = 0;
+        ShareWorld.QueryFault = () =>
+        {
+            if (++faults == faultsBeforeItHeals)
+                ShareWorld.ClearQueryFaults();
+            return new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout of 100 seconds elapsing.");
+        };
+        ShareWorld.FailingQueriesOf("sprk_todo");
+
+        var result = await UpdateRecordWithShares(
+            "sprk_todo", Todo, Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        faults.Should().Be(faultsBeforeItHeals, "the read, and at most one retry");
+        _world.Assignments.Should().Equal(("sprk_todo", Todo, Directory.ChildTeam));
+        if (released)
+            _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().BeNull("the retried read answered");
+        else
+            _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+                "whether the row WAS isolated is unknown, so nothing is released");
+    }
+
     [Fact]
     public async Task UpdateTool_ReFilingANeverIsolatedToDo_KeepsItsOwnShares()
     {

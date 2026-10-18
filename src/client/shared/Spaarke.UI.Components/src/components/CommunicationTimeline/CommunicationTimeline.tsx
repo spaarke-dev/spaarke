@@ -168,6 +168,7 @@ const ThreadModeCommunicationTimeline: React.FC<CommunicationTimelineThreadModeP
     prefill,
     onQuoteIntoEmail,
     onSearchRecipients,
+    threadIsPrivate,
     associations,
     sendMode,
     archiveToSpe,
@@ -190,10 +191,11 @@ const ThreadModeCommunicationTimeline: React.FC<CommunicationTimelineThreadModeP
   const prefillFormat = prefill?.bodyFormat;
   const prefillSubject = prefill?.subject;
   const prefillToKey = prefill?.to?.join(',');
+  const prefillInternalOnly = prefill?.isInternalOnly;
   React.useEffect(() => {
     setEffectivePrefill(prefill);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefillBody, prefillFormat, prefillSubject, prefillToKey]);
+  }, [prefillBody, prefillFormat, prefillSubject, prefillToKey, prefillInternalOnly]);
 
   // Refs so the poll hook always reads the freshest cursor without re-subscribing its effect.
   const sinceCursorRef = React.useRef<string | undefined>(undefined);
@@ -301,6 +303,8 @@ const ThreadModeCommunicationTimeline: React.FC<CommunicationTimelineThreadModeP
       to: message.sender ? [message.sender] : undefined,
       body: quoted,
       bodyFormat: 'HTML',
+      // Replying to an internal-only item starts the switch on; a normal item leaves the user's toggle alone.
+      isInternalOnly: message.isInternalOnly === true ? true : undefined,
     });
   }, []);
 
@@ -343,6 +347,7 @@ const ThreadModeCommunicationTimeline: React.FC<CommunicationTimelineThreadModeP
             // {subject}"/"Email: {subject}").
             subject: payload.subject,
             attachmentDocumentIds: payload.attachmentDocumentIds,
+            isInternalOnly: payload.isInternalOnly,
             associations,
             sendMode,
             archiveToSpe,
@@ -397,6 +402,7 @@ const ThreadModeCommunicationTimeline: React.FC<CommunicationTimelineThreadModeP
         isSending={state.isSending}
         onSend={handleSend}
         onSearchRecipients={onSearchRecipients}
+        threadIsPrivate={threadIsPrivate}
       />
     </div>
   );

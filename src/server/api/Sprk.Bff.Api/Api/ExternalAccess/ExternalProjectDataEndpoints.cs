@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -6,7 +7,10 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -1124,37 +1128,42 @@ public static class ExternalProjectDataEndpoints
     private static Task<IResult> UploadDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
-        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
+        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.Project, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
 
     private static Task<IResult> UploadMatterDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
-        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
+        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.Matter, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
 
     private static Task<IResult> UploadWorkAssignmentDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
-        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
+        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
 
     private static Task<IResult> UploadServiceRequestDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
-        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
+        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
 
     private static Task<IResult> UploadInvoiceDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
-        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
+        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.Invoice, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
 
     private static Task<IResult> GetDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
@@ -1275,6 +1284,9 @@ public static class ExternalProjectDataEndpoints
         RecordContainerResolver containerResolver,
         ISpeFileOperations fileStore,
         IRecordOwnershipResolver ownership,
+        IPostUploadIndexingEnqueuer indexing,
+        JobSubmissionService jobs,
+        IConfiguration configuration,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -1393,17 +1405,20 @@ public static class ExternalProjectDataEndpoints
                 detail: "The document could not be stored. Please try again.");
         }
 
+        // One value feeds both the row and the post-upload index request, so the two cannot name different items.
+        var pointers = new ExternalUploadedFilePointers(
+            // FileHandleDto.DriveId is the drive resolved during the upload; fall back to the
+            // container we resolved rather than persisting a null pointer.
+            DriveId: uploaded.DriveId ?? decision.ContainerId,
+            ItemId: uploaded.Id,
+            FileName: uploaded.Name,
+            FileSizeBytes: uploaded.Size,
+            WebUrl: uploaded.WebUrl);
+
         var created = await dataService.CreateDocumentAsync(
             parentKind,
             id,
-            new ExternalUploadedFilePointers(
-                // FileHandleDto.DriveId is the drive resolved during the upload; fall back to the
-                // container we resolved rather than persisting a null pointer.
-                DriveId: uploaded.DriveId ?? decision.ContainerId,
-                ItemId: uploaded.Id,
-                FileName: uploaded.Name,
-                FileSizeBytes: uploaded.Size,
-                WebUrl: uploaded.WebUrl),
+            pointers,
             owningTeamId,
             callerContext, // task 030 (FR-25): the creator stamp comes from the resolved principal
             ct);
@@ -1412,10 +1427,141 @@ public static class ExternalProjectDataEndpoints
             "[EXT-UPLOAD] Contact {ContactId} uploaded '{FileName}' to {ParentKind} {ParentId} as document {DocumentId}",
             callerContext.ContactId, uploadPath, parentKind, id, created.SprkDocumentid);
 
+        // Task 063 (owner decision 2026-10-13): index AND profile the new document, both app-only. Only reached once
+        // the bytes and the row exist; neither queue can change the 201.
+        await QueueIndexingAndProfileAsync(
+            parentKind, id, created.SprkDocumentid, pointers, file.ContentType,
+            indexing, jobs, configuration, httpContext.TraceIdentifier, logger);
+
         // Response carries the document row only — Graph pointers are never surfaced on this surface.
         return Results.Created(
             $"/api/v1/external/{DocumentParentSegment(parentKind)}/{id}/documents/{created.SprkDocumentid}", created);
     }
+
+    /// <summary>
+    /// Task 063 (owner decision 2026-10-13): queues app-only AI Search indexing and the document profile for a document an
+    /// external caller just uploaded, so it is searchable and profiled like an MDA upload. Best-effort: never throws.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>App-only is correct for both.</b> The bytes were written by <see cref="ISpeFileOperations.UploadSmallAsync"/>
+    /// (the BFF's app identity), so this is an MI-written file, the precondition of
+    /// <see cref="IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync"/> (<c>.claude/constraints/auth.md</c>). The
+    /// external plane has no user token to queue, and neither job needs one: the profile job
+    /// (<see cref="AppOnlyDocumentAnalysisJobHandler"/>) reads the row and downloads the file app-only.</para>
+    /// <para><b>Each queue is independent</b>: the two run side by side, and an indexing failure does not stop the
+    /// profile. A failure is logged (identifiers and the queue's exception, no content — ADR-015) and never reaches the
+    /// response.</para>
+    /// <para><b>Bounded, and not cancelled with the request.</b> The bytes and the row are committed, so a caller that
+    /// disconnects now must not leave the document un-indexed and un-profiled (the reasoning of <c>OfficeProfileQueue</c>).
+    /// But the Service Bus client's default retry budget can hold a send for minutes when the namespace hangs; holding the
+    /// 201 that long would time the SPA out on an upload that DID land, and its retry would then meet the route's 409.
+    /// So both share one <see cref="PostUploadQueueBudget"/> of their own: a timeout is logged like any other queue
+    /// failure, and the 201 goes out.</para>
+    /// <para><b>Tenant</b> is the Spaarke tenant from configuration, as every app-only producer reads it — never the
+    /// caller token's <c>tid</c>, which names a CIAM directory or a customer's home directory.</para>
+    /// </remarks>
+    private static async Task QueueIndexingAndProfileAsync(
+        ExternalDataService.DocumentParentKind parentKind,
+        Guid parentId,
+        string? documentId,
+        ExternalUploadedFilePointers pointers,
+        string? contentType,
+        IPostUploadIndexingEnqueuer indexing,
+        JobSubmissionService jobs,
+        IConfiguration configuration,
+        string correlationId,
+        ILogger logger)
+    {
+        using var budget = new CancellationTokenSource(PostUploadQueueBudget);
+        await Task.WhenAll(QueueIndexingAsync(budget.Token), QueueProfileAsync(budget.Token));
+
+        async Task QueueIndexingAsync(CancellationToken queueCt)
+        {
+            try
+            {
+                var result = await indexing.EnqueueAppOnlyIfApplicableAsync(
+                    new PostUploadIndexingRequest(
+                        TenantId: configuration["TENANT_ID"] ?? configuration["AzureAd:TenantId"] ?? "",
+                        DriveId: pointers.DriveId,
+                        ItemId: pointers.ItemId,
+                        FileName: pointers.FileName,
+                        FileSizeBytes: pointers.FileSizeBytes,
+                        ContentType: contentType,
+                        DocumentId: documentId,
+                        ParentEntity: null, // the app-only handler resolves the governing parent from the document row
+                        SearchIndexName: null, // the handler runs the ISearchIndexNameResolver chain
+                        Source: ExternalUploadSource,
+                        CorrelationId: correlationId),
+                    queueCt);
+
+                // The production enqueuer reports its own failure as a result rather than throwing; surface it here with the
+                // document and parent ids so a failed enqueue is findable from the route's log. The 201 is unchanged.
+                if (result.FailureReason is not null)
+                {
+                    logger.LogWarning(
+                        "[EXT-UPLOAD] Queueing indexing for document {DocumentId} ({ParentKind} {ParentId}) failed ({FailureReason}); the upload stands",
+                        documentId, parentKind, parentId, result.FailureReason);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Defensive: the enqueuer catches and logs its own failures; this keeps a throw from ever reaching the 201.
+                logger.LogWarning(ex,
+                    "[EXT-UPLOAD] Queueing indexing for document {DocumentId} ({ParentKind} {ParentId}) failed; the upload stands",
+                    documentId, parentKind, parentId);
+            }
+        }
+
+        async Task QueueProfileAsync(CancellationToken queueCt)
+        {
+            if (!Guid.TryParse(documentId, out var documentGuid))
+            {
+                logger.LogWarning(
+                    "[EXT-UPLOAD] Not queueing the profile: the created document id '{DocumentId}' ({ParentKind} {ParentId}) is not a GUID",
+                    documentId, parentKind, parentId);
+                return;
+            }
+
+            try
+            {
+                await jobs.SubmitJobAsync(
+                    new JobContract
+                    {
+                        JobId = Guid.NewGuid(),
+                        JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
+                        SubjectId = documentGuid.ToString(),
+                        CorrelationId = correlationId,
+                        IdempotencyKey = AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentGuid),
+                        Attempt = 1,
+                        MaxAttempts = 3,
+                        CreatedAt = DateTimeOffset.UtcNow,
+                        Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
+                        {
+                            DocumentId = documentGuid,
+                            Source = ExternalUploadSource,
+                            EnqueuedAt = DateTimeOffset.UtcNow,
+                        })),
+                    },
+                    queueCt);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex,
+                    "[EXT-UPLOAD] Queueing the document profile for document {DocumentId} ({ParentKind} {ParentId}) failed; the upload stands",
+                    documentId, parentKind, parentId);
+            }
+        }
+    }
+
+    /// <summary>The <c>Source</c> the external upload's index request and profile job carry (telemetry only).</summary>
+    private const string ExternalUploadSource = "ExternalUpload";
+
+    /// <summary>
+    /// How long an external upload's response waits for its two post-upload queues (task 063). A healthy Service Bus send
+    /// takes well under a second and the client's transient retries a few seconds; past this the namespace is degraded,
+    /// and the upload's 201 must not wait on it.
+    /// </summary>
+    private static readonly TimeSpan PostUploadQueueBudget = TimeSpan.FromSeconds(15);
 
     /// <summary>The route segment of a document parent, for the Location of a created document.</summary>
     private static string DocumentParentSegment(ExternalDataService.DocumentParentKind parentKind) => parentKind switch

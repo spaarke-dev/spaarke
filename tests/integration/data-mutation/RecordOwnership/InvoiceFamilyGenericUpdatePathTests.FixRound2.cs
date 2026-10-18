@@ -167,4 +167,26 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         atTheGuard.Code.Should().Be(InvoiceFamilyCoreRecordGuard.RecordNotFoundCode);
         atTheWrite.Code.Should().Be(InvoiceFamilyCoreRecordGuard.RecordNotFoundCode);
     }
+
+    /// <summary>
+    /// The master merge of 2026-10-18 (uac-r2 #2094): the push re-files an invoice whose lookup it moves, and the update-only write
+    /// runs INSIDE that re-file (the per-child Write delegate). A row deleted after the guard read still fails THIS child with the
+    /// guard's not-found code, and nothing is created.
+    /// </summary>
+    [Fact]
+    public async Task TheFieldMappingPush_ReFilingAnInvoiceDeletedAfterTheGuardRead_IsRefusedRecordNotFound_InsideTheReFile()
+    {
+        TheRowIsDeletedAfterTheGuardRead();
+
+        var outcome = await RunAsync(GenericPath.FieldMappingPush, "sprk_invoice", Invoice,
+            Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain, WorldWithLines(OtherMatter).Object);
+
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.RecordNotFoundCode);
+        outcome.Message.Should().Be(
+            $"Not written: {InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(InvoiceFamilyCoreRecordGuard.RecordNotFoundCode)}");
+        NoGuid(outcome);
+        NothingWasCreated();
+        Sent().Should().ContainSingle("the one update-only attempt");
+        _pushOwnership.Reparents.Should().ContainSingle("the write ran inside the re-file");
+    }
 }
