@@ -342,3 +342,12 @@ Not exercised live (the column still exists on dev, and no write was allowed): t
 - Merge with R3: both branches edit the invoices `ReadableColumns` block (R3 puts `statuscode` on its own line with its own comment; 015 adds the old column on its own line with the `transitional` marker). Expect a trivial textual conflict; the resolution is the union, keeping 015's marker comment so the guard's exemption line stays exact. The follow-up commit then removes the old-column line on the merged branch.
 - K-class (no fix): `-Delete`'s attestation checks the three Finance readers the brief names, not every 015 reader (`FinanceSummaryService`, `FinancialCalculationToolHandler`, `InvoiceLiveFactResolver`). They arrive in the same commit as the three, so a build containing the three contains the rest (K4).
 - The seam test's live run for D-103 and the K1/K2 live paths are proven by reading only (11.2, 11.3).
+
+## 12. Live run log
+
+| When (UTC) | Step | Evidence |
+|---|---|---|
+| 2026-10-18 03:34:49 | R3 deployed the BFF admitting both columns (ProductVersion 1.0.0+ebc74b331…) | R3 message |
+| 2026-10-18 03:36:44 | R3 deployed the SPA reading statuscode (run 39094144398) | R3 message |
+| 2026-10-18 03:42:42 | `-GridConfig -BffDeployAttestation ebc74b331`, WhatIf first then live: grid 3ff4102c moved sprk_invoicestatus → statuscode (3 mentions, If-Match W/"21226563") | Read back: 0 old mentions, etag W/"28505656". Delete verdict is still BLOCKED until a BFF with 015's Finance readers is live (R3 merges 015) |
+

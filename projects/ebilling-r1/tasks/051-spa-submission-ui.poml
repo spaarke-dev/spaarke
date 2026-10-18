@@ -42,7 +42,7 @@
   </context>
 
   <constraints>
-    <constraint source="owner D-106 (2026-10-17)">The chosen firm must be linked to the chosen core record (matter, project or work assignment). The server refuses otherwise, failing closed, and the picker lists only records linked to the chosen firm.</constraint>
+    <constraint source="owner D-106, refined by D-110 (2026-10-17)">Linked = the record's assigned law firms (sprk_assignedlawfirm1/2) only, and the rule is enforced in the submission service, so it holds on every channel, internal included. The chosen firm must be linked to the chosen core record (matter, project or work assignment). The server refuses otherwise, failing closed, and the picker lists only records linked to the chosen firm.</constraint>
     <constraint source="D-91 (owner, 2026-10-16)">The Details step requires the firm invoice number (cannot continue while blank); PO stays optional.</constraint>
     <constraint source="ADR-021">Fluent UI v9 only, tokens for every colour and spacing, no hard-coded colours; dark mode via the existing theme provider (style a wrapper div, not the FluentProvider — project gotcha F-10).</constraint>
     <constraint source="ADR-012">Compose existing shared components (WizardShell, FileUploadZone, UploadedFileList, StatusBadge, AiProgressStepper); the new shared component takes data callbacks as props and never imports SPA auth or Xrm.</constraint>
