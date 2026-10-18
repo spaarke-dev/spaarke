@@ -156,9 +156,25 @@ public class InvoiceSubmissionService
                     "The firm was not found or is not active.");
         }
 
+        var row = new Entity(SubmissionEntity);
+        row[core.SubmissionColumn] = new EntityReference(core.EntityLogicalName, core.RecordId);
+        var decided = await InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync(
+            InvoiceFamilyCoreRecordGuard.Check(row), _entities, _recordTypes.QueryRecordTypeRefAsync, ct);
+        if (decided.IsRefused || decided.ResolverFields is null)
+        {
+            _logger.LogWarning("Invoice submission refused: the core record's fields could not be derived ({Code})", decided.RefusalCode);
+            return decided.RefusalCode == InvoiceFamilyCoreRecordGuard.ReadFailedCode
+                ? InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                    "The record could not be read right now. Try again shortly.")
+                : InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                    "The record cannot take an invoice submission (it is missing or incomplete).");
+        }
+
         // D-106 / D-110: the firm must be one of the core record's assigned law firms, on EVERY channel (the internal route names its firm in
-        // the query and is held to the same rule as an external contact). Before anything is read for the write and long before any write;
-        // the same codes whichever route called. The detail names no firm and no record.
+        // the query and is held to the same rule as an external contact). After the record's own fields (a missing record is 422 above) and
+        // before the owner is resolved and long before any write; the same codes whichever route called. The order matters: the link reader
+        // cannot tell a record that is not returned (deleted, not found) from a fault, so both come back unreadable, and asking it first would
+        // answer a deleted record 503 "try again shortly". The detail names no firm and no record.
         switch (await CheckFirmLinkAsync(core, request.FirmId, ct))
         {
             case InvoiceFirmLink.Linked:
@@ -172,20 +188,6 @@ public class InvoiceSubmissionService
             default:
                 return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
                     "The firm could not be checked right now. Try again shortly.");
-        }
-
-        var row = new Entity(SubmissionEntity);
-        row[core.SubmissionColumn] = new EntityReference(core.EntityLogicalName, core.RecordId);
-        var decided = await InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync(
-            InvoiceFamilyCoreRecordGuard.Check(row), _entities, _recordTypes.QueryRecordTypeRefAsync, ct);
-        if (decided.IsRefused || decided.ResolverFields is null)
-        {
-            _logger.LogWarning("Invoice submission refused: the core record's fields could not be derived ({Code})", decided.RefusalCode);
-            return decided.RefusalCode == InvoiceFamilyCoreRecordGuard.ReadFailedCode
-                ? InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
-                    "The record could not be read right now. Try again shortly.")
-                : InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.CoreRecordUnavailable,
-                    "The record cannot take an invoice submission (it is missing or incomplete).");
         }
 
         var owner = await _ownership.ResolveOwnerAsync(
@@ -319,7 +321,9 @@ public class InvoiceSubmissionService
     /// model's own record-to-organization read (<see cref="ExternalParticipationService.GetReferencedOrganizationIdsAsync"/>, one batched query
     /// that selects BOTH lookups). The ONE definition of "linked" for the submit gate (this service, and the external filter's early refusal);
     /// the picker route applies <see cref="LinkOf"/> to its batched answer, so the list it offers is exactly what a submit accepts. A fault, a
-    /// missing row or an incomplete answer is <see cref="InvoiceFirmLink.Unreadable"/>, never "linked" and never a final "not linked".
+    /// missing row or an incomplete answer is <see cref="InvoiceFirmLink.Unreadable"/>, never "linked" and never a final "not linked". The reader
+    /// cannot tell a record that is not returned (deleted) from a fault, so a caller that must tell them apart reads the record first: <see cref="SubmitAsync"/>
+    /// derives the record's fields (a missing record is its 422) before it asks for the link.
     /// </summary>
     public async Task<InvoiceFirmLink> CheckFirmLinkAsync(InvoiceCoreRecord core, Guid firmId, CancellationToken ct)
     {

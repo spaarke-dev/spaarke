@@ -367,25 +367,13 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// The route filter let the request through. For a matter the whole submission runs (202, one allocation); for a project or a work assignment
-    /// the shared test service has no record to read, so the request reaches the service and stops at 422 record_unavailable: not at any refusal
-    /// the filter owns.
+    /// The request got through the route filter and the service's checks: the whole submission ran (202, a row allocated). The shared test service
+    /// serves the record of every kind (a matter, a project, a work assignment), so each kind is received.
     /// </summary>
     private async Task AssertPastTheFilterAsync(string segment, HttpResponseMessage response)
     {
-        if (segment == "matters")
-        {
-            response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-            _h.Allocations.Should().ContainSingle();
-            return;
-        }
-
-        new[]
-        {
-            InvoiceSubmissionErrors.UseInternalRoute, InvoiceSubmissionErrors.FirmNotLinked, InvoiceSubmissionErrors.FirmForbidden,
-            InvoiceSubmissionErrors.RecordForbidden, InvoiceSubmissionErrors.FirmRequired, InvoiceSubmissionErrors.FirmUnverifiable,
-        }.Should().NotContain(await ErrorCodeAsync(response));
-        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, $"the {segment} submission is received ({await ErrorCodeAsync(response)})");
+        _h.Allocations.Should().NotBeEmpty();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -456,6 +444,66 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FirmUnverifiable);
+        NothingWritten();
+    }
+
+    // ── A record that cannot be found keeps its 422; 503 means a real fault (round 3) ──
+    // The link reader cannot tell a record that is not returned (deleted) from a fault, so both come back unreadable. The route filter's early
+    // refusal therefore fires only on a definite NotLinked: an unreadable answer goes on to the service, which reads the record's own fields
+    // first (a missing record is its 422) and only then asks for the link.
+
+    private void RemoveCoreRecord(string segment)
+    {
+        if (segment == "matters")
+        {
+            _h.Matter = null;
+        }
+        else
+        {
+            _h.OtherCoreRecordsExist = false;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(CoreSegments))]
+    public async Task External_submit_on_a_record_that_cannot_be_found_is_422_not_503_even_though_its_links_come_back_unreadable(string segment)
+    {
+        _resolver.Principal = OnEveryRoot();
+        _participations.LinksUnreadable = true; // what the reader answers for a deleted record
+        RemoveCoreRecord(segment);
+
+        var response = await PostToAsync(segment);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
+        NothingWritten();
+    }
+
+    [Fact]
+    public async Task A_real_link_fault_on_an_existing_record_passes_the_route_filter_and_is_503_from_the_service()
+    {
+        _participations.LinksUnreadable = true;
+
+        var response = await PostExternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FirmUnverifiable);
+        _participations.LinkReads.Should().HaveCount(2, "the filter's early copy let the unreadable answer through and the service read again");
+        NothingWritten();
+    }
+
+    [Fact]
+    public async Task An_unlinked_firm_is_refused_403_by_the_route_filter_early_before_the_service_reads_the_record()
+    {
+        _participations.Links[("sprk_matter", MatterId)] = new[] { OtherFirmId };
+
+        var response = await PostExternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FirmNotLinked);
+        _participations.LinkReads.Should().ContainSingle("only the filter's early copy asked; the service was never reached");
+        _h.Entities.Verify(
+            e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
         NothingWritten();
     }
 
@@ -957,16 +1005,8 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
         var response = await PostInternalToAsync(segment, set, id);
 
-        if (segment == "matters")
-        {
-            response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-            _h.Allocations.Should().ContainSingle().Which.FirmId.Should().Be(FirmId);
-            return;
-        }
-
-        // The shared test service has no project / work-assignment row to read: past the link, it stops at 422 record_unavailable.
-        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
-        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        _h.Allocations.Should().ContainSingle().Which.FirmId.Should().Be(FirmId);
     }
 
     [Fact]
@@ -979,6 +1019,22 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FirmUnverifiable);
+        NothingWritten();
+    }
+
+    [Theory]
+    [MemberData(nameof(InternalSegments))]
+    public async Task Internal_submit_on_a_record_that_cannot_be_found_is_422_not_503_even_though_its_links_come_back_unreadable(string segment, string set)
+    {
+        var (_, id) = CoreOf(segment);
+        _participations.LinksUnreadable = true; // what the reader answers for a deleted record
+        RemoveCoreRecord(segment);
+
+        var response = await PostInternalToAsync(segment, set, id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
+        _participations.LinkReads.Should().BeEmpty("the record's own fields are read first; a missing record never reaches the link read");
         NothingWritten();
     }
 

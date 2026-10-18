@@ -158,14 +158,34 @@ public sealed class InvoiceSubmissionFirmLinkWireTests
 
     [Theory]
     [MemberData(nameof(Channels))]
-    public async Task A_record_that_does_not_come_back_is_unverifiable(InvoiceSubmissionChannel channel)
+    public async Task A_record_that_exists_but_does_not_come_back_from_the_link_read_is_unverifiable(InvoiceSubmissionChannel channel)
     {
+        // The service read the record's own fields (it exists), yet the link read returned no row for it: that is not an answer about the record's
+        // firms, so the submission fails closed.
         await using var world = await World.StartAsync();
         world.Dataverse.NoRows = true;
 
         var outcome = await world.SubmitAsync(channel);
 
         outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 503 && o.ErrorCode == InvoiceSubmissionErrors.FirmUnverifiable);
+        world.Dataverse.Requests.Should().ContainSingle("the record was read first, then its links");
+        world.Harness.Writes.Should().Be(0);
+    }
+
+    [Theory]
+    [MemberData(nameof(Channels))]
+    public async Task A_record_that_cannot_be_found_is_422_not_503_and_its_links_are_never_asked_for(InvoiceSubmissionChannel channel)
+    {
+        // A deleted record is a row the link reader is not given, which it cannot tell from a fault. The submission therefore reads the record's own
+        // fields first: a missing record is its 422, so 503 "try again shortly" means only a real fault.
+        await using var world = await World.StartAsync();
+        world.Dataverse.NoRows = true; // what the reader would see for the deleted record
+        world.Harness.Matter = null;
+
+        var outcome = await world.SubmitAsync(channel);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 422 && o.ErrorCode == InvoiceSubmissionErrors.CoreRecordUnavailable);
+        world.Dataverse.Requests.Should().BeEmpty("the missing record is refused before its links are read");
         world.Harness.Writes.Should().Be(0);
     }
 

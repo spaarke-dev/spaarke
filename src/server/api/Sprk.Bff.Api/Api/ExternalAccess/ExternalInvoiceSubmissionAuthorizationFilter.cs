@@ -98,7 +98,9 @@ internal sealed record ExternalInvoiceSubmissionScope(
 /// one of the record's assigned law firms; else 403 <see cref="InvoiceSubmissionErrors.FirmNotLinked"/> (code only), and a link read that
 /// faults is 503 <see cref="InvoiceSubmissionErrors.FirmUnverifiable"/>. <b>The owner of this rule is <see cref="InvoiceSubmissionService.SubmitAsync"/></b>,
 /// which every channel (this one and the internal route) calls and which enforces it with the same codes; the check here is an EARLY copy of
-/// it, through the same <see cref="InvoiceSubmissionService.CheckFirmLinkAsync"/>, kept so a refused request is answered before its upload is read.</para>
+/// it, through the same <see cref="InvoiceSubmissionService.CheckFirmLinkAsync"/>, kept so a refused request is answered before its upload is read.
+/// The copy refuses only a definite 403 NotLinked: an unreadable answer (a fault, or a record that is not returned, which the reader cannot tell
+/// apart) passes through to the service, which answers a missing record 422 and a real fault 503.</para>
 /// <para><b>Reads.</b> One submission is visible only when its firm is one of the caller's and the caller can read its core record;
 /// anything else, including a missing row, is the same 404 (no existence oracle). The list is scoped by the caller's firms here and by
 /// the caller's readable records in the query.</para>
@@ -237,9 +239,11 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
 
     /// <summary>
     /// D-106 / D-110, the EARLY copy of the submission service's own check (<see cref="InvoiceSubmissionService.CheckFirmLinkAsync"/>, the one
-    /// definition of "linked": the record's assigned law firms <c>sprk_assignedlawfirm1/2</c>, an org-level grant does not link). Null when linked;
-    /// otherwise the refusal. A record whose links could not be read is a 503, never "linked" and never a final "not linked". The refusal
-    /// carries the code only.
+    /// definition of "linked": the record's assigned law firms <c>sprk_assignedlawfirm1/2</c>, an org-level grant does not link). Null when linked
+    /// OR when the links could not be read; otherwise the 403 refusal, which carries the code only. <b>Only a definite NotLinked refuses here.</b>
+    /// The reader cannot tell a record that is not returned (deleted, or not found) from a fault, so both come back unreadable; refusing 503 on that
+    /// would answer a deleted record with "try again shortly". An unreadable answer passes through instead: the service reads the record's fields
+    /// first (a missing record is its 422), then re-reads the links and answers 503 only for a real fault, so nothing is ever treated as linked.
     /// </summary>
     private async Task<IResult?> DenyUnlinkedFirmAsync(InvoiceCoreRecord core, Guid firmId, CancellationToken ct)
     {
@@ -252,7 +256,7 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
                 return Deny(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
                     "The firm you chose is not linked to this record, so an invoice cannot be submitted for it.");
             default:
-                return Unverifiable();
+                return null; // unreadable: the service decides (see the summary); never a pass for the write, only for this early copy
         }
     }
 

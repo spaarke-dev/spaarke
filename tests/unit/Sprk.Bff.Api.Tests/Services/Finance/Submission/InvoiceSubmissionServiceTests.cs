@@ -86,6 +86,12 @@ public sealed class InvoiceSubmissionServiceTests
         public TrackingNumberResult Allocation = TrackingNumberResult.Created("INV-1.1", 1);
         public Entity? Firm = new("sprk_organization", FirmId) { ["statecode"] = new OptionSetValue(0) };
         public Entity? Matter = new("sprk_matter", MatterId) { ["sprk_mattername"] = "Acme v. Roe", ["sprk_matternumber"] = "M-1" };
+
+        /// <summary>
+        /// False: a project or work assignment is not found by the core-record read (a record deleted since the caller's access was composed).
+        /// True (default): any project or work assignment id is found, with a name and a number.
+        /// </summary>
+        public bool OtherCoreRecordsExist = true;
         public Entity? Submission;
         public Exception? MatterReadFailure;
         public Exception? JobFailure;
@@ -235,6 +241,9 @@ public sealed class InvoiceSubmissionServiceTests
                 {
                     "sprk_organization" => FirmReadFailure is { } firmFailure ? throw firmFailure : Firm!,
                     "sprk_matter" => MatterReadFailure is { } failure ? throw failure : Matter!,
+                    "sprk_project" or "sprk_workassignment" => OtherCoreRecordsExist
+                        ? new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Core record", ["sprk_matternumber"] = "C-1" }
+                        : null!,
                     "sprk_invoicesubmission" => Submission!,
                     _ => null!,
                 });
@@ -543,6 +552,7 @@ public sealed class InvoiceSubmissionServiceTests
         (await missing.Build().SubmitAsync(Spa(), CancellationToken.None)).Should().Match<InvoiceSubmissionOutcome>(o =>
             o.StatusCode == 422 && o.ErrorCode == InvoiceSubmissionErrors.CoreRecordUnavailable);
         missing.Writes.Should().Be(0);
+        missing.LinkReads.Should().BeEmpty("the record's own fields are read first; a missing record never reaches the link read");
 
         var faulted = new Harness { MatterReadFailure = new TimeoutException("throttled") };
         (await faulted.Build().SubmitAsync(Spa(), CancellationToken.None)).Should().Match<InvoiceSubmissionOutcome>(o =>
@@ -673,11 +683,10 @@ public sealed class InvoiceSubmissionServiceTests
         unlinked.LinkReads.Should().ContainSingle().Which.Entity.Should().Be(entity);
         unlinked.Writes.Should().Be(0);
 
-        // Linked: the request goes on past the link check (this harness has no such record to read, so it stops at 422 record_unavailable).
+        // Linked: the request goes on past the link check and is received.
         var linked = new Harness();
         linked.Links[(entity, recordId)] = new[] { FirmId };
-        (await linked.Build().SubmitAsync(request, CancellationToken.None)).Should().Match<InvoiceSubmissionOutcome>(o =>
-            o.ErrorCode == InvoiceSubmissionErrors.CoreRecordUnavailable);
+        (await linked.Build().SubmitAsync(request, CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
     }
 
     [Fact]
@@ -690,6 +699,52 @@ public sealed class InvoiceSubmissionServiceTests
         var inactiveFirm = new Harness { Firm = new Entity("sprk_organization", FirmId) { ["statecode"] = new OptionSetValue(1) } };
         (await inactiveFirm.Build().SubmitAsync(Internal(), CancellationToken.None)).ErrorCode.Should().Be(InvoiceSubmissionErrors.FirmInvalid);
         inactiveFirm.LinkReads.Should().BeEmpty("an inactive firm is refused as invalid before its links are looked up");
+
+        var missingRecord = new Harness { Matter = null };
+        (await missingRecord.Build().SubmitAsync(Internal(), CancellationToken.None)).ErrorCode.Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
+        missingRecord.LinkReads.Should().BeEmpty("a record that cannot be found is refused before its links are looked up");
+    }
+
+    // The link reader cannot tell a record that is not returned (deleted) from a fault: both come back unreadable. The link is therefore asked
+    // for only AFTER the record's own fields were read, so a missing record keeps its 422 and 503 firm_unverifiable means a real fault.
+    [Theory]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceCoreRecordKind.Matter)]
+    [InlineData(InvoiceSubmissionChannel.Internal, InvoiceCoreRecordKind.Matter)]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceCoreRecordKind.Project)]
+    [InlineData(InvoiceSubmissionChannel.Internal, InvoiceCoreRecordKind.Project)]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceCoreRecordKind.WorkAssignment)]
+    [InlineData(InvoiceSubmissionChannel.Internal, InvoiceCoreRecordKind.WorkAssignment)]
+    public async Task A_record_that_cannot_be_found_is_422_not_503_even_though_its_links_come_back_unreadable(
+        InvoiceSubmissionChannel channel, InvoiceCoreRecordKind kind)
+    {
+        var h = new Harness { LinksUnreadable = true, OtherCoreRecordsExist = false };
+        var request = On(channel) with { CoreRecord = new InvoiceCoreRecord(kind, kind == InvoiceCoreRecordKind.Matter ? MatterId : Guid.NewGuid()) };
+        if (kind == InvoiceCoreRecordKind.Matter)
+        {
+            h.Matter = null;
+        }
+
+        var outcome = await h.Build().SubmitAsync(request, CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 422 && o.ErrorCode == InvoiceSubmissionErrors.CoreRecordUnavailable);
+        h.Writes.Should().Be(0);
+        h.OwnerContexts.Should().BeEmpty();
+        h.LinkReads.Should().BeEmpty("the missing record is refused before its links are asked for");
+    }
+
+    [Theory]
+    [InlineData(InvoiceSubmissionChannel.Spa)]
+    [InlineData(InvoiceSubmissionChannel.Internal)]
+    public async Task A_real_fault_reading_the_links_of_an_existing_record_is_still_503_after_the_record_was_read(InvoiceSubmissionChannel channel)
+    {
+        var h = new Harness { LinkReadFailure = new TimeoutException("throttled") };
+
+        var outcome = await h.Build().SubmitAsync(On(channel), CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 503 && o.ErrorCode == InvoiceSubmissionErrors.FirmUnverifiable);
+        h.LinkReads.Should().ContainSingle("the record exists, so its links are asked for, and the fault is what refuses");
+        h.Writes.Should().Be(0);
+        h.OwnerContexts.Should().BeEmpty("the refusal comes before the owner is resolved");
     }
 
     [Fact]
