@@ -79,7 +79,12 @@ public sealed record BillingFactSet
     /// <para><b>Priors come from both sides of the secure wall (D-112).</b> Restricting the load to the invoice's own side would
     /// let double billing across the wall go unflagged, so 072 loads secure and ordinary priors and sets each prior's
     /// <see cref="BillingPriorSubmission.SecureRoots"/> (and the invoice's <see cref="BillingInvoiceFacts.SecureRoots"/>) app-only
-    /// from <c>SecureChildShareSynchronizer.SecureRootsAboveAsync</c>, walking up from the core record. Duplicate then shows a
+    /// from <c>SecureChildShareSynchronizer</c>'s secure-root walk. The walk starts from CHILD rows, never a root table (it throws for
+    /// a root table such as <c>sprk_matter</c>, so the core record is never passed itself): a prior's <c>sprk_invoice</c> and
+    /// <c>sprk_invoicesubmission</c> rows, their sets unioned, and the judged invoice as an unsaved <c>sprk_invoice</c> probe carrying
+    /// the core lookup. The walk's outcomes are mapped by uac-r2's calling conditions: Failed (an ambiguous Secure owner team) and a
+    /// fault leave every set unresolved; NotApplicable (no Secure owner team) gives every set empty; an Undetermined row, or a
+    /// Secure-owned row whose lookups reach no secure root, leaves its side unresolved. Duplicate then shows a
     /// prior's tracking number and line detail only when both sets are resolved and the prior's roots are a subset of the
     /// invoice's; in every other case the finding still fires but withholds them (fail closed). 071 does not call the
     /// synchronizer.</para>
@@ -103,7 +108,8 @@ public sealed record BillingInvoiceFacts
     public required Guid SubmissionId { get; init; }
 
     /// <summary>
-    /// The ids of the secure roots above this submission's core record (D-112): every Secure record is its own wall. An ordinary
+    /// The ids of the secure roots above this submission (D-112), walked from the child rows (see <see cref="BillingFactSet.PriorSubmissions"/>):
+    /// every Secure record is its own wall. An ordinary
     /// record has the empty set. <c>null</c> = the set could not be read (unresolved), which Duplicate treats as unknown and fails
     /// closed on: no prior's detail is shown. Required, so a caller states which of the three it means.
     /// </summary>
@@ -224,7 +230,8 @@ public sealed record BillingPriorSubmission
     public BillingPriorStatus Status { get; init; }
 
     /// <summary>
-    /// The secure roots above the prior's core record (D-112); the empty set for an ordinary record; <c>null</c> = unresolved.
+    /// The secure roots above the prior's invoice and submission rows (D-112, walked from those child rows, never from a root table);
+    /// the empty set for an ordinary record; <c>null</c> = unresolved.
     /// Its tracking number and line detail are shown on a Duplicate finding only when this set and the invoice's are both
     /// resolved and this one is a subset of the invoice's. Required, so a caller states which of the three it means.
     /// </summary>

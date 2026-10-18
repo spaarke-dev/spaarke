@@ -54,7 +54,12 @@ ArchTests ADR-010 test is green).
   for them in `BillingPriorStatus`). The submission being evaluated is excluded by `SubmissionId` (a required, non-nullable Guid on
   `BillingInvoiceFacts`). **Priors come from both sides of the secure wall (D-112)**, and 072 sets `SecureRoots` on each prior and on
   the invoice (required `IReadOnlySet<Guid>?`: empty = ordinary, `null` = could not be read) app-only from
-  `SecureChildShareSynchronizer.SecureRootsAboveAsync`, walking up from the core record. 071 does not call it.
+  `SecureChildShareSynchronizer`'s secure-root walk. The walk starts from CHILD rows, never a root table (`SecureRootsAboveAsync`
+  throws for a root table, so a core record is never passed itself): a prior's `sprk_invoice` and `sprk_invoicesubmission` rows, their
+  sets unioned (072 review A1), and the judged invoice as an unsaved `sprk_invoice` probe. Failed, NotApplicable and Undetermined are
+  handled per uac-r2's calling conditions: Failed (ambiguous Secure owner team) or a fault means every set is unresolved; NotApplicable
+  (no Secure owner team) means every set is empty; an Undetermined row, or a Secure-owned row whose lookups reach no secure root, leaves
+  its side unresolved. 071 does not call it.
 - `CoreRecord` (open date, close date, closed). `null` means CoreRecordWindow judges nothing; 072 need not call the rule for a
   submission with no core record.
 - Code tables (018) are **not** in the fact set: no handler reads them (NonBillableActivity and ExpenseRule compare the rule's
@@ -288,8 +293,7 @@ test is repeated outside `BillingMath`. The guard that would catch a sixth hand-
 
 ## Fix round 2 (ontology-r1's review at `4257e7f35`; owner decisions D-105, D-111, D-112)
 
-Base `6bcd4d029` (`work/ebilling-r1`). Commits (cherry-picked onto `work/ebilling-r1` by the main session; the hashes below are the
-fix-round worktree's own): `8b0604728` F4 read fields and K2, `a563146cb` K1, `eb978396c` D-112, `b78b30c0b` Describe texts (D-111),
+Base `6bcd4d029` (`work/ebilling-r1`). Commits (cherry-picked onto `work/ebilling-r1` by the main session): `8b0604728` F4 read fields and K2, `a563146cb` K1, `eb978396c` D-112, `b78b30c0b` Describe texts (D-111),
 `cae4e9051` K4 purity guard, plus this notes commit. Cherry-picked hashes on `work/ebilling-r1`: `8b0604728` (F4, K2), `a563146cb` (K1), `eb978396c` (D-112), `b78b30c0b` (D-111), `cae4e9051` (K4), `7b0204f21` (notes); range `e2288a659..7b0204f21`.
 
 | Item | Change | Evidence |
