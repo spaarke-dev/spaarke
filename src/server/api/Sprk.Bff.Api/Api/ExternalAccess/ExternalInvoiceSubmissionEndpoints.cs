@@ -127,11 +127,34 @@ public static class ExternalInvoiceSubmissionEndpoints
     private static IResult GetAsync(HttpContext http) =>
         Scope(http) is { Submission: { } view } ? Results.Ok(view) : NoScope();
 
+    /// <summary>The most record ids returned per kind (matters, projects, work assignments): the picker's own page is 200 rows per source.</summary>
+    internal const int MaxFirmRecordsPerKind = 200;
+
     /// <summary>
-    /// The caller's readable matters, projects and work assignments that the chosen firm is linked to (D-106: the picker offers only these). The
-    /// link is the same one the submit route checks (<see cref="ExternalInvoiceSubmissionAuthorizationFilter.IsFirmLinkedAsync"/> reads the same
-    /// <c>GetReferencedOrganizationIdsAsync</c>), batched over the caller's own readable ids, so nothing outside the caller's scope is read or named.
-    /// A record whose links could not be read is left out and <c>Partial</c> says so (fail closed).
+    /// The most of the caller's readable records of one kind whose links are read (<c>GetReferencedOrganizationIdsAsync</c> reads 50 records per
+    /// Dataverse request, so this bounds a call to 10 requests per kind however large the caller's access set is).
+    /// </summary>
+    internal const int MaxFirmRecordCandidatesPerKind = 500;
+
+    /// <summary>
+    /// The picker's link read (D-106): which of the caller's OWN readable matters, projects and work assignments the chosen firm is linked to.
+    /// <para>
+    /// <b>Scope.</b> The candidates are the caller's composed, Read-gated record sets on <see cref="CallerPrincipal"/> (the access model's
+    /// post-veto answer, the same sets every other external read route scopes by), narrowed to the records the caller could submit on (Read and
+    /// Create, the submit filter's own test), so a record the caller has no grant on is never read and never named, even when the firm is linked to
+    /// it: the list is the INTERSECTION of "the caller can submit on it" and "the firm is one of its assigned law firms", never "every record of
+    /// the firm". The firm itself was checked by the route filter against the caller's own ACTIVE memberships, and a
+    /// systemuser was refused there, before anything is read.
+    /// </para>
+    /// <para>
+    /// <b>Link.</b> The same definition the submit gate applies (<see cref="InvoiceSubmissionService.LinkOf"/>), batched. A record whose links
+    /// could not be read is left out and <c>Partial</c> says so (fail closed).
+    /// </para>
+    /// <para>
+    /// <b>Bounds.</b> At most <see cref="MaxFirmRecordCandidatesPerKind"/> readable records per kind are examined (in id order, so the answer is
+    /// stable) and at most <see cref="MaxFirmRecordsPerKind"/> ids per kind are returned; either cut sets <c>Truncated</c>, so the list is never
+    /// presented as complete when it is not.
+    /// </para>
     /// </summary>
     private static async Task<IResult> FirmRecordsAsync(
         HttpContext http, ExternalParticipationService participations, CancellationToken ct)
@@ -143,25 +166,51 @@ public static class ExternalInvoiceSubmissionEndpoints
 
         var principal = scope.Principal;
         var partial = false;
+        var truncated = false;
 
-        async Task<IReadOnlyList<Guid>> LinkedAsync(InvoiceCoreRecordKind kind, IReadOnlyCollection<Guid> readable)
+        async Task<IReadOnlyList<Guid>> LinkedAsync(InvoiceCoreRecordKind kind, IEnumerable<Guid> readable)
         {
-            if (readable.Count == 0)
+            // Only records the caller could submit on (Read + Create, the submit filter's own test): a Read-only record would be offered and then refused.
+            var rootType = new InvoiceCoreRecord(kind, Guid.Empty).GrantRootType;
+            var candidates = readable
+                .Where(id => id != Guid.Empty && principal.RightsOn(rootType, id).HasFlag(ExternalInvoiceSubmissionAuthorizationFilter.SubmitRights))
+                .Distinct().Order().ToList();
+            if (candidates.Count > MaxFirmRecordCandidatesPerKind)
+            {
+                truncated = true;
+                candidates = candidates.GetRange(0, MaxFirmRecordCandidatesPerKind);
+            }
+
+            if (candidates.Count == 0)
             {
                 return Array.Empty<Guid>();
             }
 
-            var references = await participations.GetReferencedOrganizationIdsAsync(new InvoiceCoreRecord(kind, Guid.Empty).EntityLogicalName, readable, ct);
-            var linked = new List<Guid>();
-            foreach (var id in readable)
+            IReadOnlyDictionary<Guid, ReferencedOrganizations> references;
+            try
             {
-                if (!references.TryGetValue(id, out var record) || record.Unreadable)
+                references = await participations.GetReferencedOrganizationIdsAsync(new InvoiceCoreRecord(kind, Guid.Empty).EntityLogicalName, candidates, ct);
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                partial = true; // none of this kind's links could be read: none is offered
+                return Array.Empty<Guid>();
+            }
+
+            var linked = new List<Guid>();
+            foreach (var id in candidates)
+            {
+                switch (InvoiceSubmissionService.LinkOf(references is not null && references.TryGetValue(id, out var record) ? record : null, firmId))
                 {
-                    partial = true;
-                }
-                else if (record.OrganizationIds.Contains(firmId))
-                {
-                    linked.Add(id);
+                    case InvoiceFirmLink.Linked when linked.Count < MaxFirmRecordsPerKind:
+                        linked.Add(id);
+                        break;
+                    case InvoiceFirmLink.Linked:
+                        truncated = true;
+                        break;
+                    case InvoiceFirmLink.Unreadable:
+                        partial = true;
+                        break;
                 }
             }
 
@@ -169,9 +218,9 @@ public static class ExternalInvoiceSubmissionEndpoints
         }
 
         var matters = await LinkedAsync(InvoiceCoreRecordKind.Matter, principal.AccessibleMatterIds);
-        var projects = await LinkedAsync(InvoiceCoreRecordKind.Project, principal.GetAccessibleProjectIds().Distinct().ToList());
+        var projects = await LinkedAsync(InvoiceCoreRecordKind.Project, principal.GetAccessibleProjectIds());
         var workAssignments = await LinkedAsync(InvoiceCoreRecordKind.WorkAssignment, principal.AccessibleWorkAssignmentIds);
-        return Results.Ok(new ExternalInvoiceFirmRecords(firmId, matters, projects, workAssignments, partial));
+        return Results.Ok(new ExternalInvoiceFirmRecords(firmId, matters, projects, workAssignments, partial, truncated));
     }
 
     private static async Task<IResult> ListAsync(HttpContext http, InvoiceSubmissionService service, CancellationToken ct)
@@ -202,6 +251,8 @@ public static class ExternalInvoiceSubmissionEndpoints
 /// <summary>
 /// The body of <c>GET /api/v1/external/invoice-submissions/firm-records</c> (ebilling-r1 task 051, D-106): the ids, among the caller's own readable
 /// records, that the named firm is linked to. <paramref name="Partial"/> is true when some record's links could not be read (those are left out).
+/// <paramref name="Truncated"/> is true when the list was cut at its bound (too many readable records to examine, or more linked records than are
+/// returned), so a linked record may be missing: a client must say so and never present the list as complete.
 /// </summary>
 public sealed record ExternalInvoiceFirmRecords(
-    Guid FirmId, IReadOnlyList<Guid> Matters, IReadOnlyList<Guid> Projects, IReadOnlyList<Guid> WorkAssignments, bool Partial);
+    Guid FirmId, IReadOnlyList<Guid> Matters, IReadOnlyList<Guid> Projects, IReadOnlyList<Guid> WorkAssignments, bool Partial, bool Truncated);

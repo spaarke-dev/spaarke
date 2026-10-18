@@ -94,9 +94,11 @@ internal sealed record ExternalInvoiceSubmissionScope(
 /// never "no firm".</para>
 /// <para><b>A systemuser (task 051).</b> A workforce systemuser is refused on a submit route before anything is read or written
 /// (403 <see cref="InvoiceSubmissionErrors.UseInternalRoute"/>); internal users submit through the internal route.</para>
-/// <para><b>The firm is linked to the record (D-106, task 051).</b> After the checks above, a submit is accepted only when the chosen firm is one of
-/// the record's assigned law firms (<see cref="IsFirmLinkedAsync"/>); else 403 <see cref="InvoiceSubmissionErrors.FirmNotLinked"/> (code only),
-/// and a link read that faults is 503 <see cref="InvoiceSubmissionErrors.FirmUnverifiable"/>.</para>
+/// <para><b>The firm is linked to the record (D-106, D-110, task 051).</b> After the checks above, a submit is accepted only when the chosen firm is
+/// one of the record's assigned law firms; else 403 <see cref="InvoiceSubmissionErrors.FirmNotLinked"/> (code only), and a link read that
+/// faults is 503 <see cref="InvoiceSubmissionErrors.FirmUnverifiable"/>. <b>The owner of this rule is <see cref="InvoiceSubmissionService.SubmitAsync"/></b>,
+/// which every channel (this one and the internal route) calls and which enforces it with the same codes; the check here is an EARLY copy of
+/// it, through the same <see cref="InvoiceSubmissionService.CheckFirmLinkAsync"/>, kept so a refused request is answered before its upload is read.</para>
 /// <para><b>Reads.</b> One submission is visible only when its firm is one of the caller's and the caller can read its core record;
 /// anything else, including a missing row, is the same 404 (no existence oracle). The list is scoped by the caller's firms here and by
 /// the caller's readable records in the query.</para>
@@ -104,7 +106,8 @@ internal sealed record ExternalInvoiceSubmissionScope(
 /// </remarks>
 internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFilter
 {
-    private const AccessRights SubmitRights = AccessRights.Read | AccessRights.Create;
+    /// <summary>What a submit needs on the core record. Also what the firm-records picker offers: a record the caller could not submit on is not listed.</summary>
+    internal const AccessRights SubmitRights = AccessRights.Read | AccessRights.Create;
 
     private readonly ExternalInvoiceSubmissionAccess _access;
     private readonly InvoiceCoreRecordKind? _coreKind;
@@ -233,50 +236,23 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
     internal static bool IsSystemUser(CallerPrincipal principal) => principal.SystemUserId is not null;
 
     /// <summary>
-    /// D-106: whether <paramref name="firmId"/> is one of the core record's assigned law firms (<c>sprk_assignedlawfirm1/2</c>), through the access
-    /// model's own record-to-organization read (<see cref="ExternalParticipationService.GetReferencedOrganizationIdsAsync"/>, the read the
-    /// ethical-wall veto uses). Null when linked; otherwise the refusal. A record whose links could not be read is a 503, never "linked" and never
-    /// a final "not linked". The refusal carries the code only.
+    /// D-106 / D-110, the EARLY copy of the submission service's own check (<see cref="InvoiceSubmissionService.CheckFirmLinkAsync"/>, the one
+    /// definition of "linked": the record's assigned law firms <c>sprk_assignedlawfirm1/2</c>, an org-level grant does not link). Null when linked;
+    /// otherwise the refusal. A record whose links could not be read is a 503, never "linked" and never a final "not linked". The refusal
+    /// carries the code only.
     /// </summary>
     private async Task<IResult?> DenyUnlinkedFirmAsync(InvoiceCoreRecord core, Guid firmId, CancellationToken ct)
     {
-        var (linked, unreadable) = await IsFirmLinkedAsync(_participations, core, firmId, _logger, ct);
-        if (unreadable)
+        switch (await _submissions.CheckFirmLinkAsync(core, firmId, ct))
         {
-            return Unverifiable();
-        }
-
-        if (linked)
-        {
-            return null;
-        }
-
-        _logger.LogInformation("[EBILLING-SUBMIT] Denied: the chosen firm is not linked to {Kind} {RecordId}", core.Kind, core.RecordId);
-        return Deny(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
-            "The firm you chose is not linked to this record, so an invoice cannot be submitted for it.");
-    }
-
-    /// <summary>
-    /// Whether a firm is linked to a core record (D-106), read through the one record-to-organization read. <c>Unreadable</c> is true when the read
-    /// faulted or returned nothing for the record. Shared with the picker route so the list it offers is exactly what the submit accepts.
-    /// </summary>
-    internal static async Task<(bool Linked, bool Unreadable)> IsFirmLinkedAsync(
-        ExternalParticipationService participations, InvoiceCoreRecord core, Guid firmId, ILogger logger, CancellationToken ct)
-    {
-        try
-        {
-            var references = await participations.GetReferencedOrganizationIdsAsync(core.EntityLogicalName, new[] { core.RecordId }, ct);
-            if (!references.TryGetValue(core.RecordId, out var record) || record.Unreadable)
-            {
-                return (false, true);
-            }
-
-            return (record.OrganizationIds.Contains(firmId), false);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            logger.LogWarning(ex, "[EBILLING-SUBMIT] The assigned firms of {Kind} {RecordId} could not be read; failing closed.", core.Kind, core.RecordId);
-            return (false, true);
+            case InvoiceFirmLink.Linked:
+                return null;
+            case InvoiceFirmLink.NotLinked:
+                _logger.LogInformation("[EBILLING-SUBMIT] Denied: the chosen firm is not linked to {Kind} {RecordId}", core.Kind, core.RecordId);
+                return Deny(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
+                    "The firm you chose is not linked to this record, so an invoice cannot be submitted for it.");
+            default:
+                return Unverifiable();
         }
     }
 

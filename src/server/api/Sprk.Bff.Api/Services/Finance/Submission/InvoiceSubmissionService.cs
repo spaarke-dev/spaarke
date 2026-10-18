@@ -23,8 +23,16 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// and enqueues <see cref="JobType"/>. Both entry points call it: the external SPA route and the internal route (D-24: the same checks).
 /// </summary>
 /// <remarks>
-/// <para><b>Authorization is the routes' job, not this service's.</b> Each route's endpoint filter decides the caller, the firm and the core record
+/// <para><b>Authorization of the CALLER is the routes' job.</b> Each route's endpoint filter decides the caller, the firm and the core record
 /// before this runs (ADR-008); the request carries the validated firm and core record. This service validates the payload and writes.</para>
+/// <para><b>The firm-to-record link is THIS service's (ebilling-r1 D-106, D-110; ADR-002 one owner per invariant).</b> A submission is filed
+/// only under a firm that is one of the core record's assigned law firms (<c>sprk_assignedlawfirm1/2</c>): 403 <see cref="InvoiceSubmissionErrors.FirmNotLinked"/>
+/// otherwise, 503 <see cref="InvoiceSubmissionErrors.FirmUnverifiable"/> when the links cannot be read. The check runs here, in the one
+/// decision point both channels call, so an internal user who names a firm the record is not linked to is refused exactly as an external
+/// contact is; the external filter keeps an early copy of the same check (<see cref="CheckFirmLinkAsync"/>) only to refuse before the upload
+/// is read. It reuses <see cref="ExternalParticipationService.GetReferencedOrganizationIdsAsync"/> (the access model's own record-to-organization
+/// read): that class lives in the external-access infrastructure namespace this service already depends on (<see cref="ExternalDataService"/>,
+/// <see cref="CallerPrincipal"/>), and the read is app-only and channel-neutral, so no new seam or interface is needed (ADR-010).</para>
 /// <para><b>Order (copied from the external upload, <c>ExternalProjectDataEndpoints.UploadDocumentForParent</c>):</b> every check and read first
 /// (number, file, firm, core-record fields, owner, container), then the bytes, then the rows, then the job. A failure after the upload is
 /// compensated in reverse order with its own token, so it leaves no Received submission behind (acceptance criterion 7). A compensation that
@@ -72,6 +80,7 @@ public class InvoiceSubmissionService
     private readonly IDocumentDataverseService _documents;
     private readonly ICommunicationDataverseService _recordTypes;
     private readonly ExternalDataService _externalData;
+    private readonly ExternalParticipationService _participations;
     private readonly SpeFileStore _spe;
     private readonly RecordContainerResolver _containers;
     private readonly IRecordOwnershipResolver _ownership;
@@ -85,6 +94,7 @@ public class InvoiceSubmissionService
         IDocumentDataverseService documents,
         ICommunicationDataverseService recordTypes,
         ExternalDataService externalData,
+        ExternalParticipationService participations,
         SpeFileStore spe,
         RecordContainerResolver containers,
         IRecordOwnershipResolver ownership,
@@ -97,6 +107,7 @@ public class InvoiceSubmissionService
         _documents = documents ?? throw new ArgumentNullException(nameof(documents));
         _recordTypes = recordTypes ?? throw new ArgumentNullException(nameof(recordTypes));
         _externalData = externalData ?? throw new ArgumentNullException(nameof(externalData));
+        _participations = participations ?? throw new ArgumentNullException(nameof(participations));
         _spe = spe ?? throw new ArgumentNullException(nameof(spe));
         _containers = containers ?? throw new ArgumentNullException(nameof(containers));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
@@ -143,6 +154,24 @@ public class InvoiceSubmissionService
             case false:
                 return InvoiceSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid,
                     "The firm was not found or is not active.");
+        }
+
+        // D-106 / D-110: the firm must be one of the core record's assigned law firms, on EVERY channel (the internal route names its firm in
+        // the query and is held to the same rule as an external contact). Before anything is read for the write and long before any write;
+        // the same codes whichever route called. The detail names no firm and no record.
+        switch (await CheckFirmLinkAsync(core, request.FirmId, ct))
+        {
+            case InvoiceFirmLink.Linked:
+                break;
+            case InvoiceFirmLink.NotLinked:
+                _logger.LogInformation(
+                    "Invoice submission refused: firm {FirmId} is not linked to {Entity} {RecordId} ({Channel})",
+                    request.FirmId, core.EntityLogicalName, core.RecordId, request.Channel);
+                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
+                    "The firm you chose is not linked to this record, so an invoice cannot be submitted for it.");
+            default:
+                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
+                    "The firm could not be checked right now. Try again shortly.");
         }
 
         var row = new Entity(SubmissionEntity);
@@ -283,6 +312,44 @@ public class InvoiceSubmissionService
             _logger.LogWarning(ex, "Invoice submission refused: firm {FirmId} could not be read", firmId);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="firmId"/> is one of the core record's assigned law firms (<c>sprk_assignedlawfirm1/2</c>), read through the access
+    /// model's own record-to-organization read (<see cref="ExternalParticipationService.GetReferencedOrganizationIdsAsync"/>, one batched query
+    /// that selects BOTH lookups). The ONE definition of "linked" for the submit gate (this service, and the external filter's early refusal);
+    /// the picker route applies <see cref="LinkOf"/> to its batched answer, so the list it offers is exactly what a submit accepts. A fault, a
+    /// missing row or an incomplete answer is <see cref="InvoiceFirmLink.Unreadable"/>, never "linked" and never a final "not linked".
+    /// </summary>
+    public async Task<InvoiceFirmLink> CheckFirmLinkAsync(InvoiceCoreRecord core, Guid firmId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(core);
+        try
+        {
+            var references = await _participations.GetReferencedOrganizationIdsAsync(core.EntityLogicalName, new[] { core.RecordId }, ct);
+            return LinkOf(references is not null && references.TryGetValue(core.RecordId, out var record) ? record : null, firmId);
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning(ex, "The assigned firms of {Entity} {RecordId} could not be read; failing closed", core.EntityLogicalName, core.RecordId);
+            return InvoiceFirmLink.Unreadable;
+        }
+    }
+
+    /// <summary>
+    /// The pure rule behind <see cref="CheckFirmLinkAsync"/>: an answer that is missing, flagged unreadable or empty-handed (a defaulted
+    /// struct) is <see cref="InvoiceFirmLink.Unreadable"/>; an empty firm id never matches; a firm links only when it is among the record's
+    /// organizations. An empty lookup slot is simply absent from <see cref="ReferencedOrganizations.OrganizationIds"/>, so a null never
+    /// counts as a match.
+    /// </summary>
+    internal static InvoiceFirmLink LinkOf(ReferencedOrganizations? read, Guid firmId)
+    {
+        if (read is not { Unreadable: false, OrganizationIds: { } organizations })
+        {
+            return InvoiceFirmLink.Unreadable;
+        }
+
+        return firmId != Guid.Empty && organizations.Contains(firmId) ? InvoiceFirmLink.Linked : InvoiceFirmLink.NotLinked;
     }
 
     /// <summary>

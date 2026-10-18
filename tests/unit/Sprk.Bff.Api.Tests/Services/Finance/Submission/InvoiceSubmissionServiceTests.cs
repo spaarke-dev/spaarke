@@ -2,6 +2,7 @@ using System.Text.Json;
 using Azure.Core;
 using Azure.Messaging.ServiceBus;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -12,6 +13,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -95,10 +97,53 @@ public sealed class InvoiceSubmissionServiceTests
         public Exception? FirmReadFailure;
         public Action? OnUpload;
 
+        /// <summary>
+        /// The assigned law firms (<c>sprk_assignedlawfirm1/2</c>) of each core record, by (table, id) - D-106/D-110. By default the test matter is
+        /// linked to <see cref="FirmId"/>; a record not listed references no firm. Behind <see cref="Participations"/> unless a test replaces it.
+        /// </summary>
+        public readonly Dictionary<(string Entity, Guid Id), Guid[]> Links = new() { [("sprk_matter", MatterId)] = new[] { FirmId } };
+
+        /// <summary>True: every record comes back unresolved (the record-to-organization read could not be completed).</summary>
+        public bool LinksUnreadable;
+
+        /// <summary>Non-null: the record-to-organization read throws this.</summary>
+        public Exception? LinkReadFailure;
+
+        /// <summary>Every record-to-organization read the service made.</summary>
+        public readonly List<(string Entity, IReadOnlyCollection<Guid> Ids)> LinkReads = new();
+
+        /// <summary>
+        /// The participation service the submission service reads the firm links through. The default double answers from <see cref="Links"/>;
+        /// a test (or the contract suite) sets this to its own before <see cref="Build"/>.
+        /// </summary>
+        public ExternalParticipationService Participations { get; set; } = null!;
+
         public int Writes => Uploads.Count + DocumentCreates.Count + ExternalCreates.Count + Allocations.Count + JobsSent.Count;
 
         public Harness()
         {
+            var participations = new Mock<ExternalParticipationService>(
+                new HttpClient(), Mock.Of<ITenantCache>(), new ConfigurationBuilder().Build(), Mock.Of<TokenCredential>(),
+                Mock.Of<IHttpContextAccessor>(), NullLogger<ExternalParticipationService>.Instance, null!);
+            participations.Setup(p => p.GetReferencedOrganizationIdsAsync(
+                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
+                .Returns((string entity, IReadOnlyCollection<Guid> ids, CancellationToken _) =>
+                {
+                    LinkReads.Add((entity, ids));
+                    if (LinkReadFailure is { } failure)
+                    {
+                        throw failure;
+                    }
+
+                    IReadOnlyDictionary<Guid, ReferencedOrganizations> answer = ids.Distinct().ToDictionary(
+                        id => id,
+                        id => LinksUnreadable
+                            ? ReferencedOrganizations.Unresolved
+                            : new ReferencedOrganizations(Links.TryGetValue((entity, id), out var firms) ? firms : Array.Empty<Guid>(), Unreadable: false));
+                    return Task.FromResult(answer);
+                });
+            Participations = participations.Object;
+
             var gcf = Mock.Of<IGraphClientFactory>();
             Spe = new Mock<SpeFileStore>(
                 MockBehavior.Strict,
@@ -262,7 +307,7 @@ public sealed class InvoiceSubmissionServiceTests
             var containers = new RecordContainerResolver(
                 Mock.Of<ISecurableEntityRegistry>(), Mock.Of<IGenericEntityService>(), NullLogger<RecordContainerResolver>.Instance);
             return new TestableService(this, Allocator.Object, Entities.Object, Documents.Object, RecordTypes.Object, ExternalData.Object,
-                Spe.Object, containers, Ownership.Object, Jobs.Object, monitor);
+                Participations, Spe.Object, containers, Ownership.Object, Jobs.Object, monitor);
         }
 
         private sealed class TestableService(
@@ -272,12 +317,13 @@ public sealed class InvoiceSubmissionServiceTests
             IDocumentDataverseService documents,
             ICommunicationDataverseService recordTypes,
             ExternalDataService externalData,
+            ExternalParticipationService participations,
             SpeFileStore spe,
             RecordContainerResolver containers,
             IRecordOwnershipResolver ownership,
             JobSubmissionService jobs,
             IOptionsMonitor<EbillingOptions> ebilling)
-            : InvoiceSubmissionService(allocator, entities, documents, recordTypes, externalData, spe, containers, ownership, jobs, ebilling,
+            : InvoiceSubmissionService(allocator, entities, documents, recordTypes, externalData, participations, spe, containers, ownership, jobs, ebilling,
                 NullLogger<InvoiceSubmissionService>.Instance)
         {
             internal override Task<ContainerDecision> ResolveContainerAsync(InvoiceCoreRecord core, CancellationToken ct) =>
@@ -526,6 +572,164 @@ public sealed class InvoiceSubmissionServiceTests
 
         outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 422 && o.ErrorCode == InvoiceSubmissionErrors.StorageNotConfigured);
         h.Writes.Should().Be(0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // The firm is linked to the record (D-106, refined by D-110): THIS service refuses, whichever channel called
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    internal static readonly Guid OtherFirmId = Guid.NewGuid();
+
+    internal static InvoiceSubmissionRequest On(InvoiceSubmissionChannel channel) =>
+        channel == InvoiceSubmissionChannel.Spa ? Spa() : Internal();
+
+    [Theory]
+    [InlineData(InvoiceSubmissionChannel.Spa)]
+    [InlineData(InvoiceSubmissionChannel.Internal)]
+    public async Task A_firm_not_linked_to_the_record_is_403_firm_not_linked_on_every_channel_and_nothing_is_written(InvoiceSubmissionChannel channel)
+    {
+        var h = new Harness();
+        h.Links[("sprk_matter", MatterId)] = new[] { OtherFirmId }; // the matter belongs to another firm
+
+        var outcome = await h.Build().SubmitAsync(On(channel), CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 403 && o.ErrorCode == InvoiceSubmissionErrors.FirmNotLinked);
+        outcome.Detail.Should().NotContain(OtherFirmId.ToString()).And.NotContain(FirmId.ToString(), "the refusal names no firm");
+        h.Writes.Should().Be(0);
+        h.OwnerContexts.Should().BeEmpty("the refusal comes before the owner is resolved");
+        h.LinkReads.Should().ContainSingle().Which.Entity.Should().Be("sprk_matter");
+        h.LinkReads[0].Ids.Should().Equal(MatterId);
+    }
+
+    [Theory]
+    [InlineData(InvoiceSubmissionChannel.Spa)]
+    [InlineData(InvoiceSubmissionChannel.Internal)]
+    public async Task A_record_with_no_assigned_firm_links_no_firm(InvoiceSubmissionChannel channel)
+    {
+        var h = new Harness();
+        h.Links.Clear();
+
+        var outcome = await h.Build().SubmitAsync(On(channel), CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 403 && o.ErrorCode == InvoiceSubmissionErrors.FirmNotLinked);
+        h.Writes.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(InvoiceSubmissionChannel.Spa, true)]
+    [InlineData(InvoiceSubmissionChannel.Spa, false)]
+    [InlineData(InvoiceSubmissionChannel.Internal, true)]
+    [InlineData(InvoiceSubmissionChannel.Internal, false)]
+    public async Task A_firm_linked_to_the_record_in_either_assigned_firm_slot_is_accepted_on_both_channels(InvoiceSubmissionChannel channel, bool firstSlot)
+    {
+        // The control for the refusals above: only the link differs.
+        var h = new Harness();
+        h.Links[("sprk_matter", MatterId)] = firstSlot ? new[] { FirmId, OtherFirmId } : new[] { OtherFirmId, FirmId };
+
+        var outcome = await h.Build().SubmitAsync(On(channel), CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        h.Allocations.Should().ContainSingle().Which.FirmId.Should().Be(FirmId);
+    }
+
+    [Theory]
+    [InlineData(InvoiceSubmissionChannel.Spa, "unreadable")]
+    [InlineData(InvoiceSubmissionChannel.Internal, "unreadable")]
+    [InlineData(InvoiceSubmissionChannel.Spa, "threw")]
+    [InlineData(InvoiceSubmissionChannel.Internal, "threw")]
+    public async Task A_link_that_cannot_be_read_is_503_firm_unverifiable_not_a_pass_and_not_a_deny_and_nothing_is_written(
+        InvoiceSubmissionChannel channel, string failure)
+    {
+        var h = new Harness();
+        if (failure == "unreadable")
+        {
+            h.LinksUnreadable = true;
+        }
+        else
+        {
+            h.LinkReadFailure = new TimeoutException("throttled");
+        }
+
+        var outcome = await h.Build().SubmitAsync(On(channel), CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 503 && o.ErrorCode == InvoiceSubmissionErrors.FirmUnverifiable);
+        h.Writes.Should().Be(0);
+        h.OwnerContexts.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(InvoiceCoreRecordKind.Project, "sprk_project")]
+    [InlineData(InvoiceCoreRecordKind.WorkAssignment, "sprk_workassignment")]
+    public async Task The_link_is_read_from_the_table_of_the_record_kind_so_a_project_or_work_assignment_is_held_to_it_too(
+        InvoiceCoreRecordKind kind, string entity)
+    {
+        var recordId = Guid.NewGuid();
+        var request = Internal() with { CoreRecord = new InvoiceCoreRecord(kind, recordId) };
+
+        var unlinked = new Harness();
+        unlinked.Links[(entity, recordId)] = new[] { OtherFirmId };
+        (await unlinked.Build().SubmitAsync(request, CancellationToken.None)).Should().Match<InvoiceSubmissionOutcome>(o =>
+            o.StatusCode == 403 && o.ErrorCode == InvoiceSubmissionErrors.FirmNotLinked);
+        unlinked.LinkReads.Should().ContainSingle().Which.Entity.Should().Be(entity);
+        unlinked.Writes.Should().Be(0);
+
+        // Linked: the request goes on past the link check (this harness has no such record to read, so it stops at 422 record_unavailable).
+        var linked = new Harness();
+        linked.Links[(entity, recordId)] = new[] { FirmId };
+        (await linked.Build().SubmitAsync(request, CancellationToken.None)).Should().Match<InvoiceSubmissionOutcome>(o =>
+            o.ErrorCode == InvoiceSubmissionErrors.CoreRecordUnavailable);
+    }
+
+    [Fact]
+    public async Task The_link_is_not_read_for_a_request_an_earlier_check_refuses()
+    {
+        var noNumber = new Harness();
+        await noNumber.Build().SubmitAsync(Spa(number: ""), CancellationToken.None);
+        noNumber.LinkReads.Should().BeEmpty("the payload is validated before anything is read");
+
+        var inactiveFirm = new Harness { Firm = new Entity("sprk_organization", FirmId) { ["statecode"] = new OptionSetValue(1) } };
+        (await inactiveFirm.Build().SubmitAsync(Internal(), CancellationToken.None)).ErrorCode.Should().Be(InvoiceSubmissionErrors.FirmInvalid);
+        inactiveFirm.LinkReads.Should().BeEmpty("an inactive firm is refused as invalid before its links are looked up");
+    }
+
+    [Fact]
+    public async Task A_caller_who_abandons_the_request_during_the_link_read_is_a_cancellation_not_a_503()
+    {
+        using var cts = new CancellationTokenSource();
+        var h = new Harness { LinkReadFailure = new OperationCanceledException(cts.Token) };
+        cts.Cancel();
+
+        var act = () => h.Build().SubmitAsync(Internal(), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        h.Writes.Should().Be(0);
+    }
+
+    public static TheoryData<string> UnreadableAnswers => new() { "missing", "flagged", "defaulted" };
+
+    [Theory]
+    [MemberData(nameof(UnreadableAnswers))]
+    public void An_answer_that_is_missing_flagged_unreadable_or_defaulted_is_never_linked(string answer)
+    {
+        ReferencedOrganizations? read = answer switch
+        {
+            "missing" => null,
+            "flagged" => new ReferencedOrganizations(new[] { FirmId }, Unreadable: true), // even though it names the firm
+            _ => default(ReferencedOrganizations), // a defaulted struct: Unreadable false, no id collection
+        };
+
+        InvoiceSubmissionService.LinkOf(read, FirmId).Should().Be(InvoiceFirmLink.Unreadable);
+    }
+
+    [Fact]
+    public void An_empty_firm_id_never_matches_even_when_an_empty_slot_was_returned_as_an_id()
+    {
+        // A null lookup never counts as a match: the empty firm id is not linked to a record, whatever the record's id list holds.
+        var read = new ReferencedOrganizations(new[] { Guid.Empty, OtherFirmId }, Unreadable: false);
+
+        InvoiceSubmissionService.LinkOf(read, Guid.Empty).Should().Be(InvoiceFirmLink.NotLinked);
+        InvoiceSubmissionService.LinkOf(read, OtherFirmId).Should().Be(InvoiceFirmLink.Linked);
+        InvoiceSubmissionService.LinkOf(new ReferencedOrganizations(Array.Empty<Guid>(), Unreadable: false), FirmId).Should().Be(InvoiceFirmLink.NotLinked);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

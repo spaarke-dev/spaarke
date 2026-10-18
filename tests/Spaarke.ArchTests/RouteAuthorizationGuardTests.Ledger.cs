@@ -364,7 +364,9 @@ public partial class RouteAuthorizationGuardTests
             "/api/finance/{matters|projects|workassignments}/{id}/invoice-submissions and /api/finance/invoice-submissions/{id} "
             + "(ebilling-r1 task 044, FR-17 internal channel). The submits run AddFinanceAuthorizationFilter as the caller: Read and "
             + "AppendTo on the route's core record (finance.submit_invoice) and AppendTo on the query firm (finance.attach_invoice); "
-            + "the status read needs Read on the submission (uniform 404). The eBilling kill switch runs after each filter."),
+            + "the status read needs Read on the submission (uniform 404). The eBilling kill switch runs after each filter. The firm must also be "
+            + "linked to the record (task 051, D-110: the record's assigned law firms only; 403 firm_not_linked, 503 when the link cannot be read) "
+            + "-- decided in InvoiceSubmissionService.SubmitAsync, the one owner both channels call, not in this file."),
         new GovernedFile("Api/Finance/CodeSetMappingEndpoints.cs", Scope.RouteLevelGate,
             "/api/finance/code-set-mappings/* (ebilling-r1 task 048, FR-22) -- AI code-set proposals (GET) and the admin confirm that writes one "
             + "default code set (POST). Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, "
@@ -460,9 +462,11 @@ public partial class RouteAuthorizationGuardTests
             + "record (the principal's post-veto rights) and a firm among the caller contact's conferring memberships; a read needs the "
             + "submission's firm to be the caller's and Read on its core record (uniform 404); the list is the caller's firms on the "
             + "caller's readable records. The eBilling kill switch runs after the filter. Task 051 (D-106) adds GET "
-            + "/api/v1/external/invoice-submissions/firm-records under the same filter (the firm must be one of the caller's; it lists "
-            + "only ids from the caller's own readable sets that the firm is linked to), a systemuser refusal on a submit before any "
-            + "write, and the firm-to-record link a submit requires."),
+            + "/api/v1/external/invoice-submissions/firm-records under the same filter (the firm must be one of the caller's ACTIVE "
+            + "memberships; it lists only ids from the caller's own readable sets that the firm is linked to, at most 200 per kind from at "
+            + "most 500 examined, with partial and truncated flags; a systemuser is refused), a systemuser refusal on a submit before any "
+            + "write, and the firm-to-record link a submit requires. The filter's link check is an early copy: the owner is "
+            + "InvoiceSubmissionService.SubmitAsync (D-110), so the internal route enforces the same rule with the same codes."),
         new GovernedFile("Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs", Scope.GroupGated,
             "GET /api/v1/external/notifications and POST /api/v1/external/notifications/seen "
             + "(spaarke-SPA-external-access-platform-r3 task 037, FR-08) on the COLLABORATION group. Neither takes an id: the "

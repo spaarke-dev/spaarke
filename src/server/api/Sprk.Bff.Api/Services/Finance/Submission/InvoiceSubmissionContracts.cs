@@ -34,6 +34,22 @@ public enum InvoiceCoreRecordKind
     WorkAssignment,
 }
 
+/// <summary>
+/// Whether a firm is linked to a core record (ebilling-r1 D-106, refined by D-110): "linked" means the record's assigned law firms
+/// (<c>sprk_assignedlawfirm1/2</c>) and nothing else. An organization-level access grant does not link a firm.
+/// </summary>
+public enum InvoiceFirmLink
+{
+    /// <summary>The firm is one of the record's assigned law firms.</summary>
+    Linked,
+
+    /// <summary>The record's links were read and the firm is none of them.</summary>
+    NotLinked,
+
+    /// <summary>The record's links could not be read (a fault, a missing row, an incomplete answer). Never "linked" and never a final "not linked": 503.</summary>
+    Unreadable,
+}
+
 /// <summary>A core record (matter, project or work assignment) named by a route.</summary>
 public sealed record InvoiceCoreRecord(InvoiceCoreRecordKind Kind, Guid RecordId)
 {
@@ -82,7 +98,11 @@ public sealed record InvoiceSubmissionFile(string? FileName, string? ContentType
 /// </summary>
 public sealed record InvoiceSubmissionRequest
 {
-    /// <summary>The validated firm (NFR-10): the external caller's own organization, or the firm an internal caller chose.</summary>
+    /// <summary>
+    /// The firm the invoice is from (NFR-10): the external caller's own organization, or the firm an internal caller chose. The route decides
+    /// who may name it; <see cref="InvoiceSubmissionService.SubmitAsync"/> then checks it is active and LINKED to <see cref="CoreRecord"/>
+    /// (D-106 / D-110), whichever channel the request came through.
+    /// </summary>
     public required Guid FirmId { get; init; }
 
     /// <summary>The core record the invoice is filed against.</summary>
@@ -214,8 +234,9 @@ public static class InvoiceSubmissionErrors
     public const string FirmUnverifiable = "ebilling.submission.firm_unverifiable";
 
     /// <summary>
-    /// ebilling-r1 task 051 (D-106): the chosen firm is not linked to the chosen core record (it is none of the record's assigned law firms),
-    /// or the record's links could not be read. 403 for a refusal; the reason is this code and nothing else, so no record or firm detail leaves.
+    /// ebilling-r1 task 051 (D-106, D-110): the chosen firm is not linked to the chosen core record (it is none of the record's assigned law
+    /// firms). 403, on every channel; the reason is this code and nothing else, so no record or firm detail leaves. A record whose links could
+    /// not be read is NOT this code: it is 503 <see cref="FirmUnverifiable"/>.
     /// </summary>
     public const string FirmNotLinked = "ebilling.submission.firm_not_linked";
 
