@@ -2750,30 +2750,51 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            if (IsRowVersionMismatch(ex))
+            var mapped = MapConditionalBulkFailure(entityLogicalName, plain, ex);
+            if (mapped is System.Data.DBConcurrencyException)
             {
                 _logger.LogWarning(
                     "[DATAVERSE] Conditional bulk update of {RecordCount} {EntityLogicalName} records refused: a row changed since it was read; nothing was applied",
                     updates.Count,
                     entityLogicalName);
-                throw new System.Data.DBConcurrencyException(
-                    $"A {entityLogicalName} record changed since it was read; the transaction was rolled back and no update was applied.", ex);
+            }
+            else
+            {
+                _logger.LogError(
+                    ex,
+                    "[DATAVERSE] Conditional bulk update of {RecordCount} {EntityLogicalName} records failed: {BulkUpdateFailure}",
+                    updates.Count,
+                    entityLogicalName,
+                    mapped.Message);
             }
 
-            var failure = DescribeBulkUpdateFailure(entityLogicalName, plain, ex);
-            _logger.LogError(
-                ex,
-                "[DATAVERSE] Conditional bulk update of {RecordCount} {EntityLogicalName} records failed: {BulkUpdateFailure}",
-                updates.Count,
-                entityLogicalName,
-                failure);
-            throw new InvalidOperationException(failure, ex);
+            throw mapped;
         }
 
         _logger.LogInformation(
             "[DATAVERSE] Bulk updated {RecordCount} {EntityLogicalName} records in one transaction, each at its expected row version",
             updates.Count,
             entityLogicalName);
+    }
+
+    /// <summary>
+    /// Pure: the exception <see cref="BulkUpdateIfRowVersionsMatchAsync"/> throws for a failed transaction. A row version mismatch
+    /// (<see cref="IsRowVersionMismatch"/>) is a <see cref="System.Data.DBConcurrencyException"/> — the transaction rolled back, nothing
+    /// was applied. Any other failure, a Dataverse fault or an exception with no fault at all (a timeout, whose outcome is unknown), is the
+    /// <see cref="InvalidOperationException"/> that <see cref="BulkUpdateAsync"/> throws, worded by <see cref="DescribeBulkUpdateFailure"/>;
+    /// the original is its inner exception in every case.
+    /// </summary>
+    public static Exception MapConditionalBulkFailure(
+        string entityLogicalName,
+        IReadOnlyList<(Guid id, Dictionary<string, object> fields)> updates,
+        Exception failure)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+
+        return IsRowVersionMismatch(failure)
+            ? new System.Data.DBConcurrencyException(
+                $"A {entityLogicalName} record changed since it was read; the transaction was rolled back and no update was applied.", failure)
+            : new InvalidOperationException(DescribeBulkUpdateFailure(entityLogicalName, updates, failure), failure);
     }
 
     /// <summary>Dataverse's <c>ConcurrencyVersionMismatch</c> error code (a conditional write found the row at another version).</summary>

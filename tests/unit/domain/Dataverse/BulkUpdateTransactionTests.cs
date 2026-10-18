@@ -218,4 +218,76 @@ public class BulkUpdateTransactionTests
         DataverseServiceClientImpl.IsRowVersionMismatch(new TimeoutException("The request channel timed out")).Should().BeFalse(
             "an unknown outcome is not a refusal: the caller must not treat it as 'nothing landed'");
     }
+
+    // ebilling-r1 task 076 (review round 3): the catch in BulkUpdateIfRowVersionsMatchAsync throws what MapConditionalBulkFailure
+    // returns, so these cases are the catch's behaviour: a mismatch is a DBConcurrencyException (the 409 path of the rule set
+    // publish); anything else keeps the InvalidOperationException of BulkUpdateAsync (the 500 path).
+
+    private static FaultException<OrganizationServiceFault> MismatchFault() => new(
+        new OrganizationServiceFault { ErrorCode = DataverseServiceClientImpl.ConcurrencyVersionMismatch, Message = "The version of the existing record doesn't match" },
+        new FaultReason("mismatch"));
+
+    [Fact]
+    public void MapConditionalBulkFailure_ForTheMismatchCodeOnTheFault_IsADbConcurrencyException()
+    {
+        var failure = MismatchFault();
+
+        var mapped = DataverseServiceClientImpl.MapConditionalBulkFailure(Table, ThreeRows(), failure);
+
+        mapped.Should().BeOfType<System.Data.DBConcurrencyException>();
+        mapped.InnerException.Should().BeSameAs(failure);
+        mapped.Message.Should().Contain(Table).And.Contain("no update was applied");
+    }
+
+    [Fact]
+    public void MapConditionalBulkFailure_ForTheMismatchCodeOnAnInnerFault_IsADbConcurrencyException()
+    {
+        var inTransaction = new FaultException<OrganizationServiceFault>(
+            new ExecuteTransactionFault
+            {
+                FaultedRequestIndex = 1,
+                Message = "transaction failed",
+                InnerFault = new OrganizationServiceFault { ErrorCode = DataverseServiceClientImpl.ConcurrencyVersionMismatch },
+            },
+            new FaultReason("transaction failed"));
+
+        DataverseServiceClientImpl.MapConditionalBulkFailure(Table, ThreeRows(), inTransaction)
+            .Should().BeOfType<System.Data.DBConcurrencyException>();
+        DataverseServiceClientImpl.MapConditionalBulkFailure(Table, ThreeRows(), new InvalidOperationException("wrapped", inTransaction))
+            .Should().BeOfType<System.Data.DBConcurrencyException>("the SDK may surface the fault wrapped");
+    }
+
+    [Fact]
+    public void MapConditionalBulkFailure_ForTheMismatchGivenOnlyAsMessageText_IsADbConcurrencyException()
+    {
+        DataverseServiceClientImpl.MapConditionalBulkFailure(
+                Table, ThreeRows(), new InvalidOperationException("Error code 0x80060882 ConcurrencyVersionMismatch"))
+            .Should().BeOfType<System.Data.DBConcurrencyException>();
+    }
+
+    [Fact]
+    public void MapConditionalBulkFailure_ForAnUnrelatedFault_IsTheInvalidOperationExceptionOfBulkUpdate_NamingTheFaultedRecord()
+    {
+        var accessDenied = new FaultException<OrganizationServiceFault>(
+            new ExecuteTransactionFault { FaultedRequestIndex = 1, ErrorCode = unchecked((int)0x80040220), Message = "Principal lacks write access" },
+            new FaultReason("Principal lacks write access"));
+
+        var mapped = DataverseServiceClientImpl.MapConditionalBulkFailure(Table, ThreeRows(), accessDenied);
+
+        mapped.Should().BeOfType<InvalidOperationException>("a failure that is not a refusal must not read as one: the caller answers it as a 500");
+        mapped.InnerException.Should().BeSameAs(accessDenied);
+        mapped.Message.Should().Contain(SecondId.ToString()).And.Contain("NO updates were applied");
+    }
+
+    [Fact]
+    public void MapConditionalBulkFailure_ForAnExceptionWithNoFault_IsTheInvalidOperationException_SayingTheOutcomeIsUnknown()
+    {
+        var timeout = new TimeoutException("The request channel timed out");
+
+        var mapped = DataverseServiceClientImpl.MapConditionalBulkFailure(Table, ThreeRows(), timeout);
+
+        mapped.Should().BeOfType<InvalidOperationException>("an unknown outcome is not a refusal: it is never a DBConcurrencyException");
+        mapped.InnerException.Should().BeSameAs(timeout);
+        mapped.Message.Should().Contain("outcome is unknown");
+    }
 }
