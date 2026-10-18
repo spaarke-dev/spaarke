@@ -12,9 +12,12 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// zero, <see cref="BillingMath.ToCent"/>). The rule fires when the billed rate is <b>above</b> the limit; a rate equal to it holds.</para>
 /// <para><b>The suggested reduction</b> is the whole excess over the <b>approved</b> rate, not over the limit:
 /// <c>(billed - approved) x hours</c>, rounded to the cent. The tolerance is the slack before the rule fires, not a rate the firm
-/// is entitled to; the research note names the consequence "adjust to approved". Hours that are missing or not positive leave
+/// is entitled to; the research note names the consequence "adjust to approved". Hours that are missing or zero leave
 /// the amount <c>null</c> (a reduction is suggested, its size is not known). This is an owner-visible reading of "excess times
 /// hours": the alternative (reduce to the limit) is one line here.</para>
+/// <para><b>Credit lines are skipped (D-105).</b> A line with negative hours or a negative amount
+/// (<see cref="BillingMath.IsCreditLine"/>) is never judged: a reversal is not billed at a rate, so there is nothing to reduce.
+/// Hours of zero are not a credit and are still judged (the reduction is then unknown).</para>
 /// <para><b>No approved rate.</b> When the billed rate cannot be compared because 046 found no approved rate in force, found
 /// several that disagree, or could not look one up, the rule fires with a reason that says so and suggests nothing. The Rate field's
 /// reference-missing cap (D-47) exists for this case: such a finding holds and cannot reject. A line that bills no hourly rate is
@@ -31,7 +34,9 @@ internal static class ApprovedRateHandler
         var findings = new List<BillingFinding>();
         foreach (var line in context.Facts.Lines)
         {
-            if (line.LineType != InvoiceLineType.Fee || line.BilledRate is not { } billed)
+            // A credit line (negative hours or amount, D-105) is never judged as a charge: a reversal at the old rate is not a
+            // new overcharge. It stays on the invoice for the reviewer; this rule just says nothing about it.
+            if (line.LineType != InvoiceLineType.Fee || line.BilledRate is not { } billed || BillingMath.IsCreditLine(line))
             {
                 continue;
             }

@@ -95,12 +95,45 @@ public class ApprovedRateHandlerTests
     [Theory]
     [InlineData(null)]
     [InlineData(0.0)]
-    [InlineData(-1.0)]
-    public void WithNoPositiveHours_TheRuleStillFires_ButTheReductionAmountIsUnknown(double? hours)
+    public void WithNoHoursOrZeroHours_TheRuleStillFires_ButTheReductionAmountIsUnknown(double? hours)
     {
         var finding = Run(RateRule(), Facts(Line(650m, hours: (decimal?)hours))).Single();
 
         finding.SuggestedAdjustment.Should().Be(new BillingSuggestedAdjustment(BillingAdjustmentKind.Reduce, null));
+    }
+
+    // ── D-105: a credit line is never judged as a charge ────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("-1.0", "575.00")] // negative hours
+    [InlineData("-2.5", null)]
+    [InlineData("2.5", "-1625.00")] // negative amount
+    [InlineData(null, "-1625.00")]
+    [InlineData("-2.5", "-1625.00")]
+    public void MustNotFire_ForACreditLine_AtARateAboveTheApprovedRate_D105(string? hours, string? amount)
+    {
+        var credit = Line(650m, hours: hours is null ? null : D(hours)) with { Amount = amount is null ? null : D(amount) };
+
+        Run(RateRule(), Facts(credit)).Should().BeEmpty("a reversal is not billed at a rate");
+    }
+
+    [Fact]
+    public void MustNotFire_ForACreditLine_WhoseApprovedRateWasNotEstablished_D105()
+    {
+        var credit = Fee(0) with { Hours = -1m, ApprovedRate = new RateResolution { Status = RateResolutionStatus.NotFound, Reason = RateNotFoundReason.NoRateInForce } };
+
+        Run(RateRule(), Facts(credit)).Should().BeEmpty("the no-approved-rate finding is a charge finding too");
+    }
+
+    [Fact]
+    public void MustFire_ForTheChargeLinesAroundACreditLine_TheCreditIsSkippedAndTheRestAreStillJudged_D105()
+    {
+        var facts = Facts(Line(650m, index: 0), Line(650m, hours: -2.5m, index: 1), Line(650m, index: 2));
+
+        var findings = Run(RateRule(), facts);
+
+        findings.Select(f => f.Subject.LineIndex).Should().Equal(0, 2);
+        findings.Should().OnlyContain(f => f.ReasonCode == BillingReasonCodes.RateAboveApproved);
     }
 
     // ── What the rule judges ────────────────────────────────────────────────────────────────────────────────────
