@@ -152,7 +152,7 @@ def field_id(create):
 def board_items():
     """[(item_id, slug, task_count, tasks_planned)] for every Type=Project item (None = unset)."""
     r = subprocess.run(["gh", "project", "item-list", ubs.PROJECT_NUMBER, "--owner", ubs.OWNER,
-                        "--format", "json", "-L", "500"],
+                        "--format", "json", "-L", "5000"],  # the board passed 500 items on 2026-10-18; a lower cap drops the newest projects
                        capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
     out = []
     for i in json.loads(r.stdout)["items"]:

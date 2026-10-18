@@ -64,7 +64,7 @@ def board_projects():
     current_* is the figure already on the board (None if never set)."""
     r = subprocess.run(
         ["gh", "project", "item-list", PROJECT_NUMBER, "--owner", OWNER,
-         "--format", "json", "-L", "500"],
+         "--format", "json", "-L", "5000"],  # the board passed 500 items on 2026-10-18; a lower cap drops the newest projects
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
     )
     items = json.loads(r.stdout)["items"]
