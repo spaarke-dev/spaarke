@@ -925,7 +925,7 @@ export async function getInvoiceSubmission(submissionId: string): Promise<Invoic
  * Whether invoice submission is on. `firms` on GET /api/v1/external/me is the cheap signal: the BFF sends it only when
  * eBilling is on (absent or null otherwise, and for an older BFF), so a list is `available` without another call. Only
  * when `firms` is absent does this fall back to the one route every caller may read, the caller's own submissions list,
- * to tell "off" from "unknown": 503 with the `ebilling.disabled` code is the only "off" answer (FR-45). Any other failure
+ * to tell an off flag apart from an unknown state: 503 with the `ebilling.disabled` code is the only "off" answer (FR-45). Any other failure
  * is `unknown`: an outage or a refusal must not read as "off", so the entry stays and the server answers when it is used.
  */
 export async function probeInvoiceSubmission(): Promise<'available' | 'disabled' | 'unknown'> {
