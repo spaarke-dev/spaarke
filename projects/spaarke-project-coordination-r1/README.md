@@ -1,5 +1,7 @@
 # Spaarke Project Coordination R1
 
+> **Portfolio**: [Project #2089](https://github.com/spaarke-dev/spaarke/issues/2089) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Parent [Epic #429](https://github.com/spaarke-dev/spaarke/issues/429)
+
 > **Last Updated**: 2026-10-18
 >
 > **Status**: Initialized — tasks generated, execution not started (owner review first)
