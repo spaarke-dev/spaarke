@@ -968,6 +968,8 @@ interface InvoiceFirmRecordsResponse {
   projects?: string[];
   workAssignments?: string[];
   partial?: boolean;
+  /** The BFF cut the list at its bound (too many readable records to examine, or more linked records than it returns). */
+  truncated?: boolean;
 }
 
 const sameId = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
@@ -981,7 +983,7 @@ const sameId = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerC
  * caller's own readable records the firm is linked to, and the three reads are filtered to them (the Tier-2 module read
  * is allow-listed, so the link cannot be asked for there). A failed firm-records read throws (the picker then shows the
  * failure, never an unfiltered list the server would refuse). If one record source fails the others are still offered,
- * flagged `partial`; `truncated` is the row cap (200) or `moreRecords`, which can hide a linked record. If every source
+ * flagged `partial`; `truncated` is the row cap (200), `moreRecords`, or the firm-records route's own bound, any of which can hide a linked record. If every source
  * fails the first failure is thrown.
  */
 export async function listInvoiceCoreRecords(query: InvoiceRecordQuery = {}): Promise<InvoiceCoreRecordList> {
@@ -1047,7 +1049,7 @@ export async function listInvoiceCoreRecords(query: InvoiceRecordQuery = {}): Pr
 
   return {
     records: records.sort((a, b) => a.name.localeCompare(b.name)),
-    truncated: fulfilled.some(r => r.value.truncated === true),
+    truncated: fulfilled.some(r => r.value.truncated === true) || linked?.truncated === true,
     partial: fulfilled.length < reads.length || linked?.partial === true,
   };
 }

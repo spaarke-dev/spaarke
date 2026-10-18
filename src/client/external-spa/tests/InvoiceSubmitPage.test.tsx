@@ -79,8 +79,13 @@ const json = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 /** The firm-records body: the ids (among the caller's readable records) the firm is linked to. */
-const linkedTo = (firmId: string, matters: string[], projects: string[], partial = false): Response =>
-  json(200, { firmId, matters, projects, workAssignments: [], partial });
+const linkedTo = (
+  firmId: string,
+  matters: string[],
+  projects: string[],
+  partial = false,
+  truncated = false
+): Response => json(200, { firmId, matters, projects, workAssignments: [], partial, truncated });
 
 const problem = (status: number, detail: string | undefined, errorCode?: string): Response =>
   json(status, { status, title: 'refused', ...(detail ? { detail } : {}), ...(errorCode ? { errorCode } : {}) });
@@ -509,6 +514,19 @@ describe('InvoiceSubmitPage — Choose firm (owner, 2026-10-17: add a firm step)
       renderPage((await load()).InvoiceSubmitPage, '/invoices/submit');
       expect(await screen.findByRole('radio', { name: /Acme v\. Roadrunner/ }, SLOW)).toBeTruthy();
       expect(screen.getByTestId('records-partial')).toBeTruthy();
+    },
+    SLOW
+  );
+
+  it(
+    'says the list is cut short when the firm-records read reports it was truncated at the BFF bound (a linked record may be missing)',
+    async () => {
+      script.firmRecords = firmId => linkedTo(firmId, [MATTER_ID], [], false, true);
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, '/invoices/submit');
+      expect(await screen.findByRole('radio', { name: /Acme v\. Roadrunner/ }, SLOW)).toBeTruthy();
+      expect(screen.getByTestId('records-truncated')).toBeTruthy();
+      expect(screen.queryByTestId('records-partial')).toBeNull();
     },
     SLOW
   );
