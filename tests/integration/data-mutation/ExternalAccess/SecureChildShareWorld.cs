@@ -49,6 +49,9 @@ internal sealed class SecureChildShareWorld
     private readonly HashSet<Guid> _ignoredOwnerWrites = new();
     private readonly List<(string Table, int AfterCount, Action<SecureChildShareWorld> Change)> _afterQueries = new();
 
+    /// <summary>#2091 round 4: how many single-row reads (<see cref="Retrieve"/>) this world answered.</summary>
+    public int RowReads { get; private set; }
+
     /// <summary>Every table queried, in order.</summary>
     public List<string> QueriedTables { get; } = new();
 
@@ -149,6 +152,10 @@ internal sealed class SecureChildShareWorld
         string table, Guid id, (string, object) owner, (string Column, string Target, Guid TargetId)[] lookups)
         => Add(table, id, lookups.Select(l => (l.Column, (object)new EntityReference(l.Target, l.TargetId)))
             .Prepend(owner).ToArray());
+
+    /// <summary>#2091 round 3: what a query of a <see cref="FailingQueriesOf"/> table throws instead of the Dataverse fault
+    /// (a <see cref="TaskCanceledException"/> models an HttpClient timeout).</summary>
+    public Func<Exception>? QueryFault { get; set; }
 
     /// <summary>Makes every query of one table throw (a Dataverse fault).</summary>
     public SecureChildShareWorld FailingQueriesOf(string table)
@@ -424,8 +431,10 @@ internal sealed class SecureChildShareWorld
     /// Ontology task 144: one row by id with the requested columns only (an empty list answers the row with none), or
     /// Dataverse's ObjectDoesNotExist fault — an <see cref="IGenericEntityService.RetrieveAsync"/> of this world.
     /// </summary>
+    /// <remarks>#2091 round 4: counted in <see cref="RowReads"/>.</remarks>
     public Entity Retrieve(string table, Guid id, string[]? columns)
     {
+        RowReads++;
         if (_failingRowReads.Contains((table, id)))
             throw new InvalidOperationException($"Test: this {table} row cannot be read.");
         if (!_rows.TryGetValue((table, id), out var row))
@@ -604,7 +613,7 @@ internal sealed class SecureChildShareWorld
     {
         QueriedTables.Add(query.EntityName);
         if (_failingTables.Contains(query.EntityName))
-            throw new InvalidOperationException($"Test: {query.EntityName} cannot be read.");
+            throw QueryFault?.Invoke() ?? new InvalidOperationException($"Test: {query.EntityName} cannot be read.");
         if (query.Criteria.Conditions.Any(c =>
                 c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.Equal
                 && c.Values.Single() is Guid id && _failingRowReads.Contains((query.EntityName, id))))

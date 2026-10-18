@@ -41,6 +41,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
     {
         var services = new ServiceCollection();
         services.AddScoped(_ => _h.Materializer);
+        services.AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service());
         return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }
 
