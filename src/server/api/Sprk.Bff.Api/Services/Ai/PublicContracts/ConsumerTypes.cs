@@ -394,8 +394,9 @@ public static class ConsumerTypes
 
     /// <summary>
     /// <see cref="IInvoiceAi.DraftRulesAsync"/> — billing-rule drafting from a guideline document (spec
-    /// <c>BILLING-RULE-DRAFT@v1</c>, FR-27). Binding + Action seeded by ebilling-r1 task 075, which also adds
-    /// this constant to <see cref="All"/>.
+    /// <c>BILLING-RULE-DRAFT@v1</c>, FR-27). Action <c>billing-rule-draft</c> + Binding mirrored by ebilling-r1 task 075
+    /// (<c>infra/dataverse/actions/billing-rule-draft.action.json</c>, <c>sprk_playbookconsumer-rows.json</c>; live seeding in
+    /// task 053's deploy order); this constant is in <see cref="All"/> from the same change.
     /// </summary>
     public const string BillingRuleDraft = "billing-rule-draft";
 
@@ -443,5 +444,6 @@ public static class ConsumerTypes
         InvoiceClassify,
         InvoiceLineCode,
         InvoiceCodeSetMatch,
+        BillingRuleDraft,
     };
 }

@@ -632,6 +632,26 @@
       "toolDescription": null
     },
     {
+      "$comment": "ebilling-r1 task 075 (FR-27, D-27, D-52) - Binding for billing-rule-draft, a Linear AI Consumer reached only through the IInvoiceAi PublicContracts facade (IInvoiceAi.DraftRulesAsync, called by BillingRuleDraftJobHandler for the rule drafting job) - NOT chat/loop-projectable, deliberately: toolDescription, surfaces, disposition, risk, captureMode, chipTransitions and onEventBindings are all null (same shape as invoice-codeset-match). actionCode resolves to the JPS Action infra/dataverse/actions/billing-rule-draft.action.json (display name BILLING-RULE-DRAFT@v1, Standard tier). ConsumerTypes.BillingRuleDraft joined ConsumerTypes.All in the same change. Live seeding is held for task 053's deploy order (Action row, then this row together with the BFF build carrying the All entry).",
+      "consumerType": "billing-rule-draft",
+      "consumerCode": "default",
+      "environment": "*",
+      "name": "Billing Rule Draft (rule drafting from guidelines)",
+      "priority": 500,
+      "enabled": true,
+      "playbookName": null,
+      "actionCode": "billing-rule-draft",
+      "ucid": null,
+      "disposition": null,
+      "risk": null,
+      "captureMode": null,
+      "surfaces": null,
+      "chipTransitions": null,
+      "onEventBindings": null,
+      "matchConditions": null,
+      "toolDescription": null
+    },
+    {
       "consumerType": "matter-pre-fill",
       "consumerCode": "default",
       "environment": "*",

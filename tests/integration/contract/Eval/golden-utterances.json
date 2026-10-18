@@ -2452,6 +2452,26 @@
         "dispatchAssertPhase": "P3",
         "activatedBy": "ebilling-r1 task 054 (FR-22, D-93)"
       }
+    },
+    {
+      "caseId": "GU-145",
+      "family": "billing-rule-draft",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "an administrator uploads an outside counsel guideline as a rule set and the rule drafting job proposes billing rules from its text, each beside the clause it came from, and lists the text it could not convert (ebilling-r1 task 075, FR-27)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.BillingRuleDraft constant (added task 075). A Linear AI Consumer, same shape as GU-144 invoice-codeset-match: invoked server-side by BillingRuleDraftJobHandler through IInvoiceAi.DraftRulesAsync (the billing-rule-draft Action run through IActionRunner), never chat/loop-projected and never Click-dispatched (the Binding carries no tool description, surfaces or chips). Dedicated coverage (operand to prompt, the closed rule-type list, output to DTO, the per-rule ValidateForSave refusal and the not-converted list, idempotent re-delivery) lives in tests/integration/seam/Ai/PublicContracts/BillingRuleDraftSeamTests.cs and tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Handlers/BillingRuleDraftJobHandlerTests.cs, and the Action mirror contract in tests/integration/contract/Catalog/BillingRuleDraftActionContractTests.cs; this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "finance-rule-drafting" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "billing-rule-draft",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "ebilling-r1 task 075 (FR-27)"
+      }
     }
   ]
 }
