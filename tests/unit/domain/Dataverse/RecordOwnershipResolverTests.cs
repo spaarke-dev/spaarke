@@ -1020,16 +1020,64 @@ public class RecordOwnershipResolverTests
     }
 
     [Theory]
-    [InlineData("sprk_communication", true, false, true)]
-    [InlineData("sprk_communication", false, true, true)]
-    [InlineData("sprk_communication", false, false, false)]
-    [InlineData("sprk_matter", true, true, false)] // a secure root is never re-filed by its lookups
-    [InlineData("sprk_servicerequest", true, true, false)]
-    public void MayRefile_IsTheChatToolsPredicate(string table, bool setsAnOwnershipParent, bool clears, bool expected)
+    [InlineData("sprk_communication", "sprk_matter", null, true)] // sets an ownership parent
+    [InlineData("sprk_communication", "contact", "sprk_regardingmatter", true)] // clears a filing lookup
+    [InlineData("sprk_communication", "contact", "_sprk_regardingmatter_value", true)]
+    [InlineData("sprk_communication", "contact", "sprk_RegardingMatter@odata.bind", true)]
+    [InlineData("sprk_todo", "contact", "sprk_regardingservicerequest", true)] // a service request files a to-do too
+    [InlineData("sprk_communication", "contact", "sprk_subject", false)] // round 4: a cleared TEXT column is no re-file
+    [InlineData("sprk_communication", "contact", "sprk_communicationthread", false)] // filing lineage, not an ownership parent
+    [InlineData("sprk_communication", "contact", null, false)]
+    [InlineData("sprk_matter", "sprk_matter", "sprk_project", false)] // a secure root is never re-filed by its lookups
+    [InlineData("sprk_servicerequest", "sprk_matter", "sprk_regardingmatter", false)]
+    public void MayRefile_CountsOwnershipParentsSet_AndFilingLookupsCleared_Only(
+        string table, string lookupTarget, string? clearedColumn, bool expected)
     {
-        var targets = setsAnOwnershipParent ? new[] { "sprk_matter" } : new[] { "contact" };
+        RecordReparent.MayRefile(table, [lookupTarget], clearedColumn is null ? [] : [clearedColumn]).Should().Be(expected);
+    }
 
-        RecordReparent.MayRefile(table, targets, clears).Should().Be(expected);
+    [Fact]
+    public void ParentChangesWithClearsIn_ReadsAServiceRequestBind_FromTheSolutionsRelationshipList()
+    {
+        var request = Guid.NewGuid();
+
+        var changes = RecordReparent.ParentChangesWithClearsIn("sprk_todo",
+            new Dictionary<string, object?> { ["sprk_RegardingServiceRequest@odata.bind"] = $"/sprk_servicerequests({request})" });
+        var documentChanges = RecordReparent.ParentChangesWithClearsIn("sprk_document",
+            new Dictionary<string, object?> { ["sprk_RelatedServiceRequest@odata.bind"] = $"/sprk_servicerequests({request})" });
+
+        changes["sprk_regardingservicerequest"].Should().Be(new EntityReference("sprk_servicerequest", request));
+        documentChanges["sprk_relatedservicerequest"].Should().Be(new EntityReference("sprk_servicerequest", request));
+        var mismatched = () => RecordReparent.ParentChangesWithClearsIn("sprk_todo",
+            new Dictionary<string, object?> { ["sprk_RegardingServiceRequest@odata.bind"] = $"/sprk_matters({request})" });
+        mismatched.Should().Throw<RecordOwnerUnresolvedException>().Which.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+    }
+
+    [Fact]
+    public async Task Reparent_ThatRebindsTheParentTheColumnAlreadyHolds_WritesIt_AndSaysNothingMoved()
+    {
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_document", documentId, SecureBu, owningTeam: SecureNamedTeam,
+                extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) });
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = RecordReparent.ParentChangesWithClearsIn("sprk_document",
+                    new Dictionary<string, object?> { ["sprk_Project@odata.bind"] = $"/sprk_projects({SecureProjectId})" }),
+            },
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        applied.Should().BeTrue();
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.ParentsUnchanged.Should().BeTrue("the row is already filed under that project");
+        directory.Assignments.Should().BeEmpty();
     }
 
     [Fact]

@@ -43,6 +43,7 @@ public class RefilePathRestampTests
         var services = new ServiceCollection()
             .AddSingleton(world.Restamper)
             .AddSingleton<IRecordOwnershipResolver>(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble())
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
             .BuildServiceProvider();
         var core = new UpdateRecordActionCore(
             new Mock<IFieldMappingDataverseService>().Object,
@@ -236,6 +237,7 @@ public class RefilePathRestampTests
                 .AddSingleton(world.Restamper)
                 .AddSingleton(ownership)
                 .AddSingleton(threads)
+                .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
                 .BuildServiceProvider()
                 .GetRequiredService<IServiceScopeFactory>(),
             NullLogger.Instance);

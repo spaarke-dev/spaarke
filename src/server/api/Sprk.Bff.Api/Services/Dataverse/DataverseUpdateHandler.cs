@@ -73,24 +73,18 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
 
         // #2091: a write that may re-file the row (the ONE predicate, RecordReparent.MayRefile) runs the ONE step after a
         // re-file (SecureChildReconciler.AfterRefileAsync), as every other re-file writer does. Whether the row was isolated
-        // is read BEFORE the write: a move OUT releases only from a row that was. A read that fails — a timeout included —
-        // is handed to the step as a fault; only the caller's own cancellation ends the write here.
+        // is read BEFORE the write (once more after a fault — a timeout included — then handed to the step as a fault): a move
+        // OUT releases only from a row that was. Only the caller's own cancellation ends the write here.
         var refiledTable = entityLogicalName.Trim().ToLowerInvariant();
         var mayRefile = RecordReparent.MayRefile(refiledTable, parentChanges);
-        Exception? isolationReadFault = null;
-        var isolatedBefore = false;
-        if (mayRefile)
-        {
-            try
-            {
-                isolatedBefore = await _children.IsSecureTeamOwnedAsync(refiledTable, recordId, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                isolationReadFault = ex;
-            }
-        }
+        var wasIsolated = mayRefile
+            ? await Sprk.Bff.Api.Services.Access.RefileIsolationRead.BeforeWriteAsync(_children, refiledTable, recordId, ct)
+                .ConfigureAwait(false)
+            : null;
 
+        // #2091 round 4: the reparent reads the row; a change that moves none of its parents (a rebind onto the parent it
+        // holds) is written and is no re-file, so the step does not run.
+        var refiled = false;
         if (parentChanges.Count == 0)
         {
             await WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, ct);
@@ -110,6 +104,8 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             {
                 throw new RecordOwnerUnresolvedException(entityLogicalName, reparent);
             }
+
+            refiled = !reparent.ParentsUnchanged;
         }
 
         // Task 156 (owner round 4 item 5, option b): this generic update can write what a to-do / event / communication /
@@ -126,12 +122,9 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // #2091, AFTER the re-stamp (the stamps on the rows filed under it are lookups the ownership rule reads): the re-filed
         // row's mirror and the pass over everything filed under it — and a communication's thread follows the filing (task
         // 129). Never throws; the write stands.
-        if (mayRefile)
+        if (refiled && wasIsolated is not null)
         {
-            await _children.AfterRefileAsync(
-                refiledTable, recordId,
-                () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
-                CancellationToken.None).ConfigureAwait(false);
+            await _children.AfterRefileAsync(refiledTable, recordId, wasIsolated, CancellationToken.None).ConfigureAwait(false);
         }
     }
 

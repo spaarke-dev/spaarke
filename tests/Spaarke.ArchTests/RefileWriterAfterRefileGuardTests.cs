@@ -37,7 +37,10 @@ namespace Spaarke.ArchTests;
 /// with no seam. That class is closed instead by the ONE payload reader every generic writer uses,
 /// <see cref="RecordReparent.ParentChangesWithClearsIn{TValue}"/>: it turns a filing bind into a parent change (or refuses
 /// it), so those writers re-file through <see cref="IRecordOwnershipResolver.ReparentAsync"/> and are held here. A new
-/// generic writer that bypasses the reader is a code-review item.</para>
+/// generic writer that bypasses the reader is a code-review item. Lineage tables that are NOT reparentable children
+/// (<c>sprk_signal</c>, <c>sprk_decisionrecord</c>, <c>sprk_fileversion</c>, <c>sprk_communicationthread</c>, …) still re-file
+/// through the generic writers with no seam and no step — their owner is not re-derived there — and are covered only by the
+/// two-minute net.</para>
 /// <para><b>Controls.</b> <see cref="Detector_MustFireAndMustNotFire"/> runs the same detector over
 /// the <c>RefileGuardControl*</c> fixtures below: a reparent with only a comment and a <c>nameof</c> of the hook, and a
 /// thread join without it, are found; a reparent whose hook runs inside a lambda, and a writer that re-files nothing, are

@@ -195,6 +195,84 @@ public sealed class RefileWriterAfterRefileHookTests
         AssertTheWriteStoodAndNothingWasReleased();
     }
 
+    // ── #2091 round 4: one transient fault on the isolation read is retried, so a move OUT still releases ────────────
+
+    [Fact(DisplayName = "#2091 r4: an UpdateRecord node whose isolation read faults ONCE retries it, and the move out releases the row and what is filed under it")]
+    public async Task UpdateRecordActionCore_OneTransientIsolationReadFault_IsRetried_AndTheMoveOutReleases()
+    {
+        TheIsolationReadFaultsOnce();
+
+        await Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null, LegacyFields: null,
+                Lookups: [new RenderedLookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter.ToString())]),
+            CancellationToken.None);
+
+        _writes.Should().ContainSingle();
+        AssertTheStepRanOnceForTheCommunication();
+    }
+
+    [Fact(DisplayName = "#2091 r4: the output orchestrator's update whose isolation read faults ONCE retries it, and the move out releases the row and what is filed under it")]
+    public async Task DataverseUpdateHandler_OneTransientIsolationReadFault_IsRetried_AndTheMoveOutReleases()
+    {
+        TheIsolationReadFaultsOnce();
+
+        await Handler().UpdateAsync(
+            "sprk_communication", Communication,
+            new Dictionary<string, object?> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter) },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        _writes.Should().ContainSingle();
+        AssertTheStepRanOnceForTheCommunication();
+    }
+
+    private void TheIsolationReadFaultsOnce()
+    {
+        _world.QueryFault = () =>
+        {
+            _world.ClearQueryFaults();
+            return new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout of 100 seconds elapsing.");
+        };
+        _world.FailingQueriesOf("sprk_communication");
+    }
+
+    // ── #2091 round 4: a cleared TEXT column is no re-file; a cleared filing lookup is ───────────────────────────────
+
+    [Fact(DisplayName = "#2091 r4: the output orchestrator's update clearing a text column runs no step after a re-file (and reads no owner)")]
+    public async Task DataverseUpdateHandler_ANullTextColumn_RunsNoStep()
+    {
+        await Handler().UpdateAsync(
+            "sprk_communication", Communication, new Dictionary<string, object?> { ["sprk_subject"] = null },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        _writes.Should().ContainSingle();
+        AssertTheStepDidNotRun(readsAllowed: false);
+    }
+
+    [Fact(DisplayName = "#2091 r4: an UpdateRecord node clearing a text column runs no step after a re-file (and reads no owner)")]
+    public async Task UpdateRecordActionCore_ANullTextColumn_RunsNoStep()
+    {
+        await Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_subject"] = null }, Lookups: null),
+            CancellationToken.None);
+
+        _writes.Should().ContainSingle();
+        AssertTheStepDidNotRun(readsAllowed: false);
+    }
+
+    [Fact(DisplayName = "#2091 r4: the output orchestrator's update clearing a filing lookup runs the step after a re-file")]
+    public async Task DataverseUpdateHandler_ANullFilingLookup_RunsTheStep()
+    {
+        await Handler().UpdateAsync(
+            "sprk_communication", Communication, new Dictionary<string, object?> { ["sprk_regardingmatter"] = null },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        _writes.Should().ContainSingle();
+        AssertTheStepRanOnceForTheCommunication();
+    }
+
     private void TheIsolationReadTimesOut()
     {
         _world.QueryFault = () => new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout of 100 seconds elapsing.");
@@ -258,6 +336,7 @@ public sealed class RefileWriterAfterRefileHookTests
                 .AddSingleton(Restamper())
                 .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
                 .AddSingleton(_threads.Object)
+                .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
                 .AddScoped(_ => Reconciler())
                 .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true })
                 .GetRequiredService<IServiceScopeFactory>(),

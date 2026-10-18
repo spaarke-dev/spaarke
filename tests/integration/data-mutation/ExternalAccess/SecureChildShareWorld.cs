@@ -49,6 +49,9 @@ internal sealed class SecureChildShareWorld
     private readonly HashSet<Guid> _ignoredOwnerWrites = new();
     private readonly List<(string Table, int AfterCount, Action<SecureChildShareWorld> Change)> _afterQueries = new();
 
+    /// <summary>#2091 round 4: how many single-row reads (<see cref="Retrieve"/>) this world answered.</summary>
+    public int RowReads { get; private set; }
+
     /// <summary>Every table queried, in order.</summary>
     public List<string> QueriedTables { get; } = new();
 
@@ -428,8 +431,10 @@ internal sealed class SecureChildShareWorld
     /// Ontology task 144: one row by id with the requested columns only (an empty list answers the row with none), or
     /// Dataverse's ObjectDoesNotExist fault — an <see cref="IGenericEntityService.RetrieveAsync"/> of this world.
     /// </summary>
+    /// <remarks>#2091 round 4: counted in <see cref="RowReads"/>.</remarks>
     public Entity Retrieve(string table, Guid id, string[]? columns)
     {
+        RowReads++;
         if (_failingRowReads.Contains((table, id)))
             throw new InvalidOperationException($"Test: this {table} row cannot be read.");
         if (!_rows.TryGetValue((table, id), out var row))

@@ -120,14 +120,25 @@ internal sealed class UpdateRecordActionCore
             }
         }
 
-        // Handle lookup fields with @odata.bind syntax
-        if (input.Lookups is { Count: > 0 })
+        // Handle lookup fields with @odata.bind syntax. The target's entity set is read from metadata (#2091 round 4: a
+        // guessed plural is wrong for sprk_analysis → sprk_analysises and every -y table), once per target table per run.
+        if (input.Lookups is { Count: > 0 } lookups && lookups.Any(l => Guid.TryParse(l.RenderedTargetId, out _)))
         {
-            foreach (var lookup in input.Lookups)
+            using var metadataScope = _scopeFactory.CreateScope();
+            var entities = metadataScope.ServiceProvider.GetService<IGenericEntityService>()
+                ?? throw new InvalidOperationException(
+                    "No IGenericEntityService is registered, so a lookup's entity set cannot be read; the record was not written.");
+            var entitySets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var lookup in lookups)
             {
                 if (Guid.TryParse(lookup.RenderedTargetId, out var targetGuid))
                 {
-                    var entitySetName = GetEntitySetName(lookup.TargetEntity);
+                    if (!entitySets.TryGetValue(lookup.TargetEntity, out var entitySetName))
+                    {
+                        entitySetName = await entities.GetEntitySetNameAsync(lookup.TargetEntity, cancellationToken).ConfigureAwait(false);
+                        entitySets[lookup.TargetEntity] = entitySetName;
+                    }
+
                     updatePayload[$"{lookup.Field}@odata.bind"] = $"/{entitySetName}({targetGuid})";
                 }
             }
@@ -170,9 +181,9 @@ internal sealed class UpdateRecordActionCore
 
         // #2091: a write that may re-file the row (the ONE predicate, RecordReparent.MayRefile) runs the ONE step after a
         // re-file (SecureChildReconciler.AfterRefileAsync), as every other re-file writer does. Whether the row was isolated
-        // is read BEFORE the write: a move OUT releases only from a row that was. A read that fails — a timeout included — is
-        // handed to the step as a fault; only the caller's own cancellation ends the write here. The reconciler is scoped and
-        // this core's constructor is frozen (task 031), so it comes from a scope.
+        // is read BEFORE the write (once more after a fault — a timeout included — then handed to the step as a fault): a move
+        // OUT releases only from a row that was. Only the caller's own cancellation ends the write here. The reconciler is
+        // scoped and this core's constructor is frozen (task 031), so it comes from a scope.
         var refiledTable = input.EntityLogicalName.Trim().ToLowerInvariant();
         var mayRefile = RecordReparent.MayRefile(refiledTable, parentChanges);
         using var refileScope = mayRefile ? _scopeFactory.CreateScope() : null;
@@ -187,20 +198,14 @@ internal sealed class UpdateRecordActionCore
                 refiledTable, input.RecordId);
         }
 
-        Exception? isolationReadFault = null;
-        var isolatedBefore = false;
-        if (children is not null)
-        {
-            try
-            {
-                isolatedBefore = await children.IsSecureTeamOwnedAsync(refiledTable, input.RecordId, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-            {
-                isolationReadFault = ex;
-            }
-        }
+        var wasIsolated = children is not null
+            ? await Sprk.Bff.Api.Services.Access.RefileIsolationRead.BeforeWriteAsync(children, refiledTable, input.RecordId, cancellationToken)
+                .ConfigureAwait(false)
+            : null;
 
+        // #2091 round 4: the reparent reads the row; a change that moves none of its parents (a rebind onto the parent it
+        // holds) is written and is no re-file, so the step does not run.
+        var refiled = false;
         if (parentChanges.Count == 0)
         {
             await Patch(cancellationToken);
@@ -231,6 +236,8 @@ internal sealed class UpdateRecordActionCore
             {
                 throw new RecordOwnerUnresolvedException(input.EntityLogicalName, reparent);
             }
+
+            refiled = !reparent.ParentsUnchanged;
         }
 
         // After whichever path wrote the record (the plain PATCH or the re-file): task 156's re-stamp, then task 142's
@@ -241,16 +248,16 @@ internal sealed class UpdateRecordActionCore
         // #2091, AFTER the re-stamp (the stamps on the rows filed under it are lookups the ownership rule reads): the re-filed
         // row's mirror and the pass over everything filed under it — and a communication's thread follows the filing. Never
         // throws; the write stands.
-        if (children is not null)
+        if (children is not null && wasIsolated is not null)
         {
-            await children.AfterRefileAsync(
-                refiledTable, input.RecordId,
-                () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
-                CancellationToken.None).ConfigureAwait(false);
+            if (refiled)
+            {
+                await children.AfterRefileAsync(refiledTable, input.RecordId, wasIsolated, CancellationToken.None).ConfigureAwait(false);
+            }
         }
         // Spaarkeai-word-add-in-r1 task 129: a re-file that could not run the step above (a host without the reconciler, logged
         // above) still lets a re-filed communication's thread follow the filing — once. Never throws.
-        else if (parentChanges.Count > 0)
+        else if (mayRefile && refiled)
         {
             await ReconcileThreadAfterRefileAsync(input.EntityLogicalName, input.RecordId).ConfigureAwait(false);
         }
@@ -552,21 +559,6 @@ internal sealed class UpdateRecordActionCore
         if (decimal.TryParse(value, out var d)) return d;
         if (bool.TryParse(value, out var b)) return b;
         return value;
-    }
-
-    private static string GetEntitySetName(string entityLogicalName)
-    {
-        return entityLogicalName switch
-        {
-            "sprk_document" => "sprk_documents",
-            "sprk_matter" => "sprk_matters",
-            "sprk_project" => "sprk_projects",
-            "account" => "accounts",
-            "contact" => "contacts",
-            "task" => "tasks",
-            "systemuser" => "systemusers",
-            _ => entityLogicalName.EndsWith("s") ? entityLogicalName : entityLogicalName + "s"
-        };
     }
 }
 

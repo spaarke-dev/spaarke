@@ -2173,6 +2173,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         var noGate = new ServiceCollection()
             .AddSingleton(new StampWorld().Restamper)
             .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
             .BuildServiceProvider();
         var core = new UpdateRecordActionCore(
             FieldMappingWritingToTheWorld().Object, noGate.GetRequiredService<IServiceScopeFactory>(), NullLogger.Instance);
@@ -2208,6 +2209,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         var services = new ServiceCollection()
             .AddSingleton(new StampWorld().Restamper)
             .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
             .AddSingleton(_gate)
             .BuildServiceProvider();
         return new UpdateRecordActionCore(
@@ -2336,6 +2338,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         var services = new ServiceCollection()
             .AddSingleton(new StampWorld().Restamper)
             .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
             .AddSingleton(_gate)
             .BuildServiceProvider();
         var core = new UpdateRecordActionCore(

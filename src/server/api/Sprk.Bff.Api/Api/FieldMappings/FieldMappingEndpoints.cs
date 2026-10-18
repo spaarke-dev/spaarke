@@ -1013,6 +1013,22 @@ public static class FieldMappingEndpoints
         var failed = 0;
         var skipped = 0;
 
+        // #2091 round 4: on a reparentable child, a lookup rule writes the column it NAMES or nothing. Its bind is planned by
+        // the referenced table's navigation property, which can be another lookup to the same table — a filing move the rule
+        // never asked for. Refused per rule, like any other unplannable lookup.
+        if (lookupBinds is not null && Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(targetEntity))
+        {
+            lookupBinds = lookupBinds.ToDictionary(
+                b => b.Key,
+                b => b.Value.BindKey is { } bindKey
+                     && !string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(bindKey),
+                         b.Key.TargetField?.Trim(), StringComparison.OrdinalIgnoreCase)
+                    ? LookupBindPlan.Refused(
+                        $"'{b.Key.TargetField}' on '{targetEntity}' would be written through '{bindKey}', a different lookup; "
+                        + "the lookup was not copied.")
+                    : b.Value);
+        }
+
         foreach (var childRecordId in childRecordIds)
         {
             ct.ThrowIfCancellationRequested();
@@ -1071,8 +1087,8 @@ public static class FieldMappingEndpoints
                     // so no app-only child write remains on this route.
                     Task Write(CancellationToken token) => dataverseService.UpdateRecordFieldsAsync(
                         targetEntity, childRecordId, updatePayload, token, impersonateSystemUserId: callerSystemUserId);
-                    Exception? isolationReadFault = null;
-                    var isolatedBefore = false;
+                    Func<Task<bool>>? wasIsolated = null;
+                    var refiled = false;
                     if (!mayRefile)
                     {
                         await Write(ct);
@@ -1089,14 +1105,8 @@ public static class FieldMappingEndpoints
                     }
                     else
                     {
-                        try
-                        {
-                            isolatedBefore = await children.IsSecureTeamOwnedAsync(targetEntity.Trim().ToLowerInvariant(), childRecordId, ct);
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-                        {
-                            isolationReadFault = ex;
-                        }
+                        wasIsolated = await Sprk.Bff.Api.Services.Access.RefileIsolationRead.BeforeWriteAsync(
+                            children, targetEntity.Trim().ToLowerInvariant(), childRecordId, ct);
 
                         var reparent = await ownership.ReparentAsync(
                             new Sprk.Bff.Api.Services.Dataverse.RecordReparent
@@ -1122,6 +1132,9 @@ public static class FieldMappingEndpoints
                             });
                             continue;
                         }
+
+                        // #2091 round 4: a rule that re-binds the parent the child already holds moves nothing — no step.
+                        refiled = !reparent.ParentsUnchanged;
                     }
 
                     updated++;
@@ -1139,12 +1152,10 @@ public static class FieldMappingEndpoints
 
                     // #2091, AFTER the re-stamp: the re-filed child's mirror and the pass over everything filed under it.
                     // Never throws; the child's update stands.
-                    if (children is not null)
+                    if (refiled && children is not null && wasIsolated is not null)
                     {
                         await children.AfterRefileAsync(
-                            targetEntity.Trim().ToLowerInvariant(), childRecordId,
-                            () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
-                            CancellationToken.None);
+                            targetEntity.Trim().ToLowerInvariant(), childRecordId, wasIsolated, CancellationToken.None);
                     }
 
                     // Task 142 (L1): a push that wrote a ROOT's "Assigned *" column (a project/matter/work assignment
