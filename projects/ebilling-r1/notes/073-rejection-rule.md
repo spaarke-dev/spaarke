@@ -1,10 +1,10 @@
 # Task 073 - Rejection rule and reject-eligibility at publish (FR-26, I-5, NFR-06, D-89)
 
 > Rigor FULL. Base `33723dbdc` on `work/ebilling-r1`. Executed 2026-10-18.
-> Commits (range `33723dbdc..bba56e6e3`, plus this notes commit):
-> `7c95567c8` consequence allowed by type (catalogue, validator, rule-set service, evaluator pass-through, fixtures);
-> `1ffd98815` settings invariant and reader log; `ccfd1539b` the rejection rule, DI, tests;
-> `bba56e6e3` RequiredData real-evaluator tests and the data-model line.
+> Commits (range `33723dbdc..73e293223`, plus this notes commit):
+> `5655ad67e` consequence allowed by type (catalogue, validator, rule-set service, evaluator pass-through, fixtures);
+> `e67a333ca` settings invariant and reader log; `7f384a265` the rejection rule, DI, tests;
+> `73e293223` RequiredData real-evaluator tests and the data-model line.
 
 ## 1. What shipped
 
@@ -142,7 +142,7 @@ PDBs included; fresh `git archive` exports at `C:\m73\{master,before,after}`):
 |---|---|---|---|
 | master `c690b0ac2` | 39,208,107 B (37.39 MB) | 192 | 19,651,584 |
 | before (`33723dbdc`) | 39,630,571 B (37.79 MB) | 192 | 20,703,744 |
-| after (`ccfd1539b`; later commits change no `src/`) | 39,637,681 B (37.80 MB) | 192 | 20,722,176 |
+| after (`7f384a265`; later commits change no `src/`) | 39,637,681 B (37.80 MB) | 192 | 20,722,176 |
 
 Task delta: **+7,110 B (+0.007 MB)** against the before build; branch against master +0.41 MB. Total 37.80 MB (< 55 MB review line;
 < +5 MB task line). File counts match. `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`: no vulnerable
