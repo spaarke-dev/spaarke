@@ -4,7 +4,7 @@
     <title>Gate Decision Record for an unfiled communication: visible to the communication's sharees, re-owned when the communication is filed (D-169, #1876)</title>
     <phase>D Decision Record</phase>
     <gate>042 complete; uac-r2 reviews the POML before it starts</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include security and tenant-isolation: it changes who can read a Decision Record, and it re-owns Decision Records on filing.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -90,4 +90,5 @@
       <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
     </files>
   </knowledge>
+  <completion date="2026-10-18">PR #2096 merged into docs `f66aa811a` after 4 rounds (uac-r2 review of the POML and both foreign diffs; adversarial passes 1 (no over-share) and 2 (2 F1 fixed in r3); scoped re-check clean, K closed in r4). D-169 internal only. Re-own runs from SecureChildReconciler.AfterRefileAsync (uac-r2 choice A). Known limits: UAC #2091 (three re-file writers skip the hook), DI-117 #2092, DI-118 #2093. Closes #1876 / DI-84. Notes: notes/042b-gate-dr-participant-visibility.md.</completion>
 </task>

@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-18 ~05:30Z (main session; #2088 merged to master `20fb86dc4`; 042b running). State only — history is in git log,
+> **Last Updated**: 2026-10-18 ~09:00Z (main session; 042b merged into docs `f66aa811a`). State only — history is in git log,
 > task `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path;
 > D-123 secure family; D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-169). Deferred work: one self-contained GitHub issue per item, label
@@ -10,12 +10,12 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 042b running (implementer, `C:\wts-042b`, branch `task/ontology-042b`; D-169 internal only). 071 r2 re-check running (`e2288a659..229643893`) |
-| **Next Action** | 1) R3 deploys dev BFF from master (candidate `20e7b71a1` = 20fb86dc4 src); owner approved in this session, R3 asking owner directly. After: verify version, send after-notices (word-add-in, uac-r2). NOT the 015 BFF (no `e0df77339`). 2) 042b result → send uac-r2 the DirectThreadAccessService diff → PR → two adversarial passes. 3) 071 r2 findings → ebilling. 4) uac-r2's #2084 PR (after #2063): two passes |
+| **Task** | No lane in flight. 042b ✅ (#2096 → docs `f66aa811a`; not yet on master) |
+| **Next Action** | 1) Dev BFF deploy from master `20fb86dc4` (R3 candidate `20e7b71a1`): waiting on the owner's direct confirmation to R3. After: verify version, after-notices to word-add-in and uac-r2. NOT the 015 BFF. 2) Next docs→master sync carries 042b (full ArchTests first). 3) Re-check ebilling 071 r3 and 072 fix ranges when sent. 4) uac-r2's #2084 PR (after #2063): two passes |
 
 ## Open owner / peer items
 
-1. **#2084 / DI-115 ADOPTED (D-168, relayed by uac-r2):** UAC builds SecureChildLineage for `sprk_policy` + `sprk_policyversion` after 099b (#2063). Ontology asked UAC to also file versions created under an already-Secure policy. **#1876 / DI-84 decided (D-169):** a gate DR for an unfiled communication gets the communication's per-participant shares; ontology drafts the writer side, UAC the resolver; needs `requireTeam` relaxed for this case.
+1. **#2084 / DI-115 ADOPTED (D-168):** UAC builds SecureChildLineage for `sprk_policy` + `sprk_policyversion` after 099b (#2063), including the publish path's version create taking its owner from RecordOwnershipResolver (`OntologyAdminAuthoringService.cs` :1154, edited in UAC's PR; we give it two adversarial passes). **UAC #2091:** three re-file writers will call `AfterRefileAsync` (then 042b's re-own follows).
 2. **111 row 4** (owner): `/upload?entityType=sprk_project&entityId=<GUID>`, with the GUID taken from `/project/<GUID>`. Then close 111 → 114.
 3. **CORS** on `/api/v1/external/notifications` (R3 owns): if it recurs, get the UTC time and the OPTIONS status. **Never dispatch `deploy-external-spa.yml` from master** while R3's SPA work is off master.
 4. **POL-MATTER-NOBUDGET** is on (D-163): the owner bulk-closes the dev Signals after the next evaluation.
