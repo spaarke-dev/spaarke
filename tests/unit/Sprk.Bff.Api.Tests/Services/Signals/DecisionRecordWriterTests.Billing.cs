@@ -183,14 +183,14 @@ public sealed partial class DecisionRecordWriterTests
     [Fact]
     public async Task Billing_C3_ARowWithTheSameKeyAndCodeButAnotherCreator_IsNotAlreadyRecorded_AndTheRecordIsWritten()
     {
-        // ontology-r1 F3-1: the forged row carries everything the writer's own record would (the key, the billing code in sprk_actioncode),
-        // so ONLY the createdby condition keeps it from answering as this decision's record. Without sprk_actioncode the code filter
-        // skipped it and the test proved nothing about createdby.
+        // ontology-r1 F3-1: the forged row carries everything the writer's own record would (the key, this decision's content hash, the billing
+        // code in sprk_actioncode), so ONLY the createdby condition keeps it from answering as this decision's record. Without
+        // sprk_actioncode the code filter skipped it and the test proved nothing about createdby.
         var h = BillingHarness();
         var forged = new Entity("sprk_decisionrecord", Guid.NewGuid())
         {
             ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", InvoiceId),
-            ["sprk_steps"] = $"{{\"reviewId\":\"{BillingDecisionKey.IdOf("sprk_invoice", InvoiceId, BillingDecision):D}\",\"steps\":[{{\"code\":\"approve-invoice\"}}]}}",
+            ["sprk_steps"] = $"{{\"reviewId\":\"{BillingDecisionKey.IdOf("sprk_invoice", InvoiceId, BillingDecision):D}\",\"reviewHash\":\"{DecisionRecordWriter.BillingDecisionHash(Billing())}\",\"steps\":[{{\"code\":\"approve-invoice\"}}]}}",
             ["sprk_actioncode"] = "approve-invoice",
             ["createdby"] = new EntityReference("systemuser", ConsoleUser),
             ["sprk_confirmedby"] = new EntityReference("systemuser", Framed),
@@ -256,6 +256,59 @@ public sealed partial class DecisionRecordWriterTests
         h.Created.Should().HaveCount(2);
         BillingDecisionKey.IdOf("sprk_billingevent", LineId, BillingDecision).Should().NotBe(BillingDecisionKey.IdOf("sprk_invoice", InvoiceId, BillingDecision));
         BillingDecisionKey.Of("sprk_invoice", InvoiceId, BillingDecision).Should().StartWith("billing-dr-");
+    }
+
+    // ── ontology-r1 K2: AlreadyRecorded only for the same content, not just the same code ─────────────────────────
+
+    private static BillingDecisionRecordRequest Reduce(decimal approvedAmount) =>
+        Billing("reduce-line", reason: "rate above card", values: new Dictionary<string, object?> { ["approvedAmount"] = approvedAmount });
+
+    [Fact]
+    public async Task Billing_K2_TheSameIdAndCodeWithOtherValues_IsRefused_AndNoSecondRecordIsWritten()
+    {
+        var h = BillingHarness();
+        var first = await h.Writer.WriteBillingDecisionAsync(Reduce(800m));
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Reduce(700m))).Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        first.AlreadyRecorded.Should().BeFalse();
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid, "700 is not a repeat of the recorded 800");
+        ex.Message.Should().Contain("other content");
+        h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Billing_K2_ATrueRepeat_IsAlreadyRecorded_AndTheRecordStoresItsContentHash()
+    {
+        var h = BillingHarness();
+        var first = await h.Writer.WriteBillingDecisionAsync(Reduce(800m));
+
+        var repeat = await h.Writer.WriteBillingDecisionAsync(Reduce(800m));
+
+        repeat.AlreadyRecorded.Should().BeTrue();
+        repeat.RecordId.Should().Be(first.RecordId);
+        h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+        using var steps = JsonDocument.Parse(h.Row.GetAttributeValue<string>("sprk_steps"));
+        steps.RootElement.GetProperty("reviewHash").GetString().Should().Be(DecisionRecordWriter.BillingDecisionHash(Reduce(800m)));
+        DecisionRecordWriter.BillingDecisionHash(Reduce(800m) with { Facts = new Dictionary<string, object?> { ["reread"] = true }, DecidedOn = Now })
+            .Should().Be(DecisionRecordWriter.BillingDecisionHash(Reduce(800m)), "a retry may re-read its facts and clock");
+    }
+
+    [Fact]
+    public async Task Billing_K2_AWriterRecordWithTheSameKeyAndCodeButNoReadableHash_IsRefused_NeverAnsweredNorWrittenOver()
+    {
+        var h = BillingHarness();
+        h.Seeded.Add(new Entity("sprk_decisionrecord", Guid.NewGuid())
+        {
+            ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", InvoiceId),
+            ["sprk_steps"] = $"{{\"reviewId\":\"{BillingDecisionKey.IdOf("sprk_invoice", InvoiceId, BillingDecision):D}\",\"steps\":[{{\"code\":\"approve-invoice\"}}]}}",
+            ["sprk_actioncode"] = "approve-invoice",
+            ["createdby"] = new EntityReference("systemuser", WriterUser),
+        });
+
+        (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing())).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        h.Created.Should().BeEmpty();
     }
 
     // ── C4: a lookup fault writes nothing ─────────────────────────────────────────────────────────────────────────

@@ -1243,8 +1243,9 @@ public sealed class DecisionRecordWriter
     /// <summary>
     /// ebilling-r1 task 074 (spec FR-30, FR-19, FR-35 to FR-37; D-75, D-100, D-101): writes the ONE Decision Record of a billing decision,
     /// human or system, exactly once per (subject, decision id) for retries made one after another: a second call with the same decision id
-    /// and code returns the first record, and with the same decision id but ANOTHER billing code is refused
-    /// (<see cref="DecisionRecordRefusalReason.ReviewInvalid"/>). Two CONCURRENT calls can both write (lookup then create, no unique key, as on
+    /// and the same content (<see cref="BillingDecisionHash"/>, stored in <c>sprk_steps</c> as the review path stores its review hash) returns
+    /// the first record; with the same decision id but ANOTHER billing code, or the same code with other content (reduce-line 800, then 700),
+    /// it is refused (<see cref="DecisionRecordRefusalReason.ReviewInvalid"/>). Two CONCURRENT calls can both write (lookup then create, no unique key, as on
     /// the gate path), so a caller serialises its decisions per invoice (its status check-and-set). An additive entry point beside
     /// <see cref="WriteGateDecisionAsync"/> and
     /// <see cref="WriteConditionClearedAsync"/>: <see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/>, <see cref="Validate"/>
@@ -1293,9 +1294,20 @@ public sealed class DecisionRecordWriter
                     "This decision id is already recorded on its subject with another billing action; nothing was written.");
             }
 
+            var hash = BillingDecisionHash(request);
             var existing = recorded.FirstOrDefault(r => string.Equals(r.Code, request.ActionCode, StringComparison.Ordinal));
             if (existing.Id != Guid.Empty)
             {
+                if (!string.Equals(existing.Hash, hash, StringComparison.Ordinal))
+                {
+                    // K2 (ontology-r1): the same id and code with other content (reduce-line 800, then 700) is not a repeat of the recorded
+                    // decision; answering AlreadyRecorded would tell the caller its 700 was recorded when 800 was. A record whose hash cannot
+                    // be read proves nothing either, so it is refused the same way, never written over with a second record.
+                    throw new DecisionRecordRefusedException(
+                        DecisionRecordRefusalReason.ReviewInvalid,
+                        "This decision id is already recorded on its subject with the same billing action but other content; nothing was written.");
+                }
+
                 _logger.LogInformation(
                     "Billing decision {DecisionId} ({ActionCode}) already recorded as Decision Record {RecordId}; nothing written.",
                     request.DecisionId, request.ActionCode, existing.Id);
@@ -1310,7 +1322,7 @@ public sealed class DecisionRecordWriter
             var signalSubjects = await BillingSignalSubjectsAsync(request.ResolvedSignalIds, ct).ConfigureAwait(false);
             var (core, derived) = await ResolveBillingCoreAsync(request.Subject, ct).ConfigureAwait(false);
             var written = await CreateAsync(
-                    BillingReview(request, plan, key, core) with { SignalSubjects = signalSubjects },
+                    BillingReview(request, plan, key, core) with { SignalSubjects = signalSubjects, ReviewHash = hash },
                     plan with { AlreadyDerived = derived },
                     resolvedOwner: null,
                     ct)
@@ -1338,6 +1350,34 @@ public sealed class DecisionRecordWriter
     }
 
     private static Guid? NoneIfEmpty(Guid? id) => id is { } value && value != Guid.Empty ? value : null;
+
+    /// <summary>
+    /// K2 (ontology-r1): a stable hash of what the billing decision IS, stored in <c>sprk_steps</c> beside the key (the review path's
+    /// <see cref="DecisionRecordRequest.ReviewHash"/> slot, task 043), so a repeat of the decision id can be told from a different decision
+    /// under the same id. Covered: the code, the subject, who decided (confirmer and role), the values (ordered by key), the outcome, the
+    /// reason, the policy version and the resolved Signals (ordered). Not covered, because an honest retry may differ in them: the fact
+    /// snapshot (re-read at retry time), the decision time (the clock when not given), the written rows (a caller may recreate them on a retry)
+    /// and the deciding contact and privilege flag (derived from the confirmer and the findings, not decided).
+    /// </summary>
+    internal static string BillingDecisionHash(BillingDecisionRecordRequest r)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        var canonical = new
+        {
+            code = r.ActionCode,
+            subject = r.Subject.Entity,
+            subjectId = r.Subject.Id,
+            confirmedBy = NoneIfEmpty(r.ConfirmedByUserId),
+            role = r.DeciderRole,
+            values = (r.Values ?? new Dictionary<string, object?>()).OrderBy(v => v.Key, StringComparer.Ordinal)
+                .Select(v => new object?[] { v.Key, v.Value }).ToArray(),
+            outcome = r.Outcome,
+            reason = r.Reason,
+            policyVersion = NoneIfEmpty(r.PolicyVersionId),
+            signals = (r.ResolvedSignalIds ?? []).OrderBy(id => id).ToArray(),
+        };
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(canonical))));
+    }
 
     /// <summary>The review shape the shared builders read (<see cref="Content"/>, <see cref="FiledAndOwnedAsync"/>): <see cref="Guid.Empty"/>
     /// means "none" for the policy version and the confirmer, as on the gate and closure paths.</summary>
@@ -1426,8 +1466,8 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>
-    /// ebilling-r1 task 074 (D-100): the billing records already written under this key, each with its code and <c>sprk_confirmedby</c> (empty
-    /// when none). Narrowed by the subject's regarding lookup (indexed), then by the key in <c>sprk_steps</c>, and only among records the writer
+    /// ebilling-r1 task 074 (D-100): the billing records already written under this key, each with its code, <c>sprk_confirmedby</c> (empty
+    /// when none) and stored content hash (<see cref="BillingDecisionHash"/>, from <c>sprk_steps</c>; null when it cannot be read). Narrowed by the subject's regarding lookup (indexed), then by the key in <c>sprk_steps</c>, and only among records the writer
     /// itself created (<c>createdby</c> = the writer identity: a row a person created with this key is not this record). The key carries no
     /// code, so the code is READ (<c>sprk_actioncode</c>, the one taken step's code) rather than filtered on: the caller can then tell "this
     /// decision, already recorded" from "this decision id, recorded with another billing code". A row whose code is not a billing code is a
@@ -1437,14 +1477,14 @@ public sealed class DecisionRecordWriter
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the lookup (or
     /// the writer identity it is narrowed by) faulted, a timeout surfacing as a cancellation the caller did not ask for included. Nothing is
     /// written: guessing "none" would risk a second record; a retry may succeed.</exception>
-    private async Task<IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code)>> FindBillingRecordsAsync(
+    private async Task<IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>> FindBillingRecordsAsync(
         DecisionRecordRef subject, Guid key, CancellationToken ct)
     {
         try
         {
             var query = new QueryExpression(Table)
             {
-                ColumnSet = new ColumnSet("sprk_confirmedby", "sprk_actioncode"),
+                ColumnSet = new ColumnSet("sprk_confirmedby", "sprk_actioncode", "sprk_steps"),
                 // Sequential use leaves at most one billing row per key; a concurrent pair (see WriteBillingDecisionAsync) or a Signals review
                 // that reused the id adds one each. Bounded, never a scan.
                 TopCount = BillingLookupTop,
@@ -1455,14 +1495,14 @@ public sealed class DecisionRecordWriter
             query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
 
-            var found = new List<(Guid Id, Guid? ConfirmedBy, string Code)>();
+            var found = new List<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>();
             foreach (var row in rows?.Entities ?? Enumerable.Empty<Entity>())
             {
                 if (row.Id != Guid.Empty
                     && row.GetAttributeValue<string>("sprk_actioncode") is { } code
                     && BillingSubjectByCode.ContainsKey(code))
                 {
-                    found.Add((row.Id, row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id, code));
+                    found.Add((row.Id, row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id, code, StoredBillingHashOf(row)));
                 }
             }
 
@@ -1474,6 +1514,24 @@ public sealed class DecisionRecordWriter
                 DecisionRecordRefusalReason.BillingRecordLookupFailed,
                 "Whether the billing decision's Decision Record already exists could not be checked, so nothing was written.",
                 innerException: ex);
+        }
+    }
+
+    /// <summary>K2: the content hash a billing record stored in <c>sprk_steps</c> (<c>reviewHash</c>, right after the key); null when the
+    /// column is missing, not JSON, or carries none. A null never matches, so such a record refuses a repeat instead of answering it.</summary>
+    private static string? StoredBillingHashOf(Entity row)
+    {
+        try
+        {
+            using var steps = JsonDocument.Parse(row.GetAttributeValue<string>("sprk_steps") ?? "{}");
+            return steps.RootElement.ValueKind == JsonValueKind.Object
+                && steps.RootElement.TryGetProperty("reviewHash", out var hash) && hash.ValueKind == JsonValueKind.String
+                ? hash.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
