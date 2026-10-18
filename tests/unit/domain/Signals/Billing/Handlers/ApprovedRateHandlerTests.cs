@@ -69,6 +69,29 @@ public class ApprovedRateHandlerTests
         Run(RateRule(tolerance), Facts(Line(D(billed), D(approved)))).Any().Should().Be(fires);
     }
 
+    [Theory]
+    [InlineData("575.004", "0", false)] // rounds to 575.00: equal to the approved rate, which holds
+    [InlineData("575.0049", "0", false)]
+    [InlineData("575.005", "0", true)] // the midpoint rounds away from zero to 575.01: one cent over
+    [InlineData("603.754", "5", false)] // 575 + 5% = 603.75; 603.754 is 603.75
+    [InlineData("603.755", "5", true)] // 603.76
+    public void TheBilledRateIsComparedAtTheCent_ASubCentRateNeverFiresAgainstALimitThatShowsAsEqual(string billed, string tolerance, bool fires)
+    {
+        var findings = Run(RateRule(tolerance), Facts(Line(D(billed))));
+
+        findings.Any().Should().Be(fires);
+    }
+
+    [Fact]
+    public void TheReduction_IsComputedFromTheRateAsShown_SoTheFindingAddsUp()
+    {
+        // 650.004 is shown as 650.00; (650.00 - 575.00) x 2.5 = 187.50, not 187.51 from the unrounded rate.
+        var finding = Run(RateRule(), Facts(Line(650.004m))).Single();
+
+        finding.Value("line.rate").Value.Should().Be("650.00");
+        finding.SuggestedAdjustment!.Amount.Should().Be(187.50m);
+    }
+
     [Fact]
     public void TheSuggestedReduction_IsTheExcessOverTheApprovedRate_NotOverTheToleranceLimit()
     {

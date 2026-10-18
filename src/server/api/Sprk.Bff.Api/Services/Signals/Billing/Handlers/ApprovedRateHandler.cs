@@ -9,7 +9,9 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// </summary>
 /// <remarks>
 /// <para><b>The check.</b> The limit is <c>approved x (1 + tolerancePercent / 100)</c>, rounded to the cent (midpoint away from
-/// zero, <see cref="BillingMath.ToCent"/>). The rule fires when the billed rate is <b>above</b> the limit; a rate equal to it holds.</para>
+/// zero, <see cref="BillingMath.ToCent"/>). The rule fires when the billed rate is <b>above</b> the limit; a rate equal to it holds.
+/// The billed rate is itself rounded to the cent before the comparison (and before the reduction is computed), so the rate judged
+/// is the rate the finding shows: a sub-cent extraction such as 575.004 against 575.00 holds.</para>
 /// <para><b>The suggested reduction</b> is the whole excess over the <b>approved</b> rate, not over the limit:
 /// <c>(billed - approved) x hours</c>, rounded to the cent. The tolerance is the slack before the rule fires, not a rate the firm
 /// is entitled to; the research note names the consequence "adjust to approved". Hours that are missing or zero leave
@@ -44,10 +46,13 @@ internal static class ApprovedRateHandler
             var resolution = line.ApprovedRate;
             if (resolution is { Status: RateResolutionStatus.Found, ApprovedRate: { } approved })
             {
+                // The billed rate is compared at the precision it is shown and billed at, the cent, like the limit it is held
+                // against: an extracted 575.004 is 575.00 and holds, instead of firing "above" a limit the finding shows as equal.
+                var billedCent = BillingMath.ToCent(billed);
                 var limit = BillingMath.ToCent(approved * (1m + (tolerance / 100m)));
-                if (billed > limit)
+                if (billedCent > limit)
                 {
-                    findings.Add(AboveApproved(context, line, billed, approved, limit, resolution));
+                    findings.Add(AboveApproved(context, line, billedCent, approved, limit, resolution));
                 }
 
                 continue;
