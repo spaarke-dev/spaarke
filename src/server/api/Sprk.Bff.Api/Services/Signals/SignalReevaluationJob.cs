@@ -28,6 +28,11 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// Superseded and PolicyRetired closures are task 033's (<see cref="SignalClosureService"/>, run from this job); the planner
 /// re-raises their episodes.</para>
 /// <para><b>Re-raise rule (D-13, D-32, FR-03, FR-17a).</b> See <see cref="SignalEpisodePlanner"/>.</para>
+/// <para><b>Scope (task 102b, D-165; DI-62).</b> A policy limited to a matter (<c>sprk_matter</c>, rule subject <c>sprk_matter</c>) is
+/// evaluated within that matter by the subject-scoped evaluation of task 032; the planner sees only its Signals, so nothing is raised
+/// or closed as ConditionCleared for another matter. Its Signals outside the scope that cite a superseded version close Superseded
+/// (a publish that changes the scope). A tenant scope, or a matter scope on a rule about another table, is not evaluated
+/// (<c>scopedNotEvaluated</c>: the run is not successful).</para>
 /// <para><b>No silent failure (owner 2026-10-04).</b> A heartbeat per attempt (<see cref="OntologyWriterEvents.EvaluatorHeartbeat"/>);
 /// <c>ontology.evaluator.runs</c> by outcome plus per-action counts; any refusal, unreadable policy or unparseable key makes
 /// the run <c>failed</c>, never a successful run with zero Signals; the last SUCCESSFUL run time is kept in the distributed
@@ -124,13 +129,15 @@ public sealed class SignalReevaluationJob : IScheduledJob
         }
 
         // Task 145 (uac-r2 review F1 on #1874): an in-force policy that stopped before its redaction (invalid rule, no current
-        // version or lane, a version not in force, a partition skip, a fault, or a scoped policy the nightly pass does not
-        // evaluate) still has its stored evidence checked.
+        // version or lane, a version not in force, a partition skip, a fault, or a tenant-scoped or mis-scoped policy the nightly
+        // pass does not evaluate) still has its stored evidence checked.
         await SweepStoredEvidenceAsync(
             policies.Select(p => p.Code), "is in force but was not evaluated to the end this run", counts, cancellationToken).ConfigureAwait(false);
 
         await ClosePoliciesNotInForceAsync(counts, cancellationToken).ConfigureAwait(false);
+        var existingCodes = await CloseSignalsOfDeletedPoliciesAsync(counts, cancellationToken).ConfigureAwait(false);
         await RedactPoliciesNotInForceAsync(counts, cancellationToken).ConfigureAwait(false);
+        await RedactSignalsOfDeletedPoliciesAsync(existingCodes, counts, cancellationToken).ConfigureAwait(false);
 
         var success = counts.IsSuccess;
         var duration = Finish(context, counts, started, success);
@@ -171,15 +178,24 @@ public sealed class SignalReevaluationJob : IScheduledJob
         return new PolicyReevaluationResult(counts.IsSuccess, counts.SupersededClosed, counts.Written + counts.Reraised, counts.FailureSummary());
     }
 
+    /// <summary>The one subject a matter scope is allowed on (task 102b, D-165).</summary>
+    internal const string MatterScopeSubject = "sprk_matter";
+
+    /// <summary>Task 102b fix round 2 (K4): the most Signal ids the out-of-scope closure log line names (the count is always exact).</summary>
+    internal const int MaxLoggedOutOfScopeIds = 50;
+
+    /// <param name="scope">An event trigger's one subject (task 032), or null for the whole policy. A policy's OWN matter scope (task
+    /// 102b) is read from <paramref name="policy"/>, never from here.</param>
     private async Task EvaluatePolicyAsync(PolicyRow policy, RunCounts counts, CancellationToken ct, SubjectScope? scope = null)
     {
-        if (policy.IsScoped)
+        if (policy.TenantScoped)
         {
-            // A tenant- or matter-scoped policy needs a scope the nightly pass does not have (defer-issues row, task 031).
+            // D-165: the tenant scope stays blank (every environment is single-tenant, CommunicationRuleGate), so a policy carrying one was
+            // written outside the BFF and cannot be evaluated: refused visibly, never evaluated as if it were unscoped.
             counts.ScopedNotEvaluated++;
             _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
-                "Policy {PolicyCode} is tenant- or matter-scoped; the nightly pass evaluates unscoped policies only, so it was " +
-                "NOT evaluated.", policy.Code);
+                "Policy {PolicyCode} carries a tenant scope; a tenant scope is not evaluated (every environment is single-tenant), so it " +
+                "was NOT evaluated. Clear sprk_tenant.", policy.Code);
             return;
         }
 
@@ -218,6 +234,30 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 version.GetAttributeValue<string>("sprk_rulebody"),
                 version.GetAttributeValue<string>("sprk_messagetemplate"));
 
+            // Task 102b (D-165, DI-62): a matter-scoped policy is evaluated within its matter, by the same subject-scoped evaluation an
+            // event trigger uses. Its rule must be about matters; one that is not (only possible when written outside the BFF) is refused
+            // visibly, never evaluated as if it were unscoped.
+            SubjectScope? matterScope = null;
+            if (policy.MatterId is { } matterId)
+            {
+                if (!string.Equals(RuleSubjectEntity(spec.RuleBody), MatterScopeSubject, StringComparison.Ordinal))
+                {
+                    counts.ScopedNotEvaluated++;
+                    _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                        "Policy {PolicyCode} is limited to a matter but its rule is not about matters, so it was NOT evaluated. Publish a " +
+                        "version about sprk_matter, or clear sprk_matter.", policy.Code);
+                    return;
+                }
+
+                matterScope = new SubjectScope(MatterScopeSubject, matterId);
+                if (scope is { } trigger && trigger != matterScope)
+                {
+                    // An event trigger on any other subject cannot hold or clear for a policy limited to this matter.
+                    counts.NotApplicable++;
+                    return;
+                }
+            }
+
             if (scope is { } only && RuleSubjectEntity(spec.RuleBody) is { } ruleSubject
                 && !string.Equals(ruleSubject, only.Entity, StringComparison.Ordinal))
             {
@@ -226,15 +266,30 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 return;
             }
 
+            // The subject the evaluation is confined to: the trigger's, else the policy's own matter scope, else none (every subject).
+            var confinedTo = scope ?? matterScope;
+
             counts.PoliciesEvaluated++;
             if (lane == SignalWriter.LaneDo) counts.DoLanePolicies++;
             else counts.DecideLanePolicies++;
 
-            var evaluation = await _evaluator.EvaluateAsync(spec, scope?.Id, ct).ConfigureAwait(false);
+            var evaluation = await _evaluator.EvaluateAsync(spec, confinedTo?.Id, ct).ConfigureAwait(false);
             if (!evaluation.PolicyValid)
             {
                 // Logged and metered by the validator gate (50301). Nothing is closed on an unknown truth value.
                 counts.InvalidPolicies++;
+                return;
+            }
+
+            if (confinedTo is { } confined
+                && evaluation.Hits.Any(h => !string.Equals(h.SubjectEntity, confined.Entity, StringComparison.Ordinal) || h.SubjectId != confined.Id))
+            {
+                // Task 102b: the scoped query cannot return another subject. If it ever does, nothing is read, closed or written for the
+                // policy this pass (fail closed): a Signal outside the scope is never raised.
+                counts.PolicyFailures++;
+                _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "Policy {PolicyCode}: the evaluation confined to {SubjectEntity} {SubjectId} returned another subject; nothing was " +
+                    "raised, closed or reconciled for it this run.", policy.Code, confined.Entity, confined.Id);
                 return;
             }
 
@@ -247,14 +302,48 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }
 
             counts.MissingInputs += unjudged.Count;
+            // A trigger reads only its subject's episodes (task 032). A matter-scoped policy's own pass reads EVERY Signal of the policy
+            // (the unscoped policy's read) so that the supersede below, which is version-based, also closes its Signals outside the
+            // scope; the planner and everything after it see only the in-scope ones (task 102b, closure on scope change).
             var read = await ReadPolicySignalsAsync(policy.Code, counts, ct, scope).ConfigureAwait(false);
+            // Task 102b: on the policy's own pass (not a trigger's), a Signal outside its matter scope.
+            Func<ExistingSignal, bool>? outside = null;
+            if (scope is null && matterScope is { } own)
+            {
+                outside = s => !(string.Equals(s.SubjectEntity, own.Entity, StringComparison.Ordinal) && s.SubjectId == own.Id);
+            }
+
             // Task 033 (FR-16, D-13): Signals citing an older version close Superseded first, so the planner below re-raises
-            // the subjects the current version still holds as new episodes in this same pass.
-            var superseded = await _closure.SupersedeInPassAsync(policy.Code, versionId, read, ct).ConfigureAwait(false);
+            // the subjects the current version still holds as new episodes in this same pass. Task 102b: every open Signal outside the
+            // matter scope closes Superseded here too, whatever version it cites (fix round 1, uac-r2 F2): after a publish that changed
+            // the scope it cites the old version (or none), and after a scope changed in Dataverse without a publish it cites the
+            // current one. The policy's scope supersedes it either way, and, never reaching the planner, it is not re-raised.
+            var superseded = await _closure.SupersedeInPassAsync(policy.Code, versionId, read, ct, outside).ConfigureAwait(false);
             counts.AddClosure(superseded.Outcome, retired: false);
+            // Task 145 (D-123): the stored-evidence redaction only ever removes detail, so it covers every Signal read, in and out of
+            // the scope, as it does for an unscoped policy (nothing else would ever redact the out-of-scope ones again).
+            IReadOnlyList<ExistingSignal> inScope = superseded.Existing;
+            IReadOnlyList<ExistingSignal> outOfScope = Array.Empty<ExistingSignal>();
+            if (outside is not null)
+            {
+                inScope = superseded.Existing.Where(s => !outside(s)).ToList();
+                outOfScope = superseded.Existing.Where(outside).ToList();
+                var closedOutside = read.Where(s => s.IsOpen && outside(s) && !superseded.NotClosed.Contains(s.Id)).Select(s => s.Id).ToList();
+                if (closedOutside.Count > 0)
+                {
+                    counts.OutOfScopeSuperseded += closedOutside.Count;
+                    // Fix round 2 (K4): the count, and at most the first MaxLoggedOutOfScopeIds ids, so one scope change on a policy with
+                    // thousands of Signals is one bounded line.
+                    _logger.LogInformation(
+                        "Policy {PolicyCode}: {Count} open Signal(s) outside its matter scope were closed Superseded (the policy's scope " +
+                        "supersedes them): {SignalIds}{More}.", policy.Code, closedOutside.Count,
+                        string.Join(",", closedOutside.Take(MaxLoggedOutOfScopeIds)),
+                        closedOutside.Count > MaxLoggedOutOfScopeIds ? $" and {closedOutside.Count - MaxLoggedOutOfScopeIds} more" : string.Empty);
+                }
+            }
             // Task 034 (FR-17) and #1661: place every stamped or countable Signal in its secure-family partition, stamp a partition
             // found at the threshold and withdraw a stamp its partition no longer justifies, so the planner below sees the result.
-            var reconciled = await _suppression.ReconcileAsync(policy.Id, policy.Code, policy.CountsTowardSuppression, superseded.Existing, ct,
+            var reconciled = await _suppression.ReconcileAsync(policy.Id, policy.Code, policy.CountsTowardSuppression, inScope, ct,
                 doLane: lane == SignalWriter.LaneDo).ConfigureAwait(false);
             counts.PolicyFailures += reconciled.Failures;
             if (reconciled.PartitionsUnavailable)
@@ -329,7 +418,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
             var closedNow = await ApplyAsync(policy, spec, plan, counts, ct).ConfigureAwait(false);
             // Last, so its conditional writes never invalidate the version this pass's own closes and reconciles were planned on.
-            await RedactStoredEvidenceAsync(policy.Code, existing, counts, ct).ConfigureAwait(false);
+            await RedactStoredEvidenceAsync(policy.Code, outOfScope.Count == 0 ? existing : existing.Concat(outOfScope).ToList(), counts, ct)
+                .ConfigureAwait(false);
             if (lane == SignalWriter.LaneDo)
             {
                 // Task 153 (D-145b): after the redaction, whose conditional writes are planned on the versions read; each link below reads
@@ -360,6 +450,101 @@ public sealed class SignalReevaluationJob : IScheduledJob
             _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
                 "Policies that are Off or Retired could not be read ({ExceptionType}); their open Signals were not closed this run.",
                 ex.GetType().Name);
+        }
+    }
+
+    /// <summary>Task 102b fix round 3: open Signals of a policy that no longer exists (a matter's delete cascades to a rule limited to it,
+    /// or an administrator deleted the rule) close PolicyRetired (<see cref="SignalClosureService.CloseSignalsOfDeletedPoliciesAsync"/>). A
+    /// read fault closes nothing: it is logged, the run is failed (visible) and continues; the next run retries.
+    /// Fix round 4: returns the existing policy codes it read (null when that read failed), so the deleted-policy redaction
+    /// (<see cref="RedactSignalsOfDeletedPoliciesAsync"/>) decides by the same list without reading it again.</summary>
+    private async Task<ExistingPolicyCodes?> CloseSignalsOfDeletedPoliciesAsync(RunCounts counts, CancellationToken ct)
+    {
+        ExistingPolicyCodes? existing = null;
+        try
+        {
+            existing = await _closure.ExistingPolicyCodesAsync(ct).ConfigureAwait(false);
+            var sweep = await _closure.CloseSignalsOfDeletedPoliciesAsync(existing, ct).ConfigureAwait(false);
+            counts.AddClosure(sweep.Outcome, retired: true);
+            counts.DeletedPolicyRetired += sweep.ClosedIds.Count;
+            if (sweep.ClosedIds.Count > 0)
+            {
+                // The K4 pattern (fix round 2): the exact count, and at most the first MaxLoggedOutOfScopeIds ids, in one bounded line.
+                // Fix round 4 (K a): and the deleted policies' codes, capped the same way.
+                _logger.LogInformation(
+                    "{Count} open Signal(s) of a deleted policy were closed PolicyRetired (their policy no longer exists): {SignalIds}{More}; " +
+                    "policy code(s) {PolicyCodes}{MoreCodes}.",
+                    sweep.ClosedIds.Count, string.Join(",", sweep.ClosedIds.Take(MaxLoggedOutOfScopeIds)),
+                    sweep.ClosedIds.Count > MaxLoggedOutOfScopeIds ? $" and {sweep.ClosedIds.Count - MaxLoggedOutOfScopeIds} more" : string.Empty,
+                    string.Join(",", sweep.ClosedCodes.Take(MaxLoggedOutOfScopeIds)),
+                    sweep.ClosedCodes.Count > MaxLoggedOutOfScopeIds ? $" and {sweep.ClosedCodes.Count - MaxLoggedOutOfScopeIds} more" : string.Empty);
+            }
+
+            if (sweep.Unparseable > 0)
+            {
+                // Fix round 4 (K b): at most MaxLoggedOutOfScopeIds ids, as above.
+                _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "{Count} open Signal(s) with no policy lookup have a dedupe key that is not {{code}}|{{type}}|{{id}}|{{episode}}; their policy " +
+                    "cannot be named, so they were left open: {SignalIds}{More}.", sweep.Unparseable,
+                    string.Join(",", sweep.UnparseableIds.Take(MaxLoggedOutOfScopeIds)),
+                    sweep.UnparseableIds.Count > MaxLoggedOutOfScopeIds ? $" and {sweep.UnparseableIds.Count - MaxLoggedOutOfScopeIds} more" : string.Empty);
+            }
+
+            if (sweep.PolicyStillExists > 0)
+            {
+                _logger.LogInformation(
+                    "{Count} open Signal(s) with no policy lookup name a policy code that still exists; they were left alone.", sweep.PolicyStillExists);
+            }
+
+            if (sweep.MoreRemain)
+            {
+                _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "More open Signals with no policy lookup remain than one run reads ({MaxPages} pages); the next run continues.", SignalEvaluator.MaxPages);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            counts.PolicyFailures++;
+            _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                "Open Signals of deleted policies could not be read ({ExceptionType}); none was closed this run.", ex.GetType().Name);
+        }
+
+        return existing;
+    }
+
+    /// <summary>
+    /// Task 102b fix round 4 (item 1, D-123): a deleted policy's code is neither in force nor Off/Retired, so the two task 145 sweeps never
+    /// reach its Signals, Resolved ones included, and a witness later filed under a Secure record would keep its detail in their stored
+    /// evidence forever. This sweeps the codes <see cref="SignalClosureService.DeletedPolicyCodesWithSignalsAsync"/> finds by the same rule
+    /// as the other sweeps (<see cref="SweepStoredEvidenceAsync"/>, which reads by prefix across every status and skips a code this run
+    /// already attempted). Fail closed: no policy list (<paramref name="existing"/> null, already counted and logged) or a read fault
+    /// redacts nothing extra; a fault fails the run (visible) and the run continues. A bound reached is a failed run too, after the codes
+    /// read are swept: the remaining codes' evidence was not checked.
+    /// </summary>
+    private async Task RedactSignalsOfDeletedPoliciesAsync(ExistingPolicyCodes? existing, RunCounts counts, CancellationToken ct)
+    {
+        if (existing is null) return;
+
+        DeletedPolicyCodes deleted;
+        try
+        {
+            deleted = await _closure.DeletedPolicyCodesWithSignalsAsync(existing, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            counts.PolicyFailures++;
+            _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                "Signals of deleted policies could not be read ({ExceptionType}); their stored evidence was not checked this run.", ex.GetType().Name);
+            return;
+        }
+
+        await SweepStoredEvidenceAsync(deleted.Codes, "was deleted", counts, ct).ConfigureAwait(false);
+        if (deleted.MoreRemain)
+        {
+            counts.PolicyFailures++;
+            _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                "More Signals with no policy lookup exist than one run reads ({MaxPages} pages); the stored evidence of the deleted policies " +
+                "beyond them was not checked this run.", SignalEvaluator.MaxPages);
         }
     }
 
@@ -976,8 +1161,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// Task 032 (D-12, D-48): the event-triggered pass. Evaluates every enabled <b>Decide-lane</b> policy about
     /// <paramref name="subjectEntity"/> for the ONE subject, through <see cref="EvaluatePolicyAsync"/> - the SAME evaluation,
     /// episode planner and writer path as the nightly pass (a second path is how the two come to disagree). Do-lane policies
-    /// are not evaluated here (nightly only, cadence from <c>sprk_lane</c>). A tenant- or matter-scoped policy is skipped with the
-    /// nightly Warning (F-62) and does not fail the trigger. A Signal already Resolved is never closed again (FR-16), so a
+    /// are not evaluated here (nightly only, cadence from <c>sprk_lane</c>). A policy limited to a matter (task 102b) is evaluated only
+    /// when the trigger's subject is that matter (otherwise it is not applicable); a tenant-scoped or mis-scoped policy is skipped with
+    /// the nightly Warning and does not fail the trigger. A Signal already Resolved is never closed again (FR-16), so a
     /// revision recorded through a decision leaves its Acted Signal Acted.
     /// </summary>
     /// <exception cref="InvalidOperationException">The enabled policies could not be read; the caller must retry.</exception>
@@ -1032,8 +1218,11 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
     // ── Reads ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
+    /// <param name="TenantScoped">A non-blank <c>sprk_tenant</c>: never evaluated (D-165, every environment is single-tenant).</param>
+    /// <param name="MatterId">Task 102b: the policy's matter scope (<c>sprk_matter</c>), evaluated within that matter; null for all.</param>
     internal sealed record PolicyRow(
-        Guid Id, string Code, int? Lane, int? Severity, string Headline, Guid? CurrentVersionId, bool IsScoped, bool CountsTowardSuppression = true);
+        Guid Id, string Code, int? Lane, int? Severity, string Headline, Guid? CurrentVersionId, bool TenantScoped,
+        bool CountsTowardSuppression = true, Guid? MatterId = null);
 
     /// <summary>Every enabled, active policy (the same filter as <see cref="PolicyScopeResolver"/>: <c>sprk_enabled</c> and
     /// <c>statecode</c> Active, so a disabled or Retired policy is not evaluated at all), with its lane, severity and headline.</summary>
@@ -1071,9 +1260,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
             row.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
             headline.Length > 200 ? headline[..200] : headline,
             version is { Id: var id } && id != Guid.Empty ? id : null,
-            !string.IsNullOrWhiteSpace(row.GetAttributeValue<string>("sprk_tenant"))
-                || row.GetAttributeValue<EntityReference>("sprk_matter") is { Id: var m } && m != Guid.Empty,
-            row.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true);
+            !string.IsNullOrWhiteSpace(row.GetAttributeValue<string>("sprk_tenant")),
+            row.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true,
+            row.GetAttributeValue<EntityReference>("sprk_matter") is { Id: var m } && m != Guid.Empty ? m : null);
     }
 
     /// <summary>Every Signal of the policy, by the begins-with query D-13 names, keyed exactly by the parsed key. A key that
@@ -1294,6 +1483,11 @@ public sealed class SignalReevaluationJob : IScheduledJob
         /// <summary>K1: the part of <see cref="Refused"/> that is a Dataverse privilege refusal (deterministic, so not retried by a trigger).</summary>
         public int AccessDenied;
         public int SupersededClosed, RetiredClosed;
+        /// <summary>Task 102b (fix round 1, uac-r2 F2): the part of <see cref="SupersededClosed"/> that is an open Signal outside its policy's
+        /// matter scope, closed because the scope supersedes it.</summary>
+        public int OutOfScopeSuperseded;
+        /// <summary>Task 102b fix round 3: the part of <see cref="RetiredClosed"/> that is an open Signal of a deleted policy.</summary>
+        public int DeletedPolicyRetired;
         /// <summary>Task 145 (review F1): Signals whose stored evidence lost detail outside their secure family this pass.</summary>
         public int EvidenceRedacted;
 
@@ -1315,8 +1509,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
         /// also a policy failure).</summary>
         public List<(Guid PolicyId, string PolicyCode, int Failures)> PartitionSkips { get; } = new();
 
-        /// <summary>A scoped policy that is silently skipped, a Signal left untouched as an anomaly, or a policy skipped because its
-        /// secure-family partitions are unknown (#1661, counted in <see cref="PolicyFailures"/>), is not a healthy run.</summary>
+        /// <summary>A policy whose scope cannot be evaluated (a tenant scope, or a matter scope on a rule not about matters: task 102b),
+        /// a Signal left untouched as an anomaly, or a policy skipped because its secure-family partitions are unknown (#1661, counted in
+        /// <see cref="PolicyFailures"/>), is not a healthy run. A matter-scoped matter rule is evaluated and does not count here.</summary>
         public bool IsSuccess =>
             Refused == 0 && InvalidPolicies == 0 && PolicyFailures == 0 && UnparseableKeys == 0 && Anomalies == 0 && ScopedNotEvaluated == 0
             && PartitionSkips.Count == 0;
@@ -1374,7 +1569,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
             updated = Updated,
             closed = Closed,
             supersededClosed = SupersededClosed,
+            outOfScopeSuperseded = OutOfScopeSuperseded,
             policyRetiredClosed = RetiredClosed,
+            deletedPolicyRetired = DeletedPolicyRetired,
             reassigned = Reassigned,
             refused = Refused,
             accessDenied = AccessDenied,

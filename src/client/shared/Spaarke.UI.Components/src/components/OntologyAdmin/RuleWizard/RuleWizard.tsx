@@ -24,7 +24,12 @@ import { Button, MessageBar, MessageBarBody, Spinner, Text, makeStyles, tokens }
 import { CheckmarkCircleRegular } from '@fluentui/react-icons';
 import { ConfirmModal, SprkModal } from '../../SprkModal';
 import { WizardShell } from '../../Wizard/WizardShell';
-import type { IWizardFooterContext, IWizardFooterSlots, IWizardStepConfig, IWizardSuccessConfig } from '../../Wizard/wizardShellTypes';
+import type {
+  IWizardFooterContext,
+  IWizardFooterSlots,
+  IWizardStepConfig,
+  IWizardSuccessConfig,
+} from '../../Wizard/wizardShellTypes';
 import { fieldErrorsOfValidation, REASON_DRY_RUN_REQUIRED, REASON_POLICY_CODE_TAKEN } from './authoringService';
 import type {
   AuthoringCatalog,
@@ -42,11 +47,13 @@ import {
   newPolicyRequest,
   priorityProblem,
   quietWindowProblem,
+  scopeChangeSentence,
+  scopeIntentRequest,
   validateRequest,
 } from './ruleDraft';
 import type { RuleDraft } from './ruleDraft';
 import { initialDraftOf } from './ruleWizardTypes';
-import type { NewVersionMode, RuleWizardMode } from './ruleWizardTypes';
+import type { MatterPicker, NewVersionMode, RuleWizardMode } from './ruleWizardTypes';
 import { ActionsStep } from './steps/ActionsStep';
 import { BasicsStep } from './steps/BasicsStep';
 import { ConditionStep } from './steps/ConditionStep';
@@ -76,6 +83,11 @@ export interface RuleWizardProps {
   mode: RuleWizardMode;
   /** The `--sprk-ui-scale` factor the host passes to `scaleTheme` (modal sizing). Default 1. */
   uiScale?: number;
+  /**
+   * Task 102b (D-165): the Scope and noise step's matter picker (the subject it belongs to and a search as the caller). Without it the
+   * rule keeps the scope it has (a new rule: all matters); the limit can still be removed.
+   */
+  matterPicker?: MatterPicker;
   /** The wizard was closed. `result` is set only when a rule or version was written. */
   onClose: (result: RuleWizardResult | null) => void;
 }
@@ -110,7 +122,7 @@ const GATE_FIELDS: Readonly<Record<RuleWizardStepId, readonly string[]>> = {
   wording: ['shortHeadline', 'messageTemplate', 'proposedAction'],
   actions: ['decisionPlan'],
   // The quiet window is part of the rule body, so a body refusal on this step is the quiet window's.
-  scope: ['priority', 'countsTowardSuppression', 'ruleBody'],
+  scope: ['matterId', 'priority', 'countsTowardSuppression', 'ruleBody'],
   test: [],
   save: [],
 };
@@ -247,7 +259,7 @@ interface RuleWizardBodyProps extends RuleWizardProps {
   catalog: AuthoringCatalog;
 }
 
-const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale, onClose, catalog }) => {
+const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale, matterPicker, onClose, catalog }) => {
   const styles = useStyles();
 
   const initialRef = React.useRef<RuleDraft | null>(null);
@@ -303,7 +315,8 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
   // ---- what each step shows ---------------------------------------------------------------------------------------------------
 
   const errorsFor = (step: RuleWizardStepId): FieldErrors => {
-    const shown = (field: string): boolean => (step === 'save' ? stepOfField(field) === 'save' : STEP_FIELDS[step].includes(field));
+    const shown = (field: string): boolean =>
+      step === 'save' ? stepOfField(field) === 'save' : STEP_FIELDS[step].includes(field);
     const merged: FieldErrors = {};
     const add = (source: FieldErrors) => {
       for (const [field, messages] of Object.entries(source)) {
@@ -319,7 +332,13 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
     return merged;
   };
 
-  const baseProps = (step: RuleWizardStepId): StepBaseProps => ({ catalog, draft, onChange, errors: errorsFor(step), locked });
+  const baseProps = (step: RuleWizardStepId): StepBaseProps => ({
+    catalog,
+    draft,
+    onChange,
+    errors: errorsFor(step),
+    locked,
+  });
 
   // ---- navigation -------------------------------------------------------------------------------------------------------------
 
@@ -341,13 +360,19 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
   const canLeave = (step: RuleWizardStepId): boolean => {
     switch (step) {
       case 'basics':
-        return mode.kind === 'version' || (draft.policyCode.trim() !== '' && draft.name.trim() !== '' && draft.lane !== '');
+        return (
+          mode.kind === 'version' || (draft.policyCode.trim() !== '' && draft.name.trim() !== '' && draft.lane !== '')
+        );
       case 'condition':
       case 'wording':
       case 'actions':
         return built.ruleBody !== null;
       case 'scope':
-        return built.ruleBody !== null && priorityProblem(draft.priority) === null && quietWindowProblem(draft.quietWindowDays, catalog) === null;
+        return (
+          built.ruleBody !== null &&
+          priorityProblem(draft.priority) === null &&
+          quietWindowProblem(draft.quietWindowDays, catalog) === null
+        );
       case 'test':
         return testPassed;
       case 'save':
@@ -412,6 +437,9 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
       ruleType: draft.condition.ruleType,
       ruleBody: body,
       messageTemplate: draft.messageTemplate,
+      // Task 102b (DI-112): the test runs within the same scope the save or publish will have, so its counts are exact. Fix round 1
+      // (F4): said explicitly, a matter or all matters.
+      ...scopeIntentRequest(draft),
     });
     if (!mounted.current) {
       return;
@@ -481,24 +509,34 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
       title: 'Rule saved',
       body: (
         <Text data-testid="rule-wizard-saved">
-          {draft.policyCode.trim()} was saved as version {saved.versionNumber}. It is Off: nothing is raised until you turn it On from its
-          page.
+          {draft.policyCode.trim()} was saved as version {saved.versionNumber}. It is Off: nothing is raised until you
+          turn it On from its page.
         </Text>
       ),
       actions: (
-        <Button appearance="primary" onClick={() => onClose({ kind: 'saved', policyId: saved.policyId, versionNumber: saved.versionNumber })}>
+        <Button
+          appearance="primary"
+          onClick={() => onClose({ kind: 'saved', policyId: saved.policyId, versionNumber: saved.versionNumber })}
+        >
           Done
         </Button>
       ),
     };
   };
 
-  const finishVersion = async (current: NewVersionMode, body: string, asked: string): Promise<IWizardSuccessConfig | void> => {
+  const finishVersion = async (
+    current: NewVersionMode,
+    body: string,
+    asked: string
+  ): Promise<IWizardSuccessConfig | void> => {
     const confirmed = await askToPublish();
     if (!confirmed) {
       return undefined;
     }
-    const answer = await service.publishVersion(current.policyId, { draft: draftPayload(draft, body) });
+    const answer = await service.publishVersion(current.policyId, {
+      draft: draftPayload(draft, body),
+      ...scopeIntentRequest(draft),
+    });
     if (!answer.ok) {
       return failWrite(answer, asked);
     }
@@ -513,7 +551,12 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
         </Text>
       ),
       actions: (
-        <Button appearance="primary" onClick={() => onClose({ kind: 'published', policyId: published.policyId, versionNumber: published.versionNumber })}>
+        <Button
+          appearance="primary"
+          onClick={() =>
+            onClose({ kind: 'published', policyId: published.policyId, versionNumber: published.versionNumber })
+          }
+        >
           Done
         </Button>
       ),
@@ -576,7 +619,9 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
       id: 'wording',
       label: 'Wording',
       canAdvance: () => canLeave('wording'),
-      renderContent: () => <WordingStep {...baseProps('wording')} eligibleFields={eligibleFields} checking={checking} />,
+      renderContent: () => (
+        <WordingStep {...baseProps('wording')} eligibleFields={eligibleFields} checking={checking} />
+      ),
     },
     {
       id: 'actions',
@@ -588,14 +633,21 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
       id: 'scope',
       label: 'Scope and noise',
       canAdvance: () => canLeave('scope'),
-      renderContent: () => <ScopeNoiseStep {...baseProps('scope')} mode={mode} />,
+      renderContent: () => <ScopeNoiseStep {...baseProps('scope')} mode={mode} matterPicker={matterPicker} />,
     },
     {
       id: 'test',
       label: 'Test',
       canAdvance: () => canLeave('test'),
       renderContent: () => (
-        <TestStep mode={mode} ready={ready} run={test} isCurrent={testCurrent} onRun={() => void runTest()} locked={locked} />
+        <TestStep
+          mode={mode}
+          ready={ready}
+          run={test}
+          isCurrent={testCurrent}
+          onRun={() => void runTest()}
+          locked={locked}
+        />
       ),
     },
     {
@@ -646,7 +698,9 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
     <div className={styles.notices} data-testid="rule-wizard-notices">
       {writeLock !== null ? (
         <MessageBar intent="warning" role="alert" data-testid="rule-wizard-write-lock">
-          <MessageBarBody>{writeLock} Nothing more is sent from this wizard; close it and check the Rules list before you try again.</MessageBarBody>
+          <MessageBarBody>
+            {writeLock} Nothing more is sent from this wizard; close it and check the Rules list before you try again.
+          </MessageBarBody>
         </MessageBar>
       ) : null}
       {callFailure !== null ? (
@@ -682,16 +736,28 @@ const RuleWizardBody: React.FC<RuleWizardBodyProps> = ({ service, mode, uiScale,
     const counts = testResult;
     const supersede = counts === null ? 0 : counts.wouldSupersede;
     const reraise = counts === null ? 0 : counts.wouldReraise;
+    // Fix round 1 (F4): the scope in force as the test read it (the BFF refuses the publish if it changed since), else as the page showed.
+    const stored =
+      counts !== null && counts.storedMatterId !== undefined
+        ? {
+            matterId: counts.storedMatterId,
+            matterName:
+              counts.storedMatterName ??
+              (counts.storedMatterId !== null && counts.storedMatterId === current.scope.matterId
+                ? current.scope.matter
+                : null),
+          }
+        : { matterId: current.scope.matterId, matterName: current.scope.matter };
+    const scopeChange = scopeChangeSentence(stored, draft);
     return (
       <span data-testid="rule-wizard-publish-confirm">
-        Publishing makes this the version in force for {current.code}. {plural(supersede, 'open item', 'open items')} from the current version
-        will be replaced and {plural(reraise, 'item', 'items')} will be raised again, as the test showed.
+        Publishing makes this the version in force for {current.code}. {plural(supersede, 'open item', 'open items')}{' '}
+        from the current version will be replaced and {plural(reraise, 'item', 'items')} will be raised again, as the
+        test showed.
         {counts !== null && counts.policyEnabled === false
           ? ' The rule is Off, so nothing is replaced or raised until it is turned On.'
           : ''}
-        {current.scope.tenant !== null || current.scope.matter !== null
-          ? " These counts are worked out without the rule's scope, so once it is published they may be lower."
-          : ''}
+        {scopeChange !== null ? <span data-testid="rule-wizard-publish-scope-change"> {scopeChange}</span> : null}
       </span>
     );
   };

@@ -305,3 +305,9 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - Owner: "checked and it seems correct; formal UAT once delivered" (D-154).
 - Dataverse read-back (main session): DR-1066 `67d34ab5-…` 15:03:15Z (Judgement; Send budget inquiry + Revise budget; confirmed by the owner; policy version `e51906ea-…`); budget revision 15:03:06Z (amount 150000); inquiry `sprk_communication` status Send; Signal `b35d4ec2-…` Resolved with the record linked. DR-1064 (12:25Z, Revise budget) likewise.
 - Not exercised: Next step To Do (DR follow-ons empty, no new `sprk_todo`). Carried to 105 UAT.
+
+## 2026-10-17 — owner answers: policy on, landing tab switched
+
+- ~14:36Z: POL-MATTER-NOBUDGET (`00000000-0000-4000-8000-000000006301`) `sprk_enabled` = Yes (PATCH with If-Match *, read back; unscoped; current version `…6311`) (D-163).
+- 14:38Z: dev landing tab switched to the Worklist by `scripts/Set-DefaultWorkspaceLayout.ps1 -To Worklist` (WhatIf first, verified) (D-164). Peers notified before and after.
+- Same day, R3 deployed dev BFF `1.0.0+9721819ed…` (14:32:19Z): master `88b3ecb1f` (sync #2073: 063, 102a, 102, 064) + UAC #2074. Console from `88b3ecb1f` at 07:32:56Z.
