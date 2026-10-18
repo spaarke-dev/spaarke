@@ -1319,10 +1319,10 @@ public class RuleSetService
     /// makes Dataverse refuse that chunk, which then wrote NOTHING, and the publish stops with <see cref="PublishWrite.Conflict"/>.</para>
     /// <para><b>Take-back only for what landed.</b> The chunks of step 1 that landed (or whose outcome is unknown) are taken back for the
     /// policies whose pointer did not move. A refused step 1 chunk is not: whatever end date its old versions carry is not this
-    /// publish's, and clearing it could clear the end of a version a concurrent publish really superseded. For a refused step 2 chunk the
-    /// stamps step 1 wrote for its policies stand as well: the policy changed under this publish, most likely because another publish
-    /// moved its pointer; an end date on a version still in force fails safe (the pointer decides, K3) and the next publish finishes or
-    /// re-stamps it, where clearing the end date of a version that was superseded would not be put right by anything.</para>
+    /// publish's, and clearing it could clear the end of a version a concurrent publish really superseded. A refused step 2 chunk is taken
+    /// back like any other failure (round 3): the take-back decides from a fresh read, so a policy whose pointer another writer moved
+    /// keeps its stamp (that version was superseded) and a policy that changed WITHOUT its pointer moving (a rename, a toggle) has its
+    /// stamp cleared: its old version is still current and must not end up carrying an end date.</para>
     /// </remarks>
     private async Task<PublishWrite> WritePublishAsync(
         Guid ruleSetId, Entity set, int? status, IReadOnlyList<RuleSetRule> candidates, DateTime effectiveStart)
@@ -1364,7 +1364,6 @@ public class RuleSetService
         }
 
         var mayHaveStamped = new HashSet<Guid>();   // old versions whose end date a landed (or unknown) step 1 chunk wrote
-        var stampsStand = new HashSet<Guid>();      // policies of a refused step 2 chunk: their stamps are left
         try
         {
             // (1) the versions: the new versions' in-force-from, the old versions' in-force-to (one table, one transaction per chunk).
@@ -1386,21 +1385,13 @@ public class RuleSetService
             // (2) the policies: the pointer move is what puts a version in force.
             foreach (var chunk in policyUpdates.Chunk(MaxPerTransaction))
             {
-                try
-                {
-                    await _entities.BulkUpdateIfRowVersionsMatchAsync(PolicyEntity, chunk.ToList(), ct);
-                }
-                catch (System.Data.DBConcurrencyException)
-                {
-                    stampsStand.UnionWith(chunk.Select(u => u.id));
-                    throw;
-                }
+                await _entities.BulkUpdateIfRowVersionsMatchAsync(PolicyEntity, chunk.ToList(), ct);
             }
         }
         catch (System.Data.DBConcurrencyException ex)
         {
             _logger.LogWarning(ex, "Rule set {RuleSetId} publish stopped: a rule changed after the publish read it. The refused chunk wrote nothing; the end dates of the chunks that landed are taken back where the pointer did not move", ruleSetId);
-            await TakeBackEndDatesAsync(ruleSetId, stamped.Where(r => mayHaveStamped.Contains(r.Predecessor!.Id) && !stampsStand.Contains(r.Policy.Id)).ToList());
+            await TakeBackEndDatesAsync(ruleSetId, stamped.Where(r => mayHaveStamped.Contains(r.Predecessor!.Id)).ToList());
             return PublishWrite.Conflict;
         }
         catch (Exception ex)

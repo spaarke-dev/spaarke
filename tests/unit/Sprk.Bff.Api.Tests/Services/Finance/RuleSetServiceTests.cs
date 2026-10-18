@@ -1570,7 +1570,80 @@ public sealed class RuleSetServiceTests
         h.Refusals.Should().ContainSingle().Which.Entity.Should().Be("sprk_policy");
         h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(Utc(2026, 11, 1),
             "v1 really was superseded: its end date stands");
-        h.ConditionalCalls.Should().HaveCount(2, "the version write and the refused pointer move; no take-back is sent for the refused chunk");
+        h.ConditionalCalls.Should().HaveCount(2, "the version write and the refused pointer move; the take-back reads, sees the pointer on v2 and sends nothing");
+    }
+
+    // ── Review round 3 item 1 (F3): a refused pointer move that did not move the pointer ──
+
+    [Theory]
+    [InlineData("sprk_name", "Renamed by another admin")]
+    [InlineData("sprk_enabled", false)]
+    public async Task Publish_WhenThePolicyChangedWithoutItsPointerMoving_ThePolicyWriteIs409_AndTheVersionStillInForceKeepsNoEndDate(string column, object value)
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, v1) = h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+        var v2 = h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+        h.OnBulk = entity =>
+        {
+            if (entity != "sprk_policy") return;
+            h.OnBulk = null; // another admin renames the policy (or toggles it) between this publish's version write and its pointer move
+            h.ConcurrentWrite("sprk_policy", policy, new Dictionary<string, object> { [column] = value });
+        };
+        var service = h.Service();
+
+        var outcome = await service.PublishAsync(set, Effective, default);
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("ruleset.concurrent_edit");
+        h.Refusals.Should().ContainSingle().Which.Entity.Should().Be("sprk_policy");
+        h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v1, "the refused pointer move wrote nothing");
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime?>("sprk_inforceto").Should().BeNull(
+            "v1 is still the policy's current version, so it must not keep the end date this publish stamped: the stamp is taken back");
+
+        var retried = await service.PublishAsync(set, Effective, default);
+
+        retried.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v2);
+        h.Row("sprk_policyversion", v1).GetAttributeValue<DateTime>("sprk_inforceto").Should().Be(Utc(2026, 11, 1), "a retry after the reload completes the publish");
+    }
+
+    [Fact]
+    public async Task Publish_WhenOneChunkOfPolicyWritesIsRefusedWithoutAPointerMove_TakesBackThatChunk_AndKeepsTheStampsOfThePointersThatMoved()
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var olds = new Dictionary<Guid, Guid>(); // old version -> policy
+        for (var i = 0; i < 1001; i++) // 1,001 pointer moves: a chunk of 1,000 that lands and a chunk of 1 that is refused
+        {
+            var (policy, v1) = h.Rule(set, "BILL-" + i.ToString("D4"), ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+            h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+            olds[v1] = policy;
+        }
+
+        var policyWrites = 0;
+        Guid? renamed = null;
+        h.OnBulk = entity =>
+        {
+            if (entity != "sprk_policy" || ++policyWrites != 2) return;
+            // The second chunk holds the one policy whose pointer move has not been written; another admin renames it first.
+            var moved = h.Rows["sprk_policy"].Where(p => ((EntityReference)p["sprk_currentversion"]).Id is var cur
+                && h.Row("sprk_policyversion", cur).GetAttributeValue<int>("sprk_versionnumber") == 2).Select(p => p.Id).ToHashSet();
+            renamed = h.Rows["sprk_policy"].Single(p => !moved.Contains(p.Id)).Id;
+            h.ConcurrentWrite("sprk_policy", renamed.Value, new Dictionary<string, object> { ["sprk_name"] = "Renamed" });
+        };
+
+        var outcome = await h.Service().PublishAsync(set, Effective, default);
+
+        outcome.StatusCode.Should().Be(409);
+        renamed.Should().NotBeNull();
+        foreach (var (old, policy) in olds)
+        {
+            var row = h.Row("sprk_policyversion", old);
+            var pointerMoved = h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id != old;
+            row.GetAttributeValue<DateTime?>("sprk_inforceto").Should().Be(pointerMoved ? Utc(2026, 11, 1) : null,
+                "a version whose pointer moved keeps its end date; one that is still the current version has none");
+        }
     }
 
     [Fact]
