@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-18 ~09:00Z (main session; 042b merged into docs `f66aa811a`). State only — history is in git log,
+> **Last Updated**: 2026-10-18 ~22:40Z (main session; dev BFF live on ad0e9e1a7 with 102b). State only — history is in git log,
 > task `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path;
 > D-123 secure family; D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-169). Deferred work: one self-contained GitHub issue per item, label
@@ -11,7 +11,7 @@
 | Field | Value |
 |---|---|
 | **Task** | No lane in flight. 042b ✅ (#2096 → docs `f66aa811a`; not yet on master) |
-| **Next Action** | 1) Dev BFF deploy from master `20fb86dc4` (R3 candidate `20e7b71a1`): waiting on the owner's direct confirmation to R3. After: verify version, after-notices to word-add-in and uac-r2. NOT the 015 BFF. 2) Next docs→master sync carries 042b (full ArchTests first). 3) Re-check ebilling 071 r3 and 072 fix ranges when sent. 4) uac-r2's #2084 PR (after #2063): two passes |
+| **Next Action** | 1) Tomorrow: check the first nightly sweep on the 102b BFF (deleted-rule Signals closed as PolicyRetired + redacted; none expected beyond any S2-type rows). 2) Next docs→master sync carries 042b (full ArchTests first; then R3 BFF deploy with fresh owner approval). 3) Re-check ebilling fix ranges when sent: 071 r3 / 072 combined, 073 (K1 guard + K2 comment), 074 follow-up (K1-K4 + ParentUndetermined). 4) uac-r2's #2084 PR (after #2063): two passes. 5) After 074 reaches master: immutability ArchTest entry + 5 stale writer comments |
 
 ## Open owner / peer items
 
@@ -39,8 +39,8 @@
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- BFF `1.0.0+ebc74b331…` (R3, 03:34Z); does NOT contain 102b. Deploy from master 20fb86dc4 approved by the owner 2026-10-18 (pending R3). Until then the Console (auto-deployed 20fb86dc4 at 04:36Z) is AHEAD of the BFF: a matter-limited rule would save as all-matters — no scoped authoring on dev.
-- Console from master `20fb86dc4` (04:36Z, run 39097698431). **Landing tab = Worklist** (D-164; revert `Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing'`).
+- BFF `1.0.0+ad0e9e1a7…` (R3, 2026-10-18 22:31Z; owner-approved directly to R3) = master 20fb86dc4 (#2088, 102b) + UAC #2094 + R3. Rollback `ebc74b331`. Does NOT contain ebilling 015 (`e0df77339`) nor 042b.
+- Console from master `20fb86dc4` (04:36Z). Console and BFF aligned for 102b. **Landing tab = Worklist** (D-164; revert `Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing'`).
 - **`sprk_policy_matter` CascadeDelete = Cascade** since 2026-10-18 ~03:35Z (D-167; Archive RemoveLink). Live facts: an admin delete removes only the rule; a Core User's matter delete also deletes the matter's rules (no privilege check on the child; audited). See notes/102b "Live on spaarkedev1".
 - Policies: six on, including POL-MATTER-NOBUDGET (D-163); none has a matter.
 - Roles: Ontology Service 58; Ontology Administrator 38 (keeps Signal Assign/Delete, D-162); Console User 21.
