@@ -20,12 +20,22 @@ namespace Spaarke.ArchTests;
 /// static state allowed is a readonly <c>string[]</c> lookup table.</para>
 /// <para><b>Enforced by this test:</b> the rule "the billing handlers are pure" is a type-level fact of the compiled assembly, so
 /// a prose rule would drift; a must-fire control fixture per forbidden shape (below) proves the scan detects it.</para>
-/// <para><b>Not covered:</b> reflection reached through a type this list does not name, and a handler that gains an input from a
-/// static the scan does not read (a new <c>static</c> field is caught by the static-state test). Both are code-review concerns.</para>
+/// <para><b>Transitive (K4).</b> The scan follows every call target declared in <c>Sprk.Bff.Api</c> into its own body, once per
+/// method (a visited set), so a handler cannot reach reflection or I/O through a helper in another type (mutation M10:
+/// <c>InvoiceAge</c> calling <c>BillingRuleCatalogue.SchemaText</c>). The catalogue is therefore scanned as far as the handlers
+/// reach it, not as a whole: <c>SchemaText</c> is legitimate for the drafting Action (task 075) and only a handler's call into it
+/// is a violation.</para>
+/// <para><b>Not covered:</b> a call through an interface, a virtual method or a delegate whose target is chosen at run time
+/// (the scan reads the declared target, not the implementations), reflection reached through a type this list does not name,
+/// and a handler that gains an input from a static the scan does not read (a new <c>static</c> field is caught by the
+/// static-state test). These are code-review concerns.</para>
 /// </remarks>
 public sealed class BillingHandlerPurityGuardTests
 {
     private const string HandlersNamespace = "Sprk.Bff.Api.Services.Signals.Billing.Handlers";
+
+    /// <summary>The assembly whose methods the scan follows into (a call target declared here is read in turn).</summary>
+    private static readonly Assembly BffAssembly = typeof(HandlerContext).Assembly;
 
     /// <summary>Whole namespaces a pure handler never calls into.</summary>
     private static readonly string[] ForbiddenNamespaces =
@@ -80,10 +90,13 @@ public sealed class BillingHandlerPurityGuardTests
     [Fact(DisplayName = "Task 071: the billing handlers and their contracts are pure (no I/O, clock, randomness, logging, reflection)")]
     public void HandlersReferenceNothingImpure()
     {
-        var violations = Violations(ScannedTypes()).ToList();
+        // Transitive (K4): every Sprk.Bff.Api method the handlers reach is read too, so a handler cannot launder an impure call
+        // through a helper in another type (M10).
+        var violations = Violations(ScannedTypes(), follow: BffAssembly).ToList();
 
         Assert.True(violations.Count == 0,
-            "A billing handler or its contract references something impure. The handlers judge one rule against one fact set; "
+            "A billing handler or its contract references something impure, directly or through a helper it calls. "
+            + "The handlers judge one rule against one fact set; "
             + "anything they would read from the world belongs in BillingFactSet (assembled by task 072). "
             + string.Join("; ", violations));
     }
@@ -167,6 +180,37 @@ public sealed class BillingHandlerPurityGuardTests
         Assert.Empty(quiet);
     }
 
+    [Fact(DisplayName = "Task 071 (K4): a handler that calls a helper which calls a forbidden API is caught (must-fire control); a direct-only scan misses it")]
+    public void AHandlerCallingAnImpureHelper_IsCaughtTransitively()
+    {
+        var fixtureAssembly = typeof(PurityControlHandlerShaped).Assembly;
+        var entry = new[] { typeof(PurityControlHandlerShaped) };
+
+        Assert.DoesNotContain(Violations(entry), v => v.Contains("System.IO.File", StringComparison.Ordinal));
+
+        var transitive = Violations(entry, follow: fixtureAssembly).ToList();
+        Assert.Contains(transitive, v => v.StartsWith("PurityControlHelper::Leaf calls System.IO.File::ReadAllText", StringComparison.Ordinal));
+        Assert.Contains(transitive, v => v.StartsWith("PurityControlHelper::ReadsTheClockInAConstructor", StringComparison.Ordinal)
+                                         || v.StartsWith("PurityControlHelper::.ctor", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Task 071 (K4): a pure call chain, including a cycle, is not flagged and the walk ends (must-not-fire control)")]
+    public void APureHelperChain_IncludingACycle_IsNotFlagged()
+    {
+        var violations = Violations([typeof(PurityControlPureChain)], follow: typeof(PurityControlPureChain).Assembly).ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact(DisplayName = "Task 071 (K4): the transitive scan reaches into the catalogue and the other Sprk.Bff.Api types the handlers call")]
+    public void TheTransitiveScanLeavesTheHandlerNamespace()
+    {
+        var reached = ReachableReferences(ScannedTypes(), BffAssembly).Select(r => r.Caller).ToHashSet();
+
+        Assert.Contains(typeof(BillingRuleCatalogue), reached);
+        Assert.Contains(reached, t => t.Namespace != HandlersNamespace && t.Namespace?.StartsWith("Sprk.Bff.Api.Services", StringComparison.Ordinal) == true);
+    }
+
     [Fact(DisplayName = "Task 071: a pure method is not flagged (must-not-fire control)")]
     public void APureMethodIsNotFlagged()
     {
@@ -177,9 +221,59 @@ public sealed class BillingHandlerPurityGuardTests
 
     // ── The scan ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private static IEnumerable<string> Violations(IEnumerable<Type> types)
+    /// <summary>
+    /// The method references of <paramref name="roots"/>' own bodies and, when <paramref name="follow"/> is given, of every method
+    /// they reach that is declared in that assembly, transitively (M10: <c>InvoiceAge</c> calling
+    /// <c>BillingRuleCatalogue.SchemaText</c>, which reflects over the assembly and reads a resource stream, passed a scan that
+    /// read direct calls only). Each method is read once (a visited set keyed by its definition), so a cycle ends. Lambdas, local
+    /// functions and constructors are reached through their <c>ldftn</c> / <c>newobj</c> / <c>call</c>; an async or iterator body
+    /// through its state machine's <c>MoveNext</c>.
+    /// </summary>
+    private static IEnumerable<(Type Caller, MethodBase CallerMethod, MethodBase Target)> ReachableReferences(
+        IEnumerable<Type> roots, Assembly? follow)
     {
-        foreach (var (caller, callerMethod, target) in IlCallScan.MethodReferences(types))
+        var visited = new HashSet<(Module, int)>();
+        var pending = new Queue<MethodBase>();
+
+        void Enqueue(MethodBase method)
+        {
+            var definition = method.Module.ResolveMethod(method.MetadataToken)!;
+            if (visited.Add((definition.Module, definition.MetadataToken)))
+            {
+                pending.Enqueue(definition);
+                if (definition is MethodInfo info
+                    && info.GetCustomAttribute<System.Runtime.CompilerServices.StateMachineAttribute>() is not null)
+                {
+                    Enqueue(IlCallScan.CompiledBody(info));   // the async / iterator body lives in the state machine's MoveNext
+                }
+            }
+        }
+
+        foreach (var root in roots)
+        {
+            foreach (var method in IlCallScan.DeclaredBodies(root))
+            {
+                Enqueue(method);
+            }
+        }
+
+        while (pending.TryDequeue(out var current))
+        {
+            foreach (var target in IlCallScan.ReferencedMethods(current))
+            {
+                yield return (current.DeclaringType!, current, target);
+
+                if (follow is not null && target.DeclaringType?.Assembly == follow)
+                {
+                    Enqueue(target);
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<string> Violations(IEnumerable<Type> types, Assembly? follow = null)
+    {
+        foreach (var (caller, callerMethod, target) in ReachableReferences(types, follow))
         {
             var declaring = target.DeclaringType;
             if (declaring is null)
@@ -302,4 +396,37 @@ internal static class BillingHandlerPurityControlFixtures
 
         internal const string Constant = "c";
     }
+}
+
+/// <summary>NEGATIVE CONTROL for the transitive scan (K4) — never called. Handler-shaped: it contains no forbidden call itself;
+/// the impurity is one or two hops away, in <see cref="PurityControlHelper"/>.</summary>
+internal static class PurityControlHandlerShaped
+{
+    internal static string Evaluate() => PurityControlHelper.Middle();
+
+    internal static Func<string> ViaALambda() => () => PurityControlHelper.Leaf("rules.json");
+
+    internal static object Constructs() => new PurityControlHelper();
+}
+
+internal sealed class PurityControlHelper
+{
+    internal PurityControlHelper() => ReadsTheClockInAConstructor();
+
+    internal static string Middle() => Leaf("rules.json");
+
+    internal static string Leaf(string path) => File.ReadAllText(path);
+
+    internal static DateTime ReadsTheClockInAConstructor() => DateTime.UtcNow;
+}
+
+/// <summary>MUST-NOT-FIRE control for the transitive scan: helpers that only do arithmetic and text, calling each other in a cycle.</summary>
+internal static class PurityControlPureChain
+{
+    internal static string Evaluate(decimal value) => First(value, 3);
+
+    private static string First(decimal value, int depth) =>
+        depth == 0 ? value.ToString("F2", CultureInfo.InvariantCulture) : Second(value, depth);
+
+    private static string Second(decimal value, int depth) => First(decimal.Round(value, 2, MidpointRounding.AwayFromZero), depth - 1);
 }

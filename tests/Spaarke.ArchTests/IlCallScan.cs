@@ -150,24 +150,36 @@ internal static class IlCallScan
         {
             foreach (var method in Bodies(type))
             {
-                foreach (var operand in TokenOperands(method))
+                foreach (var target in ReferencedMethods(method))
                 {
-                    var target = operand.Kind switch
-                    {
-                        OperandType.InlineMethod => Resolve(method, operand.Token, (module, token, ta, ma) => module.ResolveMethod(token, ta, ma)),
-                        OperandType.InlineTok when IsMethodTable(operand.Token) =>
-                            Resolve(method, operand.Token, (module, token, ta, ma) => module.ResolveMember(token, ta, ma)) as MethodBase,
-                        _ => null,
-                    };
-
-                    if (target is not null)
-                    {
-                        yield return (type, method, target);
-                    }
+                    yield return (type, method, target);
                 }
             }
         }
     }
+
+    /// <summary>Every method referenced from ONE body (same rules as <see cref="MethodReferences"/>), in IL order.</summary>
+    internal static IEnumerable<MethodBase> ReferencedMethods(MethodBase method)
+    {
+        foreach (var operand in TokenOperands(method))
+        {
+            var target = operand.Kind switch
+            {
+                OperandType.InlineMethod => Resolve(method, operand.Token, (module, token, ta, ma) => module.ResolveMethod(token, ta, ma)),
+                OperandType.InlineTok when IsMethodTable(operand.Token) =>
+                    Resolve(method, operand.Token, (module, token, ta, ma) => module.ResolveMember(token, ta, ma)) as MethodBase,
+                _ => null,
+            };
+
+            if (target is not null)
+            {
+                yield return target;
+            }
+        }
+    }
+
+    /// <summary>The methods and constructors (static ones included) a type declares: the bodies a scan reads.</summary>
+    internal static IEnumerable<MethodBase> DeclaredBodies(Type type) => Bodies(type);
 
     /// <summary>Every string constant (<c>ldstr</c>) loaded from <paramref name="types"/>' own method and constructor bodies.</summary>
     internal static IEnumerable<(Type Caller, MethodBase CallerMethod, string Value)> StringLoads(IEnumerable<Type> types)
