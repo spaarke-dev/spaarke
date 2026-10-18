@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="067" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Service Request automatic numbers: sprk_servicerequestnumber AutoNumberFormat RQST-{SEQNUM:4} (check-2 issue 3)</title>
+    <phase>5b Owner check fixes</phase>
+    <gate>startable (owner 2026-10-13: "yes service requests should get automatic numbers"); the dev apply is shown to the owner with its rollback before it runs</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Dataverse column setting in the solution plus an owner-gated dev apply; no C# or TS</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single column property change</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CHK3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, solution, fields</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Give sprk_servicerequest.sprk_servicerequestnumber the Dataverse autonumber format RQST-{SEQNUM:4} in the SpaarkeMaster solution and, after the owner sees the command and rollback, on dev.</prompt>
+  <role>SPAARKE platform developer. Dataverse schema. Follow ADRs strictly.</role>
+  <goal>Every new Service Request, created from the external SPA (app-only BFF create) or the model-driven app, gets a number RQST-0001, RQST-0002, … with no code change.</goal>
+
+  <context>
+    <background>Owner check 2: SPA-created requests show "Number —". Read-only dev check 2026-10-13: AutoNumberFormat is empty; no workflows, flows or form scripts on sprk_servicerequest; 1 of 2 rows numbered (hand-typed). The repo schema (Entities/sprk_ServiceRequest/Entity.xml ~:1539-1571) has an empty AutoNumberFormat. BuildServiceRequestCreatePayload (ExternalDataService.cs ~:979-1000) sets no number, which is correct once the column is autonumbered (Dataverse fills it on create from any source).</background>
+    <relevant-files>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_ServiceRequest/Entity.xml</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r3/notes/task-067-autonumber-record.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-10-13">Format exactly RQST-{SEQNUM:4}. Existing rows are not renumbered; the hand-typed RQST-0001 on dev stays. Set the seed so new numbers do not collide with existing values (read the highest existing RQST-nnnn first; if one exists, set the seed above it via SetAutoNumberSeed — owner-approved).</constraint>
+    <constraint source="ADR-002">No plugin or flow; the platform autonumber only.</constraint>
+    <constraint source="project security directives">The dev change (attribute update + any seed) is shown to the owner with its rollback (clear AutoNumberFormat) before it runs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/plugin-structure.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge; declare rigor/tier.</step>
+    <step order="1">Set AutoNumberFormat in the solution Entity.xml.</step>
+    <step order="2">Prepare the dev command (Web API PUT of the attribute metadata with AutoNumberFormat, plus SetAutoNumberSeed if needed) and the rollback; show them to the owner; wait for approval.</step>
+    <step order="3">Apply, read back; record in notes/task-067-autonumber-record.md; status + drift check.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_ServiceRequest/Entity.xml</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-067-autonumber-record.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Solution Entity.xml has AutoNumberFormat RQST-{SEQNUM:4} on sprk_servicerequestnumber and stays well-formed.</criterion>
+    <criterion testable="true">Dev reads back the same AutoNumberFormat; a new service request created afterwards (owner test) gets a number that does not equal any existing one.</criterion>
+    <criterion testable="true">No dev command ran before the owner approved it; the record lists commands and rollback.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner check 2 issue 3; decision 2026-10-13.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -131,7 +131,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
                 var (_, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
                     _writes.Object, new StampWorld().Restamper, rules.ToArray(), values, table, [id], Caller,
-                    NullLogger.Instance, CancellationToken.None, lookupBinds: binds, appOnlyEntities: app);
+                    NullLogger.Instance, CancellationToken.None, scopes: PushScopes(), lookupBinds: binds, appOnlyEntities: app);
                 if (failed == 0)
                     return new PathOutcome(null, null);
 
@@ -148,10 +148,31 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             .AddSingleton(new StampWorld().Restamper)
             .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble());
         if (app is not null)
+        {
+            // uac-r2 #2091 round 4 (master): the core reads a lookup's entity set from metadata through this same service.
+            Mock.Get(app)
+                .Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, CancellationToken _) => EntitySetNameFixtures.SetOf(table));
             services.AddSingleton(app);
+        }
+
         return new UpdateRecordActionCore(_writes.Object, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             NullLogger.Instance);
     }
+
+    /// <summary>The ownership resolver the push's re-file asks (it records each reparent and then runs the write).</summary>
+    private readonly RecordOwnershipResolverDouble _pushOwnership = new();
+
+    /// <summary>
+    /// The scope the push re-files through (uac-r2 #2091, merged 2026-10-18): a lookup move of an invoice or line is a re-file,
+    /// which needs the ownership resolver and the reconciler, or the child is refused before any write.
+    /// </summary>
+    private IServiceScopeFactory PushScopes() =>
+        new ServiceCollection()
+            .AddSingleton<IRecordOwnershipResolver>(_pushOwnership)
+            .AddScoped(_ => SecureChildReconcilerFixtures.OverEmptyWorld())
+            .BuildServiceProvider()
+            .GetRequiredService<IServiceScopeFactory>();
 
     private static IReadOnlyDictionary<string, EntityReference?> Lookups(params (string Column, EntityReference? Record)[] values) =>
         values.ToDictionary(v => v.Column, v => v.Record);
@@ -246,8 +267,17 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     public async Task UpdateRecordActionCore_WithNoEntityServiceRegistered_FailsClosedReadFailed_AndNothingIsWritten(
         string table, bool touchesLookup)
     {
-        var outcome = await RunAsync(GenericPath.PlaybookUpdate, table, Invoice,
-            touchesLookup ? Lookups(("sprk_matter", MatterRef(Matter))) : NoLookups, touchesLookup ? NoPlain : RenameOnly, app: null);
+        if (touchesLookup)
+        {
+            // Merged with uac-r2 #2091 round 4 (2026-10-18): a lookup's entity set is read from metadata before the guard runs,
+            // so with no entity service the write fails closed THERE (still nothing written), before the guard's read.
+            var act = () => RunAsync(GenericPath.PlaybookUpdate, table, Invoice, Lookups(("sprk_matter", MatterRef(Matter))), NoPlain, app: null);
+            (await act.Should().ThrowExactlyAsync<InvalidOperationException>()).Which.Message.Should().Contain("was not written");
+            NothingWritten();
+            return;
+        }
+
+        var outcome = await RunAsync(GenericPath.PlaybookUpdate, table, Invoice, NoLookups, RenameOnly, app: null);
 
         outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
         outcome.Message.Should().Be(

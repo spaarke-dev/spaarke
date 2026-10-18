@@ -428,12 +428,66 @@ public class UpdateRecordNodeExecutorTests
         var context = CreateValidContext(config);
 
         SetupMockPassThrough();
+        var written = UseEntitySetsFromMetadata();
 
         // Act
         var result = await _executor.ExecuteAsync(context, CancellationToken.None);
 
         // Assert
         result.Success.Should().BeTrue();
+        written.Should().ContainSingle().Which["ownerid@odata.bind"].Should().Be($"/systemusers({ownerId})");
+    }
+
+    [Fact(DisplayName = "#2091 r4: a lookup's bind names the target's entity set as metadata answers it (sprk_analysis → sprk_analysises), never a guessed plural")]
+    public async Task ExecuteAsync_WithALookupToSprkAnalysis_BindsTheMetadataEntitySet()
+    {
+        var recordId = Guid.NewGuid();
+        var analysisId = Guid.NewGuid();
+        var config = $@"{{
+            ""entityLogicalName"":""sprk_analysisoutput"",
+            ""recordId"":""{recordId}"",
+            ""fields"":{{""sprk_name"":""Output""}},
+            ""lookups"":{{
+                ""sprk_AnalysisId"":{{
+                    ""targetEntity"":""sprk_analysis"",
+                    ""targetId"":""{analysisId}""
+                }}
+            }}
+        }}";
+        SetupMockPassThrough();
+        var written = UseEntitySetsFromMetadata();
+
+        var result = await _executor.ExecuteAsync(CreateValidContext(config), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        written.Should().ContainSingle().Which["sprk_AnalysisId@odata.bind"].Should().Be($"/sprk_analysises({analysisId})");
+    }
+
+    /// <summary>
+    /// #2091 round 4: the node reads a lookup target's entity set from metadata (<see cref="IGenericEntityService"/>, from a
+    /// scope); answers the live names and captures every payload written.
+    /// </summary>
+    private List<Dictionary<string, object?>> UseEntitySetsFromMetadata()
+    {
+        var written = new List<Dictionary<string, object?>>();
+        _dataverseServiceMock
+            .Setup(s => s.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, CancellationToken _) => Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.SetOf(table));
+        _dataverseServiceMock
+            .Setup(s => s.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, _, fields, _, _) => written.Add(fields))
+            .Returns(Task.CompletedTask);
+
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        serviceProviderMock
+            .Setup(sp => sp.GetService(typeof(IGenericEntityService)))
+            .Returns(_dataverseServiceMock.Object);
+        var scopeMock = new Mock<IServiceScope>();
+        scopeMock.Setup(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
+        _scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
+        return written;
     }
 
     #endregion

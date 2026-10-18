@@ -111,7 +111,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     private DataverseUpdateHandler Handler(IGenericEntityService app) =>
         new(_writes.Object, app, new StampWorld().Restamper, new RecordOwnershipResolverDouble(),
-            SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance);
+            SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
+            SecureChildReconcilerFixtures.OverEmptyWorld());
 
     [Fact]
     public async Task DataverseUpdateHandler_AnInvoiceGivenASecondCoreRecord_IsRefusedWithTheGuardsCode_AndNothingIsWritten()
@@ -153,8 +154,14 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     // ── The playbook update: UpdateRecordActionCore ────────────────────────────────────────────────────────────────
 
-    private UpdateRecordActionCore Core(IGenericEntityService app) =>
-        new(_writes.Object,
+    private UpdateRecordActionCore Core(IGenericEntityService app)
+    {
+        // uac-r2 #2091 round 4 (master, merged 2026-10-18): the core reads a lookup's entity set from metadata through this
+        // same service.
+        Mock.Get(app)
+            .Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, CancellationToken _) => EntitySetNameFixtures.SetOf(table));
+        return new(_writes.Object,
             new ServiceCollection()
                 .AddSingleton(app)
                 .AddSingleton(new StampWorld().Restamper)
@@ -162,6 +169,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                 .BuildServiceProvider()
                 .GetRequiredService<IServiceScopeFactory>(),
             NullLogger.Instance);
+    }
 
     [Fact]
     public async Task UpdateRecordActionCore_AnInvoiceGivenASecondCoreRecord_IsRefusedWithTheGuardsCode_AndNothingIsWritten()

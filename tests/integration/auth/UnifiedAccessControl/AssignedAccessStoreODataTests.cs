@@ -631,6 +631,100 @@ public class AssignedAccessStoreODataTests
         }
     }
 
+    // ── Manage Access subject names ──────────────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid Organization = Guid.Parse("15800000-0000-0000-0000-00000000ee01");
+
+    private static readonly AssignedSubject[] ContactAndOrganization =
+    {
+        new(AssignedSubjectKind.Contact, Contact),
+        new(AssignedSubjectKind.Organization, Organization),
+    };
+
+    /// <summary>
+    /// An organization's name is read from <c>sprk_organizationname</c>, its primary-name column. <c>sprk_organization</c>
+    /// has no <c>sprk_name</c>: Dataverse answers a <c>$select</c> naming it with a 400, so every organization suggestion was
+    /// listed without a name.
+    /// </summary>
+    [Fact]
+    public async Task SubjectNames_ReadAnOrganizationsNameFromSprkOrganizationname()
+    {
+        var tables = new SubjectTables();
+        var store = new AssignedAccessStore(tables, NullLogger<AssignedAccessStore>.Instance);
+
+        var names = await store.ReadSubjectNamesAsync(ContactAndOrganization, CancellationToken.None);
+
+        tables.Selects["sprk_organizations"].Should().Be("sprk_organizationid,sprk_organizationname");
+        tables.Selects["contacts"].Should().Be("contactid,fullname");
+        names.Should().BeEquivalentTo(new Dictionary<Guid, string>
+        {
+            [Contact] = "Casey Contact",
+            [Organization] = "Acme Org",
+        });
+    }
+
+    /// <summary>
+    /// Each subject kind's names are read on their own: a failed contact read keeps the organization names, and a failed
+    /// organization read keeps the contact names (display only: what failed is simply left out).
+    /// </summary>
+    [Theory]
+    [InlineData("contacts")]
+    [InlineData("sprk_organizations")]
+    public async Task SubjectNames_AFailedReadOfOneKind_KeepsTheOtherKindsNames(string failingSet)
+    {
+        var tables = new SubjectTables { Failing = failingSet };
+        var store = new AssignedAccessStore(tables, NullLogger<AssignedAccessStore>.Instance);
+
+        var names = await store.ReadSubjectNamesAsync(ContactAndOrganization, CancellationToken.None);
+
+        names.Should().BeEquivalentTo(failingSet == "contacts"
+            ? new Dictionary<Guid, string> { [Organization] = "Acme Org" }
+            : new Dictionary<Guid, string> { [Contact] = "Casey Contact" });
+    }
+
+    /// <summary>
+    /// <c>contacts</c> and <c>sprk_organizations</c> as Dataverse answers them: a <c>$select</c> naming a column the table
+    /// does not have is refused with a 400, as is any read of the set named <see cref="Failing"/>. Records the
+    /// <c>$select</c> each set was sent.
+    /// </summary>
+    private sealed class SubjectTables : DataverseWebApiClient
+    {
+        private readonly Dictionary<string, Dictionary<string, object?>> _rows = new()
+        {
+            ["contacts"] = new() { ["contactid"] = Contact, ["fullname"] = "Casey Contact" },
+            ["sprk_organizations"] = new() { ["sprk_organizationid"] = Organization, ["sprk_organizationname"] = "Acme Org" },
+        };
+
+        public SubjectTables()
+            : base(new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com" })
+                    .Build(),
+                NullLogger<DataverseWebApiClient>.Instance,
+                NoCredential.Instance)
+        {
+        }
+
+        public string? Failing { get; init; }
+
+        public Dictionary<string, string?> Selects { get; } = new();
+
+        public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
+            int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+        {
+            Selects[entitySetName] = select;
+            var row = _rows[entitySetName];
+            if (entitySetName == Failing)
+                throw new HttpRequestException($"{entitySetName}: the read failed.", null, HttpStatusCode.InternalServerError);
+
+            var columns = (select ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (columns.FirstOrDefault(c => !row.ContainsKey(c)) is { } missing)
+                throw new HttpRequestException($"Could not find a property named '{missing}' on {entitySetName}.", null, HttpStatusCode.BadRequest);
+
+            var projected = columns.ToDictionary(c => c, c => row[c]);
+            return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(new[] { projected }))!);
+        }
+    }
+
     private sealed class NoCredential : TokenCredential
     {
         public static readonly NoCredential Instance = new();

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Messages sent from the model-driven app carry the form's "Internal only" value (default No) and the sender (check-3 item 5)</title>
+    <phase>5b Owner check fixes</phase>
+    <gate>startable (owner decision 2026-10-13)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tag bff-api; changes which messages external users can see</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Decides internal/external visibility of messages (security-relevant) across a shared communication service</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CHK3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, security, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the model-driven app's message send pass the form's "Internal only" value to the BFF and have the BFF write it explicitly (default No), and stamp the sender (sprk_sentby), so external participants see messages unless the sender marked them internal, and see who sent them.</prompt>
+  <role>SPAARKE platform developer. BFF communication services and Dataverse web resources. Follow ADRs strictly.</role>
+  <goal>A message sent from the model-driven form with "Internal only" = No is visible to a CIAM partner with access to the record and shows the sender's name; with "Internal only" = Yes it stays hidden from every external caller.</goal>
+
+  <context>
+    <background>Owner decision 2026-10-13: "messages is an important way to communicate between internal and external users"; old dev messages are not corrected. Code map: the external read shows a row to a non-internal caller only when sprk_isinternalonly is explicitly false (CommunicationAccessFilter.cs:39-40, 73-86, fail closed on null). The MDA form web resource src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_communication_send posts to POST /api/communications/send (lines ~75-82, 426-457); CommunicationService.BuildMessageDataverseRecordAsync (~:893-907) and BuildDataverseRecordAsync (~:2135-2150) write neither sprk_isinternalonly nor sprk_sentby. The SPA post path writes sprk_isinternalonly = false (~:1193) and sprk_sentby (~:1201). Another send path already resolves sprk_sentby from the caller's oid (~:1950-1970): reuse it. The column has AppDefaultValue 0 and is on the form (Entity.xml:1761-1792).</background>
+    <relevant-files>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_communication_send</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file role="modify">the existing CommunicationService send unit tests (find with Grep)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-10-13 (escalation answer)">The send request gains an optional isInternalOnly (bool). ALL THREE record builders — BuildMessageDataverseRecordAsync, BuildDataverseRecordAsync and BuildDataverseRecordForUserAsync — write sprk_isinternalonly explicitly for EVERY communication type (messages and emails): the request value when present, otherwise false. Owner: "'no' for emails too (internal only is internal for all records)". The one exception (main session's fail-closed call, owner may override): a Message sent into a Private thread with no request value is written true. If privacy is not determinable inside the builder, STOP and report rather than improvising.</constraint>
+    <constraint source="owner 2026-10-13 (escalation answer)">The web resource sends the form's current sprk_isinternalonly value, and maps sprk_communicationtype 100000004 to "Message" (today it falls through to "Email", so a Message-type form sends a real email and creates a second Email record). With the mapping fixed, a Message-type send takes the BFF's existing Message path (SendMessageAsync → ACS Chat via the channel dispatcher, one sprk_communication of type Message, no email).</constraint>
+    <constraint source="security (fail closed)">CommunicationAccessFilter's null handling is NOT changed: a null flag still hides the row from external callers. Old rows are not corrected (owner).</constraint>
+    <constraint source="project">sprk_sentby is set to the sending systemuser using the existing oid → systemuserid resolution; if it cannot be resolved, the message is still sent and the existing warning is logged.</constraint>
+    <constraint source="project">No email is sent on message post (spec C6) — unchanged.</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size delta; no new package. Web resource change ships in the solution; its dev deploy is owner-approved.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; /conflict-check (Services/Communication is shared; PR #1494); declare rigor/tier.</step>
+    <step order="1">Tests first for the builders; implement BFF; update the web resource.</step>
+    <step order="2">Seeding proof: drop the explicit false → the external-visibility test fails; restore.</step>
+    <step order="3">Build + filtered tests; publish-size delta; adversarial pass; notes/task-065-notes.md; status + drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>RESOLVED 2026-10-13: the owner chose explicit false for emails too (all callers of the three builders). RegistrationEmailService sends are never filed to a record and are unaffected.</trigger>
+    <trigger>If the Message path cannot work from the model-driven form (it needs input the form does not have, such as an ACS thread or participant list, or it needs Acs configuration that is not in appsettings.json or the dev app settings template), STOP and report what is missing before changing the mapping.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</output>
+    <output type="code">src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_communication_send</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Send with isInternalOnly false or absent → created record has sprk_isinternalonly = false and sprk_sentby = the sender; a contact caller's external read returns it with the sender's name.</criterion>
+    <criterion testable="true">Send with isInternalOnly true → sprk_isinternalonly = true; the external read for a contact does not return it.</criterion>
+    <criterion testable="true">Unresolvable sender oid → message still created, sprk_sentby unset, warning logged.</criterion>
+    <criterion testable="true">CommunicationAccessFilter null-flag behaviour unchanged (existing tests pass).</criterion>
+    <criterion testable="true">The web resource sends the form's Internal-only value, and a form with sprk_communicationtype 100000004 sends communicationType "Message".</criterion>
+    <criterion testable="true">An email send (shared mailbox and user mode) with isInternalOnly absent → sprk_isinternalonly = false; with true → true.</criterion>
+    <criterion testable="true">A Message into a Private thread with isInternalOnly absent → sprk_isinternalonly = true.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner check 3 item 5 and decision 2. Task 062 (createdby fallback) still covers older rows without a sender.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

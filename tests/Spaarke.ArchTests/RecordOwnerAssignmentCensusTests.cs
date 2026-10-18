@@ -359,6 +359,8 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerSeam("ExternalDataService.cs", "BuildTodoCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "BuildServiceRequestCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "RequireOwner", Refusal),
+        // R3 task 047 (UAC re-check F3): the WorkforceHome contact create refuses an empty owning team.
+        new OwnerSeam("ContactIdentityStore.cs", "CreatePayload", Refusal),
     };
 
     /// <summary>The refusal every seam throws: "... refusing to create ... app-owned ..." (a stray throw elsewhere in
@@ -452,6 +454,11 @@ public class RecordOwnerAssignmentCensusTests
             "The team the external route resolved from the root — RequireOwner refuses an empty one."),
         new OwnerWriteEntry("ExternalDataService.cs", "BuildServiceRequestCreatePayload", 1, OwnerWriteKind.Seam,
             "The team the intake route resolved from the requester's contact (its business unit's default team) — RequireOwner refuses an empty one."),
+        new OwnerWriteEntry("ContactIdentityStore.cs", "CreatePayload", 1, OwnerWriteKind.Seam,
+            "R3 task 047 (ADR-028 A9 registration): a WorkforceHome contact is a person, not a secure record's child; its owner is "
+            + "the default team of the configured customer business unit (ExternalAccess:CustomerBusinessUnitId; the Secure Record "
+            + "business unit is refused by id), resolved by the binder before the create. Every other plane writes no owner, and "
+            + "CreatePayload throws on an empty team."),
 
         new OwnerWriteEntry("DocumentCheckoutService.cs", "CreateFileVersionAsync", 1, OwnerWriteKind.Routed,
             "A file version is content of its document (ContentOf)."),

@@ -926,7 +926,7 @@ public class RecordOwnershipResolverTests
             {
                 EntityLogicalName = "sprk_document",
                 RecordId = documentId,
-                ParentChanges = RecordReparent.ParentChangesWithClearsIn(
+                ParentChanges = RecordReparent.ParentChangesWithClearsIn("sprk_document",
                     new Dictionary<string, object?> { ["sprk_project"] = null, ["sprk_description"] = null }),
                 // Owner round 10 item 7 (task 146 c1): leaving the secure project is an un-secure — a Full Access holder.
                 SecureExitCaller = CallerHolding(FullAccess),
@@ -938,6 +938,204 @@ public class RecordOwnershipResolverTests
         directory.Assignments.Should().Equal(("sprk_document", documentId, ChildTeam));
         directory.Row("sprk_document", documentId).GetAttributeValue<EntityReference>("owningteam").Id
             .Should().Be(ChildTeam, "read back");
+    }
+
+    // ── #2091 round 3: the payload reading every generic writer shares (RecordReparent.ParentChangesWithClearsIn) ──────
+
+    [Fact]
+    public void ParentChangesWithClearsIn_ReadsAFilingBind_AsAParentChange_OnTheColumnItBinds()
+    {
+        var matter = Guid.NewGuid();
+
+        var changes = RecordReparent.ParentChangesWithClearsIn("sprk_communication", new Dictionary<string, object?>
+        {
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({matter})",
+            ["sprk_subject"] = "Re: invoice",
+        });
+
+        changes.Should().ContainSingle().Which.Should().Be(
+            new KeyValuePair<string, EntityReference?>("sprk_regardingmatter", new EntityReference("sprk_matter", matter)));
+    }
+
+    [Fact]
+    public void ParentChangesWithClearsIn_ReadsABindAsJson_AndARootsOwnEntitySet()
+    {
+        var project = Guid.NewGuid();
+        var json = System.Text.Json.JsonDocument.Parse($"\"sprk_projects({project})\"").RootElement;
+
+        var changes = RecordReparent.ParentChangesWithClearsIn("sprk_todo",
+            new Dictionary<string, object?> { ["sprk_regardingproject@odata.bind"] = json });
+
+        changes["sprk_regardingproject"].Should().Be(new EntityReference("sprk_project", project));
+    }
+
+    [Fact]
+    public void ParentChangesWithClearsIn_EntersABindClearOrAValueClear_UnderTheColumnItClears()
+    {
+        var changes = RecordReparent.ParentChangesWithClearsIn("sprk_communication", new Dictionary<string, object?>
+        {
+            ["sprk_RegardingMatter@odata.bind"] = null,
+            ["_sprk_regardingproject_value"] = System.Text.Json.JsonDocument.Parse("null").RootElement,
+        });
+
+        changes.Should().BeEquivalentTo(new Dictionary<string, EntityReference?>
+        {
+            ["sprk_regardingmatter"] = null,
+            ["sprk_regardingproject"] = null,
+        });
+    }
+
+    [Theory]
+    [InlineData("sprk_communication", "sprk_Contact@odata.bind", "/contacts(6a4b2f0e-0000-4000-8000-000000000001)")] // a relationship
+    [InlineData("sprk_communication", "sprk_communicationthread@odata.bind", "garbage")] // filing lineage, not an ownership parent
+    [InlineData("sprk_matter", "sprk_Project@odata.bind", "garbage")] // a root's own lookups are no child's re-file
+    public void ParentChangesWithClearsIn_IgnoresABindThatIsNoOwnershipParentOfAChild(string table, string key, string bind)
+    {
+        RecordReparent.ParentChangesWithClearsIn(table, new Dictionary<string, object?> { [key] = bind })
+            .Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("/sprk_projects(6a4b2f0e-0000-4000-8000-000000000001)")] // another table's entity set
+    [InlineData("/sprk_matter(6a4b2f0e-0000-4000-8000-000000000001)")] // the logical name, not the set
+    [InlineData("/sprk_matters(nope)")]
+    [InlineData("/sprk_matters(00000000-0000-0000-0000-000000000000)")]
+    [InlineData("https://org.crm.dynamics.com/api/data/v9.2/sprk_matters(6a4b2f0e-0000-4000-8000-000000000001)")]
+    [InlineData("")]
+    public void ParentChangesWithClearsIn_RefusesAFilingBindThatNamesNoRowOfItsTarget(string bind)
+    {
+        var read = () => RecordReparent.ParentChangesWithClearsIn("sprk_communication",
+            new Dictionary<string, object?> { ["sprk_RegardingMatter@odata.bind"] = bind });
+
+        read.Should().Throw<RecordOwnerUnresolvedException>().Which.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+    }
+
+    [Fact]
+    public void ParentChangesWithClearsIn_RefusesAFilingBindThatIsNotText()
+    {
+        var read = () => RecordReparent.ParentChangesWithClearsIn("sprk_communication",
+            new Dictionary<string, object?> { ["sprk_RegardingMatter@odata.bind"] = Guid.NewGuid() });
+
+        read.Should().Throw<RecordOwnerUnresolvedException>();
+    }
+
+    [Theory]
+    [InlineData("sprk_communication", "sprk_matter", null, true)] // sets an ownership parent
+    [InlineData("sprk_communication", "contact", "sprk_regardingmatter", true)] // clears a filing lookup
+    [InlineData("sprk_communication", "contact", "_sprk_regardingmatter_value", true)]
+    [InlineData("sprk_communication", "contact", "sprk_RegardingMatter@odata.bind", true)]
+    [InlineData("sprk_todo", "contact", "sprk_regardingservicerequest", true)] // a service request files a to-do too
+    [InlineData("sprk_communication", "contact", "sprk_subject", false)] // round 4: a cleared TEXT column is no re-file
+    [InlineData("sprk_communication", "contact", "sprk_communicationthread", false)] // filing lineage, not an ownership parent
+    [InlineData("sprk_communication", "contact", null, false)]
+    [InlineData("sprk_matter", "sprk_matter", "sprk_project", false)] // a secure root is never re-filed by its lookups
+    [InlineData("sprk_servicerequest", "sprk_matter", "sprk_regardingmatter", false)]
+    public void MayRefile_CountsOwnershipParentsSet_AndFilingLookupsCleared_Only(
+        string table, string lookupTarget, string? clearedColumn, bool expected)
+    {
+        RecordReparent.MayRefile(table, [lookupTarget], clearedColumn is null ? [] : [clearedColumn]).Should().Be(expected);
+    }
+
+    [Fact]
+    public void ParentChangesWithClearsIn_ReadsAServiceRequestBind_FromTheSolutionsRelationshipList()
+    {
+        var request = Guid.NewGuid();
+
+        var changes = RecordReparent.ParentChangesWithClearsIn("sprk_todo",
+            new Dictionary<string, object?> { ["sprk_RegardingServiceRequest@odata.bind"] = $"/sprk_servicerequests({request})" });
+        var documentChanges = RecordReparent.ParentChangesWithClearsIn("sprk_document",
+            new Dictionary<string, object?> { ["sprk_RelatedServiceRequest@odata.bind"] = $"/sprk_servicerequests({request})" });
+
+        changes["sprk_regardingservicerequest"].Should().Be(new EntityReference("sprk_servicerequest", request));
+        documentChanges["sprk_relatedservicerequest"].Should().Be(new EntityReference("sprk_servicerequest", request));
+        var mismatched = () => RecordReparent.ParentChangesWithClearsIn("sprk_todo",
+            new Dictionary<string, object?> { ["sprk_RegardingServiceRequest@odata.bind"] = $"/sprk_matters({request})" });
+        mismatched.Should().Throw<RecordOwnerUnresolvedException>().Which.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+    }
+
+    [Fact]
+    public async Task Reparent_ThatRebindsTheParentTheColumnAlreadyHolds_WritesIt_AndSaysNothingMoved()
+    {
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_document", documentId, SecureBu, owningTeam: SecureNamedTeam,
+                extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) });
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = RecordReparent.ParentChangesWithClearsIn("sprk_document",
+                    new Dictionary<string, object?> { ["sprk_Project@odata.bind"] = $"/sprk_projects({SecureProjectId})" }),
+            },
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        applied.Should().BeTrue();
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.ParentsUnchanged.Should().BeTrue("the row is already filed under that project");
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Reparent_ThatRebindsOneParentItHolds_AndSetsAnother_IsAParentChange()
+    {
+        // #2091 round 5: one unchanged column does not make the whole change a no-op.
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_matter", MatterId, ChildBu)
+            .WithRecord("sprk_document", documentId, SecureBu, owningTeam: SecureNamedTeam,
+                extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) });
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = RecordReparent.ParentChangesWithClearsIn("sprk_document",
+                    new Dictionary<string, object?>
+                    {
+                        ["sprk_Project@odata.bind"] = $"/sprk_projects({SecureProjectId})",
+                        ["sprk_Matter@odata.bind"] = $"/sprk_matters({MatterId})",
+                    }),
+            },
+            _ => Task.CompletedTask,
+            CancellationToken.None);
+
+        resolution.ParentsUnchanged.Should().BeFalse("the matter column moved, so the step after a re-file runs");
+        resolution.IsRefused.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Reparent_ThatClearsAFilingLookupAlreadyNull_WritesIt_AndSaysNothingMoved()
+    {
+        // #2091 round 5: a clear of a filing lookup the row does not hold moves nothing.
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_document", documentId, SecureBu, owningTeam: SecureNamedTeam,
+                extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) });
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = RecordReparent.ParentChangesWithClearsIn("sprk_document",
+                    new Dictionary<string, object?> { ["sprk_Matter@odata.bind"] = null }),
+            },
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        applied.Should().BeTrue();
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.ParentsUnchanged.Should().BeTrue("the matter column was already empty");
+        directory.Assignments.Should().BeEmpty();
     }
 
     [Fact]
@@ -955,7 +1153,7 @@ public class RecordOwnershipResolverTests
             {
                 EntityLogicalName = "sprk_document",
                 RecordId = documentId,
-                ParentChanges = RecordReparent.ParentChangesWithClearsIn(
+                ParentChanges = RecordReparent.ParentChangesWithClearsIn("sprk_document",
                     new Dictionary<string, object?> { ["sprk_description"] = null }),
             },
             _ => { applied = true; return Task.CompletedTask; },

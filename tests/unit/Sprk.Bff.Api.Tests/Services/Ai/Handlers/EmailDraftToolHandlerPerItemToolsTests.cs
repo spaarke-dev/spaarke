@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 
@@ -36,12 +37,17 @@ public sealed class EmailDraftToolHandlerPerItemToolsTests : TypedToolHandlerTes
     private readonly Mock<IDataverseUserClient> _dataverse = new();
     private readonly Mock<IEmailDraftAi> _emailDraftAi = new();
 
+    /// <summary>Task 065 fix round 6 (F1): the communication-visibility seam; default = an internal caller reading a shareable email.</summary>
+    private (Sprk.Bff.Api.Services.Communication.CommunicationThreadReadService Service, Microsoft.AspNetCore.Http.IHttpContextAccessor Accessor) Visibility { get; set; } =
+        new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
+
     private EmailDraftToolHandler CreateHandler() =>
         new(_dataverse.Object, _emailDraftAi.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             CreateLogger<EmailDraftToolHandler>(),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(Moq.MockBehavior.Strict).Object);
+            new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(Moq.MockBehavior.Strict).Object,
+            Visibility.Service, Visibility.Accessor);
 
     private static AnalysisTool BuildTool(string method, string name) =>
         BuildAnalysisTool(
@@ -226,6 +232,93 @@ public sealed class EmailDraftToolHandlerPerItemToolsTests : TypedToolHandlerTes
             .Should().BeTrue("summarize_thread emits no widget/composer surface");
         _dataverse.Verify(d => d.PostAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
         _dataverse.Verify(d => d.PatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // Task 065 fix round 6 (F1, defensive) — the communication must be VISIBLE to the caller before its content is read
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private static CommunicationVisibilityFixtures ExternalCaller(bool internalOnly = false, int? threadPrivacy = 100000000) =>
+        new() { CallerIsExternal = true, InternalOnly = internalOnly, ThreadPrivacy = threadPrivacy };
+
+    private async Task AssertDeniedAsync(string method, CommunicationVisibilityFixtures fixture)
+    {
+        SetupCommunicationRead(SourceBodyWithQuotedThread);
+        SetupAiDraft("A summary that must never be produced for a hidden email.");
+        Visibility = fixture.Build();
+
+        var result = await CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: ArgsFor(CommunicationId)),
+            BuildTool(method, "SYS-Email Tool"),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.NotFound, "the tool's normal not-found answer");
+        _dataverse.Verify(
+            d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communications(")), It.IsAny<CancellationToken>()), Times.Never,
+            "no content of a hidden email is read");
+        _emailDraftAi.Verify(a => a.DraftAsync(It.IsAny<EmailDraftAiRequest>(), It.IsAny<CancellationToken>()), Times.Never,
+            "and none reaches the AI facade");
+    }
+
+    [Fact(DisplayName = "F1: email.summarize_thread is denied to an external caller for an internal-only email")]
+    public Task SummarizeThread_ExternalCaller_InternalOnlyEmail_IsDenied() =>
+        AssertDeniedAsync("summarize_thread", ExternalCaller(internalOnly: true));
+
+    [Fact(DisplayName = "F1: email.summarize_thread is denied to an external caller for an email in a Private thread")]
+    public Task SummarizeThread_ExternalCaller_PrivateThread_IsDenied() =>
+        AssertDeniedAsync("summarize_thread", ExternalCaller(threadPrivacy: 100000001));
+
+    [Fact(DisplayName = "F1: email.summarize_thread is denied when the caller cannot read the email at all")]
+    public Task SummarizeThread_EmailNotReadable_IsDenied() =>
+        AssertDeniedAsync("summarize_thread", new CommunicationVisibilityFixtures { CommunicationReadable = false });
+
+    [Fact(DisplayName = "F1: email.summarize_thread is denied (fail closed) when the request carries no principal")]
+    public Task SummarizeThread_NoPrincipal_IsDenied() =>
+        AssertDeniedAsync("summarize_thread", new CommunicationVisibilityFixtures { HasPrincipal = false });
+
+    [Fact(DisplayName = "F1: an unresolvable caller gets the same not-found answer, not an unexpected failure")]
+    public Task SummarizeThread_UnresolvableCaller_IsDeniedAsNotFound() =>
+        AssertDeniedAsync("summarize_thread", new CommunicationVisibilityFixtures { CallerResolvable = false });
+
+    [Theory(DisplayName = "F1: draft_reply and draft_forward share the same fetch, so they are denied alike")]
+    [InlineData("reply")]
+    [InlineData("forward")]
+    public Task DraftReplyAndForward_ExternalCaller_PrivateThread_AreDenied(string method) =>
+        AssertDeniedAsync(method, ExternalCaller(threadPrivacy: 100000001));
+
+    [Fact(DisplayName = "F1 control: an external caller still gets the summary of a shareable email in an Open thread")]
+    public async Task SummarizeThread_ExternalCaller_ShareableEmailInOpenThread_ReturnsTheSummary()
+    {
+        SetupCommunicationRead(SourceBodyWithQuotedThread);
+        SetupAiDraft("The shareable summary.");
+        Visibility = ExternalCaller().Build();
+
+        var result = await CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: ArgsFor(CommunicationId)),
+            BuildTool("summarize_thread", "SYS-Email Thread Summary"),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        DataOf(result).GetProperty("text").GetString().Should().Be("The shareable summary.");
+    }
+
+    [Fact(DisplayName = "F1: an internal caller gets the summary, even of an internal-only email in a Private thread")]
+    public async Task SummarizeThread_InternalCaller_InternalOnlyEmailInPrivateThread_ReturnsTheSummary()
+    {
+        SetupCommunicationRead(SourceBodyWithQuotedThread);
+        SetupAiDraft("The internal summary.");
+        var fixture = new CommunicationVisibilityFixtures { InternalOnly = true, ThreadPrivacy = 100000001 };
+        Visibility = fixture.Build();
+
+        var result = await CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: ArgsFor(CommunicationId)),
+            BuildTool("summarize_thread", "SYS-Email Thread Summary"),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        DataOf(result).GetProperty("text").GetString().Should().Be("The internal summary.");
+        fixture.CommunicationQueries.Should().ContainSingle().Which.Should().Contain(CommunicationId.ToString("D"));
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

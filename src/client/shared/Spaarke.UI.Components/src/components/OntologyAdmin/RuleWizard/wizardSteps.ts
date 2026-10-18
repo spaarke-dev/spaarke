@@ -32,6 +32,7 @@ const FIELD_STEP: Readonly<Record<string, RuleWizardStepId>> = {
   messageTemplate: 'wording',
   proposedAction: 'wording',
   decisionPlan: 'actions',
+  matterId: 'scope',
   priority: 'scope',
   countsTowardSuppression: 'scope',
 };
@@ -51,7 +52,7 @@ export const STEP_FIELDS: Readonly<Record<RuleWizardStepId, readonly string[]>> 
   condition: ['ruleType', 'ruleBody'],
   wording: ['shortHeadline', 'messageTemplate', 'proposedAction'],
   actions: ['decisionPlan'],
-  scope: ['priority', 'countsTowardSuppression'],
+  scope: ['matterId', 'priority', 'countsTowardSuppression'],
   test: [],
   save: [],
 };
