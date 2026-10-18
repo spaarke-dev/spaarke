@@ -52,6 +52,7 @@
   </context>
 
   <constraints>
+    <constraint source="owner D-106 (2026-10-17)">The chosen firm must be linked to the chosen core record (matter, project or work assignment). The server refuses otherwise, failing closed, and the picker lists only records linked to the chosen firm.</constraint>
     <constraint source="D-91 (owner, 2026-10-16)">The firm invoice number is required on both entry points; a missing or blank value is refused with 400 and a stable code before any upload or write. The tracking number is therefore always set in the 202 response.</constraint>
     <constraint source="D-87 (owner, 2026-10-16)">The submission row is created by ITrackingNumberAllocator with its tracking number already set (create-with-number, retry on the alternate key). Never create a submission without a number, never write a placeholder; sprk_trackingnumber stays SystemRequired.</constraint>
     <constraint source="task 020 (2026-10-15)">sprk_invoicesubmission.sprk_vendororg is SystemRequired (a null firm escapes the (sprk_vendororg, sprk_trackingnumber) key). The internal channel must set the firm at create. If the internal channel genuinely cannot know the firm at create, lower the column with Set-ColumnRequiredLevel (scripts/ebilling/EbillingSchema.psm1) and report it with the reason; do not write a placeholder firm.</constraint>
