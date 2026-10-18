@@ -83,9 +83,14 @@ public class ApprovedTimekeeperHandlerTests
     }
 
     [Fact]
-    public void AnUnmatchedTimekeeper_OnlyHolds_ItCarries046sCappedConfidence_AndIsMarkedUnreliable_D89()
+    public void AnUnmatchedTimekeeper_PassesThrough046sCappedConfidence_AndIsMarkedUnreliable_ThisIsNotTheD89Enforcement()
     {
-        // 046 caps a reference-missing field at 0.80, below the 0.90 reliability threshold (D-47, D-89).
+        // What this proves, and what it does not. It proves the handler passes 046's 0.80 reference-missing cap through unchanged
+        // and marks a value below the 0.90 reliability threshold as unreliable (D-47). It does NOT prove D-89 ("ApprovedTimekeeper
+        // holds, never auto-rejects"): the handler decides no rejection (I-5), and D-89 holds today only because the cap
+        // (0.80) happens to be below the threshold (0.90). Both are settings. Enforcing D-89 independent of that coincidence is
+        // task 073: it refuses a Reject consequence for ApprovedTimekeeper at publish, treats ApprovedTimekeeper findings as
+        // hold-only in the rejection rule, and validates ReferenceMissingCap < ReliabilityThreshold when the settings are saved.
         var capped = Fee(0) with
         {
             Timekeeper = Unmatched(TimekeeperUnmatchedReason.NotOnRoster),
