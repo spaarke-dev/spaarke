@@ -52,6 +52,7 @@
     <constraint source="project">The evaluation-time gate refuses a stored version whose consequence is not allowed for its type (rows can be authored directly in Dataverse — PolicyVersionValidator.cs:49-52 remarks); it logs and meters with 070's reason vocabulary.</constraint>
     <constraint source="project">Ontology save and evaluation paths unchanged (existing tests unmodified).</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: publish-size delta, no new HIGH CVE, no package.</constraint>
+    <constraint source="071 fix round 2 (reported defects)">(1) When BillingFinding.DetailWithheld is true (D-112), the finding is rendered and stored only with BillingRuleCatalogue.WithheldDuplicateTemplate. Never use the rule's own or the default template, and never write a withheld value into the Signal or its facts. Required test: a withheld Duplicate stores no tracking number in any field. (2) The default Duplicate template in BillingRuleDraftTranslator.Wording(Duplicate) names {{line.date}} and {{line.timekeeperName}}, which an invoice-level Duplicate finding lacks. Choose the template by subject (invoice vs line) so an invoice-level finding is never refused for absent tokens. Required test: an invoice-level Duplicate with the default template is written.</constraint>
   </constraints>
 
   <knowledge>
