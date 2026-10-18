@@ -149,6 +149,50 @@ public sealed class BillingRuleDraftTranslatorTests
         (rule.ShortHeadline, rule.MessageTemplate).Should().Be(BillingRuleDraftTranslator.Wording(RuleType.TimeIncrement));
     }
 
+    // ── the clause quote must be in the document ────────────────────────────────────────────────
+
+    private const string Document = "4.2 Time is billed in\r\n  tenth-hour increments.\n\n5.1 \u201CNo timekeeper\u201D may bill over 12 hours \u2013 per day.";
+
+    [Theory]
+    [InlineData("4.2 Time is billed in tenth-hour increments.")] // line break and indent collapsed
+    [InlineData("4.2 TIME IS BILLED IN TENTH-HOUR INCREMENTS.")] // case
+    [InlineData("5.1 \"No timekeeper\" may bill over 12 hours - per day.")] // typographic quotes and dash
+    [InlineData("tenth-hour")] // a part of a sentence
+    public void Translate_AQuoteThatIsInTheDocument_IsKept_IgnoringWhiteSpaceCaseAndTypographicCharacters(string quote)
+    {
+        var (rules, refused) = BillingRuleDraftTranslator.Translate(
+            new[] { Proposal("TimeIncrement", With("incrementHours", "0.1"), quote) }, Document);
+
+        refused.Should().BeEmpty();
+        rules.Should().ContainSingle().Which.ClauseQuote.Should().Be(quote, "the stored quote is the model's, unchanged");
+    }
+
+    [Theory]
+    [InlineData("4.2 Time is billed in quarter-hour increments.")] // reworded
+    [InlineData("A clause that is not in the document at all.")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Translate_AQuoteThatIsNotInTheDocument_IsRefusedWithItsClause_NotStored(string quote)
+    {
+        var (rules, refused) = BillingRuleDraftTranslator.Translate(
+            new[] { Proposal("TimeIncrement", With("incrementHours", "0.1"), quote, location: "Section 4.2") }, Document);
+
+        rules.Should().BeEmpty();
+        var listed = refused.Should().ContainSingle().Subject;
+        listed.Text.Should().Be(quote);
+        listed.Location.Should().Be("Section 4.2");
+        listed.Reason.Should().Contain("not found in the document");
+    }
+
+    [Fact]
+    public void Translate_WithoutTheDocumentText_DoesNotCheckTheQuote()
+    {
+        var (rules, refused) = BillingRuleDraftTranslator.Translate(new[] { Proposal("TimeIncrement", With("incrementHours", "0.1"), "Anything.") });
+
+        refused.Should().BeEmpty();
+        rules.Should().ContainSingle();
+    }
+
     [Fact]
     public void Translate_ATypeWithNoParameters_IsJustTheTypeMember()
     {

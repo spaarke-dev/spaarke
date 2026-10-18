@@ -20,9 +20,13 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// marker: a redelivery after it finds <see cref="DraftSource.AlreadyDrafted"/> and completes without calling the model. A redelivery
 /// after a crash BEFORE the marker re-asks the model and the store skips every rule whose type, body and clause it already holds, so
 /// no rule is stored twice. No row is written until every model call has returned.</para>
-/// <para><b>Failures.</b> Transient ones (the model or a write failed, the download returned nothing) return <see cref="JobOutcome.Failure"/>
-/// until the last attempt, then <see cref="JobOutcome.Poisoned"/>; permanent ones (no such rule set, no Binding, AI switched off, no
-/// text) are Poisoned at once so they reach the dead-letter queue instead of looping. There is no per-job status row (ADR-017 is Proposed
+/// <para><b>One run at a time.</b> The queue does not de-duplicate and a run can outlast the message lock, so the run holds a processing
+/// lock keyed on the rule set (ADR-004); a delivery that cannot take it fails and is retried, finds the marker, and ends as a no-op. The
+/// model's clause quotes are checked against the document text before anything is stored.</para>
+/// <para><b>Failures.</b> Transient ones (the model or a write failed, the Binding read failed, the download returned nothing, another
+/// delivery holds the lock) return <see cref="JobOutcome.Failure"/> until <see cref="JobContract.IsFinalDelivery"/>, then
+/// <see cref="JobOutcome.Poisoned"/>; permanent ones (no such rule set, AI switched off, no text, no owner for the rules) are Poisoned at
+/// once so they reach the dead-letter queue instead of looping. There is no per-job status row (ADR-017 is Proposed
 /// and a status store needs a schema or cache-key review, see the task notes): the admin watches the rule set (a finished run lists its
 /// rules and its not-converted list), and an operator reads the log and the DLQ.</para>
 /// <para><b>Logging (ADR-015).</b> Ids, counts and reason codes only; never the document text, a clause or a model reply.</para>
@@ -39,19 +43,28 @@ public class BillingRuleDraftJobHandler : IJobHandler
     private readonly IInvoiceAi _ai;
     private readonly ISpeFileOperations _spe;
     private readonly ITextExtractor _text;
+    private readonly IIdempotencyService _idempotency;
     private readonly ILogger<BillingRuleDraftJobHandler> _logger;
+
+    /// <summary>Processing-lock key prefix; one drafting run per rule set at a time.</summary>
+    internal const string LockKeyPrefix = "billing-rule-draft:";
+
+    /// <summary>Longer than the worst run (eight Standard-tier calls plus the writes), so a live run is never overtaken; a dead run's lock expires.</summary>
+    internal static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(20);
 
     public BillingRuleDraftJobHandler(
         RuleSetService ruleSets,
         IInvoiceAi ai,
         ISpeFileOperations spe,
         ITextExtractor text,
+        IIdempotencyService idempotency,
         ILogger<BillingRuleDraftJobHandler> logger)
     {
         _ruleSets = ruleSets ?? throw new ArgumentNullException(nameof(ruleSets));
         _ai = ai ?? throw new ArgumentNullException(nameof(ai));
         _spe = spe ?? throw new ArgumentNullException(nameof(spe));
         _text = text ?? throw new ArgumentNullException(nameof(text));
+        _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -81,11 +94,23 @@ public class BillingRuleDraftJobHandler : IJobHandler
         }
 
         var ruleSetId = payload.RuleSetId;
+        var lockKey = LockKeyPrefix + ruleSetId.ToString("N");
+        var lockHeld = false;
         try
         {
             _logger.LogInformation(
                 "Billing rule draft job {JobId} for rule set {RuleSetId}, attempt {Attempt}, correlation {CorrelationId}",
                 job.JobId, ruleSetId, job.Attempt, job.CorrelationId);
+
+            // 0. One run per rule set at a time. The queue does not de-duplicate, and a run can outlast the message lock, so a second
+            //    delivery (a double click, two admins, a redelivery) would otherwise store every rule twice. Not acquired: try again
+            //    later; by then the first run has finished and the marker makes this one a no-op.
+            lockHeld = await _idempotency.TryAcquireProcessingLockAsync(lockKey, LockDuration, ct);
+            if (!lockHeld)
+            {
+                _logger.LogWarning("Billing rule draft job {JobId}: another delivery is drafting rule set {RuleSetId}", job.JobId, ruleSetId);
+                return Transient(job, "another delivery is drafting this rule set", stopwatch);
+            }
 
             // 1. The source, found server-side. A finished run is a no-op (idempotent redelivery).
             var found = await _ruleSets.GetDraftSourceAsync(ruleSetId, ct);
@@ -145,7 +170,7 @@ public class BillingRuleDraftJobHandler : IJobHandler
             }
 
             // 4. The proposals become drafted rules; the store validates every one and writes them, then the marker.
-            var translated = BillingRuleDraftTranslator.Translate(proposals);
+            var translated = BillingRuleDraftTranslator.Translate(proposals, extracted.Text);
             notConverted.AddRange(translated.Refused);
             var added = await _ruleSets.AddDraftsAsync(ruleSetId, translated.Rules, notConverted, payload.CallerObjectId, ct);
             if (added.Kind == RuleSetOutcomeKind.Done)
@@ -163,6 +188,14 @@ public class BillingRuleDraftJobHandler : IJobHandler
                 return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
             }
 
+            if (added.Kind == RuleSetOutcomeKind.OwnerRefused)
+            {
+                // Nobody can own the new rules (no owner team for the caller): permanent until an administrator fixes the setup.
+                var reason = added.OwnerRefusal?.RefusalCode ?? "owner_refused";
+                _logger.LogWarning("Billing rule draft job {JobId}: the new rules could not be given an owner ({Reason})", job.JobId, reason);
+                return JobOutcome.Poisoned(job.JobId, JobType, $"The drafted rules have no owner ({reason})", job.Attempt, stopwatch.Elapsed);
+            }
+
             return Refused(job, added.ErrorCode, added.StatusCode, stopwatch);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -173,6 +206,21 @@ public class BillingRuleDraftJobHandler : IJobHandler
         {
             _logger.LogError(ex, "Billing rule draft job {JobId} for rule set {RuleSetId} failed ({ExceptionType})", job.JobId, ruleSetId, ex.GetType().Name);
             return Transient(job, ex.GetType().Name, stopwatch);
+        }
+        finally
+        {
+            if (lockHeld)
+            {
+                try
+                {
+                    await _idempotency.ReleaseProcessingLockAsync(lockKey, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    // The lock expires on its own; a failed release must not turn a finished run into a failure.
+                    _logger.LogWarning(ex, "Billing rule draft job {JobId}: the processing lock for rule set {RuleSetId} could not be released", job.JobId, ruleSetId);
+                }
+            }
         }
     }
 
@@ -211,10 +259,12 @@ public class BillingRuleDraftJobHandler : IJobHandler
     private JobOutcome AiFailed(JobContract job, InvoiceAiException ex, Stopwatch stopwatch)
     {
         _logger.LogWarning("Billing rule draft job {JobId}: the AI step failed ({ReasonCode})", job.JobId, ex.ReasonCode);
-        // No Binding is configuration, not chance: retrying cannot help. A failed completion or an output the parser refused may succeed again.
-        return ex.ReasonCode == InvoiceAiException.BindingMissing
-            ? JobOutcome.Poisoned(job.JobId, JobType, $"The {ConsumerTypes.BillingRuleDraft} Binding is missing ({ex.ReasonCode})", job.Attempt, stopwatch.Elapsed)
-            : Transient(job, ex.ReasonCode, stopwatch);
+        // A missing Binding can be a transient routing-table read (the facade documents it so; platform issue #1936) as well as missing
+        // configuration, so it is retried like a failed completion or an output the parser refused. On the last delivery it is Poisoned
+        // with its reason, which is where a genuinely missing Binding ends up.
+        return Transient(job, ex.ReasonCode == InvoiceAiException.BindingMissing
+            ? $"The {ConsumerTypes.BillingRuleDraft} Binding is missing ({ex.ReasonCode})"
+            : ex.ReasonCode, stopwatch);
     }
 
     private JobOutcome Refused(JobContract job, string? errorCode, int statusCode, Stopwatch stopwatch)
@@ -227,7 +277,8 @@ public class BillingRuleDraftJobHandler : IJobHandler
     }
 
     private static JobOutcome Transient(JobContract job, string reason, Stopwatch stopwatch) =>
-        job.Attempt < job.MaxAttempts
+        // IsFinalDelivery, not Attempt: a redelivery is the same message, so Attempt never advances; the broker's delivery count does.
+        !job.IsFinalDelivery
             ? JobOutcome.Failure(job.JobId, JobTypeName, reason, job.Attempt, stopwatch.Elapsed)
             : JobOutcome.Poisoned(job.JobId, JobTypeName, reason, job.Attempt, stopwatch.Elapsed);
 

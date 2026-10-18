@@ -61,6 +61,34 @@ public sealed class BillingRuleDraftSeamTests
         "{\"ruleType\":\"ApprovedRate\",\"parameters\":" + Params("tolerancePercent", "0", ("incrementHours", "0.5")) + ",\"consequence\":\"SuggestAdjustment\",\"clauseQuote\":\"6.3 Hourly rates are capped at the agreed rate card.\",\"clauseLocation\":null}" +
         "],\"notConverted\":[{\"text\":\"9.3 Staff sensibly.\",\"location\":\"Section 9.3\",\"reason\":\"No offered rule type checks this.\"}]}";
 
+    /// <summary>A real (in-memory) processing lock: the second taker of a key is refused until the first releases it.</summary>
+    private sealed class InMemoryLock : IIdempotencyService
+    {
+        private readonly HashSet<string> _held = new();
+
+        public Task<bool> IsEventProcessedAsync(string eventId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+        public Task MarkEventAsProcessedAsync(string eventId, TimeSpan? expiration = null, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<bool> TryAcquireProcessingLockAsync(string eventId, TimeSpan? lockDuration = null, CancellationToken cancellationToken = default)
+        {
+            lock (_held)
+            {
+                return Task.FromResult(_held.Add(eventId));
+            }
+        }
+
+        public Task ReleaseProcessingLockAsync(string eventId, CancellationToken cancellationToken = default)
+        {
+            lock (_held)
+            {
+                _held.Remove(eventId);
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class Rig
     {
         public readonly RuleSetServiceTests.Harness Store = new();
@@ -110,7 +138,7 @@ public sealed class BillingRuleDraftSeamTests
                 runner,
                 ContentUnderstandingTestHost.Unconfigured(),
                 NullLogger<InvoiceAi>.Instance);
-            Handler = new BillingRuleDraftJobHandler(Store.Service(), ai, Spe.Object, Text.Object, NullLogger<BillingRuleDraftJobHandler>.Instance);
+            Handler = new BillingRuleDraftJobHandler(Store.Service(), ai, Spe.Object, Text.Object, new InMemoryLock(), NullLogger<BillingRuleDraftJobHandler>.Instance);
         }
 
         public Task<JobOutcome> RunAsync() =>
@@ -187,6 +215,49 @@ public sealed class BillingRuleDraftSeamTests
         rig.Prompts.Should().ContainSingle("the second delivery found the marker and did not call the model");
         rig.Store.Writes.Should().HaveCount(writes, "and wrote nothing");
         rig.Store.Rows["sprk_policy"].Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task TwoDeliveriesAtOnce_DraftOnce_TheSecondWaitsAndFindsTheMarker()
+    {
+        // The queue does not de-duplicate: a double click, or a redelivery while the first run is still in the model, starts a second run.
+        var rig = new Rig();
+        var gate = new TaskCompletionSource();
+        rig.Model.Setup(o => o.GetStructuredCompletionRawAsync(
+                It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(), It.IsAny<string?>(),
+                It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string prompt, BinaryData _, string _, string? _, int? _, float? _, CancellationToken _) =>
+            {
+                rig.Prompts.Add(prompt);
+                await gate.Task;
+                return ModelReply;
+            });
+
+        var first = rig.RunAsync();
+        while (rig.Prompts.Count == 0)
+        {
+            await Task.Delay(5);
+        }
+
+        JobOutcome second;
+        try
+        {
+            // Bounded: without the lock this delivery would also wait on the model and the test would hang instead of failing.
+            second = await rig.RunAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            gate.SetResult();
+        }
+
+        var firstOutcome = await first;
+        var retried = await rig.RunAsync();
+
+        second.Status.Should().Be(JobStatus.Failed, "the second delivery could not take the lock and is retried later");
+        firstOutcome.Status.Should().Be(JobStatus.Completed);
+        retried.Status.Should().Be(JobStatus.Completed, "the retry finds the marker");
+        rig.Prompts.Should().ContainSingle("only the first run asked the model");
+        rig.Store.Rows["sprk_policy"].Should().ContainSingle("the rule was stored once");
     }
 
     [Fact]

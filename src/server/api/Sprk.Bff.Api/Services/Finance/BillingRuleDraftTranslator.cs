@@ -133,18 +133,30 @@ internal static class BillingRuleDraftTranslator
     /// <summary>
     /// Turns the proposals of one or more drafting calls into drafted rules and the proposals that could not even be shaped into a body.
     /// A repeated rule (same type, body and clause) is kept once. The result is NOT validated against the rule body schema here.
+    /// When <paramref name="sourceText"/> is given, a proposal whose clause quote is not in that text (ignoring white space, case and
+    /// typographic quote and dash characters) is refused: a "verbatim" quote the model made up must never reach the review page or,
+    /// once published, a firm.
     /// </summary>
-    internal static (List<DraftedRule> Rules, List<NotConvertedClause> Refused) Translate(IEnumerable<BillingRuleProposal> proposals)
+    internal static (List<DraftedRule> Rules, List<NotConvertedClause> Refused) Translate(
+        IEnumerable<BillingRuleProposal> proposals, string? sourceText = null)
     {
         var rules = new List<DraftedRule>();
         var refused = new List<NotConvertedClause>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var normalisedSource = sourceText is null ? null : NormaliseForQuoteCheck(sourceText);
         foreach (var proposal in proposals)
         {
             if (!TryParseType(proposal.RuleType, out var ruleType))
             {
                 refused.Add(new NotConvertedClause(
                     proposal.ClauseQuote, proposal.ClauseLocation, "Not stored: the drafted rule named a rule type that is not in the offered list."));
+                continue;
+            }
+
+            if (normalisedSource is not null && !QuoteIsInText(proposal.ClauseQuote, normalisedSource))
+            {
+                refused.Add(new NotConvertedClause(
+                    proposal.ClauseQuote, proposal.ClauseLocation, "Not stored: the clause quote was not found in the document."));
                 continue;
             }
 
@@ -171,6 +183,48 @@ internal static class BillingRuleDraftTranslator
         }
 
         return (rules, refused);
+    }
+
+    private static bool QuoteIsInText(string? quote, string normalisedSource)
+    {
+        if (string.IsNullOrWhiteSpace(quote))
+        {
+            return false;
+        }
+
+        return normalisedSource.Contains(NormaliseForQuoteCheck(quote), StringComparison.Ordinal);
+    }
+
+    /// <summary>White space collapsed to one space, lower case, typographic quotes and dashes reduced to their plain forms.</summary>
+    internal static string NormaliseForQuoteCheck(string text)
+    {
+        var builder = new System.Text.StringBuilder(text.Length);
+        var pendingSpace = false;
+        foreach (var raw in text)
+        {
+            if (char.IsWhiteSpace(raw) || raw == ' ')
+            {
+                pendingSpace = builder.Length > 0;
+                continue;
+            }
+
+            var c = raw switch
+            {
+                '‘' or '’' or '‛' => '\'',
+                '“' or '”' or '‟' => '"',
+                '‐' or '‑' or '‒' or '–' or '—' or '−' => '-',
+                _ => char.ToLowerInvariant(raw),
+            };
+            if (pendingSpace)
+            {
+                builder.Append(' ');
+                pendingSpace = false;
+            }
+
+            builder.Append(c);
+        }
+
+        return builder.ToString();
     }
 
     /// <summary>Exact catalogue name only (ordinal): never a number, a comma list or another case, which the model must not be able to smuggle in.</summary>

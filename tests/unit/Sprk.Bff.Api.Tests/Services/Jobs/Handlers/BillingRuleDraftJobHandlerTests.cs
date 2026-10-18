@@ -63,7 +63,9 @@ public sealed class BillingRuleDraftJobHandlerTests
         public readonly Mock<IInvoiceAi> Ai = new(MockBehavior.Strict);
         public readonly Mock<ISpeFileOperations> Spe = new(MockBehavior.Strict);
         public readonly Mock<ITextExtractor> Text = new(MockBehavior.Strict);
+        public readonly Mock<IIdempotencyService> Lock = new(MockBehavior.Strict);
         public readonly CapturingLogger<BillingRuleDraftJobHandler> Log = new();
+        public bool LockAvailable = true;
         public readonly List<BillingRuleDraftRequest> AiRequests = new();
         public IReadOnlyList<DraftedRule>? Stored;
         public IReadOnlyList<NotConvertedClause>? StoredNotConverted;
@@ -86,12 +88,16 @@ public sealed class BillingRuleDraftJobHandlerTests
                 new RuleBodyDescriber(validator, entities, NullLogger<RuleBodyDescriber>.Instance),
                 Mock.Of<IOptionsMonitor<FinanceOptions>>(), Mock.Of<ILogger<RuleSetService>>());
 
+            Lock.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => LockAvailable);
+            Lock.Setup(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
             RuleSets.Setup(r => r.GetDraftSourceAsync(SetId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(new DraftSource(SetId, "Acme", DocId, "b!lib", "item-1", "ocg.pdf", false)));
             Spe.Setup(s => s.DownloadFileAsync("b!lib", "item-1", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => new MemoryStream(new byte[] { 1 }));
             Text.Setup(t => t.ExtractAsync(It.IsAny<Stream>(), "ocg.pdf", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(TextExtractionResult.Succeeded($"4.2 Bill in tenth hours. {SecretText}", TextExtractionMethod.Native));
+                .ReturnsAsync(TextExtractionResult.Succeeded($"4.2 Bill in tenth hours. {SecretText} {SecretQuote}", TextExtractionMethod.Native));
             Ai.Setup(a => a.DraftRulesAsync(It.IsAny<BillingRuleDraftRequest>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((BillingRuleDraftRequest r, CancellationToken _) =>
                 {
@@ -122,18 +128,19 @@ public sealed class BillingRuleDraftJobHandlerTests
                 });
         }
 
-        public BillingRuleDraftJobHandler Handler() => new(RuleSets.Object, Ai.Object, Spe.Object, Text.Object, Log);
+        public BillingRuleDraftJobHandler Handler() => new(RuleSets.Object, Ai.Object, Spe.Object, Text.Object, Lock.Object, Log);
 
         public void Extracts(string text) =>
             Text.Setup(t => t.ExtractAsync(It.IsAny<Stream>(), "ocg.pdf", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(TextExtractionResult.Succeeded(text, TextExtractionMethod.Native));
     }
 
-    private static JobContract Job(int attempt = 1, int max = 3)
+    private static JobContract Job(int attempt = 1, int max = 3, int delivery = 1)
     {
         var job = BillingRuleDraftJobHandler.BuildJob(Guid.NewGuid(), SetId, Caller, "corr-1");
         job.Attempt = attempt;
         job.MaxAttempts = max;
+        job.DeliveryCount = delivery;
         return job;
     }
 
@@ -206,7 +213,7 @@ public sealed class BillingRuleDraftJobHandlerTests
     {
         var rig = new Rig();
         var paragraph = new string('p', 10_000) + "\n\n";
-        rig.Extracts(string.Concat(Enumerable.Repeat(paragraph, 7))); // about 70,000 chars: pieces of two paragraphs (a third would pass 24,000)
+        rig.Extracts(SecretQuote + string.Concat(Enumerable.Repeat(paragraph, 7))); // about 70,000 chars: pieces of two paragraphs (a third would pass 24,000)
 
         var outcome = await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
 
@@ -227,7 +234,7 @@ public sealed class BillingRuleDraftJobHandlerTests
 
         outcome.Status.Should().Be(JobStatus.Completed);
         rig.AiRequests.Should().HaveCount(BillingRuleDraftTranslator.MaxChunks);
-        rig.StoredNotConverted!.Last().Reason.Should().Contain("was not read").And.Contain((BillingRuleDraftTranslator.ChunkChars * BillingRuleDraftTranslator.MaxChunks).ToString());
+        rig.StoredNotConverted!.Should().Contain(c => c.Reason.Contains("was not read") && c.Reason.Contains((BillingRuleDraftTranslator.ChunkChars * BillingRuleDraftTranslator.MaxChunks).ToString()));
     }
 
     // ── idempotent redelivery ───────────────────────────────────────────────────────────────────
@@ -333,10 +340,10 @@ public sealed class BillingRuleDraftJobHandlerTests
     }
 
     [Theory]
-    [InlineData(InvoiceAiException.BindingMissing, JobStatus.Poisoned)]
+    [InlineData(InvoiceAiException.BindingMissing, JobStatus.Failed)]
     [InlineData(InvoiceAiException.CompletionFailed, JobStatus.Failed)]
     [InlineData(InvoiceAiException.OutputInvalid, JobStatus.Failed)]
-    public async Task Process_AFacadeFailure_RetriesUnlessItIsConfiguration(string reason, JobStatus expected)
+    public async Task Process_AFacadeFailure_IsRetried_IncludingAMissingBindingWhichCanBeATransientRead(string reason, JobStatus expected)
     {
         var rig = new Rig();
         rig.Ai.Setup(a => a.DraftRulesAsync(It.IsAny<BillingRuleDraftRequest>(), It.IsAny<CancellationToken>()))
@@ -348,16 +355,87 @@ public sealed class BillingRuleDraftJobHandlerTests
         rig.Stored.Should().BeNull("nothing is written when any piece failed");
     }
 
-    [Fact]
-    public async Task Process_AFacadeFailureOnTheLastAttempt_IsPoisoned()
+    [Theory]
+    [InlineData(InvoiceAiException.CompletionFailed)]
+    [InlineData(InvoiceAiException.BindingMissing)]
+    public async Task Process_AFacadeFailureOnTheFinalDelivery_IsPoisoned_WithItsReason(string reason)
     {
+        // Production: Attempt never advances on a redelivery; the broker's delivery count does (JobContract.IsFinalDelivery).
         var rig = new Rig();
         rig.Ai.Setup(a => a.DraftRulesAsync(It.IsAny<BillingRuleDraftRequest>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvoiceAiException(InvoiceAiException.CompletionFailed, ConsumerTypes.BillingRuleDraft, "failed"));
+            .ThrowsAsync(new InvoiceAiException(reason, ConsumerTypes.BillingRuleDraft, "failed"));
 
-        var outcome = await rig.Handler().ProcessAsync(Job(attempt: 3, max: 3), CancellationToken.None);
+        var notFinal = await rig.Handler().ProcessAsync(Job(attempt: 1, max: 3, delivery: JobContract.MaxDeliveryCount - 1), CancellationToken.None);
+        var final = await rig.Handler().ProcessAsync(Job(attempt: 1, max: 3, delivery: JobContract.MaxDeliveryCount), CancellationToken.None);
+
+        notFinal.Status.Should().Be(JobStatus.Failed);
+        final.Status.Should().Be(JobStatus.Poisoned);
+        final.ErrorMessage.Should().Contain(reason);
+    }
+
+    [Fact]
+    public async Task Process_WhenTheNewRulesCannotBeOwned_IsPoisoned_WithTheOwnerRefusalCode()
+    {
+        var rig = new Rig();
+        rig.RuleSets.Setup(r => r.AddDraftsAsync(SetId, It.IsAny<IReadOnlyList<DraftedRule>>(), It.IsAny<IReadOnlyList<NotConvertedClause>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftsAdded>.OwnerRefused(RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, "no team")));
+
+        var outcome = await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
 
         outcome.Status.Should().Be(JobStatus.Poisoned);
+        outcome.ErrorMessage.Should().Contain(RecordOwnerRefusal.NoOwnerSource);
+    }
+
+    // ── one run at a time ───────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Process_WhileAnotherDeliveryHoldsTheLock_DoesNothing_AndIsRetried()
+    {
+        var rig = new Rig { LockAvailable = false };
+
+        var first = await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
+        var last = await rig.Handler().ProcessAsync(Job(delivery: JobContract.MaxDeliveryCount), CancellationToken.None);
+
+        first.Status.Should().Be(JobStatus.Failed);
+        last.Status.Should().Be(JobStatus.Poisoned);
+        rig.RuleSets.Verify(r => r.GetDraftSourceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        rig.Spe.VerifyNoOtherCalls();
+        rig.Ai.VerifyNoOtherCalls();
+        rig.Stored.Should().BeNull();
+        rig.Lock.Verify(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never, "a lock this delivery never held is not released");
+    }
+
+    [Fact]
+    public async Task Process_TakesTheLockOfTheRuleSet_AndReleasesItOnEveryPath()
+    {
+        var rig = new Rig();
+        var failing = new Rig();
+        failing.Spe.Setup(s => s.DownloadFileAsync("b!lib", "item-1", It.IsAny<CancellationToken>())).ThrowsAsync(new HttpRequestException("graph 503"));
+
+        await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
+        await failing.Handler().ProcessAsync(Job(), CancellationToken.None);
+
+        var key = BillingRuleDraftJobHandler.LockKeyPrefix + SetId.ToString("N");
+        foreach (var r in new[] { rig, failing })
+        {
+            r.Lock.Verify(l => l.TryAcquireProcessingLockAsync(key, BillingRuleDraftJobHandler.LockDuration, It.IsAny<CancellationToken>()), Times.Once);
+            r.Lock.Verify(l => l.ReleaseProcessingLockAsync(key, It.IsAny<CancellationToken>()), Times.Once);
+        }
+    }
+
+    // ── the clause quote ────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Process_AQuoteThatIsNotInTheDocument_IsNotStored_AndIsListedWithThatReason()
+    {
+        var rig = new Rig();
+        rig.Extracts("4.2 Bill in tenth hours. The firm shall staff sensibly.");
+
+        var outcome = await rig.Handler().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        rig.Stored.Should().BeEmpty("the model's quote does not occur in the document, so the rule cites nothing real");
+        rig.StoredNotConverted!.Should().Contain(c => c.Text == SecretQuote && c.Reason.Contains("not found in the document"));
     }
 
     [Fact]
