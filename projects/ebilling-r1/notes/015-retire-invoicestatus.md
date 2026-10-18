@@ -14,6 +14,8 @@
 
 **D-107 (2026-10-17):** firms see the `statuscode` labels as they are, including "Sent to AP". The external SPA keeps reading `statuscode` and shows its label unchanged.
 
+uac-r2 relayed the same owner decision on 2026-10-18: firms may see every invoice status, including "Sent to AP". That closes the product question from uac-r2's 015 review.
+
 D-97's condition "once nothing references them" is not yet met on dev (section 3.4), so the delete did not run.
 
 ## 2. Step 0 and step 1 (grep reconciliation)
