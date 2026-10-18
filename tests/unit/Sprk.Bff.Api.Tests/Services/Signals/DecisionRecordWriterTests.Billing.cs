@@ -620,6 +620,8 @@ public sealed partial class DecisionRecordWriterTests
     {
         var h = BillingHarness();
         var signal = Guid.NewGuid();
+        h.Rows[("sprk_policyversion", PolicyVersion)] = new Entity("sprk_policyversion", PolicyVersion);
+        h.Rows[("sprk_signal", signal)] = SignalAbout(signal, "sprk_invoice", InvoiceId);
 
         await h.Writer.WriteBillingDecisionAsync(Billing("reject-invoice", reason: "duplicate - already paid") with
         {
@@ -714,15 +716,17 @@ public sealed partial class DecisionRecordWriterTests
         [SignalWriter.RegardingLookupByEntity[subjectTable]] = new EntityReference(subjectTable, subjectId),
     };
 
-    private static System.ServiceModel.FaultException<OrganizationServiceFault> NotFound() =>
-        new(new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217) }, "Does Not Exist");
-
     private static void NothingWritten(Harness h)
     {
         h.Created.Should().BeEmpty();
         h.OwnerAsks.Should().BeEmpty("refused before the owner question");
         h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    /// <summary>A fault on the reader's query of <paramref name="table"/> only (every other query is answered as usual).</summary>
+    private static void FaultQueriesOf(Harness h, string table, Exception fault) =>
+        h.Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == table), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(fault);
 
     [Fact]
     public async Task Billing_F41_AnInvoiceDecisionResolvingALineSignal_AsksTheOwnerAboutTheLine()
@@ -735,8 +739,11 @@ public sealed partial class DecisionRecordWriterTests
         await h.Writer.WriteBillingDecisionAsync(Billing("approve-invoice") with { ResolvedSignalIds = [BillingSignal] });
 
         h.OwnerAsks.Should().ContainSingle().Which.Parents.Should().Contain(new RecordOwnershipParent("sprk_billingevent", LineId));
-        h.Entities.Verify(e => e.RetrieveAsync("sprk_signal", BillingSignal, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once,
-            "read app-only through the shared sysadmin reader");
+        var read = h.Lookups.Where(q => q.EntityName == "sprk_signal").Should().ContainSingle("one query for every resolved Signal").Which;
+        read.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "sprk_signalid" && c.Operator == ConditionOperator.In)
+            .Which.Values.Should().Equal(BillingSignal);
+        h.Entities.Verify(e => e.RetrieveAsync("sprk_signal", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the writer reads the Signals through the shared sysadmin reader's RetrieveMultipleAsync only (D-34)");
         h.Created.Should().ContainSingle();
     }
 
@@ -744,13 +751,13 @@ public sealed partial class DecisionRecordWriterTests
     public async Task Billing_F41_AMissingSignal_IsRefused_BeforeAnyCreate()
     {
         var h = BillingHarness();
-        h.Entities.Setup(e => e.RetrieveAsync("sprk_signal", BillingSignal, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(NotFound());
+        var other = Guid.NewGuid();
+        h.Rows[("sprk_signal", other)] = SignalAbout(other, "sprk_billingevent", LineId);
 
-        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing("approve-invoice") with { ResolvedSignalIds = [BillingSignal] }))
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing("approve-invoice") with { ResolvedSignalIds = [other, BillingSignal] }))
             .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
 
-        ex.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused, "the second Signal does not exist");
         ex.OwnerRefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
         NothingWritten(h);
     }
@@ -774,8 +781,8 @@ public sealed partial class DecisionRecordWriterTests
     public async Task Billing_F41_AFaultOnTheSignalRead_WritesNothing()
     {
         var h = BillingHarness();
-        h.Entities.Setup(e => e.RetrieveAsync("sprk_signal", BillingSignal, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new TimeoutException("throttled"));
+        h.Rows[("sprk_signal", BillingSignal)] = SignalAbout(BillingSignal, "sprk_billingevent", LineId);
+        FaultQueriesOf(h, "sprk_signal", new TimeoutException("throttled"));
 
         var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing("approve-invoice") with { ResolvedSignalIds = [BillingSignal] }))
             .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
@@ -789,17 +796,26 @@ public sealed partial class DecisionRecordWriterTests
     public async Task Billing_F41_APolicyVersionThatDoesNotExist_IsRefused_AndAReadFaultWritesNothing()
     {
         var h = BillingHarness();
-        h.Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", PolicyVersion, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(NotFound());
 
         (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing(policyVersion: PolicyVersion)))
             .Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
         NothingWritten(h);
 
-        h.Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", PolicyVersion, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new TimeoutException("throttled"));
+        h.Rows[("sprk_policyversion", PolicyVersion)] = new Entity("sprk_policyversion", PolicyVersion);
+        FaultQueriesOf(h, "sprk_policyversion", new TimeoutException("throttled"));
         (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing(policyVersion: PolicyVersion)))
             .Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.BillingRecordLookupFailed);
         NothingWritten(h);
+    }
+
+    [Fact]
+    public async Task Billing_F41_AnExistingPolicyVersion_IsRecorded()
+    {
+        var h = BillingHarness();
+        h.Rows[("sprk_policyversion", PolicyVersion)] = new Entity("sprk_policyversion", PolicyVersion);
+
+        await h.Writer.WriteBillingDecisionAsync(Billing(policyVersion: PolicyVersion));
+
+        h.Row.GetAttributeValue<EntityReference>("sprk_policyversion").Id.Should().Be(PolicyVersion);
     }
 }

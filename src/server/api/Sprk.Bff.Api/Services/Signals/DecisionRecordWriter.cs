@@ -1551,15 +1551,16 @@ public sealed class DecisionRecordWriter
 
     /// <summary>
     /// ontology-r1 F4-1 (D-123, secure-if-any): the subject of every Signal a billing decision resolves, read app-only through the shared
-    /// sysadmin reader, as parents of the record's owner question. The rule is the commit route's own, REUSED, not copied:
-    /// <see cref="DecisionCommitService.ToRow"/> derives the subject from the subject lookup that carries the pair id, and
-    /// <see cref="DecisionCommitService.SignalSubjectsOf"/> keeps it (a Signal with no pair id adds none; a pair id no single lookup carries
-    /// is refused). Without this, a finding about a line under a secure record could be closed by an invoice decision whose record an
-    /// ordinary team owns.
+    /// sysadmin reader (one query by id; the writer may use that reader only for <c>RetrieveMultipleAsync</c>, D-34), as parents of the
+    /// record's owner question. The rule is the commit route's own, REUSED, not copied: <see cref="DecisionCommitService.ToRow"/> derives the
+    /// subject from the subject lookup that carries the pair id, and <see cref="DecisionCommitService.SignalSubjectsOf"/> keeps it (a Signal
+    /// with no pair id adds none; a pair id no single lookup carries is refused). Without this, a finding about a line under a secure record
+    /// could be closed by an invoice decision whose record an ordinary team owns.
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.OwnerRefused"/>
     /// (<see cref="RecordOwnerRefusal.ParentUndetermined"/>): a Signal does not exist, or its subject cannot be determined.
-    /// <see cref="DecisionRecordRefusalReason.OwnerResolutionFailed"/>: a Signal could not be read (a retry may succeed). Nothing is written.</exception>
+    /// <see cref="DecisionRecordRefusalReason.OwnerResolutionFailed"/>: the Signals could not be read (a retry may succeed). Nothing is
+    /// written.</exception>
     private async Task<IReadOnlyList<DecisionRecordRef>> BillingSignalSubjectsAsync(IReadOnlyList<Guid>? signalIds, CancellationToken ct)
     {
         if (signalIds is not { Count: > 0 })
@@ -1567,28 +1568,40 @@ public sealed class DecisionRecordWriter
             return [];
         }
 
+        EntityCollection? found;
+        try
+        {
+            var query = new QueryExpression("sprk_signal")
+            {
+                ColumnSet = new ColumnSet(BillingSignalSubjectColumns),
+                TopCount = signalIds.Count,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition("sprk_signalid", ConditionOperator.In, signalIds.Cast<object>().ToArray());
+            found = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.OwnerResolutionFailed,
+                "A Signal the decision resolves could not be read, so the Decision Record owner is unknown; nothing was written.",
+                RecordOwnerRefusal.ParentUndetermined,
+                ex);
+        }
+
+        var byId = new Dictionary<Guid, Entity>();
+        foreach (var entity in found?.Entities ?? Enumerable.Empty<Entity>())
+        {
+            if (entity.Id != Guid.Empty)
+            {
+                byId.TryAdd(entity.Id, entity);
+            }
+        }
+
         var rows = new List<DecisionCommitService.SignalRow>(signalIds.Count);
         foreach (var signalId in signalIds)
         {
-            Entity? row;
-            try
-            {
-                row = await _entities.RetrieveAsync("sprk_signal", signalId, BillingSignalSubjectColumns, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (IsBillingReadNotFound(ex))
-            {
-                row = null;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                throw new DecisionRecordRefusedException(
-                    DecisionRecordRefusalReason.OwnerResolutionFailed,
-                    "A Signal the decision resolves could not be read, so the Decision Record owner is unknown; nothing was written.",
-                    RecordOwnerRefusal.ParentUndetermined,
-                    ex);
-            }
-
-            if (row is null)
+            if (!byId.TryGetValue(signalId, out var row))
             {
                 throw new DecisionRecordRefusedException(
                     DecisionRecordRefusalReason.OwnerRefused,
@@ -1603,7 +1616,7 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>ontology-r1 F4-1: a billing decision's policy version, when it names one, must exist; the record would otherwise reference a
-    /// version no rule ever had. Read app-only through the shared sysadmin reader.</summary>
+    /// version no rule ever had. Read app-only through the shared sysadmin reader (a query by id, D-34, as for the Signals).</summary>
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ReviewInvalid"/>: no such policy version.
     /// <see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the read faulted (a retry may succeed). Nothing is written.</exception>
     private async Task RequireBillingPolicyVersionAsync(Guid? policyVersionId, CancellationToken ct)
@@ -1613,14 +1626,18 @@ public sealed class DecisionRecordWriter
             return;
         }
 
-        Entity? row;
+        bool exists;
         try
         {
-            row = await _entities.RetrieveAsync("sprk_policyversion", versionId, ["sprk_policyversionid"], ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (IsBillingReadNotFound(ex))
-        {
-            row = null;
+            var query = new QueryExpression("sprk_policyversion")
+            {
+                ColumnSet = new ColumnSet("sprk_policyversionid"),
+                TopCount = 1,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition("sprk_policyversionid", ConditionOperator.Equal, versionId);
+            var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            exists = rows?.Entities?.Any(e => e.Id == versionId) == true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1630,27 +1647,12 @@ public sealed class DecisionRecordWriter
                 innerException: ex);
         }
 
-        if (row is null)
+        if (!exists)
         {
             throw new DecisionRecordRefusedException(
                 DecisionRecordRefusalReason.ReviewInvalid,
                 "PolicyVersionId names no policy version; nothing was written.");
         }
-    }
-
-    /// <summary>A by-id read that failed because the row does not exist (<c>0x80040217</c> anywhere in the chain), through the one shared
-    /// predicate (<see cref="Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound"/>).</summary>
-    private static bool IsBillingReadNotFound(Exception ex)
-    {
-        for (var e = ex; e is not null; e = e.InnerException)
-        {
-            if (Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound(e))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /// <summary>
