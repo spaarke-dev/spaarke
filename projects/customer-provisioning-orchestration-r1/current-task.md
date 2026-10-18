@@ -24,13 +24,14 @@
 
 1. **L62 Exchange role grant** (above) — blocks T186.
 2. **L56 AI content for ACME**: ACME has 0 playbooks / nodes / actions / tools / consumers (dev: 34 / 93 / 80 / 51 / 40); H12a seeded 4 of 12 sets and the repo lacks dev's content. Recommended: export what the 40 consumer rows reach from dev with ids preserved, port a PK-preserving writer into H12a (tools → actions → playbooks → N:N → nodes after H12c → node N:N → canvas → consumers), re-seed ACME. Does not block the run.
-3. Demo accounts not classified: `jake.schroeder`, `rachel.schroeder`, `sarah.johnson`, `jane.smith`, `alex.demo` @demo.spaarke.com.
-4. Dev BFF secrets an agent printed locally (webhook secret, signing key, SignalR key): rotation is the owner's call.
-5. ISS-026 publisher verification (Partner ID 7011236) — waits on Partner Center facts.
+3. **#2027 org auditing** (code done `c28d9dc48`: H6 contract `isauditenabled=true`, `auditretentionperiodv2=-1`, read-back): OK needed for two live writes — spaarkedev1 retention null→-1 (uac-r2 waits to verify read-only), and ACME (H6 already ran under the old contract). Tell uac-r2 when dev is set.
+4. Demo accounts not classified: `jake.schroeder`, `rachel.schroeder`, `sarah.johnson`, `jane.smith`, `alex.demo` @demo.spaarke.com.
+5. Dev BFF secrets an agent printed locally (webhook secret, signing key, SignalR key): rotation is the owner's call.
+6. ISS-026 publisher verification (Partner ID 7011236) — waits on Partner Center facts.
 
 ## 📋 Remaining
 
-- **When this branch merges to master**: PR body must say `Closes #2034` and `Closes #2040` (UAC offered a review of the isdisabled check — send them the PR number).
+- **When this branch merges to master**: PR body must say `Closes #2034`, `Closes #2040` and `Closes #2027` (UAC offered a review of the isdisabled check — send them the PR number).
 - **After T186 completes**: Step 6a registry reconcile; handoff `runs/{runId}.md`; 6e/6f; Step 7; carry lessons L1–L62 into the guide + prereqs; fix L15 and L30; remove the old broad L2 Graph roles; track the S18 columns.
 - **Report to the owner**: S1 plan cost; L49 ComposeIdentityKey DEGRADED on the ACME BFF; task 264 ordering vs task 047; registry table shipping in SpaarkeMaster (does the BFF need it per environment?).
 - **T186 live proofs still open**: ISS-008 (second POST refused); H14m route-level M4; H13 census (T260); PRQ-C-14.
