@@ -560,7 +560,7 @@
     <ReferencingEntityName>sprk_Policy</ReferencingEntityName>
     <ReferencedEntityName>sprk_Matter</ReferencedEntityName>
     <CascadeAssign>NoCascade</CascadeAssign>
-    <CascadeDelete>RemoveLink</CascadeDelete>
+    <CascadeDelete>Cascade</CascadeDelete>
     <CascadeArchive>RemoveLink</CascadeArchive>
     <CascadeReparent>NoCascade</CascadeReparent>
     <CascadeShare>NoCascade</CascadeShare>

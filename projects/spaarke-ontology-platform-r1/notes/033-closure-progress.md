@@ -39,9 +39,13 @@ not edited here.
    in force, so the policy is not evaluated, nothing is closed or raised, `PolicyFailures` is counted (the run is not
    successful) and EventId 50309 `PolicyVersionNotInForce` is logged. Closing would just reopen the same version every night.
    Controls: a current version with no, or a future, `sprk_inforceto` runs normally.
-2. **"Deleted" policy is not handled.** FR-16 says "disabled or deleted". Retire (D-22) replaced deletion as the way a policy
-   stops, and no role deletes `sprk_policy`; a hard-deleted policy would also orphan the `sprk_policy` lookup the closure reads
-   by. Known limit, not filed: no path creates the state.
+2. **"Deleted" policy: now handled (task 102b fix round 3, 2026-10-17).** FR-16 says "disabled or deleted". Retire (D-22) replaced
+   deletion as the way a policy stops, but the state now has a path: deleting a matter deletes a rule limited to it
+   (`sprk_policy_matter` CascadeDelete=Cascade, owner 2026-10-17), and an Ontology Administrator can hard-delete a policy. The
+   policy's Signals keep their rows with `sprk_policy` nulled (RemoveLink), so the closure above, which reads by that lookup,
+   never reaches them. The nightly job's deleted-policy sweep
+   (`SignalClosureService.CloseSignalsOfDeletedPoliciesAsync`) closes every Open or Acknowledged Signal whose `sprk_policy` is
+   empty and whose dedupe key names no existing policy code, as `PolicyRetired`. See `102b-rule-matter-scope.md`, "Fix round 3".
 3. **`ExistingSignal` reused for the callable read** (placeholders for the fields the closure does not need) rather than a
    second record type; the closure needs only id, row version, status and cited version.
 4. **Shared-file edits** (lanes 032 / 034 also near the job): ctor gains one parameter; `EvaluatePolicyAsync` gains 4 lines after
