@@ -2,6 +2,7 @@ using System.Globalization;
 using FluentAssertions;
 using Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 using Xunit;
+using static Sprk.Bff.Api.Tests.Domain.Signals.Billing.Handlers.BillingHandlerKit;
 
 namespace Sprk.Bff.Api.Tests.Domain.Signals.Billing.Handlers;
 
@@ -31,6 +32,44 @@ public class BillingMathTests
         // Banker's rounding would give 2.34 for 2.345 and 2.36 for 2.355; the rule is half away from zero.
         BillingMath.ToCent(2.345m).Should().Be(2.35m);
         BillingMath.ToCent(2.365m).Should().Be(2.37m);
+    }
+
+    // ── D-105: the one definition of a credit line ──────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("-0.1", "575.00")] // negative hours
+    [InlineData("-8", null)]
+    [InlineData("1.0", "-575.00")] // negative amount
+    [InlineData(null, "-50.00")]
+    [InlineData("-1.0", "-575.00")] // both
+    [InlineData("-0.0001", "0")] // the smallest negative still counts
+    [InlineData("1.0", "-0.01")]
+    public void IsCreditLine_MustFire_ForNegativeHoursOrANegativeAmount(string? hours, string? amount)
+    {
+        var line = Fee() with { Hours = hours is null ? null : D(hours), Amount = amount is null ? null : D(amount) };
+
+        BillingMath.IsCreditLine(line).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("1.0", "575.00")]
+    [InlineData("0", "0")] // zero is not negative
+    [InlineData("0.0", null)]
+    [InlineData(null, "0.00")]
+    [InlineData(null, null)] // no hours and no amount: nothing says it is a credit
+    [InlineData("0.0001", "0.01")]
+    public void IsCreditLine_MustNotFire_ForPositiveZeroOrMissingHoursAndAmount(string? hours, string? amount)
+    {
+        var line = Fee() with { Hours = hours is null ? null : D(hours), Amount = amount is null ? null : D(amount) };
+
+        BillingMath.IsCreditLine(line).Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsCreditLine_JudgesAnExpenseLineByItsAmount()
+    {
+        BillingMath.IsCreditLine(Expense() with { Amount = -50m }).Should().BeTrue();
+        BillingMath.IsCreditLine(Expense() with { Amount = 50m }).Should().BeFalse();
     }
 
     [Theory]

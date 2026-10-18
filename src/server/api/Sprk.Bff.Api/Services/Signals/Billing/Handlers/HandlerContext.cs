@@ -7,10 +7,21 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// The one rounding rule of the billing handlers (task 071): money is rounded to the cent, a midpoint away from zero
 /// (<c>2.345</c> becomes <c>2.35</c>, <c>-2.345</c> becomes <c>-2.35</c>). Every computed amount (the rate limit with its tolerance, a
 /// suggested reduction) goes through <see cref="ToCent"/>; nothing else rounds. Money and hours are <c>decimal</c> throughout.
+/// It also holds the one definition of a credit line (<see cref="IsCreditLine"/>, D-105), the other piece of arithmetic every
+/// charge rule shares.
 /// </summary>
 internal static class BillingMath
 {
     internal static decimal ToCent(decimal value) => decimal.Round(value, 2, MidpointRounding.AwayFromZero);
+
+    /// <summary>
+    /// The one definition of a credit line (D-105): a line with negative hours or a negative amount, a reversal or a write-off
+    /// of an earlier charge. A charge rule never judges it as a charge (ApprovedRate, ExpenseRule, InvoiceAge, CoreRecordWindow
+    /// skip it; NonBillableActivity never suggests disallowing it), so a credit cannot be rejected or reduced as if it were
+    /// billed. The credit stays on the invoice, visible to the reviewer. A line with no hours and no amount is not a credit.
+    /// Every handler asks this method; none repeats the sign test.
+    /// </summary>
+    internal static bool IsCreditLine(BillingLineFacts line) => line.Hours < 0m || line.Amount < 0m;
 }
 
 /// <summary>Invariant text for the values a finding records, so a finding does not depend on the machine's culture.</summary>
