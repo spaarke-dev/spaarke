@@ -1,9 +1,9 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-18 ~04:00Z (main session; 102b done, cascade live). State only — history is in git log,
+> **Last Updated**: 2026-10-18 ~05:00Z (main session; sync PR #2088 updated with master, merging). State only — history is in git log,
 > task `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path;
 > D-123 secure family; D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6.
-> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-167). Deferred work: one self-contained GitHub issue per item, label
+> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-169). Deferred work: one self-contained GitHub issue per item, label
 > `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-117**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
@@ -11,11 +11,11 @@
 | Field | Value |
 |---|---|
 | **Task** | No lane in flight. 102b ✅ (PR #2075 merged `4ff829fa5`; live cascade applied and checked 2026-10-18) |
-| **Next Action** | 1) docs→master sync (102b) via `C:\wts-sync`, full ArchTests first; then ask R3 for a dev BFF deploy (fresh owner approval; BFF BEFORE Console, K3). 2) Re-check the ebilling 074 fix range when it arrives. 3) Owner: #2084 decision |
+| **Next Action** | 1) Sync PR #2088 head `ee7469c33` (master #2086 merged in; build + ArchTests 1128 pass); merge script running. After merge: send R3 the master SHA for a dev BFF deploy (fresh owner approval; BFF BEFORE Console, K3); notify word-add-in. 2) ebilling 015 follow-up re-check running (`be1c60e38..009317530`). 3) Draft the #1876 writer side (D-169) for uac-r2. 4) Re-check ebilling 074 and 071 fix ranges when they arrive |
 
 ## Open owner / peer items
 
-1. **#2084 / DI-115 (owner decision):** when a matter turns Secure after a rule was limited to it, move the rule (and maybe its versions) into the matter's secure team (SecureChildLineage entry; uac-r2 builds it)? Recommended yes. Nothing is exposed on dev (no matter-scoped rules).
+1. **#2084 / DI-115 ADOPTED (D-168, relayed by uac-r2):** UAC builds SecureChildLineage for `sprk_policy` + `sprk_policyversion` after 099b (#2063). Ontology asked UAC to also file versions created under an already-Secure policy. **#1876 / DI-84 decided (D-169):** a gate DR for an unfiled communication gets the communication's per-participant shares; ontology drafts the writer side, UAC the resolver; needs `requireTeam` relaxed for this case.
 2. **111 row 4** (owner): `/upload?entityType=sprk_project&entityId=<GUID>`, with the GUID taken from `/project/<GUID>`. Then close 111 → 114.
 3. **CORS** on `/api/v1/external/notifications` (R3 owns): if it recurs, get the UTC time and the OPTIONS status. **Never dispatch `deploy-external-spa.yml` from master** while R3's SPA work is off master.
 4. **POL-MATTER-NOBUDGET** is on (D-163): the owner bulk-closes the dev Signals after the next evaluation.
@@ -26,6 +26,7 @@
 - **015** (retire `sprk_invoicestatus`; counted = Approved, Sent to AP, Paid on `statuscode`, D-166 = their D-103): fix round re-check CLEAN (`62d51bf2e^..d249e9a50`). The PR #1911 Q24 condition is met. The delete script requires `-BffDeployAttestation`/`-SpaDeployAttestation`. After the delete, every dev BFF must contain `e0df77339` (R3 agreed). **When 015 reaches master:** update `notes/102a-authoring-contract.md` residual row and D-161 to name `statuscode`.
 - **074** (`WriteBillingDecisionAsync`, D-100/D-101): pass done; all 7 conditions MET. ebilling is fixing F4-1 fully (resolved Signals' subjects in ownership), F3-1, K2 hash, K3 (no contactId), K4. Consumer obligations are in 049/100/103-105. **Re-check their fix range.** Ours after 074 reaches master: `DecisionRecordContextImmutabilityTests.CreateEntryPoints` + synthetic member + must-fire control; 5 stale writer comments (`DecisionRecordWriter.cs` :556 :1547 :1660 :2164 :2326).
 - **049** (held invoices D-102, Pending Spend D-104): review when sent. The held exclusion must be in both sum paths. Pending Spend needs §11 answers and owner schema approval. If it should be authorable as a Threshold, we add allow-list entries (`PolicyVersionValidator.AuthorableColumns`, `PredicateCompiler`, `RuleBodyDescriber`).
+- **071** (billing rule handlers): pass done; 4 fix-now items sent (read fields after IsCreditLine; D-123 cross-wall Duplicate evidence, with their owner + uac-r2; Describe text vs handler; stale hashes) and K4 purity guard, K1 currency, K1 SubmissionId, K2. Re-check their fix range when it arrives.
 - **070**: re-check CLEAN through `cc01731b3`. Their master PR and our 102b touch the same authoring files; whoever reaches master second resolves the conflict.
 
 ## Next, in order
