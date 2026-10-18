@@ -755,6 +755,10 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         {
             "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
             "sprk_totalamount", "sprk_project", "sprk_matter",
+            // spaarke-SPA-external-access-platform-r3 (owner Partner UAT 2026-10-17, ebilling-r1 task 015): NOT grid-derived.
+            // The SPA record detail reads the invoice status from statuscode. Appears on both sides of the task 134 shrink
+            // comparison, so it drops nothing.
+            "statuscode",
         },
         ["sprk_workassignment"] = new[]
         {
@@ -793,6 +797,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         {
             "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
             "sprk_totalamount", "sprk_project", "sprk_matter", "sprk_visibilitystate", "modifiedon", "statecode",
+            "statuscode", // the 2026-10-17 addition above; on both sides, so the shrink comparison is unchanged
         },
         ["sprk_workassignment"] = new[]
         {
