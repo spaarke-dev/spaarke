@@ -23,6 +23,7 @@ Status: see `tasks/TASK-INDEX.md` and `current-task.md`. Spec: `spec.md` (source
 
 **Authorization and data access**
 - Every new external-plane route sits in the `/api/v1/external` group (`ExternalCollaboration` policy + `CallerPrincipalAuthorizationFilter`, `ExternalAccessEndpoints.cs:60-63`). It checks the record against the accessible set, fail-closed (NFR-01).
+  - **Exceptions (A9 identity routes):** `POST /api/v1/external/registration` (047) and `POST /api/v1/external/workforce/link` (048) sit in their own `/api/v1/external` group, with `ExternalCollaboration` but no `CallerPrincipalAuthorizationFilter`. That filter would refuse a not-yet-registered or not-yet-linked caller before the handler runs. Both take no record id and act only on the caller's own identities, so the handler checks WorkforceHome first. They are ledgered `Permanent CallerScopedOnly` (`r3-047`, `r3-048`).
 - No handler branches on plane. The plane comes only from validated `iss`/`tid` (`CallerPrincipalResolver.DeterminePlane`, `:386`).
 - No OBO on the external plane. Dataverse and SPE access there is app-only, scoped to the composed set; SPE goes through `SpeContainerOwnershipGuard` (NFR-01, FR-24).
 - Rights per record: a list or download needs Read, an upload or create needs Create, an update needs Write.
@@ -62,6 +63,10 @@ Status: see `tasks/TASK-INDEX.md` and `current-task.md`. Spec: `spec.md` (source
 - **ADR-028 A3 (:124)** — path B. Default Tier-1 modules by user type (FR-19). Task 001.
 - **ADR-028 A1 (:55)** — path B (clarify). The "no B2B guest per external user" rule targets CIAM partners. Workforce contacts are customer staff and become guests (C7). Task 001.
 - **ADR-052** — path C. The registration service host is chosen under ADR-052 §6 (task 060). *Lapsed: task 060 is withdrawn under A9.*
+- **ADR-028 A9, "authorization never relies on email/UPN"** (task 048) — path A, owner-approved 2026-10-13 (`notes/a9-bff-design.md` §11 item 3: "The UPN consistency check stays").
+  - The stored-link route compares the guest token's home UPN with the home bearer's `preferred_username`, as a refuse-only check (`SpaarkeGuestTokenValidator.cs`).
+  - It can never grant or choose the link target: the systemuser is found by the proven guest `oid`.
+  - It can refuse a genuine user (`upn_mismatch`, known limit K1 in `notes/task-048-notes.md`). Task 074 verifies the claim shapes live.
 - **ADR-028 A9** (2026-10-13) — path B, owner-approved. Workforce contacts sign in with their customer's home directory, and the A1 guest clarification and A8 guest self-registration are superseded for them. Applied in PR #1810. Cross-project note: `notes/coordination/2026-10-13-model1-workforce-signin-cross-project.md`.
 
 ## 3. Owner directives and standing decisions
@@ -112,6 +117,24 @@ Full table: `spec.md` §Owner Clarifications. These still constrain work:
 - Intake: department from the contact record; Invention for workforce by default, partners behind a flag (default off); incidents kept simple (alerting deferred); fixed option lists in R3; NDA covers review and issuing our standard NDA. Details: `notes/intake-form-design.md` §6.1.
 - Grid columns: the owner wants grids driven by the entity's Dataverse views (savedqueries) with the shared view selector, as in the workspace grids, rather than hard-coded column sets. Approach under discussion (task 002).
 - Registration service (060): a shared service is acceptable if it does not conflict with the Model 1 dedicated and segregated customer directive.
+
+**Owner answers 2026-10-13 ("follow your recommendations so we are not blocked")**
+- Grid views (task 002 → "use Dataverse views"):
+  - "My" views use the assignment/membership resolver;
+  - each entity has External Active, My and Inactive views;
+  - the internal `ownerid eq-userid` "My" views are logged as an issue (`/project-defer-issue-tracking`) at the start of the grid task.
+- Bell items:
+  - team access: option A, no bell item; people still get message items on records reached through a team;
+  - renewals: option A, accept `modifiedon` noise; no `sprk_renewedon` column.
+- ISS-005: option A. Provisioning H4b writes `ExternalAccess:CustomerBusinessUnitId` from H10's BU id. While it is missing, no contact is created (fail safe). Dev sets it by hand.
+- 052:
+  - Service Requests stays a partner default tab, but only while the partner switch is on (as built);
+  - no intake idempotency key is a known limit (Finish is locked while a submit is in flight).
+- 053: no Trademark "classes" field (design §4: Legal assigns the classes).
+- Licensing: a commercial item, handled outside this project. It does not block R3.
+- Mechanical guard against `organizations`/`common`: **not added**.
+  - The security control is the BFF's A9 token acceptance; a client-side authority grants nothing.
+  - The A9 BFF task carries must-reject tests: an unlisted `tid`, `acct` = 1, an app token, a non-exact `iss` and a wrong `aud`.
 
 **Delivery**
 - 2026-10-09 — R3 delivers the production build and package; go-live is gated on T240c/T240d and DNS.

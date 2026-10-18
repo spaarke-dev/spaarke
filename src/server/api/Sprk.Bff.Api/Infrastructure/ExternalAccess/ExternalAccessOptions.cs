@@ -38,4 +38,12 @@ public sealed class ExternalAccessOptions
     /// value, including empty, fails startup.
     /// </summary>
     public bool PartnerInventionIntakeEnabled { get; set; }
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the business unit whose DEFAULT team owns every contact the registration route
+    /// (<c>POST /api/v1/external/registration</c>) creates. Absent means no registration create: the route answers 500
+    /// <c>registration_owner_unconfigured</c> and creates nothing (binding an existing contact needs no owner). App Service
+    /// form: <c>ExternalAccess__CustomerBusinessUnitId</c>. A value that is not a GUID fails startup.
+    /// </summary>
+    public Guid? CustomerBusinessUnitId { get; set; }
 }

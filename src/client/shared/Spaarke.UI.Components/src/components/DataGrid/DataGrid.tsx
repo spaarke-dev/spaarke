@@ -585,9 +585,45 @@ export function buildRecordOpenNavArgs(
   return { pageInput, navOptions: LAYOUT_1_NAV_OPTIONS };
 }
 
-/** Formats one cell for display. Exported for tests (task 098). */
-export function renderCellValue(value: unknown, renderer: string): string {
+/**
+ * The display label the BFF fetch seam attached for one column: `row['@formattedValues'][column]`
+ * (task 061). Undefined when the row has no map, no entry, or the entry is not a non-blank string.
+ */
+export function formattedLabelOf(row: Record<string, unknown>, column: string): string | undefined {
+  const map = row['@formattedValues'];
+  if (map && typeof map === 'object') {
+    const label = (map as Record<string, unknown>)[column];
+    if (typeof label === 'string' && label.trim()) return label;
+  }
+  return undefined;
+}
+
+/** Renderers whose client formatting wins over a server label: dates (task 098 calendar-day rule) and percentages. */
+const CLIENT_FORMATTED_RENDERERS = new Set(['date', 'dateonly', 'datetime', 'percentage']);
+
+/**
+ * Whether a server label replaces the client rendering of a cell (task 061). Not for the client-formatted renderers,
+ * and not for a plain number under 'currency' (a configured currency column keeps its client formatting; a Money
+ * object, which would otherwise render as JSON, takes the label).
+ */
+function usesFormattedLabel(value: unknown, renderer: string): boolean {
+  if (CLIENT_FORMATTED_RENDERERS.has(renderer)) return false;
+  return !(renderer === 'currency' && typeof value === 'number');
+}
+
+/**
+ * Formats one cell for display. Exported for tests (tasks 098, 061).
+ *
+ * `formattedLabel` is the server-side display string for the cell (see {@link formattedLabelOf}). It takes
+ * precedence over the raw value so an option set / lookup / money value shows its label instead of JSON. The date and
+ * percentage renderers ignore it (a server-formatted date carries the server's culture and zone and would undo the
+ * calendar-day handling below, task 098), and so does 'currency' for a plain number (see usesFormattedLabel).
+ */
+export function renderCellValue(value: unknown, renderer: string, formattedLabel?: string): string {
   if (value === null || value === undefined || value === '') return '';
+  if (formattedLabel && usesFormattedLabel(value, renderer)) {
+    return formattedLabel;
+  }
   switch (renderer) {
     case 'currency': {
       const num = typeof value === 'number' ? value : Number(value);
@@ -1127,7 +1163,15 @@ export const DataGrid: React.FC<DataGridProps> = props => {
           if (typeof aVal === 'number' && typeof bVal === 'number') {
             return aVal - bVal;
           }
-          return String(aVal ?? '').localeCompare(String(bVal ?? ''));
+          // Dates sort on the raw ISO value (their display string is locale order, not time order).
+          if (col.renderer === 'date' || col.renderer === 'dateonly' || col.renderer === 'datetime') {
+            return String(aVal ?? '').localeCompare(String(bVal ?? ''));
+          }
+          // Everything else sorts on what the cell shows (task 061): an option set or lookup arrives as an object,
+          // which would otherwise compare as "[object Object]" and never move.
+          return renderCellValue(aVal, col.renderer, formattedLabelOf(a, col.name)).localeCompare(
+            renderCellValue(bVal, col.renderer, formattedLabelOf(b, col.name))
+          );
         },
         renderHeaderCell: () => (
           <HeaderCellContent
@@ -1153,7 +1197,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
 
           if (col.isPrimaryName && resolved) {
             const idValue = String(item[resolved.primaryIdAttribute] ?? item._rowId ?? '');
-            const label = renderCellValue(value, 'default') || '(no name)';
+            const label = renderCellValue(value, 'default', formattedLabelOf(item, col.name)) || '(no name)';
             return React.createElement(
               Link,
               {
@@ -1177,7 +1221,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
           if (customRenderer) {
             return customRenderer(value, item) as React.ReactNode;
           }
-          return renderCellValue(value, col.renderer);
+          return renderCellValue(value, col.renderer, formattedLabelOf(item, col.name));
         },
       })
     );
