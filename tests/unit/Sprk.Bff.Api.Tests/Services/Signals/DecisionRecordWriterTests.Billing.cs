@@ -317,6 +317,17 @@ public sealed partial class DecisionRecordWriterTests
         NoIo(h);
     }
 
+    [Fact]
+    public async Task Billing_C5_ASystemDecisionNamingADecidingContact_IsRefused()
+    {
+        // Edge beyond the stated contract (one line in notes): sprk_assignedtointernal would name a person for a decision no person made (D-129).
+        var h = BillingHarness();
+
+        (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing("reject-invoice", system: true, reason: "late") with { DeciderContactId = Guid.NewGuid() }))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        NoIo(h);
+    }
+
     // ── C6: the 026 invoice-family checks run on the billing path (the shared FiledAndOwnedAsync) ─────────────────
 
     [Theory]

@@ -1361,6 +1361,8 @@ public sealed class DecisionRecordWriter
         var confirmed = NoneIfEmpty(r.ConfirmedByUserId) is not null;
         if (!confirmed && !automated) throw Invalid("A billing decision with no confirming user must be a system decision (an 'automated:' decider).");
         if (confirmed && automated) throw Invalid("A billing decision a user confirmed cannot carry an 'automated:' decider.");
+        // D-129: sprk_assignedtointernal names the individual who decided; a system decision has none.
+        if (!confirmed && NoneIfEmpty(r.DeciderContactId) is not null) throw Invalid("A system decision cannot name a deciding contact.");
 
         if (string.IsNullOrWhiteSpace(r.Outcome)) throw Invalid("Outcome is required.");
         if (r.Reason is { Length: > ReasonMaxLength }) throw Invalid("Reason is too long for sprk_reason.");
