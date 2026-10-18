@@ -38,7 +38,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     private readonly Lazy<IThreadMembershipDerivationService> _membershipDerivation;
     private readonly IConfiguration _configuration;
     private readonly ILogger<DirectThreadAccessService> _logger;
-    private readonly Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? _gateDecisionRecords;
+    private readonly Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing _gateDecisionRecords;
 
     /// <param name="membershipDerivation">
     /// Lazily-resolved (task 052 / FR-11): <see cref="IThreadMembershipDerivationService"/>'s default
@@ -59,14 +59,14 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         Lazy<IThreadMembershipDerivationService> membershipDerivation,
         IConfiguration configuration,
         ILogger<DirectThreadAccessService> logger,
-        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null)
+        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing gateDecisionRecords)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _accessGrant = accessGrant ?? throw new ArgumentNullException(nameof(accessGrant));
         _membershipDerivation = membershipDerivation ?? throw new ArgumentNullException(nameof(membershipDerivation));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _gateDecisionRecords = gateDecisionRecords;
+        _gateDecisionRecords = gateDecisionRecords ?? throw new ArgumentNullException(nameof(gateDecisionRecords));
     }
 
     /// <inheritdoc />
@@ -216,7 +216,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
             {
                 await GrantReadAccessToPrincipalsAsync(communicationId, threadId, principals, ct);
                 // Ontology 042b (D-169): a user-owned message's gate Decision Records follow its shares; a revoke path added here must mirror the revoke.
-                if (messageOwningTeam is null && _gateDecisionRecords is not null)
+                if (messageOwningTeam is null)
                     await _gateDecisionRecords.MirrorCommunicationSharesAsync(communicationId, ct);
             }
         }

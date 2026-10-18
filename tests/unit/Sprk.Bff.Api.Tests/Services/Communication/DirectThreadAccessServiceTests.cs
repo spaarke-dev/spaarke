@@ -69,12 +69,7 @@ public class DirectThreadAccessServiceTests
             }));
     }
 
-    private DirectThreadAccessService BuildSut() => new(
-        _entityService.Object,
-        _accessGrant.Object,
-        new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
-        new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
-        Mock.Of<ILogger<DirectThreadAccessService>>());
+    private DirectThreadAccessService BuildSut() => BuildSut(new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
 
     // ── FindOrCreateDirectThreadAsync: create + no regarding anchor ────────────────────────────
 
@@ -658,7 +653,7 @@ public class DirectThreadAccessServiceTests
             _entityService.Object, _accessGrant.Object,
             new Lazy<IThreadMembershipDerivationService>(() => derivation),
             new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
-            Mock.Of<ILogger<DirectThreadAccessService>>());
+            Mock.Of<ILogger<DirectThreadAccessService>>(), new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

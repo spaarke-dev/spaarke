@@ -70,9 +70,10 @@ public static class SignalsModule
 
         // GateDecisionRecordSharing (task 042b, D-169): the gate Decision Record of an UNFILED communication is shared Read with the
         // communication's internal sharees (at write, and on each later grant of the communication), and re-owned to the resolver's team
-        // when an Office save files the communication. Singleton over singletons (the shared sysadmin reader, the POA seam, the writer
-        // client above, the resolver, the cache invalidator). Taken as an optional last parameter by DecisionRecordWriter,
-        // DirectThreadAccessService and ReconciledEmailFiling. CLAUDE.md section 11: Existing: the writer (create-only, guarded), uac-r2's
+        // when any re-file of the communication runs SecureChildReconciler.AfterRefileAsync. Registered unconditionally, singleton over
+        // singletons (the shared sysadmin reader, the POA seam, the writer client above, the resolver, the cache invalidator), so the
+        // scoped SecureChildReconciler and the singleton DirectThreadAccessService take it as a REQUIRED dependency with no captive
+        // scope (GateDecisionRecordSharingRegistrationTests). DecisionRecordWriter takes it as an optional last parameter. CLAUDE.md section 11: Existing: the writer (create-only, guarded), uac-r2's
         // DirectThreadAccessService and SecureChildReconciler.ReownOrdinaryRowAsync (refuses a user-owned row). Extension: the writer cannot
         // assign without breaking its create-only guard; the other two are uac-r2's. Cost of doing nothing: D-169 fails (owner-only record).
         services.AddSingleton<GateDecisionRecordSharing>();
