@@ -55,6 +55,7 @@
     <constraint source="ADR-015, NFR-11">Logs carry ids, sizes, timings and outcome codes, never prose or findings text.</constraint>
     <constraint source="ADR-008, ADR-019, 040">Draft route: endpoint-filter authorization with the same check 104 uses for Reject / Return on that invoice; ProblemDetails with stable codes; RequireEbillingEnabled().</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement BFF, no package, publish-size delta recorded, no new HIGH CVE.</constraint>
+    <constraint source="076 review round 2 item 5 (notes/076-ruleset-endpoints.md section 8)">Clause text for firms comes only from RuleSetService.GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct). invoiceFirmId is the firm of the INVOICE the finding belongs to: the invoice's sprk_vendororg, read server-side, and passed only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route) and never the SPA identity's firm: a CIAM caller may belong to several firms, and internal callers have no SPA identity. Guid.Empty (the invoice has no firm) returns no text. Required test: a caller in two firms, viewing firm A's invoice, gets A's clause and never B's.</constraint>
   </constraints>
 
   <knowledge>

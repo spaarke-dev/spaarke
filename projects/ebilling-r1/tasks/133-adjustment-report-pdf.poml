@@ -47,6 +47,7 @@
     <constraint source="NFR-08">GenerateAsync is idempotent: an existing report for the same outcome is reused; a changed outcome (for example Return after an earlier rejection report) creates a new document and repoints the link.</constraint>
     <constraint source="ADR-008, ADR-028, 040">Download route on the external group: CIAM caller checked with 130's firm-scope check; 404 with a stable code when no report exists; RequireEbillingEnabled().</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: no new package (OpenXml already referenced), publish-size delta recorded, no new HIGH CVE.</constraint>
+    <constraint source="076 review round 2 item 5 (notes/076-ruleset-endpoints.md section 8)">Clause text for firms comes only from RuleSetService.GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct). invoiceFirmId is the firm of the INVOICE the finding belongs to: the invoice's sprk_vendororg, read server-side, and passed only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route) and never the SPA identity's firm: a CIAM caller may belong to several firms, and internal callers have no SPA identity. Guid.Empty (the invoice has no firm) returns no text. Required test: a caller in two firms, viewing firm A's invoice, gets A's clause and never B's.</constraint>
   </constraints>
 
   <knowledge>

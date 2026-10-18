@@ -50,6 +50,7 @@
     <constraint source="ADR-019, 040">ProblemDetails with stable codes; RequireEbillingEnabled() (503 ebilling.disabled); the widget is hidden when the flag is off, using the same signal 051 uses.</constraint>
     <constraint source="ADR-021, ADR-012, NFR-13">Fluent v9 tokens only; shared components first; works at 360 px width; no new npm package.</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement BFF (B1 caller identity, B4 live request), no package, publish-size delta recorded, no new HIGH CVE.</constraint>
+    <constraint source="076 review round 2 item 5 (notes/076-ruleset-endpoints.md section 8)">Clause text for firms comes only from RuleSetService.GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct). invoiceFirmId is the firm of the INVOICE the finding belongs to: the invoice's sprk_vendororg, read server-side, and passed only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route) and never the SPA identity's firm: a CIAM caller may belong to several firms, and internal callers have no SPA identity. Guid.Empty (the invoice has no firm) returns no text. Required test: a caller in two firms, viewing firm A's invoice, gets A's clause and never B's.</constraint>
   </constraints>
 
   <knowledge>

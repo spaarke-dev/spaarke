@@ -46,6 +46,7 @@
     <constraint source="FR-38">For an outcome still In Review, show status and billed total and the text "Under review" only.</constraint>
     <constraint source="project">Network calls only through the SPA's existing bffApiCall path (ADR-028 auth v2); errors map to the SPA's existing error presentation (403 → no access message, 503 ebilling.disabled → hidden section).</constraint>
     <constraint source="project">src/client/external-spa is shared with SPA-r3: change RecordDetailModal minimally (one section) and run /conflict-check before the PR.</constraint>
+    <constraint source="076 review round 2 item 5 (notes/076-ruleset-endpoints.md section 8)">Clause text for firms comes only from RuleSetService.GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct). invoiceFirmId is the firm of the INVOICE the finding belongs to: the invoice's sprk_vendororg, read server-side, and passed only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route) and never the SPA identity's firm: a CIAM caller may belong to several firms, and internal callers have no SPA identity. Guid.Empty (the invoice has no firm) returns no text. Required test: a caller in two firms, viewing firm A's invoice, gets A's clause and never B's.</constraint>
   </constraints>
 
   <knowledge>
