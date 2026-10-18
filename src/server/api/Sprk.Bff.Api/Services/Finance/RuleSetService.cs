@@ -74,12 +74,16 @@ public sealed record RuleSetCreated(
 /// this view. The Rule Review page sends it back with Accept and Reject (<see cref="RuleSetService.DecideAsync"/>), so an admin never decides
 /// content they were not shown. Null in the response to a write (the token after a write is not read back; reload the rule set to decide).
 /// </param>
+/// <param name="RejectionReason">
+/// Why an admin rejected the draft (task 077, D-113): set only while <paramref name="State"/> is <c>Rejected</c>, otherwise null. <b>Admin-only</b>:
+/// this view is the Rule Review read; no firm projection (<see cref="FirmClauseText"/>) carries it.
+/// </param>
 public sealed record ProposalView(
     Guid PolicyId, string PolicyCode, string Name, string State, bool InForce, bool HasPublishedVersion,
     Guid VersionId, int VersionNumber, string? RuleType, JsonNode? RuleBody, string? MessageTemplate, string? ShortHeadline,
     string? Consequence, string? DescriptionText, string? DescriptionFormal, string? DescriptionRefusal,
     string? ClauseQuote, string? ClauseLocation, IReadOnlyList<string> ValidationErrors,
-    string? RowVersion = null);
+    string? RowVersion = null, string? RejectionReason = null);
 
 /// <summary>A rule set with its rules (the Rule Review page's read).</summary>
 public sealed record RuleSetDetail(
@@ -286,6 +290,12 @@ public class RuleSetService
     /// <summary>The row version Dataverse advances on every write; the publish and decide writes are conditional on it (review pass 2).</summary>
     internal const string RowVersionColumn = "versionnumber";
 
+    /// <summary>The reason an admin gave when rejecting a draft (<c>sprk_policyversion</c>, task 077, D-113). Admin-only: never selected by a firm read.</summary>
+    internal const string RejectionReasonColumn = "sprk_rejectionreason";
+
+    /// <summary>The longest rejection reason (the column's max length).</summary>
+    public const int MaxRejectionReasonChars = 2000;
+
     /// <summary>
     /// The namespace of the ids of versions an edit creates (RFC 4122 version 5). A constant of this service, generated once; never
     /// change it: the primary key of version N of a policy is <see cref="VersionIdFor"/> of it, which is what makes two concurrent edits
@@ -301,7 +311,7 @@ public class RuleSetService
     {
         "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
         "sprk_consequence", "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", "sprk_inforceto",
-        RowVersionColumn,
+        RowVersionColumn, RejectionReasonColumn,
     };
 
     private static readonly string[] RuleSetColumns =
@@ -1193,7 +1203,15 @@ public class RuleSetService
                     || merged.ClauseReference != work.ClauseReference || merged.ClauseLocation != work.ClauseLocation)
                 {
                     fields["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Proposed);
-                    merged = merged with { State = (int)ProposalState.Proposed };
+
+                    // The decision is void, and so is the reason that went with it (D-113): the same write clears both, so a Proposed
+                    // draft never carries a rejection reason. Written only when there is a reason to clear.
+                    if (work.RejectionReason is not null)
+                    {
+                        fields[RejectionReasonColumn] = DBNull.Value;
+                    }
+
+                    merged = merged with { State = (int)ProposalState.Proposed, RejectionReason = null };
                 }
 
                 // Conditional on the row as read (review round 2, Step 9.5): a publish that has already written this draft's start date
@@ -1303,9 +1321,20 @@ public class RuleSetService
     /// refused 409 <see cref="CodeConcurrentEdit"/> before it is validated or written, whatever the change was (a headline edit included,
     /// because the admin saw the old headline). The write below is also conditional on this same token.
     /// </param>
+    /// <param name="rejectionReason">
+    /// Required for a reject (task 077, D-113): trimmed, 1 to <see cref="MaxRejectionReasonChars"/> characters, else 400 <see cref="CodeInvalid"/>
+    /// with a <c>reason</c> field error and nothing read or written. Stored in the same conditional write as the Rejected status. Ignored by an
+    /// accept, which clears any reason an earlier reject left. Optional only so that the accept call sites stay as they were.
+    /// </param>
     public virtual async Task<RuleSetOutcome<ProposalView>> DecideAsync(
-        Guid ruleSetId, Guid policyId, bool accept, long expectedRowVersion, CancellationToken ct)
+        Guid ruleSetId, Guid policyId, bool accept, long expectedRowVersion, CancellationToken ct, string? rejectionReason = null)
     {
+        var reason = string.Empty;
+        if (!accept && !TryNormalizeRejectionReason(rejectionReason, out reason))
+        {
+            return RuleSetOutcome<ProposalView>.Invalid(CodeInvalid, new[] { RejectionReasonError(policyId) });
+        }
+
         var found = await FindRuleAsync<ProposalView>(ruleSetId, policyId, ct);
         if (found.Refusal is not null)
         {
@@ -1347,9 +1376,21 @@ public class RuleSetService
             // Conditional on the row as read: the decision is about the content this read validated. An edit that landed since then
             // (it changed the content and wrote Proposed) advanced the row version, so this decision is refused instead of putting
             // content nobody reviewed into the Accepted state (review pass 2).
+            // The reason travels with the status in this one write (D-113): a reject stores it, an accept clears an earlier one (only
+            // when there is one, so an accept of a never-rejected draft writes what it always did).
+            var decision = new Dictionary<string, object> { ["sprk_proposalstatus"] = new OptionSetValue((int)state) };
+            if (!accept)
+            {
+                decision[RejectionReasonColumn] = reason;
+            }
+            else if (work.RejectionReason is not null)
+            {
+                decision[RejectionReasonColumn] = DBNull.Value;
+            }
+
             await _entities.BulkUpdateIfRowVersionsMatchAsync(VersionEntity, new List<(Guid id, Dictionary<string, object> fields, long rowVersion)>
             {
-                (work.Id, new Dictionary<string, object> { ["sprk_proposalstatus"] = new OptionSetValue((int)state) }, RequireRowVersion(work.RowVersion, VersionEntity, work.Id)),
+                (work.Id, decision, RequireRowVersion(work.RowVersion, VersionEntity, work.Id)),
             }, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1370,8 +1411,24 @@ public class RuleSetService
                 StatusCodes.Status500InternalServerError, CodeWriteFailed, "The decision could not be saved. Try again; if it keeps failing, contact support.");
         }
 
-        return RuleSetOutcome<ProposalView>.Done(await ViewAsync(rule with { Working = work with { State = (int)state } }, ct));
+        return RuleSetOutcome<ProposalView>.Done(await ViewAsync(
+            rule with { Working = work with { State = (int)state, RejectionReason = accept ? null : reason } }, ct));
     }
+
+    /// <summary>
+    /// The one rule for a rejection reason (D-113): trimmed, 1 to <see cref="MaxRejectionReasonChars"/> characters. The reject route applies it
+    /// before the service is called and <see cref="DecideAsync"/> applies it again, so no caller can store a blank or an over-long reason.
+    /// </summary>
+    public static bool TryNormalizeRejectionReason(string? raw, out string reason)
+    {
+        reason = raw?.Trim() ?? string.Empty;
+        return reason.Length is >= 1 and <= MaxRejectionReasonChars;
+    }
+
+    /// <summary>The field error for a missing, blank or over-long rejection reason.</summary>
+    public static RuleSetError RejectionReasonError(Guid policyId) => new(
+        policyId, null, "reason",
+        $"reason is required to reject a rule: 1 to {MaxRejectionReasonChars.ToString(CultureInfo.InvariantCulture)} characters.", null);
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
     // Publish
@@ -1978,7 +2035,8 @@ public class RuleSetService
     /// <param name="RowVersion">The row's <c>versionnumber</c> as read; the publish and decide writes are conditional on it.</param>
     internal sealed record VersionRow(
         Guid Id, int Number, int? RuleType, string? RuleBody, string? Template, string? Headline, int? Consequence, int? State,
-        string? ClauseReference, string? ClauseLocation, DateTime? InForceFrom, DateTime? InForceTo, long? RowVersion = null)
+        string? ClauseReference, string? ClauseLocation, DateTime? InForceFrom, DateTime? InForceTo, long? RowVersion = null,
+        string? RejectionReason = null)
     {
         public ProposalState StateOrProposed =>
             State is { } s && Enum.IsDefined(typeof(ProposalState), s) ? (ProposalState)s : ProposalState.Proposed;
@@ -2122,7 +2180,8 @@ public class RuleSetService
         v.GetAttributeValue<string>("sprk_clauselocation"),
         v.GetAttributeValue<DateTime?>("sprk_inforcefrom"),
         v.GetAttributeValue<DateTime?>("sprk_inforceto"),
-        v.GetAttributeValue<long?>(RowVersionColumn));
+        v.GetAttributeValue<long?>(RowVersionColumn),
+        v.GetAttributeValue<string>(RejectionReasonColumn));
 
     private static RuleSetSummary Summarize(Entity set, int ruleCount)
     {
@@ -2187,7 +2246,8 @@ public class RuleSetService
             work.Consequence is { } c && Enum.IsDefined(typeof(BillingConsequence), c) ? ((BillingConsequence)c).ToString() : null,
             text, formal, refusal, work.ClauseReference, work.ClauseLocation,
             validation.Select(e => $"{e.Field}: {e.Message}").ToList(),
-            carryRowVersion ? work.RowVersion?.ToString(CultureInfo.InvariantCulture) : null);
+            carryRowVersion ? work.RowVersion?.ToString(CultureInfo.InvariantCulture) : null,
+            work.StateOrProposed == ProposalState.Rejected ? work.RejectionReason : null);
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────

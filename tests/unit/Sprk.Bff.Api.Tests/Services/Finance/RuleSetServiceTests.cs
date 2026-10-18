@@ -704,7 +704,7 @@ public sealed class RuleSetServiceTests
         {
             (await service.EditAsync(set, policy, Edit(headline: "x"), default)).StatusCode.Should().Be(404);
             (await service.DecideAsync(set, policy, true, h.WorkingToken(policy), default)).StatusCode.Should().Be(404);
-            (await service.DecideAsync(set, policy, false, h.WorkingToken(policy), default)).StatusCode.Should().Be(404);
+            (await service.DecideAsync(set, policy, false, h.WorkingToken(policy), default, rejectionReason: Reason)).StatusCode.Should().Be(404);
         }
 
         (await service.PublishAsync(set, Effective, default)).ErrorCode.Should().Be("ruleset.nothing_to_publish");
@@ -1077,14 +1077,236 @@ public sealed class RuleSetServiceTests
         var service = h.Service();
 
         var accepted = await service.DecideAsync(set, policy, accept: true, h.WorkingToken(policy), default);
-        var rejected = await service.DecideAsync(set, policy, accept: false, h.WorkingToken(policy), default);
+        var rejected = await service.DecideAsync(set, policy, accept: false, h.WorkingToken(policy), default, rejectionReason: Reason);
 
         accepted.Value!.State.Should().Be("Accepted");
         rejected.Value!.State.Should().Be("Rejected");
         h.Writes.Should().OnlyContain(w => w.Kind == Write.BulkUpdate && w.Entity == "sprk_policyversion" && w.Id == version);
-        h.Writes.Should().OnlyContain(w => w.Fields.Keys.Single() == "sprk_proposalstatus");
+        h.Writes.Should().OnlyContain(w => w.Fields.Keys.All(k => k == "sprk_proposalstatus" || k == "sprk_rejectionreason"),
+            "a decision writes the status and, for a reject, its reason");
+        h.Writes.First().Fields.Keys.Should().Equal(new[] { "sprk_proposalstatus" }, "an accept of a draft that was never rejected writes the status alone");
         h.ConditionalCalls.Should().HaveCount(2, "each decision is written conditional on the row version it read");
         h.Row("sprk_policy", policy).Contains("sprk_currentversion").Should().BeFalse("deciding never puts anything in force");
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────────────
+    // The rejection reason (task 077 follow-up, D-113): required on a reject, stored with the status, admin-only
+    // ───────────────────────────────────────────────────────────────────────────────────────────
+
+    private const string Reason = "The guideline allows 12 hours a day, not 10.";
+
+    private static string ReasonOf(Harness h, Guid version) =>
+        h.Row("sprk_policyversion", version).GetAttributeValue<string>("sprk_rejectionreason");
+
+    [Fact]
+    public async Task Reject_WithAReason_StoresItInTheSameConditionalWriteAsTheStatus_AndTheViewCarriesIt()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+        var shown = TokenShown(await service.GetAsync(set, default), policy);
+
+        var outcome = await service.DecideAsync(set, policy, accept: false, shown, default, rejectionReason: "  " + Reason + "\n ");
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        outcome.Value!.State.Should().Be("Rejected");
+        outcome.Value.RejectionReason.Should().Be(Reason, "the reason is trimmed");
+        var write = h.Writes.Single();
+        write.Id.Should().Be(version);
+        write.Fields["sprk_proposalstatus"].Should().BeEquivalentTo(new OptionSetValue((int)ProposalState.Rejected));
+        write.Fields["sprk_rejectionreason"].Should().Be(Reason, "the reason and the status are one write");
+        h.ConditionalCalls.Single().Rows.Single().RowVersion.Should().Be(shown, "and that write is conditional on the version the admin saw");
+        ReasonOf(h, version).Should().Be(Reason);
+
+        var read = await service.GetAsync(set, default);
+        read.Value!.Proposals.Single().RejectionReason.Should().Be(Reason, "the Rule Review read shows it");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   \t\r\n ")]
+    public async Task Reject_WithNoReason_Is400OnTheReasonField_AndNothingIsReadOrWritten(string? reason)
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+        var shown = TokenShown(await service.GetAsync(set, default), policy);
+        var queriesBefore = h.Queries.Count;
+
+        var outcome = await service.DecideAsync(set, policy, accept: false, shown, default, rejectionReason: reason);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Invalid);
+        outcome.ErrorCode.Should().Be("ruleset.invalid");
+        outcome.Errors.Should().ContainSingle().Which.Field.Should().Be("reason");
+        h.Writes.Should().BeEmpty("nothing is written");
+        h.Queries.Should().HaveCount(queriesBefore, "the request is refused before the rule is read");
+        h.Row("sprk_policyversion", version).GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Proposed);
+        h.Row("sprk_policyversion", version).Contains("sprk_rejectionreason").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Reject_ReasonOfExactly2000Characters_IsStored_AndOneMoreIs400()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+        var longest = new string('r', RuleSetService.MaxRejectionReasonChars);
+
+        var tooLong = await service.DecideAsync(set, policy, accept: false, h.WorkingToken(policy), default, rejectionReason: longest + "x");
+        h.Writes.Should().BeEmpty();
+        var exact = await service.DecideAsync(set, policy, accept: false, h.WorkingToken(policy), default, rejectionReason: " " + longest + " ");
+
+        tooLong.Kind.Should().Be(RuleSetOutcomeKind.Invalid);
+        exact.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        ReasonOf(h, version).Should().Be(longest, "the limit is applied after trimming");
+    }
+
+    [Fact]
+    public async Task Reject_WithAStaleRowVersion_StillIs409_AndStoresNoReason()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+        var shown = TokenShown(await service.GetAsync(set, default), policy);
+        await service.EditAsync(set, policy, Edit(body: CapBody8), default); // another admin changes the rule
+        var writesAfterTheEdit = h.Writes.Count;
+
+        var outcome = await service.DecideAsync(set, policy, accept: false, shown, default, rejectionReason: Reason);
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("ruleset.concurrent_edit");
+        h.Writes.Should().HaveCount(writesAfterTheEdit, "the refused reject wrote nothing");
+        h.Row("sprk_policyversion", version).Contains("sprk_rejectionreason").Should().BeFalse("no reason is stored for a decision that was refused");
+    }
+
+    [Fact]
+    public async Task Reject_ARejectedDraftAgain_ReplacesTheReason()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+        (await service.DecideAsync(set, policy, accept: false, h.WorkingToken(policy), default, rejectionReason: Reason)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+
+        var again = await service.DecideAsync(set, policy, accept: false, h.WorkingToken(policy), default, rejectionReason: "A better reason.");
+
+        again.Value!.RejectionReason.Should().Be("A better reason.");
+        ReasonOf(h, version).Should().Be("A better reason.");
+    }
+
+    [Fact]
+    public async Task Accept_AfterAReject_ClearsTheReason_InTheSameWriteAsTheStatus_AndTheViewCarriesNone()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+        (await service.DecideAsync(set, policy, accept: false, h.WorkingToken(policy), default, rejectionReason: Reason)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        h.Writes.Clear();
+
+        var accepted = await service.DecideAsync(set, policy, accept: true, h.WorkingToken(policy), default);
+
+        accepted.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        accepted.Value!.State.Should().Be("Accepted");
+        accepted.Value.RejectionReason.Should().BeNull();
+        var write = h.Writes.Single();
+        write.Fields["sprk_proposalstatus"].Should().BeEquivalentTo(new OptionSetValue((int)ProposalState.Accepted));
+        write.Fields["sprk_rejectionreason"].Should().Be(DBNull.Value, "the old reason is cleared in the accepting write");
+        h.Row("sprk_policyversion", version).Contains("sprk_rejectionreason").Should().BeFalse();
+        (await service.GetAsync(set, default)).Value!.Proposals.Single().RejectionReason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Accept_IgnoresAReasonInTheRequest_AndStoresNone()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+
+        var accepted = await h.Service().DecideAsync(set, policy, accept: true, h.WorkingToken(policy), default, rejectionReason: Reason);
+
+        accepted.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        h.Row("sprk_policyversion", version).Contains("sprk_rejectionreason").Should().BeFalse("only a reject stores a reason");
+    }
+
+    [Theory]
+    [InlineData("body")]
+    [InlineData("quote")]
+    public async Task Edit_ThatReturnsARejectedDraftToProposed_ClearsTheReason(string what)
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+        (await service.DecideAsync(set, policy, accept: false, h.WorkingToken(policy), default, rejectionReason: Reason)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        h.Writes.Clear();
+
+        var edited = await service.EditAsync(set, policy, what == "body" ? Edit(body: CapBody8) : Edit(quote: "A different clause."), default);
+
+        edited.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        edited.Value!.Proposal.State.Should().Be("Proposed");
+        edited.Value.Proposal.RejectionReason.Should().BeNull();
+        var write = h.Writes.Single();
+        write.Fields["sprk_proposalstatus"].Should().BeEquivalentTo(new OptionSetValue((int)ProposalState.Proposed));
+        write.Fields["sprk_rejectionreason"].Should().Be(DBNull.Value, "the decision is void and its reason goes with it, in the same write");
+        h.Row("sprk_policyversion", version).Contains("sprk_rejectionreason").Should().BeFalse();
+        (await service.GetAsync(set, default)).Value!.Proposals.Single().RejectionReason.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Edit_OfARejectedDraft_ThatChangesOnlyTheHeadline_KeepsTheDecisionAndItsReason()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set);
+        var service = h.Service();
+        (await service.DecideAsync(set, policy, accept: false, h.WorkingToken(policy), default, rejectionReason: Reason)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+
+        var edited = await service.EditAsync(set, policy, Edit(headline: "A different headline"), default);
+
+        edited.Value!.Proposal.State.Should().Be("Rejected");
+        edited.Value.Proposal.RejectionReason.Should().Be(Reason);
+        ReasonOf(h, version).Should().Be(Reason);
+    }
+
+    [Fact]
+    public async Task Read_ShowsAReasonOnlyForARejectedDraft_EvenIfAStaleOneIsStoredOnAnotherState()
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set, state: ProposalState.Accepted);
+        h.Row("sprk_policyversion", version)["sprk_rejectionreason"] = Reason; // data written outside this service
+
+        var read = await h.Service().GetAsync(set, default);
+
+        read.Value!.Proposals.Single().RejectionReason.Should().BeNull("a reason belongs to a Rejected draft only");
+    }
+
+    // The reason is for the admins who review rules. A firm is shown a rule's clause (FR-28, D-66) and nothing about how the rule was
+    // reviewed: not that it was rejected, and not why.
+    [Fact]
+    public async Task TheFirmProjection_NeverCarriesTheRejectionReason()
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished, visible: true);
+        var (policy, version) = h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+        h.Row("sprk_policyversion", version)["sprk_rejectionreason"] = "INTERNAL: " + Reason; // even a stray value on a version in force
+
+        var shown = await h.Service().GetFirmClauseAsync(version, FirmId, default);
+
+        shown.Should().Be(new FirmClauseText("No timekeeper may bill more than 10 hours a day.", "Section 4.2, p. 7"));
+        System.Text.Json.JsonSerializer.Serialize(shown).Should().NotContain("INTERNAL").And.NotContain(Reason).And.NotContainEquivalentOf("reason");
+        typeof(FirmClauseText).GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name).Should().BeEquivalentTo(new[] { "Quote", "SectionReference" },
+            "the firm projection has exactly the clause and its location");
+        h.Queries.Where(q => q.EntityName == "sprk_policyversion").Should().OnlyContain(
+            q => !q.ColumnSet.AllColumns && !q.ColumnSet.Columns.Contains(RuleSetService.RejectionReasonColumn),
+            "the firm read never selects the reason column, nor all columns");
+        policy.Should().NotBeEmpty();
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────
@@ -1127,7 +1349,7 @@ public sealed class RuleSetServiceTests
         bEdit.Kind.Should().Be(RuleSetOutcomeKind.Done);
         var writesAfterB = h.Writes.Count;
 
-        var outcome = await service.DecideAsync(set, policy, accept, shownToA, default);
+        var outcome = await service.DecideAsync(set, policy, accept, shownToA, default, rejectionReason: accept ? null : Reason);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Refused);
         outcome.StatusCode.Should().Be(409);
@@ -1149,7 +1371,7 @@ public sealed class RuleSetServiceTests
         var service = h.Service();
         var shown = TokenShown(await service.GetAsync(set, default), policy);
 
-        var outcome = await service.DecideAsync(set, policy, accept, shown, default);
+        var outcome = await service.DecideAsync(set, policy, accept, shown, default, rejectionReason: accept ? null : Reason);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         outcome.Value!.State.Should().Be(expected.ToString());
@@ -1181,7 +1403,7 @@ public sealed class RuleSetServiceTests
         var (policy, version) = h.Rule(set);
         var service = h.Service();
         var shownToBoth = TokenShown(await service.GetAsync(set, default), policy);
-        (await service.DecideAsync(set, policy, accept: false, shownToBoth, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await service.DecideAsync(set, policy, accept: false, shownToBoth, default, rejectionReason: Reason)).Kind.Should().Be(RuleSetOutcomeKind.Done);
 
         var second = await service.DecideAsync(set, policy, accept: true, shownToBoth, default);
 
@@ -1322,7 +1544,7 @@ public sealed class RuleSetServiceTests
         var (policy, _) = h.Rule(set, state: ProposalState.Accepted, current: true);
 
         var accept = await h.Service().DecideAsync(set, policy, true, h.WorkingToken(policy), default);
-        var reject = await h.Service().DecideAsync(set, policy, false, h.WorkingToken(policy), default);
+        var reject = await h.Service().DecideAsync(set, policy, false, h.WorkingToken(policy), default, rejectionReason: Reason);
 
         accept.ErrorCode.Should().Be("ruleset.proposal_in_force");
         reject.ErrorCode.Should().Be("ruleset.proposal_in_force");
@@ -1639,7 +1861,7 @@ public sealed class RuleSetServiceTests
         var (h, service, set, policy, v1, _) = await FailedPointerMoveAsync();
         h.FailBulkFor = null;
 
-        (await service.DecideAsync(set, policy, accept: false, h.WorkingToken(policy), default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await service.DecideAsync(set, policy, accept: false, h.WorkingToken(policy), default, rejectionReason: Reason)).Kind.Should().Be(RuleSetOutcomeKind.Done);
         (await service.PublishAsync(set, Effective, default)).ErrorCode.Should().Be("ruleset.nothing_to_publish");
 
         h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v1);

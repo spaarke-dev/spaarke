@@ -472,15 +472,15 @@ public sealed class RuleSetEndpointsTests
     {
         await using var host = await Host.StartAsync();
         var ontologyPolicy = Guid.NewGuid();
-        host.Service.Setup(s => s.DecideAsync(SetId, PolicyId, true, 4711L, It.IsAny<CancellationToken>()))
+        host.Service.Setup(s => s.DecideAsync(SetId, PolicyId, true, 4711L, It.IsAny<CancellationToken>(), null))
             .ReturnsAsync(RuleSetOutcome<ProposalView>.Done(Proposal("Accepted")));
-        host.Service.Setup(s => s.DecideAsync(SetId, PolicyId, false, 4711L, It.IsAny<CancellationToken>()))
+        host.Service.Setup(s => s.DecideAsync(SetId, PolicyId, false, 4711L, It.IsAny<CancellationToken>(), "Wrong limit."))
             .ReturnsAsync(RuleSetOutcome<ProposalView>.Done(Proposal("Rejected")));
-        host.Service.Setup(s => s.DecideAsync(SetId, ontologyPolicy, It.IsAny<bool>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
+        host.Service.Setup(s => s.DecideAsync(SetId, ontologyPolicy, It.IsAny<bool>(), It.IsAny<long>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
             .ReturnsAsync(RuleSetOutcome<ProposalView>.Refused(404, RuleSetService.CodeProposalNotFound, "no such rule"));
 
         var accept = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{PolicyId}/accept", content: JsonContent.Create(new { rowVersion = "4711" })));
-        var reject = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{PolicyId}/reject", content: JsonContent.Create(new { rowVersion = "4711" })));
+        var reject = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{PolicyId}/reject", content: JsonContent.Create(new { rowVersion = "4711", reason = "  Wrong limit.  " })));
         var foreign = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{ontologyPolicy}/accept", content: JsonContent.Create(new { rowVersion = "4711" })));
 
         (await Json(accept))["state"]!.GetValue<string>().Should().Be("Accepted");
@@ -515,10 +515,49 @@ public sealed class RuleSetEndpointsTests
     }
 
     [Fact]
+    public async Task Reject_WithoutAReason_Is400OnTheReasonField_AndNeverReachesTheService()
+    {
+        await using var host = await Host.StartAsync();
+        var url = $"{Base}/{SetId}/proposals/{PolicyId}/reject";
+
+        var missing = await host.Client.SendAsync(Req("POST", url, content: JsonContent.Create(new { rowVersion = "4711" })));
+        var empty = await host.Client.SendAsync(Req("POST", url, content: JsonContent.Create(new { rowVersion = "4711", reason = "" })));
+        var blank = await host.Client.SendAsync(Req("POST", url, content: JsonContent.Create(new { rowVersion = "4711", reason = " \t\n " })));
+        var tooLong = await host.Client.SendAsync(Req("POST", url, content: JsonContent.Create(new { rowVersion = "4711", reason = new string('r', 2001) })));
+
+        foreach (var response in new[] { missing, empty, blank, tooLong })
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            var body = await Json(response);
+            body["errorCode"]!.GetValue<string>().Should().Be("ruleset.invalid");
+            body["errors"]![0]!["field"]!.GetValue<string>().Should().Be("reason");
+        }
+
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Reject_PassesTheTrimmedReasonToTheService_AndAcceptNeverPassesOne()
+    {
+        await using var host = await Host.StartAsync();
+        var exact = new string('r', 2000);
+        host.Service.Setup(s => s.DecideAsync(SetId, PolicyId, false, 4711L, It.IsAny<CancellationToken>(), exact))
+            .ReturnsAsync(RuleSetOutcome<ProposalView>.Done(Proposal("Rejected")));
+        host.Service.Setup(s => s.DecideAsync(SetId, PolicyId, true, 4711L, It.IsAny<CancellationToken>(), null))
+            .ReturnsAsync(RuleSetOutcome<ProposalView>.Done(Proposal("Accepted")));
+
+        var reject = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{PolicyId}/reject", content: JsonContent.Create(new { rowVersion = "4711", reason = " " + exact + " " })));
+        var accept = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{PolicyId}/accept", content: JsonContent.Create(new { rowVersion = "4711", reason = "ignored" })));
+
+        reject.StatusCode.Should().Be(HttpStatusCode.OK, "2,000 characters after trimming is the limit");
+        accept.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task Decide_OfARuleThatChangedSinceItWasShown_IsThe409ConcurrentEdit()
     {
         await using var host = await Host.StartAsync();
-        host.Service.Setup(s => s.DecideAsync(SetId, PolicyId, true, 4711L, It.IsAny<CancellationToken>()))
+        host.Service.Setup(s => s.DecideAsync(SetId, PolicyId, true, 4711L, It.IsAny<CancellationToken>(), null))
             .ReturnsAsync(RuleSetOutcome<ProposalView>.Refused(409, RuleSetService.CodeConcurrentEdit, "changed"));
 
         var response = await host.Client.SendAsync(Req("POST", $"{Base}/{SetId}/proposals/{PolicyId}/accept", content: JsonContent.Create(new { rowVersion = "4711" })));
