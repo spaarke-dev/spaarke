@@ -11,10 +11,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. 42/79 complete. Running agents (4/4): 076 fix round 2, 051 round 2 (D-110 move to service plus uac's firm-records items), 074 fix round (ontology F4-1/F3-1/Ks), 071 fix round 2 (ontology review at 4257e7f35, plus D-111 and D-112). Queued: the 075 retry fix and the #2081 follow-up (briefs below) |
-| **Step** | Branch HEAD 6bcd4d029 (local, not pushed). The 015 follow-up is cherry-picked (7965ef68e..009317530); uac-r2 re-check PASS; ontology-r1 is re-checking. ADR-010 ceiling 166; route ledger 137 |
+| **Task** | Parallel mode. 42/79 complete. Running agents (4/4): 051 round 2, the 074 fix round, the 075 retry fix, 076 fix round 3 (re-check F3 x2 plus the take-back race). Queued: #2081 follow-up |
+| **Step** | Branch HEAD 66a2e3adb (local, not pushed). On the branch: 015 follow-up plus its ontology re-check fixes (ad338f34a), 071 fix round 2 (e2288a659..229643893), 076 fix round 2 (05b8c75aa..d7e5c5a83, notes hashes fixed in cd0cdffb5). Verified: build 0/0; Billing 871; RuleSet/BillingAdmin/Finance 1381; BulkUpdate 12; ArchTests 1175 |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | As each agent reports: review it, cherry-pick it (`RANGES="a..b" bash $TEMP/claude/c--code-files-spaarke-wt-ebilling-r1/e7feb8db-bd91-431a-995c-acf68e28cb28/scratchpad/cp.sh`, in the background), build and run targeted tests, then send the range on. 071 r2 → ontology-r1. 074 fix → ontology-r1. 051 combined b21be61be..r2 tip → uac-r2. 076 r2 → re-check the fix diff. Then copy the GetFirmClauseAsync caller rule into the 130/134/135 POMLs. Mark 015 ✅ once ontology-r1 passes. Launch the queued agents as slots free. Next tasks: 072 (needs 071 ✅), 077 (needs 076 ✅), 049 |
+| **Next Action** | As each agent reports: review, cherry-pick (cp.sh in the background), build and targeted tests, send the range on. Waiting on: ontology-r1 (015 ad338f34a; 071 r2 range) and the 076 r3 agent. 074 fix → ontology-r1. 051 combined b21be61be..r2 tip → uac-r2. Mark 015 ✅ when ontology-r1 is clean; 071 ✅ when its re-check is clean; 076 ✅ after r3 plus its re-check. Then start 072 (its POML carries D-112 root sets, uac-r2 calling conditions, currency and withheld-template constraints) and 077 |
 
 ### Queued briefs (not yet launched)
 - **075 retry fix (open F-class defect).** A run that dies midway and is retried asks the model again, and its output is not deterministic, so both runs' drafts remain. Fix by compensation: on a rerun with no completion marker, first delete the earlier run's untouched drafts, then draft again. A draft counts as untouched only when all of these hold: created by the job identity, created for this rule set, still Proposed and Off, modifiedon = createdon, no current version. Must-fire: a rerun after a partial run leaves exactly one set. Must-not-fire: a draft an admin edited or accepted is never deleted.
@@ -24,12 +24,14 @@
   - add a test for UpdateRecordActionCore with no IGenericEntityService;
   - add a code-safe hint for detach → move → re-attach;
   - ActionSeam.cs:163 prints the code twice.
+- **Pre-deploy live probe (076 re-check K2):** before relying on 076's conditional publish, make one probe on dev to confirm that IfRowVersionMatches inside ExecuteTransactionRequest is honoured per inner request and that the mismatch fault carries 0x80060882. It is a live write, so it needs the owner's OK.
 - **053 deploy order (from 075):** Deploy-ActionMirrors.ps1 and Seed-PlaybookConsumers.ps1 (the BILLING-RULE-DRAFT Binding) run before or with the BFF; then check /healthz.
 
 ### Critical Context
 - **Decisions:** D-96 to D-112 (decisions-log). New this session:
   - D-111: a closed core record is judged by its close date.
-  - D-112: a cross-wall Duplicate flags without the tracking number or line detail. The loader still covers both partitions.
+  - D-112: a cross-wall Duplicate flags without the tracking number or line detail. Refined to secure-root sets with a subset rule that fails closed. The loader still covers both partitions.
+  - 072/073/077/130-135 constraints were added this session (withheld template; template by subject; displayed version on accept; the GetFirmClauseAsync caller contract).
   - 072 POML carries the D-112, SubmissionId and non-USD skip constraints.
 - **015 deploy sequence.** Done: steps 1–3 (R3 BFF+SPA live; grid 3ff4102c switched 2026-10-18 03:42Z). Remaining:
   4. 015 reaches master and R3 merges it.
