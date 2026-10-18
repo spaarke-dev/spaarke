@@ -287,3 +287,21 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
 - **Setting added** 13:46:55Z (D-138 035 deploy approval; word-add-in, R3 and uac-r2 notified before and after); healthz 200 at 13:47:38Z; code unchanged (master `f292ad119`).
 - **Positive run** 13:48:04Z → outcome `succeeded`, policiesEvaluated 1, hits 1, written 1, refused 0. First proof of the writer's managed-identity token path on dev.
 - The test policy and its rows are cleaned up by task 146 (zz-146 prefix).
+
+
+## 2026-10-16 — task 055 (dev, spaarkedev1): Console + grid configuration from master; policies on (D-146)
+
+- **BFF:** not deployed by ontology. R3 deployed `1.0.0+eb5ba4011` (R3 + master `7315b3e85`, ancestor check passed, hash-verified, healthz 200) at 01:55Z under the owner-approved plan (a).
+- **Policies (D-146):** `sprk_enabled=true` on 6101–6104 and `4d204810…` at 01:56:00Z; manual `signal-reevaluation` run `dd1ebeec`: 5 policies, 87 written, 0 refused.
+- **Grid configuration:** `Apply-WorklistGridConfiguration.ps1` from master `44b6a72c1` (worktree `C:\wts-055`): `-Verify` DRIFT → `-WhatIf` one UPDATE → applied 01:56:17Z (read-back OK) → `-Verify -RequireRow` IN SYNC.
+- **Console:** `npm run build` in `src/solutions/SpaarkeAi` at master `44b6a72c1` (#1989 + #1996); `Deploy-SpaarkeAi.ps1` updated `sprk_spaarkeai` (`5206a442-…`), PublishXml for that web resource only (D-83). Live 01:56:32Z; live content SHA-256 = local build `0470e7f11752cdffb9a0aaa42c507ba5574e89527db1cec18584eddc40db23f2`.
+- **Peer notices:** word-add-in, uac-r2, R3 before and after.
+- **Worklist reachability (task 156, found at this deploy):** no Console path opened the worklist. #2004 → master #2008 `a8c3182ec`. Console rebuilt from `a8c3182ec` in `C:\wts-055` (contains the 01:56 build's `44b6a72c1`; live hash checked unchanged before deploying); `Deploy-SpaarkeAi.ps1` 03:44:03–03:44:16Z, live SHA-256 = build `06d393561564f5835ba5702941b5767095b91f8abdf1a32dcba7670c43f218e1`. `seed-worklist-workspace-layout.ps1`: `-WhatIf` one create → CREATED `Worklist` (`202bcde0-13c9-f111-a05c-0022482913fc`, system, sortorder 13, sections `["worklist"]`) → re-run SKIP. The BFF layout route does not cache. Peer notices before and after.
+  CI also published the same commit at 03:45:41Z (`deploy-spaarke-ai.yml` run 38846776203, push to master): live SHA-256 `b62f6fca…e8b849` differs from the Windows build only in CRLF/LF on 13 HTML wrapper lines. The owner's `Unknown section ID: worklist` was a browser still on the pre-03:44 bundle (hard reload).
+- **Pending (criteria 1–4, 6, 7):** owner checks in the browser (worklist renders real items; one full review with two actions + one Next step; network log; console errors; Daily Briefing).
+
+## 2026-10-17 — task 055 closed (owner browser check)
+
+- Owner: "checked and it seems correct; formal UAT once delivered" (D-154).
+- Dataverse read-back (main session): DR-1066 `67d34ab5-…` 15:03:15Z (Judgement; Send budget inquiry + Revise budget; confirmed by the owner; policy version `e51906ea-…`); budget revision 15:03:06Z (amount 150000); inquiry `sprk_communication` status Send; Signal `b35d4ec2-…` Resolved with the record linked. DR-1064 (12:25Z, Revise budget) likewise.
+- Not exercised: Next step To Do (DR follow-ons empty, no new `sprk_todo`). Carried to 105 UAT.

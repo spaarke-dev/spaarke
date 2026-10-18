@@ -378,7 +378,7 @@ public sealed class DailyBriefingEndpointTestFixture : IAsyncLifetime, IDisposab
 
         private static DailyBriefingNarrateResponse BuildResponse() => new()
         {
-            Tldr = new TldrResult { Summary = "contract summary", KeyTakeaways = ["k"], TopAction = "a" },
+            Tldr = new TldrResult { Summary = "contract summary", KeyTakeaways = ["k"] },
             ChannelNarratives = [],
             GeneratedAtUtc = DateTimeOffset.UtcNow,
         };

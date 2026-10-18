@@ -32,14 +32,24 @@ set -uo pipefail
 INPUT=$(cat)
 
 # --- Extract file path ---
-# Try jq first; fall back to python3; fall back to simple grep/sed.
+# Try jq first; fall back to Python; fall back to simple grep/sed.
 FILE=""
 if command -v jq &>/dev/null; then
   FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)
 fi
 
-if [ -z "$FILE" ] && command -v python3 &>/dev/null; then
-  FILE=$(echo "$INPUT" | python3 -c "
+# Prefer `python`: on Windows, `python3` is often the Microsoft Store alias stub
+# (…/WindowsApps/python3), which does not reliably forward stdin and has been seen
+# spinning at 100% CPU for days (2026-10-13, 2026-10-15). Skip that stub entirely.
+PY=""
+for cand in python python3; do
+  p=$(command -v "$cand" 2>/dev/null) || continue
+  case "$p" in *WindowsApps*) continue ;; esac
+  PY="$cand"; break
+done
+
+if [ -z "$FILE" ] && [ -n "$PY" ]; then
+  FILE=$(echo "$INPUT" | "$PY" -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
@@ -114,7 +124,7 @@ esac
 if [ -n "$FINDINGS" ]; then
   MSG="post-edit-lint: $BASENAME has lint findings (advisory - fix the ones your edit introduced):
 $(echo "$FINDINGS" | head -c 3000)"
-  PY=$(command -v python3 || command -v python || true)
+  # $PY was chosen above (python first; the WindowsApps python3 stub is skipped).
   if [ -n "$PY" ]; then
     printf '%s' "$MSG" | "$PY" -c 'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":sys.stdin.read()}}))'
   else

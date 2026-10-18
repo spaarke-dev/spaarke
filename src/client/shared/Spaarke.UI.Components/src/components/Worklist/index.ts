@@ -20,12 +20,19 @@ export type {
   InquiryReply,
   RecordDispositionResult,
   WorklistData,
+  WorklistDecision,
+  WorklistDecisionFollowOn,
+  WorklistDecisionStep,
   WorklistGroupData,
   WorklistRouteItem,
+  WorklistRouteSetName,
   WorklistService,
   WorklistServiceOptions,
   WorklistSetName,
 } from './worklistService';
+// The Briefing narrative over the list's counts (task 062): prose the Assistant writes; it never lists, orders or chooses.
+export { acceptNarrative, buildWorklistNarrativeRequest } from './worklistNarrative';
+export type { WorklistNarrativeRequest, WorklistNarrativeText } from './worklistNarrative';
 export { buildLaneView, hiddenItemsNote } from './worklistView';
 export type { LaneGroupView, LaneView } from './worklistView';
 export { buildWizardItem, closedLineText, parseEvidenceRefs } from './worklistWizardItem';

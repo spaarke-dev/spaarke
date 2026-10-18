@@ -817,6 +817,67 @@ public class NoAccessShareEnforcerTests
         _h.Shares.MaskOf(WorkAssignment, FiledWorkAssignment, User(Colleague)).Should().Be(CollaborateMask);
     }
 
+    /// <summary>
+    /// #1620: the filed record was left unsecured (inheritance Refused or Failed), so its creator — the walled user — still OWNS
+    /// it and holds a direct share. Dataverse refuses an app-only revoke of the owner's own share (0x80040223), so it is
+    /// revoked AS the owner; the access ownership still gives is reported user-ownership (re-own the record to wall them),
+    /// and the enforcement COMPLETES rather than failing revoke-not-confirmed on every pass.
+    /// </summary>
+    [Fact]
+    public async Task Enforce_AFiledRecordTheWalledUserOwns_RevokesTheirShareAsTheOwner_AndReportsUserOwnership()
+    {
+        SecureMatterWithAFiledWorkAssignment(filedFlaggedSecure: false);
+        _h.Store.OwningUsers[FiledWorkAssignment] = Walled;
+        _h.Shares.OwningUsers[FiledWorkAssignment] = Walled;
+        _h.Shares.Seed(WorkAssignment, FiledWorkAssignment, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeTrue(string.Join("; ", report.Failures.Select(f => f.Message)));
+        report.Removed.Should().Contain(new NoAccessRemovedShare(Walled, WorkAssignment, FiledWorkAssignment, CollaborateMask));
+        _h.Shares.RevokesAsOwner.Should().Equal((FiledWorkAssignment, User(Walled)));
+        report.NotEnforceable.Should().ContainSingle(n => n.RecordId == FiledWorkAssignment).Which.Should().Be(
+            new NoAccessNotEnforceable(Walled, WorkAssignment, FiledWorkAssignment, NoAccessEnforcementReason.UserOwnership, null));
+    }
+
+    /// <summary>#1620: a team-owned record is unchanged — the walled member's share is revoked app-only, team ownership reported.</summary>
+    [Fact]
+    public async Task Enforce_OnATeamOwnedRecord_RevokesAppOnly_AndReportsTeamOwnershipAsBefore()
+    {
+        _h.Store.OwningTeams[SecureProject] = Team;
+        _h.Store.TeamMembers[Walled] = new HashSet<Guid> { Team };
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Removed.Should().ContainSingle(r => r.SystemUserId == Walled);
+        _h.Shares.RevokesAsOwner.Should().BeEmpty();
+        report.NotEnforceable.Should().ContainSingle().Which.Mechanism.Should().Be(NoAccessEnforcementReason.TeamOwnership);
+    }
+
+    /// <summary>
+    /// #1620: the walled user owns the record and its owner cannot be read — never reported removed or complete: the app-only
+    /// revoke Dataverse refuses for the owner leaves the share, the pass is incomplete, and the next pass retries.
+    /// </summary>
+    [Fact]
+    public async Task Enforce_WhenTheOwnerCannotBeRead_AndTheWalledUserOwnsIt_IsIncomplete_AndKeepsTheShare()
+    {
+        _h.Shares.OwningUsers[SecureProject] = Walled;
+        _h.Store.FailOwnerRead = true;
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Complete.Should().BeFalse();
+        report.Removed.Should().BeEmpty();
+        report.Failures.Should().ContainSingle(f => f.Kind == "revoke-not-confirmed" && f.SystemUserId == Walled);
+        _h.Shares.RevokesAsOwner.Should().BeEmpty("no revoke runs as anyone on an owner that was not read");
+        _h.Shares.MaskOf(Project, SecureProject, User(Walled)).Should().Be(CollaborateMask);
+    }
+
     /// <summary>Round 82: a NOT-yet-secure record filed under the matter whose filing type cannot be confirmed is left alone.</summary>
     [Fact]
     public async Task Enforce_ANotYetSecureRecordWhoseFilingIsUnconfirmed_IsLeftAlone_AndReportedIncomplete()

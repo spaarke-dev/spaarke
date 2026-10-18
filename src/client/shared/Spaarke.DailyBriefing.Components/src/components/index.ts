@@ -49,9 +49,6 @@ export type { NarrativeBulletProps } from './NarrativeBullet';
 export { NarrativeCitedText } from './NarrativeCitedText';
 export type { NarrativeCitedTextProps } from './NarrativeCitedText';
 
-export { HighPrioritySection } from './HighPrioritySection';
-export type { HighPrioritySectionProps } from './HighPrioritySection';
-
 export { StatTiles } from './StatTiles';
 export type { StatTile, StatTilesProps, StatTone } from './StatTiles';
 

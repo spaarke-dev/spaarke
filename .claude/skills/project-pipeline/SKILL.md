@@ -655,7 +655,7 @@ CREATE: projects/{project-name}/tasks/TASK-INDEX.md
 SET the board field "Tasks Planned" (number) to the number of task files just created, once, when the tasks are first created.
   Never on later runs or syncs, and never overwrite a non-empty value. The Task Count field keeps tracking the current number.
   Field id: gh project field-list 2 --owner spaarke-dev --format json  (name "Tasks Planned")
-  The board item usually does not exist yet at this step (it is created by devops-project-register, later in this skill).
+  The board item usually does not exist yet at this step (it is created in Step 4.2, by devops-project-register).
   In that case skip here, and after registration and the commit of TASK-INDEX.md run
   `python scripts/ai-cost/backfill-tasks-planned.py <slug> --apply`, which sets it from the first committed TASK-INDEX.md.
 ```
@@ -767,8 +767,48 @@ WHY create branch at this point:
 [Y to start task 001 / stop to exit]
 ```
 
-**Autonomous mode** (default): Report branch creation and proceed immediately to task execution.
+**Autonomous mode** (default): Report branch creation and proceed to Step 4.2 (registration), then to task execution.
 **Interactive mode**: Wait for user confirmation.
+
+---
+
+### Step 4.2: Register the project on GitHub (MUST — added 2026-10-15)
+
+**Why this is a MUST.** This used to be a `[Y/n]` prompt in an appendix (the old "Portfolio Hook"), and failures only warned. Projects got missed: on 2026-10-15, 16 project folders had no Project Issue, active ones among them. Board #2 is now where findings are triaged and where projects find each other, so an unregistered project is invisible to both. Owner direction, 2026-10-15.
+
+**Action** (no prompt, autonomous and interactive alike):
+```
+IF projects/{name}/README.md already has the `> **Portfolio**:` pointer block:
+  → invoke /devops-project-sync (silent) and go to VERIFY.
+
+ELSE:
+  EPIC: the parent Epic is required (devops-project-register D-12). Take it from design.md/spec.md
+        if named; otherwise ask the operator this one question (in autonomous mode too: it cannot be guessed).
+  → invoke /devops-project-register --epic <#E>
+  → python scripts/ai-cost/backfill-tasks-planned.py {name} --apply   (after TASK-INDEX.md is committed)
+
+ALWAYS (idempotent):
+  gh label create {name} --force --description "Issues filed by or for projects/{name}"
+    # the label /project-defer-issue-tracking and finding triage use to find this project's issues
+
+  Commit and push the README pointer block if it changed.
+
+VERIFY (all must hold):
+  ✓ README.md has the `> **Portfolio**:` pointer block, committed and pushed
+  ✓ gh issue view <#N> --json projectItems   → lists project "Spaarke Core" (Board #2)
+  ✓ The Project Issue's parent is the Epic
+  ✓ Board fields set: Status, Type = Project, Project Type, Worktree Path, Project Folder, Task Count, Tasks Planned
+  ✓ gh label list --search {name}            → the project label exists
+
+IF any check fails (including gh being unavailable):
+  → STOP. Do NOT start Step 5. Report ❌ with the failed check and the command to fix it.
+  → A project that is not registered is not ready to execute.
+```
+
+**Output to User:**
+```
+✅ Registered on GitHub: Project Issue #{N} under Epic #{E} · Board #2 · label {name}
+```
 
 ---
 
@@ -808,8 +848,7 @@ IF projects/{name}/README.md has a portfolio pointer block (Project Issue exists
     Re-prompt ONCE. Second invalid = treat as 'skip'.
 
 ELSE (no portfolio pointer block — project not registered):
-  SKIP this step. The /devops-project-register hook (Step 1.7) would have
-  already handled this via its own Target Date prompt.
+  Cannot happen after Step 4.2 (a MUST). If it does, return to Step 4.2.
 ```
 
 **Why this step is here, not earlier**:
@@ -1136,6 +1175,7 @@ Pipeline successful when:
 - [ ] Wrap-up task added (090-project-wrap-up.poml) (Step 3)
 - [ ] Feature branch created and pushed to remote (Step 4)
 - [ ] Initial commit made with project artifacts (Step 4)
+- [ ] **Registered on GitHub: Project Issue on Board #2 under its Epic, fields set, project label, README pointer committed (Step 4.2, MUST)**
 - [ ] User confirmed ready to execute Task 001 (or declined) (Step 5)
 
 ---
@@ -1157,17 +1197,8 @@ Pipeline successful when:
 
 ---
 
-## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 031 · FR-17)
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 031 · FR-17; made a MUST 2026-10-15)
 
-**At start of skill** (after Step 1 spec validation, before resource discovery): check `projects/{name}/README.md` for `> **Portfolio**:` pointer block.
-
-- **If pointer block ABSENT**: prompt "Register this project on the portfolio? [Y/n]" → on Y, invoke `/devops-project-register` (will prompt for `--epic`).
-- **If pointer block PRESENT**: silently invoke `/devops-project-sync`.
-
-Hook is silent on success (single ✅ line). Failures degrade to ⚠️ warn; do NOT block pipeline progression (NFR-03).
-
-After a registration here, and once `tasks/TASK-INDEX.md` is committed, set "Tasks Planned" (it was skipped in Step 3 because the board item did not exist yet): `python scripts/ai-cost/backfill-tasks-planned.py <slug> --apply`. It never overwrites a value that is already set.
-
-Register prompt fires at most ONCE per project — subsequent runs always sync silently.
+Registration is now **Step 4.2 (MUST)**: no `[Y/n]` prompt, and a failed registration stops the pipeline before Step 5. On a re-run of this skill for an already registered project, Step 4.2 only invokes `/devops-project-sync` (silent on success; a sync failure warns and does not block, NFR-03).
 
 See: [`.claude/skills/devops-project-register/SKILL.md`](../devops-project-register/SKILL.md), [`.claude/skills/devops-project-sync/SKILL.md`](../devops-project-sync/SKILL.md).

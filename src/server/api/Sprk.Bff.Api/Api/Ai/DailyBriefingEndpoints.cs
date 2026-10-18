@@ -600,7 +600,6 @@ public static class DailyBriefingEndpoints
                 {
                     Summary = string.Empty,
                     KeyTakeaways = [],
-                    TopAction = string.Empty,
                     CategoryCount = 0,
                     PriorityItemCount = 0
                 },
@@ -914,7 +913,7 @@ public record ChannelItemDto
 
 /// <summary>
 /// Deterministically-computed ground-truth facts for the TL;DR LLM call (R5 task 013, FR-A4).
-/// Every field is computed in C# from source records — the LLM composes prose and prioritizes
+/// Every field is computed in C# from source records — the LLM composes prose
 /// OVER these facts; it must never invent a count, date, or name absent from this payload. This
 /// IS the input payload the TL;DR call receives (replaces the earlier raw
 /// categories/priorityItems/channels dump — see <see
@@ -967,7 +966,7 @@ public sealed record TldrKeyDateDto
 /// </summary>
 public record DailyBriefingNarrateResponse
 {
-    /// <summary>TL;DR executive summary (2-3 sentences + 3-5 key-takeaway bullets + top action).</summary>
+    /// <summary>TL;DR executive summary (2-3 sentences + 3-5 key-takeaway bullets). No model-chosen top action (task 062, FR-32).</summary>
     [JsonPropertyName("tldr")]
     public TldrResult Tldr { get; init; } = new();
 
@@ -980,31 +979,12 @@ public record DailyBriefingNarrateResponse
     public DateTimeOffset GeneratedAtUtc { get; init; }
 
     /// <summary>
-    /// R7 W12 feedback item 9 (2026-07-01) — HIGH PRIORITY items across the 7 flagged
-    /// entities (sprk_matter, sprk_project, sprk_invoice, sprk_document,
-    /// sprk_workassignment, sprk_event, sprk_todo). Populated by
-    /// <c>DailyBriefingCollector.CollectHighPriorityAsync</c>, bypasses the narrator
-    /// (no LLM call — plain structured list). Widget renders a subtle red banner section
-    /// above the TL;DR when this array is non-empty. Ordered by due date ascending (undated
-    /// items last). Empty array = no flagged items, widget hides the section.
-    /// </summary>
-    [JsonPropertyName("highPriorityItems")]
-    public HighPriorityItemDto[] HighPriorityItems { get; init; } = [];
-
-    /// <summary>
     /// unified-access-control-r2 task 152 — the briefing channels whose caller-context read failed (copied from
     /// <see cref="DailyBriefingNarrateRequest.FailedChannels"/>). The widget and the email say "could not be loaded"
     /// for these instead of implying there was nothing to report.
     /// </summary>
     [JsonPropertyName("failedChannels")]
     public string[] FailedChannels { get; init; } = [];
-
-    /// <summary>
-    /// unified-access-control-r2 task 152 — High Priority entity types (e.g. <c>"sprk_invoice"</c>) whose
-    /// caller-context read failed, so a missing flagged record is not mistaken for "nothing flagged".
-    /// </summary>
-    [JsonPropertyName("highPriorityFailedEntityTypes")]
-    public string[] HighPriorityFailedEntityTypes { get; init; } = [];
 
     /// <summary>
     /// Optional sidecar with post-LLM entity-name validation metadata. Added by R7
@@ -1019,9 +999,12 @@ public record DailyBriefingNarrateResponse
 }
 
 /// <summary>
-/// A high-priority item from one of the 7 flagged entities. Assembled directly by
-/// <c>DailyBriefingCollector.CollectHighPriorityAsync</c> — no LLM narration. Widget
-/// renders as a compact list of clickable record refs with optional due-date badge.
+/// A flagged record (<c>sprk_highpriority</c> or <c>sprk_monitor</c>) from one of the 7 flagged entities. Assembled directly by
+/// <c>DailyBriefingCollector.CollectHighPriorityAsync</c> — no LLM narration. Task 062 (FR-32) retired the "Critical Today" LIST that
+/// rendered these: it is no longer part of the briefing response. <c>sprk_highpriority</c> is a rank input of the worklist read route
+/// (D-42), and <c>sprk_monitor</c> is a SUBSCRIPTION to Know — counted in the narrative (<see
+/// cref="Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.WithMonitoredSubscription"/>) and fed to the proactive suggestion
+/// producer. This DTO stays as the collector's internal shape.
 /// </summary>
 public record HighPriorityItemDto
 {
@@ -1112,7 +1095,8 @@ public record ValidationMetadataDto
 }
 
 /// <summary>
-/// TL;DR executive summary with key takeaways and top action identification.
+/// TL;DR executive summary with key takeaways. Task 062 (FR-32) REMOVED the model-chosen "top action": the first worklist row IS the
+/// top action because rank is deterministic (decision 15, row-contract requirement 2).
 /// R2.2: switched from a single 5-7 sentence narrative to a structured shape —
 /// a 2-3 sentence executive summary + 3-5 key-takeaway bullets — so the client
 /// can render an at-a-glance scannable summary instead of a paragraph block.
@@ -1127,10 +1111,6 @@ public record TldrResult
     [JsonPropertyName("keyTakeaways")]
     public string[] KeyTakeaways { get; init; } = [];
 
-    /// <summary>The single most important action for today.</summary>
-    [JsonPropertyName("topAction")]
-    public string TopAction { get; init; } = "";
-
     /// <summary>Number of categories that were summarized.</summary>
     [JsonPropertyName("categoryCount")]
     public int CategoryCount { get; init; }
@@ -1141,8 +1121,8 @@ public record TldrResult
 
     /// <summary>
     /// R5 task 014 (FR-A5): anchor-to-item grounding for the TL;DR. Every named anchor
-    /// (a record/matter/party name the LLM chose to call out in <see cref="Summary"/>,
-    /// <see cref="KeyTakeaways"/>, or <see cref="TopAction"/>) MUST carry an <see
+    /// (a record/matter/party name the LLM chose to call out in <see cref="Summary"/>
+    /// or <see cref="KeyTakeaways"/>) MUST carry an <see
     /// cref="TldrItemRefDto.ItemId"/> pointing at a real source item. Resolution is BINARY —
     /// the widget resolves each <c>itemId</c> against the request's <c>items[]</c>
     /// (<c>ChannelItemDto.Id</c>) and DROPS any anchor that doesn't resolve (renders the
@@ -1168,8 +1148,7 @@ public sealed record TldrItemRefDto
 {
     /// <summary>
     /// The exact text span (record/party/matter name) the TL;DR named in <see
-    /// cref="TldrResult.Summary"/>, one of <see cref="TldrResult.KeyTakeaways"/>, or <see
-    /// cref="TldrResult.TopAction"/>. Matched case-insensitively against the TL;DR text by the
+    /// cref="TldrResult.Summary"/> or one of <see cref="TldrResult.KeyTakeaways"/>. Matched case-insensitively against the TL;DR text by the
     /// widget (mirrors the <c>NarrativeCitedText.buildSegments</c> matching rule).
     /// </summary>
     [JsonPropertyName("anchorText")]

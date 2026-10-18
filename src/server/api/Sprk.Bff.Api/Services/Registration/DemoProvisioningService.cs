@@ -32,16 +32,32 @@ public sealed class DemoProvisioningService
         IOptions<DemoProvisioningOptions> options,
         ILogger<DemoProvisioningService> logger,
         ILoggerFactory loggerFactory)
+        : this(
+            graphUserService, dataverseService, emailService, passwordGenerator,
+            // Task 171 (finding 6): Step 8 grants through the ONE marked-grant primitive. The service is stateless over the
+            // ownership guard (task 227d), so this singleton holds its own instance rather than reaching into a request scope.
+            new SpeContainerMembershipService(
+                ownership ?? throw new ArgumentNullException(nameof(ownership)),
+                (loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory))).CreateLogger<SpeContainerMembershipService>()),
+            options, logger)
+    {
+    }
+
+    /// <summary>The test seam (ADR-038 §4): the marked-grant primitives are virtual, so a test substitutes them here.</summary>
+    internal DemoProvisioningService(
+        GraphUserService graphUserService,
+        RegistrationDataverseService dataverseService,
+        RegistrationEmailService emailService,
+        PasswordGenerator passwordGenerator,
+        SpeContainerMembershipService membership,
+        IOptions<DemoProvisioningOptions> options,
+        ILogger<DemoProvisioningService> logger)
     {
         _graphUserService = graphUserService ?? throw new ArgumentNullException(nameof(graphUserService));
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
         _passwordGenerator = passwordGenerator ?? throw new ArgumentNullException(nameof(passwordGenerator));
-        // Task 171 (finding 6): Step 8 grants through the ONE marked-grant primitive. The service is stateless over the
-        // ownership guard (task 227d), so this singleton holds its own instance rather than reaching into a request scope.
-        _membership = new SpeContainerMembershipService(
-            ownership ?? throw new ArgumentNullException(nameof(ownership)),
-            (loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory))).CreateLogger<SpeContainerMembershipService>());
+        _membership = membership ?? throw new ArgumentNullException(nameof(membership));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -174,7 +190,7 @@ public sealed class DemoProvisioningService
             {
                 _logger.LogInformation("[Step 8/9] Granting Writer access on SPE container {ContainerId} to user {UserId}",
                     environment.SpeContainerId, entraUserId);
-                await GrantSpeContainerAccessAsync(environment.SpeContainerId, dataverseSystemUserId.Value, upn, ct);
+                await GrantSpeContainerAccessAsync(environment.SpeContainerId, entraUserId, upn, ct);
                 completedSteps.Add("GrantSpeContainerAccess");
                 _logger.LogInformation("[Step 8/9] Granted SPE container Writer access");
             }
@@ -247,29 +263,43 @@ public sealed class DemoProvisioningService
     }
 
     /// <summary>
-    /// Grants the new user a STANDING writer role on the environment's SPE container — the same marked grant
-    /// <c>SpeContainerMembershipSyncJob</c> keeps (unified-access-control-r2 task 171, adversarial finding 6). Before
-    /// task 171 this POSTed an UNMARKED permission, which nothing could ever tell apart from a hand-granted role, so the
-    /// sync never removed it (disabled, moved, flagged external — the role stayed). Marked, it is reconciled like every
-    /// other standing writer; granting here (rather than waiting up to five minutes for the job) lets the new user edit
-    /// in Office immediately. A user who already holds a role is left as they are (Graph 409 → nothing recorded).
+    /// Grants the new user a writer role on the environment's SPE container as a marked DEMO grant
+    /// (<see cref="SpeContainerMembershipService.DemoWriterMarkerPrefix"/>, keyed by the user's Entra object id), which
+    /// demo expiry removes (<c>DemoExpirationJob</c>). Granting here lets the new user edit in Office immediately. A
+    /// user who already holds a role is left as they are (Graph 409 → nothing recorded).
     /// </summary>
-    private async Task GrantSpeContainerAccessAsync(
-        string containerId, Guid systemUserId, string upn, CancellationToken ct)
+    /// <remarks>
+    /// <para><b>Why not a standing marker (#1363).</b> Task 171 recorded this grant as <c>SprkStd{systemuserid}</c> with the
+    /// systemuserid from Step 6 — a row in the DEMO environment's Dataverse (<c>environment.DataverseUrl</c>). The
+    /// standing pass resolves <c>SprkStd</c> holders in the BFF's OWN Dataverse, so on a demo container it also syncs the
+    /// marker named a user it could never read: kept and counted unknown on every run. The Entra object id is the same
+    /// in every environment of the tenant and is stored on the registration request, so expiry can name the grant
+    /// without reading the demo environment.</para>
+    /// <para><b>Internal</b> so the test assembly (InternalsVisibleTo) pins the grant this step records; Steps 1–7 need a
+    /// live Graph and Dataverse.</para>
+    /// </remarks>
+    internal async Task GrantSpeContainerAccessAsync(
+        string containerId, string entraUserId, string upn, CancellationToken ct)
     {
+        if (!Guid.TryParse(entraUserId, out var entraObjectId) || entraObjectId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                $"The demo user's Entra object id '{entraUserId}' is not a GUID; no grant was made on SPE container '{containerId}'.");
+        }
+
         var outcome = await _membership
-            .GrantMarkedWriterAsync(containerId, SpeContainerMembershipService.StandingWriterMarkerPrefix, systemUserId, upn, ct)
+            .GrantMarkedWriterAsync(containerId, SpeContainerMembershipService.DemoWriterMarkerPrefix, entraObjectId, upn, ct)
             .ConfigureAwait(false);
 
         if (outcome == SpeContainerMembershipService.MarkedGrantOutcome.Failed)
         {
             throw new InvalidOperationException(
-                $"The standing writer grant on SPE container '{containerId}' for user {systemUserId} could not be made.");
+                $"The demo writer grant on SPE container '{containerId}' for user {entraObjectId} could not be made.");
         }
 
         _logger.LogInformation(
-            "Standing writer on SPE container {ContainerId} for user {SystemUserId}: {Outcome}",
-            containerId, systemUserId, outcome);
+            "Demo writer on SPE container {ContainerId} for Entra user {EntraUserId}: {Outcome}",
+            containerId, entraObjectId, outcome);
     }
 }
 

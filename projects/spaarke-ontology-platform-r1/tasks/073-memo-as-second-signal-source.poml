@@ -4,7 +4,7 @@
     <title>sprk_memo as signal source number two</title>
     <phase>7 Inquiry and the classifier</phase>
     <gate>030,072 complete</gate>
-    <status>not-started</status>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Proves the shape generalises; a consumer change here would mean the abstraction failed.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -99,4 +99,5 @@
   <notes-2026-10-07>Blocked at start (stream D2, 2026-10-07): SignalWriter accepts only sprk_matter / sprk_communication subjects; no sprk_regardingmemo lookup on sprk_signal (schema change, needs owner approval); the core-record writer path is task 037, secure-child Signals task 039; nothing consumes Signals until 031. Resume after 037 + 039 + 031 land. Schema needed then: sprk_signal.sprk_regardingmemo lookup, and possibly a triage-category lookup on sprk_memo (verify live first). The Action + Binding rows follow infra/dataverse/actions/triage-email.action.json via ConsumerTypes / ICommunicationTriageAi.</notes-2026-10-07>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion date="2026-10-17">DEFERRED out of R1 by the owner (D-157). Self-contained follow-up: DI-108 #2051 (five decisions with recommendations, implementation notes, done-when).</completion>
 </task>

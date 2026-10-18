@@ -275,6 +275,8 @@ public class NoAccessEnforcementStore
         var found = new List<Guid>();
         foreach (var chunk in oids.Where(o => o != Guid.Empty).Distinct().Chunk(IdChunkSize))
         {
+            // includes disabled: a No Access entry must be enforced against every systemuser the oid names, disabled or
+            // not — a disabled account can be re-enabled, and the person state (isdisabled) is read separately below.
             var filter = string.Join(" or ", chunk.Select(o => $"azureactivedirectoryobjectid eq {o}"));
             using var doc = await GetAsync($"systemusers?$filter={filter}&$select=systemuserid", ct);
             found.AddRange(Values(doc).Select(r => GuidOf(r, "systemuserid")).OfType<Guid>());
@@ -325,11 +327,22 @@ public class NoAccessEnforcementStore
         return member;
     }
 
-    /// <summary>The record's owning team, or <c>null</c> when a user owns it.</summary>
-    internal virtual async Task<Guid?> ReadOwningTeamAsync(string entitySet, string idColumn, Guid recordId, CancellationToken ct)
+    /// <summary>
+    /// The record's CURRENT owner — its owning team, else its owning user — or <c>null</c> when the read returned no row or
+    /// neither owner column (#1620: the owning USER matters too — their own share is revoked only as them, and ownership is
+    /// access no revoke removes).
+    /// </summary>
+    internal virtual async Task<DataversePrincipalRef?> ReadOwnerAsync(string entitySet, string idColumn, Guid recordId, CancellationToken ct)
     {
-        using var doc = await GetAsync($"{entitySet}?$filter={idColumn} eq {recordId}&$select=_owningteam_value&$top=1", ct);
-        return Values(doc).Select(r => GuidOf(r, "_owningteam_value")).FirstOrDefault();
+        using var doc = await GetAsync(
+            $"{entitySet}?$filter={idColumn} eq {recordId}&$select=_owningteam_value,_owninguser_value&$top=1", ct);
+        var row = Values(doc).FirstOrDefault();
+        if (row.ValueKind != JsonValueKind.Object)
+            return null;
+
+        return GuidOf(row, "_owningteam_value") is { } team && team != Guid.Empty ? DataversePrincipalRef.Team(team)
+            : GuidOf(row, "_owninguser_value") is { } user && user != Guid.Empty ? DataversePrincipalRef.User(user)
+            : null;
     }
 
     /// <summary>

@@ -10,7 +10,8 @@ import { buildOpenRecordUrl, configuredSpaarkeAppName } from './openRecordLaunch
  * actual `hostAdapter.composeNewEmail()` call.
  *
  * **Task 096 (UAT round 4, 2026-10-04) — no sharing link, anywhere.** The document link used to be a Graph
- * sharing link minted by `POST /api/documents/{id}/share-link`. Graph refuses `createLink` for files in
+ * sharing link minted by `POST /api/documents/{id}/share-link` (a route since RETIRED — unified-access-control-r2,
+ * 2026-10-16, #1350). Graph refuses `createLink` for files in
  * SharePoint Embedded containers ("This sharing scenario is not supported on CSP Container site." — the
  * owner's screenshot), so every Send Email failed. The document link is now the document's SPAARKE record
  * (`sprk_document`, opened in the Spaarke app) — built the same way as the related-record link, with no

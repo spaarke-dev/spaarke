@@ -32,7 +32,7 @@
  * @see D-08    — data-refreshed restore
  */
 
-import { registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry';
+import { hasWorkspaceWidget, registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry';
 import { createWorkspaceWrapper } from './WorkspaceWidgetWrapper';
 import { safeRegister } from '@spaarke/ui-components';
 import type { WorkspaceWidgetComponent } from '../../types/widget-types';
@@ -1222,4 +1222,45 @@ registerWorkspaceWidget(
 export function registerWorkspaceWidgets(): void {
   // All registrations execute at module evaluation time (top-level side effects above).
   // This function is a no-op that exists for explicitness at the call site.
+}
+
+// ---------------------------------------------------------------------------
+// spaarke-ontology-platform-r1 task 104 — Ontology admin (D-22, FR-56). GATED: NOT registered at module load.
+//
+// Unlike every registration above, this one runs only when `registerOntologyAdminWidget()` is called, and the only caller is
+// `ontologyAdminGate.ts`, once the BFF capability probe has answered, AS THE CALLER, that they hold prvCreatesprk_PolicyVersion.
+// A user without the Spaarke Ontology Administrator role never has the type registered, so nothing can open the tab for them.
+// The registration decides what is SHOWN only: every admin write route authorizes itself as the caller.
+// ---------------------------------------------------------------------------
+
+/** The registered type string of the Ontology admin tab (ADR-039 Path C: surface identity stays in code). */
+export const ONTOLOGY_ADMIN_WIDGET_TYPE = 'ontology-admin';
+
+const ONTOLOGY_ADMIN_OPT_OUT = assistantContractOptOut(
+  'Ontology admin — an administration surface for rules and triage categories; the Assistant does not query or act on it ' +
+    '(outside R3 FR-06/07 scope).'
+);
+
+/** Registers the Ontology admin tab. Call it only when the capability probe said yes (`ontologyAdminGate.ts`). Idempotent. */
+export function registerOntologyAdminWidget(): void {
+  if (hasWorkspaceWidget(ONTOLOGY_ADMIN_WIDGET_TYPE)) return;
+  safeRegisterWidget(
+    ONTOLOGY_ADMIN_WIDGET_TYPE,
+    {
+      displayName: 'Ontology admin',
+      category: 'admin',
+      icon: 'ShieldTaskRegular',
+      // One admin tab: a second would show the same areas.
+      allowMultiple: false,
+      // After the worklist (247) and the metrics dashboards (300s): an operator surface, last in any listing.
+      defaultOrder: 400,
+      // FR-15 (task 050): explicit opt-out — see ONTOLOGY_ADMIN_OPT_OUT.
+      assistantContract: ONTOLOGY_ADMIN_OPT_OUT,
+    },
+    () =>
+      import('./OntologyAdminWorkspaceWidget').then(m => ({
+        default:
+          m.OntologyAdminWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+      }))
+  );
 }

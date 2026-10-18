@@ -166,7 +166,12 @@ import {
   ArrowDownRegular,
   AddRegular,
 } from "@fluentui/react-icons";
-import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
+import {
+  ONTOLOGY_ADMIN_WIDGET_TYPE,
+  useAiSession,
+  useDispatchPaneEvent,
+  useOntologyAdminTabAvailable,
+} from "@spaarke/ai-widgets";
 import { formatRelativeTime, navigateToWebResourceSurfaceAsync, RowActionMenu } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import {
@@ -563,6 +568,9 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
   });
   // Used by row-click → `widget_load` dispatch (mirrors WorkspacePaneMenu.handleLayoutSelect)
   const dispatch = useDispatchPaneEvent();
+  // Ontology task 104 (D-22): true only after the capability probe said the caller can author policies and the
+  // 'ontology-admin' tab was registered; the "Administration" entry below is listed only then.
+  const ontologyAdminAvailable = useOntologyAdminTabAvailable();
 
   // -------------------------------------------------------------------------
   // Ordered pinned list — task 104
@@ -803,6 +811,17 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
     },
     [dispatch, onOpenChange, renamingId],
   );
+
+  // Ontology task 104 (D-22): open the Ontology admin tab. Listed only when the gate registered it, so this
+  // dispatch never names an unregistered type.
+  const handleOpenOntologyAdmin = React.useCallback((): void => {
+    dispatch("workspace", {
+      type: "widget_load",
+      widgetType: ONTOLOGY_ADMIN_WIDGET_TYPE,
+      displayName: "Ontology admin",
+    });
+    onOpenChange(false);
+  }, [dispatch, onOpenChange]);
 
   // -------------------------------------------------------------------------
   // "+ New" — launch the create wizard, then (on a confirmed save) refetch the
@@ -1233,6 +1252,47 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
                   </div>
                 </>
               )}
+            </div>
+          )}
+
+          {/* Ontology task 104 (D-22): the Ontology admin tab, for a caller the capability probe said can author
+           * policies. Not a layout row: it is a gated direct widget, so it is listed apart from the layouts. */}
+          {ontologyAdminAvailable && (
+            <div data-testid="manage-section-admin">
+              <div className={styles.sectionDivider} role="presentation" />
+              <Text
+                as="h3"
+                size={200}
+                weight="semibold"
+                block
+                className={styles.sectionHeader}
+                data-testid="manage-section-admin-header"
+              >
+                Administration
+              </Text>
+              <div className={styles.list}>
+                <div
+                  className={styles.row}
+                  data-testid="manage-workspaces-row-ontology-admin"
+                  onClick={handleOpenOntologyAdmin}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleOpenOntologyAdmin();
+                    }
+                  }}
+                >
+                  <div className={styles.nameCol}>
+                    <div className={styles.nameLine}>
+                      <Text className={styles.name} weight="semibold">
+                        Ontology admin
+                      </Text>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </DrawerBody>

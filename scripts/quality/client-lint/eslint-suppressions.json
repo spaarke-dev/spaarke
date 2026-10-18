@@ -577,7 +577,7 @@
   },
   "src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingRender.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 7
+      "count": 4
     }
   },
   "src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useInlineTodoCreate.ts": {
@@ -587,12 +587,7 @@
   },
   "src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingService.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 9
-    }
-  },
-  "src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 13
+      "count": 7
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/AppErrorBoundary/AppErrorBoundary.tsx": {

@@ -55,7 +55,6 @@ import type { TldrResolvableItem } from './TldrSection';
 import { ActivityNotesSection } from './ActivityNotesSection';
 import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
-import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
 import {
   SendEmailDialog,
@@ -152,7 +151,8 @@ export interface DailyBriefingAppProps {
  * state. BOTH modes open the CANONICAL SendEmailDialog engine (standard
  * communication pipeline) prefilled: `briefing` carries the full-briefing HTML
  * overview with per-item record deep links (buildBriefingEmailHtml); `item`
- * carries a single high-priority record draft (buildItemEmailDraft).
+ * carries a single-record draft (buildItemEmailDraft), used by the document
+ * preview's "Email" action.
  */
 type EmailDialogState =
   | { mode: 'briefing'; defaultSubject: string; defaultBody: string }
@@ -173,7 +173,7 @@ export function buildRecordDeepLink(clientUrl: string, entityType: string, entit
 
 /**
  * r5 email-share #3 — compose the draft email subject + body for a single
- * high-priority item, DETERMINISTICALLY from the item's structured fields
+ * record, DETERMINISTICALLY from the item's structured fields
  * (name, kindLabel, description) plus a deep link built from entityType/entityId.
  * No narrative text is consulted (mirrors the deterministic-link rule the TL;DR
  * renderer follows). Exported so the composition is unit-testable without a mount.
@@ -208,8 +208,7 @@ function esc(v: string): string {
  */
 export function buildBriefingEmailHtml(
   clientUrl: string,
-  tldr: { summary?: string; topAction?: string; keyTakeaways?: string[] } | null,
-  highPriorityItems: HighPriorityItemResult[],
+  tldr: { summary?: string; keyTakeaways?: string[] } | null,
   channelNarratives: Array<{
     category: string;
     bullets?: Array<{
@@ -229,16 +228,6 @@ export function buildBriefingEmailHtml(
   if (tldr?.keyTakeaways?.length) {
     parts.push('<ul>');
     for (const t of tldr.keyTakeaways) parts.push(`<li>${esc(t)}</li>`);
-    parts.push('</ul>');
-  }
-  if (tldr?.topAction) parts.push(`<p><strong>Top action:</strong> ${esc(tldr.topAction)}</p>`);
-  if (highPriorityItems.length > 0) {
-    parts.push('<h3>High Priority</h3>', '<ul>');
-    for (const item of highPriorityItems) {
-      const label = `${item.kindLabel ? `${item.kindLabel}: ` : ''}${item.name || 'Record'}`;
-      const link = buildRecordDeepLink(clientUrl, item.entityType, item.entityId);
-      parts.push(`<li>${link ? `<a href="${esc(link)}">${esc(label)}</a>` : esc(label)}</li>`);
-    }
     parts.push('</ul>');
   }
   for (const channel of channelNarratives) {
@@ -664,12 +653,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
 
   const handleEmailBriefing = React.useCallback(() => {
     const subject = `Daily Briefing — ${new Date().toLocaleDateString()}`;
-    const body = buildBriefingEmailHtml(
-      clientUrl,
-      renderData?.tldr ?? null,
-      renderData?.highPriorityItems ?? [],
-      renderData?.channelNarratives ?? []
-    );
+    const body = buildBriefingEmailHtml(clientUrl, renderData?.tldr ?? null, renderData?.channelNarratives ?? []);
     setEmailDialog({ mode: 'briefing', defaultSubject: subject, defaultBody: body });
   }, [clientUrl, renderData]);
 
@@ -769,14 +753,10 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     );
   }
 
-  // Success — render HighPriority (if any) + TldrSection + filtered channelNarratives.
+  // Success — render TldrSection + filtered channelNarratives. ("Critical Today" is retired as a list: task 062, FR-32.)
   const tldr = renderData?.tldr ?? null;
-  const highPriorityItems = renderData?.highPriorityItems ?? [];
   // unified-access-control-r2 task 152: sections whose read as the caller failed are named, never shown as empty.
-  const failedSectionLabels = describeFailedSections(
-    renderData?.failedChannels ?? [],
-    renderData?.highPriorityFailedEntityTypes ?? []
-  );
+  const failedSectionLabels = describeFailedSections(renderData?.failedChannels ?? []);
 
   // Deterministic KPI tiles (task 021 redesign). Every count is derived from the
   // already-deterministic render data — no LLM, no fabrication (FR-A4 posture).
@@ -784,12 +764,8 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   //   Updates = the activity-feed bullet count (the sections below)
   //   Overdue / Documents / Matters & Projects = subsets of that feed (the overdue,
   //     documents, and matters+projects channels respectively)
-  //   Critical = the SEPARATE high-priority flagged-records section (own data source,
-  //     bypasses the narrator) — so it can legitimately exceed "Updates". It was
-  //     labelled "Open items" before (2026-07-09 operator UAT): that implied a grand
-  //     total and made "Critical > Open items" read as a contradiction. "Updates" is
-  //     the honest label; summing the two sources is deliberately avoided (records can
-  //     appear in both → double-count would violate the by-construction accuracy rule).
+  //   (A "Critical" tile counted the retired Critical Today list; it is removed with it — task 062, FR-32.
+  //   sprk_highpriority is now a rank input of the worklist read route and sprk_monitor a subscription to Know.)
   // Match the EXACT channel-category keys emitted by DailyBriefingCollector (server constants
   // ChannelOverdueTasks="overdue-tasks", ChannelMatters="matters") — not a loose /overdue/ /matter/
   // regex, which could false-match a future channel (e.g. "overdue-documents", "matter-invoices")
@@ -814,7 +790,6 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   const statTiles: StatTile[] = [
     { label: 'Updates', value: totalVisibleBullets, tone: 'neutral' },
     { label: 'Overdue', value: overdueCount, tone: overdueCount > 0 ? 'danger' : 'neutral' },
-    { label: 'Critical', value: highPriorityItems.length, tone: highPriorityItems.length > 0 ? 'warning' : 'neutral' },
     { label: 'Documents', value: documentsCount, tone: 'neutral' },
     { label: 'Matters & Projects', value: mattersAndProjectsCount, tone: 'brand' },
   ];
@@ -840,7 +815,6 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         )}
         {/* Task 021 redesign: deterministic KPI tiles at the top. */}
         <StatTiles tiles={statTiles} />
-        {/* Operator order (2026-07-09): Today's summary above Critical Today. */}
         <TldrSection
           tldr={tldr}
           isLoading={false}
@@ -851,7 +825,6 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           resolvableItems={tldrResolvableItems}
           onOpenRecord={handleOpenRecord}
         />
-        <HighPrioritySection items={highPriorityItems} onOpenRecord={handleOpenRecord} onEmailItem={handleEmailItem} />
         <div className={styles.activitySection}>
           <ActivityNotesSection
             channelNarratives={filteredNarratives}
