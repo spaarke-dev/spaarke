@@ -706,7 +706,21 @@ public class RecordOwnerAssignmentCensusTests
             + "communication and the record's stamps; the owner is read back before any share is revoked."),
     };
 
-    private static readonly Regex AssignCall = new(@"\.AssignAsync\s*\(|\bnew\s+AssignRequest\b", RegexOptions.Compiled);
+    // 042b round 4: a member access on AssignAsync with any spacing (a call, a method group, `this.`, `?.`, a line break after the dot or
+    // before the parenthesis), and `new AssignRequest` however qualified (`global::`, a namespace).
+    private static readonly Regex AssignCall = new(
+        @"\.\s*AssignAsync\b|\bnew\s+(?:global::)?(?:\w+\s*\.\s*)*AssignRequest\b", RegexOptions.Compiled);
+
+    // 042b round 4: a regex over call shapes cannot see an AssignRequest built through a using alias (`new Assign { ... }`) or a
+    // target-typed `new()`. Both need the TYPE named somewhere in code (the alias's declaration, the variable's or parameter's type), so the
+    // type token itself is censused, by member, wherever it appears outside comments. Only the primitive names it today.
+    private static readonly Regex AssignRequestToken = new(@"\bAssignRequest\b", RegexOptions.Compiled);
+
+    private static readonly IReadOnlyList<AssignCaller> AssignRequestTokens = new[]
+    {
+        new AssignCaller("OntologyWriterDataverseClient.cs", "AssignAsync", 1,
+            "The primitive itself: the one AssignRequest the server builds (see AssignCallers)."),
+    };
 
     private static List<string> AssignCensusProblems(
         Dictionary<(string File, string Member), List<int>> actual, IReadOnlyList<AssignCaller> listed)
@@ -728,38 +742,73 @@ public class RecordOwnerAssignmentCensusTests
     [Fact(DisplayName = "Ontology 042b r3: every AssignAsync call and AssignRequest in the server is censused, by member, with its count")]
     public void EveryAssignCallerIsCensused()
     {
-        var problems = AssignCensusProblems(ScanCalls(ServerFiles(), AssignCall), AssignCallers);
+        var files = ServerFiles();
+        var problems = AssignCensusProblems(ScanCalls(files, AssignCall), AssignCallers)
+            .Concat(AssignCensusProblems(ScanCalls(files, AssignRequestToken), AssignRequestTokens).Select(p => "AssignRequest token: " + p))
+            .ToList();
         Assert.True(problems.Count == 0,
-            "The Assign census does not match the source (ontology 042b round 3). An Assign re-owns a row of any table outside the owner-write "
-            + "scanner; a new caller must take its owner from IRecordOwnershipResolver and be listed with its reason:\n"
+            "The Assign census does not match the source (ontology 042b rounds 3-4). An Assign re-owns a row of any table outside the "
+            + "owner-write scanner; a new caller, or a new mention of the AssignRequest type (an alias, a target-typed new()), must take its "
+            + "owner from IRecordOwnershipResolver and be listed with its reason:\n"
             + string.Join("\n", problems));
     }
 
-    [Fact(DisplayName = "Ontology 042b r3: negative control — a new AssignAsync caller or AssignRequest fails the Assign census; a declaration does not")]
+    [Fact(DisplayName = "Ontology 042b r3/r4: negative control — every AssignAsync access and AssignRequest shape fails the Assign census; a declaration does not")]
     public void AssignCallDetector_NegativeControl()
     {
         var code = SourceScan.CodeText(new[]
         {
+            "using AssignAlias = Microsoft.Crm.Sdk.Messages.AssignRequest;",
             "internal sealed class Seeded",
             "{",
             "    public Task AssignAsync(string table, Guid id, EntityReference assignee, CancellationToken ct = default) => Task.CompletedTask;",
             "    private async Task Rogue(Guid id, Guid team) { await _writer.AssignAsync(\"account\", id, new EntityReference(\"team\", team)); }",
             "    private Task Raw(Guid id, Guid team) => _org.ExecuteAsync(new AssignRequest { Target = new EntityReference(\"contact\", id) });",
+            "    private Task Qualified(Guid id) => _org.ExecuteAsync(new Microsoft.Crm.Sdk.Messages.AssignRequest { Target = null });",
+            "    private Task Global(Guid id) => _org.ExecuteAsync(new global::Microsoft.Crm.Sdk.Messages.AssignRequest { Target = null });",
+            "    private Task Aliased(Guid id) => _org.ExecuteAsync(new AssignAlias { Target = null });",
+            "    private Task TargetTyped(Guid id) { AssignRequest request = new() { Target = null }; return _org.ExecuteAsync(request); }",
+            "    private async Task DotThenBreak(Guid id) { await _writer.",
+            "        AssignAsync(\"account\", id, null!); }",
+            "    private async Task BreakThenParen(Guid id) { await _writer.AssignAsync",
+            "        (\"account\", id, null!); }",
+            "    private Func<string, Guid, EntityReference, CancellationToken, Task> MethodGroup() { var f = _writer.AssignAsync; return f; }",
+            "    private async Task ThisCall(Guid id) { await this.AssignAsync(\"account\", id, null!); }",
+            "    private async Task Conditional(Guid id) { await _writer?.AssignAsync(\"account\", id, null!)!; }",
             "    private async Task Threads(ThreadResolutionRequest r) { await _threads.ResolveAndAssignAsync(r); }",
             "    private async Task Private(Guid id) { await AssignAsync(\"sprk_signal\", id, null!); }",
+            "    private Task Request(Guid id) => _org.ExecuteAsync(new AssignRequestFactory().Build(id));",
             "    // a comment naming _writer.AssignAsync( and new AssignRequest is not code",
             "}",
         });
-        var sites = ScanCalls(new Dictionary<string, string> { ["Seeded.cs"] = code }, AssignCall);
+        var files = new Dictionary<string, string> { ["Seeded.cs"] = code };
+        var sites = ScanCalls(files, AssignCall);
+        var tokens = ScanCalls(files, AssignRequestToken);
 
-        // Must fire: the qualified call and the raw AssignRequest; must not fire: the declaration, ResolveAndAssignAsync, the comment.
-        Assert.Equal(new[] { "Raw", "Rogue" }, sites.Keys.Select(k => k.Member).OrderBy(m => m, StringComparer.Ordinal));
+        // Must fire (the call regex): every member access on AssignAsync and every `new [global::][Ns.]AssignRequest`.
+        Assert.Equal(
+            new[] { "BreakThenParen", "Conditional", "DotThenBreak", "Global", "MethodGroup", "Qualified", "Raw", "Rogue", "ThisCall" },
+            sites.Keys.Select(k => k.Member).OrderBy(m => m, StringComparer.Ordinal));
+
+        // Must fire (the type token): the alias's declaration (outside any member) and the target-typed new()'s variable type — the two
+        // shapes the call regex cannot see — plus every spelled AssignRequest.
+        Assert.Equal(
+            new[] { "(file)", "Global", "Qualified", "Raw", "TargetTyped" },
+            tokens.Keys.Select(k => k.Member).OrderBy(m => m, StringComparer.Ordinal));
+
+        // Must not fire on either: the declaration, ResolveAndAssignAsync, the unqualified private call, AssignRequestFactory, the comment.
+        foreach (var quiet in new[] { "Seeded", "AssignAsync", "Threads", "Private", "Request" })
+        {
+            Assert.DoesNotContain(sites.Keys, k => k.Member == quiet);
+            Assert.DoesNotContain(tokens.Keys, k => k.Member == quiet);
+        }
 
         var problems = AssignCensusProblems(sites, new[] { new AssignCaller("Seeded.cs", "Raw", 1, "listed"), new AssignCaller("Seeded.cs", "Gone", 1, "stale") });
-        Assert.Equal(2, problems.Count);
+        Assert.Equal(9, problems.Count);
         Assert.Contains(problems, p => p.StartsWith("UNLISTED Assign caller Seeded.cs.Rogue", StringComparison.Ordinal));
         Assert.Contains(problems, p => p.StartsWith("STALE Assign census entry Seeded.cs.Gone", StringComparison.Ordinal));
-        Assert.Empty(AssignCensusProblems(sites, new[] { new AssignCaller("Seeded.cs", "Raw", 1, "x"), new AssignCaller("Seeded.cs", "Rogue", 1, "x") }));
+        Assert.Empty(AssignCensusProblems(sites, sites.Select(kv => new AssignCaller(kv.Key.File, kv.Key.Member, kv.Value.Count, "x")).ToList()));
+        Assert.Contains(AssignCensusProblems(tokens, AssignRequestTokens), p => p.StartsWith("UNLISTED Assign caller Seeded.cs.(file)", StringComparison.Ordinal));
     }
 
     /// <summary>(file, member) → the 1-based lines of each match of <paramref name="call"/>.</summary>
