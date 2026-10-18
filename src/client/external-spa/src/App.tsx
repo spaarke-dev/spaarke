@@ -156,7 +156,7 @@ const AppShell: React.FC<{
             {/* Opens the record a `?record={type}:{id}` link names, once signed in (task 055, FR-07). */}
             <RecordDeepLink teamsHost={teamsHost} />
             <Routes>
-              <Route path="/" element={<WorkspaceHomePage teamsHost={teamsHost} />} />
+              <Route path="/" element={<WorkspaceHomePage teamsHost={teamsHost} onNavigate={navigate} />} />
               <Route path="/project/:id" element={<ProjectPage />} />
               <Route path="/upload" element={<DocumentUploadPage teamsHost={teamsHost} />} />
               <Route path={INVOICE_SUBMIT_PATH} element={<InvoiceSubmitPage />} />

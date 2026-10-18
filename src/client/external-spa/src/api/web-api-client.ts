@@ -40,6 +40,7 @@ import type {
   InvoiceCoreRecordList,
   InvoiceCoreRecordOption,
   InvoiceFirmOption,
+  InvoiceRecordQuery,
   InvoiceSubmissionAccepted,
   InvoiceSubmissionInput,
   InvoiceSubmissionStatusView,
@@ -838,7 +839,8 @@ export async function deleteOwnEvent(eventId: string): Promise<void> {
 //   POST /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions
 //        multipart: file, firmInvoiceNumber, poNumber; optional ?firmId=   -> 202 { submissionId, jobId, trackingNumber, statusUrl }
 //   GET  /api/v1/external/invoice-submissions/{id}                          -> the status view
-//   GET  /api/v1/external/invoice-submissions                               -> the caller's firms' submissions (flag probe)
+//   GET  /api/v1/external/invoice-submissions                               -> the caller's firms' submissions (flag probe fallback)
+//   GET  /api/v1/external/invoice-submissions/firm-records?firmId=          -> the caller's readable records the firm is linked to (D-106)
 //
 // The server decides who may submit and for which firm (ADR-002 / FR-17). A caller with one firm names none (the server
 // takes it); a caller with several picks one in the wizard's "Choose firm" step (owner, 2026-10-17) and it goes as the
@@ -899,12 +901,13 @@ export async function submitInvoice(input: InvoiceSubmissionInput): Promise<Invo
 
 /**
  * The firms the signed-in user can submit invoices for: `firms` on GET /api/v1/external/me (only the caller's own).
- * Unknown (an older BFF, eBilling off, a failed read) is `[]` here, so the wizard shows no firm step and the server
- * answers `firm_required` if a several-firm caller still needs to choose.
+ * `null` is UNKNOWN (an older BFF, eBilling off, a failed firm read), which is not "no firm" (`[]`): the wizard shows no
+ * firm step for either, but on a `firm_required` answer it asks again and inserts the step when the caller now has several.
  */
-export async function listInvoiceFirms(): Promise<InvoiceFirmOption[]> {
+export async function listInvoiceFirms(): Promise<InvoiceFirmOption[] | null> {
   const me = await getExternalUserContext();
-  return (me.firms ?? []).filter(f => GUID_RE.test(f.firmId)).map(f => ({ firmId: f.firmId, name: f.name }));
+  if (me.firms == null) return null;
+  return me.firms.filter(f => GUID_RE.test(f.firmId)).map(f => ({ firmId: f.firmId, name: f.name }));
 }
 
 /** Reads one submission's current status. Rejects with an {@link InvoiceSubmissionError}. */
@@ -919,11 +922,19 @@ export async function getInvoiceSubmission(submissionId: string): Promise<Invoic
 }
 
 /**
- * Whether invoice submission is on, from the one route every caller may read: the caller's own submissions list.
- * 503 with the `ebilling.disabled` code is the only "off" answer (FR-45). Any other failure is `unknown`: an outage or a
- * refusal must not read as "off", so the entry stays and the server answers when it is used.
+ * Whether invoice submission is on. `firms` on GET /api/v1/external/me is the cheap signal: the BFF sends it only when
+ * eBilling is on (absent or null otherwise, and for an older BFF), so a list is `available` without another call. Only
+ * when `firms` is absent does this fall back to the one route every caller may read, the caller's own submissions list,
+ * to tell "off" from "unknown": 503 with the `ebilling.disabled` code is the only "off" answer (FR-45). Any other failure
+ * is `unknown`: an outage or a refusal must not read as "off", so the entry stays and the server answers when it is used.
  */
 export async function probeInvoiceSubmission(): Promise<'available' | 'disabled' | 'unknown'> {
+  try {
+    const me = await getExternalUserContext();
+    if (me.firms != null) return 'available';
+  } catch {
+    /* /me failed: the list read below decides (and is 'unknown' when it fails too) */
+  }
   try {
     await bffApiCall<InvoiceSubmissionStatusView[]>('/api/v1/external/invoice-submissions');
     return 'available';
@@ -950,41 +961,76 @@ const INVOICE_RECORD_READS = [
   },
 ] as const;
 
+/** The body of GET /api/v1/external/invoice-submissions/firm-records (task 051 / D-106): the caller's readable records the firm is linked to. */
+interface InvoiceFirmRecordsResponse {
+  firmId: string;
+  matters?: string[];
+  projects?: string[];
+  workAssignments?: string[];
+  partial?: boolean;
+}
+
+const sameId = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+
 /**
  * The core records the caller can pick for an invoice: their accessible projects (the external projects route) plus
  * matters and work assignments (the Tier-2-scoped module read). The server re-checks Read and Create on the chosen
- * record when the invoice is submitted. If one source fails the others are still offered, flagged as a partial list;
- * if all fail the first failure is thrown.
+ * record, and that the firm is linked to it (D-106), when the invoice is submitted.
+ *
+ * With `query.firmId` the list is narrowed to the records linked to that firm: the BFF's firm-records route names the
+ * caller's own readable records the firm is linked to, and the three reads are filtered to them (the Tier-2 module read
+ * is allow-listed, so the link cannot be asked for there). A failed firm-records read throws (the picker then shows the
+ * failure, never an unfiltered list the server would refuse). If one record source fails the others are still offered,
+ * flagged `partial`; `truncated` is the row cap (200) or `moreRecords`, which can hide a linked record. If every source
+ * fails the first failure is thrown.
  */
-export async function listInvoiceCoreRecords(): Promise<InvoiceCoreRecordList> {
-  const reads = await Promise.allSettled<InvoiceCoreRecordList>([
-    getProjects().then(list => ({
-      truncated: list.truncated,
-      records: list.items.map<InvoiceCoreRecordOption>(p => ({
-        kind: 'project',
-        recordId: p.sprk_projectid,
-        name: p.sprk_name,
-        number: p.sprk_referencenumber,
+export async function listInvoiceCoreRecords(query: InvoiceRecordQuery = {}): Promise<InvoiceCoreRecordList> {
+  const firmId = query.firmId;
+  if (firmId !== undefined && !GUID_RE.test(firmId)) {
+    throw new InvoiceSubmissionError({ message: 'Invalid firm id.' });
+  }
+  const linkedRead: Promise<InvoiceFirmRecordsResponse | null> = firmId
+    ? bffApiCall<InvoiceFirmRecordsResponse>(
+        `/api/v1/external/invoice-submissions/firm-records?firmId=${encodeURIComponent(firmId)}`
+      ).catch(err => {
+        throw toInvoiceSubmissionError(err);
+      })
+    : Promise.resolve(null);
+
+  const [linked, reads] = await Promise.all([
+    linkedRead,
+    Promise.allSettled<InvoiceCoreRecordList>([
+      getProjects().then(list => ({
+        truncated: list.truncated,
+        records: list.items.map<InvoiceCoreRecordOption>(p => ({
+          kind: 'project',
+          recordId: p.sprk_projectid,
+          name: p.sprk_name,
+          number: p.sprk_referencenumber,
+        })),
       })),
-    })),
-    ...INVOICE_RECORD_READS.map(async read => {
-      const fetchXml =
-        `<fetch count="${INVOICE_RECORD_PAGE}"><entity name="${read.entity}">` +
-        `<attribute name="${read.id}"/><attribute name="${read.name}"/><attribute name="${read.number}"/>` +
-        `<order attribute="${read.number}"/></entity></fetch>`;
-      const result = await gridDataverseClient.retrieveMultipleRecords<Record<string, unknown>>(read.entity, fetchXml);
-      return {
-        truncated: result.moreRecords,
-        records: result.entities
-          .filter(row => typeof row[read.id] === 'string')
-          .map<InvoiceCoreRecordOption>(row => ({
-            kind: read.kind,
-            recordId: String(row[read.id]),
-            name: String(row[read.name] ?? row[read.number] ?? ''),
-            number: row[read.number] == null ? null : String(row[read.number]),
-          })),
-      };
-    }),
+      ...INVOICE_RECORD_READS.map(async read => {
+        const fetchXml =
+          `<fetch count="${INVOICE_RECORD_PAGE}"><entity name="${read.entity}">` +
+          `<attribute name="${read.id}"/><attribute name="${read.name}"/><attribute name="${read.number}"/>` +
+          `<order attribute="${read.number}"/></entity></fetch>`;
+        const result = await gridDataverseClient.retrieveMultipleRecords<Record<string, unknown>>(
+          read.entity,
+          fetchXml
+        );
+        return {
+          truncated: result.moreRecords,
+          records: result.entities
+            .filter(row => typeof row[read.id] === 'string')
+            .map<InvoiceCoreRecordOption>(row => ({
+              kind: read.kind,
+              recordId: String(row[read.id]),
+              name: String(row[read.name] ?? row[read.number] ?? ''),
+              number: row[read.number] == null ? null : String(row[read.number]),
+            })),
+        };
+      }),
+    ]),
   ]);
 
   const fulfilled = reads.filter((r): r is PromiseFulfilledResult<InvoiceCoreRecordList> => r.status === 'fulfilled');
@@ -992,9 +1038,17 @@ export async function listInvoiceCoreRecords(): Promise<InvoiceCoreRecordList> {
     const first = reads.find((r): r is PromiseRejectedResult => r.status === 'rejected');
     throw toInvoiceSubmissionError(first?.reason);
   }
+
+  const linkedIds: Readonly<Record<InvoiceCoreRecordKind, readonly string[]>> | null = linked
+    ? { matter: linked.matters ?? [], project: linked.projects ?? [], workassignment: linked.workAssignments ?? [] }
+    : null;
+  const all = fulfilled.flatMap(r => r.value.records);
+  const records = linkedIds ? all.filter(r => linkedIds[r.kind].some(id => sameId(id, r.recordId))) : all;
+
   return {
-    records: fulfilled.flatMap(r => r.value.records).sort((a, b) => a.name.localeCompare(b.name)),
-    truncated: fulfilled.length < reads.length || fulfilled.some(r => r.value.truncated === true),
+    records: records.sort((a, b) => a.name.localeCompare(b.name)),
+    truncated: fulfilled.some(r => r.value.truncated === true),
+    partial: fulfilled.length < reads.length || linked?.partial === true,
   };
 }
 

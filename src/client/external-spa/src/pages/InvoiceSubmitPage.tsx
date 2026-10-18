@@ -13,7 +13,8 @@
  *   - submissionId: the Processing / Result screen alone, read from the server. Leaving the page and coming back shows
  *     the same answer (FR-18). Nothing is kept in the browser.
  *
- * FR-45: the first thing the page does is the availability probe. A 503 `ebilling.disabled` replaces the page with a
+ * FR-45: the first thing the page does is the availability probe (`firms` on /me, then the submissions list only when
+ * `firms` is absent, to tell "off" from "unknown"). A 503 `ebilling.disabled` replaces the page with a
  * plain "not available" state; the wizard is never shown. The client decides no authorization (ADR-002 / FR-17): it
  * shows what the server refused, by code.
  *

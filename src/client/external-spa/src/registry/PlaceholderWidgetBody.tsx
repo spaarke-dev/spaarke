@@ -29,6 +29,11 @@ export interface WidgetBodyProps {
   title: string;
   /** Widget description from its registry definition. */
   description?: string;
+  /**
+   * In-app navigation, supplied by the host that sits inside the router (App.tsx -> WorkspaceHomePage). Absent when the
+   * body is rendered without one (a unit test, a surface with no router): a widget with a navigating action then omits it.
+   */
+  onNavigate?: (path: string) => void;
 }
 
 /** The component type every registry `lazyLoader` must resolve to. */

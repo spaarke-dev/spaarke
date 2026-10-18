@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 
 // teams-js fetches its valid-domains list when first loaded; a fake keeps the recorded traffic to the SPA's own calls.
 vi.mock('@microsoft/teams-js', () => ({
@@ -63,6 +63,8 @@ interface Script {
   status: Array<() => Response>;
   /** GET /api/v1/external/me (the caller's firms are `firms`). */
   me: () => Response;
+  /** GET .../invoice-submissions/firm-records?firmId= (D-106): the caller's readable records the firm is linked to. */
+  firmRecords: (firmId: string) => Response;
 }
 
 const FIRM_ALPHA = { firmId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Alpha LLP' };
@@ -75,6 +77,10 @@ let script: Script;
 
 const json = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+/** The firm-records body: the ids (among the caller's readable records) the firm is linked to. */
+const linkedTo = (firmId: string, matters: string[], projects: string[], partial = false): Response =>
+  json(200, { firmId, matters, projects, workAssignments: [], partial });
 
 const problem = (status: number, detail: string | undefined, errorCode?: string): Response =>
   json(status, { status, title: 'refused', ...(detail ? { detail } : {}), ...(errorCode ? { errorCode } : {}) });
@@ -102,6 +108,8 @@ beforeEach(() => {
     submit: ACCEPTED_202,
     status: [() => json(200, statusView({ status: 'Accepted' }))],
     me: meWith([FIRM_ALPHA]),
+    // Every firm is linked to the matter and the project unless a test says otherwise.
+    firmRecords: firmId => linkedTo(firmId, [MATTER_ID], [PROJECT_ID]),
   };
   localStorage.clear();
   sessionStorage.clear();
@@ -132,6 +140,9 @@ beforeEach(() => {
       const p = new URL(url).pathname;
       if (method === 'GET' && p === '/api/v1/external/invoice-submissions') return script.probe();
       if (method === 'GET' && p === '/api/v1/external/me') return script.me();
+      if (method === 'GET' && p === '/api/v1/external/invoice-submissions/firm-records') {
+        return script.firmRecords(new URL(url).searchParams.get('firmId') ?? '');
+      }
       if (method === 'GET' && p === '/api/v1/external/projects') {
         return json(200, {
           value: [{ sprk_projectid: PROJECT_ID, sprk_name: 'Patent portfolio', sprk_referencenumber: 'P-77' }],
@@ -230,7 +241,8 @@ describe('InvoiceSubmitPage — submit', () => {
       const { InvoiceSubmitPage } = await load();
       renderPage(InvoiceSubmitPage, '/invoices/submit');
 
-      // The picker offers the caller's projects, matters and work assignments (three reads), nothing else.
+      // The picker offers the caller's projects, matters and work assignments (three reads), narrowed to the records
+      // linked to the firm. The availability probe is /me (its `firms`), not a list read; /me is read again for the firms.
       const firmInvoiceNumber = await toDetails();
       expect(
         calls
@@ -238,10 +250,14 @@ describe('InvoiceSubmitPage — submit', () => {
           .map(c => new URL(c.url).pathname)
           .sort()
       ).toEqual([
-        '/api/v1/external/invoice-submissions', // the availability probe
+        '/api/v1/external/invoice-submissions/firm-records', // the records linked to the firm (D-106)
+        '/api/v1/external/me', // the availability probe
         '/api/v1/external/me', // the caller's firms (one here: no firm step)
         '/api/v1/external/projects',
       ]);
+      expect(calls.find(c => c.url.includes('/firm-records'))?.url).toContain(`firmId=${FIRM_ALPHA.firmId}`);
+      // The probe made no list read: that route is only the fallback when `firms` is absent.
+      expect(calls.some(c => new URL(c.url).pathname === '/api/v1/external/invoice-submissions')).toBe(false);
       // Matters and work assignments: one Tier-2-scoped module read each.
       expect(calls.filter(c => c.url.includes('/dataverse/fetch'))).toHaveLength(2);
 
@@ -448,6 +464,117 @@ describe('InvoiceSubmitPage — Choose firm (owner, 2026-10-17: add a firm step)
   );
 
   it(
+    'lists only the records linked to the chosen firm (D-106), and asks again when another firm is chosen',
+    async () => {
+      script.me = meWith([FIRM_ALPHA, FIRM_BETA]);
+      // Alpha is linked to the matter only; Beta to the project only.
+      script.firmRecords = firmId =>
+        firmId === FIRM_ALPHA.firmId ? linkedTo(firmId, [MATTER_ID], []) : linkedTo(firmId, [], [PROJECT_ID]);
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, '/invoices/submit');
+
+      // Nothing about records is asked before a firm is chosen.
+      await firmRadio('Alpha LLP');
+      expect(calls.some(c => c.url.includes('/firm-records'))).toBe(false);
+      expect(calls.some(c => new URL(c.url).pathname === '/api/v1/external/projects')).toBe(false);
+
+      fireEvent.click(screen.getByRole('radio', { name: 'Alpha LLP' }));
+      fireEvent.click(await next());
+      expect(await screen.findByRole('radio', { name: /Acme v\. Roadrunner/ }, SLOW)).toBeTruthy();
+      expect(screen.queryByRole('radio', { name: /Patent portfolio/ })).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
+      fireEvent.click(await firmRadio('Beta & Co'));
+      fireEvent.click(await next());
+      expect(await screen.findByRole('radio', { name: /Patent portfolio/ }, SLOW)).toBeTruthy();
+      expect(screen.queryByRole('radio', { name: /Acme v\. Roadrunner/ })).toBeNull();
+      expect(
+        calls.filter(c => c.url.includes('/firm-records')).map(c => new URL(c.url).searchParams.get('firmId'))
+      ).toEqual([FIRM_ALPHA.firmId, FIRM_BETA.firmId]);
+    },
+    SLOW
+  );
+
+  it(
+    'says so when no record is linked to the firm, and when the link read failed (partial) it does not read as "none"',
+    async () => {
+      script.firmRecords = firmId => linkedTo(firmId, [], [], false);
+      const { InvoiceSubmitPage } = await load();
+      const view = renderPage(InvoiceSubmitPage, '/invoices/submit');
+      expect(await screen.findByText(/is linked to this firm/i, {}, SLOW)).toBeTruthy();
+      expect(isEnabled(await next())).toBe(false);
+      view.unmount();
+
+      script.firmRecords = firmId => linkedTo(firmId, [MATTER_ID], [], true);
+      renderPage((await load()).InvoiceSubmitPage, '/invoices/submit');
+      expect(await screen.findByRole('radio', { name: /Acme v\. Roadrunner/ }, SLOW)).toBeTruthy();
+      expect(screen.getByTestId('records-partial')).toBeTruthy();
+    },
+    SLOW
+  );
+
+  it(
+    'a refused or failed firm-records read shows the failure and never an unfiltered list',
+    async () => {
+      script.firmRecords = () => problem(403, undefined, 'ebilling.submission.use_internal_route');
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, '/invoices/submit');
+      expect(await screen.findByText(/submitted from the internal workspace/i, {}, SLOW)).toBeTruthy();
+      expect(screen.queryByRole('radio', { name: /Acme v\. Roadrunner/ })).toBeNull();
+      expect(screen.queryByRole('radio', { name: /Patent portfolio/ })).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'with firms unknown (null) the records are not narrowed (no firm-records read): the server checks the link on submit',
+    async () => {
+      script.me = meWith(null);
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, '/invoices/submit');
+      expect(await screen.findByRole('radio', { name: /Acme v\. Roadrunner/ }, SLOW)).toBeTruthy();
+      expect(screen.getByRole('radio', { name: /Patent portfolio/ })).toBeTruthy();
+      expect(calls.some(c => c.url.includes('/firm-records'))).toBe(false);
+    },
+    SLOW
+  );
+
+  it(
+    'a 400 firm_required on submit brings the Choose firm step in, then the chosen firm goes as firmId',
+    async () => {
+      // /me says null the first time (unknown), several firms after the refusal.
+      let meReads = 0;
+      script.me = () => (++meReads <= 2 ? meWith(null)() : meWith([FIRM_ALPHA, FIRM_BETA])());
+      let posts = 0;
+      script.submit = () =>
+        ++posts === 1 ? problem(400, undefined, 'ebilling.submission.firm_required') : ACCEPTED_202();
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, '/invoices/submit');
+
+      fireEvent.change(await toDetails(), { target: { value: 'INV-9' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Submit invoice' }));
+
+      expect(await screen.findByText('Choose the firm this invoice is from', {}, SLOW)).toBeTruthy();
+      fireEvent.click(screen.getByRole('radio', { name: 'Beta & Co' }));
+      fireEvent.click(await next());
+      // The record is still chosen (offered under the firm), the file and the number are kept.
+      await screen.findByRole('radio', { name: /Acme v\. Roadrunner/ }, SLOW);
+      fireEvent.click(await next());
+      await waitFor(() => expect(isEnabled(screen.getByRole('button', { name: /^next$/i }))).toBe(true));
+      fireEvent.click(await next());
+      expect(((await screen.findByLabelText(/Firm invoice number/i)) as HTMLInputElement).value).toBe('INV-9');
+      fireEvent.click(screen.getByRole('button', { name: 'Submit invoice' }));
+
+      expect(await screen.findByText('Invoice received', {}, SLOW)).toBeTruthy();
+      const sent = submitCalls();
+      expect(sent).toHaveLength(2);
+      expect(sent[0].url).not.toContain('firmId');
+      expect(sent[1].url).toContain(`?firmId=${FIRM_BETA.firmId}`);
+    },
+    SLOW
+  );
+
+  it(
     'shows the server refusal when the chosen firm is refused, and does not advance',
     async () => {
       script.me = meWith([FIRM_ALPHA, FIRM_BETA]);
@@ -525,6 +652,8 @@ describe('InvoiceSubmitPage — eBilling off (FR-45)', () => {
   it(
     '503 ebilling.disabled from the probe replaces the page with a not-available state; no record is read and nothing can be submitted',
     async () => {
+      // eBilling off: /me carries no `firms`, so the probe falls back to the list read, which answers 503 ebilling.disabled.
+      script.me = meWith(null);
       script.probe = () => problem(503, 'eBilling is not enabled in this environment.', 'ebilling.disabled');
       const { InvoiceSubmitPage } = await load();
       renderPage(InvoiceSubmitPage, '/invoices/submit');
@@ -532,7 +661,10 @@ describe('InvoiceSubmitPage — eBilling off (FR-45)', () => {
       expect(await screen.findByTestId('invoice-submit-unavailable', {}, SLOW)).toBeTruthy();
       expect(screen.queryByRole('radio')).toBeNull();
       expect(screen.queryByRole('button', { name: /^next$/i })).toBeNull();
-      expect(calls.map(c => new URL(c.url).pathname)).toEqual(['/api/v1/external/invoice-submissions']);
+      expect(calls.map(c => new URL(c.url).pathname)).toEqual([
+        '/api/v1/external/me',
+        '/api/v1/external/invoice-submissions',
+      ]);
     },
     SLOW
   );
@@ -540,6 +672,7 @@ describe('InvoiceSubmitPage — eBilling off (FR-45)', () => {
   it(
     'a 503 that is an outage (another error code) does not read as disabled: the wizard is shown',
     async () => {
+      script.me = meWith(null);
       script.probe = () => problem(503, 'Submissions could not be read.', 'ebilling.submission.record_unavailable');
       const { InvoiceSubmitPage } = await load();
       renderPage(InvoiceSubmitPage, '/invoices/submit');
@@ -551,7 +684,13 @@ describe('InvoiceSubmitPage — eBilling off (FR-45)', () => {
 });
 
 describe('Invoices widget — Submit invoice entry (FR-18, FR-45)', () => {
-  function renderWidget(Body: React.FC<{ title: string }>) {
+  type BodyProps = { title: string; onNavigate?: (path: string) => void };
+  /** The router-owning host (App.tsx -> WorkspaceHomePage) hands the body `navigate`; `withNavigate: false` is a host without one. */
+  function renderWidget(Body: React.FC<BodyProps>, withNavigate = true) {
+    const Host: React.FC = () => {
+      const navigate = useNavigate();
+      return React.createElement(Body, { title: 'Invoices', onNavigate: withNavigate ? navigate : undefined });
+    };
     return render(
       React.createElement(
         MemoryRouter,
@@ -559,7 +698,7 @@ describe('Invoices widget — Submit invoice entry (FR-18, FR-45)', () => {
         React.createElement(
           Routes,
           null,
-          React.createElement(Route, { path: '/', element: React.createElement(Body, { title: 'Invoices' }) }),
+          React.createElement(Route, { path: '/', element: React.createElement(Host) }),
           React.createElement(Route, {
             path: '/invoices/submit',
             element: React.createElement('div', null, 'submit page'),
@@ -583,31 +722,58 @@ describe('Invoices widget — Submit invoice entry (FR-18, FR-45)', () => {
   );
 
   it(
-    'hides the action on 503 ebilling.disabled (the grid stays)',
+    'reads only /me on mount: no list probe, no record read',
     async () => {
-      script.probe = () => problem(503, undefined, 'ebilling.disabled');
+      const { InvoicesWidgetBody } = await load();
+      renderWidget(InvoicesWidgetBody);
+      await screen.findByRole('button', { name: /submit invoice/i }, SLOW);
+      expect(calls.map(c => new URL(c.url).pathname)).toEqual(['/api/v1/external/me']);
+    },
+    SLOW
+  );
+
+  it.each([
+    ['eBilling off or an older BFF (firms null)', meWith(null)],
+    [
+      'firms absent',
+      () => json(200, { contactId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', email: 'a@b.example', projects: [] }),
+    ],
+    ['no firm (empty: a systemuser, a deactivated contact)', meWith([])],
+    ['a /me that fails', () => problem(500, 'boom')],
+  ])(
+    'hides the action for %s (the grid stays)',
+    async (_name, me) => {
+      script.me = me;
       const { InvoicesWidgetBody } = await load();
       renderWidget(InvoicesWidgetBody);
       await waitFor(() => expect(calls.length).toBeGreaterThan(0));
-      await new Promise(r => setTimeout(r, 50));
+      await new Promise(r => setTimeout(r, 100));
       expect(screen.queryByRole('button', { name: /submit invoice/i })).toBeNull();
       expect(screen.getByTestId('invoices-grid')).toBeTruthy();
+      expect(calls.some(c => new URL(c.url).pathname === '/api/v1/external/invoice-submissions')).toBe(false);
     },
     SLOW
   );
 
   it(
-    'keeps the action through an outage 503 or a refusal: only ebilling.disabled hides it',
+    'without a navigate handed by the host (no router) it renders the grid alone and reads nothing',
     async () => {
-      script.probe = () => problem(503, undefined, 'ebilling.submission.record_unavailable');
       const { InvoicesWidgetBody } = await load();
-      const view = renderWidget(InvoicesWidgetBody);
-      expect(await screen.findByRole('button', { name: /submit invoice/i }, SLOW)).toBeTruthy();
-      view.unmount();
+      renderWidget(InvoicesWidgetBody, false);
+      await new Promise(r => setTimeout(r, 100));
+      expect(screen.queryByRole('button', { name: /submit invoice/i })).toBeNull();
+      expect(screen.getByTestId('invoices-grid')).toBeTruthy();
+      expect(calls).toHaveLength(0);
+    },
+    SLOW
+  );
 
-      script.probe = () => problem(403, undefined);
-      renderWidget(InvoicesWidgetBody);
-      expect(await screen.findByRole('button', { name: /submit invoice/i }, SLOW)).toBeTruthy();
+  it(
+    'renders with no router at all (the body imports no router API)',
+    async () => {
+      const { InvoicesWidgetBody } = await load();
+      render(React.createElement(InvoicesWidgetBody, { title: 'Invoices' }));
+      expect(screen.getByTestId('invoices-grid')).toBeTruthy();
     },
     SLOW
   );
