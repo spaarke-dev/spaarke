@@ -195,3 +195,71 @@ All of them pass after the fixes.
 
   The round delta (head vs base) is **+4,395 B**. Head vs master is **+401,252 B (+0.38 MB; 37.76 MB total)**. Both are under the +5 MB and 55 MB thresholds.
 - Class search: the other writers of `sprk_inforceto` are in `Services/Ontology/**` and `Services/Signals/**`. They are ontology-owned, so they are listed for the operator and not changed.
+
+## 9. Review round 3 (fix list from the main session; base `229643893`)
+
+Commits:
+- `bc727c68e`: item 2, `MapConditionalBulkFailure`.
+- `be39dc551`: item 1, `stampsStand` removed.
+- `c96f3a8f1`: item 3, the publish claim.
+
+No schema change, no new registration, no package change. Each red count was taken by running the new tests against the code without the fix (for a one-line fix, a mutation that undoes it).
+
+| # | Finding | Fix | Must-fire tests and fail-before evidence |
+|---|---|---|---|
+| 1 | F3: the `stampsStand` test proved nothing; one unrelated edit of a policy in a chunk left every old version of the chunk current but carrying an end date | The exclusion is removed. A refused step 2 chunk is taken back like any other failure. The take-back already decides from a fresh read, so a policy whose pointer another writer moved keeps its stamp, and a policy that changed without its pointer moving has its stamp cleared. The rule now stated in the code: a version that is still the policy's current version never ends with an end date, unless the same publish moves its pointer | `Publish_WhenThePolicyChangedWithoutItsPointerMoving_...` (2 rows: `sprk_name` renamed, `sprk_enabled` toggled; the end state is v1 current with no end date, and a retry completes) and `Publish_WhenOneChunkOfPolicyWritesIsRefusedWithoutAPointerMove_...` (1,001 rules; the chunk that landed keeps its stamps, the refused chunk's are cleared). **3 of 3 failed** with the exclusion in place (found `2026-11-01`, expected null). The round 2 test `...TheStampsOfThatChunkStand` still passes: it covers a moved pointer, which the fresh read handles |
+| 2 | F3: the catch in `BulkUpdateIfRowVersionsMatchAsync` was untested | The decision moved to the pure `DataverseServiceClientImpl.MapConditionalBulkFailure(entity, updates, failure)`: a mismatch is a `DBConcurrencyException`; every other failure is the `InvalidOperationException` that `BulkUpdateAsync` throws (worded by `DescribeBulkUpdateFailure`). The catch only logs and throws what it returns. A non-fault exception (a timeout) keeps today's behaviour: an `InvalidOperationException` that says the outcome is unknown. It is not rethrown bare, because that would change the 500 path | 5 tests in `BulkUpdateTransactionTests`: the code on the fault, on an inner fault (also wrapped), as message text, an unrelated fault, a non-fault exception. The helper did not exist before, so the red count is by mutation (the mismatch test made always false): **3 of 5 failed** |
+| 3 | Real defect (filed as K3 by the reviewer): the take-back race | **Option chosen: a per-rule-set publish claim over the existing `IScheduledJobLease`**, not a column on `sprk_ruleset`. See below | `Publish_WhileAnotherPublishOfTheSetHoldsTheClaim_...`, `Publish_WhenTheClaimStoreIsUnreachable_FailsClosed_...`, `Publish_WhenASecondPublishStartsWhileTheFirstFailsAtItsPointerMove_...` (two real threads; P2 is parked just before its pointer move while P1 fails and takes back), and the must-not-fire `Publish_ReleasesItsClaim_HoweverItEnds_...` (done, refused, failed, throws). With the claim skipped, **3 failed** (the race ends with the pointer on v2 and v1 without an end date, the exact defect). With the release removed, the 4 release rows and every test that publishes twice failed (14 in the `Publish` filter) |
+
+### Item 3: why a lease and not the options in the brief
+
+- **Why the take-back race cannot be closed by conditional writes alone.**
+  - A take-back's clear is conditional on the row version of its own fresh read. That read happens after the second publish's stamp, so the condition holds and the clear lands. The second publish's pointer move is conditional on a policy row version the first publish never touched, so it also lands.
+  - "P2 re-verifies after moving its pointer" has a hole: P1 can read, P2 can move and verify, and then P1 clears with the row version it read. Closing that needs a multi-table transaction (a clear of v1 and a touch of the policy row in one request), whose no-op-update row version behaviour is unverified live.
+  - A claim marker on `sprk_ruleset` needs a new column, which the brief rules out.
+- **What shipped.**
+  - `PublishAsync` takes the lease `ruleset-publish:{ruleSetId}` (`RuleSetService.PublishClaimId`) before its first read, for ten minutes (`PublishClaimLifetime`, the stale-claim timeout), and releases it in a `finally` with `CancellationToken.None`, however the publish ends.
+  - A second publish of the same set finds it held and gets 409 `ruleset.publish_in_progress`, having read and written nothing. Publishes of other sets are not affected.
+  - An unreachable claim store fails closed: 500 `ruleset.write_failed`, nothing read or written.
+  - The body of the publish is unchanged (`PublishClaimedAsync`).
+- **Distribution.** In the BFF the lease is the Redis one (`SET NX PX`, token-checked release), so the claim holds across instances and slots. With Redis off (single-instance development) it is process-local.
+- **Precedent.** `DecisionCommitService` already uses `IScheduledJobLease` as a mutex outside the scheduler. The ArchTest that keeps jobs host-neutral concerns `IScheduledJob` types only, so it does not apply.
+
+### Section 11 - new surface this round
+
+- **`RuleSetService` depends on `IScheduledJobLease`; new code `ruleset.publish_in_progress`; `DataverseServiceClientImpl.MapConditionalBulkFailure`.**
+  - Existing: `IScheduledJobLease` (the registration already exists in `SchedulingModule`; `DecisionCommitService` is the precedent). `MapConditionalBulkFailure` only moves code that was inside the catch.
+  - Extension: the lease is the extension. A `sprk_ruleset` marker column would be schema; an in-process lock would not hold across instances.
+  - Cost of doing nothing: a superseded version can end with no end date, and 072 never evaluates it for invoices dated in its window (item 3).
+- No route, no DI registration, no package. The route ledger stays at 137.
+
+### Known limits (round 3)
+
+Carried from round 2 and earlier, as stated:
+- **`IfRowVersionMatches` inside `ExecuteTransactionRequest` is unverified live.** It is a pre-deploy dev probe item for the main session: a conditional update inside a transaction, with the row changed in between, must fault with `0x80060882` and roll the transaction back. The unit tests use the documented code.
+- **A retry after a lost response can be misreported as a mismatch.** The SDK may retry the transaction on throttling. If the first attempt landed but its response was lost, the retry finds the row versions changed and reads as a 409, although the publish's own write is what changed them.
+- **The edit / publish window for sets above 1,000 rules.** The writes are several chunk transactions, so an edit can land between two chunks. Each chunk is conditional, so the edit or the publish is refused, never both applied half way.
+- **Accept / reject staleness from the page load.** The client sends no version, so the service reads the row version when the request arrives. An accept can therefore decide on content the admin did not see if an edit landed after the page loaded. Note for task 077: the page should send the version it showed (or the proposal's content hash) and the service should compare it.
+- **A create that succeeded but lost its response is reported as a 409** (round 2).
+
+New or restated this round:
+- **The claim is not renewed.** A publish that outlived `PublishClaimLifetime` (ten minutes; a few thousand rows take seconds) would let a second publish in. The conditional writes still catch every case except the take-back race the claim exists to close.
+- **The claim covers publishes of one set only.** Edits, decisions and the Ontology publish (`Services/Ontology/**`, another project's code) are not serialised with it; the conditional writes and the fresh-read take-back cover them.
+- **A refused step 2 chunk caused by a rename or toggle** now takes back the stamps. If that take-back itself fails, the Error log names the version ids, as before; a retry of the publish re-stamps.
+
+### Verification (round 3)
+
+- Build: `dotnet build src/server/api/Sprk.Bff.Api/` 0 warnings, 0 errors.
+- Filter `RuleSet|BulkUpdate|BillingAdmin` on `tests/unit/Sprk.Bff.Api.Tests`: **261 pass / 0 fail**. `RuleSet` alone: **244 pass** (round 2: 234; +3 item 1, +7 item 3). `BulkUpdateTransactionTests`: **15 pass** (+5 item 2).
+- The wider filter `RuleSet|BulkUpdate|BillingAdmin|Finance`: **1408 pass / 0 fail / 3 skipped** (round 2: 1381 pass, without `BulkUpdate`).
+- ArchTests (`tests/Spaarke.ArchTests`): **1175 pass / 0 fail / 0 skipped**.
+- Publish size, measured as in round 1 (Release, `-r linux-x64 --self-contained false`, `Compress-Archive` Optimal, PDBs included, short-path copies from `git archive`, 192 files each):
+
+  | Build | Size |
+  |---|---|
+  | Base `229643893` | **39,594,409 B** |
+  | Head `c96f3a8f1` | **39,595,681 B** |
+  | Fresh master `a82578cdc` | **39,190,712 B** |
+
+  The round delta is **+1,272 B**. Head vs master is **+404,969 B (+0.39 MB; 37.76 MB total)**. Both are under the +5 MB and 55 MB thresholds.
+- Class search: no code constructs `RuleSetService` outside the DI registration and the three test harnesses, which were updated.
