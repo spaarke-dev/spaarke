@@ -274,6 +274,12 @@ Source: uac-r2's re-check of the follow-up (every claim verified; three items). 
 | BFF build | 0 warnings, 0 errors |
 | Publish size (same convention as above, fresh worktrees `C:\wt2081m` / `C:\wt2081b`, 192 files each side) | `ca40c9ba0` 39,600,343 B → `490d74259` 39,601,810 B (+1,467 B) |
 
+### #2081 round 3
+
+The update-only wire was unpinned: every guard test mocks `IFieldMappingDataverseService`, so removing `If-Match: *` or the impersonation argument from `DataverseWebApiService.UpdateExistingRecordFieldsAsync` (impersonation overload) passed everything. `DataverseWebApiServiceImpersonationTests` now pins it with the recording stub handler: PATCH to `{entitySet}({id})`; `If-Match: *`; one `MSCRMCallerID` equal to the id (the metadata lookup stays app-only); none for a null caller, which keeps `If-Match: *`; `Guid.Empty` throws `ArgumentException` and no PATCH is sent; 404 and 412 throw `KeyNotFoundException`; 204 succeeds; 400, 403 and 500 stay `HttpRequestException`. Mutations: removing the `If-Match` line fails 6 tests (3 new impersonation-file tests, plus 3 in `RecalculateWriteNoCreateTests`); dropping the impersonation argument fails 4 (2 new, 2 in `RecalculateWriteNoCreateTests`).
+
+**Known limit (optional K, skipped).** Under `If-Match: *` a 404 can come from a missing `@odata.bind` target rather than the primary row, and the write reports `not_found` for it. The service reads the error body only as a message string for logging (no code or entity/id extraction), so telling the two apart would mean parsing localisable message text; that is not reliable, so the 404 stays one `KeyNotFoundException`. The effect is a mislabelled reason on a failed write, never a created row or a granted write.
+
 ## Files
 
 **Ontology-owned (ontology-r1 review requested):**
