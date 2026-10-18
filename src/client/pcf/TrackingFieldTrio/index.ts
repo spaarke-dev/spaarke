@@ -123,6 +123,28 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.54 (task 099c review round 2, PR #2062): no change in this file's logic. In the bundled modal's Expiration:
+ *   when shares end on different dates and the earliest has already passed, no disabled Apply is offered - the line says
+ *   to choose the UTC minimum date or later, and picking a valid date offers Apply; the "choose an Expiration before
+ *   adding people" message names that UTC minimum date the way the field's own error does.
+ *
+ * v1.0.53 (task 099c review round 1, PR #2062): no change in this file's logic. In the bundled modal's Expiration:
+ *   adds, Save and a suggestion's Grant wait while an Apply is in flight, and the Expiration waits while an add is in
+ *   flight (no add lands on the old date); shares on different dates offer Apply with no edit; "Not applied yet" shows
+ *   only for a date that differs from the applied one; a past-date refusal of an add shows the server's sentence; and
+ *   an Apply that finds no share keeps its date for the next add.
+ *
+ * v1.0.52 (task 099c round 2 — owner 2026-09-10, every add sends the date): no change in this file's logic. Every
+ *   external add in the bundled modal (contact, organization, suggestion; `/grant` and `/invite-and-grant`) sends the
+ *   record's applied Expiration as `expiryDate` — with shares, their date (never an unapplied edit; a re-add of a later
+ *   grant moves it to the record date); with none, the field's value, which is now editable (default today + 90).
+ *
+ * v1.0.51 (task 099c, unified-access-control-r2 — FR-33, #961): no change in this file's logic. The bundled modal's
+ *   "Add Access Permissions" toolbar gains the record-wide "Expiration": it shows the shares' earliest expiry (from
+ *   `fetchExistingGrants`, 099a) and states when they differ, and applying a date calls
+ *   `POST /api/v1/external-access/set-record-share-expiry` once with the date only (never a level), then re-reads
+ *   Current Access. It goes through the same `authenticatedFetchGated` and is shown only when Manage Access is allowed.
+ *
  * v1.0.50 (task 099a review round 2): no change in this file's logic. The bundled modal lets a failed grants read
  *   settle on its own, so role candidates, Suggested Access and the secure-owner line still load beside Current Access's
  *   error; when another read fails, Current Access shows "Not shown." under the one load notice, not a second error.
@@ -1528,7 +1550,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.50 • Built 2026-10-16',
+      versionText: 'v1.0.54 • Built 2026-10-17',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they

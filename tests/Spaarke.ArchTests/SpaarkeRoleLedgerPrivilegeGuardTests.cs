@@ -11,31 +11,45 @@ namespace Spaarke.ArchTests;
 /// <item>Only <c>Spaarke Ontology Service</c> (the writer identity) may Create a Decision Record; no Spaarke role may Write or Delete one.
 /// The BFF commit route is the one creator, so a user who could create their own record could forge one the stored-record replay accepts
 /// (the 043 review hash is a plain SHA-256).</item>
-/// <item><c>Spaarke Console User</c> may not Write <c>sprk_signal</c>: only the BFF commit route closes a Signal, so FR-18 ("no
-/// human-resolved Signal has a null record") is enforced by privilege, not by the browser's good behaviour.</item>
+/// <item><c>Spaarke Console User</c> and <c>Spaarke Ontology Administrator</c> may not Write <c>sprk_signal</c>: only the BFF commit
+/// route closes a Signal, so FR-18 ("no human-resolved Signal has a null record") is enforced by privilege, not by the browser's good
+/// behaviour. The administrator's retire, publish and re-evaluation write Signals through the writer identity (owner Q6, 2026-10-17).</item>
 /// </list>
 /// </summary>
 /// <remarks>
 /// Scans every role in <c>src/dataverse/solutions/SpaarkeMaster/Roles</c>, the only source-controlled role definitions. Any depth
-/// counts. <c>Spaarke Ontology Administrator</c> still holds Write on <c>sprk_signal</c> (Deep); D-17 does not name it, so this guard
-/// does not assert on it (reported to the owner with task 049).
+/// counts. Other roles' Signal Write (platform and service roles) is the live union check's concern, not this guard's.
 /// </remarks>
 public class SpaarkeRoleLedgerPrivilegeGuardTests
 {
     private const string WriterRole = "Spaarke Ontology Service";
-    private const string ConsoleUserRole = "Spaarke Console User";
+    private static readonly string[] SignalWriteForbiddenRoles = ["Spaarke Console User", "Spaarke Ontology Administrator"];
 
     private static readonly string[] DecisionRecordCreate = ["prvCreatesprk_DecisionRecord"];
     private static readonly string[] DecisionRecordWriteOrDelete = ["prvWritesprk_DecisionRecord", "prvDeletesprk_DecisionRecord"];
     private static readonly string[] SignalWrite = ["prvWritesprk_Signal"];
 
-    [Fact(DisplayName = "Spaarke roles: only the writer creates Decision Records, none writes or deletes them, Console User cannot write a Signal (task 049)")]
+    [Fact(DisplayName = "Spaarke roles: only the writer creates Decision Records, none writes or deletes them, Console User and Ontology Administrator cannot write a Signal (task 049)")]
     public void SourceRolesKeepTheLedgerGuarantees()
     {
         var rolesRoot = Path.Combine(SourceScan.RepoRoot, "src", "dataverse", "solutions", "SpaarkeMaster", "Roles");
         var roles = Directory.EnumerateFiles(rolesRoot, "*.xml", SearchOption.TopDirectoryOnly).ToList();
         Assert.True(roles.Count >= 12,
             $"Scanner found only {roles.Count} role definitions under {rolesRoot} (expected >= 12). Repo root resolved to '{SourceScan.RepoRoot}'.");
+
+        // The named roles must be among the scanned files. If a role file's name attribute changed, the role rules below would
+        // silently stop applying to it and this guard would pass green.
+        var scannedNames = roles
+            .Select(path => (string?)XDocument.Parse(File.ReadAllText(path)).Root?.Attribute("name"))
+            .Where(n => !string.IsNullOrEmpty(n))
+            .ToHashSet(StringComparer.Ordinal);
+        var missingRoles = SignalWriteForbiddenRoles.Append(WriterRole)
+            .Where(r => !scannedNames.Contains(r))
+            .ToList();
+        Assert.True(missingRoles.Count == 0,
+            $"The role guard names roles that no scanned file under {rolesRoot} defines: [{string.Join(", ", missingRoles)}]. "
+            + "A role file was renamed or removed, so the Signal Write and Decision Record Create rules would no longer apply to it. "
+            + "Update WriterRole / SignalWriteForbiddenRoles with the rename.");
 
         var violations = roles
             .SelectMany(path => Violations(File.ReadAllText(path))
@@ -47,7 +61,7 @@ public class SpaarkeRoleLedgerPrivilegeGuardTests
             + "(writer identity) creates a Decision Record or closes a Signal:\n  " + string.Join("\n  ", violations));
     }
 
-    [Fact(DisplayName = "Role ledger-privilege guard control: Create/Write/Delete on a Decision Record and Console User Write on a Signal are reported")]
+    [Fact(DisplayName = "Role ledger-privilege guard control: Create/Write/Delete on a Decision Record and Console User / Ontology Administrator Write on a Signal are reported")]
     public void GuardFiresOnTheForbiddenGrants()
     {
         const string humanRole = """
@@ -69,6 +83,18 @@ public class SpaarkeRoleLedgerPrivilegeGuardTests
         Assert.Contains(found, f => f.Contains("prvWritesprk_DecisionRecord", StringComparison.Ordinal));
         Assert.Contains(found, f => f.Contains("prvDeletesprk_DecisionRecord", StringComparison.Ordinal));
         Assert.Contains(found, f => f.Contains("prvWritesprk_Signal", StringComparison.Ordinal));
+
+        const string adminRole = """
+            <Role id="{00000000-0000-0000-0000-000000000004}" name="Spaarke Ontology Administrator">
+              <RolePrivileges>
+                <RolePrivilege name="prvReadsprk_DecisionRecord" level="Deep" />
+                <RolePrivilege name="prvWritesprk_Signal" level="Deep" />
+              </RolePrivileges>
+            </Role>
+            """;
+
+        var adminFound = Assert.Single(Violations(adminRole));
+        Assert.Contains("prvWritesprk_Signal", adminFound, StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "Role ledger-privilege guard control: the writer may Create, Reads, comments, look-alike names and other roles' Signal Write are not reported")]
@@ -97,9 +123,9 @@ public class SpaarkeRoleLedgerPrivilegeGuardTests
               </RolePrivileges>
             </Role>
             """;
-        // Not Console User, so its Signal Write is not this guard's concern (D-17 names Console User only).
-        const string adminRole = """
-            <Role id="{00000000-0000-0000-0000-000000000004}" name="Spaarke Ontology Administrator">
+        // Not a named role, so its Signal Write is the live union check's concern, not this guard's.
+        const string otherRole = """
+            <Role id="{00000000-0000-0000-0000-000000000004}" name="Spaarke Matter Contributor">
               <RolePrivileges>
                 <RolePrivilege name="prvReadsprk_DecisionRecord" level="Deep" />
                 <RolePrivilege name="prvWritesprk_Signal" level="Deep" />
@@ -109,7 +135,7 @@ public class SpaarkeRoleLedgerPrivilegeGuardTests
 
         Assert.Empty(Violations(consoleUserRole));
         Assert.Empty(Violations(writerRole));
-        Assert.Empty(Violations(adminRole));
+        Assert.Empty(Violations(otherRole));
     }
 
     /// <summary>The forbidden grants in one role definition, as "role: name (level)".</summary>
@@ -118,7 +144,7 @@ public class SpaarkeRoleLedgerPrivilegeGuardTests
         var doc = XDocument.Parse(roleXml);
         var roleName = (string?)doc.Root?.Attribute("name") ?? string.Empty;
         var isWriter = string.Equals(roleName, WriterRole, StringComparison.Ordinal);
-        var isConsoleUser = string.Equals(roleName, ConsoleUserRole, StringComparison.Ordinal);
+        var isSignalWriteForbidden = SignalWriteForbiddenRoles.Contains(roleName, StringComparer.Ordinal);
 
         return doc.Descendants()
             .Where(e => e.Name.LocalName == "RolePrivilege")
@@ -126,7 +152,7 @@ public class SpaarkeRoleLedgerPrivilegeGuardTests
             .Where(p =>
                 DecisionRecordWriteOrDelete.Contains(p.Name, StringComparer.Ordinal)
                 || (!isWriter && DecisionRecordCreate.Contains(p.Name, StringComparer.Ordinal))
-                || (isConsoleUser && SignalWrite.Contains(p.Name, StringComparer.Ordinal)))
+                || (isSignalWriteForbidden && SignalWrite.Contains(p.Name, StringComparer.Ordinal)))
             .Select(p => $"{roleName}: {p.Name} ({p.Level})")
             .ToList();
     }

@@ -11,6 +11,7 @@ import { render, screen } from '@testing-library/react';
 const authenticatedFetch = jest.fn();
 const createOntologyRulesService = jest.fn((opts: unknown) => ({ opts }));
 const createClassificationService = jest.fn((opts: unknown) => ({ opts }));
+const createOntologyAuthoringService = jest.fn((opts: unknown) => ({ authoring: opts }));
 let tabProps: Record<string, unknown> | undefined;
 let rulesAreaProps: Record<string, unknown> | undefined;
 let classificationAreaProps: Record<string, unknown> | undefined;
@@ -31,6 +32,7 @@ jest.mock('@spaarke/ui-components', () => ({
   },
   createOntologyRulesService: (opts: unknown) => createOntologyRulesService(opts),
   createClassificationService: (opts: unknown) => createClassificationService(opts),
+  createOntologyAuthoringService: (opts: unknown) => createOntologyAuthoringService(opts),
 }));
 jest.mock('../../../providers/useAiSession', () => ({
   __esModule: true,
@@ -57,6 +59,13 @@ describe('OntologyAdminWorkspaceWidget', () => {
     expect(rulesAreaProps?.service).toEqual({ opts: { fetch: authenticatedFetch, baseUrl: 'https://bff.example' } });
   });
 
+  it('builds the rule wizard\'s authoring service over the same session and hands it to the Rules area', () => {
+    render(<OntologyAdminWorkspaceWidget {...props} />);
+
+    expect(createOntologyAuthoringService).toHaveBeenCalledWith({ fetch: authenticatedFetch, baseUrl: 'https://bff.example' });
+    expect(rulesAreaProps?.authoringService).toEqual({ authoring: { fetch: authenticatedFetch, baseUrl: 'https://bff.example' } });
+  });
+
   it('fills the tab\'s classification slot with the area, over a service built from the session fetch and BFF base url', () => {
     render(<OntologyAdminWorkspaceWidget {...props} />);
 
@@ -72,5 +81,6 @@ describe('OntologyAdminWorkspaceWidget', () => {
 
     expect(createOntologyRulesService).toHaveBeenCalledTimes(1);
     expect(createClassificationService).toHaveBeenCalledTimes(1);
+    expect(createOntologyAuthoringService).toHaveBeenCalledTimes(1);
   });
 });
