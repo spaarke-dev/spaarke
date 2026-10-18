@@ -4,7 +4,7 @@
     <title>Billing actions in DecisionActionCatalog</title>
     <phase>3 Rules (WP3) — wave W3-2</phase>
     <gate>startable</gate>
-    <status>completed</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the ontology's closed action catalog and the append-only Decision Record path; FR-30 requires exactly one record per approve / reject / return / override (NFR-09 attribution).</rigor-reason>
     <model-tier>opus</model-tier>
