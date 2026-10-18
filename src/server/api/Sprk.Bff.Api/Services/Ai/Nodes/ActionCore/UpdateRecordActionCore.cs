@@ -164,6 +164,27 @@ internal sealed class UpdateRecordActionCore
                 throw new RecordOwnerUnresolvedException(input.EntityLogicalName, refusal);
         }
 
+        // #2091: a write that moves one of the table's filing lookups (SecureChildLineage) is a RE-FILE, so it runs the ONE step
+        // after a re-file (SecureChildReconciler.AfterRefileAsync), as every other re-file writer does. Whether the row was
+        // isolated is read BEFORE the write: a move OUT releases only from a row that was. The reconciler is scoped and this
+        // core's constructor is frozen (task 031), so it comes from a scope; a host without it skips the step.
+        var refiledTable = input.EntityLogicalName.Trim().ToLowerInvariant();
+        using var refileScope = WritesALineageLookup(refiledTable, updatePayload.Keys) ? _scopeFactory.CreateScope() : null;
+        var children = refileScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureChildReconciler>();
+        Exception? isolationReadFault = null;
+        var isolatedBefore = false;
+        if (children is not null)
+        {
+            try
+            {
+                isolatedBefore = await children.IsSecureTeamOwnedAsync(refiledTable, input.RecordId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                isolationReadFault = ex;
+            }
+        }
+
         var parentChanges = ParentChangesOf(input, updatePayload);
         if (parentChanges.Count == 0)
         {
@@ -202,11 +223,22 @@ internal sealed class UpdateRecordActionCore
         await RestampAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
         await SecureFiledRootAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
 
-        // Spaarkeai-word-add-in-r1 task 129: a re-filed communication's thread follows the filing, so it shows on the record's
-        // Messages panel. This node's re-file does not run SecureChildReconciler.AfterRefileAsync (the step the other re-file
-        // writers share, which reconciles), so it reconciles here — once. Never throws.
-        if (parentChanges.Count > 0)
+        // #2091, AFTER the re-stamp (the stamps on the rows filed under it are lookups the ownership rule reads): the re-filed
+        // row's mirror and the pass over everything filed under it — and a communication's thread follows the filing. Never
+        // throws; the write stands.
+        if (children is not null)
+        {
+            await children.AfterRefileAsync(
+                refiledTable, input.RecordId,
+                () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        // Spaarkeai-word-add-in-r1 task 129: a re-file that did not run the step above (no filing lookup moved, or a host
+        // without the reconciler) still lets a re-filed communication's thread follow the filing — once. Never throws.
+        else if (parentChanges.Count > 0)
+        {
             await ReconcileThreadAfterRefileAsync(input.EntityLogicalName, input.RecordId).ConfigureAwait(false);
+        }
 
         // Task 142 (L1, owner Q5 + A4): a PATCH that wrote a root's "Assigned *" column (as a value or an @odata.bind)
         // materializes the Assigned-To access now. After the PATCH committed; never throws and never fails this update.
@@ -216,6 +248,14 @@ internal sealed class UpdateRecordActionCore
 
         return updatePayload.Keys.ToArray();
     }
+
+    /// <summary>
+    /// #2091: whether the write moves a filing lookup of <paramref name="table"/> — a column of its entry in the ONE lineage
+    /// map (<see cref="Sprk.Bff.Api.Services.Access.SecureChildLineage"/>), as a value or an <c>@odata.bind</c>.
+    /// </summary>
+    private static bool WritesALineageLookup(string table, IEnumerable<string> writtenKeys) =>
+        Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(table, out var lineage)
+        && writtenKeys.Any(k => lineage.Lookups.ContainsKey(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k)));
 
     /// <summary>
     /// Task 129: after a written re-file of a <c>sprk_communication</c>, its thread follows the filing
