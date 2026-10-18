@@ -82,4 +82,18 @@ public sealed record EbillingSettings
 
     /// <summary>The AP export field mapping as JSON (FR-41, D-56); <c>null</c> when the row holds none.</summary>
     public string? ApExportMappingJson { get; init; }
+
+    /// <summary>
+    /// Why these settings cannot back a rejection (FR-26, I-5, D-89), or <c>null</c> when they can. The rule: the reliability threshold
+    /// is above 0 and at most 1, and <see cref="ReferenceMissingCap"/> is below it, so a field with no reference match can never reach
+    /// the threshold and so can never support a rejection. The platform checks each column's range but not this pair (a cross-field
+    /// rule, and ADR-002 allows no plugin or business rule to own it), so the readers check it when they use the row:
+    /// <see cref="EbillingSettingsReader"/> logs it, and <c>SubmissionRejectionRule</c> then rejects nothing until it is fixed.
+    /// </summary>
+    public string? RejectionInvariantProblem =>
+        ReliabilityThreshold is <= 0m or > 1m
+            ? $"The reliability threshold ({ReliabilityThreshold}) must be above 0 and at most 1."
+            : ReferenceMissingCap >= ReliabilityThreshold
+                ? $"The reference-missing cap ({ReferenceMissingCap}) must be below the reliability threshold ({ReliabilityThreshold}); otherwise a field with no reference match can support a rejection."
+                : null;
 }

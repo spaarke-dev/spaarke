@@ -118,7 +118,20 @@ public sealed class EbillingSettingsReader : IEbillingSettingsReader
                 EntityName);
         }
 
-        return Map(result.Entities[0]);
+        var settings = Map(result.Entities[0]);
+
+        // Task 073 (FR-26, I-5, D-89): the platform checks each column's range, not the pair "reference-missing cap below the threshold".
+        // A row that breaks it is still returned (the other settings are unaffected), but loudly: one Error per cache cycle, and the
+        // submission rejection rule rejects nothing while it stands, so an out-of-range save cannot make a submission be rejected.
+        if (settings.RejectionInvariantProblem is { } problem)
+        {
+            _logger.LogError(
+                "eBilling settings: {Entity} breaks the rejection rule's invariant, so no submission can be rejected until it is fixed: {Problem}",
+                EntityName,
+                problem);
+        }
+
+        return settings;
     }
 
     private EbillingSettings Map(Entity row)

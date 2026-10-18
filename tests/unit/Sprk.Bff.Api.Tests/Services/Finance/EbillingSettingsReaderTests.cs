@@ -208,6 +208,99 @@ public sealed class EbillingSettingsReaderTests
         EbillingSettingsReader.CacheTtl.Should().BeLessThanOrEqualTo(TimeSpan.FromSeconds(60)).And.BeGreaterThan(TimeSpan.Zero);
     }
 
+    // Task 073 (FR-26, I-5, D-89): the cap-below-threshold pair is not a platform-checked column rule, so the reader says so loudly.
+
+    [Fact]
+    public async Task GetAsync_ReferenceMissingCapNotBelowTheThreshold_LogsOneErrorPerLoad_ButStillReturnsTheRow()
+    {
+        var row = SettingsRow(0.80m);
+        row["sprk_referencemissingcap"] = 0.80m;
+        row["sprk_codingchunksize"] = 40;
+        ReturnRows(row);
+        var reader = CreateReader();
+
+        var first = await reader.GetAsync();
+        var second = await reader.GetAsync();
+
+        first.ReliabilityThreshold.Should().Be(0.80m);
+        first.CodingChunkSize.Should().Be(40, "the other settings are unaffected");
+        first.RejectionInvariantProblem.Should().NotBeNull();
+        second.Should().BeSameAs(first);
+        VerifyError("breaks the rejection rule's invariant", Times.Once());
+
+        _time.Advance(EbillingSettingsReader.CacheTtl + TimeSpan.FromSeconds(1));
+        await reader.GetAsync();
+        VerifyError("breaks the rejection rule's invariant", Times.Exactly(2));
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("1.5")]
+    public async Task GetAsync_ThresholdOutOfRange_LogsAnError(string threshold)
+    {
+        ReturnRows(SettingsRow(decimal.Parse(threshold, System.Globalization.CultureInfo.InvariantCulture)));
+
+        var settings = await CreateReader().GetAsync();
+
+        settings.RejectionInvariantProblem.Should().NotBeNull();
+        VerifyError("breaks the rejection rule's invariant", Times.Once());
+    }
+
+    [Fact]
+    public async Task GetAsync_SeededValues_LogNoInvariantError()
+    {
+        var row = SettingsRow(0.90m);
+        row["sprk_referencemissingcap"] = 0.80m;
+        ReturnRows(row);
+        var reader = CreateReader();
+
+        var seeded = await reader.GetAsync();
+
+        seeded.RejectionInvariantProblem.Should().BeNull();
+        VerifyError("breaks the rejection rule's invariant", Times.Never());
+    }
+
+    [Fact]
+    public async Task GetAsync_NoRow_TheDefaults_KeepTheInvariant_AndLogNoError()
+    {
+        ReturnRows();
+
+        var settings = await CreateReader().GetAsync();
+
+        settings.RejectionInvariantProblem.Should().BeNull();
+        VerifyError("breaks the rejection rule's invariant", Times.Never());
+    }
+
+    [Theory]
+    [InlineData("0.90", "0.80", false)]
+    [InlineData("0.90", "0.89", false)]
+    [InlineData("0.90", "0.90", true)]
+    [InlineData("0.90", "0.95", true)]
+    [InlineData("0.00", "0.00", true)]
+    [InlineData("1.01", "0.50", true)]
+    [InlineData("1.00", "0.99", false)]
+    public void RejectionInvariantProblem_IsSetWhenTheCapIsNotBelowTheThreshold_OrTheThresholdIsOutsideZeroExclusiveToOne(
+        string threshold, string cap, bool broken)
+    {
+        var settings = new EbillingSettings
+        {
+            ReliabilityThreshold = decimal.Parse(threshold, System.Globalization.CultureInfo.InvariantCulture),
+            ReferenceMissingCap = decimal.Parse(cap, System.Globalization.CultureInfo.InvariantCulture),
+        };
+
+        (settings.RejectionInvariantProblem is not null).Should().Be(broken);
+    }
+
+    private void VerifyError(string messageFragment, Times times) =>
+        _logger.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains(messageFragment)),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            times);
+
     private void VerifyQueries(Times times) =>
         _entityService.Verify(
             x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()),
