@@ -118,6 +118,46 @@ public class CoreRecordWindowHandlerTests
         Run(Window(), FactsFor(Core(Open, Close), (DateOnly?)null)).Should().BeEmpty();
     }
 
+    // ── D-105: a reversal legitimately carries the old date ─────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("-1.0", "575.00")] // negative hours
+    [InlineData("1.0", "-575.00")] // negative amount
+    public void MustNotFire_ForACreditLineOutsideTheWindow_D105(string hours, string amount)
+    {
+        var before = Fee(0) with { Date = Open.AddDays(-30), Hours = D(hours), Amount = D(amount) };
+        var after = Fee(1) with { Date = Close.AddDays(30), Hours = D(hours), Amount = D(amount) };
+        var facts = Facts(before, after) with { CoreRecord = Core(Open, Close) };
+
+        Run(Window(), facts).Should().BeEmpty("a reversal carries the date of the charge it reverses");
+    }
+
+    [Fact]
+    public void MustNotFire_ForACreditLine_OnAClosedCoreRecordWithNoCloseDate_D105()
+    {
+        var facts = Facts(Fee(0) with { Amount = -575m }, Fee(1) with { Hours = -1m, Date = null }) with
+        {
+            CoreRecord = Core(open: Open, closed: true),
+        };
+
+        Run(Window(), facts).Should().BeEmpty("the closed-record reason is a charge finding too");
+    }
+
+    [Fact]
+    public void MustFire_ForTheChargeLinesAroundACredit_TheCreditIsSkippedAndTheRestAreStillJudged_D105()
+    {
+        var late = Close.AddDays(30);
+        var facts = Facts(Fee(0) with { Date = late }, Fee(1) with { Date = late, Amount = -575m }, Fee(2) with { Date = late }) with
+        {
+            CoreRecord = Core(Open, Close),
+        };
+
+        var findings = Run(Window(), facts);
+
+        findings.Select(f => f.Subject.LineIndex).Should().Equal(0, 2);
+        findings.Should().OnlyContain(f => f.ReasonCode == BillingReasonCodes.AfterCoreRecordClosed);
+    }
+
     [Fact]
     public void ExpenseLines_AreJudgedToo()
     {

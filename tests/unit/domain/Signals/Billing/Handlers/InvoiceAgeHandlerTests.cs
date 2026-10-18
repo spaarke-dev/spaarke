@@ -76,6 +76,34 @@ public class InvoiceAgeHandlerTests
         findings.Select(f => f.Subject.LineIndex).Should().Equal(1, 3);
     }
 
+    // ── D-105: a reversal legitimately carries the old date ─────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("-1.0", "575.00")] // negative hours
+    [InlineData("1.0", "-575.00")] // negative amount
+    [InlineData("-1.0", "-575.00")]
+    public void MustNotFire_ForACreditLineDatedFarBeforeTheInvoice_D105(string hours, string amount)
+    {
+        var credit = Fee(0) with { Date = InvoiceDate.AddDays(-400), Hours = D(hours), Amount = D(amount) };
+
+        Run(Age90, Facts(credit)).Should().BeEmpty("a reversal carries the date of the charge it reverses");
+    }
+
+    [Fact]
+    public void MustNotFire_ForAnExpenseCreditDatedFarBeforeTheInvoice_D105()
+    {
+        Run(Age90, Facts(Expense(0) with { Date = InvoiceDate.AddDays(-400), Amount = -40m })).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void MustFire_ForTheOldChargeLinesAroundACredit_TheCreditIsSkippedAndTheRestAreStillJudged_D105()
+    {
+        var old = InvoiceDate.AddDays(-400);
+        var facts = Facts(Fee(0) with { Date = old }, Fee(1) with { Date = old, Hours = -1m }, Fee(2) with { Date = old });
+
+        Run(Age90, facts).Select(f => f.Subject.LineIndex).Should().Equal(0, 2);
+    }
+
     [Fact]
     public void ExpenseLines_AreJudgedToo()
     {

@@ -14,6 +14,9 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// without a close date flags every line. If the owner wants any line on a closed core record flagged, it is one condition here.</para>
 /// <para>With no core record in the fact set nothing is judged (072 does not call this rule then). A line with no date can only
 /// fire on the closed-without-close-date reason.</para>
+/// <para><b>Credit lines are skipped (D-105).</b> A line with negative hours or a negative amount
+/// (<see cref="BillingMath.IsCreditLine"/>) is not judged on any of the three reasons: a reversal legitimately carries the old
+/// date of the charge it reverses.</para>
 /// <para><b>Reads:</b> Date (extracted). The open date, close date and closed state are reference values (core record).</para>
 /// </remarks>
 internal static class CoreRecordWindowHandler
@@ -29,6 +32,13 @@ internal static class CoreRecordWindowHandler
 
         foreach (var line in context.Facts.Lines)
         {
+            // A credit line (D-105) is skipped on every check, the closed-record one included: a reversal legitimately carries
+            // the date of the charge it reverses, which may be outside the window. It stays visible to the reviewer.
+            if (BillingMath.IsCreditLine(line))
+            {
+                continue;
+            }
+
             var reason = ReasonOf(line.Date, core, grace);
             if (reason is null)
             {

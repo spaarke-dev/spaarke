@@ -7,6 +7,8 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// <b>The check</b> is the exact whole-day difference <c>invoiceDate - lineDate</c>. The rule fires when it is <b>greater than</b> N:
 /// a line dated exactly N days before the invoice date holds; N + 1 days fires. A line dated after the invoice date is not old.
 /// With no invoice date, or no line date, there is nothing to compare and nothing fires (a missing date is RequiredData's).
+/// <para><b>Credit lines are skipped (D-105).</b> A line with negative hours or a negative amount
+/// (<see cref="BillingMath.IsCreditLine"/>) is not judged: a reversal legitimately carries the old date of the charge it reverses.</para>
 /// <para><b>Reads:</b> Date (line) and InvoiceDate (header), both extracted.</para>
 /// </remarks>
 internal static class InvoiceAgeHandler
@@ -22,7 +24,8 @@ internal static class InvoiceAgeHandler
 
         foreach (var line in context.Facts.Lines)
         {
-            if (line.Date is not { } lineDate || invoiceDate.DayNumber - lineDate.DayNumber <= maxAgeDays)
+            // A credit line (D-105) is skipped: a reversal legitimately carries the date of the charge it reverses.
+            if (BillingMath.IsCreditLine(line) || line.Date is not { } lineDate || invoiceDate.DayNumber - lineDate.DayNumber <= maxAgeDays)
             {
                 continue;
             }
