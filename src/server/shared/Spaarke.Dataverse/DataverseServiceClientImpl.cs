@@ -2460,6 +2460,18 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("UpdateExistingRecordFieldsAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
     }
 
+    /// <summary>Not implemented here by design — see the overload without the impersonation parameter.</summary>
+    public Task UpdateExistingRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        Guid? impersonateSystemUserId,
+        CancellationToken ct = default)
+    {
+        // RED-4 B: fail LOUD on mis-route. Inject IFieldMappingDataverseService, not the composite.
+        throw new NotImplementedException("UpdateExistingRecordFieldsAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
+    }
+
     /// <summary>
     /// Not implemented here by design — same single-live-implementation rule as
     /// <see cref="UpdateExistingRecordFieldsAsync"/>. <see cref="DataverseWebApiService"/> owns it.

@@ -1179,6 +1179,11 @@ public class InvoiceReviewWritePathTests
             return Task.CompletedTask;
         }
 
+        public Task UpdateExistingRecordFieldsAsync(
+            string entityLogicalName, Guid recordId, Dictionary<string, object?> fields, Guid? impersonateSystemUserId,
+            CancellationToken ct = default) =>
+            UpdateExistingRecordFieldsAsync(entityLogicalName, recordId, fields, ct); // this fake does not model the caller
+
         public async Task UpdateRecordFieldsIfUnchangedAsync(
             string entityLogicalName, Guid recordId, Dictionary<string, object?> fields, long expectedVersion,
             CancellationToken ct = default)
