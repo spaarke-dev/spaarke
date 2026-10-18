@@ -57,6 +57,11 @@
     <constraint source="D-43">Only a Returned to Firm predecessor is linked: when a submission with the same firm and firm invoice number is accepted and the most recent prior invoice for that pair is Returned to Firm, the new invoice's sprk_supersedesinvoice points to it. A Rejected predecessor is never linked.</constraint>
     <constraint source="ADR-001, ADR-008, ADR-019">Route conventions from 100; own endpoints file.</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">Placement BFF (B1 caller identity, B4 live request); publish-size delta; no new HIGH CVE; no package.</constraint>
+    <constraint source="074 fix-round adversarial pass (2026-10-18), caller obligations of BillingDecisionRecorder">Callers that record billing decisions through BillingDecisionRecorder must:
+- Derive the resolved Signal ids and the policy version id server-side, from the decision's own invoice and lines. Never take them from the request. The writer accepts any existing Signal or policy version (074 review K-2).
+- Record before mutating, or run the recorder's reads first. Its refusals that depend on Dataverse reads (unknown policy version, missing Signal, undetermined subject, contact read fault) happen after Preflight, so a caller that changes invoice status first can be left with a changed status and no Decision Record (K-3).
+- Serialise decisions per invoice (one at a time per invoice). The recorder's "already recorded" check and its create are not atomic (K-4).
+- Build Values the same way on every attempt (same types, same decimal scale), so that an honest retry hashes to the same content (K-5, unless 074's follow-up normalises decimals).</constraint>
   </constraints>
 
   <knowledge>

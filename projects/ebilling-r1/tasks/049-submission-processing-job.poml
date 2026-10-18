@@ -105,6 +105,11 @@ A submission that fails before it is read has no invoice. Two consequences:
 - Supply BillingEvaluationRequest.ReceivedOn: the submission's received date (sprk_submission createdon, as a DateOnly). Rule versions in force and the D-111 / D-116 window checks are judged on that date, not on the date the job runs, so a retry or a late re-evaluation gives the same result.
 - Own the Signal lifecycle that option (a) needs: compare the reason-set fingerprint with the open Signal's; on a change, close the open one as Superseded and write episode n+1; on the same fingerprint, refresh only. The mapper produces the fingerprint; it does not supersede.
 - Read the header currency confidence from HeaderConfidence["Currency"] under exactly that key, and normalise "$" to USD before the currency check. A missing currency, or one read at low confidence, counts as non-USD (flag-only; 072's currency_not_usd template).</constraint>
+    <constraint source="074 fix-round adversarial pass (2026-10-18), caller obligations of BillingDecisionRecorder">Callers that record billing decisions through BillingDecisionRecorder must:
+- Derive the resolved Signal ids and the policy version id server-side, from the decision's own invoice and lines. Never take them from the request. The writer accepts any existing Signal or policy version (074 review K-2).
+- Record before mutating, or run the recorder's reads first. Its refusals that depend on Dataverse reads (unknown policy version, missing Signal, undetermined subject, contact read fault) happen after Preflight, so a caller that changes invoice status first can be left with a changed status and no Decision Record (K-3).
+- Serialise decisions per invoice (one at a time per invoice). The recorder's "already recorded" check and its create are not atomic (K-4).
+- Build Values the same way on every attempt (same types, same decimal scale), so that an honest retry hashes to the same content (K-5, unless 074's follow-up normalises decimals).</constraint>
   </constraints>
 
   <knowledge>

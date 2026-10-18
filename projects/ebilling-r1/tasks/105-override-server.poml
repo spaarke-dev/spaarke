@@ -61,6 +61,11 @@
     <constraint source="FR-30">Exactly one Decision Record per override via 074; the Return of a blocked submission records the outcome on the submission and a Decision Record only if 074's actions cover a submission subject.</constraint>
     <constraint source="ADR-001, ADR-008, ADR-019">Own endpoints file; per-route filter plus RequireEbillingEnabled(); ProblemDetails with stable codes.</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">Placement BFF (B1 caller identity, B4 live request); publish-size delta; no new HIGH CVE; no package.</constraint>
+    <constraint source="074 fix-round adversarial pass (2026-10-18), caller obligations of BillingDecisionRecorder">Callers that record billing decisions through BillingDecisionRecorder must:
+- Derive the resolved Signal ids and the policy version id server-side, from the decision's own invoice and lines. Never take them from the request. The writer accepts any existing Signal or policy version (074 review K-2).
+- Record before mutating, or run the recorder's reads first. Its refusals that depend on Dataverse reads (unknown policy version, missing Signal, undetermined subject, contact read fault) happen after Preflight, so a caller that changes invoice status first can be left with a changed status and no Decision Record (K-3).
+- Serialise decisions per invoice (one at a time per invoice). The recorder's "already recorded" check and its create are not atomic (K-4).
+- Build Values the same way on every attempt (same types, same decimal scale), so that an honest retry hashes to the same content (K-5, unless 074's follow-up normalises decimals).</constraint>
   </constraints>
 
   <knowledge>
