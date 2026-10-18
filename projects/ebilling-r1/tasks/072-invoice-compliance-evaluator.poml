@@ -4,7 +4,7 @@
     <title>InvoiceComplianceEvaluator</title>
     <phase>3 Rules (WP3) — wave W3-3</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Core evaluation step of the submission pipeline: rule selection by date, core record and firm, precedence, determinism and the finding-to-Signal contract all decide what a firm is told.</rigor-reason>
     <model-tier>opus</model-tier>
