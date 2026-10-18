@@ -68,19 +68,21 @@ public interface IPostUploadIndexingEnqueuer
 
     /// <summary>
     /// Asynchronously enqueues RAG indexing of an MI-WRITTEN SPE file via Service Bus.
-    /// Use from background workers (<c>UploadFinalizationWorker</c>,
-    /// <c>IncomingCommunicationProcessor</c>, <c>AnalysisResultPersistence</c>) where
-    /// the file was written by MI itself — MI can read its own writes via the SPE ACL.
+    /// Use where the file was written by MI itself — background workers (<c>UploadFinalizationWorker</c>,
+    /// <c>IncomingCommunicationProcessor</c>, <c>AnalysisResultPersistence</c>) and the external upload route,
+    /// which writes app-only. MI can read its own writes via the SPE ACL.
     /// </summary>
     /// <param name="request">Indexing request. Same shape as the OBO method.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Result indicating whether the job was submitted, skipped, or failed.</returns>
     /// <remarks>
-    /// **SPE writer-identity rule** (per Pattern 4): this method may ONLY be called from contexts
-    /// where the file in question was written by the BFF's Managed Identity (Office Add-in
-    /// finalization, Email-to-Document processing, internal AI workflow re-index). Calling this
-    /// for user-OBO-uploaded files will 403 when the Service Bus job handler attempts the SPE
-    /// download under MI auth.
+    /// **Who may call it** (<c>.claude/constraints/auth.md</c>, "SPE File Access — broker-only byte identity"):
+    /// contexts where the file was written by the BFF's Managed Identity (app-only) — Office Add-in
+    /// finalization, Email-to-Document processing, internal AI workflow re-index, and the external SPA's
+    /// document upload (<c>ExternalProjectDataEndpoints.UploadDocumentForParent</c>, which writes the bytes
+    /// app-only through <c>ISpeFileOperations.UploadSmallAsync</c>; task 063). Since task 171 an app-only job can
+    /// also read user-uploaded files, so the writer-identity restriction of Pattern 4 no longer decides
+    /// readability; request-scoped user uploads still use <see cref="EnqueueIfApplicableAsync"/>.
     /// </remarks>
     Task<PostUploadIndexingResult> EnqueueAppOnlyIfApplicableAsync(
         PostUploadIndexingRequest request,
@@ -117,7 +119,7 @@ public interface IPostUploadIndexingEnqueuer
 /// <param name="Source">Identifies the caller for telemetry / debugging. Suggested
 /// values: <c>SpeContainerUpload</c>, <c>OboUploadSession</c>,
 /// <c>DirectContainerUpload</c>, <c>DirectUploadSession</c>, <c>ChatPersist</c>,
-/// <c>OfficeAddin</c>, <c>EmailToDocument</c>, <c>EnqueueEndpoint</c>.</param>
+/// <c>OfficeAddin</c>, <c>EmailToDocument</c>, <c>EnqueueEndpoint</c>, <c>ExternalUpload</c>.</param>
 /// <param name="CorrelationId">Correlation ID for distributed tracing. Should be
 /// the inbound request's correlation ID (typically <c>HttpContext.TraceIdentifier</c>
 /// or <c>Activity.Current?.Id</c>).</param>

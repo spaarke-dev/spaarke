@@ -114,6 +114,24 @@ public class CommunicationByRegardingReadTests
     }
 
     [Fact]
+    public async Task ReadByRegardingAsync_SelectsCreatedByLookup_ForTheSenderFallback()
+    {
+        // Task 062: the by-regarding / filtered pipeline (QueryVisibleMessagesAsync) feeds SentByName too.
+        var threadId = Guid.NewGuid();
+        string? messageQuery = null;
+        SetupThreads(ThreadRow(threadId, "t"));
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => messageQuery = odata)
+              .ReturnsAsync(new[] { MessageRow(Guid.NewGuid(), threadId, body: "m") });
+        SetupAttachments();
+
+        await Sut().ReadByRegardingAsync("sprk_matter", RecordId, Caller(), CancellationToken.None);
+
+        messageQuery.Should().Contain("_createdby_value").And.NotContain("_createdby_value@");
+        messageQuery.Should().Contain("&$expand=createdby($select=applicationid,accessmode)&");
+    }
+
+    [Fact]
     public async Task ReadByRegardingAsync_MultipleThreads_GroupsMessagesByThread()
     {
         var threadA = Guid.NewGuid();

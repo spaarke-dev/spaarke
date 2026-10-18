@@ -461,6 +461,13 @@ Sprk.Communication.Send._buildRequest = function (formContext, sendModeResult) {
         request.correlationId = correlationId;
     }
 
+    // The form's "Internal only" (sprk_isinternalonly) choice (external-access r3 task 065). Sent only when the
+    // form carries a value; the BFF writes the flag explicitly either way (the request's value, else false).
+    var internalOnlyAttr = formContext.getAttribute("sprk_isinternalonly");
+    if (internalOnlyAttr && internalOnlyAttr.getValue() !== null) {
+        request.isInternalOnly = internalOnlyAttr.getValue() === true;
+    }
+
     return request;
 };
 

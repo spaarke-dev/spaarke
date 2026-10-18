@@ -177,7 +177,7 @@ const CASES: Case[] = [
     nameAttribute: 'sprk_name',
     rowIds: ID.invoice,
     title: 'INV-READ-1',
-    fieldTestId: 'record-detail-field-sprk_invoicestatus',
+    fieldTestId: 'record-detail-field-statuscode',
     fieldValue: 'Approved',
   },
   {
@@ -201,7 +201,7 @@ function detailRow(c: Case, id: string): Record<string, unknown> {
     sprk_matter: { sprk_mattername: 'Matter Read-Name', sprk_matternumber: 'MAT-READ-1' },
     sprk_workassignment: { sprk_name: 'WA Read-Name', sprk_workassignmentnumber: 'WA-READ-1' },
     sprk_document: { sprk_documentname: 'Document Read-Name', sprk_documenttype: 'Contract' },
-    sprk_invoice: { sprk_invoicenumber: 'INV-READ-1', sprk_name: 'Invoice name', sprk_invoicestatus: 'Approved' },
+    sprk_invoice: { sprk_invoicenumber: 'INV-READ-1', sprk_name: 'Invoice name', statuscode: 'Approved' },
     sprk_servicerequest: { sprk_name: 'SR Read-Name', sprk_servicerequestnumber: 'SR-READ-1' },
   };
   return { [c.idAttribute]: id, ...base[c.entityName] };
@@ -610,7 +610,7 @@ describe('sections', () => {
       },
     ];
     mocks.invoices[`sprk_project:${projectId}`] = [
-      { sprk_invoiceid: guid(951), sprk_invoicenumber: 'INV-77', sprk_invoicestatus: 'Paid', sprk_totalamount: 1250 },
+      { sprk_invoiceid: guid(951), sprk_invoicenumber: 'INV-77', statuscode: 'Paid', sprk_totalamount: 1250 },
     ];
     mocks.events = [{ sprk_eventid: 'e-1', sprk_name: 'Signing call', sprk_duedate: '2026-03-01' }];
     mocks.todos = [{ sprk_todoid: 't-1', sprk_name: 'Review draft', statuscode: 1 }];
@@ -670,7 +670,7 @@ describe('sections', () => {
       },
     ];
     mocks.invoices[`sprk_matter:${matterId}`] = [
-      { sprk_invoiceid: guid(961), sprk_name: 'Matter invoice', sprk_invoicestatus: 'Open', sprk_totalamount: 10 },
+      { sprk_invoiceid: guid(961), sprk_name: 'Matter invoice', statuscode: 'Open', sprk_totalamount: 10 },
     ];
     renderWidget(c.Body);
     fireEvent.click(gridRow(c, 1));
