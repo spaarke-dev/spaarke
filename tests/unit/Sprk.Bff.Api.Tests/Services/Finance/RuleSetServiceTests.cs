@@ -629,6 +629,86 @@ public sealed class RuleSetServiceTests
         row.GetAttributeValue<string>("sprk_proposedaction").Should().Be("billing-reject");
     }
 
+    [Theory]
+    [InlineData(ProposalState.Accepted, "body")]
+    [InlineData(ProposalState.Accepted, "template")]
+    [InlineData(ProposalState.Accepted, "consequence")]
+    [InlineData(ProposalState.Accepted, "type")]
+    [InlineData(ProposalState.Rejected, "body")]
+    [InlineData(ProposalState.Rejected, "template")]
+    [InlineData(ProposalState.Rejected, "consequence")]
+    [InlineData(ProposalState.Rejected, "type")]
+    public async Task Edit_OfADecidedDraft_ThatChangesTheTypeBodyTemplateOrConsequence_ReturnsItToProposed(ProposalState decided, string member)
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set, state: decided);
+        var edit = member switch
+        {
+            "body" => Edit(body: CapBody8),
+            "template" => Edit(template: "Over {{rule.maxHoursPerDay}} hours."),
+            "consequence" => Edit(consequence: "Reject"),
+            _ => Edit(type: "TimeIncrement", body: IncrementBody, template: "Hours must be a multiple of {{rule.incrementHours}}."),
+        };
+
+        var outcome = await h.Service().EditAsync(set, policy, edit, default);
+
+        outcome.Value!.CreatedNewVersion.Should().BeFalse();
+        outcome.Value.Proposal.State.Should().Be("Proposed");
+        h.Row("sprk_policyversion", version).GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Proposed,
+            "an edit nobody has re-accepted is not the version that was accepted");
+    }
+
+    [Theory]
+    [InlineData("headline")]
+    [InlineData("clauseReference")]
+    [InlineData("clauseLocation")]
+    [InlineData("sameBody")]
+    [InlineData("sameConsequence")]
+    public async Task Edit_OfAnAcceptedDraft_ThatChangesNothingTheRuleDoes_KeepsItAccepted(string member)
+    {
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (policy, version) = h.Rule(set, state: ProposalState.Accepted);
+        var edit = member switch
+        {
+            "headline" => Edit(headline: "A new headline"),
+            "clauseReference" => Edit(quote: "A different quote."),
+            "clauseLocation" => Edit(location: "Section 9"),
+            "sameBody" => Edit(body: CapBody, headline: "A new headline"),
+            _ => Edit(consequence: "Flag", headline: "A new headline"),
+        };
+
+        var outcome = await h.Service().EditAsync(set, policy, edit, default);
+
+        outcome.Value!.Proposal.State.Should().Be("Accepted");
+        h.Row("sprk_policyversion", version).GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Accepted);
+        h.Writes.Should().ContainSingle().Which.Fields.Should().NotContainKey("sprk_proposalstatus");
+    }
+
+    [Fact]
+    public async Task EditThenPublish_WithoutAcceptingAgain_DoesNotPutTheEditInForce()
+    {
+        var h = new Harness();
+        var set = h.RuleSet(RuleSetService.RuleSetPublished);
+        var (policy, v1) = h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
+        var v2 = h.AddVersion(policy, 2, ProposalState.Accepted, body: CapBody8);
+        var service = h.Service();
+
+        await service.EditAsync(set, policy, Edit(body: CapBody), default); // 8 -> 10 hours: a different rule from the one that was accepted
+        var refused = await service.PublishAsync(set, Effective, default);
+
+        refused.ErrorCode.Should().Be("ruleset.nothing_to_publish");
+        h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v1);
+        h.Writes.Should().NotContain(w => w.Kind == Write.BulkUpdate, "nothing was published");
+
+        await service.DecideAsync(set, policy, accept: true, default);
+        var published = await service.PublishAsync(set, Effective, default);
+
+        published.Value!.Published.Should().ContainSingle().Which.VersionId.Should().Be(v2);
+        h.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(v2);
+    }
+
     [Fact]
     public async Task Edit_OfAVersionInForce_CreatesANewDraftVersion_AndLeavesThePublishedRowUnchanged()
     {

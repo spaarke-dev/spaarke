@@ -876,7 +876,9 @@ public class RuleSetService
 
     /// <summary>
     /// Edits a rule's working version. A draft (never in force) is edited in place; a version that is, or has been, in force is left
-    /// untouched and the edit becomes a NEW Proposed version. The result is validated first: an invalid result writes nothing.
+    /// untouched and the edit becomes a NEW Proposed version. The result is validated first: an invalid result writes nothing. An in-place
+    /// edit that changes the type, body, template or consequence of an Accepted or Rejected draft returns it to Proposed, so it is
+    /// accepted again before a publish can put it in force.
     /// </summary>
     public virtual async Task<RuleSetOutcome<ProposalEdited>> EditAsync(Guid ruleSetId, Guid policyId, ProposalEdit edit, CancellationToken ct)
     {
@@ -951,6 +953,17 @@ public class RuleSetService
                 if (merged.ClauseLocation is not null)
                 {
                     fields["sprk_clauselocation"] = merged.ClauseLocation;
+                }
+
+                // What the rule does or says to the firm changed: it is back in review. A decided draft (Accepted or Rejected) otherwise
+                // keeps its decision for content nobody decided on, and publish would put the edit in force. A headline or clause edit,
+                // or an edit that sets the same value, changes nothing the decision was about.
+                if (work.StateOrProposed != ProposalState.Proposed
+                    && (merged.RuleType != work.RuleType || merged.RuleBody != work.RuleBody
+                        || merged.Template != work.Template || merged.Consequence != work.Consequence))
+                {
+                    fields["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Proposed);
+                    merged = merged with { State = (int)ProposalState.Proposed };
                 }
 
                 await _entities.UpdateAsync(VersionEntity, work.Id, fields, ct);
