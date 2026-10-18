@@ -4,7 +4,7 @@
     <title>Rule set endpoints: proposals, edit, publish, visibility</title>
     <phase>3 Rules (WP3) — wave W3-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds admin-only write endpoints that publish immutable policy versions into the shared store and control firm visibility of clause text (D-66); authorization and immutability are security-relevant.</rigor-reason>
     <model-tier>sonnet</model-tier>

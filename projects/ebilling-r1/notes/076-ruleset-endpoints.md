@@ -199,9 +199,9 @@ All of them pass after the fixes.
 ## 9. Review round 3 (fix list from the main session; base `229643893`)
 
 Commits:
-- `bc727c68e`: item 2, `MapConditionalBulkFailure`.
-- `be39dc551`: item 1, `stampsStand` removed.
-- `c96f3a8f1`: item 3, the publish claim.
+- `e1501dbbc`: item 2, `MapConditionalBulkFailure`.
+- `9a6bbfe01`: item 1, `stampsStand` removed.
+- `f9cbfa486`: item 3, the publish claim.
 
 No schema change, no new registration, no package change. Each red count was taken by running the new tests against the code without the fix (for a one-line fix, a mutation that undoes it).
 
@@ -258,7 +258,7 @@ New or restated this round:
   | Build | Size |
   |---|---|
   | Base `229643893` | **39,594,409 B** |
-  | Head `c96f3a8f1` | **39,595,681 B** |
+  | Head `f9cbfa486` | **39,595,681 B** |
   | Fresh master `a82578cdc` | **39,190,712 B** |
 
   The round delta is **+1,272 B**. Head vs master is **+404,969 B (+0.39 MB; 37.76 MB total)**. Both are under the +5 MB and 55 MB thresholds.

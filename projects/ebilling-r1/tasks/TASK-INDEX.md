@@ -75,7 +75,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 073 | 🔲 [open] | Rejection rule and reject-eligibility at publish | FULL | sonnet / xhigh | none | 072, 025 |
 | 074 | 🟡 [wip] | Billing actions in `DecisionActionCatalog` | FULL | opus / high | P3-B | 070 |
 | 075 | 🟡 [wip] | Rule drafting Action `BILLING-RULE-DRAFT@v1` and job | STANDARD | sonnet / high | P3-B | 041, 070 |
-| 076 | 🟡 [wip] | Rule set endpoints: proposals, edit, publish, visibility | FULL | sonnet / high | P3-B | 019, 070 |
+| 076 | ✅ [done] | Rule set endpoints: proposals, edit, publish, visibility | FULL | sonnet / high | P3-B | 019, 070 |
 | 077 | 🔲 [open] | Rule Review code page | STANDARD | sonnet / high | P3-C | 076 |
 | 078 | ✅ [done] | Rate card and timekeeper import and publish | STANDARD | sonnet / high | P2-B | 017, 028, 029 |
 | 079 | 🔲 [open] | Deploy WP3 to dev | STANDARD | sonnet / high | none (deploy) | 070, 071, 072, 073, 074, 075, 076, 077, 078, 053 |
