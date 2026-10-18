@@ -120,3 +120,58 @@ filed). Reported, not fixed.
 | C | `ShareWithCommunicationShareesAsync`: the `IsFiled` return made never-true | `AGrantOnAFiledCommunicationWhoseRecordStayedUserOwned_AddsNoShare` | 1 failed (found a1) | pass |
 | D | `AfterRefileAsync`: the communication condition made never-true (no hook call) | the hook, route, tool and Office re-own tests | 6 failed (5 non-call controls passed) | pass |
 | E | `AfterRefileAsync`: the hook's catch filter made never-true | `AfterRefile_AGateHelperFault_…`, `FileIfUnfiled_AGateHelperFault_…` | 2 failed | pass |
+
+## Round 3 (adversarial passes, 2026-10-18)
+
+- **F1-a, filed = the resolver's test.** `IsFiled` (`GateDecisionRecordSharing.cs:551`) is now `RecordOwnershipContext.ParentsOf(row)` minus the
+  row itself, over the WHOLE communication row (`ColumnSet(true)`, as `RecordOwnershipResolver.ReadOwnershipParentsOfAsync` reads a content
+  row's parent). A communication regarding only a contact, an account or an organization is unfiled and gets D-169's shares. The misleading
+  "takes the team-owned path" log now says the filing re-owns the records. Test:
+  `ACommunicationRegardingOnlyAContactAnAccountOrAnOrganization_IsUnfiled_ItsRecordGetsTheParticipantShares` (6 cases, at write and mirror).
+- **F1-b, filing between the owner decision and the create.** `ShareAtWriteAsync` re-owns the record (`ReownAsync`, after re-reading it with
+  its stamps) when the communication reads as filed (`:124`). Tests: `AtWrite_ACommunicationAlreadyFiled_…` and the writer-level interleave
+  `Gate_AFilingThatLandsBetweenTheOwnerDecisionAndTheCreate_ReownsTheRecordAtWrite_D169_042bRound3`.
+- **K1.** `DecisionRecordWriter`'s helper parameter is REQUIRED; its 7 test sites pass the empty-world double; the DI test asserts the real
+  container's writer holds the host's helper.
+- **K2, leftover shares.** `ReownAfterFilingAsync` now also takes this communication's writer-created, unconfirmed gate records owned by a
+  team: when one still holds a user share and the resolver answers that SAME ordinary team, its user shares are revoked
+  (`RevokeLeftoverSharesAsync`, `:445`). A Secure answer, a refusal or another team leaves the row alone (a Secure-team row's shares are
+  the Secure mirror's). Tests: `Filing_ARevokeThatFailed_IsRetriedOnTheNextFiling_AndTheLeftoverSharesGo`,
+  `Filing_ASecureTeamOwnedRecordWithUserShares_IsNeverTouched_NorOneOwnedByAnotherTeam`.
+- **K3, Assign census.** `RecordOwnerAssignmentCensusTests.EveryAssignCallerIsCensused` scans `\.AssignAsync\s*\(|\bnew\s+AssignRequest\b`
+  by member against an exact allow-list (grep 2026-10-18: `OntologyWriterDataverseClient.AssignAsync` (the AssignRequest) and
+  `GateDecisionRecordSharing.ReownAsync`; `SecureChildReconciler`'s private `AssignAsync` and `ResolveAndAssignAsync` do not match).
+  `AssignCallDetector_NegativeControl`: must fire on a qualified call and a raw AssignRequest (UNLISTED, STALE), must not fire on the
+  declaration, `ResolveAndAssignAsync`, an unqualified private call or a comment.
+- **K4, telemetry.** The caller's own cancellation in the mirror (`:153`) is logged at Information and not counted; any other fault is.
+  An unreadable owner after the grants is counted (`:331`). Tests: `Mirror_TheCallersOwnCancellation_IsNotCountedAsAFailure_AnyOtherFaultIs`,
+  `AnOwnerThatCannotBeReadAfterTheGrants_IsCounted_AndTheGrantsAreRevoked`.
+- **K5, uac-r2's end-to-end.** `CommunicationFiling_IntoASecureMatter_RemovesTheGateDecisionRecordsParticipantShares_D169_042bRound3` (the
+  route's re-file core, the REAL reconciler and synchronizer over the share world): the user-owned gate record with a participant share
+  ends owned by the Secure team with no participant share. It passed first time; no defect behind it.
+- **Not changed (coordinator files them):** Unshare is not mirrored; an ordinary A→B move.
+
+### Round 3 seeding proofs
+
+| Seed | Break | Named test(s) | Seeded | Restored |
+|---|---|---|---|---|
+| F1-a | `IsFiled` back to the round-2 test (every RegardingFieldMap column + the pair) | `ACommunicationRegardingOnly…` | 6 failed | pass |
+| F1-b | at write, return on a filed communication | `AtWrite_ACommunicationAlreadyFiled_…`, `Gate_AFilingThatLandsBetween…` | 2 failed | pass |
+| K2 | no leftover pass | `Filing_ARevokeThatFailed_…` | 1 failed | pass |
+| K2 guard | leftover pass ignores the resolver's answer | `Filing_ASecureTeamOwnedRecordWithUserShares_…` | 1 failed | pass |
+| K4 | the caller's cancellation counted again | `Mirror_TheCallersOwnCancellation_…(True)` | 1 failed | pass |
+| K4 | an unreadable owner only logged | `AnOwnerThatCannotBeReadAfterTheGrants_…` | 1 failed | pass |
+
+### Publish size (CLAUDE.md section 10)
+
+Measured in round 1 (fresh worktrees, `dotnet publish -c Release`, zipped with PowerShell `Compress-Archive`):
+
+| Build | Files | Raw bytes | Zip bytes | `Sprk.Bff.Api.dll` |
+|---|---|---|---|---|
+| origin/master `c690b0ac2` | 192 | 130,905,972 | 39,212,186 | 19,651,584 |
+| branch base `3deb8c4a3` | 192 | 130,647,132 | 39,130,158 | 19,425,280 |
+| 042b head `fbb1f70a6` | 192 | 130,679,356 | 39,142,835 | 19,452,928 |
+
+042b vs its base: +32,224 bytes raw, +12,677 zipped, +27,648 on the DLL, no file added. (Head vs master is -226 KB only because the
+branch is cut from the docs branch, not master.) Rounds 2 and 3 add C# methods to existing files and no package or file, so the delta stays
+in the tens of kilobytes; not re-measured (the brief: re-measure only if the code delta is no longer trivial).
