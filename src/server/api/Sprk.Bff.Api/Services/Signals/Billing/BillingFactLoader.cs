@@ -33,6 +33,12 @@ public sealed record BillingEvaluationRequest
 
     public DateOnly? InvoiceDate { get; init; }
 
+    /// <summary>
+    /// The date the submission was received (<c>sprk_invoicesubmission</c>, task 049 supplies it as data, never a clock read). The
+    /// judging date of a subject with no line date and no invoice date, so version selection stays deterministic (072 review A3).
+    /// </summary>
+    public required DateOnly ReceivedOn { get; init; }
+
     public DateOnly? BillingPeriodStart { get; init; }
 
     public DateOnly? BillingPeriodEnd { get; init; }

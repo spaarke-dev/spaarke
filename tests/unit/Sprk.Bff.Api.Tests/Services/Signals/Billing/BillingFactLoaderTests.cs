@@ -123,6 +123,7 @@ public class BillingFactLoaderTests
         TrackingNumber = "INV-100.2",
         FirmInvoiceNumber = "INV-100",
         InvoiceDate = new DateOnly(2026, 3, 31),
+        ReceivedOn = new DateOnly(2026, 4, 2),
         Currency = "USD",
         Lines = Enumerable.Range(0, lines).Select(i => new BillingLineFacts
         {

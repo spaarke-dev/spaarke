@@ -84,6 +84,7 @@ internal static class BillingEvaluationKit
         TrackingNumber = "INV-100.2",
         FirmInvoiceNumber = "INV-100",
         InvoiceDate = InvoiceDate,
+        ReceivedOn = new DateOnly(2026, 4, 2),
         BillingPeriodStart = new DateOnly(2026, 3, 1),
         BillingPeriodEnd = InvoiceDate,
         Currency = "USD",
