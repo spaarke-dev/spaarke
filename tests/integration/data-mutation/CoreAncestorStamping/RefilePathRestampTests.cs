@@ -85,7 +85,8 @@ public class RefilePathRestampTests
         var handler = new DataverseUpdateHandler(
             new Mock<IFieldMappingDataverseService>().Object, world.Service, world.Restamper,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance);
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureChildReconcilerFixtures.OverEmptyWorld());
 
         await handler.UpdateAsync(
             "sprk_communication", Communication,
@@ -211,7 +212,7 @@ public class RefilePathRestampTests
             new Mock<IFieldMappingDataverseService>().Object, world.Service, world.Restamper,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
-            threads.Object);
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureChildReconcilerFixtures.OverEmptyWorld(threads.Object), threads.Object);
 
         await handler.UpdateAsync(
             "sprk_communication", Communication,

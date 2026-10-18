@@ -15,13 +15,13 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
     private readonly ILogger<DataverseUpdateHandler> _logger;
     private readonly Sprk.Bff.Api.Services.Communication.IThreadResolver? _threads;
-    private readonly Sprk.Bff.Api.Services.Access.SecureChildReconciler? _children;
+    private readonly Sprk.Bff.Api.Services.Access.SecureChildReconciler _children;
 
-    /// <param name="threads">Spaarkeai-word-add-in-r1 task 129: the thread reconcile after a re-filed communication.
-    /// Optional so the test compositions keep compiling; the host registers it unconditionally.</param>
     /// <param name="children">#2091: the ONE step after a re-file (<see cref="Sprk.Bff.Api.Services.Access.SecureChildReconciler.AfterRefileAsync"/>).
-    /// Scoped, like this handler (ExternalAccessModule registers it unconditionally). Optional for the same reason as
-    /// <paramref name="threads"/>.</param>
+    /// REQUIRED: without it a re-file into a Secure record would silently leave the row business-unit readable. Scoped, like
+    /// this handler (ExternalAccessModule registers it unconditionally).</param>
+    /// <param name="threads">Spaarkeai-word-add-in-r1 task 129: the thread reconcile after a re-filed communication that did
+    /// not run the step above. Optional so the test compositions keep compiling; the host registers it unconditionally.</param>
     public DataverseUpdateHandler(
         IFieldMappingDataverseService fieldMappingService,
         IGenericEntityService genericEntityService,
@@ -29,11 +29,11 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         ILogger<DataverseUpdateHandler> logger,
-        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
-        Sprk.Bff.Api.Services.Access.SecureChildReconciler? children = null)
+        Sprk.Bff.Api.Services.Access.SecureChildReconciler children,
+        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null)
     {
         _threads = threads;
-        _children = children;
+        _children = children ?? throw new ArgumentNullException(nameof(children));
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _restamper = restamper ?? throw new ArgumentNullException(nameof(restamper));
@@ -66,14 +66,14 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // after a re-file (SecureChildReconciler.AfterRefileAsync), as every other re-file writer does. Whether the row was
         // isolated is read BEFORE the write: a move OUT releases only from a row that was.
         var refiledTable = entityLogicalName.Trim().ToLowerInvariant();
-        var children = WritesALineageLookup(refiledTable, fields.Keys) ? _children : null;
+        var movesAFilingLookup = WritesALineageLookup(refiledTable, fields.Keys);
         Exception? isolationReadFault = null;
         var isolatedBefore = false;
-        if (children is not null)
+        if (movesAFilingLookup)
         {
             try
             {
-                isolatedBefore = await children.IsSecureTeamOwnedAsync(refiledTable, recordId, ct).ConfigureAwait(false);
+                isolatedBefore = await _children.IsSecureTeamOwnedAsync(refiledTable, recordId, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -126,15 +126,15 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // #2091, AFTER the re-stamp (the stamps on the rows filed under it are lookups the ownership rule reads): the re-filed
         // row's mirror and the pass over everything filed under it — and a communication's thread follows the filing. Never
         // throws; the write stands.
-        if (children is not null)
+        if (movesAFilingLookup)
         {
-            await children.AfterRefileAsync(
+            await _children.AfterRefileAsync(
                 refiledTable, recordId,
                 () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
                 CancellationToken.None).ConfigureAwait(false);
         }
-        // Spaarkeai-word-add-in-r1 task 129: a re-file that did not run the step above (no filing lookup moved, or a host
-        // without the reconciler) still lets a re-filed communication's thread follow the filing — once. Never throws.
+        // Spaarkeai-word-add-in-r1 task 129: a re-file that did not run the step above (it moved no filing lookup — a clear, or
+        // a party regarding) still lets a re-filed communication's thread follow the filing — once. Never throws.
         else if (parentChanges.Count > 0 && _threads is not null
             && string.Equals(entityLogicalName, "sprk_communication", StringComparison.OrdinalIgnoreCase))
         {

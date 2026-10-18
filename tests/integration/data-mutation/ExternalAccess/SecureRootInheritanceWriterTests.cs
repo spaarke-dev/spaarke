@@ -2086,7 +2086,8 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     private Task RefileThroughTheUpdateHandler(Guid workAssignment, Guid matter) =>
         new DataverseUpdateHandler(
                 FieldMappingWritingToTheWorld().Object, Mock.Of<IGenericEntityService>(), new StampWorld().Restamper,
-                new RecordOwnershipResolverDouble(), _gate, NullLogger<DataverseUpdateHandler>.Instance)
+                new RecordOwnershipResolverDouble(), _gate, NullLogger<DataverseUpdateHandler>.Instance,
+                SecureChildReconcilerFixtures.OverEmptyWorld())
             .UpdateAsync(
                 "sprk_workassignment", workAssignment,
                 new Dictionary<string, object?> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter) },
@@ -2139,7 +2140,8 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         _fixture.SeedWorkAssignment(workAssignment, isSecure: false);
         var handler = new DataverseUpdateHandler(
             FieldMappingWritingToTheWorld().Object, Mock.Of<IGenericEntityService>(), new StampWorld().Restamper,
-            new RecordOwnershipResolverDouble(), _gate, NullLogger<DataverseUpdateHandler>.Instance);
+            new RecordOwnershipResolverDouble(), _gate, NullLogger<DataverseUpdateHandler>.Instance,
+                SecureChildReconcilerFixtures.OverEmptyWorld());
 
         var act = () => handler.UpdateAsync("sprk_workassignment", workAssignment,
             new Dictionary<string, object?> { ["sprk_regardingmatter"] = 42 }, ConcurrencyMode.None, 1, CancellationToken.None);
@@ -2163,7 +2165,8 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
 
         var handler = new DataverseUpdateHandler(
             FieldMappingWritingToTheWorld().Object, Mock.Of<IGenericEntityService>(), new StampWorld().Restamper,
-            new RecordOwnershipResolverDouble(), SecureRootFilingGateFixtures.Unregistered(), NullLogger<DataverseUpdateHandler>.Instance);
+            new RecordOwnershipResolverDouble(), SecureRootFilingGateFixtures.Unregistered(), NullLogger<DataverseUpdateHandler>.Instance,
+                SecureChildReconcilerFixtures.OverEmptyWorld());
         var viaHandler = () => handler.UpdateAsync("sprk_workassignment", workAssignment, filing, ConcurrencyMode.None, 1, CancellationToken.None);
         await viaHandler.Should().ThrowAsync<RecordOwnerUnresolvedException>();
 
@@ -2313,7 +2316,8 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         _fixture.SeedWorkAssignment(workAssignment, isSecure: !value);
         var handler = new DataverseUpdateHandler(
             FieldMappingWritingToTheWorld().Object, Mock.Of<IGenericEntityService>(), new StampWorld().Restamper,
-            new RecordOwnershipResolverDouble(), _gate, NullLogger<DataverseUpdateHandler>.Instance);
+            new RecordOwnershipResolverDouble(), _gate, NullLogger<DataverseUpdateHandler>.Instance,
+                SecureChildReconcilerFixtures.OverEmptyWorld());
 
         var act = () => handler.UpdateAsync("sprk_workassignment", workAssignment,
             new Dictionary<string, object?> { ["sprk_issecure"] = value }, ConcurrencyMode.None, 1, CancellationToken.None);

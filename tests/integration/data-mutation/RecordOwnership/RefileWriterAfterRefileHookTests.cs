@@ -221,5 +221,5 @@ public sealed class RefileWriterAfterRefileHookTests
         new(
             _write.Object, new Mock<IGenericEntityService>().Object, Restamper(), new RecordOwnershipResolverDouble(),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
-            _threads.Object, Reconciler());
+            Reconciler(), _threads.Object);
 }

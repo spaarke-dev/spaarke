@@ -611,7 +611,7 @@ public class SecureChildOwnershipTests
         var handler = new DataverseUpdateHandler(
             fields.Object, Mock.Of<IGenericEntityService>(), new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper, ownership,
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
-            NullLogger<DataverseUpdateHandler>.Instance);
+            NullLogger<DataverseUpdateHandler>.Instance, Sprk.Bff.Api.Tests.TestInfrastructure.SecureChildReconcilerFixtures.OverEmptyWorld());
         return (handler, writes);
     }
 
