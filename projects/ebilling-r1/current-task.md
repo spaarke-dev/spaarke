@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-10-17
+> **Last Updated**: 2026-10-18
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file; never prepend new blocks above old ones. Target ≤ 10 KB.
 
@@ -11,80 +11,51 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. 42/79 complete (026 newly). Agents running from base 7c0daf8c9+: 075 (finishing mutation proofs), 015 fix round, 051 fix round, 076 fix round. 071 fix round running. 075 is on the branch (4d7a8a8f0..80daf089f) with one open defect. Queued: the 075 retry fix; the 026 follow-up for #2081 (invoice family) |
-| **Step** | All on the local branch, not pushed: 015, 051, 071, 076 and 074 (cd44dbcca..0bc6a7ad9). ADR-010 ceiling 166; route ledger 137. Build 0/0; ArchTests 1160; targeted 2349; SPA vitest 1044; shared jest 38 |
+| **Task** | Parallel mode. 42/79 complete. Running agents (4/4): 076 fix round 2, 051 round 2 (D-110 move to service plus uac's firm-records items), 074 fix round (ontology F4-1/F3-1/Ks), 071 fix round 2 (ontology review at 4257e7f35, plus D-111 and D-112). Queued: the 075 retry fix and the #2081 follow-up (briefs below) |
+| **Step** | Branch HEAD 6bcd4d029 (local, not pushed). The 015 follow-up is cherry-picked (7965ef68e..009317530); uac-r2 re-check PASS; ontology-r1 is re-checking. ADR-010 ceiling 166; route ledger 137 |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | As each agent reports: review, cherry-pick (trailer rewrite), build and targeted tests, then send the fix range to the reviewer. 015 fix → ontology-r1 and uac-r2. 051 fix → uac-r2 and R3 (DEF-004 answers). 076 fix → adversarial pass 2 (auth). 074 → waiting on ontology-r1's adversarial pass. Mark 015 / 051 / 071 / 074 / 076 ✅ after their reviews clear. Next launches: 071 fix round (brief below); #2081 follow-up; then 072 (needs 071 ✅) and 077 (needs 076 ✅) |
+| **Next Action** | As each agent reports: review it, cherry-pick it (`RANGES="a..b" bash $TEMP/claude/c--code-files-spaarke-wt-ebilling-r1/e7feb8db-bd91-431a-995c-acf68e28cb28/scratchpad/cp.sh`, in the background), build and run targeted tests, then send the range on. 071 r2 → ontology-r1. 074 fix → ontology-r1. 051 combined b21be61be..r2 tip → uac-r2. 076 r2 → re-check the fix diff. Then copy the GetFirmClauseAsync caller rule into the 130/134/135 POMLs. Mark 015 ✅ once ontology-r1 passes. Launch the queued agents as slots free. Next tasks: 072 (needs 071 ✅), 077 (needs 076 ✅), 049 |
 
 ### Queued briefs (not yet launched)
-- **071 fix round.** Findings are from the adversarial review:
-  - F1 credits per D-105: ApprovedRate and ExpenseRule skip negatives; InvoiceAge and CoreRecordWindow skip credit lines; NonBillableActivity never suggests disallowing a negative.
-  - F3: compare the sub-cent rate as `BillingMath.ToCent(billed) > limit`.
-  - F4: ApprovedRate adds Hours to its read fields only when Hours > 0, matching the notes.
-  - F4: the notes cite stale hashes; the real range is 6b99e980f..d22c8e26d.
-  - K4: the purity guard adds Guid.CreateVersion7, CultureInfo.CurrentCulture/CurrentUICulture and TimeZoneInfo.Local.
-  - K2: list the DailyHoursCap double-count limit in the notes.
-  - The D-89 enforcement belongs to 073 (constraint added).
-- **#2081 follow-up (uac-r2 split it).** For sprk_invoice and sprk_billingevent targets, the guard reads the stored row and refuses not-found (an upsert must not create an orphan). Also:
+- **075 retry fix (open F-class defect).** A run that dies midway and is retried asks the model again, and its output is not deterministic, so both runs' drafts remain. Fix by compensation: on a rerun with no completion marker, first delete the earlier run's untouched drafts, then draft again. A draft counts as untouched only when all of these hold: created by the job identity, created for this rule set, still Proposed and Off, modifiedon = createdon, no current version. Must-fire: a rerun after a partial run leaves exactly one set. Must-not-fire: a draft an admin edited or accepted is never deleted.
+- **#2081 follow-up (uac-r2 split).** For sprk_invoice and sprk_billingevent targets, the guard reads the stored row and refuses not-found, so an upsert cannot create an orphan. Also:
   - DecisionRouteCores.cs:97 passes appOnlyEntities;
-  - an end-to-end D-96 test through the three generic paths;
-  - a test for UpdateRecordActionCore with no IGenericEntityService;
-  - a code-safe hint for detach → move → re-attach;
+  - add a D-96 end-to-end test through the three generic paths;
+  - add a test for UpdateRecordActionCore with no IGenericEntityService;
+  - add a code-safe hint for detach → move → re-attach;
   - ActionSeam.cs:163 prints the code twice.
-
-- **075 retry fix (open F-class defect).** A run that dies midway and is retried asks the model again. Its output is not deterministic, so both runs' drafts remain. Chosen fix: compensation, not schema. On a re-run with no completion marker, delete the earlier run's untouched drafts first, then draft again. Untouched means all of these:
-  - created by the job identity;
-  - created for this rule set;
-  - still Proposed and Off;
-  - modifiedon equals createdon;
-  - no current version.
-  Must-fire test: a rerun after a partial run leaves exactly one set. Must-not-fire test: a draft an admin edited or accepted is never deleted.
-- **074 fix round (ontology-r1 adversarial pass; all 7 conditions MET):**
-  - F4-1: when ResolvedSignalIds is non-empty, read each Signal's subject app-only (rule from DecisionCommitService.SignalSubjectsOf), refuse with OwnerRefused when a subject is undetermined or the Signal is missing, and pass SignalSubjects into BillingReview. Test: an invoice decision resolving a line Signal puts the line in OwnerAsks[0].Parents. Full fix, not the stop-gap.
-  - F3-1: the forged row in DecisionRecordWriterTests.Billing.cs:183-201 gets sprk_actioncode="approve-invoice"; update notes §8.3 M2.
-  - K2: store a content hash in sprk_steps (the ReviewHash pattern); a repeat with different values is refused as ReviewInvalid.
-  - K3: the recorder drops the contactId input and looks the contact up itself.
-  - K4: add sprk_actioncode In <billing codes> to the existence lookup.
-  - K4: fix the notes §8 hashes to cd44dbcca..0bc6a7ad9.
-  - Keep C7 additive: these change only the billing additions.
-- **053 deploy order (from 075):** run Deploy-ActionMirrors.ps1 and Seed-PlaybookConsumers.ps1 (the BILLING-RULE-DRAFT Binding) before or with the BFF, then check /healthz. `prvCreatesprk_Policy` and `prvWritesprk_ruleset` both exist live (checked).
+- **053 deploy order (from 075):** Deploy-ActionMirrors.ps1 and Seed-PlaybookConsumers.ps1 (the BILLING-RULE-DRAFT Binding) run before or with the BFF; then check /healthz.
 
 ### Critical Context
-- **Decisions this session:**
-  - D-96 to D-102 (see project CLAUDE.md §3).
-  - D-103 supersedes D-98 (= ontology D-166): counted spend is Approved, Sent to AP, Paid.
-  - D-104: Pending Spend (In Review, held excluded) is built in 049 on both paths. ontology-r1 adds the authoring entries once the column name and type are sent.
-  - D-105: charge rules skip credit lines.
-  - D-106: the firm must be linked to the core record.
-  - D-107: firms see the statuscode labels.
-  - D-108: billing admin works at any depth.
-- **015 deploy sequence** (R3 deploys dev's BFF and SPA):
-  1. R3 deploys candidate 2bda5ebe1 (admits both columns; SPA reads statuscode), BFF then SPA, with R3's owner approval.
-  2. R3 confirms it is live.
-  3. Run -GridConfig, WhatIf first.
+- **Decisions:** D-96 to D-112 (decisions-log). New this session:
+  - D-111: a closed core record is judged by its close date.
+  - D-112: a cross-wall Duplicate flags without the tracking number or line detail. The loader still covers both partitions.
+  - 072 POML carries the D-112, SubmissionId and non-USD skip constraints.
+- **015 deploy sequence.** Done: steps 1–3 (R3 BFF+SPA live; grid 3ff4102c switched 2026-10-18 03:42Z). Remaining:
   4. 015 reaches master and R3 merges it.
-  5. R3 deploys a BFF containing 015.
-  6. Run -Delete.
+  5. A BFF with 015 is deployed.
+  6. -Delete with both attestations, -WhatIf first.
   7. Remove the transitional allow-list entries.
-  After the delete, every dev BFF must contain 015, checked by content (R3 agreed).
+  After the delete, every dev BFF must contain 015 (checked by content).
+- **Next master merge** (after the fix rounds are in):
+  - master a82578cdc+ carries R3 #2086;
+  - keep 015's marker line in ExternalAccessModule;
+  - take the union of the route ledger (master 132);
+  - then run merge-tree against #2078 and #2061. Expected conflicts: ExternalUserContextResponse, bff-client.ts, the ledger, ExternalRecordDocumentRoutesTests and config/secure-record-owner-role.json.
 - **ontology-r1:**
   - no seeding of dev invoices until their owner answers about REAL-2026-123456.01;
-  - 049 (D-102 test and D-104) goes to them for review.
-- **uac-r2:**
-  - the ExternalWrites exemption rows go in whichever PR merges second;
-  - the external invoice-submission POST is not wired to #2078's helper yet.
-- **Next master merge (after the current fix rounds are cherry-picked):** master a82578cdc carries R3 #2086 (external SPA on statuscode + transitional allow-list). In ExternalAccessModule keep 015's marker line. The master route ledger is at 132; take the union with ours. Grid 3ff4102c was switched live 2026-10-18 03:42Z; the column delete waits for R3 to merge 015.
-- Before the PR: merge current master, then run git merge-tree against #2078 and #2061, taking the union. Conflicts are expected in ExternalUserContextResponse, bff-client.ts, the ledger, ExternalRecordDocumentRoutesTests and config/secure-record-owner-role.json.
-- Filed #2077: readers of columns that don't exist (outside our scope).
-- **Standing:**
+  - 049 (D-104 Pending Spend) goes to them for review.
+- **Standing rules:**
   - no line upload or storage route before #2047;
   - 026 must not touch Roles/Spaarke Ontology Service.xml;
   - remove worktrees with Remove-WorktreeSafe.ps1;
-  - agents run filtered test sets only.
+  - agents run filtered tests only;
+  - the dev BFF and SPA deploy only through SPA-r3;
+  - only `scripts/Import-SolutionScoped.ps1` imports.
 - **Owner actions:**
   - add the 7 new tables to the Matter Management and Spaarke Administration apps;
   - grant Write on sprk_ruleset to the billing admin role before 079.
-- **Open:** G-18 (shared lint-staged stash, not yet filed); DEF-015; ISS-009; #2010, #2011, #2045.
+- **Open:** G-18 (shared lint-staged stash, not filed); 075 ADR-017 job-status (Proposed); DEF-015; ISS-009; #2010, #2011, #2045, #2077, #2087.
 
 ---
 
@@ -92,7 +63,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 075 (implementer); 015, 051, 076 (fix rounds); 074 (external review) |
+| **Task ID** | 071, 074, 076 (fix rounds); 051 (round 2); 015 (final re-check by ontology-r1) |
 
 ## Next Action
 
