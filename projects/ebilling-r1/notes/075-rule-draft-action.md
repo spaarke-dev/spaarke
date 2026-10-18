@@ -44,6 +44,58 @@ The Action JSON stays under `infra/dataverse` (not `.claude`), so no hand-off to
 
 Two deliveries of one rule set cannot run together: the processing lock above (the main queue does not de-duplicate, and a run can outlast the message lock). The marker (`sprk_notconverted`, `[]` when empty) is written LAST. A redelivery after a finished run reads the marker and ends Success without downloading, asking the model or writing (handler guard, and `AddDraftsAsync` refuses a second time with 409). A run that died midway has no marker, so the repeat re-runs; `AddDraftsAsync` loads the set's existing rule fingerprints and skips any rule already stored, so nothing is stored twice.
 
+## Retry compensation (review finding 2, F1: closed)
+
+**Defect.** A run that died midway (for example a Dataverse 429 at rule 30 of 60) was retried; the model was asked again and, being non-deterministic at temperature 0, worded things differently, so its rules did not match the stored ones by fingerprint and both runs' drafts stayed.
+
+**Fix (no schema change).** A run that finds no completion marker first removes the earlier run's untouched drafts, then drafts again. `BillingRuleDraftJobHandler` calls `RuleSetService.RemoveUntouchedDraftsAsync` right after the marker check and before the document is downloaded or the model is asked. The store decides what "untouched" means; the handler only orders the steps.
+
+A rule (one policy and all of its versions) is **untouched** only when ALL of these hold; a rule failing any one is never deleted (fail closed):
+
+| Criterion | Read from |
+|---|---|
+| Created by the job identity: the policy and every version have `createdby` = the identity the BFF writes Dataverse as | `IGenericEntityService.GetCurrentIdentityIdAsync()` (WhoAmI on the ServiceClient, cached; new member with a throwing default body, implemented by `DataverseServiceClientImpl`) |
+| Created for this rule set | the `sprk_ruleset` lookup (query and per-row re-check), Billing domain, and the drafted code prefix `BRD-{set}-` (belt and braces: three layers, each alone is enough to keep another set's rule) |
+| Still Off and Proposed | policy `sprk_enabled` is explicitly `false` (null is unknown, so kept); every version `sprk_proposalstatus` = Proposed; no version has `sprk_inforceto` |
+| No admin touch | policy and each version have `modifiedon` equal to `createdon` (an edit of a draft is in place, so it moves `modifiedon`; so does accept, reject and publish) |
+| Never published | the policy's `sprk_currentversion` is empty |
+
+A policy with no version (a run that died between the two creates and could not remove the policy) is untouched when the policy itself is. Versions are deleted before their policy, so a death between the two deletes leaves a version-less policy that the next pass removes.
+
+**Choice for a draft that is NOT untouched (an admin worked on it).** Keep it, and draft again only for what is missing. "Stop with a logged outcome" was rejected: the rule set would be stuck with no marker, every retry would stop again, and a Rejected or Accepted row would keep failing the untouched test, so the stop would repeat until someone deleted the rows by hand. Basis: the POML requires that re-delivery creates no duplicate drafts and ends in a stable outcome (NFR-08), and the earlier notes already kept admin-edited partial drafts. "What is missing" is decided by clause: `AddDraftsAsync` loads the normalised clause quotes of the rules that survived (the same normalisation as the quote-in-document check) and does not store a new rule for a clause one of them covers; it lists it in `sprk_notconverted` with the reason "a rule already in this rule set, from an earlier drafting run, covers this clause", so nothing is dropped silently. An identical rule (same type, body and clause) is still skipped quietly as before. Consequence: a rejected earlier draft is not resurrected by a retry, and an edited one is not duplicated.
+
+**Failure handling.** Deletes run as the application identity through `IGenericEntityService`. A row that is already gone (`0x80040217` anywhere in the exception chain) counts as deleted, so a repeated pass is idempotent. Any other fault returns 500 `ruleset.write_failed`; the handler maps it to Failure (Poisoned on the final delivery) **before the model is asked**, nothing is drafted, rows deleted so far stay deleted, and the next delivery compensates again. An unresolvable identity (WhoAmI failed or named no user) is the same fault: nothing is deleted. A rule set with the marker is refused (409 `ruleset.already_drafted`) and nothing is deleted: a finished run is never compensated (the handler's own marker guard already ends such a delivery as Success before reaching this step). More than one read page of rules (5,000) refuses with 422 `ruleset.result_truncated` and deletes nothing. ADR-004: the handler stays idempotent under at-least-once delivery; the processing lock still serialises deliveries.
+
+**Why not the alternative.** Persisting the translated proposals before the first row write and replaying them on retry needs a schema addition. Compensation needs none.
+
+**Known limits.** (a) If the BFF's Dataverse credential is ever changed to a different identity between the dead run and its retry, the earlier drafts read as foreign and are kept (never deleted), so a duplicate set can result; an admin rejects the extras through 076. (b) The test of "untouched" relies on `modifiedon`, which Dataverse also moves for platform-side changes to the row; that only ever keeps a row. (c) The model's second wording of an already-covered clause is listed, not stored; a clause that legitimately yields two rules from one quote, when one of them was kept, loses the second (it is listed).
+
+**Tests** (new, all in `tests/unit/Sprk.Bff.Api.Tests`): `Services/Jobs/Handlers/BillingRuleDraftRetryTests.cs` (the real handler over the real store and the 076 fake: a rerun after a partial run leaves exactly one set; an admin-edited draft is kept and its clause is not drafted twice; a completed run deletes nothing and does not redraft; a delete fault fails the run, asks no model and drafts nothing, and the next delivery finishes), `Services/Finance/RuleSetServiceCompensationTests.cs` (each criterion in isolation: edited version, edited policy, Accepted, Rejected, turned On, enabled unknown, has a current version, was in force, version or policy by another user, not a drafted code, a second version someone else added; another rule set and an Ontology policy; marker; not found; retired; already-gone rows; delete fault then retry; WhoAmI fault; version-less policy) and handler unit cases in `BillingRuleDraftJobHandlerTests.cs` (order compensate, ask, store; fault before the model; marker found; finished run never compensated). The 076 harness gained `createdby`, `modifiedon`, delete-fault and identity members.
+
+**Fail before.** With `RuleSetService.cs` and the handler restored to the previous commit, `BillingRuleDraftRetryTests`: 4 failed, 1 passed (the completed-run control passes both ways by design): "Expected rig.Policies to be 3 ... but found 4"; the delete-fault cases completed the job and drafted.
+
+**Mutation proofs.** Each mutant applied to the source alone, the 100 compensation, retry, handler and draft tests rerun, source restored. All killed.
+
+| Mutant | Tests failed |
+|---|---|
+| Drafted-code prefix check removed | 1 |
+| Off check removed | 2 |
+| Current-version check removed | 1 |
+| `createdby` check removed | 3 |
+| `modifiedon = createdon` check removed | 4 |
+| Proposed check removed | 2 |
+| `sprk_inforceto` check removed | 1 |
+| Versions not checked at all | 9 |
+| Rule set scoping removed (query filter and row check together; either alone is covered by the other, so the first run of each alone survived by design) | 1 (after adding the look-alike-code case) |
+| Marker refusal removed from the compensation | 1 |
+| Not-found treated as a failure | 1 |
+| Policy deleted before its versions | 1 |
+| Delete fault swallowed | 3 |
+| Covered-clause skip removed | 2 |
+| Handler skips the compensation | 27 |
+
+**Verification.** `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors. `Sprk.Bff.Api.Tests` filtered (`RuleSet|BillingRule|PolicyVersion|Finance|GoldenUtterance|Catalog|ConsumerType|JobHandler`): 2384 passed, 0 failed, 3 skipped (live-only). `Spaarke.ArchTests`: 1172 passed, 0 failed. `dotnet format` finds only the pre-existing whitespace finding in `RuleSetService.cs` (076's `Id = newId, ...` line). Publish size (Release, linux-x64, framework-dependent, zip Optimal, `git archive` copies, 192 files each): base `1713054e4` 39,591,749 B, head 39,597,223 B, **delta +5,474 B** (under every threshold); no PackageReference change.
+
 ## §11 answers
 
 1. **Existing**: `IInvoiceAi.DraftRulesAsync` (041), `RuleSetService` and `BillingAdminAuthorization` (076), `InvoiceExtractionJobHandler` (pattern), `PolicyVersionValidator` (070), the Action and Binding catalogue (ADR-039/043). No rule-drafting job or trigger existed.
@@ -116,7 +168,7 @@ Task 075 delta (measured on the first two commits; the review fixes add no packa
 3. **Privilege name unverified.** `prvCreatesprk_Policy` follows the verified Write-privilege names by analogy; confirm against the live role before the first admin test.
 4. **`sprk_subjecttype` left unset** on drafted policies (076 notes listed it; the data-model doc says only the lane is required). Lane = Decide and priority = 500 are my choices.
 5. **Consequence eligibility** per type (task 073) does not exist yet, so Reject is accepted for any type here; 073 should tighten `CheckDraft`.
-6. **Retry with different model output (OPEN, needs an owner decision).** If a run dies midway (for example a Dataverse 429 at rule 30 of 60) and is retried, the model is asked again; temperature 0 is not deterministic on Azure OpenAI, so the re-run may word a quote or write a number differently and its fingerprint then differs from the 30 rules already stored, which stay next to the new ones. Dedupe by content only heals an identical re-run. The adversarial review rated this F1 (it breaks "re-delivery creates no additional drafts" on a real path). Proposed fix: on a re-run with no marker, delete the earlier run's untouched drafts (policy code prefix `BRD-{set}-`, Off, no current version, version 1 Proposed, not modified since creation) before storing the new set; the alternative is to persist the translated proposals before the first row write and replay them on retry (a schema addition). I did not apply the delete because it removes rows and the "untouched" test is a design choice (an admin may have edited a partial draft); the processing lock already closes the concurrent case. Until decided, an admin rejects the extras through 076.
+6. **Retry with different model output: CLOSED.** The proposed fix was applied, with the owner-decision parts settled as recorded in "Retry compensation": untouched drafts of the earlier run are deleted before drafting again; a draft an admin worked on is kept and its clause is not drafted a second time. No schema addition.
 7. **Exception text in logs.** The handler passes the exception object to `LogError`; the message of a third-party exception is not under our control. Only ids and codes are logged by us.
 8. **Drafted version carries `sprk_inforcefrom` = drafting time.** The column is required on the version; 076's proposed-rule definition lists it too. No reader treats a non-current version as in force (they key on `sprk_currentversion`), but a view that shows the column would read "in force from" for a rule that never was. The POML says the job sets no in-force dates; this is the one exception, forced by the required column. Publish overwrites it with the effective date.
 9. **A deterministic write failure** re-runs every model call on each of the five deliveries (up to 40 Standard-tier calls). Bounded, not fixed.
@@ -129,7 +181,7 @@ One adversarial review (Opus, read-only) of `62a1ec56b..841695dd7`; adr-check by
 | Finding | Class | Outcome |
 |---|---|---|
 | 1. Two deliveries of one rule set run together and store every rule twice | F1 | Fixed: processing lock (ADR-004 pattern, `IIdempotencyService`), seam test with two deliveries at once, two mutants |
-| 2. Crash-retry with different model output leaves earlier rules beside new ones | F1 | **Open, reported**: needs an owner decision (open question 6) |
+| 2. Crash-retry with different model output leaves earlier rules beside new ones | F1 | Fixed in the retry-compensation round: see "Retry compensation" (deletes only untouched drafts; mutants and fail-before recorded there) |
 | 3. Missing Binding dead-lettered on first delivery though the facade says it may be transient | F1 | Fixed: retried until the final delivery, then Poisoned with the reason |
 | 4. Model's "verbatim" clause quote stored without checking it occurs in the document | F1 | Fixed: `Translate(proposals, sourceText)` refuses and lists a quote not found (white space, case, typographic characters ignored) |
 | 5. Retry logic keyed on `job.Attempt`, which never advances on a redelivery | F3 | Fixed: `IsFinalDelivery`; tests set `DeliveryCount` |
