@@ -130,7 +130,8 @@ public sealed partial class DecisionRecordWriterTests
             };
         });
 
-        public Harness(RecordOwnerResolution? ownership = null, IRecordOwnershipResolver? realResolver = null)
+        /// <param name="participantShares">Task 042b (D-169): the participant-share helper the writer calls after a gate create; null = none.</param>
+        public Harness(RecordOwnerResolution? ownership = null, IRecordOwnershipResolver? realResolver = null, GateDecisionRecordSharing? participantShares = null)
         {
             Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
                 .Callback<Entity, CancellationToken>((e, _) => Created.Add(e))
@@ -190,7 +191,7 @@ public sealed partial class DecisionRecordWriterTests
                         StringComparer.OrdinalIgnoreCase));
                 },
                 NullLogger<CoreAncestorResolver>.Instance);
-            Writer = new DecisionRecordWriter(client, realResolver ?? Ownership.Object, coreAncestors, Entities.Object, RecordTypes, new FakeTimeProvider(Now), Log);
+            Writer = new DecisionRecordWriter(client, realResolver ?? Ownership.Object, coreAncestors, Entities.Object, RecordTypes, new FakeTimeProvider(Now), Log, participantShares);
         }
 
         public Entity Row => Created.Single();

@@ -252,7 +252,10 @@ public class RecordOwnerAssignmentCensusTests
             + "team (D-134), with secure-parent precedence. The commit route refuses a record whose Signals span two secure "
             + "families (#1778) before any write. Ontology task 042: WriteGateDecisionAsync (the communications gate's decision, "
             + "authorize and deny) reaches the SAME single create (CreateAsync, pinned by DecisionRecordContextImmutabilityTests) "
-            + "and the SAME owner answer over the core, the communication and every derived core; it asks with no requester."),
+            + "and the SAME owner answer over the core, the communication and every derived core; it asks with no requester. "
+            + "Ontology task 042b (D-169): a user-owned gate record of an UNFILED communication is then shared Read with the "
+            + "communication's internal sharees (GateDecisionRecordSharing, never a team-owned or secure record); filing the "
+            + "communication re-owns it to the resolver's team, reads the owner back, and only then revokes those shares."),
         new CensusEntry("SignalWriter.cs", "sprk_signal", 1, Disposition.Routed,
             "Ontology task 143 (contract C3, audit F2/F3, D-130): BuildEntity writes RecordOwnershipResolver's answer over the "
             + "Signal's parents (its core record, its subject and every core-ancestor stamp) onto the row with ApplyTo, with "
@@ -328,6 +331,12 @@ public class RecordOwnerAssignmentCensusTests
             + "app-only create). PATCH /api/v1/child-records/{table}/{id}, /api/v1/events/{id}/filing and "
             + "/api/communications/{id}/filing: OwnedChildWrite.RefileAsync (ReparentAsync); a PATCH that files nothing is the "
             + "caller's own update."),
+
+        // ── spaarke-ontology-platform-r1 task 042b (D-169): the gate Decision Record follows its communication's filing ──────
+        new UnscannedWriter("GateDecisionRecordSharing.cs", "AssignRequest re-own of a filed communication's gate Decision Record",
+            "ReownAfterFilingAsync asks IRecordOwnershipResolver over the communication and the record's core stamps "
+            + "(KeepCreatorUnlessTargetIsTeamOwned); a secure answer is left to SecureChildReconciler, Unchanged or a refusal "
+            + "keeps the user owner and its shares. The assign is read back before any share is revoked."),
     };
 
     /// <summary>Seams that must refuse an owner-less create, by the method that builds the row.</summary>
@@ -553,7 +562,9 @@ public class RecordOwnerAssignmentCensusTests
         // spaarke-ontology-platform-r1 task 149 (D-144 as amended, owner ruling on uac-r2 F1 of PR #1907): the ONE owner write the Decision
         // Record writer makes itself. A gate decision about an UNFILED communication (the resolver answered Unchanged: not team-owned and
         // filed under nothing) is owned by the communication's own owning user, as read from the row; the business unit's default team is
-        // never applied, and the secure-if-any check (the Secure Record team) is still the resolver's.
+        // never applied, and the secure-if-any check (the Secure Record team) is still the resolver's. Task 042b (D-169): that
+        // user-owned record is shared Read with the communication's internal sharees, and re-owned to the resolver's team on filing
+        // (GateDecisionRecordSharing, an UnscannedWriter above).
         new OwnerWriteEntry("DecisionRecordWriter.cs", "FiledAndOwnedAsync", 1, OwnerWriteKind.Routed,
             "D-144 as amended: only after IRecordOwnershipResolver answered Unchanged for a communication-gate decision and the second ask "
             + "answered an ordinary team or NoDefaultOwnerTeam; every other answer refuses; the owner is the communication's own owner "

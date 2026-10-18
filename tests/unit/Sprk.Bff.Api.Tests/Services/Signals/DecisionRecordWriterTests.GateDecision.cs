@@ -236,27 +236,43 @@ public sealed partial class DecisionRecordWriterTests
         h.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning && e.EventId.Id != 0, "a record that is written is not an alert");
     }
 
+    private static readonly Guid CommunicationSharee = Guid.Parse("c0a1e000-0000-4000-8000-0000000000c3");
+
+    /// <summary>Task 042b: the participant-share helper over its own in-memory Dataverse, with the unfiled communication owned by
+    /// <see cref="CommunicationOwner"/> and shared Read with <see cref="CommunicationSharee"/> (not with <see cref="BasicColleague"/>).</summary>
+    private static GateSharingWorld SharedCommunication() => new GateSharingWorld()
+        .WithCommunication(CommunicationId, CommunicationOwner)
+        .WithUser(CommunicationOwner).WithUser(CommunicationSharee).WithUser(BasicColleague)
+        .Share(GateSharingWorld.Communication, CommunicationId, CommunicationSharee);
+
     [Fact]
-    public async Task Gate_AnUnfiledCommunication_ABasicColleagueInTheSameBusinessUnit_IsNotTheOwner_AndGetsNoShareOrGrant_D144Amended()
+    public async Task Gate_AnUnfiledCommunication_IsSharedReadWithTheCommunicationsSharees_D169_ButABasicColleagueWhoIsNoShareeGetsNoShareOrGrant()
     {
-        // The exposure the ruling closes: a Basic colleague in the communication's business unit (ChildBu, where the old default team sat)
-        // must not become the owner, and the writer must make no share or grant for anyone: the only Dataverse write is the one create.
+        // Task 042b INVERTS task 149's "gets no share or grant" (D-144 as amended): owner decision D-169 makes the record visible to whoever
+        // the communication is associated with, i.e. its sharees. The exposure D-144 closed stays closed: a Basic colleague in the
+        // communication's business unit (ChildBu, where the old default team sat) who is NOT a sharee is neither the owner nor shared. The
+        // shares are the BFF app identity's (the POA seam), never the writer connection's; the writer still makes one create.
         var directory = Standard()
             .WithUser(BasicColleague, Guid.NewGuid(), ChildBu)
             .WithRecord("sprk_communication", CommunicationId, ChildBu);
-        var h = new Harness(realResolver: directory.Resolver());
+        var world = SharedCommunication();
+        var h = new Harness(realResolver: directory.Resolver(), participantShares: world.Sharing);
         CommunicationOwnedBy(h, UserRef(CommunicationOwner));
+        world.WithGateRecord(h.NewId, CommunicationId, CommunicationOwner); // the row as Dataverse holds it after the create (its owner is read back)
 
-        await h.Writer.WriteGateDecisionAsync(Gate());
+        var result = await h.Writer.WriteGateDecisionAsync(Gate());
 
         var owner = h.Row.GetAttributeValue<EntityReference>("ownerid");
         owner.Id.Should().Be(CommunicationOwner).And.NotBe(BasicColleague);
         owner.Id.Should().NotBe(ChildTeam, "the colleague's team (the unit's default team) is not the owner either");
+        world.RecordSharees(result.RecordId).Should().Equal(new[] { CommunicationSharee },
+            "D-169: Read for the communication's sharee; none for the colleague or the owner");
+        world.SharesOf(GateSharingWorld.Record, result.RecordId).Values.Should().OnlyContain(mask => mask == 1, "Read only");
         h.Created.Should().ContainSingle("one record is written; nothing is created for a share or an access row");
         h.Org.Invocations.Where(i => !(i.Method.Name == "ExecuteAsync" && i.Arguments[0] is Microsoft.Crm.Sdk.Messages.WhoAmIRequest))
             .Select(i => i.Method.Name).Distinct().Should().OnlyContain(
             name => name == "CreateAsync" || name == "RetrieveAsync",
-            "no GrantAccess / ModifyAccess / Assign / Associate / Execute: the colleague gets no share (WhoAmI, adversarial pass 2 F1, only reads the writer's own identity)");
+            "no GrantAccess / ModifyAccess / Assign / Associate / Execute on the writer's connection (WhoAmI, adversarial pass 2 F1, only reads the writer's own identity)");
 
         // The shared sysadmin service (h.Entities) is the other way a share or grant could be made: it is only ever READ through.
         h.Entities.Invocations.Select(i => i.Method.Name).Distinct().Should().OnlyContain(
@@ -266,6 +282,40 @@ public sealed partial class DecisionRecordWriterTests
             "no query touches a share or access table");
         h.Created.Concat(h.Seeded).Should().NotContain(e => e.LogicalName == "principalobjectaccess" || e.LogicalName.Contains("share") || e.LogicalName.Contains("access"),
             "no share or grant row exists");
+    }
+
+    [Fact]
+    public async Task Gate_ATeamOwnedRecord_TheSecureRecordUnitsCommunication_GetsNoParticipantShare_D169_D123()
+    {
+        // The Secure Record business unit's communication goes to the Secure team (task 149 K4); a team-owned record is never shared, even
+        // when the communication has sharees.
+        var directory = Standard().WithRecord("sprk_communication", CommunicationId, SecureBu);
+        var world = SharedCommunication();
+        var h = new Harness(realResolver: directory.Resolver(), participantShares: world.Sharing) { ReadBackTeam = SecureNamedTeam };
+
+        var result = await h.Writer.WriteGateDecisionAsync(Gate());
+
+        result.SecureOwnerTeamId.Should().Be(SecureNamedTeam);
+        world.RecordSharees(result.RecordId).Should().BeEmpty();
+        world.Calls.Should().BeEmpty("the participant-share step is never reached for a team-owned record");
+    }
+
+    [Fact]
+    public async Task Gate_AFailedParticipantShareRead_StillWritesTheRecord_OwnerVisible_AndNothingEscapes_D169()
+    {
+        var directory = Standard().WithRecord("sprk_communication", CommunicationId, ChildBu);
+        var world = SharedCommunication();
+        world.Shares.FailReadFor.Add(GateSharingWorld.Communication);
+        var h = new Harness(realResolver: directory.Resolver(), participantShares: world.Sharing);
+        CommunicationOwnedBy(h, UserRef(CommunicationOwner));
+        world.WithGateRecord(h.NewId, CommunicationId, CommunicationOwner);
+
+        var result = await h.Writer.WriteGateDecisionAsync(Gate());
+
+        result.RecordId.Should().Be(h.NewId, "the record is written");
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(UserRef(CommunicationOwner), "and owner-visible");
+        world.RecordSharees(result.RecordId).Should().BeEmpty("a failed read never widens");
+        world.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.EventId == DecisionRecordEvents.ParticipantShareFailed);
     }
 
     [Fact]
