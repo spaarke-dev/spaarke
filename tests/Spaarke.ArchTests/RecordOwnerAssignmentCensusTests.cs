@@ -690,6 +690,78 @@ public class RecordOwnerAssignmentCensusTests
         Assert.Equal(new[] { ("Seed.cs", "Caller") }, ScanCalls(seeded, OrdinaryReownCall).Keys.ToArray());
     }
 
+    // ── Ontology 042b round 3 (adversarial K3): the Assign primitive ─────────────────────────────────────────────────────────────
+    // OntologyWriterDataverseClient.AssignAsync re-owns a row of ANY table through an SDK AssignRequest, a shape the owner-write scanner
+    // above does not see (MAINTENANCE PROCEDURE item 4). Every caller of it, and every AssignRequest, is listed here by member with its
+    // count, so a new caller fails the build until it is reviewed (it must take its owner from IRecordOwnershipResolver).
+    private sealed record AssignCaller(string FileName, string Member, int Calls, string Reason);
+
+    private static readonly IReadOnlyList<AssignCaller> AssignCallers = new[]
+    {
+        new AssignCaller("OntologyWriterDataverseClient.cs", "AssignAsync", 1,
+            "The primitive itself: an SDK AssignRequest on the ontology writer's connection, which holds Assign on sprk_decisionrecord only "
+            + "(D-33c); any other table fails on the platform."),
+        new AssignCaller("GateDecisionRecordSharing.cs", "ReownAsync", 1,
+            "Ontology 042b (D-169): the gate Decision Record re-own, only after IRecordOwnershipResolver answered an ordinary team for the "
+            + "communication and the record's stamps; the owner is read back before any share is revoked."),
+    };
+
+    private static readonly Regex AssignCall = new(@"\.AssignAsync\s*\(|\bnew\s+AssignRequest\b", RegexOptions.Compiled);
+
+    private static List<string> AssignCensusProblems(
+        Dictionary<(string File, string Member), List<int>> actual, IReadOnlyList<AssignCaller> listed)
+    {
+        var expected = listed.ToDictionary(c => (c.FileName, c.Member), c => c.Calls);
+        var problems = new List<string>();
+        foreach (var ((file, member), lines) in actual.OrderBy(kv => kv.Key.File, StringComparer.Ordinal))
+        {
+            if (!expected.TryGetValue((file, member), out var count))
+                problems.Add($"UNLISTED Assign caller {file}.{member}: lines {string.Join(", ", lines)}");
+            else if (count != lines.Count)
+                problems.Add($"COUNT CHANGED for {file}.{member}: census says {count}, source has {lines.Count}");
+        }
+
+        problems.AddRange(expected.Keys.Where(k => !actual.ContainsKey(k)).Select(k => $"STALE Assign census entry {k.FileName}.{k.Member}"));
+        return problems;
+    }
+
+    [Fact(DisplayName = "Ontology 042b r3: every AssignAsync call and AssignRequest in the server is censused, by member, with its count")]
+    public void EveryAssignCallerIsCensused()
+    {
+        var problems = AssignCensusProblems(ScanCalls(ServerFiles(), AssignCall), AssignCallers);
+        Assert.True(problems.Count == 0,
+            "The Assign census does not match the source (ontology 042b round 3). An Assign re-owns a row of any table outside the owner-write "
+            + "scanner; a new caller must take its owner from IRecordOwnershipResolver and be listed with its reason:\n"
+            + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "Ontology 042b r3: negative control — a new AssignAsync caller or AssignRequest fails the Assign census; a declaration does not")]
+    public void AssignCallDetector_NegativeControl()
+    {
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    public Task AssignAsync(string table, Guid id, EntityReference assignee, CancellationToken ct = default) => Task.CompletedTask;",
+            "    private async Task Rogue(Guid id, Guid team) { await _writer.AssignAsync(\"account\", id, new EntityReference(\"team\", team)); }",
+            "    private Task Raw(Guid id, Guid team) => _org.ExecuteAsync(new AssignRequest { Target = new EntityReference(\"contact\", id) });",
+            "    private async Task Threads(ThreadResolutionRequest r) { await _threads.ResolveAndAssignAsync(r); }",
+            "    private async Task Private(Guid id) { await AssignAsync(\"sprk_signal\", id, null!); }",
+            "    // a comment naming _writer.AssignAsync( and new AssignRequest is not code",
+            "}",
+        });
+        var sites = ScanCalls(new Dictionary<string, string> { ["Seeded.cs"] = code }, AssignCall);
+
+        // Must fire: the qualified call and the raw AssignRequest; must not fire: the declaration, ResolveAndAssignAsync, the comment.
+        Assert.Equal(new[] { "Raw", "Rogue" }, sites.Keys.Select(k => k.Member).OrderBy(m => m, StringComparer.Ordinal));
+
+        var problems = AssignCensusProblems(sites, new[] { new AssignCaller("Seeded.cs", "Raw", 1, "listed"), new AssignCaller("Seeded.cs", "Gone", 1, "stale") });
+        Assert.Equal(2, problems.Count);
+        Assert.Contains(problems, p => p.StartsWith("UNLISTED Assign caller Seeded.cs.Rogue", StringComparison.Ordinal));
+        Assert.Contains(problems, p => p.StartsWith("STALE Assign census entry Seeded.cs.Gone", StringComparison.Ordinal));
+        Assert.Empty(AssignCensusProblems(sites, new[] { new AssignCaller("Seeded.cs", "Raw", 1, "x"), new AssignCaller("Seeded.cs", "Rogue", 1, "x") }));
+    }
+
     /// <summary>(file, member) → the 1-based lines of each match of <paramref name="call"/>.</summary>
     private static Dictionary<(string File, string Member), List<int>> ScanCalls(IReadOnlyDictionary<string, string> files, Regex call)
     {
