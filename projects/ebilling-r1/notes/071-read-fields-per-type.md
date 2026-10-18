@@ -289,8 +289,8 @@ test is repeated outside `BillingMath`. The guard that would catch a sixth hand-
 ## Fix round 2 (ontology-r1's review at `4257e7f35`; owner decisions D-105, D-111, D-112)
 
 Base `6bcd4d029` (`work/ebilling-r1`). Commits (cherry-picked onto `work/ebilling-r1` by the main session; the hashes below are the
-fix-round worktree's own): `49805da88` F4 read fields and K2, `c1e355162` K1, `25695000f` D-112, `7108e3549` Describe texts (D-111),
-`3ced78f72` K4 purity guard, plus this notes commit. Cherry-picked hashes on `work/ebilling-r1`: `8b0604728` (F4, K2), `a563146cb` (K1), `eb978396c` (D-112), `b78b30c0b` (D-111), `cae4e9051` (K4), `7b0204f21` (notes); range `e2288a659..7b0204f21`. The agent-branch hashes above are pre-cherry-pick and will not resolve once that branch is pruned.
+fix-round worktree's own): `8b0604728` F4 read fields and K2, `a563146cb` K1, `eb978396c` D-112, `b78b30c0b` Describe texts (D-111),
+`cae4e9051` K4 purity guard, plus this notes commit. Cherry-picked hashes on `work/ebilling-r1`: `8b0604728` (F4, K2), `a563146cb` (K1), `eb978396c` (D-112), `b78b30c0b` (D-111), `cae4e9051` (K4), `7b0204f21` (notes); range `e2288a659..7b0204f21`.
 
 | Item | Change | Evidence |
 |---|---|---|
