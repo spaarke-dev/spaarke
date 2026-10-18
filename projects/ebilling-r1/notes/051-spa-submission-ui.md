@@ -1,6 +1,6 @@
 # Task 051 - SPA submission UI (shared wizard component) (FR-18, FR-19, FR-45)
 
-Status: built, including the "Choose firm" step (section 7); unit tests green; browser ui-tests deferred to task 053, the WP2 dev deploy (section 6). Rigor STANDARD.
+Status: built, including the "Choose firm" step (section 7) and the review round (section 8: sections 4 and 6 describe the first build; section 8 supersedes them where they differ); unit tests green; browser ui-tests deferred to task 053, the WP2 dev deploy (section 6). Rigor STANDARD for the build, FULL for the review round.
 Built on 044 (routes and codes) and D-91 (firm invoice number required at upload).
 
 **Decision (owner, 2026-10-17): add a firm step.** A caller who belongs to several firms chooses which one the invoice is from, in a required step.
@@ -152,3 +152,76 @@ Original build (before the firm step): shared jest 29 passed; SPA `InvoiceSubmit
 - SPA vitest: `InvoiceSubmitPage.test.tsx` 25 passed (7 new: several firms send `?firmId=`, Next blocked until a pick, one / none / null / failed `/me` send none, a refused firm is
   shown); whole suite 37 files, 1043 of 1044 passed on the full run; the one failure (`DocumentUploadPage.externalUpload` 401 case, unrelated to this change) passed on its own (25/25), a
   load-sensitive timing flake. `tsc --noEmit` and `eslint src tests` clean in external-spa; `eslint` clean and no `tsc` error in `InvoiceSubmission` in the shared library.
+
+## 8. Review round (uac-r2 F1/F3/F4, owner D-106, K1-K3, R3 comments, DEF-004). Rigor FULL (auth filters)
+
+Base 7c0daf8c9. Commits: server `54ebabd9d`, shared wizard `2e9886f4a`, SPA and notes follow (see the report). No live writes, nothing under `.claude/`.
+
+### 8.1 What changed
+
+| Item | Change | Where |
+|---|---|---|
+| uac F1 | `ReadActiveFirmNamesAsync` selected `sprk_name`, which does not exist on `sprk_organization` (the 400 was swallowed into a null firm list, so /me never carried a firm). Now one batched `QueryExpression`: `ColumnSet("statecode", RegardingNameFields.PrimaryNameField("sprk_organization"))` = `sprk_organizationname`, `In` on `sprk_organizationid` (chunked), `statecode = 0`. Null on a fault; a missing or inactive firm is left out; the caller's order is kept | `InvoiceSubmissionService.cs` |
+| uac F3 | `ExternalUserContextFirmsTests` rewritten (24 tests): the organization double validates the column set and refuses an unknown column; exact `["statecode","sprk_organizationname"]` assertion; single-query assertion; must-not-fire (a second contact's other firm never appears in the caller's `firms`) and must-fire (the caller's own firm does) | `ExternalUserContextFirmsTests.cs` |
+| uac F4 | A systemuser is refused on the three external invoice POSTs in `ExternalInvoiceSubmissionAuthorizationFilter.DecideSubmitAsync`, first, before any read or write: 403 `ebilling.submission.use_internal_route`, Warning log. /me returns `firms = []` and reads nothing for a systemuser. `ReadCallerFirmsAsync` reads the contact state first: an Inactive contact confers no firms (UAC task 137), an unreadable contact is unknown (null). One test per route proves a systemuser is refused before any write; a deactivated-contact test | filter, `ExternalUserContextEndpoint.cs`, `InvoiceSubmissionEndpointsContractTests.cs` |
+| D-106 | The chosen firm must be linked to the chosen record. See 8.2 | filter, endpoints, wizard, SPA client |
+| K1 | `listInvoiceFirms()` returns `null` for unknown (was `[]`). On a 400 `firm_required` the wizard reloads the firms, inserts the Choose firm step with the reason, and keeps the file, the number and the record | wizard, `web-api-client.ts` |
+| K2 | /me: the flag check is first; `InvoiceSubmissionService` and `ExternalParticipationService` are resolved from `RequestServices` only after it (an eBilling-off or systemuser caller resolves and reads nothing); the firm names are one query, not one per firm; the "no extra cost" comment is replaced by the real cost (one membership read, one name read, both only when eBilling is on) | `ExternalUserContextEndpoint.cs` |
+| K3 | `[property: JsonIgnore(Condition = WhenWritingNull)]` on `Firms`: an unknown list is omitted from the wire, `[]` is sent as `[]` | `ExternalUserContextResponse.cs` |
+| Trivial | /me has its own log message ("[EBILLING-FIRMS] ... the caller's firms are unknown", Warning) instead of the shared "[CONTACT-GRANT] ... refusing (fail closed)" at Error. `ContactGrantorAuthorizationFilter` is not modified | filter |
+| R3 (a) | `UNSAFE_NavigationContext` removed from `InvoicesWidget`. `useInRouterContext` cannot be used: the arch guard refuses any imported router name outside `App.tsx` (the finding in section 6). The widget takes an optional `onNavigate` prop from `WidgetBodyProps`; `App.tsx` passes `navigate` to `WorkspaceHomePage`, which hands it to the widget body. Without it (a test, a surface with no router) the action is not shown | `InvoicesWidget.tsx`, `PlaceholderWidgetBody.tsx`, `WorkspaceHomePage.tsx`, `App.tsx` |
+| R3 (b) | No list GET on mount. The widget reads /me once (`useCallerContext`) and shows "Submit invoice" only when `firms` is non-empty. `probeInvoiceSubmission` (used by the page only) reads /me first (`firms` present = on); only when `firms` is absent does it fall back to the submissions list to tell "off" (503 `ebilling.disabled`) from "unknown" | `web-api-client.ts`, `InvoicesWidget.tsx` |
+| R3 (c) | The picker says when a source failed to load (`records-partial`: the list is incomplete) apart from a capped list (`records-truncated`: the search box searches only the shown records). An empty list from a failed read is not shown as "no records". A failed firm-records read throws (the failure is shown, never an unfiltered list) | wizard, `listInvoiceCoreRecords` |
+| R3 (d) | The /me ledger HandlerDecision now names `ExternalUserContextEndpoint.HandleAsync` | `RouteAuthorizationGuardTests.Ledger.cs` |
+
+Behaviour change to note for SPA-r3: an outage of /me now hides the widget's Submit action (before, the list probe kept it through an outage). The page itself still works from a direct link.
+
+### 8.2 D-106: the firm is linked to the record
+
+- **Link used (reuse, nothing new in the model):** `sprk_assignedlawfirm1` / `sprk_assignedlawfirm2` on the matter, project or work assignment, read through the existing `ExternalParticipationService.GetReferencedOrganizationIdsAsync(entity, [recordId])`. A firm that is only granted access (an org-level grant row) is NOT counted as linked: that fails closed. **Owner to confirm** that "linked" means the assigned law firms only.
+- **Server:** `DecideSubmitAsync` ends with `DenyUnlinkedFirmAsync`: 403 `ebilling.submission.firm_not_linked` with a fixed detail (no firm or record names), 503 `firm_unverifiable` when the link cannot be read. It runs last, so a caller who failed any earlier check learns nothing about links. It applies to every external submit, single-firm callers included. The internal route is not changed.
+- **Picker:** new `GET /api/v1/external/invoice-submissions/firm-records?firmId=` in the existing `ExternalInvoiceSubmissionEndpoints.cs`. Justification (CLAUDE.md section 11): (1) Existing: the same participation read the submit gate uses; (2) Extension: the Tier-2 module read is allow-listed to id, name and number, so the link cannot be asked for there and the filter has to be server-side; (3) Cost of nothing: the picker offers records the server refuses with `firm_not_linked`. It returns ids only, drawn from the caller's OWN readable matters, projects and work assignments, and `partial` when some record's links could not be read. The firm must be one of the caller's own (403 `firm_forbidden`), a systemuser is refused. The SPA filters its three existing record reads to those ids.
+- **Wizard:** records load after the firm is known (the one firm of a single-firm caller, or the one chosen in the Choose firm step), and again when the choice changes; a record picked under another firm is dropped. With firms unknown (null, no firm, a failed load, no `loadFirms`) the list is not narrowed and the server checks the link on submit.
+- **Open question for the owner (one owner per invariant):** the link check sits in the external route's filter, as the brief placed it, and the internal submit route (task 052) does NOT enforce it. If D-106 is meant to hold for every channel, the check belongs in `InvoiceSubmissionService.SubmitAsync` (the one shared owner of the submission create), which needs the participation read there or an `IFirmRecordLink` seam; I did not do this because the internal route's firm semantics (who may name which firm) are not in the brief.
+- **Known limit:** the record reads cap at 200 rows per source before the filter, so a linked record beyond the cap is not offered; the `records-truncated` notice says so.
+- **Ledger / ADR-010:** the route sits in an existing governed file, so `ExpectedEndpointFileCount` stays 137 (the entry text was updated); no DI registration was added, so the ADR-010 ceiling (166) is unchanged.
+
+### 8.3 ExternalWrites guard exemption rows to add (#2078's guard is not on master, so none were added here)
+
+Route + reason, for each of the three:
+
+| Route | Reason |
+|---|---|
+| `POST /api/v1/external/matters/{id}/invoice-submissions` | a systemuser cannot reach it (refused in ExternalInvoiceSubmissionAuthorizationFilter before any write) |
+| `POST /api/v1/external/projects/{id}/invoice-submissions` | a systemuser cannot reach it (refused in ExternalInvoiceSubmissionAuthorizationFilter before any write) |
+| `POST /api/v1/external/workassignments/{id}/invoice-submissions` | a systemuser cannot reach it (refused in ExternalInvoiceSubmissionAuthorizationFilter before any write) |
+
+`GET .../invoice-submissions/firm-records` is a read (no row), and /me writes nothing.
+
+### 8.4 DEF-004 answers (R3), from the code
+
+- **(a) Creator.** The document row the SPA submit creates is stamped with the caller's contact: `ExternalDataService.CreateDocumentAsync` calls `StampCreator(body, creator)`, which sets `sprk_createdbycontact` for a contact principal (R3 task 030 / FR-25) and `sprk_createdbyperson` for a systemuser principal. A systemuser can no longer reach this path (refused in the filter), so the contact stamp is the only one an external submit writes. The `sprk_invoicesubmission` row records the contact in `sprk_submitter` (`InvoiceSubmissionService.cs` ~401); `sprk_createdbycontact` is not a column of that table (the data-model doc lists it on document, to do, event and communication), and `owner.ApplyTo(row)` stamps only `sprk_createdbyperson`, which a contact does not have. So the submitter is named on the submission and the creator contact on the document. **Not a gap**; note for the owner: nothing deletes a submission, so the delete-own rule does not read either column for it.
+- **(b) Owner.** Set by an explicit owner-team rule, not left as the app user: `IRecordOwnershipResolver.ResolveOwnerAsync(ForParents(core record))` runs before any write; a refusal is 409 (`OwnerRefused`) and nothing is written; `owner.ApplyTo(row)` sets `ownerid` = the resolved team on the submission row, and `CreateDocumentAsync` requires the same team (`RequireOwner`, the document create refuses without one). **No gap.**
+- **(c) Rights.** The caller's rights are the evaluator's post-veto answer on the principal (`principal.RightsOn(core root, id)`), the same expression the external document upload uses, and a submit needs Read and Create on the core record the route names. A submission has exactly one parent (the core record), so there is no further parent to union: whatever the evaluator composes for that record (inherited, granted, vetoed) is the answer. A caller with Read and Create on the record but no active firm membership is refused 403 `firm_forbidden` before any write (`External_caller_with_no_firm_is_403_firm_forbidden`), and one whose firm is not linked to the record is refused 403 `firm_not_linked`.
+
+### 8.4b Evidence (review round)
+
+- **BFF** (`-m:1`, filtered `External|InvoiceSubmission|Firms|RouteAuthorization`): 3803 passed, 0 failed. **ArchTests**: 1160, 1159 passed on the first run; the one failure was
+  `ExternalSpaGridViewSelectorGuardTests` reading the phrase `from "unknown"` inside two of my new doc comments as an import (fixed by rewording, commit e0a1c84c3); the guard
+  classes (`ExternalSpaGridViewSelectorGuardTests`, `ClientUploadRouteAgreementTests`) re-ran 237 passed. Route ledger count stays 137; ADR-010 unchanged.
+- **Fail before / pass after (server):** with the old `sprk_name` column, 11 of the 24 `ExternalUserContextFirmsTests` fail; with the systemuser refusal, the link check and the
+  inactive-contact rule neutralised, 14 contract and firms tests fail; restored, all pass.
+- **Shared jest** `InvoiceSubmission`: 51 passed (2 suites). Against the previous wizard, 12 of the 46 wizard tests fail (the 34 others pass).
+- **SPA vitest**: 37 files / 1054 passed; `InvoiceSubmitPage.test.tsx` 35 tests (was 25). Against the previous SPA sources (`web-api-client`, widget, page, `WorkspaceHomePage`,
+  `App`, `WidgetBodyProps`), 12 of the 35 fail and 23 pass. `tsc --noEmit` and `eslint` clean in external-spa; `eslint` clean on the shared `InvoiceSubmission` folder.
+- **Publish size** (framework-dependent linux-x64 `dotnet publish -c Release`, `Compress-Archive -CompressionLevel Optimal`): base `7c0daf8c9` 192 files 37.727 MB; tip 192 files
+  37.733 MB; delta +0.006 MB (no `.csproj` change: no new package, no new CVE; `dotnet list package --vulnerable` not re-run for that reason). Measured against the branch base, not a fresh
+  master build.
+
+### 8.5 Same-class defects found elsewhere (not fixed: other owners' code; reported)
+
+A Grep for a wrong-name-column read on `sprk_organization` (the class of F1) found more. `sprk_organization`'s primary name is `sprk_organizationname`; `sprk_name` does not exist there (`RegardingNameFields`, `RegardingNameFieldsTests`):
+
+- `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/AssignedAccessStore.cs:879` and `:881` (`ReadSubjectNamesAsync`, uac-r2): selects `sprk_organizationid,sprk_name` from `sprk_organizations`. The 400 is swallowed ("Display only: a failure is empty"), so Manage Access suggestions show organizations with no name.
+- `src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/projectService.ts:209-211` and `CreateProjectWizard.tsx:146-149`: the organization search selects, filters and orders on `sprk_name`.
+- `src/client/pcf/CommunicationConnections/CommunicationConnections/CommunicationConnectionsApp.tsx:240`: `sprk_organization: 'sprk_name'` in the primary-name fallback map (degrades to the GUID).
