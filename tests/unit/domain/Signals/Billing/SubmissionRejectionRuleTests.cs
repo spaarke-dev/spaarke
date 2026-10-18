@@ -829,6 +829,39 @@ public class SubmissionRejectionRuleTests
         ShouldHold(decision, SubmissionHoldReasons.ReadFieldConfidenceUnknown);
     }
 
+    [Fact]
+    public async Task ARealRequiredDataFinding_ForAFieldTheExtractionNeverFound_DoesNotReject_NFR06()
+    {
+        // 071: "an absent value is not reliably absent". The period start has no value and no confidence, so a Reject rule only Flags.
+        var rule = Version("BILL-REQ", RuleType.RequiredData, """{"type":"RequiredData","fields":["billingPeriodStart"]}""") with { Consequence = Reject };
+        var request = Request(Fee(0)) with
+        {
+            BillingPeriodStart = null,
+            HeaderConfidence = Confidence().With(BillingFieldNames.BillingPeriodStart, null),
+        };
+        var result = Evaluator().Evaluate(request, Loaded(rule));
+        result.Findings.Should().ContainSingle().Which.ReasonCode.Should().Be(BillingReasonCodes.RequiredFieldMissing);
+
+        var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
+
+        ShouldHold(decision, SubmissionHoldReasons.ReadFieldConfidenceUnknown);
+    }
+
+    [Fact]
+    public async Task ARealRequiredDataFinding_ForAReliablyReadBlankField_AndForAForeignCurrency_Rejects()
+    {
+        var rule = Version("BILL-REQ", RuleType.RequiredData, """{"type":"RequiredData","fields":["billingPeriodStart"]}""") with { Consequence = Reject };
+        var blank = Request(Fee(0)) with { BillingPeriodStart = null }; // the header confidence map still carries 0.95 for the field
+        var foreign = Request(Fee(0)) with { Currency = "EUR" };
+
+        var blankDecision = await Sut(new FakeSettings(Settings())).DecideAsync(Evaluator().Evaluate(blank, Loaded(rule)), CancellationToken.None);
+        var foreignDecision = await Sut(new FakeSettings(Settings())).DecideAsync(Evaluator().Evaluate(foreign, Loaded(rule)), CancellationToken.None);
+
+        blankDecision.Outcome.Should().Be(SubmissionOutcome.Rejected);
+        foreignDecision.Outcome.Should().Be(SubmissionOutcome.Rejected);
+        foreignDecision.DecidingFindings.Single().Finding.ReasonCode.Should().Be(BillingReasonCodes.CurrencyNotUsd);
+    }
+
     // ── The evaluation-time gate: a stored version whose consequence its type may not carry ──────────────────────
 
     [Theory]
