@@ -19,6 +19,8 @@ import type {
   CatalogSubject,
   NewPolicyRequest,
   RuleDraftPayload,
+  RuleScopeIntentRequest,
+  RuleScopeRequest,
   ValidateRequest,
 } from './authoringService';
 
@@ -104,6 +106,10 @@ export interface RuleDraft {
   actions: string[];
   nextSteps: string[];
   // Scope and noise
+  /** Task 102b (D-165): the one matter the rule is limited to, or null for all matters. Only the id is sent. */
+  matterId: string | null;
+  /** The chosen matter's name, for display only (never sent). */
+  matterName: string | null;
   priority: string;
   countsTowardSuppression: boolean;
   quietWindowDays: string;
@@ -180,6 +186,8 @@ export function emptyDraft(catalog: AuthoringCatalog): RuleDraft {
     proposedAction: '',
     actions: [],
     nextSteps: [],
+    matterId: null,
+    matterName: null,
     priority: '',
     countsTowardSuppression: true,
     quietWindowDays: '',
@@ -206,7 +214,11 @@ export function composeRelativeDate(date: RelativeDateDraft): string | null {
 }
 
 /** One scalar of the grammar, or the sentence that says why this input cannot be written as one. */
-function scalarOf(kind: ValueKind, value: string, date: RelativeDateDraft): { value: string | number | boolean } | { problem: string } {
+function scalarOf(
+  kind: ValueKind,
+  value: string,
+  date: RelativeDateDraft
+): { value: string | number | boolean } | { problem: string } {
   switch (kind) {
     case 'text':
       return value.trim() === '' ? { problem: 'Enter a value.' } : { value };
@@ -306,7 +318,11 @@ function filterOf(
  * The rule body for a condition, composed from the controls only. `quietWindowDays` is written only when it is set; a body without
  * it takes the BFF's default.
  */
-export function buildRuleBody(condition: ConditionDraft, quietWindowDays: string, catalog: AuthoringCatalog): BuiltBody {
+export function buildRuleBody(
+  condition: ConditionDraft,
+  quietWindowDays: string,
+  catalog: AuthoringCatalog
+): BuiltBody {
   const issues: Record<string, string> = {};
   if (condition.ruleType === '') {
     issues.ruleType = 'Choose a rule type.';
@@ -342,7 +358,11 @@ export function buildRuleBody(condition: ConditionDraft, quietWindowDays: string
       if (join === undefined) {
         issues[clause.id] = 'Choose the related records.';
       }
-      return { [clause.kind]: clause.related, path: join?.path ?? '', filter: filterOf(clause.filter, clause.related, catalog, issues) };
+      return {
+        [clause.kind]: clause.related,
+        path: join?.path ?? '',
+        filter: filterOf(clause.filter, clause.related, catalog, issues),
+      };
     });
   }
 
@@ -401,10 +421,44 @@ export function draftPayload(draft: RuleDraft, ruleBody: string): RuleDraftPaylo
   };
 }
 
+/**
+ * The scope every request carries (task 102b): the matter id when the draft is limited to one, nothing for all matters. It is sent as
+ * the draft holds it, whatever the subject: the BFF's one shared check refuses a limit on a rule that is not about matters, and the
+ * wizard shows that refusal on the scope field.
+ */
+export function scopeRequest(draft: RuleDraft): RuleScopeRequest {
+  return draft.matterId === null ? {} : { matterId: draft.matterId };
+}
+
+/**
+ * Task 102b fix round 1 (F4): the scope the validate (fix round 2, K2), the test and the publish carry, said explicitly: the matter id, or `allMatters: true` when "All
+ * matters" is chosen. Never neither: the BFF refuses a publish of a rule limited to a matter that names no scope, so a limit is cleared
+ * only when the admin chose All matters.
+ */
+export function scopeIntentRequest(draft: RuleDraft): RuleScopeIntentRequest {
+  return draft.matterId === null ? { allMatters: true } : { matterId: draft.matterId };
+}
+
+/**
+ * Task 102b fix round 1 (F4): the sentence the publish confirmation adds when the publish changes the rule's scope, or null when it keeps
+ * it. `stored` is the scope in force (its id and, when known, its name); `draft` holds the scope chosen.
+ */
+export function scopeChangeSentence(
+  stored: { matterId: string | null; matterName: string | null },
+  draft: RuleDraft
+): string | null {
+  if (stored.matterId === draft.matterId) {
+    return null;
+  }
+  const from = stored.matterId === null ? 'all matters' : (stored.matterName ?? stored.matterId);
+  const to = draft.matterId === null ? 'all matters' : (draft.matterName ?? draft.matterId);
+  return `This changes the rule from ${from} to ${to}.`;
+}
+
 export function validateRequest(draft: RuleDraft, ruleBody: string, policyId: string | null): ValidateRequest {
   return policyId === null
-    ? { lane: draft.lane, draft: draftPayload(draft, ruleBody) }
-    : { policyId, draft: draftPayload(draft, ruleBody) };
+    ? { lane: draft.lane, draft: draftPayload(draft, ruleBody), ...scopeIntentRequest(draft) }
+    : { policyId, draft: draftPayload(draft, ruleBody), ...scopeIntentRequest(draft) };
 }
 
 export function newPolicyRequest(draft: RuleDraft, ruleBody: string): NewPolicyRequest {
@@ -419,6 +473,7 @@ export function newPolicyRequest(draft: RuleDraft, ruleBody: string): NewPolicyR
     priority: priority === '' ? null : Number(priority),
     countsTowardSuppression: draft.countsTowardSuppression,
     draft: draftPayload(draft, ruleBody),
+    ...scopeRequest(draft),
   };
 }
 
@@ -427,7 +482,8 @@ export function newPolicyRequest(draft: RuleDraft, ruleBody: string): NewPolicyR
  * never current for this one (publish stays disabled until the Test is run again).
  */
 export function draftKey(draft: RuleDraft): string {
-  return JSON.stringify(draft, (key, value: unknown) => (key === 'id' ? undefined : value));
+  // The matter's display name is not part of the rule (the same id is the same scope); its id is.
+  return JSON.stringify(draft, (key, value: unknown) => (key === 'id' || key === 'matterName' ? undefined : value));
 }
 
 /** Whether anything has been chosen or typed (so closing needs a discard check). */

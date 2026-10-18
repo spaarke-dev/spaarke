@@ -14,4 +14,4 @@ export type {
   VersionPublished,
 } from './authoringService';
 export { versionModeOf } from './ruleWizardTypes';
-export type { NewRuleMode, NewVersionMode, RuleWizardMode } from './ruleWizardTypes';
+export type { MatterPicker, NewRuleMode, NewVersionMode, RuleWizardMode } from './ruleWizardTypes';

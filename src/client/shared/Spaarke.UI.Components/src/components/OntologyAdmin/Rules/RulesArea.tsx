@@ -11,7 +11,7 @@
 import * as React from 'react';
 import { useUiScale } from '../../../hooks/useUiScale';
 import { RuleWizard, versionModeOf } from '../RuleWizard';
-import type { OntologyAuthoringService, RuleWizardMode, RuleWizardResult } from '../RuleWizard';
+import type { MatterPicker, OntologyAuthoringService, RuleWizardMode, RuleWizardResult } from '../RuleWizard';
 import { RuleList } from './RuleList';
 import { RulePage } from './RulePage';
 import type { OntologyRulesService, RuleDetail } from './rulesService';
@@ -22,9 +22,11 @@ export interface RulesAreaProps {
   authoringService?: OntologyAuthoringService;
   /** The `--sprk-ui-scale` the host applies to its theme. Defaults to the app's display-size setting. */
   uiScale?: number;
+  /** Task 102b: the rule wizard's matter picker (as the caller), for limiting a rule about matters to one matter. */
+  matterPicker?: MatterPicker;
 }
 
-export const RulesArea: React.FC<RulesAreaProps> = ({ service, authoringService, uiScale }) => {
+export const RulesArea: React.FC<RulesAreaProps> = ({ service, authoringService, uiScale, matterPicker }) => {
   const [policyId, setPolicyId] = React.useState<string | undefined>(undefined);
   const [wizard, setWizard] = React.useState<RuleWizardMode | undefined>(undefined);
   // Bumped when the wizard wrote something, so the list or page behind it mounts afresh and reads the new state.
@@ -64,6 +66,7 @@ export const RulesArea: React.FC<RulesAreaProps> = ({ service, authoringService,
           service={authoringService}
           mode={wizard}
           uiScale={uiScale === undefined ? appScale : uiScale}
+          matterPicker={matterPicker}
           onClose={closeWizard}
         />
       ) : null}
