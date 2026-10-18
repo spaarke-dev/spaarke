@@ -17,7 +17,9 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// <para><b>Credit lines are skipped (D-105).</b> A line with negative hours or a negative amount
 /// (<see cref="BillingMath.IsCreditLine"/>) is not judged on any of the three reasons: a reversal legitimately carries the old
 /// date of the charge it reverses.</para>
-/// <para><b>Reads:</b> Date (extracted). The open date, close date and closed state are reference values (core record).</para>
+/// <para><b>Reads:</b> Date, and the line's Hours and Amount when it has them (all extracted): the credit test that precedes every
+/// reason reads Hours and Amount (<see cref="HandlerContext.WithCreditTestReads"/>). The open date, close date and closed state
+/// are reference values (core record).</para>
 /// </remarks>
 internal static class CoreRecordWindowHandler
 {
@@ -59,7 +61,7 @@ internal static class CoreRecordWindowHandler
                 .Add("coreRecord.closeDate", BillingText.Date(core.CloseDate))
                 .Add("rule.graceDays", BillingText.Number(grace));
 
-            findings.Add(context.Finding(BillingSubject.ForLine(line.Index), reason, values, facts));
+            findings.Add(context.Finding(BillingSubject.ForLine(line.Index), reason, context.WithCreditTestReads(line, values), facts));
         }
 
         return findings;

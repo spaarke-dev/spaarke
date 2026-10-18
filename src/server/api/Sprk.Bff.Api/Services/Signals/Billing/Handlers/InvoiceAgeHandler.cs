@@ -9,7 +9,8 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// With no invoice date, or no line date, there is nothing to compare and nothing fires (a missing date is RequiredData's).
 /// <para><b>Credit lines are skipped (D-105).</b> A line with negative hours or a negative amount
 /// (<see cref="BillingMath.IsCreditLine"/>) is not judged: a reversal legitimately carries the old date of the charge it reverses.</para>
-/// <para><b>Reads:</b> Date (line) and InvoiceDate (header), both extracted.</para>
+/// <para><b>Reads:</b> Date (line) and InvoiceDate (header), both extracted, and the line's Hours and Amount when it has them: the
+/// credit test that precedes the finding reads both (<see cref="HandlerContext.WithCreditTestReads"/>).</para>
 /// </remarks>
 internal static class InvoiceAgeHandler
 {
@@ -41,7 +42,8 @@ internal static class InvoiceAgeHandler
                 .Add("invoice.date", BillingText.Date(invoiceDate))
                 .Add("rule.maxAgeDays", BillingText.Number(maxAgeDays));
 
-            findings.Add(context.Finding(BillingSubject.ForLine(line.Index), BillingReasonCodes.InvoiceTooOld, values, facts));
+            findings.Add(context.Finding(
+                BillingSubject.ForLine(line.Index), BillingReasonCodes.InvoiceTooOld, context.WithCreditTestReads(line, values), facts));
         }
 
         return findings;

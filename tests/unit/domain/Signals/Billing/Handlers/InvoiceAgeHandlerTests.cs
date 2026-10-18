@@ -111,10 +111,30 @@ public class InvoiceAgeHandlerTests
     }
 
     [Fact]
-    public void ReadFields_AreTheLineDateAndTheInvoiceDate()
+    public void ReadFields_AreTheLineDateAndTheInvoiceDate_ThenTheHoursAndAmountTheCreditTestRead()
     {
         Run(Age90, Facts(Fee(2) with { Date = InvoiceDate.AddDays(-120) })).Single().ReadFields.Should().Equal(
-            new FieldRef(2, BillingFieldNames.Date), new FieldRef(null, BillingFieldNames.InvoiceDate));
+            new FieldRef(2, BillingFieldNames.Date), new FieldRef(null, BillingFieldNames.InvoiceDate),
+            new FieldRef(2, BillingFieldNames.Hours), new FieldRef(2, BillingFieldNames.Amount));
+    }
+
+    [Fact]
+    public void AReversalExtractedAsAPositiveAmountAtLowConfidence_IsJudgedAsACharge_ButTheFindingCarriesTheDoubtfulAmount_F4()
+    {
+        // A reversal printed "(1,437.50)" and extracted as +1437.50 at 0.50: it is not recognised as a credit, so InvoiceAge fires on
+        // its (reliable) date. The finding must list the amount and its confidence, so task 073 does not auto-reject on it.
+        var line = Expense(0) with
+        {
+            Date = InvoiceDate.AddDays(-120),
+            Amount = 1437.50m,
+            FieldConfidence = Confidence().With(BillingFieldNames.Amount, 0.50m),
+        };
+
+        var finding = Run(Age90, Facts(line)).Single();
+
+        finding.ReadFields.Should().Contain(new FieldRef(0, BillingFieldNames.Amount));
+        finding.Value("line.amount").Confidence.Should().Be(0.50m);
+        finding.ReadsLowConfidenceValue.Should().BeTrue();
     }
 
     [Fact]

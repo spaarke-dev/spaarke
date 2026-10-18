@@ -14,7 +14,9 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// <b>Never for a credit line (D-105):</b> a line with negative hours or a negative amount (<see cref="BillingMath.IsCreditLine"/>)
 /// still gets its finding, so the reviewer sees the credit, but with no suggested adjustment: disallowing a negative amount would
 /// raise the bill by what the firm credited.</para>
-/// <para><b>Reads:</b> ActivityCode, TaskCode (both examined, with the coding confidence), Amount, Date, TimekeeperAsBilled.</para>
+/// <para><b>Reads:</b> ActivityCode, TaskCode (both examined, with the coding confidence), Amount, Date, TimekeeperAsBilled, and
+/// Hours when the line has them: the credit test that decides the suggested adjustment reads Hours and Amount
+/// (<see cref="HandlerContext.WithCreditTestReads"/>).</para>
 /// </remarks>
 internal static class NonBillableActivityHandler
 {
@@ -55,7 +57,8 @@ internal static class NonBillableActivityHandler
                 : new BillingSuggestedAdjustment(
                     BillingAdjustmentKind.Disallow, line.Amount is { } amount ? BillingMath.ToCent(amount) : null);
 
-            findings.Add(context.Finding(BillingSubject.ForLine(line.Index), BillingReasonCodes.NonBillableCode, values, facts, disallow));
+            findings.Add(context.Finding(
+                BillingSubject.ForLine(line.Index), BillingReasonCodes.NonBillableCode, context.WithCreditTestReads(line, values), facts, disallow));
         }
 
         return findings;

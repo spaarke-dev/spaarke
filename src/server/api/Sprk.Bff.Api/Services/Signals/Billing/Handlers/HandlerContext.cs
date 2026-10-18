@@ -127,6 +127,33 @@ internal sealed class HandlerContext
     internal BillingValueRead LineHours(BillingLineFacts line) =>
         LineField(line, "line.hours", BillingFieldNames.Hours, BillingText.Number(line.Hours));
 
+    /// <summary>
+    /// The values a finding read, plus the ones the credit test read (D-105). <see cref="BillingMath.IsCreditLine"/> decides on the
+    /// extracted Hours and Amount, so a finding built after that test depends on them whether or not its own check uses them: a
+    /// reversal printed "(1,437.50)" and extracted as +1437.50 at confidence 0.50 is judged as a charge only because the amount
+    /// could not be trusted. Task 073 checks the confidence of the read fields and never infers them, so every such finding lists
+    /// them. A value already in <paramref name="values"/> is not repeated; a field the line does not have was not read.
+    /// Appended in a fixed order (Hours, then Amount) after the finding's own values.
+    /// </summary>
+    internal IReadOnlyList<BillingValueRead> WithCreditTestReads(BillingLineFacts line, IEnumerable<BillingValueRead> values)
+    {
+        var all = values.ToList();
+        var hours = new FieldRef(line.Index, BillingFieldNames.Hours);
+        var amount = new FieldRef(line.Index, BillingFieldNames.Amount);
+
+        if (line.Hours is not null && !all.Any(v => v.ExtractedField == hours))
+        {
+            all.Add(LineHours(line));
+        }
+
+        if (line.Amount is not null && !all.Any(v => v.ExtractedField == amount))
+        {
+            all.Add(LineField(line, "line.amount", BillingFieldNames.Amount, BillingText.Money(line.Amount)));
+        }
+
+        return all;
+    }
+
     /// <summary>An extracted value of the header.</summary>
     internal BillingValueRead HeaderField(string name, string fieldName, string? value) =>
         Extracted(name, new FieldRef(null, fieldName), value, Facts.Invoice.FieldConfidence);

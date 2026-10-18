@@ -167,11 +167,12 @@ public class CoreRecordWindowHandlerTests
     }
 
     [Fact]
-    public void ReadFields_AreTheLineDateOnly_AndTheCoreRecordValuesAreReferenceValues()
+    public void ReadFields_AreTheLineDate_ThenTheHoursAndAmountTheCreditTestRead_AndTheCoreRecordValuesAreReferenceValues()
     {
         var finding = Run(Window(), FactsFor(Core(Open, Close, closed: true), Close.AddDays(9))).Single();
 
-        finding.ReadFields.Should().Equal(new FieldRef(0, BillingFieldNames.Date));
+        finding.ReadFields.Should().Equal(
+            new FieldRef(0, BillingFieldNames.Date), new FieldRef(0, BillingFieldNames.Hours), new FieldRef(0, BillingFieldNames.Amount));
         finding.Value("coreRecord.closeDate").IsExtracted.Should().BeFalse();
         finding.Value("coreRecord.closed").Value.Should().Be("true");
     }

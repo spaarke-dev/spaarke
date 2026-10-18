@@ -117,10 +117,38 @@ public class ExpenseRuleHandlerTests
     }
 
     [Fact]
-    public void ReadFields_AreTheExpenseCode_TheAmountAndTheDate()
+    public void ReadFields_AreTheExpenseCode_TheAmountAndTheDate_AndTheHoursWhenTheLineHasThem()
     {
         Run(Both, Facts(Expense(7) with { ExpenseCode = "E109" })).Single().ReadFields.Should().Equal(
             new FieldRef(7, BillingFieldNames.ExpenseCode), new FieldRef(7, BillingFieldNames.Amount), new FieldRef(7, BillingFieldNames.Date));
+
+        // The credit test reads the hours too, so an expense line that carries them lists them (F4).
+        Run(Both, Facts(Expense(7) with { ExpenseCode = "E109", Hours = 1m })).Single().ReadFields.Should().Equal(
+            new FieldRef(7, BillingFieldNames.ExpenseCode), new FieldRef(7, BillingFieldNames.Amount), new FieldRef(7, BillingFieldNames.Date),
+            new FieldRef(7, BillingFieldNames.Hours));
+    }
+
+    [Fact]
+    public void AnExpenseLineWithLowConfidenceHours_CarriesThemOnTheFinding_BecauseTheCreditTestReadThem_F4()
+    {
+        var line = Expense(0) with
+        {
+            ExpenseCode = "E109",
+            Hours = 1m,
+            FieldConfidence = Confidence().With(BillingFieldNames.Hours, 0.40m),
+        };
+
+        var finding = Run(Both, Facts(line)).Single();
+
+        finding.Value("line.hours").Confidence.Should().Be(0.40m);
+        finding.ReadsLowConfidenceValue.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ALineWithNegativeHoursAndAPositiveAmount_IsSkippedAsACredit_NeitherCheckFires_K2()
+    {
+        // Negative hours alone make a credit (D-105): the amount is positive and over the cap, on a non-reimbursable code.
+        Run(Both, Facts(Expense(0) with { ExpenseCode = "E109", Hours = -1m, Amount = 900m })).Should().BeEmpty();
     }
 
     [Fact]

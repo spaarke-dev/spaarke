@@ -148,10 +148,23 @@ public class NonBillableActivityHandlerTests
     }
 
     [Fact]
-    public void ReadFields_AreBothCodes_TheAmount_TheDateAndTheTimekeeper()
+    public void ReadFields_AreBothCodes_TheAmount_TheDateAndTheTimekeeper_ThenTheHoursTheCreditTestRead()
     {
         Run(NonBillable, Facts(Fee(5) with { ActivityCode = "A101" })).Single().ReadFields.Should().Equal(
             new FieldRef(5, BillingFieldNames.ActivityCode), new FieldRef(5, BillingFieldNames.TaskCode), new FieldRef(5, BillingFieldNames.Amount),
-            new FieldRef(5, BillingFieldNames.Date), new FieldRef(5, BillingFieldNames.TimekeeperAsBilled));
+            new FieldRef(5, BillingFieldNames.Date), new FieldRef(5, BillingFieldNames.TimekeeperAsBilled),
+            new FieldRef(5, BillingFieldNames.Hours));
+    }
+
+    [Fact]
+    public void ALowConfidenceHoursValue_IsCarriedOnTheFinding_BecauseTheCreditTestThatDecidesTheDisallowReadIt_F4()
+    {
+        // 1.0 hours at 0.40 could really be -1.0 (a credit): the disallow suggestion depends on it, so task 073 must see the doubt.
+        var line = Fee(0) with { ActivityCode = "A101", FieldConfidence = Confidence().With(BillingFieldNames.Hours, 0.40m) };
+
+        var finding = Run(NonBillable, Facts(line)).Single();
+
+        finding.Value("line.hours").Confidence.Should().Be(0.40m);
+        finding.ReadsLowConfidenceValue.Should().BeTrue();
     }
 }

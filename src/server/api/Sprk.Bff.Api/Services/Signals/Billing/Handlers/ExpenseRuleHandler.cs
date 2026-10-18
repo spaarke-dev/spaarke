@@ -15,7 +15,8 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// confidence (NFR-05).</para>
 /// <para><b>Credit lines are skipped (D-105).</b> A line with a negative amount (<see cref="BillingMath.IsCreditLine"/>), for
 /// example a credit "E109 -50.00", is judged on neither check: it is a refund of a charge, not a charge.</para>
-/// <para><b>Reads:</b> ExpenseCode, Amount, Date (extracted).</para>
+/// <para><b>Reads:</b> ExpenseCode, Amount, Date (extracted), and Hours when the line has them: the credit test reads Hours and
+/// Amount (<see cref="HandlerContext.WithCreditTestReads"/>).</para>
 /// </remarks>
 internal static class ExpenseRuleHandler
 {
@@ -70,6 +71,6 @@ internal static class ExpenseRuleHandler
             .Add("line.expenseCode", code)
             .Add("line.amount", BillingText.Money(line.Amount));
 
-        return context.Finding(BillingSubject.ForLine(line.Index), reasonCode, values, facts);
+        return context.Finding(BillingSubject.ForLine(line.Index), reasonCode, context.WithCreditTestReads(line, values), facts);
     }
 }

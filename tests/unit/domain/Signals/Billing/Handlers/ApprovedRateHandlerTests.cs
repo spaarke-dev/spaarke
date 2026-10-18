@@ -195,7 +195,8 @@ public class ApprovedRateHandlerTests
         finding.SuggestedAdjustment.Should().BeNull();
         finding.FactValues.Should().NotContainKey("approvedRate", "there is none to show");
         finding.ReadFields.Should().Equal(
-            new FieldRef(0, BillingFieldNames.Rate), new FieldRef(0, BillingFieldNames.Date), new FieldRef(0, BillingFieldNames.TimekeeperAsBilled));
+            new FieldRef(0, BillingFieldNames.Rate), new FieldRef(0, BillingFieldNames.Date), new FieldRef(0, BillingFieldNames.TimekeeperAsBilled),
+            new FieldRef(0, BillingFieldNames.Hours), new FieldRef(0, BillingFieldNames.Amount));
     }
 
     [Fact]
@@ -211,13 +212,14 @@ public class ApprovedRateHandlerTests
     // ── Evidence ────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void ReadFields_AreTheRate_TheHours_TheDateAndTheTimekeeper_AndTheApprovedRateIsAReferenceValue()
+    public void ReadFields_AreTheRate_TheHours_TheDateAndTheTimekeeper_ThenTheAmountTheCreditTestRead_AndTheApprovedRateIsAReferenceValue()
     {
         var finding = Run(RateRule("5"), Facts(Line(700m, index: 4))).Single();
 
         finding.ReadFields.Should().Equal(
             new FieldRef(4, BillingFieldNames.Rate), new FieldRef(4, BillingFieldNames.Hours),
-            new FieldRef(4, BillingFieldNames.Date), new FieldRef(4, BillingFieldNames.TimekeeperAsBilled));
+            new FieldRef(4, BillingFieldNames.Date), new FieldRef(4, BillingFieldNames.TimekeeperAsBilled),
+            new FieldRef(4, BillingFieldNames.Amount));
         finding.Value("approvedRate").IsExtracted.Should().BeFalse();
         finding.Value("approvedRate.basis").Value.Should().Be("Timekeeper");
         finding.Value("approvedRate.scope").Value.Should().Be("Firm");
@@ -225,19 +227,51 @@ public class ApprovedRateHandlerTests
         finding.FactValues.Keys.Should().BeEquivalentTo(BillingRuleCatalogue.TemplateFactFields(RuleType.ApprovedRate));
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData(0.0)]
-    public void WhenTheReductionIsNotComputed_TheHoursAreNotRead_SoALowConfidenceHoursValueCannotHoldAFindingThatNeverUsedIt(double? hours)
+    [Fact]
+    public void WhenTheLineHasNoHours_TheHoursAreNotRead_SoALowConfidenceHoursValueCannotHoldAFindingThatNeverSawIt()
     {
-        var line = Line(700m, hours: (decimal?)hours) with { FieldConfidence = Confidence().With(BillingFieldNames.Hours, 0.20m) };
+        var line = Line(700m, hours: null) with { FieldConfidence = Confidence().With(BillingFieldNames.Hours, 0.20m) };
 
         var finding = Run(RateRule(), Facts(line)).Single();
 
         finding.ReadFields.Should().Equal(
-            new FieldRef(0, BillingFieldNames.Rate), new FieldRef(0, BillingFieldNames.Date), new FieldRef(0, BillingFieldNames.TimekeeperAsBilled));
+            new FieldRef(0, BillingFieldNames.Rate), new FieldRef(0, BillingFieldNames.Date), new FieldRef(0, BillingFieldNames.TimekeeperAsBilled),
+            new FieldRef(0, BillingFieldNames.Amount));
         finding.ValuesRead.Select(v => v.Name).Should().NotContain("line.hours");
-        finding.ReadsLowConfidenceValue.Should().BeFalse("the low-confidence hours were not used");
+        finding.ReadsLowConfidenceValue.Should().BeFalse("there were no hours to read");
+    }
+
+    [Fact]
+    public void WhenTheHoursAreZero_TheReductionIsNotComputed_ButTheCreditTestStillReadTheHours_F4()
+    {
+        var line = Line(700m, hours: 0m) with { FieldConfidence = Confidence().With(BillingFieldNames.Hours, 0.20m) };
+
+        var finding = Run(RateRule(), Facts(line)).Single();
+
+        finding.SuggestedAdjustment!.Amount.Should().BeNull();
+        finding.ReadFields.Should().Contain(new FieldRef(0, BillingFieldNames.Hours), "IsCreditLine tested the hours");
+        finding.ReadsLowConfidenceValue.Should().BeTrue("task 073 must see that the hours that cleared the credit test are doubtful");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheCreditTestReads_AreOnTheFindingWhateverTheRateRuleFoundOnTheLine_F4(bool rateEstablished)
+    {
+        // A reversal printed "(1,437.50)" but extracted as +1437.50 at 0.50 is judged as a charge only because the amount was
+        // trusted. The finding must list the Amount (and carry its confidence) for both the above-approved and the no-rate finding.
+        var line = Line(700m) with
+        {
+            Amount = 1437.50m,
+            ApprovedRate = rateEstablished ? Rate(575m) : new RateResolution { Status = RateResolutionStatus.NotFound, Reason = RateNotFoundReason.NoRateInForce },
+            FieldConfidence = Confidence().With(BillingFieldNames.Amount, 0.50m),
+        };
+
+        var finding = Run(RateRule(), Facts(line)).Single();
+
+        finding.ReadFields.Should().Contain(new FieldRef(0, BillingFieldNames.Amount));
+        finding.Value("line.amount").Confidence.Should().Be(0.50m);
+        finding.ReadsLowConfidenceValue.Should().BeTrue();
     }
 
     [Fact]

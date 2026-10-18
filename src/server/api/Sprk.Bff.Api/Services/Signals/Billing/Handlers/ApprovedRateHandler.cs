@@ -24,8 +24,9 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// several that disagree, or could not look one up, the rule fires with a reason that says so and suggests nothing. The Rate field's
 /// reference-missing cap (D-47) exists for this case: such a finding holds and cannot reject. A line that bills no hourly rate is
 /// not judged (nothing to approve); a missing rate is a RequiredData matter.</para>
-/// <para><b>Reads:</b> Rate, Date, TimekeeperAsBilled, and Hours when it computes the reduction (all extracted); the approved
-/// rate, its limit, basis, scope and ids are reference values.</para>
+/// <para><b>Reads:</b> Rate, Date, TimekeeperAsBilled (all extracted), and Hours and Amount whenever the line has them: the
+/// credit test that precedes every finding reads both (<see cref="HandlerContext.WithCreditTestReads"/>), and the reduction
+/// uses Hours; the approved rate, its limit, basis, scope and ids are reference values.</para>
 /// </remarks>
 internal static class ApprovedRateHandler
 {
@@ -95,7 +96,7 @@ internal static class ApprovedRateHandler
         return context.Finding(
             BillingSubject.ForLine(line.Index),
             BillingReasonCodes.RateAboveApproved,
-            values,
+            context.WithCreditTestReads(line, values),
             Tokens(context, line, billed, approved),
             new BillingSuggestedAdjustment(BillingAdjustmentKind.Reduce, reduction));
     }
@@ -123,7 +124,8 @@ internal static class ApprovedRateHandler
             HandlerContext.Reference("approvedRate.status", status),
         };
 
-        return context.Finding(BillingSubject.ForLine(line.Index), reasonCode, values, Tokens(context, line, billed, approved: null));
+        return context.Finding(
+            BillingSubject.ForLine(line.Index), reasonCode, context.WithCreditTestReads(line, values), Tokens(context, line, billed, approved: null));
     }
 
     private static FactValues Tokens(HandlerContext context, BillingLineFacts line, decimal billed, decimal? approved) => new FactValues()
