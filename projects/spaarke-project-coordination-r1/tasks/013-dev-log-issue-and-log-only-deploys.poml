@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Create the pinned dev-log issue; log-only wiring for Office add-in and web-resource deploys (FR-03)</title>
+    <phase>1 Shared environment guards</phase>
+    <gate>010 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Adds a logging call to existing deploy scripts; no blocking behaviour.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical wiring of an existing helper.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010</deps>
+    <tags>devops, deploy, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create and pin the single dev-log issue (label dev-log), and add one Write-DevLogEntry call after a successful deploy in Deploy-OfficeAddins.ps1, Deploy-AllWebResources.ps1 and Deploy-WebResourceInline.ps1.</prompt>
+  <role>SPAARKE DevOps developer. PowerShell 7, gh CLI.</role>
+  <goal>One open, pinned issue labelled dev-log exists, with a body explaining the entry format, and the three log-only scripts write one entry per successful deploy.</goal>
+
+  <context>
+    <background>Spec C-3 and C-4: SWA (Office add-in) and web-resource deploys are not guarded; they log only. The dev log is a pinned issue with comments appended through gh (A-6: not rotated in r1).</background>
+    <relevant-files>
+      <file role="modify">scripts/Deploy-OfficeAddins.ps1</file>
+      <file role="modify">scripts/Deploy-AllWebResources.ps1</file>
+      <file role="modify">scripts/Deploy-WebResourceInline.ps1</file>
+      <file role="test">tests/scripts/Deploy-LogOnly.Tests.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md section 5">Scope: creating the issue and the label is this task's only GitHub write. The label is dev-log, the title is "Dev environment log", and the issue is pinned with gh issue pin. Before creating either, check that no open issue already carries the label.</constraint>
+    <constraint source="spec FR-03">Scope: the issue body states the entry format (the fenced key: value block from task 010) and that entries are written by scripts. Fields with no meaning for a log-only deploy (prior live SHA) are written as "n/a".</constraint>
+    <constraint source="spec FR-02 negative">Scope: these three scripts get no ancestry guard and no -Supersede parameter.</constraint>
+    <constraint source="NFR-08">Scope: no secret, token or setting value in any entry.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dev-log helper" location="scripts/LiveBuildGuard.psm1">Write-DevLogEntry; never throws.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Check for an existing dev-log label or issue; create the label, the issue and the pin if absent. Record the issue number in the task notes.</step>
+    <step order="2">Add the log call at the end of each script's success path.</step>
+    <step order="3">Pester tests with gh mocked: one entry per successful deploy; none on failure; a logging failure leaves the exit code unchanged.</step>
+    <step order="4">Run the tests.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">scripts/Deploy-OfficeAddins.ps1</output>
+    <output type="code">scripts/Deploy-AllWebResources.ps1</output>
+    <output type="code">scripts/Deploy-WebResourceInline.ps1</output>
+    <output type="test">tests/scripts/Deploy-LogOnly.Tests.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Exactly one open issue carries the dev-log label, and it is pinned.</criterion>
+    <criterion testable="true">Each of the three scripts calls Write-DevLogEntry once after a successful deploy, and not at all after a failed one.</criterion>
+    <criterion testable="true">Negative: a failing Write-DevLogEntry does not change any script's exit code.</criterion>
+    <criterion testable="true">Negative: none of the three scripts calls Assert-LiveBuildAncestry.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

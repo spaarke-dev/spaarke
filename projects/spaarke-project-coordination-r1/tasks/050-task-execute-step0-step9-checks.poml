@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>task-execute: Step 0 resolves open coordination items; Step 9 diff check labels review:&lt;owner&gt; (FR-20, FR-21)</title>
+    <phase>5 Resolution and critical areas</phase>
+    <gate>040 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits the core execution skill used by every project.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High blast radius, and the edit must state item resolution without tying messaging to any step.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/: main-session-only (permission boundary).</parallel-reason>
+    <deps>040</deps>
+    <tags>documentation, devops</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>In task-execute Step 0, resolve open coordination items on the task's files on the item itself before implementing. In Step 9, re-run the detector on the actual diff and add review:&lt;owner&gt; to a PR touching another active project's owned area.</prompt>
+  <role>SPAARKE AI-procedure maintainer editing a core skill surgically.</role>
+  <goal>Step 0 and Step 9 carry the two additions, and Step 0 is the only place task-execute mentions coordination items.</goal>
+
+  <context>
+    <background>Spec FR-20 and FR-21. Resolution on the item is a comment, "no impact" with a reason, or awaiting the owner. Messaging stays outside the process.</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/task-execute/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-20">Scope: Step 0 lists open coord issues (and review:&lt;project&gt; PRs) whose paths intersect the task's relevant-files, and resolves each on the item before implementing: a comment, "no impact" plus a reason, or "awaiting owner". The task notes record how each was resolved. A paused or closed project is never waited on.</constraint>
+    <constraint source="spec FR-20 negatives">Scope: Step 0 says nothing about messaging; no step makes a message conditional on an item; Step 0 is the only place task-execute mentions coordination items.</constraint>
+    <constraint source="spec FR-21">Scope: Step 9 runs the detector against the task's diff (the changed paths), and adds the label review:&lt;owner-project&gt; to the PR for each other active project whose owned area is touched. The project's own areas are not labelled. A detector failure degrades to ⚠️.</constraint>
+    <constraint source="project">Scope: no step renumbered; small PR after /conflict-check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>.claude/constraints/cross-session.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read task-execute Step 0 and Step 9; grep the skill for "coord" to confirm no other mention exists.</step>
+    <step order="2">Add the Step 0 and Step 9 text.</step>
+    <step order="3">Grep the diff for messaging guidance; run pwsh scripts/quality/Test-InstructionPaths.ps1.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">.claude/skills/task-execute/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Step 0 states the three resolutions, the notes record and the paused/closed rule.</criterion>
+    <criterion testable="true">Step 9 states the diff check, the label rule and the own-area exclusion.</criterion>
+    <criterion testable="true">Negative: grep shows coordination items mentioned only in Step 0 (and the Step 9 label rule).</criterion>
+    <criterion testable="true">Negative: the diff contains no wording about when, whether, how often or in what form to message; no step renumbered.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

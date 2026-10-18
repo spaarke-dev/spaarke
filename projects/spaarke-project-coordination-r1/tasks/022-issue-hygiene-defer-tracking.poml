@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>project-defer-issue-tracking: rulings on the issue, owner and area on every issue, verified closes (FR-07, FR-09, FR-10)</title>
+    <phase>2 Findings: decide and dispose</phase>
+    <gate>021 complete (sequential .claude edits)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Skill edit with explicit rules from the pilot lessons.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Three explicit rule additions to one skill.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/: main-session-only (permission boundary).</parallel-reason>
+    <deps>020, 021</deps>
+    <tags>documentation, devops</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend project-defer-issue-tracking so that rulings are written on the issue with Triage Decision set (L1), every filed issue carries the project label, Owning Project and Code Area and is checked after filing (L3, L4), and a Close is applied only with verified evidence (L5).</prompt>
+  <role>SPAARKE AI-procedure maintainer.</role>
+  <goal>The skill states the three rules with their checks, and the post-filing check retries or reports when a field is missing.</goal>
+
+  <context>
+    <background>Pilot lessons L1, L3, L4 and L5 (notes/pilot-issue-triage-2026-10-15.md). The project label is the bare project name created by /project-pipeline Step 4.2, not project:&lt;name&gt;. Board #2 already has the Triage Decision, Triage Reason and Owning Project fields. Spec Unresolved questions: whether Owning Project is text or single-select affects the check. Read the field type with gh project field-list before writing the check.</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-07">Scope: a ruling or "not impacting" call about an issue is written as a comment on that issue, and Triage Decision is set on Board #2. This extends the existing two-write rule (notes plus issue); a ruling recorded only in notes is a code-review defect.</constraint>
+    <constraint source="spec FR-09">Scope: after filing, the skill verifies the project label, the Owning Project field and the Code Area (body line and field). On a miss it retries once, then reports the missing field to the operator.</constraint>
+    <constraint source="spec FR-10">Scope: a Close is applied only after verifying the evidence: the fix SHA is reachable from origin/master (git merge-base --is-ancestor sha origin/master), or the duplicate is linked. The evidence is written in the closing comment. A recommendation alone is never evidence.</constraint>
+    <constraint source="project">Scope: keep the skill's existing structure and step numbers; add rules in place.</constraint>
+    <constraint source="spec MUST NOT">Scope: no messaging wording.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/notes/pilot-issue-triage-2026-10-15.md</file>
+      <file>.claude/constraints/cross-session.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the skill and the pilot lessons; read the Owning Project field type from Board #2.</step>
+    <step order="2">Add the three rules and the post-filing check.</step>
+    <step order="3">Grep the diff for messaging guidance; run pwsh scripts/quality/Test-InstructionPaths.ps1.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">.claude/skills/project-defer-issue-tracking/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The skill states FR-07 (comment on the issue plus Triage Decision) and that a notes-only ruling is a code-review defect.</criterion>
+    <criterion testable="true">The skill's post-filing check names the label, Owning Project and Code Area, with retry-then-report behaviour matching the field type found.</criterion>
+    <criterion testable="true">The skill's Close rule requires merge-base ancestry from origin/master or a duplicate link, written in the closing comment.</criterion>
+    <criterion testable="true">Negative: the label is the bare project name everywhere; no "project:" prefix appears.</criterion>
+    <criterion testable="true">Negative: no step renumbered; no messaging wording.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

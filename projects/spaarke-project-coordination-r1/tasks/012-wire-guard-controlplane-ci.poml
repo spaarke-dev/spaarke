@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Wire the ancestry guard and dev log into Deploy-ControlPlane.ps1 and deploy-bff-api.yml (FR-02)</title>
+    <phase>1 Shared environment guards</phase>
+    <gate>010 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the control-plane deploy script and the CI deploy workflow; blocks deploys.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Explicit call-site rule plus the task 010 module; the CI permission change is narrow.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010</deps>
+    <tags>devops, deploy, azure, app-service, ci-cd, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Call Assert-LiveBuildAncestry before every az webapp deploy and slot swap in scripts/provisioning/Deploy-ControlPlane.ps1 and .github/workflows/deploy-bff-api.yml, and write one dev-log entry after each.</prompt>
+  <role>SPAARKE DevOps developer. PowerShell 7, GitHub Actions, Azure App Service slots.</role>
+  <goal>Deploy-ControlPlane.ps1 and the CI workflow both refuse a non-ancestor deploy, run no az webapp deploy before the guard, and log each deploy or swap.</goal>
+
+  <context>
+    <background>Spec C-3: every .NET App Service deploy path is guarded. Deploy-ControlPlane.ps1 deploys at lines 883 and 912 and swaps at line 964. deploy-bff-api.yml deploys at line 191 and swaps at lines 280 and 375. The control-plane main assembly is not Sprk.Bff.Api.dll. Find it from the project the script publishes.</background>
+    <relevant-files>
+      <file role="modify">scripts/provisioning/Deploy-ControlPlane.ps1</file>
+      <file role="modify">.github/workflows/deploy-bff-api.yml</file>
+      <file role="test">tests/scripts/Deploy-Guarded-ControlPlane.Tests.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-02">Scope: every az webapp deploy in both files is preceded in the same path by the guard against its target slot. Every slot swap is preceded by the guard against production with the swapped-in SHA. In the workflow, the guard runs as a pwsh step that imports scripts/LiveBuildGuard.psm1, with -DeploySha set to github.sha.</constraint>
+    <constraint source="spec FR-01 (e)">Scope: Deploy-ControlPlane.ps1 gains -Supersede. The workflow gains a workflow_dispatch input "supersede" (string, default empty) passed to the guard. Push-triggered runs pass none.</constraint>
+    <constraint source="spec FR-03">Scope: the workflow's dev-log step uses GITHUB_ACTOR and the workflow token. Add "issues: write" to that job's permissions only; no other permission changes.</constraint>
+    <constraint source="project">Scope: actions/checkout in the guarded job uses fetch-depth 0, or the guard's git fetch fetches enough history for merge-base. Shallow history must not make every deploy look like a non-ancestor.</constraint>
+    <constraint source="project">Scope: no other workflow step, trigger or environment changes. Deploy-ControlPlane.ps1's ShouldProcess behaviour is kept: -WhatIf runs the guard in -CheckOnly mode.</constraint>
+    <constraint source="NFR-06">Scope: deploy-bff-api.yml is a ci-workflows hot path. Run /conflict-check before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Guard module" location="scripts/LiveBuildGuard.psm1">Import and call; do not reimplement.</pattern>
+      <pattern name="Guarded script tests" location="tests/scripts/Deploy-Guarded-Bff.Tests.ps1">If task 011 has landed, mirror its mocks and its source-scan test.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Map the call sites in both files, and the control-plane assembly name, in the task notes.</step>
+    <step order="2">Wire Deploy-ControlPlane.ps1 and add -Supersede.</step>
+    <step order="3">Wire the workflow: a guard step before each deploy or swap step, the dispatch input, fetch-depth, a dev-log step, and the job permission.</step>
+    <step order="4">Pester tests for the script, and a source-scan test covering both files (an unguarded az webapp deploy fails it).</step>
+    <step order="5">Run the tests, PSScriptAnalyzer and actionlint (if available) on the workflow.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the CI deploy runs as an identity that cannot read Kudu VFS, STOP and escalate (ADR-028 territory) rather than granting it new rights.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">scripts/provisioning/Deploy-ControlPlane.ps1</output>
+    <output type="code">.github/workflows/deploy-bff-api.yml</output>
+    <output type="test">tests/scripts/Deploy-Guarded-ControlPlane.Tests.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Deploy-ControlPlane.ps1 with a stubbed non-ancestor live version exits non-zero before any az webapp deploy mock runs.</criterion>
+    <criterion testable="true">Deploy-ControlPlane.ps1 -WhatIf runs the guard in check-only mode and deploys nothing.</criterion>
+    <criterion testable="true">In deploy-bff-api.yml, every az webapp deploy and slot swap step is preceded in its job by a guard step (the source-scan test checks this).</criterion>
+    <criterion testable="true">The workflow job that logs has issues: write, and no other permission changed (diff shows it).</criterion>
+    <criterion testable="true">The source-scan test fails on a fixture with an unguarded deploy line.</criterion>
+    <criterion testable="true">Negative: no other workflow step or trigger changed.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

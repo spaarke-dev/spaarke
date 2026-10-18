@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>task-create: open issues in the task's files; wrap-up 090 disposition and ageing; Board #2 views (FR-11, FR-12)</title>
+    <phase>2 Findings: decide and dispose</phase>
+    <gate>022 complete (sequential .claude edits)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Skill edit to task-create Step 3.4 and Step 3.7, plus a manual board check.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Explicit additions at named steps.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/: main-session-only (permission boundary).</parallel-reason>
+    <deps>020, 022</deps>
+    <tags>documentation, devops</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make task-create list open issues whose Code Area matches a task's files as "fix it here if small", and make the 090 wrap-up give every owned issue one disposition and list issues older than 60 days with no decision. Confirm with the owner that the four Board #2 views exist.</prompt>
+  <role>SPAARKE AI-procedure maintainer.</role>
+  <goal>task-create SKILL.md carries both additions, and the task notes record the four Board #2 views as present (made by hand by the owner).</goal>
+
+  <context>
+    <background>Spec FR-11, FR-12, design.md sections 5.6.2 and 5.7. Pilot L6: the Board #2 views are made by hand, not through the API. Wrap-up tasks are named 090-wrapup-* (task-execute Step 10 matches that prefix).</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/task-create/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-11">Scope: at Step 3.4, task-create queries open issues carrying the project label, or whose Code Area glob matches a file in the task's relevant-files, and lists them in the task's notes as "fix it here if small". Tracking issues and closed issues are excluded. A query failure degrades to a warning and never blocks task-create.</constraint>
+    <constraint source="spec FR-12">Scope: Step 3.7's mandatory wrap-up steps gain: every issue owned by the project gets exactly one disposition (fixed with evidence per FR-10, handed to a named project, or closed with the owner's OK); issues older than 60 days with no Triage Decision are listed; 090 cannot complete with an undisposed owned issue.</constraint>
+    <constraint source="spec FR-12, pilot L6">Scope: this task does not create Board #2 views. It asks the owner to confirm that the four views from design.md section 5.7 exist and records the answer.</constraint>
+    <constraint source="project">Scope: no renumbering; add in place at Step 3.4 and Step 3.7.</constraint>
+    <constraint source="spec MUST NOT">Scope: no messaging wording.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/design.md</file>
+      <file>.claude/constraints/cross-session.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read task-create Step 3.4 and Step 3.7.</step>
+    <step order="2">Add the FR-11 query and listing at Step 3.4.</step>
+    <step order="3">Add the FR-12 disposition and ageing items to Step 3.7.</step>
+    <step order="4">Ask the owner about the four Board #2 views; record the answer in the task notes.</step>
+    <step order="5">Grep the diff for messaging guidance; run pwsh scripts/quality/Test-InstructionPaths.ps1.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">.claude/skills/task-create/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Step 3.4 specifies the FR-11 query, the exclusions and the warning-only failure.</criterion>
+    <criterion testable="true">Step 3.7 specifies the three dispositions, the 60-day list and the completion block.</criterion>
+    <criterion testable="true">The task notes record the owner's confirmation of the four views, or which are missing.</criterion>
+    <criterion testable="true">Negative: no step renumbered; no messaging wording.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

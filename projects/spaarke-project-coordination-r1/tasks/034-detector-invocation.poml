@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Detector invocation: nightly CI report, task-create coordination line, pre-PR, design-to-spec checklist line (FR-15)</title>
+    <phase>3 Registry and detector (report-only)</phase>
+    <gate>031, 032, 033 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>A CI job plus three skill edits; everything degrades to a warning.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Explicit call sites; the detector already exists.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/: main-session-only (permission boundary).</parallel-reason>
+    <deps>031, 032, 033</deps>
+    <tags>devops, ci-cd, documentation</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run the detector nightly in CI as a report artifact, in task-create (a coordination line on overlapping tasks), and before a PR in push-to-github. Add one checklist line to /design-to-spec. Every invocation degrades to ⚠️ on failure and never blocks its host.</prompt>
+  <role>SPAARKE DevOps and AI-procedure maintainer. GitHub Actions, skill edits.</role>
+  <goal>A nightly job uploads the detector report, task-create and push-to-github call it, and /design-to-spec carries the one checklist line.</goal>
+
+  <context>
+    <background>Spec FR-15. The nightly job goes in .github/workflows/nightly-health.yml as a new job, next to the existing jobs, reporting only. The /design-to-spec line is exactly "List the active projects whose owned areas this design touches." It does not run the detector. Its output is a "Coordination" list in the spec, one bullet per project and area, which task 040 reads.</background>
+    <relevant-files>
+      <file role="modify">.github/workflows/nightly-health.yml</file>
+      <file role="modify">.claude/skills/task-create/SKILL.md</file>
+      <file role="modify">.claude/skills/push-to-github/SKILL.md</file>
+      <file role="modify">.claude/skills/design-to-spec/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-15">Scope: nightly job "coordination-report": checks out with full history, runs the detector without --planned, and uploads the JSON and markdown as an artifact. continue-on-error true. It is not added to the nightly report/alerts jobs' needs, and opens no issue in phase 3.</constraint>
+    <constraint source="spec FR-15">Scope: task-create runs the detector with --offline once per run and adds, to each task whose relevant-files intersect a hit, a coordination element in the POML naming the other project and path. On failure it prints ⚠️ and continues.</constraint>
+    <constraint source="spec FR-15">Scope: push-to-github runs the detector before gh pr create and prints the hits for the branch's project. It never blocks the PR.</constraint>
+    <constraint source="spec FR-15">Scope: design-to-spec gains exactly one checklist line, with the bullet format "- &lt;project-slug&gt; — &lt;area&gt;" for a spec section titled Coordination. Nothing else changes in that skill.</constraint>
+    <constraint source="spec MUST NOT">Scope: no skill text says to message the other project. The coordination line is data.</constraint>
+    <constraint source="NFR-06">Scope: run /conflict-check before the PR (nightly-health.yml and three skills are shared).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing nightly report-only job" location=".github/workflows/nightly-health.yml">Mirror an existing observation job's checkout, continue-on-error and artifact upload.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add the nightly job; run actionlint if available.</step>
+    <step order="2">Edit task-create, push-to-github and design-to-spec at the narrowest point.</step>
+    <step order="3">Trigger the nightly workflow once with workflow_dispatch (if it has that trigger) or record that the first scheduled run is pending.</step>
+    <step order="4">Grep the diff for messaging guidance; run pwsh scripts/quality/Test-InstructionPaths.ps1.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">.github/workflows/nightly-health.yml</output>
+    <output type="docs">.claude/skills/task-create/SKILL.md</output>
+    <output type="docs">.claude/skills/push-to-github/SKILL.md</output>
+    <output type="docs">.claude/skills/design-to-spec/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The nightly job uploads both report files and is continue-on-error.</criterion>
+    <criterion testable="true">task-create and push-to-github state the call, the output use, and ⚠️-and-continue on failure.</criterion>
+    <criterion testable="true">design-to-spec contains the checklist line verbatim, and its diff is that line plus the format note.</criterion>
+    <criterion testable="true">Negative: no workflow job opens an issue or fails the run on a hit; no messaging wording in any diff.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

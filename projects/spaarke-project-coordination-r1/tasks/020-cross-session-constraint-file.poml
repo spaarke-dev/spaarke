@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Create .claude/constraints/cross-session.md (mechanics, record, triage prompt) and the root CLAUDE.md pointer (FR-05)</title>
+    <phase>2 Findings: decide and dispose</phase>
+    <gate>002 complete (the mechanism is a fact in section A)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New constraint file plus a root CLAUDE.md edit; prose, but binding on every session.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Wording is the deliverable. It must state mechanics completely without adding any guidance on when or how to message; a literal executor tends to add helpful advice.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/ and root CLAUDE.md: main-session-only (permission boundary).</parallel-reason>
+    <deps>002</deps>
+    <tags>documentation, config, devops</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Write .claude/constraints/cross-session.md with exactly three sections (A Mechanics, B Record, C Triage prompt) and no text on when, whether, how often or in what form to message. Add about 3 lines and one section 17 row to root CLAUDE.md pointing at it.</prompt>
+  <role>SPAARKE AI-procedure maintainer. Writes short, factual constraint files. Knows the difference between a mechanism fact and a behavioural nudge.</role>
+  <goal>The constraint file exists with sections A, B and C as specified, root CLAUDE.md grows by no more than 5 lines net, and a grep of both diffs finds no messaging guidance.</goal>
+
+  <context>
+    <background>Spec FR-05 and the owner's governing rule (spec header, notes/decisions.md#no-guidance): Claude Code's built-in judgment decides when to message, and any written guidance is a nudge. The file holds facts a session cannot otherwise know, plus the record and triage rules that skills cite. Root CLAUDE.md has maintainer notes in an HTML comment at the top (section 18). Read them before editing.</background>
+    <relevant-files>
+      <file role="new">.claude/constraints/cross-session.md</file>
+      <file role="modify">CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>task-execute Step 9.5 finding classes (F1–F4, K1–K4) and project-defer-issue-tracking's two-write rule. Neither holds the triage prompt, the critical-area globs or the messaging mechanics.</existing>
+    <extension>It extends both by holding the shared text they cite. Writing it into each skill would duplicate it across task-execute, task-create and project-defer-issue-tracking.</extension>
+    <cost-of-doing-nothing>Triage rules drift across skills and scope is decided ad hoc (E6). Sessions have no single place to read the address convention, version floor and settings (E2, K-6).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="spec FR-05 section A">Scope: section A holds facts only, exactly these items: the address convention and the FR-00 mechanism chosen in task 002; the user settings JSON (crossSessionInbound "accept", dialogExpiry "never"); the -p worker --settings value; the version floor 2.1.236 for every claude on the machine; idle notices (notify_when_idle: main conversation only, local sessions only, 12 h lifetime); the inbox socket (CLAUDE_CODE_MESSAGING_SOCKET, plus the CLAUDE_CODE_MESSAGING_TOKEN line on native Windows); that WSL 2 and native Windows sessions cannot reach each other; and where owned areas are recorded (README frontmatter owned_areas, FR-13) and how to read them.</constraint>
+    <constraint source="spec FR-05 section B">Scope: section B holds: when a GitHub item is created in addition to a message (it must outlive the session, be acted on later, or need an owner decision); lifecycle meanings (active, paused, closed); the "how the detector reaches a project" table from design.md section 5.3; the critical-area globs from spec A-2; and the ack rule from FR-22 (applied by the owning project's session; removed by a later critical-area push).</constraint>
+    <constraint source="spec FR-05 section C">Scope: section C is design.md section 5.6.1, the standard triage prompt, copied verbatim. Section B and C wording may be revised at the phase 2 checkpoint; note that in one line.</constraint>
+    <constraint source="spec FR-05">Scope: on inbound limits, exactly one line: "Claude Code's own inbound limits apply (a received message can't approve, change configuration or run commands); the SendMessage tool's own instructions cover permission boundaries; see the cross-session messaging docs."</constraint>
+    <constraint source="spec MUST NOT, FR-05 negatives">Scope: neither file contains text about when, whether, how often or in what form to message another session. That includes encouragement ("feel free to"), examples of good messages, limits, batching, templates and "message if" conditions. No project CLAUDE.md file is edited.</constraint>
+    <constraint source="spec FR-05">Scope: root CLAUDE.md: about 3 lines (where the file is and what its three sections hold) and one section 17 row ("Before you file a finding or a coordination record" → the file). Net growth is at most 5 lines.</constraint>
+    <constraint source="NFR-06">Scope: run /conflict-check before the PR; root CLAUDE.md is a hot path. Check PR #2043's state and rebase if it has merged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/design.md</file>
+      <file>projects/spaarke-project-coordination-r1/notes/decisions.md</file>
+      <file>projects/spaarke-project-coordination-r1/notes/naming-spike-2026-10-17.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Topic constraint file" location=".claude/constraints/agent-cost.md">Header, scope line and section style of an existing constraint file.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the root CLAUDE.md maintainer notes, design.md sections 5.0, 5.3 and 5.6.1, and the task 002 decision.</step>
+    <step order="2">Write the constraint file.</step>
+    <step order="3">Edit root CLAUDE.md.</step>
+    <step order="4">Grep both diffs for "message", "SendMessage", "notify", "tell", "ping", "contact" and "reach out". For each hit, record in the task notes whether it is a mechanical fact. Rewrite any hit that is not.</step>
+    <step order="5">Run pwsh scripts/quality/Test-InstructionPaths.ps1 so every path the new text cites resolves.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a section A fact cannot be stated without describing when to use it, STOP and escalate with the sentence, rather than keeping or dropping it on your own judgment.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">.claude/constraints/cross-session.md</output>
+    <output type="docs">CLAUDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The constraint file has exactly three top-level sections, A Mechanics, B Record and C Triage prompt, each holding the items listed in the constraints.</criterion>
+    <criterion testable="true">Section C matches design.md section 5.6.1 word for word.</criterion>
+    <criterion testable="true">The inbound-limits line appears once, verbatim.</criterion>
+    <criterion testable="true">Root CLAUDE.md grows by at most 5 lines net (git diff --stat) and has one new section 17 row.</criterion>
+    <criterion testable="true">Negative: the grep of both diffs finds no sentence about when, whether, how often or in what form to message; the task notes list every hit with its classification.</criterion>
+    <criterion testable="true">Negative: no projects/*/CLAUDE.md file is changed.</criterion>
+    <criterion testable="true">Test-InstructionPaths.ps1 reports no new broken path.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Verify triage on a project-labelled issue set (success criterion 4)</title>
+    <phase>2 Findings: decide and dispose</phase>
+    <gate>021, 022 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Verification run of the new triage rules against real issues; read-only.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Applies a written prompt to a bounded issue set, following the pilot method.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>021, 022</deps>
+    <tags>testing, devops</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run the pilot method with the new triage prompt over one project-labelled issue set, read-only, and check that no Fix now contradicts an on-issue ruling and that tracking issues are skipped.</prompt>
+  <role>SPAARKE tooling developer verifying a process change against real data.</role>
+  <goal>notes/triage-verification-{date}.md holds the decision table for the set, and pass/fail for the two checks.</goal>
+
+  <context>
+    <background>Success criterion 4. The pilot (notes/pilot-issue-triage-2026-10-15.md) triaged uac-r2's 208 issues and found L1–L8. Ask the owner which project label to use; default to a sample of at most 30 issues from unified-access-control-r2.</background>
+    <relevant-files>
+      <file role="output">projects/spaarke-project-coordination-r1/notes/triage-verification-{date}.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: read-only. No issue is commented on, labelled, closed or moved on Board #2. Decisions on another project's issues belong to that project (project CLAUDE.md section 4).</constraint>
+    <constraint source="NFR-07">Scope: if a subagent does the reading, it runs in its own worktree or read-only, states its model and effort, and returns a table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/notes/pilot-issue-triage-2026-10-15.md</file>
+      <file>.claude/constraints/cross-session.md</file>
+      <file>.claude/constraints/agent-cost.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the label and sample size with the owner.</step>
+    <step order="2">For each issue: tracking issue (skip) or finding; any on-issue ruling; the six prompt answers; the decision.</step>
+    <step order="3">Check both criteria and write the notes file.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/spaarke-project-coordination-r1/notes/triage-verification-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every issue in the set has a row: tracking-skip, or six answers plus a decision.</criterion>
+    <criterion testable="true">No issue with an on-issue ruling is decided Fix now against that ruling; any that are become findings against the prompt and are listed.</criterion>
+    <criterion testable="true">Every tracking issue in the set is skipped.</criterion>
+    <criterion testable="true">Negative: no GitHub write occurred (no comment, label, close or field change).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

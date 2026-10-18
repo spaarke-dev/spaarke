@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Project wrap-up: final measurement, success criteria 1–11, quality gates, close-out</title>
+    <phase>Wrap-up</phase>
+    <gate>all other tasks complete or deferred with reason</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Mandatory wrap-up: code-review, adr-check, repo-cleanup, /test-diet, success-criteria verification.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting review of every artefact the project added, including the no-guidance grep across all edited files.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task; touches .claude/ review and project close-out.</parallel-reason>
+    <deps>001, 002, 003, 004, 005, 010, 011, 012, 013, 014, 015, 016, 020, 021, 022, 023, 024, 025, 030, 031, 032, 033, 034, 035, 040, 041, 042, 050, 051, 052, 053</deps>
+    <tags>testing, devops, documentation</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project: run the final messaging measurement, verify spec success criteria 1–11, run the quality gates and /test-diet, dispose of owned issues, hand over owned areas, and archive.</prompt>
+  <role>SPAARKE project lead closing out a process-tooling project.</role>
+  <goal>Every success criterion is checked with evidence, quality gates have no F-class finding left, the project's frontmatter is closed with no owned areas, and the project is archived.</goal>
+
+  <context>
+    <background>task-create Step 3.7 (as extended by tasks 023, 031 and 053) and spec Success criteria. FR-26 runs a final time after phase 5.</background>
+    <relevant-files>
+      <file role="modify">projects/spaarke-project-coordination-r1/README.md</file>
+      <file role="modify">projects/spaarke-project-coordination-r1/plan.md</file>
+      <file role="output">projects/spaarke-project-coordination-r1/notes/lessons-learned.md</file>
+      <file role="output">projects/spaarke-project-coordination-r1/notes/messaging-final-{date}.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec success criterion 11">Scope: grep every file this project changed (git diff --name-only from the project's first commit to HEAD on master) for wording about when, whether, how often or in what form to message. Any hit that is not a mechanical fact is an F-class finding fixed in this task.</constraint>
+    <constraint source="spec success criterion 11, NFR-09">Scope: every artefact added still has a concrete section 11 Q3 answer; any that no longer does is proposed for removal to the owner.</constraint>
+    <constraint source="spec FR-12, FR-23">Scope: zero undisposed owned issues and zero owned areas at close.</constraint>
+    <constraint source="root CLAUDE.md section 7">Scope: /test-diet runs (task-execute Step 10 for 090-wrapup-*); its report is in notes/test-diet-report.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/plan.md</file>
+      <file>.claude/skills/task-create/SKILL.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run the FR-26 measurement for the 28 days after phase 5; compare with all earlier reports in notes/messaging-final-{date}.md.</step>
+    <step order="2">Verify success criteria 1–11 one by one with evidence links; record them in README Graduation Criteria.</step>
+    <step order="3">Run /code-review and /adr-check on the project's changes; classify per task-execute Step 9.5; fix every F-class finding.</step>
+    <step order="4">Run the no-guidance grep and the section 11 Q3 review.</step>
+    <step order="5">Run /test-diet.</step>
+    <step order="6">Dispose of every owned issue (FR-12); hand over owned areas and coord issues (FR-23); set lifecycle closed.</step>
+    <step order="7">Run /repo-cleanup projects/spaarke-project-coordination-r1; write notes/lessons-learned.md.</step>
+    <step order="8">Update README (Status Complete, Completed Date, Changelog) and plan.md (Status Complete).</step>
+    <step order="9">Run /devops-project-archive.</step>
+    <step order="10">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/spaarke-project-coordination-r1/notes/messaging-final-{date}.md</output>
+    <output type="docs">projects/spaarke-project-coordination-r1/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarke-project-coordination-r1/notes/test-diet-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of success criteria 1–11 is checked with evidence or explicitly marked not met with the owner's acceptance.</criterion>
+    <criterion testable="true">No F-class finding remains from /code-review or /adr-check.</criterion>
+    <criterion testable="true">The no-guidance grep lists every hit and its classification, with no unresolved non-mechanical hit.</criterion>
+    <criterion testable="true">notes/test-diet-report.md exists.</criterion>
+    <criterion testable="true">project_registry.py --validate shows this project closed with owned_areas empty; zero undisposed owned issues.</criterion>
+    <criterion testable="true">The project is archived (.archived written; Board #2 Status Done).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

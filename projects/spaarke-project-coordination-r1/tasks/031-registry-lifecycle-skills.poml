@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Lifecycle transitions in skills: pipeline writes active, archive and 090 write closed, sync mirrors to Board #2 (FR-13)</title>
+    <phase>3 Registry and detector (report-only)</phase>
+    <gate>030 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Edits to four skills and one template at named steps.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Explicit edits; schema already fixed by task 030.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/: main-session-only (permission boundary). Runs in the main session while 032 and 033 run as subagents.</parallel-reason>
+    <deps>030</deps>
+    <tags>documentation, devops</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the frontmatter block to the project README template that /project-pipeline uses, set lifecycle active at init, closed at archive and in the 090 wrap-up, and make /devops-project-sync mirror lifecycle to Board #2 Status.</prompt>
+  <role>SPAARKE AI-procedure maintainer.</role>
+  <goal>New projects start with valid frontmatter, close with lifecycle closed, and Board #2 Status follows lifecycle.</goal>
+
+  <context>
+    <background>Spec FR-13 transitions. The owner sets paused by hand. devops-project-archive today writes .archived and closes the Issue. It now also sets lifecycle closed.</background>
+    <relevant-files>
+      <file role="modify">.claude/templates/project-README.template.md</file>
+      <file role="modify">.claude/skills/project-pipeline/SKILL.md</file>
+      <file role="modify">.claude/skills/devops-project-sync/SKILL.md</file>
+      <file role="modify">.claude/skills/devops-project-archive/SKILL.md</file>
+      <file role="modify">.claude/skills/task-create/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-13">Scope: the template begins with frontmatter lifecycle: active and owned_areas: [] (plus worktree_folder only if task 002 chose mechanism 3). project-pipeline Step 2 fills owned_areas from the spec's Affected Areas when present, and leaves it empty otherwise.</constraint>
+    <constraint source="spec FR-13">Scope: task-create Step 3.7 (wrap-up) and devops-project-archive set lifecycle: closed. devops-project-sync maps active → In Progress, paused → the board's paused/on-hold value, closed → Done. Read the actual Status option names from Board #2 first; the mapping is idempotent.</constraint>
+    <constraint source="spec FR-13 negatives">Scope: projects/INDEX.md and its rules are not changed. No skill sets lifecycle from a worktree's presence.</constraint>
+    <constraint source="project">Scope: no step renumbered. Each skill change is small enough for one PR; run /conflict-check first (NFR-06).</constraint>
+    <constraint source="spec MUST NOT">Scope: no messaging wording.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/design.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Idempotent board sync" location=".claude/skills/devops-project-sync/SKILL.md">Existing field-sync steps; add Status mapping in the same style.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the Board #2 Status options (gh project field-list).</step>
+    <step order="2">Edit the template and the four skills.</step>
+    <step order="3">Validate the template's frontmatter with python scripts/quality/project_registry.py --validate on a temp copy.</step>
+    <step order="4">Grep the diff for messaging guidance; run pwsh scripts/quality/Test-InstructionPaths.ps1.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">.claude/templates/project-README.template.md</output>
+    <output type="docs">.claude/skills/project-pipeline/SKILL.md</output>
+    <output type="docs">.claude/skills/devops-project-sync/SKILL.md</output>
+    <output type="docs">.claude/skills/devops-project-archive/SKILL.md</output>
+    <output type="docs">.claude/skills/task-create/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A README generated from the template parses with zero errors via project_registry.py.</criterion>
+    <criterion testable="true">project-pipeline, devops-project-archive and the task-create wrap-up step each state the lifecycle value they write.</criterion>
+    <criterion testable="true">devops-project-sync states the three-value mapping using the real Board #2 option names.</criterion>
+    <criterion testable="true">Negative: projects/INDEX.md and its governing text are unchanged; no step renumbered; no messaging wording.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Registry frontmatter parser and validator (FR-13)</title>
+    <phase>3 Registry and detector (report-only)</phase>
+    <gate>005 passed (phase 0 checkpoint, owner "go")</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New Python module plus tests; read-only.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small parser with a fixed schema.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>005</deps>
+    <tags>devops, testing, unit-test, scripts</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Write one importable module that reads the YAML frontmatter at the top of every projects/*/README.md (lifecycle, owned_areas and, only under mechanism 3, worktree_folder), validates it, and reports two active projects declaring the same glob. The detector (033) and the banner (041) use it.</prompt>
+  <role>SPAARKE tooling developer. Python 3, YAML, pytest.</role>
+  <goal>scripts/quality/project_registry.py exposes load_registry() and a --validate CLI; tests pass.</goal>
+
+  <context>
+    <background>Owner decision C-8 (notes/decisions.md#registry): the registry is README frontmatter, not projects/INDEX.md columns. Schema per design.md section 5.1: lifecycle is active, paused or closed; owned_areas is a list of repo globs, possibly empty; worktree_folder is present only if task 002 chose mechanism 3.</background>
+    <relevant-files>
+      <file role="new">scripts/quality/project_registry.py</file>
+      <file role="new">scripts/quality/tests/test_project_registry.py</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>projects/INDEX.md (hot-path columns; recency-scoped and edited by every project, K-4). No code parses README frontmatter today.</existing>
+    <extension>No. INDEX.md is a shared, prose-celled file that drops paused and closed projects. Per-project frontmatter avoids shared-file contention (C-8).</extension>
+    <cost-of-doing-nothing>The detector and banner cannot look up who owns an area or whether a project is paused (E5, K-4).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="spec FR-13">Scope: load_registry(repo_root) returns, per project folder, lifecycle, owned_areas, worktree_folder (or None) and a list of errors. A README with no frontmatter is "unregistered" (reported, not an error that raises). An unknown lifecycle value, a non-list owned_areas, or an unknown key is an error.</constraint>
+    <constraint source="spec FR-13">Scope: --validate prints errors and same-glob conflicts between two active projects, and exits 1 if there is an error, 0 otherwise. A conflict is reported but does not change the exit code.</constraint>
+    <constraint source="spec FR-13 negatives">Scope: reads only README.md files. It never reads projects/INDEX.md, never infers lifecycle from a worktree existing on disk, and never writes.</constraint>
+    <constraint source="project">Scope: YAML parsing uses the standard library plus PyYAML only if it is already used by another script in scripts/ (check); otherwise a minimal parser for this flat schema.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/design.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Script plus pytest pair" location="scripts/quality/quality-alert-banner.py">Layout and test style.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Write the module and CLI.</step>
+    <step order="2">Tests with temp project folders: valid, missing frontmatter, bad lifecycle, bad owned_areas, unknown key, a same-glob conflict between two active projects, and the same glob on one active and one closed project (no conflict).</step>
+    <step order="3">Run python -m pytest scripts/quality/tests/test_project_registry.py.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">scripts/quality/project_registry.py</output>
+    <output type="test">scripts/quality/tests/test_project_registry.py</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A valid README parses with zero errors and the declared values.</criterion>
+    <criterion testable="true">Missing frontmatter → unregistered; bad lifecycle, bad owned_areas or unknown key → an error, and --validate exits 1.</criterion>
+    <criterion testable="true">Two active projects with the same glob → one conflict line; active plus closed with the same glob → none.</criterion>
+    <criterion testable="true">Negative: the module never opens projects/INDEX.md, and never writes (tests assert both).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

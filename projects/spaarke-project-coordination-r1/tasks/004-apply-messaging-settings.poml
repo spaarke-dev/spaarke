@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Owner applies user messaging settings and the PATH claude update; verify FR-00 (b)–(d)</title>
+    <phase>0 Messaging configuration</phase>
+    <gate>003 complete; owner present</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Operator configuration on the owner's machine plus a live check; no repo code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fixed procedure with an explicit pass/fail check.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Owner-interactive; changes the machine every session runs on.</parallel-reason>
+    <deps>003</deps>
+    <tags>config, settings, devops</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>Show the owner the exact user-settings JSON and the PATH claude fix. Once the owner has applied them, verify FR-00 acceptance (b), (c) and (d) between two live worktree sessions, and record the date FR-00 took effect. That date starts the 14-day phase 0 clock.</prompt>
+  <role>SPAARKE tooling developer assisting the owner with machine configuration.</role>
+  <goal>notes/phase0-applied-{date}.md records what was applied, the date, the messaging-config check output (empty), and the results of (b), (c) and (d).</goal>
+
+  <context>
+    <background>Spec FR-00 Settings and Version. ~/.claude/settings.json belongs to the owner and is never edited by a session without explicit OK. The PATH claude is an npm global at 2.1.6 under /c/nvm4w/nodejs. Updating it means npm install -g @anthropic-ai/claude-code@latest, or removing it so the extension's bundled binary is used.</background>
+    <relevant-files>
+      <file role="output">projects/spaarke-project-coordination-r1/notes/phase0-applied-{date}.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md section 5">Scope: the session shows the exact JSON and the exact command. The owner applies them, or explicitly tells the session to apply them. Without that OK, the session does not touch ~/.claude/settings.json or the npm global.</constraint>
+    <constraint source="spec FR-00">Scope: apply only FR-00 (crossSessionInbound "accept", dialogExpiry "never", the PATH claude at least 2.1.236, and the address mechanism from task 002). Nothing from phases 1–5 is applied in the same window, so the checkpoint measures FR-00 alone.</constraint>
+    <constraint source="spec FR-00 negatives">Scope: no permissions.deny entry naming SendMessage or ListAgents, and no isolatePeerMachines, in any scope.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/notes/naming-spike-2026-10-17.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Print the JSON fragment for ~/.claude/settings.json and the npm command, and ask the owner to apply them (or to authorize the session to).</step>
+    <step order="2">Start a new session (or ask the owner to restart one) and confirm the messaging-config check prints nothing.</step>
+    <step order="3">(b) From this session, find a second active worktree session by project slug (or by the mechanism 3 lookup) in ListAgents. (c) Exchange one message with a session in a different permission mode and confirm no approval dialog appeared. (d) Ask the owner to restart that session under the same address, send to it, and confirm delivery.</step>
+    <step order="4">Write notes/phase0-applied-{date}.md with the applied values, the date, and the (b)–(d) results.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; set task 005's gate to the date 14 days after the applied date; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of (b), (c) or (d) fails, STOP and report to the owner with the observed ListAgents rows or delivery notice. Do not start the 14-day clock.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">projects/spaarke-project-coordination-r1/notes/phase0-applied-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The messaging-config check prints nothing in a fresh session after the change.</criterion>
+    <criterion testable="true">(b) Two active same-machine worktree sessions find each other by project slug or the documented lookup.</criterion>
+    <criterion testable="true">(c) A message between sessions in different permission modes is delivered with no approval dialog.</criterion>
+    <criterion testable="true">(d) A session restarted under the same address receives a message sent to that address.</criterion>
+    <criterion testable="true">The applied date is recorded, and task 005's gate shows applied date plus 14 days.</criterion>
+    <criterion testable="true">Negative: no repo file other than the notes file and TASK-INDEX.md changes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

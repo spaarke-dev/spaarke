@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Optional: live inbox-socket notice when the banner refresh finds a new item (FR-18b)</title>
+    <phase>4 Records for sessions not running</phase>
+    <gate>041 merged; owner confirms it is wanted</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Small addition to the banner's background refresh; optional.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single documented mechanism (inbox socket) with a clear no-change rule.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>041</deps>
+    <tags>devops, testing, scripts</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>If the owner wants it, make the banner's background refresh post one line to the running session's inbox socket when it finds a new coord issue or review:&lt;project&gt; PR since the last refresh, and nothing otherwise.</prompt>
+  <role>SPAARKE tooling developer. Claude Code inbox socket, Python 3.</role>
+  <goal>A running session shows the notice without restart, with no approval dialog, and nothing is posted when nothing changed.</goal>
+
+  <context>
+    <background>Spec FR-18b; constraint file section A (CLAUDE_CODE_MESSAGING_SOCKET, and the CLAUDE_CODE_MESSAGING_TOKEN auth line on native Windows). With FR-00's settings, inbound delivery needs no dialog.</background>
+    <relevant-files>
+      <file role="modify">scripts/quality/quality-alert-banner.py</file>
+      <file role="modify">scripts/quality/tests/test_quality_alert_banner.py</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-18b">Scope: the notice is posted only for items new since the previous cache, at most one line per refresh, naming the item and its URL. If the socket variable is absent, nothing is posted.</constraint>
+    <constraint source="spec MUST NOT">Scope: the line states the new item only; no request or suggestion to reply or message.</constraint>
+    <constraint source="NFR-02">Scope: the post runs in the background refresh only and never delays the foreground.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>.claude/constraints/cross-session.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Ask the owner whether FR-18b is wanted. If not, set this task to deferred with the reason, and stop.</step>
+    <step order="2">Add the diff-against-previous-cache rule and the socket post.</step>
+    <step order="3">Tests: new item → one post; no change → none; socket absent → none.</step>
+    <step order="4">Live check in two sessions; record the result in the task notes.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">scripts/quality/quality-alert-banner.py</output>
+    <output type="test">scripts/quality/tests/test_quality_alert_banner.py</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A new coord issue during a running session produces one notice line in that session without restart.</criterion>
+    <criterion testable="true">No approval dialog appears.</criterion>
+    <criterion testable="true">Negative: no post when nothing changed, and none when the socket variable is absent.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

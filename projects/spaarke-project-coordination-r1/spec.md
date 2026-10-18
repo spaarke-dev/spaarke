@@ -253,7 +253,7 @@ Acceptance:
 
 **FR-08 — (L2) Tracking issues are tasks.** `task-execute` Step 10 closes the task's tracking issue, with a link to the commit or PR. Triage skips tracking issues. Acceptance: a completed task's tracking issue is closed. Negative: referenced issues aren't closed.
 
-**FR-09 — (L3, L4) Owner and area on every issue.** Filed issues carry the `project:<name>` label, Owning Project and Code Area (body + field). Acceptance: the filing skill checks all three after filing, and retries or reports.
+**FR-09 — (L3, L4) Owner and area on every issue.** Filed issues carry the project label (the bare project name, created by `/project-pipeline` Step 4.2), Owning Project and Code Area (body + field). Acceptance: the filing skill checks all three after filing, and retries or reports.
 
 **FR-10 — (L5) Verified closes.** A Close is applied only after verifying the evidence: the fix SHA is reachable from `origin/master`, or the duplicate is linked. The evidence is written in the closing comment. Negative: a recommendation alone is never evidence.
 
@@ -301,7 +301,7 @@ Acceptance: a detector failure degrades to ⚠️ and never blocks the host skil
 **FR-17 — Pre-code coordination issues.**
 Opened only for overlaps found **before code exists** (signal 3 when on, or a recorded design overlap) that are in a critical area or need an agreement or owner decision.
 - One issue per point, with a fixed key (sorted project pair + area).
-- Labels: `coord`, `project:<a>`, `project:<b>`.
+- Labels: `coord` plus both project labels (`<a>`, `<b>`; the label is the bare project name, per `/project-pipeline` Step 4.2).
 - Updated, never duplicated.
 - Auto-closed with a reason when the overlap disappears.
 
@@ -474,7 +474,7 @@ Coordination dependencies (not tensions; agree before the dependent tasks merge)
 1. [ ] **The E1 replay is refused.** Verify: a guard test with a non-ancestor stub exits non-zero, naming the SHA; a live attempt from a branch lacking the live commit is refused.
 2. [ ] **Every App Service deploy path is guarded.** Verify: no `az webapp deploy` in the four paths precedes the guard; a fixture per path.
 3. [ ] **Shared deploys leave dev-log entries.** Verify: one parseable comment per test deploy type.
-4. [ ] **Triage respects on-issue rulings.** Verify: pilot method on a `project:`-labelled set; no "Fix now" contradicts an on-issue ruling; tracking issues skipped.
+4. [ ] **Triage respects on-issue rulings.** Verify: pilot method on a project-labelled set; no "Fix now" contradicts an on-issue ruling; tracking issues skipped.
 5. [ ] **Messaging is reliable.** Verify: FR-00 acceptance (b)–(d) on two live worktree sessions.
 6. [ ] **A restarted session sees what it missed.** Verify: open a `coord` issue, start a session in that project, and the banner lists it without network wait.
 7. [ ] **The critical-area gate blocks and unblocks autonomously.** Verify: un-acked fixture PR fails Router; the owning project's session applies `ack`; it passes; a later critical-area push removes `ack`.

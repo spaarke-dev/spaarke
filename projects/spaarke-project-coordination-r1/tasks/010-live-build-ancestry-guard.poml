@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Shared live-build ancestry guard and dev-log helper module (FR-01, FR-03 helper)</title>
+    <phase>1 Shared environment guards</phase>
+    <gate>startable (phase 1 does not wait for the phase 0 checkpoint)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New PowerShell module that blocks deploys; fail-closed logic every App Service deploy path will call.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Complete contract (six cases), with the Kudu read to copy from Deploy-BffApi.ps1.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>devops, deploy, azure, app-service, testing, unit-test</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build one PowerShell module with two functions. Assert-LiveBuildAncestry refuses a deploy unless the commit currently live on the target App Service (read from the deployed DLL through Kudu) is an ancestor of the commit being deployed. Write-DevLogEntry appends one parseable comment to the pinned dev-log issue. Cover both with Pester tests against stubbed Kudu, git and gh.</prompt>
+  <role>SPAARKE DevOps developer. PowerShell 7, Pester 5, Azure CLI, Kudu VFS, git ancestry. Fail closed on deploy safety; fail open on logging.</role>
+  <goal>scripts/LiveBuildGuard.psm1 exports Assert-LiveBuildAncestry and Write-DevLogEntry. tests/scripts/LiveBuildGuard.Tests.ps1 covers FR-01 (a)–(f) and the FR-03 rules, and passes.</goal>
+
+  <context>
+    <background>E1 (design.md section 4): a redeploy removed another project's live fix from spaarke-bff-dev. K-1: /ping returns "pong" and /status a hard-coded version, so the live SHA must come from the deployed main assembly's ProductVersion (1.0.0+&lt;sha&gt;). Deploy-BffApi.ps1 already downloads DLLs through Kudu VFS with a management token to verify replacement. This task reuses that read before upload. The dev log is a single open issue labelled dev-log (task 013 creates it). The helper finds it by label, so no config file is needed.</background>
+    <relevant-files>
+      <file role="new">scripts/LiveBuildGuard.psm1</file>
+      <file role="new">tests/scripts/LiveBuildGuard.Tests.ps1</file>
+      <file role="reference">scripts/Deploy-BffApi.ps1</file>
+      <file role="reference">scripts/PcfBuildResult.psm1</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>scripts/Deploy-BffApi.ps1:578-599 downloads DLLs from Kudu VFS after a deploy to compare hashes. Nothing compares the live commit before a deploy, and Deploy-WorkspaceBff.ps1 and Deploy-ControlPlane.ps1 have no Kudu read at all.</existing>
+    <extension>The Kudu download logic is lifted from Deploy-BffApi.ps1 into a shared module, because four deploy paths (K-2) need the same pre-upload check. Copying it four times would let them drift.</extension>
+    <cost-of-doing-nothing>A deploy from a branch lacking the live commit silently removes another project's live fix (E1). Shared dev changes keep having no record (E3).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="spec FR-01">Scope: Assert-LiveBuildAncestry takes -ResourceGroup, -AppName, -Slot (optional), -AssemblyName (default Sprk.Bff.Api.dll), -DeploySha (default git rev-parse HEAD), -Supersede (string, optional) and -CheckOnly (switch: report the decision, return it, never throw). Before any upload it downloads site/wwwroot/AssemblyName from Kudu VFS of the target slot, reads FileVersionInfo.ProductVersion, takes the text after "+", runs git fetch origin, then evaluates git merge-base --is-ancestor liveSha deploySha.</constraint>
+    <constraint source="spec FR-01 (a)–(f)">Scope: decisions. (a) ancestor → proceed, logging "includes live &lt;sha&gt;". (b) not an ancestor → throw, naming the SHA, git branch -r --contains output, and the -Supersede parameter. (c) SHA unknown to origin → throw "the live build is not on any pushed branch". (d) DLL unreadable, or no "+sha" → throw unless -Supersede. (e) -Supersede with non-empty text → proceed and return the reason for logging; empty or whitespace text → throw. (f) deploy SHA equals live SHA → proceed.</constraint>
+    <constraint source="spec FR-01 negative">Scope: the guard only reads. It issues no PUT, POST or DELETE to Kudu or ARM, and never restarts or changes the app.</constraint>
+    <constraint source="spec FR-03">Scope: Write-DevLogEntry takes app, environment, slot, branch, deploy SHA, prior live SHA, actor (git config user.name, or GITHUB_ACTOR in CI), UTC time, action (deploy | app-setting | role | swap), setting names (names only) and supersede reason. It finds the single open issue labelled dev-log, and appends one comment whose body is a fenced block of key: value lines. On any failure (gh missing, no issue, API error) it writes a warning and returns. It never throws.</constraint>
+    <constraint source="NFR-08, spec FR-03 negative">Scope: no token, secret or app-setting value is ever logged or written to the console. Setting names only. The management token is held in a local variable and never echoed.</constraint>
+    <constraint source="ADR-028">Scope: the Kudu read reuses az account get-access-token as Deploy-BffApi.ps1 does. No new identity, credential or anonymous endpoint.</constraint>
+    <constraint source="project">Scope: this task wires nothing into the deploy scripts; tasks 011–013 do that.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/design.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Kudu VFS download with management token" location="scripts/Deploy-BffApi.ps1">Lines 578-599: token acquisition, VFS URL shape, download and hash compare.</pattern>
+      <pattern name="Script module plus Pester tests" location="scripts/copilot-agent/CopilotAgentPackage.psm1">Module shape; tests in tests/scripts/CopilotAgentPackage.Tests.ps1 mock external commands.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read Deploy-BffApi.ps1 lines 560-620 and lift the Kudu download into a private module function.</step>
+    <step order="2">Implement Assert-LiveBuildAncestry with az, git and Invoke-WebRequest behind small private wrappers that Pester can mock.</step>
+    <step order="3">Implement Write-DevLogEntry with gh behind a wrapper.</step>
+    <step order="4">Write Pester tests for (a)–(f), -CheckOnly, the read-only negative (assert no non-GET request), the logging failure paths, and a redaction test showing that a value passed by mistake is not printed.</step>
+    <step order="5">Run Invoke-Pester tests/scripts/LiveBuildGuard.Tests.ps1 and pwsh scripts/quality/Invoke-PSAnalysis.ps1 on the module.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the deployed DLL's ProductVersion on spaarke-bff-dev carries no "+sha" suffix (check once, read-only), STOP and escalate. The whole guard depends on it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">scripts/LiveBuildGuard.psm1</output>
+    <output type="test">tests/scripts/LiveBuildGuard.Tests.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">(a) Given live SHA ancestor of deploy SHA, the function returns "proceed" and the message contains "includes live" and the SHA.</criterion>
+    <criterion testable="true">(b) Given a non-ancestor live SHA known to origin, it throws, and the message contains the SHA, the containing branch names and "-Supersede".</criterion>
+    <criterion testable="true">(c) Given a live SHA unknown to origin, it throws "the live build is not on any pushed branch".</criterion>
+    <criterion testable="true">(d) Given a 404 from Kudu, or a ProductVersion without "+", it throws; with -Supersede "reason", it proceeds.</criterion>
+    <criterion testable="true">(e) -Supersede "" or "   " throws; -Supersede "hotfix for #123" proceeds and returns the reason.</criterion>
+    <criterion testable="true">(f) Given deploy SHA equal to live SHA, it proceeds.</criterion>
+    <criterion testable="true">-CheckOnly returns the decision object for (b) and (c) without throwing.</criterion>
+    <criterion testable="true">Negative: across all tests, no mocked web call uses a method other than GET.</criterion>
+    <criterion testable="true">Write-DevLogEntry with gh failing → a warning and no exception; with no open dev-log issue → a warning and no exception.</criterion>
+    <criterion testable="true">The dev-log comment body is a fenced block whose key: value lines parse back into the input fields.</criterion>
+    <criterion testable="true">Negative: no test output or comment body contains a token or setting value.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+    <criterion testable="true">Seeding proof: remove the is-ancestor check once and confirm the (b) test fails, then restore it. This guard's failure would silently allow data loss on shared dev.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Verify which naming mechanism sets the messaging address in interactive VS Code sessions (FR-00 a)</title>
+    <phase>0 Messaging configuration</phase>
+    <gate>startable (needs the owner for about 2 minutes)</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>A verification with a notes update; no code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A scripted observation with a fixed decision table.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>devops, config</tags>
+    <estimated-effort>0.5-1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>With the owner, find out whether renaming an interactive VS Code session, or a SessionStart hook's sessionTitle, changes the address other sessions see in ListAgents. Record the result and choose FR-00 mechanism 1, 2 or 3.</prompt>
+  <role>SPAARKE tooling developer running a short live verification with the owner.</role>
+  <goal>notes/naming-spike-2026-10-17.md has an "Interactive verification" section with the observed ListAgents rows, and names the chosen mechanism (1, 2 or 3) with a one-line reason.</goal>
+
+  <context>
+    <background>The headless spike (notes/naming-spike-2026-10-17.md) showed that --name sets an exact, restart-stable address, that the default suffix changes every start, and that a hook's sessionTitle sets the transcript title but not the address. Interactive VS Code sessions were not tested. Spec FR-00 lists the mechanisms in order of preference: 1 automatic hook title, 2 one rename per session, 3 lookup by worktree folder.</background>
+    <relevant-files>
+      <file role="modify">projects/spaarke-project-coordination-r1/notes/naming-spike-2026-10-17.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this task changes no settings file, hook or skill. A temporary hook used for the sessionTitle test lives only in a scratch --settings file or the scratchpad, and is removed afterwards.</constraint>
+    <constraint source="project">Scope: the owner performs the VS Code rename. The session asks for it with the exact command name ("Rename Session Tab", or /rename followed by the project slug).</constraint>
+    <constraint source="spec MUST NOT">Scope: the notes added contain observations only, with no wording about when or how to message.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/notes/naming-spike-2026-10-17.md</file>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Call ListAgents and record this session's row and one other interactive session's row.</step>
+    <step order="2">Ask the owner to rename the OTHER interactive session to its project slug. Call ListAgents again and record the row. Then ask the owner to restart that session and record the row once more.</step>
+    <step order="3">Repeat with a SessionStart hook that returns sessionTitle, set in a scratch settings file loaded by an interactive session the owner starts, if the owner agrees. Record the row.</step>
+    <step order="4">Apply the decision table: hook title becomes the address → mechanism 1; rename becomes the address and survives the restart → mechanism 2; neither → mechanism 3. Write the section and the decision.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a rename becomes the address but does NOT survive a restart, STOP and present it to the owner as a fourth case (mechanism 2 plus a re-rename line from the check) rather than picking a mechanism yourself.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">projects/spaarke-project-coordination-r1/notes/naming-spike-2026-10-17.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The notes record the ListAgents row before the rename, after it, and after a restart, for the renamed session.</criterion>
+    <criterion testable="true">The notes record the sessionTitle result, or state that the owner declined that step.</criterion>
+    <criterion testable="true">Exactly one mechanism (1, 2 or 3) is named, with its reason.</criterion>
+    <criterion testable="true">Negative: no file outside notes/ is changed, and no scratch hook remains registered.</criterion>
+  </acceptance-criteria>
+
+  <notes>If the headless result (hook title is not the address) also holds interactively, suggest the owner report it with /feedback; spec Unresolved questions notes this.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

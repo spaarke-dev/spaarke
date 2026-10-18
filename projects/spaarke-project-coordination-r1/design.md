@@ -93,7 +93,7 @@ What worked and is kept:
 
 ### 5.1 Project registry and status: the foundation
 
-- **GitHub registration is a MUST at `/project-pipeline`** (owner, 2026-10-15; PR #1983). The pipeline doesn't finish until the project has a Project Issue on Board #2, the portfolio pointer block in `projects/{name}/README.md`, a `project:<name>` label, and the Board #2 fields filled.
+- **GitHub registration is a MUST at `/project-pipeline`** (owner, 2026-10-15; PR #1983). The pipeline doesn't finish until the project has a Project Issue on Board #2, the portfolio pointer block in `projects/{name}/README.md`, a project label named `<name>` (Step 4.2), and the Board #2 fields filled.
 - **Registry frontmatter in each project's `README.md`** (owner, 2026-10-17):
 
   ```yaml
@@ -131,7 +131,7 @@ An ignore list covers files that always collide harmlessly, such as `Program.cs`
 - **For landed code, the PR is the record.** It gets the `review:<owner>` label, plus the Router acknowledgement in critical areas (§5.4).
 - **A coordination issue is opened only for pre-code overlaps** (planned work or designs) that are in a critical area or need an agreement or an owner decision. Rules:
   - One issue per point, with a fixed key (the two projects plus the area). The detector updates it and never duplicates it.
-  - Labels: `coord`, `project:<a>`, `project:<b>`.
+  - Labels: `coord` plus both project labels (`<a>`, `<b>`; the label is the bare project name, per `/project-pipeline` Step 4.2).
   - It is **closed automatically** when the overlap disappears.
 - **How the detector reaches a project.** *This governs detector output only. A session messages any live session it chooses, regardless of this table.*
 

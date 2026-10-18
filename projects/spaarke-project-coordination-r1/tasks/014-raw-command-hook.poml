@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>PreToolUse hook: ask on raw az deploy, app-setting and role commands (FR-04)</title>
+    <phase>1 Shared environment guards</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New PreToolUse hook registered in .claude/settings.json; runs on every Bash and PowerShell call.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Narrow command matcher with an existing hook and test file to copy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/settings.json: main-session-only (permission boundary); also shares that file with 015.</parallel-reason>
+    <deps>none</deps>
+    <tags>devops, config, settings, testing, unit-test</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a PreToolUse hook that returns "ask" when a session types az webapp deploy, az webapp config appsettings set|delete, or az role assignment create|delete directly. Running the guarded deploy scripts must not trigger it.</prompt>
+  <role>SPAARKE tooling developer. Claude Code hooks, Python 3, shell command parsing, pytest.</role>
+  <goal>scripts/quality/guard-raw-deploy-commands.py is registered under the existing PreToolUse "Bash|PowerShell" matcher and passes its must-fire and must-not-fire fixtures.</goal>
+
+  <context>
+    <background>The guards in tasks 010–012 sit inside the deploy scripts, so a raw az webapp deploy typed by a session bypasses them. This hook makes that a visible ask, not a silent action. Dataverse role changes have no single CLI signature (spec Unresolved questions), so they rely on dev-log logging, not this hook.</background>
+    <relevant-files>
+      <file role="new">scripts/quality/guard-raw-deploy-commands.py</file>
+      <file role="new">scripts/quality/tests/test_guard_raw_deploy_commands.py</file>
+      <file role="modify">.claude/settings.json</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>scripts/quality/guard-worktree-links.py (PreToolUse Bash|PowerShell) guards junctions and worktree deletes.</existing>
+    <extension>Same pattern and matcher, but a separate script: one policy per hook keeps each one's must-not-fire set small, and the two have unrelated triggers (spec section 11 table).</extension>
+    <cost-of-doing-nothing>A raw az webapp deploy bypasses the ancestry guard and the dev log, which reproduces E1 and E3.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="spec FR-04">Scope: returns permissionDecision "ask", with a one-line reason naming the guarded script to use, for exactly these: az webapp deploy; az webapp deployment source config-zip; az webapp config appsettings set; az webapp config appsettings delete; az role assignment create; az role assignment delete. This holds whether the command is alone or inside a chain (and, or, semicolon, pipe).</constraint>
+    <constraint source="spec FR-04">Scope: allows without output: the guarded scripts (Deploy-BffApi.ps1, Deploy-WorkspaceBff.ps1, Deploy-ControlPlane.ps1); az webapp config appsettings list; az webapp log tail; az webapp show; the phrase inside an echo or Write-Host string, a git commit message, or a heredoc body.</constraint>
+    <constraint source="NFR-02">Scope: the hook returns "ask", never "deny"; runs under 5 s; makes no network call; fails open on unparseable input; and its header docstring records "Enforced by: scripts/quality/guard-raw-deploy-commands.py + scripts/quality/tests/test_guard_raw_deploy_commands.py".</constraint>
+    <constraint source="project">Scope: register as an additional command in the existing PreToolUse "Bash|PowerShell" entry; no other settings change. Check whether PR #2043 has merged first and rebase if so.</constraint>
+    <constraint source="spec MUST NOT">Scope: the reason text names the guarded script only; no messaging wording.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+    </files>
+    <patterns>
+      <pattern name="Narrow PreToolUse guard with controls" location="scripts/quality/guard-worktree-links.py">Input parsing, ask output shape, fail-open handling; tests in scripts/quality/tests/test_guard_worktree_links.py.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read guard-worktree-links.py and its tests; reuse its input parsing and output shape.</step>
+    <step order="2">Write the matcher, tokenizing the command so quoted strings and heredoc bodies are not matched.</step>
+    <step order="3">Write the fixtures: each must-fire form alone and in a chain, for Bash and PowerShell; each must-not-fire form.</step>
+    <step order="4">Register in .claude/settings.json; run python -m pytest scripts/quality/tests/test_guard_raw_deploy_commands.py and time a call.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">scripts/quality/guard-raw-deploy-commands.py</output>
+    <output type="test">scripts/quality/tests/test_guard_raw_deploy_commands.py</output>
+    <output type="config">.claude/settings.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Must-fire: each of the six raw forms returns ask, alone and after "cd x &amp;&amp;", in both Bash and PowerShell tool input.</criterion>
+    <criterion testable="true">Must-not-fire: each guarded script invocation, appsettings list, log tail, webapp show, an echo containing "az webapp deploy", a git commit -m message containing it, and a heredoc body containing it.</criterion>
+    <criterion testable="true">Malformed hook input exits 0 with no decision (fail open).</criterion>
+    <criterion testable="true">Negative: the hook never returns "deny".</criterion>
+    <criterion testable="true">A call completes in under 5 s with no network access.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+    <criterion testable="true">Seeding proof: disable the az webapp deploy pattern once and confirm its must-fire test fails, then restore it.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

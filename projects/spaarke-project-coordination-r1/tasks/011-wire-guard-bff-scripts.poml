@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Wire the ancestry guard and dev log into Deploy-BffApi.ps1 and Deploy-WorkspaceBff.ps1 (FR-02)</title>
+    <phase>1 Shared environment guards</phase>
+    <gate>010 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the primary BFF deploy scripts; ordering relative to upload is safety-critical.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two scripts, an explicit call site rule and the module from task 010.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010</deps>
+    <tags>devops, deploy, azure, app-service, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Call Assert-LiveBuildAncestry before every az webapp deploy and slot swap in Deploy-BffApi.ps1 and Deploy-WorkspaceBff.ps1, add a -Supersede parameter to both, and write one dev-log entry after each deploy or swap.</prompt>
+  <role>SPAARKE DevOps developer. PowerShell 7, Pester, Azure App Service slots.</role>
+  <goal>Both scripts refuse a non-ancestor deploy against a stubbed live version, no az webapp deploy precedes the guard, and each successful deploy or swap writes one dev-log entry.</goal>
+
+  <context>
+    <background>K-2: Deploy-WorkspaceBff.ps1:147 deploys to the same spaarke-bff-dev app with a raw az webapp deploy, so guarding only Deploy-BffApi.ps1 would leave a second path open. Deploy-BffApi.ps1 has a slot path (deploy to slot, then swap, around lines 360-470) and a direct path (around line 528).</background>
+    <relevant-files>
+      <file role="modify">scripts/Deploy-BffApi.ps1</file>
+      <file role="modify">scripts/Deploy-WorkspaceBff.ps1</file>
+      <file role="test">tests/scripts/Deploy-Guarded-Bff.Tests.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-02">Scope: in both scripts, every az webapp deploy is preceded, in the same code path, by Assert-LiveBuildAncestry against the slot it deploys to. Every az webapp deployment slot swap is preceded by Assert-LiveBuildAncestry against production, with -DeploySha set to the SHA being swapped in.</constraint>
+    <constraint source="spec FR-01 (e)">Scope: each script gains -Supersede [string]. It is passed through to the guard and to the dev-log entry. Existing parameters and defaults are unchanged.</constraint>
+    <constraint source="spec FR-03">Scope: after each successful deploy and each successful swap, call Write-DevLogEntry once with the prior live SHA the guard read. A logging failure never fails the script.</constraint>
+    <constraint source="project">Scope: no other behaviour of either script changes, including its post-deploy hash verification, rollback and health checks.</constraint>
+    <constraint source="project">Scope: these scripts are never run against a live app in this task. Tests stub az, git and gh. Live verification is task 016.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Guard module" location="scripts/LiveBuildGuard.psm1">Import and call; do not reimplement.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Map every az webapp deploy and slot swap call site in both scripts, and list them in the task notes.</step>
+    <step order="2">Import the module and insert the guard and dev-log calls at each site; add -Supersede.</step>
+    <step order="3">Write Pester tests that dot-source or invoke each script with az, git and gh mocked: a non-ancestor refuses before any deploy call; an ancestor deploys and logs once; a swap checks production.</step>
+    <step order="4">Add a source-scan test that fails if a line containing "az webapp deploy" appears in either script without a preceding Assert-LiveBuildAncestry call in the same function. This is the must-fire control for success criterion 2.</step>
+    <step order="5">Run the Pester tests and PSScriptAnalyzer.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a call site deploys a build whose commit cannot be determined (for example a prebuilt zip with no SHA), STOP and escalate with the site, rather than skipping the guard there.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">scripts/Deploy-BffApi.ps1</output>
+    <output type="code">scripts/Deploy-WorkspaceBff.ps1</output>
+    <output type="test">tests/scripts/Deploy-Guarded-Bff.Tests.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For each script, a stubbed non-ancestor live version makes it exit non-zero before any az webapp deploy mock is invoked.</criterion>
+    <criterion testable="true">For each script, a stubbed ancestor live version deploys and calls Write-DevLogEntry exactly once per deploy.</criterion>
+    <criterion testable="true">A slot deploy guards the target slot; a swap guards production.</criterion>
+    <criterion testable="true">-Supersede "reason" proceeds past a non-ancestor and the reason reaches the dev-log call; -Supersede "" is refused.</criterion>
+    <criterion testable="true">The source-scan test fails on a fixture with an unguarded az webapp deploy, and passes on both real scripts.</criterion>
+    <criterion testable="true">Negative: a Write-DevLogEntry failure does not change the script's exit code.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

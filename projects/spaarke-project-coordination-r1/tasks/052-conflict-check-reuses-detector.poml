@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>/conflict-check calls the detector for file overlap (FR-16)</title>
+    <phase>5 Resolution and critical areas</phase>
+    <gate>035 complete with owner confirmation of FR-16; 050 complete (sequential .claude edits)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Skill edit replacing prose overlap logic with a call.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One step replaced; the hot-path watchlist stays.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/: main-session-only (permission boundary).</parallel-reason>
+    <deps>035, 050</deps>
+    <tags>documentation, devops</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace /conflict-check's own file-overlap step with a call to scripts/quality/coordination-detector.py, keeping its hot-path watchlist.</prompt>
+  <role>SPAARKE AI-procedure maintainer.</role>
+  <goal>One implementation of file-overlap detection exists; /conflict-check calls it.</goal>
+
+  <context>
+    <background>Spec FR-16, moved to phase 5 so phase 3 stays report-only and reversible (NFR-05).</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/conflict-check/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-16">Scope: only the file-overlap step changes; the hot-path watchlist and every other step are unchanged. A detector failure falls back to a ⚠️ line plus the skill's previous manual gh pr list comparison.</constraint>
+    <constraint source="spec MUST NOT">Scope: no messaging wording.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the skill; identify the overlap step.</step>
+    <step order="2">Replace it with the detector call and the fallback.</step>
+    <step order="3">Run /conflict-check once on this branch; record the output in the task notes.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">.claude/skills/conflict-check/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The skill's overlap step calls the detector, with the stated fallback.</criterion>
+    <criterion testable="true">The hot-path watchlist text is unchanged (diff).</criterion>
+    <criterion testable="true">Negative: no other step changes; no messaging wording.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

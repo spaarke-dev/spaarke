@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>task-execute: Step 9.5 triage through the standard prompt; Step 10 closes the tracking issue (FR-06, FR-08)</title>
+    <phase>2 Findings: decide and dispose</phase>
+    <gate>020 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits the core execution skill every project runs; changes how scope is decided.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High blast radius: task-execute is used by every active project, and the edit must slot into existing Step 9.5 F/K classes without contradicting them.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/: main-session-only (permission boundary).</parallel-reason>
+    <deps>020</deps>
+    <tags>documentation, devops</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make task-execute Step 9.5 send every finding through the triage prompt in .claude/constraints/cross-session.md section C and map it to exactly one action. Make Step 10 close the task's tracking issue with a link to the commit or PR.</prompt>
+  <role>SPAARKE AI-procedure maintainer editing a core skill surgically.</role>
+  <goal>task-execute SKILL.md Step 9.5 cites section C and lists the eight action mappings; Step 10 closes the tracking issue. Nothing else in the skill changes.</goal>
+
+  <context>
+    <background>Spec FR-06, FR-08 (pilot L2) and design.md section 5.6. Finding detection (F/K classes) stays exactly as it is; only the decision step changes. The owner ruled out a numeric task budget: decide by value, fit and cost.</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/task-execute/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-06">Scope: Step 9.5 maps each finding to one of: Fix now (in task, no approval; F1 when its correct fix is Small or Medium); F1 with a Large correct fix (owner, flagged urgent, same turn); Fix now (tell) (new task plus notice); Ask owner (🔔 with value, cost and recommendation); Record vs files (issue per FR-09); Note (small-fixes list); Other project (issue for that project); Close (evidence per FR-10).</constraint>
+    <constraint source="spec FR-06">Scope: the task notes record the six prompt answers and the decision for each finding. An F1 is never Note, Record or Close. Scope grows only on Fix now, qualifying Fix now (tell), owner-approved items and F1.</constraint>
+    <constraint source="spec FR-08">Scope: Step 10 closes the task's tracking issue (the issue named in the POML or TASK-INDEX row, if any) with a comment linking the commit or PR. Issues merely referenced by the task are not closed. Triage skips tracking issues.</constraint>
+    <constraint source="project">Scope: cite the prompt by path; do not copy it into the skill. Do not renumber any step (task-create Failure Modes: step numbers are external API).</constraint>
+    <constraint source="spec MUST NOT">Scope: the "notice" in Fix now (tell) and "issue for that project" in Other project are records. The edit adds no wording about sending, when to send, or how to phrase a message to another session.</constraint>
+    <constraint source="NFR-06">Scope: one small PR; run /conflict-check first.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/design.md</file>
+      <file>.claude/constraints/cross-session.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read task-execute Step 9.5 and Step 10 in full.</step>
+    <step order="2">Edit Step 9.5 to add the decision step after classification.</step>
+    <step order="3">Edit Step 10 to add the tracking-issue close.</step>
+    <step order="4">Grep the diff for messaging guidance and record the result. Run pwsh scripts/quality/Test-InstructionPaths.ps1.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the existing Step 9.5 text contradicts a mapping (for example it already routes some F-class elsewhere), STOP and escalate with both texts rather than choosing one.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">.claude/skills/task-execute/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Step 9.5 cites .claude/constraints/cross-session.md section C and lists all eight mappings.</criterion>
+    <criterion testable="true">Step 9.5 states that the six answers and the decision are recorded in task notes, and the F1 and scope-growth negatives.</criterion>
+    <criterion testable="true">Step 10 closes the tracking issue with a commit or PR link, and states that referenced issues are not closed.</criterion>
+    <criterion testable="true">Negative: no step is renumbered; no other section of the skill changes (diff review).</criterion>
+    <criterion testable="true">Negative: the diff contains no wording about when, whether, how often or in what form to message.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

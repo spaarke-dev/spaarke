@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Wrap-up hands over owned areas and coord issues (FR-23)</title>
+    <phase>5 Resolution and critical areas</phase>
+    <gate>052 complete (sequential .claude edits)</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>One addition to the task-create Step 3.7 wrap-up list.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small explicit edit.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/: main-session-only (permission boundary).</parallel-reason>
+    <deps>031, 052</deps>
+    <tags>documentation, devops</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>Add to task-create Step 3.7 (the 090 wrap-up) that every owned_areas glob is handed to a named active project or released, and every open coord issue naming the project is closed or reassigned, before lifecycle is set to closed. Extend the registry validator so a closed project listing owned areas is an error.</prompt>
+  <role>SPAARKE AI-procedure maintainer.</role>
+  <goal>090 cannot close a project that still lists owned areas, and the validator enforces it.</goal>
+
+  <context>
+    <background>Spec FR-23; success criterion 9. Lifecycle closed is written in the same step (task 031).</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/task-create/SKILL.md</file>
+      <file role="modify">scripts/quality/project_registry.py</file>
+      <file role="modify">scripts/quality/tests/test_project_registry.py</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-23">Scope: the wrap-up text: for each owned glob, name the receiving active project (and edit its README frontmatter) or release it; close or reassign open coord issues with a comment; then write lifecycle closed and owned_areas: [].</constraint>
+    <constraint source="spec FR-23">Scope: project_registry.py --validate reports "closed project lists owned areas" as an error.</constraint>
+    <constraint source="spec MUST NOT">Scope: no messaging wording.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Edit Step 3.7.</step>
+    <step order="2">Add the validator rule and one test.</step>
+    <step order="3">Run python -m pytest scripts/quality/tests/test_project_registry.py.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">.claude/skills/task-create/SKILL.md</output>
+    <output type="code">scripts/quality/project_registry.py</output>
+    <output type="test">scripts/quality/tests/test_project_registry.py</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Step 3.7 states the handover, the coord issue disposition and the order (handover before closed).</criterion>
+    <criterion testable="true">A closed project with non-empty owned_areas fails --validate; a closed project with [] passes.</criterion>
+    <criterion testable="true">Negative: no step renumbered; no messaging wording.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

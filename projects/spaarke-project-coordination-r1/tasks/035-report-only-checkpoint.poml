@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Report-only checkpoint: is the detector signal worth surfacing; signal 3 on or off; FR-16 go</title>
+    <phase>3 Registry and detector (report-only)</phase>
+    <gate>034 merged, AND at least 7 nightly reports collected (1–2 weeks)</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Review of collected reports and an owner decision.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Summarizing reports against fixed questions.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>034</deps>
+    <tags>devops</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Summarize the nightly detector reports from the report-only period, and get the owner's decisions: whether hits are worth surfacing (phase 4), whether to turn on signal 3, and whether /conflict-check moves onto the detector (FR-16).</prompt>
+  <role>SPAARKE tooling developer reporting to the owner.</role>
+  <goal>notes/detector-checkpoint-{date}.md records hit counts by signal, a sample of true and false positives, and the owner's three decisions.</goal>
+
+  <context>
+    <background>Design.md section 9 owner checkpoints; spec FR-14 (signal 3 only by owner decision), FR-16 (after the report-only period and the owner's confirmation).</background>
+    <relevant-files>
+      <file role="output">projects/spaarke-project-coordination-r1/notes/detector-checkpoint-{date}.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the owner decides all three. The session presents counts, ten sample hits labelled true or false positive with a reason, and a recommendation per question.</constraint>
+    <constraint source="project">Scope: false positives found here become ignore-list additions proposed in the notes. They are not committed in this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Download the nightly artifacts (gh run download) for the period.</step>
+    <step order="2">Write the summary and samples.</step>
+    <step order="3">Present 🔔 Human Input Required with the three questions; record the answers in the notes and notes/decisions.md.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; set the gates of 040–053 per the decisions; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/spaarke-project-coordination-r1/notes/detector-checkpoint-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The notes give hit counts per signal per night and ten labelled samples.</criterion>
+    <criterion testable="true">The three owner decisions are recorded in the notes and notes/decisions.md.</criterion>
+    <criterion testable="true">Negative: no code, ignore-list or workflow change in this task.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

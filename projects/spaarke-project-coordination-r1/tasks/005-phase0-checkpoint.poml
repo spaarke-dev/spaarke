@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Phase 0 checkpoint: re-measure 14 days after FR-00 and get the owner's go/no-go</title>
+    <phase>0 Messaging configuration</phase>
+    <gate>001 and 004 complete, AND 14 days after the applied date in notes/phase0-applied-{date}.md</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Runs an existing script and writes a comparison report; no code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fixed comparison against stated pass criteria.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001, 004</deps>
+    <tags>testing, devops</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>Run the messaging measurement for the 14 days after FR-00 was applied, compare it with the baseline against the three pass criteria, and give the owner a go/no-go for phases 3–5.</prompt>
+  <role>SPAARKE tooling developer reporting measured results to the owner.</role>
+  <goal>notes/phase0-checkpoint-{date}.md compares baseline and checkpoint, states pass or fail per criterion, and records the owner's decision. TASK-INDEX.md shows phases 3–5 unblocked (pass) or held (fail).</goal>
+
+  <context>
+    <background>Spec Scope, phase 0 procedure, and success criterion 10. The pass criteria: (1) cross-session sends do not drop; (2) unprompted sends do not shift toward item-prompted ones; (3) no held, expired or misaddressed delivery notices remain. If it fails, the owner decides whether to revert FR-00 and whether phases 3–5 go ahead.</background>
+    <relevant-files>
+      <file role="output">projects/spaarke-project-coordination-r1/notes/phase0-checkpoint-{date}.md</file>
+      <file role="modify">projects/spaarke-project-coordination-r1/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec Scope">Scope: "does not drop" is judged on sends per active-session-day (sends divided by the number of distinct project-days with a transcript), so a quieter fortnight is not read as suppression. The report shows both raw and normalized figures.</constraint>
+    <constraint source="spec Scope">Scope: run scripts/quality/measure-cross-session-messaging.py with --delivery-notices for the window from the applied date to applied date plus 14 days.</constraint>
+    <constraint source="project">Scope: the owner makes the decision. The session presents the numbers and a recommendation; it does not unblock phases 3–5 on its own.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/notes/decisions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run the script for the checkpoint window and load the baseline report.</step>
+    <step order="2">Write the comparison: each criterion, the figures, pass or fail. Misaddressed means delivery notices whose recipient was not found.</step>
+    <step order="3">Present 🔔 Human Input Required with the result and a recommendation. Record the owner's decision in the report and in notes/decisions.md.</step>
+    <step order="4">On pass: set the gate of tasks 030–053 in TASK-INDEX.md to "phase 0 passed {date}". On fail: leave them blocked and record the owner's revert decision.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/spaarke-project-coordination-r1/notes/phase0-checkpoint-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The report gives baseline and checkpoint figures for sends (raw and normalized), the unprompted share, and delivery notices by kind.</criterion>
+    <criterion testable="true">Each of the three criteria is marked pass or fail with its figures.</criterion>
+    <criterion testable="true">The owner's decision is recorded in the report and in notes/decisions.md.</criterion>
+    <criterion testable="true">Negative: tasks 030–053 are not unblocked unless the owner decided "go".</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>SessionStart coordination banner as a second source in quality-alert-banner.py (FR-18)</title>
+    <phase>4 Records for sessions not running</phase>
+    <gate>035 complete with owner "surface" decision</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a SessionStart hook every session runs; must never wait on the network.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Extends an existing cached banner with a second source following its own pattern.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>035</deps>
+    <tags>devops, testing, unit-test, scripts</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend scripts/quality/quality-alert-banner.py so that, for the session's project, it also shows open coord issues, open review:&lt;project&gt; PRs, open owner decisions the project raised, and the last 5 dev-log entries. It reads from its cache, refreshes in the background, and is silent when there is nothing to show.</prompt>
+  <role>SPAARKE tooling developer. Python 3, Claude Code SessionStart hooks, gh.</role>
+  <goal>A session started in a project with an open coord issue sees it in the banner at start, with no network wait; tests pass.</goal>
+
+  <context>
+    <background>Spec FR-18. The banner already reads a cache and refreshes it in the background (root CLAUDE.md section 16). The project is identified as .claude/hooks/reinject-project-state.ps1 does. Task 003's messaging-config-check.py may already contain a Python port of that rule; reuse it if so. "Owner decisions the project raised" are open issues with the project label whose Board #2 Triage Decision is Ask owner (task 022).</background>
+    <relevant-files>
+      <file role="modify">scripts/quality/quality-alert-banner.py</file>
+      <file role="modify">scripts/quality/tests/test_quality_alert_banner.py</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-18">Scope: the foreground path reads only the cache file; the background refresh makes the gh calls. The foreground never blocks on the network, and a missing or stale cache shows nothing for the coordination section.</constraint>
+    <constraint source="spec FR-18">Scope: the coordination section shows up to 5 items per kind with title and URL, and is omitted entirely when all four kinds are empty. The existing quality-alert output is unchanged.</constraint>
+    <constraint source="NFR-08">Scope: dev-log lines show app, environment, slot, short SHA, actor and time only.</constraint>
+    <constraint source="project">Scope: no .claude/settings.json change; the script is already registered.</constraint>
+    <constraint source="spec MUST NOT">Scope: the banner lists items. It adds no line suggesting that the session message, reply to or contact anyone.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>.claude/hooks/reinject-project-state.ps1</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Background-cache banner" location="scripts/quality/quality-alert-banner.py">Extend in place; keep cache layout versioned.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the banner and its tests; extend the cache schema with a coordination section keyed by project.</step>
+    <step order="2">Add the background fetch for the four kinds, and the foreground render.</step>
+    <step order="3">Tests: the four kinds render; empty → no section; no project → no section; cache missing → no section and no network call in the foreground; existing tests unchanged.</step>
+    <step order="4">Run the tests and time a foreground run.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">scripts/quality/quality-alert-banner.py</output>
+    <output type="test">scripts/quality/tests/test_quality_alert_banner.py</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a cached open coord issue for the project, the foreground output lists it.</criterion>
+    <criterion testable="true">Given nothing cached for the project, the coordination section is absent.</criterion>
+    <criterion testable="true">The foreground path makes no network call (test asserts gh is not invoked).</criterion>
+    <criterion testable="true">Every pre-existing banner test passes unmodified.</criterion>
+    <criterion testable="true">Negative: no token or setting value appears in output; no messaging wording added.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

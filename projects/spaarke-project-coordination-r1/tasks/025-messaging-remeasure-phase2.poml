@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Re-measure cross-session messaging 28 days after phase 2 (FR-26)</title>
+    <phase>2 Findings: decide and dispose</phase>
+    <gate>020–024 merged, AND 28 days after the last of them merged</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Runs an existing script and writes a comparison.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fixed comparison.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>005, 024</deps>
+    <tags>testing, devops</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>Run the messaging measurement for the 28 days after phase 2 merged, compare it with the phase 0 checkpoint, and report any drop or shift to the owner.</prompt>
+  <role>SPAARKE tooling developer reporting measured results.</role>
+  <goal>notes/messaging-phase2-{date}.md compares the phase 0 checkpoint and the phase 2 window, and the owner has the result.</goal>
+
+  <context>
+    <background>Spec success criterion 10: a drop in cross-session sends, or a shift to item-prompted sends, is a defect against objective 0. It blocks the next phase until the wording that caused it is found and removed. Phase 2 added the constraint file and skill edits, which are the most likely source of a nudge.</background>
+    <relevant-files>
+      <file role="output">projects/spaarke-project-coordination-r1/notes/messaging-phase2-{date}.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-26">Scope: same script, same normalization as task 005 (sends per active project-day), raw figures shown too.</constraint>
+    <constraint source="spec success criterion 10">Scope: on a drop or shift, the report lists the phase 2 diffs touching wording sessions load (constraint file, task-execute, task-create, project-defer-issue-tracking). The owner decides; the session does not edit them in this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run the script for the window and load the phase 0 checkpoint report.</step>
+    <step order="2">Write the comparison; on a drop or shift, present 🔔 Human Input Required with the candidate wording.</step>
+    <step order="3">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/spaarke-project-coordination-r1/notes/messaging-phase2-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The report shows sends (raw and normalized), the unprompted share and delivery notices for both windows.</criterion>
+    <criterion testable="true">A drop or shift is either absent, or reported to the owner with the candidate wording listed.</criterion>
+    <criterion testable="true">Negative: no skill or constraint file is edited in this task.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

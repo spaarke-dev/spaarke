@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Deterministic coordination detector: signals 1–2, signal 3 behind a flag (FR-14)</title>
+    <phase>3 Registry and detector (report-only)</phase>
+    <gate>030 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New detector that later feeds Router blocking (FR-22) and /conflict-check (FR-16).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Complete spec with fixtures; deterministic set operations over git data.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>030</deps>
+    <tags>devops, testing, unit-test, scripts</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the report-only detector. It finds files changed by two active projects (signal 1) and changes inside another active project's owned area (signal 2), with planned POML overlap (signal 3) behind a flag that is off by default. It reads remote branches, open PRs, committed POMLs and, when run locally, sibling worktrees, and writes byte-identical JSON plus markdown.</prompt>
+  <role>SPAARKE tooling developer. Python 3, git plumbing, gh, deterministic output.</role>
+  <goal>scripts/quality/coordination-detector.py runs on demand, passes its fixtures, and produces identical output on identical input.</goal>
+
+  <context>
+    <background>Spec FR-14 and design.md section 5.2. Sources per C-7. Each project's changed files come from its origin/work/&lt;project&gt; branch versus origin/master, its open PR files, and (locally) its worktree's uncommitted changes. The open coord issue count is part of the report (FR-19 folded in).</background>
+    <relevant-files>
+      <file role="new">scripts/quality/coordination-detector.py</file>
+      <file role="new">scripts/quality/tests/test_coordination_detector.py</file>
+      <file role="new">scripts/quality/coordination-ignore.txt</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>.claude/skills/conflict-check/SKILL.md compares active PR files ad hoc, inside a session. It reads neither owned areas nor local worktrees, and produces no reusable output.</existing>
+    <extension>No: conflict-check is skill prose, not code. The detector becomes the implementation that conflict-check calls (FR-16, task 052).</extension>
+    <cost-of-doing-nothing>Overlaps with a project that has no live session are found by luck (design.md section 1; E5).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="spec FR-14">Scope: signal 1 = the same path changed by two active projects. Signal 2 = a path changed by project A that matches an owned_areas glob of active project B, with A not equal to B. Signal 3 (only with --planned) = a path in the relevant-files of a not-started or in-progress POML of one project that is changed or planned by another active project. Each hit carries its source label: remote or local.</constraint>
+    <constraint source="spec FR-14">Scope: the ignore list (coordination-ignore.txt, one glob per line) is seeded with **/Program.cs, Directory.Packages.props, **/package-lock.json and **/packages.lock.json. Paused and closed projects, and unregistered ones, are excluded and listed in the report header. A project never overlaps itself.</constraint>
+    <constraint source="spec FR-14">Scope: output is --json PATH and --markdown PATH. The JSON is sorted (projects, paths, hits) and has no timestamps. The report includes the count of open issues labelled coord, marked when above --coord-threshold (default 15). With --offline, the count is skipped and no gh call is made.</constraint>
+    <constraint source="spec FR-14 negative, NFR-01">Scope: report-only. The detector opens no issue, adds no label and always exits 0 unless its own arguments are invalid.</constraint>
+    <constraint source="NFR-04">Scope: no model calls.</constraint>
+    <constraint source="project">Scope: reads the registry only through scripts/quality/project_registry.py.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/design.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Registry reader" location="scripts/quality/project_registry.py">load_registry(); do not re-parse READMEs.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Design the data model: project → set of (path, source) for changed files, and for planned files under --planned.</step>
+    <step order="2">Write the collectors (git for remote branches, gh for PRs, a POML reader, local worktrees via git worktree list), each injectable for tests.</step>
+    <step order="3">Write the signals, ignore handling and output writers.</step>
+    <step order="4">Fixtures: must-fire for 1, 2 and 3 (flag on); must-not-fire for ignored paths, paused/closed/unregistered projects, self-overlap, and signal 3 with the flag off; byte-identical rerun.</step>
+    <step order="5">Run the tests, then one real run with --offline; record its hit count in the task notes.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">scripts/quality/coordination-detector.py</output>
+    <output type="code">scripts/quality/coordination-ignore.txt</output>
+    <output type="test">scripts/quality/tests/test_coordination_detector.py</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Must-fire: two active projects changing one path → one signal-1 hit; A changing a path in B's owned area → one signal-2 hit; with --planned, a pending POML path changed by another project → one signal-3 hit.</criterion>
+    <criterion testable="true">Must-not-fire: an ignored path; a paused, closed or unregistered project; a project against itself; signal 3 without --planned.</criterion>
+    <criterion testable="true">Each hit is labelled remote or local.</criterion>
+    <criterion testable="true">Two runs over identical fixtures produce byte-identical JSON.</criterion>
+    <criterion testable="true">The coord count is shown and marked above the threshold; --offline makes no gh call.</criterion>
+    <criterion testable="true">Negative: no GitHub write in any code path (gh is called only with read subcommands; a test asserts this).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

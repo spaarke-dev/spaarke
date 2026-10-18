@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Cross-session messaging measurement script and baseline report (FR-26)</title>
+    <phase>0 Messaging configuration</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New Python script plus tests under scripts/quality; report-only, changes no behaviour.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single script with a fully specified contract and an existing script/test pair to copy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>testing, unit-test, devops, scripts</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the report-only script that counts cross-session messaging per day and per project from local Claude Code transcripts, then run it for the baseline (the 14 days before today) and commit the report.</prompt>
+  <role>SPAARKE tooling developer. Python 3, pytest, deterministic text processing. Treats transcript content as private: counts leave the machine, content does not.</role>
+  <goal>scripts/quality/measure-cross-session-messaging.py exists with passing tests, and projects/spaarke-project-coordination-r1/notes/messaging-baseline-{date}.md holds the baseline counts that the phase 0 checkpoint (task 005) compares against.</goal>
+
+  <context>
+    <background>Objective 0 (design.md section 1, spec Success criterion 10): this project must not reduce Claude Code's unprompted cross-session messaging. Without a measurement, suppression would go unnoticed. The raw indicator taken 2026-10-17 by hand (4,396 SendMessage calls including subagents; 3,767 inbound cross-session blocks; 1,776 transcripts) did not separate session sends from subagent sends. That is what this script fixes.</background>
+    <relevant-files>
+      <file role="new">scripts/quality/measure-cross-session-messaging.py</file>
+      <file role="new">scripts/quality/tests/test_measure_cross_session_messaging.py</file>
+      <file role="new">scripts/quality/tests/fixtures/messaging/</file>
+      <file role="new">projects/spaarke-project-coordination-r1/notes/messaging-baseline-{date}.md</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>None: no script under scripts/ reads ~/.claude/projects transcripts (Grep "projects/\*\*/\*.jsonl" and "cross-session-message" in scripts/ returns nothing).</existing>
+    <extension>No. The existing scripts/quality scripts are hooks with per-call input, and this is an offline batch report over transcript files.</extension>
+    <cost-of-doing-nothing>The phase 0 checkpoint (spec Scope) and success criterion 10 have no data, so a drop in unprompted messaging caused by this project's changes cannot be detected.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="spec FR-26">Scope: counts, per UTC day and per project, (1) cross-session sends: SendMessage calls addressed to another Claude session, excluding sends to subagents or teammates spawned by the Agent tool; (2) inbound cross-session messages: cross-session-message blocks in user turns; (3) with --delivery-notices, results containing "[Cross-session delivery notice]", split into held / expired / refused / other.</constraint>
+    <constraint source="spec FR-26">Scope: each send is classified "unprompted" or "item-prompted". A send is item-prompted when one of the configured marker strings appears in the same transcript within the 5 preceding entries. The marker list is a constant at the top of the script, holds the banner and detector headings that tasks 033 and 041 will add, and is empty-safe. The baseline therefore shows every send as unprompted.</constraint>
+    <constraint source="spec FR-26">Scope: the project for a transcript is derived from its folder name under ~/.claude/projects (for example c--code-files-spaarke-wt-unified-access-control-r2 → unified-access-control-r2; the main checkout folder → "main"; anything else → "other").</constraint>
+    <constraint source="NFR-04, FR-26">Scope: deterministic. The same inputs give byte-identical JSON. There are no timestamps in the output except the --since/--until window echoed from arguments, and no model calls.</constraint>
+    <constraint source="NFR-08, FR-26">Scope: the report contains counts and classifications only. It never contains message text, addresses, file paths from inside transcripts, or tool inputs. Read-only: the script never writes into ~/.claude.</constraint>
+    <constraint source="project">Scope: the script is not registered as a hook and not added to .claude/settings.json.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Script plus pytest pair" location="scripts/quality/quality-alert-banner.py">Module layout, argument handling and the matching test file scripts/quality/tests/test_quality_alert_banner.py.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read 3 or 4 real transcripts under ~/.claude/projects to learn how a SendMessage tool_use and its tool_result distinguish a session recipient from a subagent recipient, and how cross-session-message blocks and delivery notices appear. Build sanitized fixtures from what you see: synthetic text, the same JSON shape.</step>
+    <step order="2">Write the script with --since, --until, --root (default ~/.claude/projects), --delivery-notices, --json and --markdown output options.</step>
+    <step order="3">Write tests: one per counted category, the subagent exclusion, the item-prompted classification, the project mapping, byte-identical reruns, and a check that no fixture message text appears in either output.</step>
+    <step order="4">Run python -m pytest scripts/quality/tests/test_measure_cross_session_messaging.py.</step>
+    <step order="5">Run the baseline for the 14 days ending today with --delivery-notices on, and write notes/messaging-baseline-{date}.md: the markdown table plus one line saying how the session-versus-subagent distinction was made.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+    <step order="7">Record any deviation in projects/spaarke-project-coordination-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If transcripts do not let a session recipient be told apart from a subagent recipient reliably, STOP and escalate (root CLAUDE.md section 6) with the fields you found, rather than guessing a heuristic.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">scripts/quality/measure-cross-session-messaging.py</output>
+    <output type="test">scripts/quality/tests/test_measure_cross_session_messaging.py</output>
+    <output type="docs">projects/spaarke-project-coordination-r1/notes/messaging-baseline-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a fixture with two session sends and one subagent send, the per-day send count is 2.</criterion>
+    <criterion testable="true">Given a fixture with inbound cross-session-message blocks, the inbound count matches the number of blocks.</criterion>
+    <criterion testable="true">With --delivery-notices, held, expired and refused notices are counted separately; without the flag, they are not reported.</criterion>
+    <criterion testable="true">A send preceded within 5 entries by a configured marker string is item-prompted; with an empty marker list, every send is unprompted.</criterion>
+    <criterion testable="true">Two runs over the same fixtures produce byte-identical JSON.</criterion>
+    <criterion testable="true">Negative: no fixture message text, address or tool input appears in the JSON or markdown output.</criterion>
+    <criterion testable="true">Negative: running the script modifies no file under --root (the test compares file mtimes before and after).</criterion>
+    <criterion testable="true">The baseline report is committed under notes/ with sends, inbound and delivery notices per project.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>The baseline transcript window may include this project's own spike sessions (2026-10-17). Count them, and list the spike project folder separately so task 005 can exclude it if the owner wants.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

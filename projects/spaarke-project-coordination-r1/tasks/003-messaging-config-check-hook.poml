@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>SessionStart messaging configuration, address and version check (FR-00)</title>
+    <phase>0 Messaging configuration</phase>
+    <gate>002 complete (mechanism chosen)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New hook script registered in .claude/settings.json; runs at every session start for every project.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Narrow hook with a fixed contract and an existing SessionStart script plus tests to copy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/settings.json: main-session-only (permission boundary).</parallel-reason>
+    <deps>002</deps>
+    <tags>devops, config, settings, testing, unit-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a SessionStart check that is silent when messaging is configured correctly. Otherwise it prints one line per problem: missing user settings (with the exact JSON), a PATH claude below the 2.1.236 floor, and, for mechanism 2, an address that is not the project slug (with the exact rename).</prompt>
+  <role>SPAARKE tooling developer. Claude Code hooks, Python 3, pytest. Writes hooks that are fast, silent on success and fail open.</role>
+  <goal>scripts/quality/messaging-config-check.py is registered under the existing SessionStart "startup|resume" matcher, passes its tests, and prints nothing on a correctly configured machine.</goal>
+
+  <context>
+    <background>Spec FR-00: messages fail for mechanical reasons. Held messages expire, addresses change on restart, truncated names collide, and the PATH claude (npm global 2.1.6) cannot message at all. crossSessionInbound and dialogExpiry are user-scope settings, so the repo cannot set them; it can only check and say so. Task 002 chose the naming mechanism. Read its decision in notes/naming-spike-2026-10-17.md first.</background>
+    <relevant-files>
+      <file role="new">scripts/quality/messaging-config-check.py</file>
+      <file role="new">scripts/quality/tests/test_messaging_config_check.py</file>
+      <file role="modify">.claude/settings.json</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>scripts/quality/quality-alert-banner.py (SessionStart startup|resume, quality alerts) and .claude/hooks/reinject-project-state.ps1 (SessionStart compact, project state). Neither reads user settings or binary versions.</existing>
+    <extension>Registered beside them under the existing startup|resume matcher. It is a separate script because the banner's job is GitHub alert caching, and merging local config checks into it would mix two concerns with different failure modes.</extension>
+    <cost-of-doing-nothing>Held messages keep expiring, the 2.1.6 PATH binary keeps failing silently, and addresses keep drifting on restart: the three message losses of 2026-10-15 (E2, K-6, K-7).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="spec FR-00">Scope: checks exactly these. (1) ~/.claude/settings.json has crossSessionInbound "accept" and dialogExpiry "never"; when either is missing, print the exact JSON to add. (2) The claude found on PATH reports a version of at least 2.1.236; when it is lower or missing, print its path and version. (3) Only if task 002 chose mechanism 2: the session's address differs from the project slug; print the exact rename. (4) Only if task 002 chose mechanism 3: print nothing about addresses, and leave the lookup facts to the constraint file (task 020).</constraint>
+    <constraint source="spec FR-00 (e), NFR-02">Scope: under 2 s in total, no network call, silent when every check passes, exits 0 on every path, including errors (fail open).</constraint>
+    <constraint source="project">Scope: the project slug is derived exactly as .claude/hooks/reinject-project-state.ps1 derives it (a work/&lt;project&gt; branch or a spaarke-wt-&lt;project&gt; folder). If no project is identified, check 3 is skipped.</constraint>
+    <constraint source="spec FR-00 negatives">Scope: the script adds no permissions entry, never sets isolatePeerMachines, and never writes any settings file. It only reads.</constraint>
+    <constraint source="spec MUST NOT">Scope: every printed line and every comment in the script states a configuration fact or the exact fix. No line says when, whether or how to message.</constraint>
+    <constraint source="root CLAUDE.md section 16">Scope: the registration in .claude/settings.json records "Enforced by: scripts/quality/messaging-config-check.py + scripts/quality/tests/test_messaging_config_check.py" in the script's header docstring.</constraint>
+    <constraint source="project">Scope: before the PR, check whether PR #2043 (which also edits .claude/settings.json) has merged; rebase onto it if it has.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/notes/naming-spike-2026-10-17.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="SessionStart script, silent and fail-open" location="scripts/quality/quality-alert-banner.py">Output shape for SessionStart additionalContext, error handling, and the test layout in scripts/quality/tests/test_quality_alert_banner.py.</pattern>
+      <pattern name="Project identification" location=".claude/hooks/reinject-project-state.ps1">Branch-then-folder rule, ported to Python.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the task 002 decision. Decide how the hook reads the current session address for check 3 (hook input fields or the session's transcript metadata), only if mechanism 2 was chosen.</step>
+    <step order="2">Write the script and its tests with settings, versions and addresses injected through arguments or environment for testability.</step>
+    <step order="3">Register it in .claude/settings.json under SessionStart "startup|resume" as a second command beside the quality-alert banner, with a timeout of 5.</step>
+    <step order="4">Run python -m pytest scripts/quality/tests/test_messaging_config_check.py, and time one real run.</step>
+    <step order="5">Grep the diff for messaging guidance (spec MUST NOT) and record the result in the task notes.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If mechanism 2 was chosen but no reliable source of the current address is available to a SessionStart hook, STOP and escalate rather than printing the rename line on every start.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">scripts/quality/messaging-config-check.py</output>
+    <output type="test">scripts/quality/tests/test_messaging_config_check.py</output>
+    <output type="config">.claude/settings.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Must-not-fire: with both settings present, a PATH claude at or above 2.1.236 and (mechanism 2) a matching address, the output is empty.</criterion>
+    <criterion testable="true">Must-fire: crossSessionInbound missing → one line containing the exact JSON; dialogExpiry missing → one line containing the exact JSON.</criterion>
+    <criterion testable="true">Must-fire: PATH claude at 2.1.6 → one line naming its path and version; claude missing from PATH → no error, one line saying it is absent.</criterion>
+    <criterion testable="true">Mechanism 2 only: an address that is not the project slug → one line with the exact rename; with no identifiable project → no address line.</criterion>
+    <criterion testable="true">An unreadable or malformed settings file → exit 0 with no traceback (fail open).</criterion>
+    <criterion testable="true">A real run completes in under 2 s.</criterion>
+    <criterion testable="true">Negative: the script writes no file; no settings scope gains a permissions entry naming SendMessage or ListAgents; isolatePeerMachines is not set anywhere.</criterion>
+    <criterion testable="true">Negative: the diff contains no wording about when, whether, how often or in what form to message.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Worktree write boundary: extend guard-worktree-links.py to Write, Edit and destructive commands (FR-25)</title>
+    <phase>1 Shared environment guards</phase>
+    <gate>014 complete (shares .claude/settings.json)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Extends a live PreToolUse hook to every Write and Edit call; false positives would slow every session.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Brownfield extension of one hook with an explicit fixture list.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/settings.json: main-session-only (permission boundary); sequential after 014.</parallel-reason>
+    <deps>014</deps>
+    <tags>devops, config, settings, testing, unit-test</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend scripts/quality/guard-worktree-links.py so it returns "ask" when Write, Edit or a destructive shell command targets a path inside another registered worktree, the main checkout included. Keep its existing rules and its fail-open stance.</prompt>
+  <role>SPAARKE tooling developer. Claude Code hooks, Python 3, Windows path resolution (8.3 short names, junctions, drive-letter case), git worktrees.</role>
+  <goal>The extended hook passes all existing tests plus the FR-25 must-fire and must-not-fire fixtures, and is registered for Write and Edit as well as Bash and PowerShell.</goal>
+
+  <context>
+    <background>E4 (design.md section 4 and 5.9): a session deleted files in a peer's worktree. K-5: the hook already guards links between worktrees and deletes of a worktree root (FAILURE-MODES G-20), but not plain writes or destructive git into a sibling. The sandbox was evaluated and rejected: it does not run on native Windows and does not cover the file tools.</background>
+    <relevant-files>
+      <file role="modify">scripts/quality/guard-worktree-links.py</file>
+      <file role="modify">scripts/quality/tests/test_guard_worktree_links.py</file>
+      <file role="modify">.claude/settings.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-25">Scope: returns ask for (1) Write or Edit whose file_path resolves inside another registered worktree or the main checkout; (2) rm, rm -rf, Remove-Item, git checkout --, git clean and git reset --hard whose target path, or whose -C or working directory, resolves inside another registered worktree or the main checkout.</constraint>
+    <constraint source="spec FR-25">Scope: registered worktrees come from git worktree list --porcelain, run locally once per call with a 2 s timeout. If it fails, the new rules allow (fail open). The session's own worktree is the one containing the hook's cwd.</constraint>
+    <constraint source="spec FR-25">Scope: allows without output: paths inside the session's own worktree; the scratchpad and system temp directories; anything under ~/.claude; paths outside every registered worktree root; every read (Read, Grep, Glob, cat, ls, git log, git diff).</constraint>
+    <constraint source="project">Scope: path comparison normalizes drive-letter case, slash direction, 8.3 short names (os.path.realpath or GetLongPathName) and trailing separators, so C:\wt081 style short worktrees and long paths compare correctly.</constraint>
+    <constraint source="NFR-02">Scope: ask, never deny; under 5 s; no network; fails open; every existing test still passes unchanged; the header docstring's "Enforced by:" line lists the new rules.</constraint>
+    <constraint source="spec FR-25">Scope: the docstring records that the Claude Code sandbox was evaluated and rejected, and why.</constraint>
+    <constraint source="project">Scope: in .claude/settings.json, add guard-worktree-links.py to PreToolUse for "Edit|Write" (a new PreToolUse entry if none exists for that matcher). Do not change the existing Bash|PowerShell entry or any PostToolUse entry.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/design.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing hook and tests" location="scripts/quality/guard-worktree-links.py">Extend in place; keep its structure and test style.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the hook and its tests; list its existing rules in the task notes.</step>
+    <step order="2">Add worktree discovery and path normalization, then the Write/Edit rule and the destructive-command rule.</step>
+    <step order="3">Add the fixtures, using temporary directories registered as fake worktrees with the worktree list injected, so tests do not depend on the real machine.</step>
+    <step order="4">Register for Edit|Write in .claude/settings.json; run the full test file and time a real call on this machine (about 40 worktrees).</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a real call on this machine takes more than 2 s because of git worktree list, STOP and escalate with the timing, rather than adding a cache with its own staleness rules.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">scripts/quality/guard-worktree-links.py</output>
+    <output type="test">scripts/quality/tests/test_guard_worktree_links.py</output>
+    <output type="config">.claude/settings.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Must-fire: Write into a sibling worktree; Edit of a file in the main checkout from a worktree session; rm -rf of a path in a sibling; Remove-Item -Recurse of a path in a sibling; git -C sibling clean -fd; git -C sibling reset --hard; git checkout -- file run with the sibling as working directory.</criterion>
+    <criterion testable="true">Must-not-fire: Write and Edit inside the own worktree; Write to the scratchpad, system temp and ~/.claude/memory; a short-path directory outside every registered worktree; Read, Grep and cat of a sibling's file.</criterion>
+    <criterion testable="true">A short-name path (8.3) to a sibling is recognized as that sibling.</criterion>
+    <criterion testable="true">git worktree list failing → the new rules allow; existing rules unchanged.</criterion>
+    <criterion testable="true">Every pre-existing test in test_guard_worktree_links.py passes unmodified.</criterion>
+    <criterion testable="true">Negative: no path returns "deny".</criterion>
+    <criterion testable="true">A real call completes in under 5 s.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+    <criterion testable="true">Seeding proof: make the sibling check always false once and confirm the Write-into-sibling test fails, then restore it.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

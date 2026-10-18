@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-project-coordination-r1">
+  <metadata>
+    <title>Pre-code coordination issues: one per point, idempotent, auto-closed (FR-17)</title>
+    <phase>4 Records for sessions not running</phase>
+    <gate>035 complete with owner "surface" decision</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New script that writes GitHub issues from CI; idempotency is the main risk.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fixed key, fixed open/update/close rules, existing CI issue pattern to copy.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>035</deps>
+    <tags>devops, ci-cd, testing, unit-test, scripts</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the sync that opens one coordination issue per pre-code overlap in a critical area, or one needing an agreement or owner decision. It updates rather than duplicates, closes with a reason when the overlap disappears, and runs after the nightly detector.</prompt>
+  <role>SPAARKE DevOps developer. Python 3, gh, idempotent reconciliation.</role>
+  <goal>scripts/quality/coordination-issue-sync.py reconciles detector output with open coord issues; a second run on unchanged state makes zero mutations; the nightly job runs it.</goal>
+
+  <context>
+    <background>Spec FR-17 and design.md section 5.3: for landed code the PR is the record (review:&lt;owner&gt;, FR-21), so coordination issues exist only before code does. Pre-code inputs are signal 3 hits (if the owner turned it on at 035) and "Coordination" list entries in specs (task 034 format). Critical-area globs and the "needs a decision" rule are in .claude/constraints/cross-session.md section B.</background>
+    <relevant-files>
+      <file role="new">scripts/quality/coordination-issue-sync.py</file>
+      <file role="new">scripts/quality/tests/test_coordination_issue_sync.py</file>
+      <file role="modify">.github/workflows/nightly-health.yml</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>.github/actions/quality-alert/action.yml opens and auto-closes one issue per failing nightly check.</existing>
+    <extension>The same open/auto-close idea, but keyed per project pair and area with two labels. The action is shell for a single fixed issue and cannot key per pair, so this is a script that follows its conventions.</extension>
+    <cost-of-doing-nothing>A planned overlap with a project that has no live session has no record that session will see at start (E2).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="spec FR-17">Scope: the key is the sorted project pair plus the area, written as a hidden marker in the issue body (an HTML comment, coord-key: a|b|area). Labels: coord plus both bare project labels. Title: "coord: a ↔ b — area".</constraint>
+    <constraint source="spec FR-17">Scope: open only when the point is pre-code (signal 3, or a spec Coordination entry) AND (in a critical area OR the entry says it needs an agreement or owner decision). No issue when an open PR already touches the area (that PR carries review:&lt;owner&gt;).</constraint>
+    <constraint source="spec FR-17, NFR-03">Scope: an existing open issue with the key gets its body updated only if its content changed. A key no longer present gets a closing comment with the reason, and is closed. A second run on unchanged state makes zero GitHub writes.</constraint>
+    <constraint source="NFR-01">Scope: failures warn and exit 0; the nightly step is continue-on-error.</constraint>
+    <constraint source="spec MUST NOT">Scope: issue bodies state the overlap (projects, paths, source) only; no wording asking anyone to message.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-project-coordination-r1/spec.md</file>
+      <file>projects/spaarke-project-coordination-r1/design.md</file>
+      <file>.claude/constraints/cross-session.md</file>
+    </files>
+    <patterns>
+      <pattern name="CI issue open/auto-close" location=".github/actions/quality-alert/action.yml">Marker, label and close-with-reason conventions.</pattern>
+      <pattern name="Detector JSON" location="scripts/quality/coordination-detector.py">Input format.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Write the reconciler with gh behind an injectable client.</step>
+    <step order="2">Tests: open, update-only-on-change, close-with-reason, no issue for a non-critical no-decision overlap, no issue when a PR exists, zero writes on rerun.</step>
+    <step order="3">Add a step after the detector in the nightly coordination-report job, with issues: write on that job only.</step>
+    <step order="4">Run the tests; one dry run (--dry-run prints planned writes) against real state, recorded in the task notes.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">scripts/quality/coordination-issue-sync.py</output>
+    <output type="test">scripts/quality/tests/test_coordination_issue_sync.py</output>
+    <output type="code">.github/workflows/nightly-health.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A new critical-area pre-code overlap → one issue with the key marker, coord and both project labels.</criterion>
+    <criterion testable="true">An unchanged rerun → zero writes; a changed overlap → one body update; a vanished overlap → closed with a reason comment.</criterion>
+    <criterion testable="true">Must-not-fire: a non-critical overlap without a decision need; an overlap whose area already has an open PR.</criterion>
+    <criterion testable="true">--dry-run makes no write.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in the knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>
