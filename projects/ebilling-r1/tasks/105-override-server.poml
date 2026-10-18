@@ -44,6 +44,14 @@
   </context>
 
   <constraints>
+    <constraint source="074 ontology-r1 review K1/K3 (2026-10-17)">Recording billing Decision Records through BillingDecisionRecorder (074) brings two caller obligations.
+- (1) Exactly-once. The writer is exactly-once only for retries made one after another; two concurrent calls with one decision id can both write, and a duplicate in an append-only ledger is permanent. So:
+  - this task names its serialisation mechanism as an acceptance criterion. Examples: the job claims IIdempotencyService keyed by the decision id; an endpoint does a RowVersion-conditional status update and records only after it succeeds;
+  - it adds a test for the concurrent same-id case.
+- (2) Decider identity:
+  - derive the deciding user from the authenticated principal, never from request input;
+  - check invoice access through the UAC filter before recording;
+  - pass no contact id. The recorder looks the contact up itself, as DecisionCommitService does; 074's fix round removes that parameter.</constraint>
     <constraint source="owner D-101 (2026-10-17)">An overridden submission already has its invoice (In Review, held). Override releases it to approval, and its Decision Record files under that invoice (D-100 WriteBillingDecisionAsync).</constraint>
     <constraint source="D-76">eBilling Override is a Dataverse table privilege on a small dedicated table (owner decision D-76), checked once through CallerRecordAccessProbe.CallerHoldsPrivilegeAsync and failing closed; no security-role-name check and no app role. The table is created by an idempotent additive script under scripts/ebilling/ and captured into the solution source by the next deploy task; answer the root CLAUDE.md section 11 three questions for it in notes.</constraint>
     <constraint source="FR-19, FR-37, root CLAUDE.md section 6">Override requires the privilege, checked server-side on every call, fail closed (no token, probe failure, unknown user = 403 ebilling.override.not_permitted). Reason required (400). One person: no second approval step.</constraint>

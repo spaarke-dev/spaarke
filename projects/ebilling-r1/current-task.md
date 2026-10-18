@@ -39,6 +39,14 @@
   - modifiedon equals createdon;
   - no current version.
   Must-fire test: a rerun after a partial run leaves exactly one set. Must-not-fire test: a draft an admin edited or accepted is never deleted.
+- **074 fix round (ontology-r1 adversarial pass; all 7 conditions MET):**
+  - F4-1: when ResolvedSignalIds is non-empty, read each Signal's subject app-only (rule from DecisionCommitService.SignalSubjectsOf), refuse with OwnerRefused when a subject is undetermined or the Signal is missing, and pass SignalSubjects into BillingReview. Test: an invoice decision resolving a line Signal puts the line in OwnerAsks[0].Parents. Full fix, not the stop-gap.
+  - F3-1: the forged row in DecisionRecordWriterTests.Billing.cs:183-201 gets sprk_actioncode="approve-invoice"; update notes §8.3 M2.
+  - K2: store a content hash in sprk_steps (the ReviewHash pattern); a repeat with different values is refused as ReviewInvalid.
+  - K3: the recorder drops the contactId input and looks the contact up itself.
+  - K4: add sprk_actioncode In <billing codes> to the existence lookup.
+  - K4: fix the notes §8 hashes to cd44dbcca..0bc6a7ad9.
+  - Keep C7 additive: these change only the billing additions.
 - **053 deploy order (from 075):** run Deploy-ActionMirrors.ps1 and Seed-PlaybookConsumers.ps1 (the BILLING-RULE-DRAFT Binding) before or with the BFF, then check /healthz. `prvCreatesprk_Policy` and `prvWritesprk_ruleset` both exist live (checked).
 
 ### Critical Context

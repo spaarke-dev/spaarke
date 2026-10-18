@@ -48,6 +48,14 @@
   </context>
 
   <constraints>
+    <constraint source="074 ontology-r1 review K1/K3 (2026-10-17)">Recording billing Decision Records through BillingDecisionRecorder (074) brings two caller obligations.
+- (1) Exactly-once. The writer is exactly-once only for retries made one after another; two concurrent calls with one decision id can both write, and a duplicate in an append-only ledger is permanent. So:
+  - this task names its serialisation mechanism as an acceptance criterion. Examples: the job claims IIdempotencyService keyed by the decision id; an endpoint does a RowVersion-conditional status update and records only after it succeeds;
+  - it adds a test for the concurrent same-id case.
+- (2) Decider identity:
+  - derive the deciding user from the authenticated principal, never from request input;
+  - check invoice access through the UAC filter before recording;
+  - pass no contact id. The recorder looks the contact up itself, as DecisionCommitService does; 074's fix round removes that parameter.</constraint>
     <constraint source="owner D-104 (2026-10-17)">Build Pending Spend, kept separate from actual spend. It sums In Review invoices that are NOT held.
 - Define the pending status set and the held exclusion once in FinanceBaseValues, next to CountedInvoiceStatuses.
 - Compute it on both paths: a stored rollup column on matter and project, written by FinanceRollupService; and a live FinanceBaseValues measure for Thresholds.

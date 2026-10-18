@@ -47,6 +47,14 @@
   </context>
 
   <constraints>
+    <constraint source="074 ontology-r1 review K1/K3 (2026-10-17)">Recording billing Decision Records through BillingDecisionRecorder (074) brings two caller obligations.
+- (1) Exactly-once. The writer is exactly-once only for retries made one after another; two concurrent calls with one decision id can both write, and a duplicate in an append-only ledger is permanent. So:
+  - this task names its serialisation mechanism as an acceptance criterion. Examples: the job claims IIdempotencyService keyed by the decision id; an endpoint does a RowVersion-conditional status update and records only after it succeeds;
+  - it adds a test for the concurrent same-id case.
+- (2) Decider identity:
+  - derive the deciding user from the authenticated principal, never from request input;
+  - check invoice access through the UAC filter before recording;
+  - pass no contact id. The recorder looks the contact up itself, as DecisionCommitService does; 074's fix round removes that parameter.</constraint>
     <constraint source="FR-35, root CLAUDE.md section 6">Eligibility is resolved live from the core record at every approve call (authoritative); the stored N:N is for the view only and never grants approval. Non-eligible caller: 403 ebilling.approver.not_eligible, nothing written.</constraint>
     <constraint source="I-2">Approve refused (409 ebilling.approve.lines_open, with counts) while any line is Pending or Flagged.</constraint>
     <constraint source="FR-35, FR-30">Exactly one Decision Record per approval, attributed to the approver whose transition succeeded. A second approve after Approved is a no-op (200, current state, no record). Recover a failure between transition and record on retry by the same approver; tests cover it.</constraint>

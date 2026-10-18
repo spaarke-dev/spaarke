@@ -42,6 +42,14 @@
   </context>
 
   <constraints>
+    <constraint source="074 ontology-r1 review K1/K3 (2026-10-17)">Recording billing Decision Records through BillingDecisionRecorder (074) brings two caller obligations.
+- (1) Exactly-once. The writer is exactly-once only for retries made one after another; two concurrent calls with one decision id can both write, and a duplicate in an append-only ledger is permanent. So:
+  - this task names its serialisation mechanism as an acceptance criterion. Examples: the job claims IIdempotencyService keyed by the decision id; an endpoint does a RowVersion-conditional status update and records only after it succeeds;
+  - it adds a test for the concurrent same-id case.
+- (2) Decider identity:
+  - derive the deciding user from the authenticated principal, never from request input;
+  - check invoice access through the UAC filter before recording;
+  - pass no contact id. The recorder looks the contact up itself, as DecisionCommitService does; 074's fix round removes that parameter.</constraint>
     <constraint source="owner D-101 (2026-10-17)">A blocked or rejected submission already has its invoice (049 persists it). Return to firm sets that invoice to Returned to Firm through the lifecycle service, and its Decision Record files under the invoice (D-100 WriteBillingDecisionAsync). Do not add a submission lookup to sprk_decisionrecord.</constraint>
     <constraint source="FR-36">Reason required for both (400 ebilling.reason_required); reject and return only from In Review (409 otherwise); a second call after the invoice left In Review is a no-op with no new Decision Record.</constraint>
     <constraint source="FR-35 / F-7 default, root CLAUDE.md section 6">Only eligible approvers (103's live check) may reject or return: 403 ebilling.approver.not_eligible otherwise. Route filter "ebilling.invoice.decide".</constraint>
