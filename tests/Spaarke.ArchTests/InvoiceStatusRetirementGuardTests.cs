@@ -68,12 +68,84 @@ public class InvoiceStatusRetirementGuardTests
             "private const string TransitionalInvoiceStatusColumn = \"sprk_invoicestatus\"; // transitional (015/D-97): remove after the dev column delete"),
     };
 
-    private static bool IsExempt(string relativePath, string line) =>
-        TransitionalExemptions.Any(e => e.File == relativePath.Replace('\\', '/') && e.Line == line.Trim());
+    /// <summary>The two files the transition-window exemptions may name, and the marker every exempt line must carry (D-97).</summary>
+    private static readonly string[] ExpectedExemptFiles =
+    {
+        "src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs",
+        "tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs",
+    };
+
+    private const string TransitionalMarker = "transitional (015/D-97)";
+
+    /// <summary>
+    /// What is wrong with an exemption list, or <c>null</c> when it is exactly the two sanctioned entries: the file paths are exactly
+    /// <see cref="ExpectedExemptFiles"/> (in that order, so a count alone cannot pass a swapped-in file) and every line carries
+    /// <see cref="TransitionalMarker"/>.
+    /// </summary>
+    internal static string? ExemptionListProblem(IReadOnlyList<(string File, string Line)> entries)
+    {
+        var files = entries.Select(e => e.File).ToArray();
+        if (!files.SequenceEqual(ExpectedExemptFiles, StringComparer.Ordinal))
+        {
+            return $"the exempt files must be exactly [{string.Join(", ", ExpectedExemptFiles)}], found [{string.Join(", ", files)}]";
+        }
+
+        var unmarked = entries.Where(e => !e.Line.Contains(TransitionalMarker, StringComparison.Ordinal)).Select(e => $"{e.File}: {e.Line}").ToList();
+        return unmarked.Count == 0 ? null : $"every exempt line must contain '{TransitionalMarker}'; missing in: {string.Join(" | ", unmarked)}";
+    }
+
+    /// <summary>Index into <see cref="TransitionalExemptions"/> of the entry that exempts this line of this file, or -1.</summary>
+    private static int ExemptEntryIndex(string relativePath, string line)
+    {
+        var path = relativePath.Replace('\\', '/');
+        var trimmed = line.Trim();
+        for (var i = 0; i < TransitionalExemptions.Length; i++)
+        {
+            if (TransitionalExemptions[i].File == path && TransitionalExemptions[i].Line == trimmed)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
 
     /// <summary>Violations on one line of one file: <see cref="Violations(string)"/> minus the exact transition-window entries.</summary>
     internal static IReadOnlyList<string> Violations(string relativePath, string line) =>
-        IsExempt(relativePath, line) ? Array.Empty<string>() : Violations(line);
+        ExemptEntryIndex(relativePath, line) >= 0 ? Array.Empty<string>() : Violations(line);
+
+    /// <summary>
+    /// Scans the lines of one file: the violations (<c>path:line: why</c>) and how often each exemption entry was used. An exemption
+    /// covers ONE line: a second identical copy (a pasted duplicate of the marker line) is a second use, reported by
+    /// <see cref="ExemptionUsageProblems"/>.
+    /// </summary>
+    internal static (List<string> Found, int[] ExemptHits) ScanLines(string relativePath, IReadOnlyList<string> lines)
+    {
+        var found = new List<string>();
+        var hits = new int[TransitionalExemptions.Length];
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var entry = ExemptEntryIndex(relativePath, lines[i]);
+            if (entry >= 0)
+            {
+                hits[entry]++;
+                continue;
+            }
+
+            foreach (var why in Violations(lines[i]))
+            {
+                found.Add($"{relativePath}:{i + 1}: {why}");
+            }
+        }
+
+        return (found, hits);
+    }
+
+    /// <summary>One message per exemption entry that was used more than once (summed over every scanned file).</summary>
+    internal static IReadOnlyList<string> ExemptionUsageProblems(int[] exemptHits) =>
+        exemptHits.Select((count, i) => (count, i)).Where(x => x.count > 1)
+            .Select(x => $"{TransitionalExemptions[x.i].File}: the exempt line occurs {x.count} times (an exemption covers exactly one line): {TransitionalExemptions[x.i].Line}")
+            .ToList();
 
     /// <summary>Text files under <c>{repo}/{root}</c>, pruning <see cref="ExcludedDirectoryNames"/> before descending (copied from
     /// <c>ADR002_PluginTests.Walk</c>).</summary>
@@ -113,17 +185,18 @@ public class InvoiceStatusRetirementGuardTests
     public void NoReader_OfTheRetiredInvoiceStatusColumn()
     {
         var found = new List<string>();
+        var exemptHits = new int[TransitionalExemptions.Length];
         foreach (var file in ScannedRoots.SelectMany(Walk))
         {
-            var lines = File.ReadAllLines(file);
-            for (var i = 0; i < lines.Length; i++)
+            var (fileFound, fileHits) = ScanLines(SourceScan.Relative(file), File.ReadAllLines(file));
+            found.AddRange(fileFound);
+            for (var e = 0; e < exemptHits.Length; e++)
             {
-                foreach (var why in Violations(SourceScan.Relative(file), lines[i]))
-                {
-                    found.Add($"{SourceScan.Relative(file)}:{i + 1}: {why}");
-                }
+                exemptHits[e] += fileHits[e];
             }
         }
+
+        found.AddRange(ExemptionUsageProblems(exemptHits));
 
         Assert.True(found.Count == 0,
             "The invoice status lives on statuscode (ebilling-r1 D-41; the old column and option set are deleted). Found:\n"
@@ -160,9 +233,56 @@ public class InvoiceStatusRetirementGuardTests
         }
     }
 
-    [Fact(DisplayName = "ebilling-r1 015 transition: the exemption list holds the two named entries and nothing more")]
-    public void TheExemptionList_NeverGrows() => Assert.True(TransitionalExemptions.Length <= 2,
-        "Only the external invoices allow-list entry and the allow-list test's one constant are exempt (D-97 transition window).");
+    [Fact(DisplayName = "ebilling-r1 015 transition: the exemption list is exactly the two named files, each line marked transitional (015/D-97)")]
+    public void TheExemptionList_NeverGrows()
+    {
+        var problem = ExemptionListProblem(TransitionalExemptions);
+        Assert.True(problem is null,
+            "Only the external invoices allow-list entry and the allow-list test's one constant are exempt (D-97 transition window): " + problem);
+    }
+
+    [Fact(DisplayName = "ebilling-r1 015 transition control: a swapped-in file, an extra entry or an unmarked line fails the exemption-list check")]
+    public void TheExemptionListCheck_FiresOnAnyDeparture()
+    {
+        var module = TransitionalExemptions[0];
+        var tests = TransitionalExemptions[1];
+
+        // the real list is clean (the control's baseline)
+        Assert.Null(ExemptionListProblem(new[] { module, tests }));
+        // another file's line swapped in for the test file's entry: the count is still 2, the paths are not
+        Assert.NotNull(ExemptionListProblem(new[] { module, ("src/server/api/Sprk.Bff.Api/Services/Finance/FinanceSummaryService.cs", tests.Line) }));
+        Assert.NotNull(ExemptionListProblem(new[] { ("src/server/api/Sprk.Bff.Api/Services/Finance/FinanceSummaryService.cs", module.Line), tests }));
+        // the two entries in the other order, an entry dropped, an entry added
+        Assert.NotNull(ExemptionListProblem(new[] { tests, module }));
+        Assert.NotNull(ExemptionListProblem(new[] { module }));
+        Assert.NotNull(ExemptionListProblem(new[] { module, tests, ("src/x/Other.cs", module.Line) }));
+        // a line without the marker
+        Assert.NotNull(ExemptionListProblem(new[] { module, (tests.File, "private const string TransitionalInvoiceStatusColumn = \"sprk_invoicestatus\";") }));
+    }
+
+    [Fact(DisplayName = "ebilling-r1 015 transition control: a pasted duplicate of an exempt line is a violation (an exemption covers one line)")]
+    public void TheDetector_FiresOnADuplicatedExemptLine()
+    {
+        foreach (var (file, line) in TransitionalExemptions)
+        {
+            // one copy: exempt, used once
+            var (foundOnce, hitsOnce) = ScanLines(file, new[] { "// before", "            " + line, "// after" });
+            Assert.Empty(foundOnce);
+            Assert.Empty(ExemptionUsageProblems(hitsOnce));
+
+            // a pasted duplicate (same indentation or not): every copy still passes the per-line scan, the usage count fails
+            var (foundTwice, hitsTwice) = ScanLines(file, new[] { "            " + line, "            " + line });
+            Assert.Empty(foundTwice);
+            Assert.NotEmpty(ExemptionUsageProblems(hitsTwice));
+            Assert.NotEmpty(ExemptionUsageProblems(ScanLines(file, new[] { line, "        " + line }).ExemptHits));
+        }
+
+        // the count is summed over the whole scan: one copy in each of two scans of the same file also fails
+        var (_, a) = ScanLines(TransitionalExemptions[0].File, new[] { TransitionalExemptions[0].Line });
+        var (_, b) = ScanLines(TransitionalExemptions[0].File, new[] { TransitionalExemptions[0].Line });
+        Assert.Empty(ExemptionUsageProblems(a));
+        Assert.NotEmpty(ExemptionUsageProblems(a.Zip(b, (x, y) => x + y).ToArray()));
+    }
 
     [Fact(DisplayName = "ebilling-r1 015 transition control: the exact exempt entries do not fire")]
     public void TheDetector_StaysQuietOnTheExactTransitionalEntries() =>
