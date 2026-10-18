@@ -17,8 +17,12 @@
 | **Next Action** | As each agent reports: review, cherry-pick (cp.sh in the background), build and targeted tests, send the range on. Waiting on: ontology-r1 (015 ad338f34a; 071 r2 range) and the 076 r3 agent. 074 fix → ontology-r1. 051 combined b21be61be..r2 tip → uac-r2. Mark 015 ✅ when ontology-r1 is clean; 071 ✅ when its re-check is clean; 076 ✅ after r3 plus its re-check. Then start 072 (its POML carries D-112 root sets, uac-r2 calling conditions, currency and withheld-template constraints) and 077 |
 
 ### Queued briefs (not yet launched)
+- **#2081 fix round 2 (uac-r2 re-check of 79bd38196..16f0f40b6). Resume the #2081 agent when a slot frees up:**
+  - (1) **F, check-then-act.** UpdateRecordFieldsAsync (DataverseWebApiService.cs ~1948, SendPatchAsJsonAsync ~264) sends a PATCH with no If-Match, so a row deleted after the guard's read (InvoiceFamilyCoreRecordGuard.cs ~365) is re-created as an orphan. Fix: add an update-only (`If-Match: *`) overload that keeps impersonation, and use it for the invoice-family tables at UpdateRecordActionCore.cs:136, DataverseUpdateHandler.cs:136 (including its concurrency path) and FieldMappingEndpoints.cs:1078. A 404 maps to invoice_family_record_not_found, with nothing created.
+  - (2) **Existence oracle.** On the impersonated playbook-update and output-orchestrator paths, not-found also returns invoice_family_read_failed. The push is safe because its ids come from a caller-read query. Needs a test.
+  - (3) **Hint wording:** "To move an invoice that has lines, or a line of one".
 - **075 retry fix (open F-class defect).** A run that dies midway and is retried asks the model again, and its output is not deterministic, so both runs' drafts remain. Fix by compensation: on a rerun with no completion marker, first delete the earlier run's untouched drafts, then draft again. A draft counts as untouched only when all of these hold: created by the job identity, created for this rule set, still Proposed and Off, modifiedon = createdon, no current version. Must-fire: a rerun after a partial run leaves exactly one set. Must-not-fire: a draft an admin edited or accepted is never deleted.
-- **#2081 follow-up (uac-r2 split).** For sprk_invoice and sprk_billingevent targets, the guard reads the stored row and refuses not-found, so an upsert cannot create an orphan. Also:
+- **(done) #2081 follow-up, superseded by the round 2 brief above; the original items:** For sprk_invoice and sprk_billingevent targets, the guard reads the stored row and refuses not-found, so an upsert cannot create an orphan. Also:
   - DecisionRouteCores.cs:97 passes appOnlyEntities;
   - add a D-96 end-to-end test through the three generic paths;
   - add a test for UpdateRecordActionCore with no IGenericEntityService;
