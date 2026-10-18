@@ -89,28 +89,40 @@ public class BillingFactLoaderTests
 
     private void DuplicateRule() => Policy(RuleSet(RuleSetScope.ClientDefault), "CD-DUPLICATE", RuleType.Duplicate, DuplicateByNumber);
 
-    /// <summary>A prior of the firm with an invoice filed through <paramref name="filing"/> (column, target table, target id).</summary>
-    private Guid PriorWithInvoice(string trackingNumber, (string Column, string Table, Guid Id)? filing, int invoiceStatus = 1,
-        int processing = (int)InvoiceSubmissionStatus.Accepted, Guid? firm = null, Guid? submissionId = null, string firmInvoiceNumber = "INV-100")
+    private static EntityReference OrdinaryTeam => new("team", SecureChildShareWorld.GeneralTeam);
+
+    /// <summary>
+    /// A prior of the firm with an invoice filed through <paramref name="filing"/> (column, target table, target id). The invoice is
+    /// owned as the ownership resolver would own it: by the Secure team when <paramref name="secureOwned"/> (filed under a secure
+    /// root), else by an ordinary team (072 review A1 (c): an ordinary prior is never Secure-owned).
+    /// </summary>
+    private Guid PriorWithInvoice(string? trackingNumber, (string Column, string Table, Guid Id)? filing, int invoiceStatus = 1,
+        int processing = (int)InvoiceSubmissionStatus.Accepted, Guid? firm = null, Guid? submissionId = null, string firmInvoiceNumber = "INV-100",
+        bool secureOwned = false, (string Column, string Table, Guid Id)? submissionFiling = null)
     {
         var invoice = Guid.NewGuid();
-        var invoiceColumns = new List<(string, object)> { ("statuscode", new OptionSetValue(invoiceStatus)), ("owningteam", SecureTeam) };
+        var invoiceColumns = new List<(string, object)>
+        {
+            ("statuscode", new OptionSetValue(invoiceStatus)), ("owningteam", secureOwned ? SecureTeam : OrdinaryTeam),
+        };
         if (filing is { } f) invoiceColumns.Add((f.Column, Ref(f.Table, f.Id)));
         _world.Add("sprk_invoice", invoice, invoiceColumns.ToArray());
-        return Submission(trackingNumber, invoice, processing, firm, submissionId, firmInvoiceNumber);
+        return Submission(trackingNumber, invoice, processing, firm, submissionId, firmInvoiceNumber, submissionFiling);
     }
 
-    private Guid Submission(string trackingNumber, Guid? invoice, int processing = (int)InvoiceSubmissionStatus.Accepted,
-        Guid? firm = null, Guid? id = null, string firmInvoiceNumber = "INV-100")
+    private Guid Submission(string? trackingNumber, Guid? invoice, int processing = (int)InvoiceSubmissionStatus.Accepted,
+        Guid? firm = null, Guid? id = null, string firmInvoiceNumber = "INV-100", (string Column, string Table, Guid Id)? filing = null)
     {
         var submission = id ?? Guid.NewGuid();
         var columns = new List<(string, object)>
         {
-            ("sprk_vendororg", Ref("sprk_organization", firm ?? FirmId)), ("sprk_trackingnumber", trackingNumber),
+            ("sprk_vendororg", Ref("sprk_organization", firm ?? FirmId)),
             ("sprk_firminvoicenumber", firmInvoiceNumber), ("sprk_submissionsequence", 1),
             ("sprk_processingstatus", new OptionSetValue(processing)),
         };
+        if (trackingNumber is not null) columns.Add(("sprk_trackingnumber", trackingNumber));
         if (invoice is { } i) columns.Add(("sprk_invoice", Ref("sprk_invoice", i)));
+        if (filing is { } f) columns.Add((f.Column, Ref(f.Table, f.Id)));
         _world.Add("sprk_invoicesubmission", submission, columns.ToArray());
         return submission;
     }
@@ -304,7 +316,7 @@ public class BillingFactLoaderTests
     {
         DuplicateRule();
         _world.SecureRoot("sprk_matter", MatterA).SecureRoot("sprk_matter", MatterB);
-        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", MatterB));
+        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", MatterB), secureOwned: true);
 
         var finding = await TheDuplicateFindingAsync(MatterA);
 
@@ -317,7 +329,7 @@ public class BillingFactLoaderTests
     {
         DuplicateRule();
         _world.SecureRoot("sprk_matter", MatterA);
-        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", MatterA));
+        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", MatterA), secureOwned: true);
 
         var finding = await TheDuplicateFindingAsync(MatterA);
 
@@ -338,11 +350,61 @@ public class BillingFactLoaderTests
     }
 
     [Fact]
+    public async Task ASecureOwnedPrior_WhoseInvoiceLookupWasCleared_ButWhoseSubmissionNamesAnotherSecureMatter_IsWithheld_A1()
+    {
+        // 072 review A1: a grid edit cleared sprk_matter on a secure prior invoice; its submission still names secure matter B. Walked
+        // through the invoice alone the prior had the empty set (ordinary), a subset of {A}, and its detail was shown.
+        DuplicateRule();
+        _world.SecureRoot("sprk_matter", MatterA).SecureRoot("sprk_matter", MatterB);
+        PriorWithInvoice("INV-100.1", filing: null, secureOwned: true, submissionFiling: ("sprk_regardingmatter", "sprk_matter", MatterB));
+
+        var loaded = await Loader().LoadAsync(Request(MatterA), CancellationToken.None);
+        var finding = await TheDuplicateFindingAsync(MatterA);
+
+        // The Secure-owned invoice reaches no root itself, so the prior is unresolved (A1 (b)); were the invoice's own set ignored,
+        // the union with its submission's would still be {B}, not a subset of {A}.
+        loaded.PriorSubmissions.Should().ContainSingle().Which.SecureRoots.Should().BeNull();
+        finding.DetailWithheld.Should().BeTrue();
+        finding.FactValues.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ASecureOwnedPrior_WhoseLookupsReachNoSecureRoot_IsUnresolved_AndWithheld_A1()
+    {
+        // 072 review A1 (b): the Secure team owns the prior, so it IS secure, but no lookup says under which root. Not the empty set.
+        DuplicateRule();
+        _world.SecureRoot("sprk_matter", MatterA);
+        PriorWithInvoice("INV-100.1", filing: null, secureOwned: true);
+
+        var loaded = await Loader().LoadAsync(Request(MatterA), CancellationToken.None);
+        var finding = await TheDuplicateFindingAsync(MatterA);
+
+        loaded.InvoiceSecureRoots.Should().BeEquivalentTo([MatterA]);
+        loaded.PriorSubmissions.Should().ContainSingle().Which.SecureRoots.Should().BeNull();
+        finding.DetailWithheld.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task APriorWhoseSubmissionIsUnderASecureRoot_AndWhoseInvoiceIsUnderAnOrdinaryOne_IsWithheld_A1()
+    {
+        DuplicateRule();
+        _world.OrdinaryRoot("sprk_matter", OrdinaryMatter).SecureRoot("sprk_matter", MatterB);
+        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", OrdinaryMatter),
+            submissionFiling: ("sprk_regardingmatter", "sprk_matter", MatterB));
+
+        var loaded = await Loader().LoadAsync(Request(OrdinaryMatter), CancellationToken.None);
+        var finding = await TheDuplicateFindingAsync(OrdinaryMatter);
+
+        loaded.PriorSubmissions.Should().ContainSingle().Which.SecureRoots.Should().BeEquivalentTo([MatterB]);
+        finding.DetailWithheld.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task ASecurePrior_OnAnOrdinaryInvoice_IsHidden_D112()
     {
         DuplicateRule();
         _world.SecureRoot("sprk_matter", MatterB).OrdinaryRoot("sprk_matter", OrdinaryMatter);
-        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", MatterB));
+        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", MatterB), secureOwned: true);
 
         var ordinaryInvoice = await TheDuplicateFindingAsync(OrdinaryMatter);
         var noCoreRecord = await TheDuplicateFindingAsync(null);
@@ -360,7 +422,7 @@ public class BillingFactLoaderTests
         DuplicateRule();
         _world.SecureRoot("sprk_matter", MatterA);
         _world.Add("sprk_workassignment", assignment, ("owningteam", SecureTeam), ("sprk_issecure", false), ("sprk_matter", Ref("sprk_matter", MatterA)));
-        PriorWithInvoice("INV-100.1", ("sprk_regardingworkassignment", "sprk_workassignment", assignment));
+        PriorWithInvoice("INV-100.1", ("sprk_regardingworkassignment", "sprk_workassignment", assignment), secureOwned: true);
         var request = Request(null) with { CoreRecord = new CoreRecordReference(CoreRecordKind.WorkAssignment, assignment) };
 
         var loaded = await Loader().LoadAsync(request, CancellationToken.None);
@@ -376,7 +438,7 @@ public class BillingFactLoaderTests
         var project = Guid.NewGuid();
         DuplicateRule();
         _world.SecureRoot("sprk_matter", MatterA).SecureRoot("sprk_project", project).FailingQueriesOf("sprk_project");
-        PriorWithInvoice("INV-100.1", ("sprk_project", "sprk_project", project));
+        PriorWithInvoice("INV-100.1", ("sprk_project", "sprk_project", project), secureOwned: true);
 
         var loaded = await Loader().LoadAsync(Request(MatterA), CancellationToken.None);
         var finding = await TheDuplicateFindingAsync(MatterA);
@@ -393,7 +455,7 @@ public class BillingFactLoaderTests
         var assignment = Guid.NewGuid();
         DuplicateRule();
         _world.OrdinaryRoot("sprk_matter", OrdinaryMatter).SecureRoot("sprk_workassignment", assignment);
-        PriorWithInvoice("INV-100.1", ("sprk_regardingworkassignment", "sprk_workassignment", assignment));
+        PriorWithInvoice("INV-100.1", ("sprk_regardingworkassignment", "sprk_workassignment", assignment), secureOwned: true);
 
         var loaded = await Loader().LoadAsync(Request(OrdinaryMatter), CancellationToken.None);
         var finding = await TheDuplicateFindingAsync(OrdinaryMatter);

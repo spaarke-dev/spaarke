@@ -173,8 +173,11 @@ public sealed record BillingLoadedFacts
 /// the submission has one (Rejected, Returned to Firm, otherwise Active), else the submission's (Rejected, otherwise Active).</para>
 /// <para><b>Secure roots (D-112; uac-r2's calling conditions on <c>SecureChildShareSynchronizer.cs:648-721</c>).</b> (1) Each prior row
 /// is read with every lineage lookup of its table plus the owner columns, so no lookup is silently absent (an absent lookup would
-/// shrink the prior's set and pass the subset test). (2) The rows walked are child rows: a prior's <c>sprk_invoice</c> row, or its
-/// <c>sprk_invoicesubmission</c> row when it has no invoice yet; the judged invoice does not exist yet (049 persists after the
+/// shrink the prior's set and pass the subset test). (2) The rows walked are child rows, never a root table (the walk refuses
+/// one): a prior's <c>sprk_invoice</c> row AND its <c>sprk_invoicesubmission</c> row, whose sets are unioned (072 review A1: a
+/// lookup cleared on one is still covered by the other), or the submission row alone when it has no invoice yet. A walked row
+/// owned by the Secure team whose set comes back empty makes that prior unresolved: it is secure, but its wall is unknown. The
+/// judged invoice does not exist yet (049 persists after the
 /// evaluation), so it is walked as an unsaved <c>sprk_invoice</c> probe carrying only the submission's core lookup (fewer lookups
 /// can only shrink the invoice's set, which hides more, never less). A core record is never passed itself. (3) Resolved means
 /// Status Completed and no row of the group undetermined; anything else, and any fault, is unresolved (<c>null</c>), and the
@@ -427,8 +430,12 @@ public sealed class BillingFactLoader
 
     // ── Priors (Duplicate, FR-36, D-112) ─────────────────────────────────────────────────────────────────────
 
-    /// <summary>A prior as read, with the row whose lineage gives its secure roots.</summary>
-    private sealed record PriorRead(BillingPriorSubmission Prior, Entity LineageRow, ColumnSet ReadWith);
+    /// <summary>
+    /// A prior as read, with the child rows whose lineage gives its secure roots (072 review A1): its <c>sprk_invoice</c> row and its
+    /// <c>sprk_invoicesubmission</c> row when it has an invoice, else the submission row alone. Their roots are unioned, so a lookup
+    /// cleared on one row (a grid edit) is still covered by the other.
+    /// </summary>
+    private sealed record PriorRead(BillingPriorSubmission Prior, IReadOnlyList<(Entity Row, ColumnSet ReadWith)> Rows);
 
     private async Task<List<PriorRead>> LoadPriorsAsync(BillingEvaluationRequest request, CancellationToken ct)
     {
@@ -488,10 +495,11 @@ public sealed class BillingFactLoader
                 Lines = invoice is not null && lines.TryGetValue(invoice.Id, out var priorLines) ? priorLines : [],
             };
 
-            // uac-r2 condition (2): the child row in the lineage. The invoice when there is one, else the submission row.
+            // uac-r2 condition (2): child rows only. A1: the invoice AND the submission, so their roots are unioned.
+            var submissionRead = (submission, new ColumnSet(submissionColumns));
             priors.Add(invoice is not null
-                ? new PriorRead(prior, invoice, new ColumnSet(invoiceColumns))
-                : new PriorRead(prior, submission, new ColumnSet(submissionColumns)));
+                ? new PriorRead(prior, [(invoice, new ColumnSet(invoiceColumns)), submissionRead])
+                : new PriorRead(prior, [submissionRead]));
         }
 
         return priors;
@@ -588,13 +596,24 @@ public sealed class BillingFactLoader
                 return answers;
             }
 
-            var groups = new List<IReadOnlyCollection<Entity>> { new[] { InvoiceProbe(request) } };
-            groups.AddRange(priors.Select(p => (IReadOnlyCollection<Entity>)new[] { p.LineageRow }));
-            var readRows = priors.Select(p => (p.LineageRow, p.ReadWith)).ToList();
+            // One walk, one group per row, so each row's own answer is known (A1 (b)); a prior's set is the union of its rows'
+            // sets, which is what walking its rows as one group returns.
+            var probe = InvoiceProbe(request);
+            var groups = new List<IReadOnlyCollection<Entity>> { new[] { probe } };
+            groups.AddRange(priors.SelectMany(p => p.Rows).Select(r => (IReadOnlyCollection<Entity>)new[] { r.Row }));
+            var readRows = priors.SelectMany(p => p.Rows).ToList();
             var walked = await _secureRoots.SecureRootsAboveEachAsync(groups, secureTeam, ct, readRows).ConfigureAwait(false);
-            for (var i = 0; i < walked.Count && i < answers.Length; i++)
+            if (walked.Count != groups.Count)
             {
-                answers[i] = Resolved(walked[i], groups[i]);
+                throw new InvalidOperationException($"The secure-root walk answered {walked.Count} groups for {groups.Count}.");
+            }
+
+            answers[0] = Resolved(walked[0], probe, secureTeam);
+            var next = 1;
+            for (var i = 0; i < priors.Count; i++)
+            {
+                var sets = priors[i].Rows.Select(r => Resolved(walked[next++], r.Row, secureTeam)).ToList();
+                answers[i + 1] = sets.Any(s => s is null) ? null : sets.SelectMany(s => s!).ToHashSet();
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -610,16 +629,25 @@ public sealed class BillingFactLoader
         return answers;
     }
 
-    /// <summary>uac-r2 condition (3): resolved only when the walk Completed and no row of the group is undetermined.</summary>
-    private static IReadOnlySet<Guid>? Resolved(SecureRootsAbove above, IReadOnlyCollection<Entity> group)
+    /// <summary>
+    /// One walked row's set. uac-r2 condition (3): resolved only when the walk Completed and the row is not undetermined. 072 review
+    /// A1 (b): a row owned by the Secure team is secure by decision of the ownership resolver, so if its lookups reach no secure
+    /// root (a lookup cleared after filing, e.g. by a grid edit) its true wall is unknown: unresolved, never the ordinary empty set.
+    /// </summary>
+    private static IReadOnlySet<Guid>? Resolved(SecureRootsAbove above, Entity row, Guid secureTeam)
     {
         if (above.Status != SecureChildShareSyncStatus.Completed || above.Undetermined.Count > 0)
         {
             return null;
         }
 
-        if (group.Any(row => above.UndeterminedRowRefs.Any(u =>
-                string.Equals(u.Table, row.LogicalName, StringComparison.OrdinalIgnoreCase) && u.Id == row.Id)))
+        if (above.UndeterminedRowRefs.Any(u =>
+                string.Equals(u.Table, row.LogicalName, StringComparison.OrdinalIgnoreCase) && u.Id == row.Id))
+        {
+            return null;
+        }
+
+        if (above.Roots.Count == 0 && row.GetAttributeValue<EntityReference>("owningteam")?.Id == secureTeam)
         {
             return null;
         }
