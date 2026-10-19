@@ -858,3 +858,51 @@ Each restamps afterwards, but none refuses any of these:
 **Estimated effort**: 0.5–1 day (owning projects). **Related**: task 026, 053.
 
 ---
+
+### DEF-023 — System billing policy: disable only in the model-driven app; not shown in Rule Review; delete refused only by privilege
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before UAT (163) |
+| **Filed** | 2026-10-19 |
+| **Source** | ebilling-r1 task 049, ontology-r1 review of the D-125 system policy (`039c3fda9..212bdc935`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2106 |
+
+**Description**: D-125 says an admin may disable `BILL-SYSTEM-SUBMISSION`, new versions and deletion are refused, and Rule Review shows it read-only. Today: disabling is possible only in the model-driven app (the ontology admin routes return 404 for a Billing-domain policy, and the billing side has no route); Rule Review lists rule sets only, so it never shows the policy; new versions are refused on BFF routes only; deletion is refused only by the Dataverse privilege, and a deletion stops these Signals while the ontology sweep closes the open ones as PolicyRetired.
+
+**Suggested fix**: A read-only "System rules" section in Rule Review with an admin-only enable/disable route; decide whether a delete guard is needed beyond the privilege.
+
+---
+
+### DEF-024 — Seed-BillingSystemPolicy.ps1 (and Apply-DoLanePolicies.ps1) set no owning team
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | before the seed script runs on any environment |
+| **Filed** | 2026-10-19 |
+| **Source** | ebilling-r1 task 049, ontology-r1 review of the D-125 system policy (`039c3fda9..212bdc935`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2107 |
+
+**Description**: Both scripts leave the policy owned by whoever runs them, which conflicts with ontology decisions D-129 / D-130 on policy ownership.
+
+**Suggested fix**: Bind `ownerid` to the team the ontology decisions name, check it in `-Verify`, and agree the team with ontology-r1.
+
+---
+
+### DEF-025 — SubmissionIntegrity cleanup: unreachable Describe arm; tests loop over authorable types only
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | low (cleanup) |
+| **Filed** | 2026-10-19 |
+| **Source** | ebilling-r1 task 049, ontology-r1 review of the D-125 system policy (`039c3fda9..212bdc935`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2108 |
+
+**Description**: `BillingRuleCatalogue.Describe` has an unreachable SubmissionIntegrity arm. Several `SubmissionRejectionRuleTests` and consequence-gate checks loop over `BillingRuleCatalogue.Types` (authorable) only, so a future system type would escape them.
+
+**Suggested fix**: Remove the arm or make it throw; add a loop over the system types with the system expectations (Flag only, never reject-capable, never authorable).
+
+---
