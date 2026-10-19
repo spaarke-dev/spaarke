@@ -180,6 +180,14 @@ public static class AuthorizationModule
                 };
             });
 
+        // Task 077 (ADR-028 A9): the default scheme accepts the BFF app's audience in both forms, so the app's switch
+        // to requestedAccessTokenVersion = 2 (aud = the bare app id for every caller) does not turn into a 401 on every
+        // workforce surface. A SEPARATE PostConfigure, NOT inside the Copilot delegate above: that one runs once per
+        // process and only when AgentToken:CopilotAudience is set. Only the audience changes (AddWorkforceAudiences).
+        services.PostConfigure<JwtBearerOptions>(
+            JwtBearerDefaults.AuthenticationScheme,
+            options => AddWorkforceAudiences(options.TokenValidationParameters, configuration["AzureAd:ClientId"]));
+
         // FR-23 (external-access-platform-r3 task 010 · auth review R1): the DEFAULT (workforce) scheme
         // rejects every CIAM token — iss containing ciamlogin.com, or tid equal to Ciam:TenantId — the same
         // rule CallerPrincipalResolver.DeterminePlane uses to classify the CIAM plane. It runs after the
@@ -770,6 +778,38 @@ public static class AuthorizationModule
         return Guid.TryParseExact(audience, "D", out _)
             ? new[] { audience, ApiUriPrefix + audience }
             : new[] { audience };
+    }
+
+    /// <summary>
+    /// Task 077 (ADR-028 A9): adds the BFF app's own audience in both forms — the bare app id (v2 access tokens) and
+    /// <c>api://{appId}</c> (v1) — to the default scheme, merged with what is already accepted
+    /// (<c>AzureAd:Audience</c>, the Copilot audience).
+    /// </summary>
+    /// <remarks>
+    /// A9 sets <c>requestedAccessTokenVersion</c> = 2 on the BFF app, which makes <c>aud</c> the bare app id for every
+    /// caller; <c>AzureAd:Audience</c> holds only the <c>api://</c> form. Only a GUID client id adds anything, so an
+    /// unset value or an unreplaced placeholder leaves the parameters exactly as they were. Only the audience
+    /// properties change; idempotent.
+    /// </remarks>
+    internal static void AddWorkforceAudiences(Microsoft.IdentityModel.Tokens.TokenValidationParameters parameters, string? clientId)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        if (!Guid.TryParseExact(clientId?.Trim(), "D", out _))
+        {
+            return;
+        }
+
+        var audiences = new HashSet<string>(parameters.ValidAudiences ?? [], StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(parameters.ValidAudience))
+        {
+            audiences.Add(parameters.ValidAudience);
+        }
+
+        audiences.UnionWith(BuildCiamValidAudiences(clientId));
+
+        parameters.ValidAudiences = audiences;
+        // Clear the singular so the plural list is the one source, as the Copilot merge does.
+        parameters.ValidAudience = null;
     }
 
     /// <summary>

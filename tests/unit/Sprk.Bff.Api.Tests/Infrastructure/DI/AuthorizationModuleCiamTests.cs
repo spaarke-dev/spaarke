@@ -1,6 +1,7 @@
 // spaarke-SPA-external-access-platform-r3 — Task 010 (2026-10-10)
 // FR-22: the Ciam JwtBearer scheme accepts the per-customer audience in both forms ({appId}, api://{appId}).
 // FR-23: the default (workforce) JwtBearer scheme rejects any CIAM token (iss ∋ ciamlogin.com, or tid == Ciam:TenantId).
+// Task 077 (2026-10-19): the default scheme also accepts the bare app-id audience (v2 access tokens, ADR-028 A9).
 //
 // Every test runs the REAL schemes registered by AuthorizationModule.AddAuthorizationModule behind a TestServer
 // and asserts the HTTP status a route returns. Only two things are replaced, both test-side and both outside the
@@ -34,6 +35,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -41,6 +43,7 @@ using Microsoft.IdentityModel.Tokens;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Authorization;
 using Sprk.Bff.Api.Infrastructure.DI;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Infrastructure.DI;
@@ -350,6 +353,150 @@ public sealed class AuthorizationModuleCiamTests
         var act = () => new ServiceCollection().AddAuthorizationModule(configuration);
 
         act.Should().NotThrow();
+    }
+
+    // ─────────── Task 077: default scheme accepts the bare app-id audience (v2 access tokens) ───────────
+    // ADR-028 A9 sets requestedAccessTokenVersion = 2 on the BFF app, which makes aud the bare app id for EVERY caller.
+    // The default scheme must accept that form as well as api://{appId}, derived from AzureAd:ClientId, and nothing else.
+
+    [Theory]
+    [InlineData(WorkforceIssuerV2)]
+    [InlineData(WorkforceIssuerV1)]
+    public async Task DefaultScheme_BareClientIdAudience_Returns200(string issuer)
+    {
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+
+        var status = await GetAsync(host, WorkforceRoute, WorkforceToken(issuer, WorkforceTenantId, WorkforceBffClientId));
+
+        status.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task DefaultScheme_ApiUriAudienceWithV1Issuer_StillReturns200()
+    {
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+
+        var status = await GetAsync(host, WorkforceRoute,
+            WorkforceToken(WorkforceIssuerV1, WorkforceTenantId, WorkforceBffAudience));
+
+        status.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData(OtherCustomerCiamAppId)]
+    [InlineData("api://" + OtherCustomerCiamAppId)]
+    [InlineData("api://")]
+    public async Task DefaultScheme_AnotherAppsAudience_Returns401(string audience)
+    {
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+
+        var status = await GetAsync(host, WorkforceRoute, WorkforceToken(WorkforceIssuerV2, WorkforceTenantId, audience));
+
+        status.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Theory]
+    [InlineData(CiamIssuer, CiamTenantId)]
+    [InlineData(CiamTenantViaWorkforceAuthorityIssuer, CiamTenantId)]
+    public async Task DefaultScheme_CiamTokenWithBareClientIdAudience_Returns401(string issuer, string tenantId)
+    {
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+
+        var status = await GetAsync(host, WorkforceRoute, WorkforceToken(issuer, tenantId, WorkforceBffClientId));
+
+        status.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task DefaultScheme_BareClientIdAudience_EveryHostInTheProcess_Returns200()
+    {
+        // The Copilot merge runs once per PROCESS (_jwtPostConfigureApplied); the bare-id audience must not depend on it.
+        using var first = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+        using var second = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+
+        var token = WorkforceToken(WorkforceIssuerV2, WorkforceTenantId, WorkforceBffClientId);
+
+        (await GetAsync(first, WorkforceRoute, token)).Should().Be(HttpStatusCode.OK);
+        (await GetAsync(second, WorkforceRoute, token)).Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task DefaultScheme_ResolvedOptions_AudiencesAddedAndValidationFlagsKept()
+    {
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+
+        var parameters = host.Services.GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(JwtBearerDefaults.AuthenticationScheme).TokenValidationParameters;
+
+        parameters.ValidAudiences.Should().Contain(new[] { WorkforceBffClientId, WorkforceBffAudience, CopilotAudience });
+        parameters.ValidAudiences.Should().NotContain(a => a == "api://" || string.IsNullOrWhiteSpace(a));
+        parameters.ValidateAudience.Should().BeTrue();
+        parameters.ValidateIssuer.Should().BeTrue();
+        parameters.ValidateLifetime.Should().BeTrue();
+        parameters.RequireSignedTokens.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GuestTokenParameters_V2GuestTokenWithBareStampAppId_Validates()
+    {
+        // SpaarkeGuestTokenValidator clones the default scheme's parameters and hands them the scheme's configuration
+        // manager; this repeats exactly that against the REAL registered scheme.
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+        var options = host.Services.GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(JwtBearerDefaults.AuthenticationScheme);
+        var parameters = options.TokenValidationParameters.Clone();
+        parameters.ConfigurationManager = (BaseConfigurationManager)options.ConfigurationManager!;
+
+        var result = await new JsonWebTokenHandler { MapInboundClaims = false }.ValidateTokenAsync(
+            WorkforceToken(WorkforceIssuerV2, WorkforceTenantId, WorkforceBffClientId), parameters);
+
+        result.IsValid.Should().BeTrue(result.Exception?.Message);
+    }
+
+    [Fact]
+    public void GuestTokenDenyReason_CopilotAudience_StillRefused()
+    {
+        var jwt = new JsonWebToken(WorkforceToken(WorkforceIssuerV2, WorkforceTenantId, CopilotAudience));
+
+        var reason = SpaarkeGuestTokenValidator.DenyReason(
+            jwt, Guid.NewGuid(), "someone@example.com", WorkforceTenantId, WorkforceBffClientId, out _);
+
+        reason.Should().Be(GuestTokenDeny.Invalid);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void AddWorkforceAudiences_ClientIdUnsetOrBlank_LeavesParametersUnchanged(string? clientId)
+    {
+        var parameters = new TokenValidationParameters { ValidAudience = WorkforceBffAudience };
+
+        AuthorizationModule.AddWorkforceAudiences(parameters, clientId);
+
+        parameters.ValidAudience.Should().Be(WorkforceBffAudience);
+        parameters.ValidAudiences.Should().BeNull();
+    }
+
+    [Fact]
+    public void AddWorkforceAudiences_MergesBothFormsKeepsExistingAndIsIdempotent()
+    {
+        IssuerValidator issuerValidator = (issuer, _, _) => issuer;
+        var parameters = new TokenValidationParameters
+        {
+            ValidAudience = WorkforceBffAudience,
+            ValidAudiences = new[] { CopilotAudience },
+            ValidIssuers = new[] { WorkforceIssuerV2 },
+            IssuerValidator = issuerValidator,
+        };
+
+        AuthorizationModule.AddWorkforceAudiences(parameters, WorkforceBffClientId);
+        AuthorizationModule.AddWorkforceAudiences(parameters, WorkforceBffClientId);
+
+        parameters.ValidAudience.Should().BeNull();
+        parameters.ValidAudiences.Should().BeEquivalentTo(new[] { WorkforceBffAudience, WorkforceBffClientId, CopilotAudience });
+        parameters.ValidIssuers.Should().BeEquivalentTo(new[] { WorkforceIssuerV2 });
+        parameters.IssuerValidator.Should().BeSameAs(issuerValidator);
     }
 
     // ───────────────────────────── harness ─────────────────────────────
