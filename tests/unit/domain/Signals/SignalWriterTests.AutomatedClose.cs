@@ -105,6 +105,9 @@ public partial class SignalWriterTests
         fields.Should().NotContainKey("sprk_resolvedby", "an automated decider has no person, and none is invented");
         fields.Should().NotContainKey("sprk_resolutionnotes");
         org.UpdateCalls.Should().BeEmpty("the only write is the row-version conditional one");
+        org.RetrievedColumns.Should().ContainSingle(r => r.Entity == "sprk_signal").Which.Columns.Should().BeEquivalentTo(
+            ["sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon", "sprk_decisionrecord", "versionnumber"],
+            "the decision reads exactly these columns: a missing one (resolvedon) silently changes what the guards see");
     }
 
     [Theory(DisplayName = "049 D-122: a Signal the system closed AFTER the set was read is re-closed with the record, so Signal and record agree")]
@@ -132,6 +135,29 @@ public partial class SignalWriterTests
         (await Close(writer)).Should().Be(SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord);
 
         org.ConditionalUpdates.Should().BeEmpty();
+        org.UpdateCalls.Should().BeEmpty("no unconditional write either");
+    }
+
+    [Fact(DisplayName = "049 D-122: a system close with NO resolvedon is not 'after the read' - left as it is, nothing written (a null time never passes the guard)")]
+    public async Task AutomatedClose_SystemClosedWithNoResolvedOn_IsLeftAsIs()
+    {
+        var (writer, org, _) = AutomatedCloseRig("Resolved", "Condition Cleared", resolvedOn: null);
+
+        (await Close(writer)).Should().Be(SignalAutomatedCloseOutcome.LeftAsIs);
+
+        org.ConditionalUpdates.Should().BeEmpty();
+        org.UpdateCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 D-122: a system close at exactly the instant the set was read counts as after the read (>=, not >) and is re-closed")]
+    public async Task AutomatedClose_SystemClosedAtExactlyTheSetReadTime_IsReclosed()
+    {
+        var (writer, org, _) = AutomatedCloseRig("Resolved", "Condition Cleared", SetReadAt);
+
+        (await Close(writer)).Should().Be(SignalAutomatedCloseOutcome.Closed);
+
+        org.ConditionalUpdates.Should().ContainSingle();
+        org.UpdateCalls.Should().BeEmpty();
     }
 
     [Theory(DisplayName = "049 D-122: a person's resolution, another record's close, or a system close before the set was read is left as it is, with one Information line (ids and code only)")]
@@ -148,6 +174,7 @@ public partial class SignalWriterTests
         (await Close(writer)).Should().Be(SignalAutomatedCloseOutcome.LeftAsIs);
 
         org.ConditionalUpdates.Should().BeEmpty("a person's resolution is never overwritten");
+        org.UpdateCalls.Should().BeEmpty("nor by an unconditional write");
         var info = log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Information).Subject;
         info.Message.Should().Contain(ClosedSignalId.ToString()).And.Contain("BILL-AGE").And.Contain(AutoRecordId.ToString());
         log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
@@ -171,6 +198,27 @@ public partial class SignalWriterTests
 
         org.RetrievedColumns.Count(r => r.Entity == "sprk_signal").Should().Be(2, "one read, one re-read");
         org.ConditionalUpdates.Should().ContainSingle();
+        org.UpdateCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 D-122: the re-read sees the Signal already Resolved by THIS record (a concurrent run closed it) -> AlreadyClosedByThisRecord, no second write")]
+    public async Task AutomatedClose_ConcurrentRunClosedItWithThisRecord_IsAlreadyClosedOnTheReRead()
+    {
+        var (writer, org, _) = AutomatedCloseRig("Open");
+        org.BeforeConditionalUpdate = id =>
+        {
+            org.BeforeConditionalUpdate = null;
+            org.Rows[id]["sprk_signalstatus"] = new OptionSetValue(Status("Resolved"));
+            org.Rows[id]["sprk_resolutiontype"] = new OptionSetValue(Resolution("Acted"));
+            org.Rows[id]["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", AutoRecordId);
+            org.Rows[id].RowVersion = "2";
+        };
+
+        (await Close(writer)).Should().Be(SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord);
+
+        org.ConditionalUpdates.Should().BeEmpty();
+        org.UpdateCalls.Should().BeEmpty();
+        org.RetrievedColumns.Count(r => r.Entity == "sprk_signal").Should().Be(2, "one read, one re-read");
     }
 
     [Fact(DisplayName = "049 D-122: a person resolving it between the read and the write is seen on the re-read and left as it is")]
@@ -188,6 +236,7 @@ public partial class SignalWriterTests
         (await Close(writer)).Should().Be(SignalAutomatedCloseOutcome.LeftAsIs);
 
         org.ConditionalUpdates.Should().BeEmpty();
+        org.UpdateCalls.Should().BeEmpty();
         org.Rows[ClosedSignalId].GetAttributeValue<OptionSetValue>("sprk_resolutiontype").Value.Should().Be(Resolution("Dismissed"));
     }
 
@@ -201,6 +250,7 @@ public partial class SignalWriterTests
         (await Close(writer)).Should().Be(SignalAutomatedCloseOutcome.ChangedSinceRead);
 
         org.ConditionalUpdates.Should().BeEmpty();
+        org.UpdateCalls.Should().BeEmpty();
         org.RetrievedColumns.Count(r => r.Entity == "sprk_signal").Should().Be(2, "re-read once, not more");
     }
 
@@ -224,6 +274,46 @@ public partial class SignalWriterTests
         var error = log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Subject;
         error.EventId.Id.Should().Be(OntologyWriterEvents.WriteRefused.Id);
         error.Field("PolicyCode").Should().Be("BILL-AGE");
+        org.UpdateCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 D-122: a privilege refusal is metered as DataverseAccessDenied (not signal_close_failed), logged at Error and rethrown")]
+    public async Task AutomatedClose_AnAccessDeniedFault_IsMeteredAsDataverseAccessDenied()
+    {
+        var scope = Guid.NewGuid();
+        FailureMetricScope.Value = scope;
+        var (listener, reasons) = ListenFailureReasonsScoped(scope);
+        using var _ = listener;
+        var (writer, org, log) = AutomatedCloseRig("Open");
+        org.ConditionalUpdateFault = new FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040220), Message = "does not have Write right(s) for entity sprk_signal." },
+            "does not have Write right(s) for entity sprk_signal.");
+
+        var act = () => Close(writer);
+
+        await act.Should().ThrowAsync<FaultException<OrganizationServiceFault>>();
+        reasons().Should().Equal(OntologyWriterFailureReason.DataverseAccessDenied);
+        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Which.Field("Reason").Should().Be(OntologyWriterFailureReason.DataverseAccessDenied);
+        org.UpdateCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 D-122: a Signal read without a row version is never written (no unconditional fallback); the refusal is logged, metered as signal_close_failed and thrown")]
+    public async Task AutomatedClose_ReadWithoutARowVersion_ThrowsAndWritesNothing()
+    {
+        var scope = Guid.NewGuid();
+        FailureMetricScope.Value = scope;
+        var (listener, reasons) = ListenFailureReasonsScoped(scope);
+        using var _ = listener;
+        var (writer, org, log) = AutomatedCloseRig("Open");
+        org.Rows[ClosedSignalId].RowVersion = null;
+
+        var act = () => Close(writer);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*row version*");
+        org.ConditionalUpdates.Should().BeEmpty();
+        org.UpdateCalls.Should().BeEmpty();
+        reasons().Should().Equal(OntologyWriterFailureReason.SignalCloseFailed);
+        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error);
     }
 
     [Fact(DisplayName = "049 D-122: an empty id or a non-UTC set time is refused before any read")]

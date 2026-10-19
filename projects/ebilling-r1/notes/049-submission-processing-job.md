@@ -482,3 +482,27 @@ both reasons on one invoice, and a must-not-fire test with two coding notes.
 2. A totals refusal is not recorded in the findings. Part C said "part D records it"; the brief did not ask for it.
 3. `IEbillingNotificationSink`'s "do not retry" contract was kept. If the notification must be exactly-once even when the sink faults, the sink
    contract has to change (owner decision).
+
+## D-122 close method - owner review (ontology-r1)
+
+Test-only follow-up to ontology-r1's review of `SignalWriter.CloseActedByAutomatedDecisionAsync` (landed as 650109d97). No production change: no test exposed a defect.
+
+**Tests added** (`tests/unit/domain/Signals/SignalWriterTests.AutomatedClose.cs`):
+- F3-1: the open-Signal test asserts the read's column set is exactly `sprk_signalstatus, sprk_resolutiontype, sprk_resolvedon, sprk_decisionrecord, versionnumber` (the shared fake already records the requested ColumnSet).
+- F3-2: Resolved + ConditionCleared with no `sprk_resolvedon` -> LeftAsIs, no write; a concurrent run closes it with this record between the read and the write -> `AlreadyClosedByThisRecord` on the re-read; `resolvedon == setReadAt` -> Closed.
+- F3-3: `org.UpdateCalls.Should().BeEmpty()` added to every no-write test (already-closed, left-as-is, person-resolves, two mismatches, fault) and the mismatch-then-close test.
+- Also: the missing-row-version throw (nothing written, `signal_close_failed`) and the `DataverseAccessDenied` reason on a 0x80040220 fault.
+
+**Mutation evidence** (each applied to `SignalWriter.cs` alone, the SignalWriterTests suite run, then restored):
+
+| Mutation | Result |
+|---|---|
+| M3 null `resolvedon` treated as after the read | 1 fails: the null-resolvedon test |
+| M4 `sprk_resolvedon` dropped from `AutomatedCloseColumns` | 2 fail: the open-Signal test (Open, Acknowledged) |
+| M5 "already closed by this record" skipped on the re-read (`attempt == 0 &&`) | 1 fails: the concurrent-run test |
+| M6 `>=` -> `>` | 1 fails: the `resolvedon == setReadAt` test |
+| F3-3 an unconditional `UpdateAsync` on the LeftAsIs path | 7 fail: the left-as-is theory rows, person-resolves, null-resolvedon |
+
+**Known limits.**
+- K1: Dataverse stores `sprk_resolvedon` to the second, so a system close in the same second after the read reads as before it -> LeftAsIs. It fails safe, and matches the commit route's `SystemClosedSince`. Do not round `setReadAt` down: that would fail open.
+- K4: the extra Information logs on Closed / ChangedSinceRead carry ids and the policy code only. The row-version line duplicates the one in `LinkConditionClearedRecordAsync` (~:1096); a shared helper is optional.
