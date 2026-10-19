@@ -907,6 +907,39 @@ public class SubmissionRejectionRuleTests
         org.Rows[written.SignalId].GetAttributeValue<string>("sprk_sentence").Should().Be("Invoice INV-100 duplicates INV-100.1.");
     }
 
+    // ── D-115: the "rates not checked" finding never rejects ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RatesNotChecked_UnderAnExpenseRuleRejectVersion_NeverRejects_EvenWithTheCurrencyReadReliably_D115()
+    {
+        // Without the flag-only rule this finding would reject: ExpenseRule is reject-eligible, the version says Reject, and the one
+        // field it read (Currency, EUR at 0.95) is reliable.
+        var rule = Version("BILL-EXPENSE", RuleType.ExpenseRule) with { Consequence = Reject };
+        var request = Request(Expense(0) with { ExpenseCode = "E101", Amount = 600m }) with { Currency = "EUR" };
+        var result = Evaluator().Evaluate(request, Loaded(rule));
+        result.Findings.Should().ContainSingle().Which.ReasonCode.Should().Be(BillingEvaluationReasons.CurrencyNotUsd);
+
+        var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
+
+        ShouldHold(decision, SubmissionHoldReasons.ReasonFlagOnly);
+    }
+
+    [Fact]
+    public async Task ARejectCapableReason_OfTheSameMoneyPolicy_KeepsItsReject_AndOnlyItDecides_D115()
+    {
+        var rule = Version("BILL-EXPENSE", RuleType.ExpenseRule) with { Consequence = Reject };
+        var request = Request(Expense(0) with { ExpenseCode = "E109", Amount = 600m }) with { Currency = "EUR" };
+        var result = Evaluator().Evaluate(request, Loaded(rule));
+        result.Findings.Select(f => f.ReasonCode).Should().Equal(BillingEvaluationReasons.CurrencyNotUsd, BillingReasonCodes.ExpenseCodeNotReimbursable);
+
+        var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SubmissionOutcome.Rejected);
+        decision.DecidingFindings.Should().ContainSingle().Which.Finding.ReasonCode.Should().Be(BillingReasonCodes.ExpenseCodeNotReimbursable);
+        decision.Findings.Single(f => f.Finding.ReasonCode == BillingEvaluationReasons.CurrencyNotUsd).HeldBecause
+            .Should().Be(SubmissionHoldReasons.ReasonFlagOnly, "the rejection is never BECAUSE of the currency");
+    }
+
     // ── Through the real evaluator ───────────────────────────────────────────────────────────────────────────────
 
     [Fact]

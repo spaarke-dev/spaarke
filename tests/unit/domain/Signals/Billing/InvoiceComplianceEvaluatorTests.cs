@@ -326,8 +326,9 @@ public class InvoiceComplianceEvaluatorTests
         { BillingEvaluationReasons.CurrencyNotUsd, "EUR", 0.95m },
         { BillingEvaluationReasons.CurrencyMissing, null, null },
         { BillingEvaluationReasons.CurrencyMissing, "  ", 0.95m },
-        { BillingEvaluationReasons.CurrencyLowConfidence, "USD", 0.50m },
-        { BillingEvaluationReasons.CurrencyLowConfidence, "USD", null },
+        { BillingEvaluationReasons.CurrencyUnreliable, "USD", 0.50m },
+        { BillingEvaluationReasons.CurrencyUnreliable, "USD", null },
+        { BillingEvaluationReasons.CurrencyUnreliable, "$", 0.50m },
     };
 
     [Theory]
@@ -345,20 +346,97 @@ public class InvoiceComplianceEvaluatorTests
 
         var result = Evaluate(request, Loaded(rate));
 
-        result.Findings.Should().BeEmpty("no ApprovedRate finding and no adjustment when the currency is not reliably USD");
+        // No ApprovedRate finding and no adjustment; only D-115's flag-only "not checked" finding on the invoice.
+        var notChecked = result.Findings.Should().ContainSingle().Subject;
+        notChecked.ReasonCode.Should().Be(reason);
+        notChecked.Subject.Should().Be(BillingSubject.ForInvoice());
+        notChecked.SuggestedAdjustment.Should().BeNull();
+        BillingRuleCatalogue.IsFlagOnlyReason(notChecked.ReasonCode).Should().BeTrue();
         result.Skips.Should().ContainSingle().Which.Should().Be(new BillingRuleSkip(
             rate.PolicyId, "CD-RATE", rate.PolicyVersionId, RuleType.ApprovedRate, reason));
     }
 
-    [Fact]
-    public void AMoneyRule_IsJudged_OnAReliablyReadUsdInvoice()
+    [Theory]
+    [InlineData("usd")]
+    [InlineData("$")]
+    [InlineData(" $ ")]
+    public void AMoneyRule_IsJudged_OnAReliablyReadUsdInvoice(string currency)
     {
-        var request = Request(Fee(0) with { BilledRate = 700m, Amount = 700m }) with { Currency = "usd" };
+        // 049 caller obligation: "$" is read as USD.
+        var request = Request(Fee(0) with { BilledRate = 700m, Amount = 700m }) with { Currency = currency };
 
         var result = Evaluate(request, Loaded(Version("CD-RATE", RuleType.ApprovedRate)));
 
         result.Findings.Should().ContainSingle().Which.SuggestedAdjustment.Should().NotBeNull();
         result.Skips.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TheCurrencyConfidence_IsReadUnderExactlyTheKeyCurrency()
+    {
+        var misKeyed = new Dictionary<string, decimal>(Confidence().Where(kv => kv.Key != BillingFieldNames.Currency)) { ["currency"] = 0.99m };
+        var request = Request(Fee(0) with { BilledRate = 700m, Amount = 700m }) with { HeaderConfidence = misKeyed };
+
+        var result = Evaluate(request, Loaded(Version("CD-RATE", RuleType.ApprovedRate)));
+
+        result.Skips.Should().ContainSingle().Which.ReasonCode.Should().Be(BillingEvaluationReasons.CurrencyUnreliable);
+    }
+
+    // ── D-115: rates and expense caps not checked ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void RatesNotChecked_IsOneInvoiceLevelFinding_OnTheFirstSkippedMoneyPolicy_CitingEverySkippedVersion_D115()
+    {
+        var rate = Version("CD-RATE", RuleType.ApprovedRate);
+        var expense = Version("AA-EXPENSE", RuleType.ExpenseRule);     // ordinal first
+        var increment = Increment("CD-INCREMENT", "0.1");             // not a money rule
+        var request = Request(Fee(0) with { BilledRate = 700m, Amount = 700m }, Expense(1) with { ExpenseCode = "E101", Amount = 600m }) with
+        {
+            Currency = "EUR",
+        };
+
+        var result = Evaluate(request, Loaded(rate, expense, increment));
+
+        var notChecked = result.Findings.Should().ContainSingle("one finding, not one per skipped rule").Subject;
+        notChecked.ReasonCode.Should().Be(BillingEvaluationReasons.CurrencyNotUsd);
+        notChecked.PolicyCode.Should().Be("AA-EXPENSE");
+        notChecked.PolicyVersionId.Should().Be(expense.PolicyVersionId);
+        notChecked.RuleType.Should().Be(RuleType.ExpenseRule);
+        notChecked.ClauseReference.Should().Be(expense.ClauseReference);
+        notChecked.FactValues.Should().BeEmpty();
+        notChecked.ValuesRead.Where(v => v.Name == "skippedPolicyVersion").Select(v => v.Value).Should().Equal(
+            "AA-EXPENSE:" + expense.PolicyVersionId.ToString("D").ToLowerInvariant(),
+            "CD-RATE:" + rate.PolicyVersionId.ToString("D").ToLowerInvariant());
+        var currencyRead = notChecked.ValuesRead.Single(v => v.IsExtracted);
+        currencyRead.Value.Should().Be("EUR");
+        currencyRead.ExtractedField.Should().Be(new Sprk.Bff.Api.Services.Finance.Resolution.FieldRef(null, BillingFieldNames.Currency));
+        currencyRead.Confidence.Should().Be(0.95m);
+        result.RulesByVersion[notChecked.PolicyVersionId].Should().Be(expense, "the mapper and 073 find the version");
+    }
+
+    [Fact]
+    public void RatesNotChecked_IsRaised_WithoutAnyRequiredDataRule_AndAlongsideRequiredDatasOwnCurrencyFinding_D115()
+    {
+        var rate = Version("CD-RATE", RuleType.ApprovedRate);
+        var required = Version("CD-REQUIRED", RuleType.RequiredData);
+        var request = Request(Fee(0)) with { Currency = "EUR" };
+
+        Evaluate(request, Loaded(rate)).Findings.Select(f => f.ReasonCode).Should().Equal(BillingEvaluationReasons.CurrencyNotUsd);
+        Evaluate(request, Loaded(rate, required)).Findings.Select(f => f.ReasonCode)
+            .Should().BeEquivalentTo([BillingEvaluationReasons.CurrencyNotUsd, BillingReasonCodes.CurrencyNotUsd]);
+    }
+
+    [Fact]
+    public void RatesNotChecked_IsNotRaised_WhenNoMoneyRuleIsInForce_D115()
+    {
+        var request = Request(Line(0, EarlyLine)) with { Currency = "EUR" };
+        var notYetInForce = Version("CD-RATE", RuleType.ApprovedRate, from: new DateOnly(2027, 1, 1));
+        var codesOnly = Version("CD-EXPENSE", RuleType.ExpenseRule, """{"type":"ExpenseRule","nonReimbursableCodes":["E109"]}""");
+
+        Evaluate(request, Loaded(Increment("CD-INCREMENT", "0.1"))).Findings.Should().BeEmpty("no money rule at all");
+        Evaluate(request, Loaded(notYetInForce)).Findings.Should().BeEmpty("the money rule is not in force on the invoice's dates");
+        Evaluate(request, Loaded(codesOnly)).Findings.Should().BeEmpty("an ExpenseRule with no cap compares no money");
+        Evaluate(request, Loaded(notYetInForce, codesOnly)).Skips.Should().BeEmpty();
     }
 
     [Fact]
@@ -372,7 +450,7 @@ public class InvoiceComplianceEvaluatorTests
 
         usd.Findings.Select(f => f.ReasonCode).Should().BeEquivalentTo(
             [BillingReasonCodes.ExpenseCodeNotReimbursable, BillingReasonCodes.ExpenseAmountOverCap], "control: both checks fire in USD");
-        eur.Findings.Select(f => f.ReasonCode).Should().Equal(BillingReasonCodes.ExpenseCodeNotReimbursable);
+        eur.Findings.Select(f => f.ReasonCode).Should().Equal(BillingEvaluationReasons.CurrencyNotUsd, BillingReasonCodes.ExpenseCodeNotReimbursable);
         eur.Skips.Should().ContainSingle().Which.ReasonCode.Should().Be(BillingEvaluationReasons.CurrencyNotUsd);
     }
 

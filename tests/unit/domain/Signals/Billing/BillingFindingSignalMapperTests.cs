@@ -408,6 +408,61 @@ public class BillingFindingSignalMapperTests
         ByKey(BillingFindingSignalMapper.MapAll(interleaved, result.RulesByVersion, subjects)).Should().Equal(original);
     }
 
+    // ── D-115: rates and expense caps not checked ────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(null, null, "missing")]
+    [InlineData("USD", 0.50, "unclear")]
+    [InlineData("EUR", 0.95, "not USD")]
+    public async Task RatesNotChecked_IsWrittenWithItsOwnMessage_AsAFlag_D115(string? currency, double? confidence, string said)
+    {
+        var rule = Version("CD-RATE", RuleType.ApprovedRate, template: "{{line.timekeeperName}} billed {{line.rate}}.") with { Consequence = Reject };
+        var request = Request(Fee(0) with { BilledRate = 700m, Amount = 700m }) with
+        {
+            Currency = currency,
+            HeaderConfidence = Confidence().With(BillingFieldNames.Currency, (decimal?)confidence),
+        };
+        var result = Evaluator().Evaluate(request, Loaded(rule));
+        var subjects = SubjectsFor(request);
+
+        var mapping = BillingFindingSignalMapper.MapAll(result, subjects).Should().ContainSingle().Subject;
+        var (writer, org) = Writer(subjects);
+        var written = await writer.WriteAsync(mapping.Request);
+
+        mapping.MessageSource.Should().Be(BillingMessageSource.ReasonTemplate);
+        mapping.Consequence.Should().Be(BillingConsequence.Flag, "forced to Flag whatever the version's consequence");
+        org.Rows[written.SignalId].GetAttributeValue<string>("sprk_sentence")
+            .Should().Be($"Rates and expense caps were not checked: the invoice currency is {said}.");
+        mapping.Request.SubjectEntityLogicalName.Should().Be("sprk_invoice");
+        mapping.Request.EvidenceRefs!.Where(e => e.Kind == BillingFindingSignalMapper.ReferenceEvidenceKind && e.Ref == "skippedPolicyVersion")
+            .Should().ContainSingle().Which.Text.Should().Be("CD-RATE:" + rule.PolicyVersionId.ToString("D").ToLowerInvariant());
+    }
+
+    [Fact]
+    public void RatesNotChecked_MergedWithARejectCapableReasonOfTheSamePolicyAndSubject_KeepsTheReject_D115()
+    {
+        // The real handlers give a money policy no other invoice-level reason, so the second reason is built by hand: an invoice-level
+        // ExpenseRule finding under the same Reject version.
+        var rule = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = Reject };
+        var request = Request(Expense(0) with { ExpenseCode = "E101", Amount = 600m }) with { Currency = "EUR" };
+        var result = Evaluator().Evaluate(request, Loaded(rule));
+        var notChecked = result.Findings.Should().ContainSingle().Subject;
+        var rejectCapable = notChecked with
+        {
+            ReasonCode = BillingReasonCodes.ExpenseCodeNotReimbursable,
+            ValuesRead = [new BillingValueRead { Name = "invoice.firmInvoiceNumber", Value = "INV-100" }],
+        };
+
+        var withBoth = BillingFindingSignalMapper.MapAll([notChecked, rejectCapable], result.RulesByVersion, SubjectsFor(request)).Should().ContainSingle().Subject;
+        var alone = BillingFindingSignalMapper.MapAll(result, SubjectsFor(request)).Should().ContainSingle().Subject;
+
+        withBoth.Consequence.Should().Be(BillingConsequence.Reject, "the reject-capable reason keeps its Reject");
+        withBoth.ReasonCodes.Should().Equal(BillingEvaluationReasons.CurrencyNotUsd, BillingReasonCodes.ExpenseCodeNotReimbursable);
+        withBoth.Fingerprint.Should().Be("billing.currency.not_usd,expense_rule.code_not_reimbursable|Reject");
+        alone.Consequence.Should().Be(BillingConsequence.Flag, "the currency reason alone never raises the consequence");
+        alone.Fingerprint.Should().Be("billing.currency.not_usd|Flag");
+    }
+
     [Fact]
     public void AChangedReasonSet_OrAChangedConsequence_GivesAnotherFingerprint_A4()
     {

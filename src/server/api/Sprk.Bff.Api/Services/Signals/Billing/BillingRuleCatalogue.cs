@@ -128,8 +128,14 @@ public static class BillingRuleCatalogue
     public static string? ReasonTemplate(string reasonCode) => reasonCode switch
     {
         BillingReasonCodes.CurrencyNotUsd => CurrencyNotUsdTemplate,
+        BillingEvaluationReasons.CurrencyMissing => RatesNotCheckedPrefix + "missing.",
+        BillingEvaluationReasons.CurrencyUnreliable => RatesNotCheckedPrefix + "unclear.",
+        BillingEvaluationReasons.CurrencyNotUsd => RatesNotCheckedPrefix + "not USD.",
         _ => null,
     };
+
+    /// <summary>D-115: the start of the message of the evaluator's "money not judged" finding; the reason completes it.</summary>
+    private const string RatesNotCheckedPrefix = "Rates and expense caps were not checked: the invoice currency is ";
 
     /// <summary>
     /// A reason that never rejects or adjusts, whatever consequence its policy version carries (D-115; ontology-r1 072 review F1):
@@ -139,6 +145,7 @@ public static class BillingRuleCatalogue
     public static bool IsFlagOnlyReason(string reasonCode) => reasonCode switch
     {
         BillingReasonCodes.CurrencyNotUsd => true,
+        BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd => true,
         _ => false,
     };
 
