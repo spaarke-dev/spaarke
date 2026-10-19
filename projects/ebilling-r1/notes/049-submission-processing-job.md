@@ -567,8 +567,21 @@ write; the terminal is counted from the conditional write, and any unconditional
 
 **Left for other parts.** D-122 wiring, `SignalWriter.PreflightRefusal` at persist, firmCode / invoice-number caps, permanent-refusal
 classification and the Held presentation (other agents). Part E: call `ResumeAsync` for a Processing submission that links an invoice
-(instead of re-running the processor and `PersistAsync`), and treat `stored_state_mismatch`, `signal_plan_missing` and `not_processing` as
-Refused like the other codes.
+(instead of re-running the processor and `PersistAsync`), and treat `signal_plan_missing` and `not_processing` as Refused like the other
+codes. **Corrected after ontology-r1's re-check (2026-10-19):** `stored_state_mismatch` cannot occur on a legitimate path. The handler
+(72a2cd64d, ~:285-288) sends the persister's Resumed result to `ResumeAsync`, so `RunAsync` is only reached on Committed, where the stored
+JSON and the outcome are the same object. A mismatch therefore means a bug; the handler never calls `RunAsync` with a re-evaluated outcome.
+Marking such a submission Failed would strand an invoice that has no Signals or record, and nothing on the handler path resumes after Failed.
+
+**Known limits (ontology-r1 re-check of 5a04a41fb, no change now).**
+- K1: the test fake does not move the row version on a findings `UpdateAsync`, so removing `rowVersion = null` after the totals-refusal
+  write survives all tests. In production that costs one extra conflict and re-read; the retry succeeds.
+- K2: a failed sink delivery is logged and swallowed, the marker is not set, and the terminal is still written; that notification is never
+  redelivered (matches `IEbillingNotificationSink`'s "does not retry"). Re-check the marker if task 132 makes the sink a durable enqueue.
+- K3: the persister's `sprk_findingsjson` cap check does not allow for the ~100-character `totalsRefusal` member; a fault there is
+  thrown and retried, not lost.
+- K4: a reviewer can decide between the start read and the Signals step, and the Signals are still written on the decided invoice. The
+  terminal write itself is safe (conditional on Processing).
 
 ### 13b. D-122 close method - owner review (ontology-r1)
 
