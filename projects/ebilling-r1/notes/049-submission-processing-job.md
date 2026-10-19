@@ -483,7 +483,94 @@ both reasons on one invoice, and a must-not-fire test with two coding notes.
 3. `IEbillingNotificationSink`'s "do not retry" contract was kept. If the notification must be exactly-once even when the sink faults, the sink
    contract has to change (owner decision).
 
-## D-122 close method - owner review (ontology-r1)
+### 13a. After-steps core fixes (ontology review of part D)
+
+Supersedes the matching statements in section 13 ("Terminal status, last: `UpdateAsync(... = TerminalStatus ...)`", the policy read's "joined to
+its current version", open item 2). Files: `IInvoiceSubmissionAfterSteps.cs`, `InvoiceSubmissionAfterSteps.cs`, `InvoiceSubmissionPersister.cs`
+(`TerminalFor` overload only), `SubmissionReasonCodes.cs`; tests `InvoiceSubmissionAfterStepsTests.cs`. Not touched: `SignalWriter`, the mapper,
+D-122, preflight at persist.
+
+**A. The terminal comes from the STORED state (F4-1).**
+- `InvoiceSubmissionPersister.TerminalFor(SubmissionEvaluationKind, string?)` is the one mapping; `TerminalFor(outcome)` calls it. The after-steps
+  call it with the stored findings JSON's `kind` and root `reasonCode` for the status, the reason code and the notification.
+- `RunAsync(persisted, ...)` stays the first-run entry after Committed. Its `TerminalStatus` / `TerminalReasonCode` are now only checked: if
+  they differ from the stored mapping the result is `Refused` with `ebilling.submission.stored_state_mismatch`
+  (`SubmissionReasonCodes.StoredStateMismatch`) and nothing is written. A crash-then-resume can therefore never write Accepted beside a Rejected
+  invoice and an AutoRejected record.
+- `StoredFindings.Parse` also refuses (null → `findings_unreadable`) a stored `kind` that is not persistable (Accepted, AcceptedUncoded,
+  AutoRejected, Blocked).
+- **Totals refusal (closes section 13 open item 2).** A refused 016 calculation (`persisted.Totals.Refusal` on the first run; the resume's own
+  recalculation) is written into `sprk_findingsjson` as `totalsRefusal: { code, lineId }` (code only, never the message or amounts). Idempotent:
+  no write when the same code is stored. The invoice is not undone. The write moves the row version, so the terminal write re-reads first.
+
+**Resume entry contract (part E codes against exactly this).**
+`Task<SubmissionAfterStepsResult> ResumeAsync(Guid submissionId, string? correlationId, CancellationToken ct = default)`.
+
+| Step | Behaviour |
+|---|---|
+| Read | the submission: `sprk_findingsjson`, `sprk_invoice`, channel, document, correlation id, `sprk_processingstatus`, `versionnumber` |
+| Missing row | `SubmissionMissing` |
+| Accepted / Rejected / Failed | `Completed`, `AlreadyTerminal = true`, `TerminalStatus` = the status found; nothing runs, totals included |
+| Received / no status | `Refused`, `ebilling.submission.not_processing` |
+| No invoice link | `Refused`, `invoice_link_mismatch` |
+| Totals | `IInvoiceTotalsService.RecalculateAsync(invoiceId)`; a fault → the Signals and the record run, then `Retry` (`totals_failed`), as the first run's totals Retry; a refusal → recorded (above) |
+| Then | the same steps as `RunAsync`, from the stored state; never AI, never the evaluation |
+
+- Line ids: not needed. The rule Signals carry their subject ids in the stored plan, and the system Signals use the deterministic
+  `LineIdFor(submissionId, index)` the persister created the lines with, on the first run and on a resume alike. No line query was added
+  (the persister's Resumed query stays the only one).
+- New constructor dependency: `IInvoiceTotalsService` (already registered). `SubmissionAfterStepsResult.AlreadyTerminal` is new.
+
+**B. The terminal is written only while Processing (F4-2).**
+- The submission read now includes `sprk_processingstatus` and `versionnumber`. Not Processing at the start → no step runs (above). Reason for
+  skipping every step, not only notify and terminal: a terminal status means either every step already completed or someone else decided
+  (a reviewer, the job's Failed), and re-running the system Signals after a policy change could open a new episode on a decided invoice.
+- The terminal write is `IGenericEntityService.BulkUpdateIfRowVersionsMatchAsync` with one row (the existing conditional seam on this identity;
+  `UpdateIfRowVersionMatchesAsync` is the ontology writer's own connection). On `DBConcurrencyException`: re-read status and version once;
+  still Processing → write once more on the new version; now terminal → `Completed`, `AlreadyTerminal`, nothing written; a second conflict →
+  `Retry` (`ebilling.submission.terminal_write_conflict`), still Processing. No row version readable → `Retry` (`row_version_missing`).
+- Scenario test: Blocked completes (Rejected), a reviewer sets Accepted, a re-delivery through `RunAsync` and through `ResumeAsync` completes
+  with nothing written, no second notification and no step run.
+
+**F. System-policy predicate (K1).** The policy is read (billing domain, by code), then all its versions; the version used is
+`InvoiceComplianceEvaluator.SelectVersion(versions, receivedOn)`, i.e. `BillingRuleCandidate.IsInForceOn` (current from its start, a superseded
+one inside `[from, to)`), the evaluator's own definition, called, not copied. It must be SubmissionIntegrity. "Current version Active" is
+gone, so a re-seed after `receivedOn` no longer drops that submission's system Signals. Two reads instead of one join.
+
+**G. `signalPlan` required.** `StoredFindings.HasSignalPlan` is false when the stored JSON has no `signalPlan` array; the run is `Refused`
+with `ebilling.submission.signal_plan_missing` and nothing is written. An empty array is still a valid (empty) plan. Schema stays 1: the
+persister always writes the member (its `Validate` requires an evaluation for every persisted kind), and no stored data exists yet.
+
+**E (part).** The rejection decision id test now asserts `IdOf("ebilling-auto-reject-{S:D}")` (and that it differs from the invoice id and
+another submission's), not the id against itself. The test fake now separates a findings-JSON `UpdateAsync` (`FindingsWrites`) from a status
+write; the terminal is counted from the conditional write, and any unconditional status write is collected separately and asserted empty.
+
+**Fail-before evidence.**
+- Against the base sources (650109d97) the new tests do not compile: CS1061 (`ResumeAsync` x8, `HasSignalPlan`, `AlreadyTerminal` x2),
+  CS0117 (`StoredStateMismatch`, `SignalPlanMissingCode`, `NotProcessingCode`, `TerminalWriteConflictCode`, `TotalsRefusalMember`), CS1729
+  (the constructor with `IInvoiceTotalsService`).
+- Mutations of the new code (non-constant expressions), each run on the 57 after-steps tests:
+
+| Mutation | Tests failing |
+|---|---|
+| A: terminal taken from `persisted` and the mismatch check off (the old behaviour) | 2 (both stored-state mismatch cases) |
+| B: status gate off (every status treated as Processing) | 6 (reviewer scenario, now-terminal conflict, 4 not-Processing cases) |
+| B: no re-read after a conflict (same version retried) | 2 (still-Processing retry, now-terminal conflict) |
+| F: only the current version considered | 1 (superseded-in-window) |
+| G: a missing plan read as present | 1 |
+| Totals refusal not recorded | 1 |
+| Totals refusal written again when stored | 1 |
+| E: decision id key `:N` instead of `:D` | 1 (the section 7 shape test) |
+
+**Verification.** `dotnet build src/server/api/Sprk.Bff.Api/` 0 warnings / 0 errors. Filtered unit suite 5,306 passed / 0 failed / 11 skipped
+(after-steps tests 34 → 57). ArchTests 1,214 passed.
+
+**Left for other parts.** D-122 wiring, `SignalWriter.PreflightRefusal` at persist, firmCode / invoice-number caps, permanent-refusal
+classification and the Held presentation (other agents). Part E: call `ResumeAsync` for a Processing submission that links an invoice
+(instead of re-running the processor and `PersistAsync`), and treat `stored_state_mismatch`, `signal_plan_missing` and `not_processing` as
+Refused like the other codes.
+
+### 13b. D-122 close method - owner review (ontology-r1)
 
 Test-only follow-up to ontology-r1's review of `SignalWriter.CloseActedByAutomatedDecisionAsync` (landed as 650109d97). No production change: no test exposed a defect.
 
