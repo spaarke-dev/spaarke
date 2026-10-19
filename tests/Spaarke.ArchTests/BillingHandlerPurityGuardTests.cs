@@ -28,7 +28,9 @@ namespace Spaarke.ArchTests;
 /// <para><b>Not covered:</b> a call through an interface, a virtual method or a delegate whose target is chosen at run time
 /// (the scan reads the declared target, not the implementations), reflection reached through a type this list does not name,
 /// and a handler that gains an input from a static the scan does not read (a new <c>static</c> field is caught by the
-/// static-state test). These are code-review concerns.</para>
+/// static-state test). Static field loads (<c>ldsfld</c> of another type's static, such as a cached clock value or a mutable
+/// table) and type initialisers (a <c>.cctor</c> that runs on first touch of a type, which may read the clock, the environment or
+/// a file) are not followed either: the scan follows method references only, and a type initialiser is never referenced in IL. These are code-review concerns.</para>
 /// </remarks>
 public sealed class BillingHandlerPurityGuardTests
 {

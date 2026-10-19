@@ -18,7 +18,8 @@ namespace Spaarke.ArchTests;
 /// (<see cref="IlCallScan"/>), once per method. The fact loader (<c>EvaluateAsync</c>'s I/O half) is not a root.</para>
 /// <para><b>Enforced by this test.</b> A must-fire control (a clock read two calls deep) and a must-not-fire control (a pure chain).</para>
 /// <para><b>Not covered:</b> a call through a delegate, an interface or a virtual method chosen at run time (the handler dispatch is
-/// a delegate; the handlers are covered by the 071 purity guard).</para>
+/// a delegate; the handlers are covered by the 071 purity guard), a static field load (<c>ldsfld</c>) and a type initialiser
+/// (<c>.cctor</c>): the scan follows method references only, and a type initialiser is never referenced in IL.</para>
 /// </remarks>
 public sealed class BillingEvaluatorClockGuardTests
 {

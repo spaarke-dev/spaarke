@@ -36,7 +36,7 @@ count, so a broken firm rule leaves the client default in force (fails toward th
 **Handlers** run once per applicable version on the whole fact set; 072 keeps the findings whose subject that version applies to.
 Suggested adjustments are carried, never applied.
 
-**D-20.** Skip reasons `billing.currency.missing`, `.not_usd`, `.low_confidence` (unknown confidence counts as below the floor, as in
+**D-20.** Skip reasons `billing.currency.missing`, `.not_usd`, `.unreliable` (unknown confidence counts as below the floor, as in
 `HandlerContext`). ApprovedRate is not run; ExpenseRule runs and its `amount_over_cap` findings are dropped (the code check stays). Each
 skip is logged (Warning) and listed in `Skips`. A missing currency is never taken as USD.
 
@@ -160,6 +160,9 @@ or project file changed; `dotnet list package --vulnerable --include-transitive`
    under it keeps its detail.
 10. **The judged invoice is a probe** (it does not exist yet): only its core lookup is walked; fewer lookups can only shrink its set,
     which hides more, never less.
+11. **The current version ignores `sprk_inforceto`** (`BillingRuleCandidate.IsInForceOn`, 076's "the pointer decides"): a version
+    the policy's `sprk_currentversion` points at is in force from its `sprk_inforcefrom` on, even if an end date was left on it by a
+    failed publish; only a superseded (non-current) version is bounded by `[sprk_inforcefrom, sprk_inforceto)`.
 
 ## 8. Owner questions (with recommendation)
 
@@ -406,3 +409,152 @@ mappings, so aggregation cannot change a decision:
    differ only in case would still collide in the writer. The mapper groups ordinally, as the writer builds the key.
 7. **Null `Clause` on billing evidence lines.** These lines leave `Clause` null. `SignalEvidenceRef`'s doc says the UI shows such a
    line as "context, not tested"; a billing UI (077) should read the `billing.*` kinds instead.
+
+
+## 12. Review fix round, part W
+
+Model: Opus 5.5 @ high (implementer). Base `work/ebilling-r1` `db4eee636` (parts L and E and the 073 fix round landed). Branch
+`fix/072-part-w`; the main session cherry-picks. Part W also carries 071's round-3 items (071 notes, "Round 3").
+
+### W.1 Item map
+
+| Item | Commit | Change |
+|---|---|---|
+| (base red) | `f58768889`, `2f3244fca` | Test-only. The base failed 9 cases in the filtered suite: part E was written before D-117 and F-ALLOW. `Expense()` bills E101, so fixtures that set only `ExpenseCode = "E109"` never fired the code reason (the 150-line fixture, the A4 two-reasons test, 073's `ARejectCapableReason_OfTheSameMoneyPolicy_...`); they now bill E109, and the union-of-reads assertion expects `line[0].BilledExpenseCode`. 073's `AnUnlistedReasonCode_...` theory no longer uses `billing.currency.missing` as its "new" reason (flag-only since part E, held as `reason_flag_only`); that case is asserted separately |
+| A6 + A8 (D-116) | `57eb49096` | CoreRecordWindow reads the billing status; Describe text and schema description say what it does, "every charge line (credits excluded)"; docs/data-model lists the columns |
+| A7 (071 round 3 F4) | `c39da7f8a` | A line with NEITHER Hours NOR Amount lists both as null-valued reads with unknown confidence |
+| D-119 | `18738ed67` | `BillingCurrency.Normalise` / `IsUsd`, used by the evaluator's money skip and by RequiredData: a bare `"$"` is USD in both |
+| A5 placement (049 rule 5) | `f4aca8bdb` | The D-115 finding hangs on a skipped ApprovedRate version; ExpenseRule only when no ApprovedRate version is in force |
+| K2 (073 review, deferred) | `bc69be34b` | A stored consequence the type may not carry is evaluated as Flag, not dropped |
+| ReceivedOn (main session) | `debbffa1d` | `Evaluate` / `EvaluateAsync` throw `ArgumentException` on a default `ReceivedOn`; documented as a UTC date |
+| B5 (rest) | this notes commit | Guard "Not covered" lists, section 7 item 11, the D-112 known limits below, `.unreliable` in section 2 |
+
+### W.2 Behaviour
+
+**A6 (D-116).** `BillingFactLoader` reads `sprk_billingstatus`, `sprk_openeddate` and `sprk_closeddate` on all three core tables
+(verified live on spaarkedev1 2026-10-18: the three columns exist on sprk_matter, sprk_project and sprk_workassignment; the global
+choice is Open 100000000, Final 100000001, Closed 100000002, form default Open; work-assignment dates are DateOnly behaviour,
+matter and project TimeZoneIndependent, both DateOnly format). The values are named once, in `CoreRecordBillingStatus`
+(`BillingFactSet.cs`). Per line, credits skipped first (D-105):
+- **Open**: only `before_open` (with grace). The close date and the inactive state are ignored.
+- **Final**: `before_open`; then with no close date every charge line (`core_record_closed`, a line with no date included);
+  else `after_close` (with grace).
+- **Closed**: every charge line, whatever its date: `core_record_window.closed_to_billing` (new).
+- **Empty, or a value outside the set**: D-111 exactly as before. The loader logs an unknown value as a Warning.
+
+Findings carry the reference value `coreRecord.billingStatus` (the label). **Allowlist choice:** CoreRecordWindow's existing three
+codes are all on `BillingRuleCatalogue.RejectCapableReasons`, so `closed_to_billing` is added too; the rule's author decides the
+consequence. 073's allowlist guard (the handler source names each listed code) passes.
+
+**A7.** See the 071 notes, "Round 3". Through 073: ApprovedRate on "(2.5) @ 650 = (1,625.00)" (rate parsed, hours and amount not)
+now holds as `read_field_confidence_unknown` with Hours and Amount as the unreliable fields, where it used to reject.
+
+**D-119.** `"$"` gives no currency finding from either path and rates are checked; `"EUR"` (and `"US$"`) gives both D-115's
+`billing.currency.not_usd` flag and RequiredData's `required_data.currency_not_usd`; a missing or blank currency gives only D-115's
+`billing.currency.missing` (RequiredData still does not treat absence as evidence). The confidence key stays exactly `Currency`.
+
+**A5.** The host is the first skipped ApprovedRate version (ordinal code, then version id), else the first skipped ExpenseRule
+version. Why this keeps rule (5): the mapper groups by (policy code, subject). ApprovedRate is not run at all when the currency
+skips, so its invoice-level group holds only the currency reason. ExpenseRule's handler emits line-level findings only, so the
+fallback's invoice-level group is alone too. **The ExpenseRule merge case is therefore not reachable** with distinct policy codes;
+nothing is refused and no D-115 reason is withheld. It would become reachable only if two policies shared a code (E.6 item 6, the
+case-insensitive alternate key) or ExpenseRule gained an invoice-level reason; the must-fire test below would then fail.
+
+**K2.** Before the gate, the evaluator checks the stored consequence against `BillingRuleCatalogue.IsConsequenceAllowed` (after
+parsing the type; an unknown or non-billing type goes to the gate unchanged and is refused there). A disallowed consequence is left
+out of the gate's snapshot, so the gate still validates the body, template and length and refuses an invalid body exactly as before.
+An accepted version is evaluated; `RulesByVersion` carries it `with { Consequence = Flag }`, which 073 and the mapper read, so it can
+never reject. It is logged as a Warning (`OntologyWriterEvents.PolicyVersionInvalid`, reason `consequence_not_allowed`, "evaluated
+with Flag") and counted on the new `billing.rule.consequence_downgraded` (tag `rule_type`, `OntologyWriterTelemetry`, beside
+`billing.rule.invalid`). It is not a refusal and not in `Refusals`. A downgraded firm version still displaces the client default
+(D-39). `PolicyVersionValidator.cs` is untouched, so the Ontology paths are byte-identical; publish, accept and edit still refuse at
+authoring.
+
+**ReceivedOn.** A default `ReceivedOn` (0001-01-01) has no version in force, so every undated subject was silently judged by
+nothing. Both entry points now throw `ArgumentException` (param `request`) before the loader runs.
+
+### W.3 Tests and evidence
+
+Fail-before = the new tests against the pre-change production file (restored afterwards); mutation = applied to the committed
+source, suite run, file restored (helper `w_mutate.py`, session scratchpad).
+
+| Proof | Result |
+|---|---|
+| A6 mutation: handler ignores the billing status (always D-111) | 5 fail: Open x2, Final with no close date, Closed, the work-assignment end-to-end loader test |
+| A6 mutation: loader drops `BillingStatus` | 5 fail: the 3-table theory x3, the end-to-end test, the unknown-value test |
+| A6 mutation: work assignment read without its dates | 1 fails (the theory's WorkAssignment row) |
+| A6 mutation: `closed_to_billing` off the allowlist | 1 fails (the Closed test's allowlist assertion) |
+| A8 mutation: the Closed sentence removed from Describe | 1 fails (`Describer_CoreRecordWindow_SaysWhatEachBillingStatusDoes_...`) |
+| A7 fail-before (old `HandlerContext.cs`) | 1 fails (the both-absent ApprovedRate case rejects); the one-absent negative case passes on both |
+| D-119 fail-before (old `RequiredDataHandler.cs`) | 4 fail (`"$"`, `" $ "` in the handler theory and the evaluator's two-path theory) |
+| A5 mutation: old placement (first skipped by code) | 43 fail: the placement test and 42 rows of the combination test (host type) |
+| A5 mutation: the mapper ignores flag-only (currency takes the version's Reject) | 90 fail; e.g. "Expected mapping.Consequence to be Flag ... but found Reject" |
+| K2 fail-before (old evaluator) | 7 fail: the ApprovedTimekeeper client default, the D-39 firm displacement, and 073's five-type theory (previously "refused, no finding"); the body-invalid control passes on both |
+| ReceivedOn fail-before | 1 fails; the control passes on both |
+| 150-line guard (main session ask) | With grouping broken (key suffixed per group), `TheMapper_NeverSendsTwoRequestsWithOneDedupeKey_OverThe150LineFixture_MustFireGuard_A4` fails listing exactly 15 repeated keys |
+
+**The A5 must-fire test** (`TheSignalCarryingTheCurrencyReason_IsNeverStrongerThanFlag_OverEveryCombinationOfMoneyRules_MustFire`):
+every non-empty subset of five money rules (client default and firm ApprovedRate, client default and firm ExpenseRule with a cap, a
+cap-less ExpenseRule), each at Reject, times three currency cases (EUR, missing, USD at 0.50): 93 rows. Invoice-level RequiredData and
+Duplicate Rejects are in force and fire in every row (asserted as a control). The Signal carrying the currency reason is Flag and
+holds only flag-only reasons; the host is ApprovedRate whenever one is in the subset; with no rate and no cap, no currency reason.
+
+**Changed existing tests.** 073's `TheBillingGate_RefusesAStoredVersion_WhoseConsequenceIsReject` became
+`AStoredVersion_WhoseConsequenceIsReject_IsEvaluatedAsFlag_TheCheckSurvives_K2` (K2 is the brief's semantics). The D-115 placement
+test now expects the ApprovedRate host. The 071 D-111 Describe assertion reads "every charge line (credits excluded)". RequiredData's
+must-fire theory uses `"US$"` where it used `"$"`, and `"$"` / `" $ "` moved to its must-not-fire theory.
+
+**Suites.**
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
+- `Sprk.Bff.Api.Tests` filtered `Billing|Compliance|Rejection|RuleSet|Finance|Signals|PolicyVersion`: base `db4eee636` 4,665 passed,
+  9 failed, 5 skipped; tip 4,805 passed, 0 failed, 5 skipped (live Dataverse).
+- `Spaarke.ArchTests`: 1,207 / 1,207 (the D-34 failure part L reported is no longer present at this base), including `OntologyBillingConsequenceIsolationGuardTests`.
+
+**Publish delta.** `dotnet publish -c Release -r linux-x64`, short paths, `Compress-Archive` (Optimal). Fresh `origin/master` `d7eabba3b`: 39,237,970 bytes; base `db4eee636`: 39,742,544; tip `debbffa1d`: 39,743,814. 192 files in all three. Tip vs master +505,844 bytes (+0.48 MB, all of it ebilling-r1 work already on the branch); part W alone (tip vs base) +1,270 bytes. Total 39.7 MB, under the +5 MB per-task and 55 MB review thresholds.
+
+### W.4 Deviations and judgment calls
+
+1. **Final with no close date reuses `core_record_closed`** (D-111's "no window end" reason) rather than a second new code; only
+   Closed gets a new code, as the brief asked.
+2. **An unknown billing-status value is treated as empty (D-111)** and logged by the loader as a Warning. Failing safe (flag every
+   line) was the alternative; D-111 is what such a row got before the column existed.
+3. **Under Closed, a line before the open date reports `closed_to_billing`**, not `before_open`: the status decides first.
+4. **The K2 downgrade is in the evaluator**, so the gate and every Ontology path are byte-identical. Warning plus a "downgraded"
+   metric was chosen over keeping the Error log and a `Refusals` entry, because the version is not refused: it produces findings.
+5. **A7 adds the unknown read even when the finding already lists the field with a known confidence** (the line's map can hold one for
+   a value that did not parse); it is not added again when one with unknown confidence is already there.
+6. **The guard "Not covered" wording** was added to both `BillingHandlerPurityGuardTests` and `BillingEvaluatorClockGuardTests` (the
+   same scanner, `IlCallScan`, follows method references only).
+7. **Commit order.** The A6 commit landed before the two test-only commits that turned the base green; A6 touches none of the
+   failing tests, and the filtered suite was green before every later commit.
+8. **`BillingRuleDraftTranslator`'s CoreRecordWindow description** (the drafting prompt: "within the open and close dates") is not
+   changed: it describes what to draft, not how it is judged. Recommend a follow-up if 075 should mention the billing status.
+
+### W.5 Known limits (recorded, not changed)
+
+**D-112 (one sentence each).**
+- A two-edit narrowing of a Secure-owned prior's union before reconciliation: if the root lookup is cleared on both the prior's
+  invoice and its submission before the reconciler runs, the prior's union narrows; that widens what is shown, but it needs write
+  access inside the wall, so it is not an escalation (uac-r2, K-ii).
+- Whether detail is shown is decided once, at evaluation time, so a prior moved under a secure root later keeps the detail already
+  written into its Duplicate finding and Signal.
+- The single named Secure team (uac task 178, future): the A1(b) guard (`BillingFactLoader.cs` around line 697) tests
+  `owningteam ==` the configured Secure team only, so a row owned by another family's Secure team (UAC task 178 /
+  uac-secure-project-r3, not live yet) whose lookups are cleared would read as ordinary; when 178 lands, A1(b) must test "owned by
+  any team in the Secure BU" (`ResolveSecureBusinessUnitAsync`, as `ReownOrdinaryRowAsync` does) and add a second-team test. uac-r2 is
+  filing an issue against 178 (uac-r2, K-i).
+
+**K2.**
+- A downgraded firm version (say an InvoiceAge version stored with Suggest adjustment) displaces a client-default InvoiceAge Reject,
+  so the client's Reject becomes a Flag for that firm; the same shape as 073's known limit for a null-consequence firm row, and only
+  a row written around publish can do it.
+
+**Mapper and currency (main session).**
+- The reason-set fingerprint ignores which field is missing: two RequiredData `missing_field` reasons whose fields change but whose
+  count does not keep the same fingerprint (E.6 item 5).
+- A foreign-currency invoice with a RequiredData rule and a money rule gets two currency Signals: D-115's on the money policy and
+  RequiredData's `currency_not_usd` on the RequiredData policy (different policy codes, so different groups). Both are flags.
+- A withheld group's `BillingSignalMapping.Findings` still carries the visible reason's values (the request itself is scrubbed). 049
+  must build the Decision Record snapshot from the merged, scrubbed form; the main session adds that constraint to 049.
+- RequiredData's own `currency_not_usd` (flag-only) can share a group with a RequiredData `missing_field` Reject on the invoice; the
+  merged Signal then shows Reject because of the missing field (E.6 item 2's case, not the D-115 reason).
