@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -6,7 +7,10 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -103,6 +107,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects — list all projects the user has access to
         group.MapGet("/projects", GetProjects)
             .WithName("GetExternalProjects")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjects)
             .WithSummary("List all Secure Projects the authenticated user can access")
             .Produces<ExternalCollectionResponse<ExternalProjectDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -111,6 +116,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id} — single project
         group.MapGet("/projects/{id:guid}", GetProjectById)
             .WithName("GetExternalProjectById")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjects)
             .WithSummary("Get a single Secure Project by ID")
             .Produces<ExternalProjectDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -120,6 +126,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id}/documents
         group.MapGet("/projects/{id:guid}/documents", GetDocuments)
             .WithName("GetExternalProjectDocuments")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectDocuments)
             .WithSummary("Get documents for a Secure Project")
             .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -130,6 +137,7 @@ public static class ExternalProjectDataEndpoints
         // scoping are enforced BEFORE any SPE pointer resolution or Graph read (ADR-028 A1, NFR-03).
         group.MapGet("/projects/{id:guid}/documents/{documentId:guid}/content", DownloadDocumentContent)
             .WithName("DownloadExternalProjectDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectDocuments)
             .WithSummary("Download a Secure Project document's content (authz-before-stream, app-only)")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -140,6 +148,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id}/todos
         group.MapGet("/projects/{id:guid}/todos", GetTodos)
             .WithName("GetExternalProjectTodos")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectTodos)
             .WithSummary("Get to-dos for a Secure Project (sprk_todo records regarding the project)")
             .Produces<ExternalCollectionResponse<ExternalTodoDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -148,6 +157,7 @@ public static class ExternalProjectDataEndpoints
         // POST /api/v1/external/projects/{id}/todos — create a new to-do regarding the project
         group.MapPost("/projects/{id:guid}/todos", CreateTodo)
             .WithName("CreateExternalProjectTodo")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.CreateProjectTodo)
             .WithSummary("Create a new sprk_todo regarding a Secure Project (ADR-024 resolver fields applied)")
             .Produces<ExternalTodoDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -171,6 +181,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/matters/{id:guid}/todos", GetMatterTodos)
             .WithName("GetExternalMatterTodos")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadMatterTodos)
             .WithSummary("Get to-dos regarding an accessible matter (sprk_regardingmatter)")
             .Produces<ExternalCollectionResponse<ExternalTodoDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -178,6 +189,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapPost("/matters/{id:guid}/todos", CreateMatterTodo)
             .WithName("CreateExternalMatterTodo")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.CreateMatterTodo)
             .WithSummary("Create a new sprk_todo regarding a matter (ADR-024 resolver fields applied)")
             .Produces<ExternalTodoDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -187,6 +199,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/workassignments/{id:guid}/todos", GetWorkAssignmentTodos)
             .WithName("GetExternalWorkAssignmentTodos")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadWorkAssignmentTodos)
             .WithSummary("Get to-dos regarding an accessible work assignment (sprk_regardingworkassignment)")
             .Produces<ExternalCollectionResponse<ExternalTodoDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -194,6 +207,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapPost("/workassignments/{id:guid}/todos", CreateWorkAssignmentTodo)
             .WithName("CreateExternalWorkAssignmentTodo")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.CreateWorkAssignmentTodo)
             .WithSummary("Create a new sprk_todo regarding a work assignment (ADR-024 resolver fields applied)")
             .Produces<ExternalTodoDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -206,6 +220,7 @@ public static class ExternalProjectDataEndpoints
         // ConflictBehavior.Fail so a same-named file can never be overwritten by an external caller.
         group.MapPost("/projects/{id:guid}/documents", UploadDocument)
             .WithName("UploadExternalProjectDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UploadProjectDocument)
             .WithSummary("Upload a document to a Secure Project (server-derived container, app-only)")
             .Accepts<IFormFile>("multipart/form-data")
             .DisableAntiforgery() // multipart upload; auth is the JWT + participation gate, not a form token
@@ -219,6 +234,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id}/documents/{documentId}/versions — SPE version history
         group.MapGet("/projects/{id:guid}/documents/{documentId:guid}/versions", GetDocumentVersions)
             .WithName("GetExternalDocumentVersions")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectDocuments)
             .WithSummary("Get SPE version history for a document in a Secure Project")
             .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -238,6 +254,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/matters/{id:guid}/documents", GetMatterDocuments)
             .WithName("GetExternalMatterDocuments")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadMatterDocuments)
             .WithSummary("Get documents for a matter the caller can read")
             .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -245,6 +262,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/matters/{id:guid}/documents/{documentId:guid}/content", DownloadMatterDocumentContent)
             .WithName("DownloadExternalMatterDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadMatterDocuments)
             .WithSummary("Download a matter document's content (authz-before-stream, app-only)")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -254,6 +272,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapPost("/matters/{id:guid}/documents", UploadMatterDocument)
             .WithName("UploadExternalMatterDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UploadMatterDocument)
             .WithSummary("Upload a document to a matter (server-derived container, app-only)")
             .Accepts<IFormFile>("multipart/form-data")
             .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
@@ -266,6 +285,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/matters/{id:guid}/documents/{documentId:guid}/versions", GetMatterDocumentVersions)
             .WithName("GetExternalMatterDocumentVersions")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadMatterDocuments)
             .WithSummary("Get SPE version history for a document on a matter")
             .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -274,6 +294,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/workassignments/{id:guid}/documents", GetWorkAssignmentDocuments)
             .WithName("GetExternalWorkAssignmentDocuments")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadWorkAssignmentDocuments)
             .WithSummary("Get documents for a work assignment the caller can read")
             .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -281,6 +302,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/workassignments/{id:guid}/documents/{documentId:guid}/content", DownloadWorkAssignmentDocumentContent)
             .WithName("DownloadExternalWorkAssignmentDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadWorkAssignmentDocuments)
             .WithSummary("Download a work assignment document's content (authz-before-stream, app-only)")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -290,6 +312,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapPost("/workassignments/{id:guid}/documents", UploadWorkAssignmentDocument)
             .WithName("UploadExternalWorkAssignmentDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UploadWorkAssignmentDocument)
             .WithSummary("Upload a document to a work assignment (server-derived container, app-only)")
             .Accepts<IFormFile>("multipart/form-data")
             .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
@@ -302,6 +325,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/workassignments/{id:guid}/documents/{documentId:guid}/versions", GetWorkAssignmentDocumentVersions)
             .WithName("GetExternalWorkAssignmentDocumentVersions")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadWorkAssignmentDocuments)
             .WithSummary("Get SPE version history for a document on a work assignment")
             .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -310,6 +334,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/servicerequests/{id:guid}/documents", GetServiceRequestDocuments)
             .WithName("GetExternalServiceRequestDocuments")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadServiceRequestDocuments)
             .WithSummary("Get documents for a service request the caller submitted")
             .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -317,6 +342,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/servicerequests/{id:guid}/documents/{documentId:guid}/content", DownloadServiceRequestDocumentContent)
             .WithName("DownloadExternalServiceRequestDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadServiceRequestDocuments)
             .WithSummary("Download a service request document's content (authz-before-stream, app-only)")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -326,6 +352,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapPost("/servicerequests/{id:guid}/documents", UploadServiceRequestDocument)
             .WithName("UploadExternalServiceRequestDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UploadServiceRequestDocument)
             .WithSummary("Upload a document to a service request the caller submitted (server-derived container, app-only)")
             .Accepts<IFormFile>("multipart/form-data")
             .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
@@ -338,6 +365,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/servicerequests/{id:guid}/documents/{documentId:guid}/versions", GetServiceRequestDocumentVersions)
             .WithName("GetExternalServiceRequestDocumentVersions")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadServiceRequestDocuments)
             .WithSummary("Get SPE version history for a document on a service request the caller submitted")
             .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -349,6 +377,7 @@ public static class ExternalProjectDataEndpoints
         // sprk_matter and sprk_project (RightsForInvoiceAsync). Read lists, downloads and reads versions; Create uploads.
         group.MapGet("/invoices/{id:guid}/documents", GetInvoiceDocuments)
             .WithName("GetExternalInvoiceDocuments")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceDocuments)
             .WithSummary("Get documents for an invoice whose matter or project the caller can read")
             .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -357,6 +386,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/invoices/{id:guid}/documents/{documentId:guid}/content", DownloadInvoiceDocumentContent)
             .WithName("DownloadExternalInvoiceDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceDocuments)
             .WithSummary("Download an invoice document's content (authz-before-stream, app-only)")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -367,6 +397,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapPost("/invoices/{id:guid}/documents", UploadInvoiceDocument)
             .WithName("UploadExternalInvoiceDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UploadInvoiceDocument)
             .WithSummary("Upload a document to an invoice (Create inherited from its matter or project; server-derived container, app-only)")
             .Accepts<IFormFile>("multipart/form-data")
             .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
@@ -380,6 +411,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/invoices/{id:guid}/documents/{documentId:guid}/versions", GetInvoiceDocumentVersions)
             .WithName("GetExternalInvoiceDocumentVersions")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceDocuments)
             .WithSummary("Get SPE version history for a document on an invoice")
             .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -390,6 +422,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id}/events — calendar events for the project
         group.MapGet("/projects/{id:guid}/events", GetEvents)
             .WithName("GetExternalProjectEvents")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectEvents)
             .WithSummary("Get calendar events for a Secure Project (sprk_event records regarding the project)")
             .Produces<ExternalCollectionResponse<ExternalEventDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -399,6 +432,7 @@ public static class ExternalProjectDataEndpoints
         // project route's own, so the Read check and the DTO are identical. Read only: event CREATE stays project-only.
         group.MapGet("/matters/{id:guid}/events", GetMatterEvents)
             .WithName("GetExternalMatterEvents")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadMatterEvents)
             .WithSummary("Get calendar events regarding an accessible matter (sprk_event, sprk_regardingmatter)")
             .Produces<ExternalCollectionResponse<ExternalEventDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -406,6 +440,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/workassignments/{id:guid}/events", GetWorkAssignmentEvents)
             .WithName("GetExternalWorkAssignmentEvents")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadWorkAssignmentEvents)
             .WithSummary("Get calendar events regarding an accessible work assignment (sprk_event, sprk_regardingworkassignment)")
             .Produces<ExternalCollectionResponse<ExternalEventDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -414,6 +449,7 @@ public static class ExternalProjectDataEndpoints
         // POST /api/v1/external/projects/{id}/events — create a calendar event on the project
         group.MapPost("/projects/{id:guid}/events", CreateEvent)
             .WithName("CreateExternalProjectEvent")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.CreateProjectEvent)
             .WithSummary("Create a new sprk_event regarding a Secure Project")
             .Produces<ExternalEventDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -424,6 +460,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id}/contacts
         group.MapGet("/projects/{id:guid}/contacts", GetContacts)
             .WithName("GetExternalProjectContacts")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectContacts)
             .WithSummary("Get contacts with access to a Secure Project")
             .Produces<ExternalCollectionResponse<ExternalContactDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -432,6 +469,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id}/organizations
         group.MapGet("/projects/{id:guid}/organizations", GetOrganizations)
             .WithName("GetExternalProjectOrganizations")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectOrganizations)
             .WithSummary("Get organizations linked to contacts on a Secure Project")
             .Produces<ExternalCollectionResponse<ExternalOrganizationDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -440,6 +478,7 @@ public static class ExternalProjectDataEndpoints
         // PATCH /api/v1/external/todos/{id} — update a to-do
         group.MapPatch("/todos/{id:guid}", UpdateTodo)
             .WithName("UpdateExternalTodo")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UpdateTodo)
             .WithSummary("Update a to-do (PATCH semantics — only provided fields are changed)")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -459,6 +498,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapDelete("/documents/{id:guid}", DeleteOwnDocument)
             .WithName("DeleteOwnExternalDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.DeleteDocument)
             .WithSummary("Delete a document the caller created, and its file (creator stamp + Read on its parent)")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -469,6 +509,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapDelete("/todos/{id:guid}", DeleteOwnTodo)
             .WithName("DeleteOwnExternalTodo")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.DeleteTodo)
             .WithSummary("Delete a to-do the caller created (creator stamp + Read on its root)")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -477,6 +518,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapDelete("/events/{id:guid}", DeleteOwnEvent)
             .WithName("DeleteOwnExternalEvent")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.DeleteEvent)
             .WithSummary("Delete a calendar event the caller created (creator stamp + Read on its root)")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -489,6 +531,7 @@ public static class ExternalProjectDataEndpoints
         // (POST /servicerequests/{id}/messages, task 034). Hard delete.
         group.MapDelete("/servicerequests/{id:guid}", DeleteOwnServiceRequest)
             .WithName("DeleteOwnExternalServiceRequest")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.DeleteServiceRequest)
             .WithSummary("Delete a service request the caller requested, while it is open and has no related records (else 409 service_request_closed or has_related_records)")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -1124,37 +1167,42 @@ public static class ExternalProjectDataEndpoints
     private static Task<IResult> UploadDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
-        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
+        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.Project, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
 
     private static Task<IResult> UploadMatterDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
-        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
+        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.Matter, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
 
     private static Task<IResult> UploadWorkAssignmentDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
-        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
+        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
 
     private static Task<IResult> UploadServiceRequestDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
-        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
+        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
 
     private static Task<IResult> UploadInvoiceDocument(
         Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
-        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        IRecordOwnershipResolver ownership, IPostUploadIndexingEnqueuer indexing, JobSubmissionService jobs,
+        IConfiguration configuration, ILogger<Program> logger, CancellationToken ct) =>
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.Invoice, id, file, httpContext, dataService,
-            modules, containerResolver, fileStore, ownership, logger, ct);
+            modules, containerResolver, fileStore, ownership, indexing, jobs, configuration, logger, ct);
 
     private static Task<IResult> GetDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
@@ -1275,6 +1323,9 @@ public static class ExternalProjectDataEndpoints
         RecordContainerResolver containerResolver,
         ISpeFileOperations fileStore,
         IRecordOwnershipResolver ownership,
+        IPostUploadIndexingEnqueuer indexing,
+        JobSubmissionService jobs,
+        IConfiguration configuration,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -1393,17 +1444,20 @@ public static class ExternalProjectDataEndpoints
                 detail: "The document could not be stored. Please try again.");
         }
 
+        // One value feeds both the row and the post-upload index request, so the two cannot name different items.
+        var pointers = new ExternalUploadedFilePointers(
+            // FileHandleDto.DriveId is the drive resolved during the upload; fall back to the
+            // container we resolved rather than persisting a null pointer.
+            DriveId: uploaded.DriveId ?? decision.ContainerId,
+            ItemId: uploaded.Id,
+            FileName: uploaded.Name,
+            FileSizeBytes: uploaded.Size,
+            WebUrl: uploaded.WebUrl);
+
         var created = await dataService.CreateDocumentAsync(
             parentKind,
             id,
-            new ExternalUploadedFilePointers(
-                // FileHandleDto.DriveId is the drive resolved during the upload; fall back to the
-                // container we resolved rather than persisting a null pointer.
-                DriveId: uploaded.DriveId ?? decision.ContainerId,
-                ItemId: uploaded.Id,
-                FileName: uploaded.Name,
-                FileSizeBytes: uploaded.Size,
-                WebUrl: uploaded.WebUrl),
+            pointers,
             owningTeamId,
             callerContext, // task 030 (FR-25): the creator stamp comes from the resolved principal
             ct);
@@ -1412,10 +1466,141 @@ public static class ExternalProjectDataEndpoints
             "[EXT-UPLOAD] Contact {ContactId} uploaded '{FileName}' to {ParentKind} {ParentId} as document {DocumentId}",
             callerContext.ContactId, uploadPath, parentKind, id, created.SprkDocumentid);
 
+        // Task 063 (owner decision 2026-10-13): index AND profile the new document, both app-only. Only reached once
+        // the bytes and the row exist; neither queue can change the 201.
+        await QueueIndexingAndProfileAsync(
+            parentKind, id, created.SprkDocumentid, pointers, file.ContentType,
+            indexing, jobs, configuration, httpContext.TraceIdentifier, logger);
+
         // Response carries the document row only — Graph pointers are never surfaced on this surface.
         return Results.Created(
             $"/api/v1/external/{DocumentParentSegment(parentKind)}/{id}/documents/{created.SprkDocumentid}", created);
     }
+
+    /// <summary>
+    /// Task 063 (owner decision 2026-10-13): queues app-only AI Search indexing and the document profile for a document an
+    /// external caller just uploaded, so it is searchable and profiled like an MDA upload. Best-effort: never throws.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>App-only is correct for both.</b> The bytes were written by <see cref="ISpeFileOperations.UploadSmallAsync"/>
+    /// (the BFF's app identity), so this is an MI-written file, the precondition of
+    /// <see cref="IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync"/> (<c>.claude/constraints/auth.md</c>). The
+    /// external plane has no user token to queue, and neither job needs one: the profile job
+    /// (<see cref="AppOnlyDocumentAnalysisJobHandler"/>) reads the row and downloads the file app-only.</para>
+    /// <para><b>Each queue is independent</b>: the two run side by side, and an indexing failure does not stop the
+    /// profile. A failure is logged (identifiers and the queue's exception, no content — ADR-015) and never reaches the
+    /// response.</para>
+    /// <para><b>Bounded, and not cancelled with the request.</b> The bytes and the row are committed, so a caller that
+    /// disconnects now must not leave the document un-indexed and un-profiled (the reasoning of <c>OfficeProfileQueue</c>).
+    /// But the Service Bus client's default retry budget can hold a send for minutes when the namespace hangs; holding the
+    /// 201 that long would time the SPA out on an upload that DID land, and its retry would then meet the route's 409.
+    /// So both share one <see cref="PostUploadQueueBudget"/> of their own: a timeout is logged like any other queue
+    /// failure, and the 201 goes out.</para>
+    /// <para><b>Tenant</b> is the Spaarke tenant from configuration, as every app-only producer reads it — never the
+    /// caller token's <c>tid</c>, which names a CIAM directory or a customer's home directory.</para>
+    /// </remarks>
+    private static async Task QueueIndexingAndProfileAsync(
+        ExternalDataService.DocumentParentKind parentKind,
+        Guid parentId,
+        string? documentId,
+        ExternalUploadedFilePointers pointers,
+        string? contentType,
+        IPostUploadIndexingEnqueuer indexing,
+        JobSubmissionService jobs,
+        IConfiguration configuration,
+        string correlationId,
+        ILogger logger)
+    {
+        using var budget = new CancellationTokenSource(PostUploadQueueBudget);
+        await Task.WhenAll(QueueIndexingAsync(budget.Token), QueueProfileAsync(budget.Token));
+
+        async Task QueueIndexingAsync(CancellationToken queueCt)
+        {
+            try
+            {
+                var result = await indexing.EnqueueAppOnlyIfApplicableAsync(
+                    new PostUploadIndexingRequest(
+                        TenantId: configuration["TENANT_ID"] ?? configuration["AzureAd:TenantId"] ?? "",
+                        DriveId: pointers.DriveId,
+                        ItemId: pointers.ItemId,
+                        FileName: pointers.FileName,
+                        FileSizeBytes: pointers.FileSizeBytes,
+                        ContentType: contentType,
+                        DocumentId: documentId,
+                        ParentEntity: null, // the app-only handler resolves the governing parent from the document row
+                        SearchIndexName: null, // the handler runs the ISearchIndexNameResolver chain
+                        Source: ExternalUploadSource,
+                        CorrelationId: correlationId),
+                    queueCt);
+
+                // The production enqueuer reports its own failure as a result rather than throwing; surface it here with the
+                // document and parent ids so a failed enqueue is findable from the route's log. The 201 is unchanged.
+                if (result.FailureReason is not null)
+                {
+                    logger.LogWarning(
+                        "[EXT-UPLOAD] Queueing indexing for document {DocumentId} ({ParentKind} {ParentId}) failed ({FailureReason}); the upload stands",
+                        documentId, parentKind, parentId, result.FailureReason);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Defensive: the enqueuer catches and logs its own failures; this keeps a throw from ever reaching the 201.
+                logger.LogWarning(ex,
+                    "[EXT-UPLOAD] Queueing indexing for document {DocumentId} ({ParentKind} {ParentId}) failed; the upload stands",
+                    documentId, parentKind, parentId);
+            }
+        }
+
+        async Task QueueProfileAsync(CancellationToken queueCt)
+        {
+            if (!Guid.TryParse(documentId, out var documentGuid))
+            {
+                logger.LogWarning(
+                    "[EXT-UPLOAD] Not queueing the profile: the created document id '{DocumentId}' ({ParentKind} {ParentId}) is not a GUID",
+                    documentId, parentKind, parentId);
+                return;
+            }
+
+            try
+            {
+                await jobs.SubmitJobAsync(
+                    new JobContract
+                    {
+                        JobId = Guid.NewGuid(),
+                        JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
+                        SubjectId = documentGuid.ToString(),
+                        CorrelationId = correlationId,
+                        IdempotencyKey = AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentGuid),
+                        Attempt = 1,
+                        MaxAttempts = 3,
+                        CreatedAt = DateTimeOffset.UtcNow,
+                        Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
+                        {
+                            DocumentId = documentGuid,
+                            Source = ExternalUploadSource,
+                            EnqueuedAt = DateTimeOffset.UtcNow,
+                        })),
+                    },
+                    queueCt);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex,
+                    "[EXT-UPLOAD] Queueing the document profile for document {DocumentId} ({ParentKind} {ParentId}) failed; the upload stands",
+                    documentId, parentKind, parentId);
+            }
+        }
+    }
+
+    /// <summary>The <c>Source</c> the external upload's index request and profile job carry (telemetry only).</summary>
+    private const string ExternalUploadSource = "ExternalUpload";
+
+    /// <summary>
+    /// How long an external upload's response waits for its two post-upload queues (task 063). A healthy Service Bus send
+    /// takes well under a second and the client's transient retries a few seconds; past this the namespace is degraded,
+    /// and the upload's 201 must not wait on it.
+    /// </summary>
+    private static readonly TimeSpan PostUploadQueueBudget = TimeSpan.FromSeconds(15);
 
     /// <summary>The route segment of a document parent, for the Location of a created document.</summary>
     private static string DocumentParentSegment(ExternalDataService.DocumentParentKind parentKind) => parentKind switch

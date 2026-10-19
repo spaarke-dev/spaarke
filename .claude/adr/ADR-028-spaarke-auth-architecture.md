@@ -518,6 +518,7 @@ The Office add-in already runs the working shape: one single-tenant Spaarke clie
   - Its authority is pinned to `https://login.microsoftonline.com/{Spaarke tenant id}`.
   > ⚠️ **Amended by [A9](#amendment-a9-2026-10-13-workforce-contacts-sign-in-with-their-customers-home-directory-browser-spa) (2026-10-13):** this rule now covers **licensed core users**. Workforce contacts on the browser SPA sign in through one **multitenant** Spaarke SPA client at their customer's home directory.
 - **MUST**, in Teams, acquire tokens with **Nested App Authentication first, then the MSAL popup**.
+  > ⚠️ **Amended by [A9](#amendment-a9-2026-10-13-workforce-contacts-sign-in-with-their-customers-home-directory-browser-spa) (2026-10-13):** the Teams host now uses the A9 multitenant client for both populations, still NAA then popup. The Spaarke-tenant authority above remains for the Office add-ins.
 - **MUST** request `api://{app id}/user_impersonation` on **both** planes:
   - **Workforce client:** `{app id}` is the customer BFF app id.
   - **CIAM client:** `{app id}` is the customer's own **CIAM API app**, registered in the CIAM tenant (`spaarkeextid`) by provisioning, keyless, with the CIAM SPA client pre-authorized. A CIAM local account cannot get a token for an API registered in the workforce tenant (AADSTS500207; T240d spike S1, 2026-10-12). The stamp's `Ciam:Audience` is that app id.
@@ -599,13 +600,13 @@ The Office add-in already runs the working shape: one single-tenant Spaarke clie
 
 | Population | Identity | Sign-in | Surfaces |
 |---|---|---|---|
-| Licensed core users | B2B guest in the Spaarke tenant; Dataverse `systemuser` | **Unchanged (A8):** single-tenant Spaarke client, Spaarke-tenant authority, NAA then popup | Model-driven apps, Office add-ins, Teams; the browser SPA through the stored link below |
-| **Workforce contacts** (licence-free customer employees) | **Company account in the customer's home directory; Dataverse `contact`. No B2B guest** | **This amendment** | Browser SPA. Teams is deferred (see Scope) |
+| Licensed core users | B2B guest in the Spaarke tenant; Dataverse `systemuser` | **Unchanged (A8)** for model-driven apps and Office add-ins: single-tenant Spaarke client, Spaarke-tenant authority, NAA then popup | Model-driven apps, Office add-ins; the browser SPA **and Teams** through the stored link below |
+| **Workforce contacts** (licence-free customer employees) | **Company account in the customer's home directory; Dataverse `contact`. No B2B guest** | **This amendment** | Browser SPA and Teams |
 | Partners | CIAM local account (`spaarkeextid`) | **Unchanged (A1/A8)** | Browser SPA |
 
 ### New MUST rules
 
-- **MUST** sign workforce contacts in to the browser SPA through **one multitenant Spaarke SPA client**.
+- **MUST** sign workforce contacts in to the browser SPA **and the Teams host** through **one multitenant Spaarke SPA client**. In Teams it signs in **everyone**, licensed core users included: the host cannot tell the two apart before sign-in. Teams uses NAA with the Teams context's tenant id as the authority, then the MSAL popup. Licensed users there resolve through the stored link (amended 2026-10-13, owner: "yes include teams").
   - The authority is the customer's home directory, `https://login.microsoftonline.com/{home directory id}`. The id comes from Spaarke-owned data (the T240c directory, or dev configuration until it ships), never from a link or other client input.
   - `organizations` is allowed for this client only, and only for discovery before the customer is known. The BFF rules below are the enforcement point either way.
 - **MUST** make each customer's BFF API app multitenant, with `requestedAccessTokenVersion` = 2.
@@ -634,12 +635,12 @@ The Office add-in already runs the working shape: one single-tenant Spaarke clie
 
 - **MUST NOT** create B2B guests for workforce contacts. A8's "Workforce-contact self-registration" rules (guest creation through a shared registration path) are withdrawn.
 - **MUST NOT** accept, on this path, a home-directory token whose `tid` is not in that stamp's list, a home-directory guest (`acct` = 1), or an app token.
-- **MUST NOT** move licensed core users' Office add-in or Teams sign-in to the multitenant client. They stay on A8.
+- **MUST NOT** move licensed core users' **Office add-in** sign-in to the multitenant client. It stays on A8. (Teams moved to the multitenant client for both populations, owner, 2026-10-13.)
 
 ### Scope and preserved invariants
 
 - **Unchanged:** no OBO on any collaboration plane; app-only Dataverse and SPE; plane selection from validated `iss`/`tid`; A8's `user_impersonation` scope, default Tier-1 modules and CIAM rules; no invite permission on any stamp identity.
-- **Teams for workforce contacts is deferred** (owner: a soft requirement). When it is added, it uses the documented multitenant NAA pattern under these same rules, after a live sign-in test.
+- **Teams** (owner, 2026-10-13: included). Teams uses the documented multitenant NAA pattern under these same rules, with a live sign-in test on desktop, web and mobile before release. The A8 Teams clause (NAA against the Spaarke tenant) no longer applies to the Teams host.
 - **Licensing** (multiplexing, External Users) is a commercial question outside this ADR.
 - **Model 1 only.** Model 2 keeps A2's text until a further amendment.
 

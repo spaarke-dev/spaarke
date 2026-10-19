@@ -112,6 +112,104 @@ public class CallerPrincipalResolverTests
         ciam.Called.Should().BeFalse();
     }
 
+    // ── R3 task 046: a WorkforceHome principal is chosen by SCHEME, never by iss — never the CIAM plane ─────────
+
+    /// <summary>A principal authenticated by the WorkforceHome scheme (its AuthenticationType is set by the handler).</summary>
+    private static ClaimsPrincipal HomePrincipal(params (string type, string value)[] claims) =>
+        new(new ClaimsIdentity(claims.Select(c => new Claim(c.type, c.value)),
+            Sprk.Bff.Api.Infrastructure.Authentication.AuthSchemes.WorkforceHome));
+
+    [Theory]
+    [InlineData("ciam-iss")]
+    [InlineData("ciam-tid")]
+    [InlineData("both")]
+    [InlineData("customer")]
+    public void DeterminePlane_WorkforceHomePrincipal_IsAlwaysWorkforce_WhateverItsIssOrTid(string shape)
+    {
+        var claims = shape switch
+        {
+            "ciam-iss" => new[] { ("iss", $"https://spaarke.ciamlogin.com/{Guid.NewGuid()}/v2.0"), ("tid", Guid.NewGuid().ToString()) },
+            "ciam-tid" => new[] { ("iss", $"https://login.microsoftonline.com/{CiamTenantId}/v2.0"), ("tid", CiamTenantId) },
+            "both" => new[] { ("iss", $"https://spaarke.ciamlogin.com/{CiamTenantId}/v2.0"), ("tid", CiamTenantId) },
+            _ => new[] { ("iss", "https://login.microsoftonline.com/99999999-eeee-4eee-8eee-999999999999/v2.0"),
+                ("tid", "99999999-eeee-4eee-8eee-999999999999") },
+        };
+
+        CreateResolver().DeterminePlane(HomePrincipal(claims)).Should().Be(CallerPrincipalPlane.Workforce);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AWorkforceHomePrincipal_NeverReachesTheCiamStrategy()
+    {
+        var ciam = new StubStrategy(CallerPrincipalPlane.CiamContact);
+        var workforce = new StubStrategy(CallerPrincipalPlane.Workforce);
+        var http = new DefaultHttpContext
+        {
+            User = HomePrincipal(("iss", $"https://x.ciamlogin.com/{CiamTenantId}/v2.0"), ("tid", CiamTenantId)),
+        };
+
+        await CreateResolver(ciam, workforce).ResolveAsync(http, CancellationToken.None);
+
+        ciam.Called.Should().BeFalse("a home principal never resolves on the CIAM (contact-by-oid, invite-bind) plane");
+        workforce.Called.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task WorkforceStrategy_RegistrationRequired_Is403_WithTheReasonCodeAndTheTokenPrefill()
+    {
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, WorkforcePrincipalResolver.DenyRegistrationRequired));
+        var accessible = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, accessible.Object, Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
+        var http = new DefaultHttpContext
+        {
+            User = HomePrincipal(
+                ("oid", Guid.NewGuid().ToString()), ("tid", "99999999-eeee-4eee-8eee-999999999999"),
+                ("given_name", "Mike"), ("family_name", "Okafor"), ("email", "mike@customer.example")),
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+        };
+        http.Response.Body = new MemoryStream();
+
+        var result = await strategy.ResolveAsync(http, CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        var body = await DenyBodyAsync(result, http);
+        http.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        using var json = System.Text.Json.JsonDocument.Parse(body);
+        json.RootElement.GetProperty("reasonCode").GetString().Should().Be("sdap.access.registration_required");
+        json.RootElement.GetProperty("givenName").GetString().Should().Be("Mike");
+        json.RootElement.GetProperty("familyName").GetString().Should().Be("Okafor");
+        json.RootElement.GetProperty("email").GetString().Should().Be("mike@customer.example");
+    }
+
+    [Fact]
+    public async Task WorkforceStrategy_AnyOtherDeny_CarriesNoPrefill()
+    {
+        // The prefill is for the registration form only; every other deny stays the plain reasonCode problem.
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, WorkforcePrincipalResolver.DenySystemUserDisabled));
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
+            Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
+        var http = new DefaultHttpContext
+        {
+            User = HomePrincipal(("given_name", "Mike"), ("family_name", "Okafor"), ("email", "mike@customer.example")),
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+        };
+        http.Response.Body = new MemoryStream();
+
+        var body = await DenyBodyAsync(await strategy.ResolveAsync(http, CancellationToken.None), http);
+
+        http.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        body.Should().Contain(WorkforcePrincipalResolver.DenySystemUserDisabled);
+        body.Should().NotContain("Mike").And.NotContain("mike@customer.example");
+    }
+
     // ── Workforce strategy: Tier-2 record scope = accessible set (NFR-08) ────────────────────────
 
     [Fact]

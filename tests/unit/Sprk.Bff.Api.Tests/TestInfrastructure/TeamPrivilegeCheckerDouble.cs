@@ -11,7 +11,8 @@ namespace Sprk.Bff.Api.Tests.TestInfrastructure;
 /// </summary>
 /// <remarks>
 /// The user questions (<see cref="IDataversePrivilegeChecker.HasReadPrivilegeAsync"/>,
-/// <see cref="IDataversePrivilegeChecker.GetReadableEntitiesAsync"/>) are not this double's: they throw, so a test that
+/// <see cref="IDataversePrivilegeChecker.GetReadableEntitiesAsync"/>) and the task 186 Workforce-role ceiling
+/// (<see cref="IDataversePrivilegeChecker.GetWorkforceRoleCeilingAsync"/>) are not this double's: they throw, so a test that
 /// reaches them through it fails loudly instead of being answered.
 /// </remarks>
 public sealed class TeamPrivilegeCheckerDouble : IDataversePrivilegeChecker
@@ -57,5 +58,8 @@ public sealed class TeamPrivilegeCheckerDouble : IDataversePrivilegeChecker
         throw new NotSupportedException("TeamPrivilegeCheckerDouble answers owner-team questions only.");
 
     public Task<IReadOnlySet<string>> GetReadableEntitiesAsync(Guid userOid, CancellationToken ct) =>
+        throw new NotSupportedException("TeamPrivilegeCheckerDouble answers owner-team questions only.");
+
+    public Task<WorkforceRoleCeiling> GetWorkforceRoleCeilingAsync(CancellationToken ct) =>
         throw new NotSupportedException("TeamPrivilegeCheckerDouble answers owner-team questions only.");
 }

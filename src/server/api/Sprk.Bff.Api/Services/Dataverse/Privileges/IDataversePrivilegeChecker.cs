@@ -81,4 +81,79 @@ public interface IDataversePrivilegeChecker
     /// <remarks>App-only: <c>RetrieveTeamPrivileges</c> through the same application <c>ServiceClient</c> the ownership
     /// resolver reads through; no impersonation.</remarks>
     Task<bool> TeamHasReadPrivilegeAsync(Guid teamId, string entityLogicalName, bool fresh, CancellationToken ct);
+
+    /// <summary>
+    /// The CEILING for a workforce-contact caller (unified-access-control-r2 task 186, ADR-028 A9, owner round 101 option
+    /// (a)): the table × operation privileges of the Dataverse role <see cref="UserPrivilegeChecker.WorkforceRoleName"/>,
+    /// read app-only with <c>RetrieveRolePrivilegesRole</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Depth is collapsed: a privilege held at ANY depth counts, and none means none. The ceiling never widens record
+    /// scope; a caller is allowed an operation only when the ceiling holds it AND UAC's record scope allows it.</para>
+    /// <para>Fail closed: a role that is missing, ambiguous (more than one root role with the name) or unreadable answers
+    /// <see cref="WorkforceRoleCeiling.IsAvailable"/> = <see langword="false"/>, which denies every check. Only a READ
+    /// role is cached (about 5 minutes, so the owner's privilege edits take effect within that); a fault is never
+    /// cached.</para>
+    /// </remarks>
+    Task<WorkforceRoleCeiling> GetWorkforceRoleCeilingAsync(CancellationToken ct);
+}
+
+/// <summary>
+/// The privileges of the Workforce role as a table → operations map (task 186). See
+/// <see cref="IDataversePrivilegeChecker.GetWorkforceRoleCeilingAsync"/>.
+/// </summary>
+/// <remarks>
+/// CLAUDE.md §11. <b>Existing:</b> <see cref="IDataversePrivilegeChecker"/> answers Read per systemuser only (keyed by
+/// oid, impersonated); nothing reads a ROLE's privileges for a caller that is not a systemuser. <b>Extension:</b> this is
+/// the extension: a value type on the same checker, not a second reader. <b>Cost of doing nothing:</b> a self-registered
+/// workforce contact could create, read and delete service requests whatever the owner's role says (the owner's round-101
+/// decision has no enforcement point).
+/// </remarks>
+public sealed class WorkforceRoleCeiling
+{
+    private static readonly IReadOnlyDictionary<string, Spaarke.Dataverse.AccessRights> NoPrivileges =
+        new Dictionary<string, Spaarke.Dataverse.AccessRights>(StringComparer.OrdinalIgnoreCase);
+
+    private WorkforceRoleCeiling(
+        bool isAvailable, IReadOnlyDictionary<string, Spaarke.Dataverse.AccessRights> privileges, string? unavailableReason)
+    {
+        IsAvailable = isAvailable;
+        Privileges = privileges;
+        UnavailableReason = unavailableReason;
+    }
+
+    /// <summary>True when the role was read; false when it is missing, ambiguous or unreadable (deny everything).</summary>
+    public bool IsAvailable { get; }
+
+    /// <summary>Table logical name → the operations the role holds on it (any depth). Empty when unavailable.</summary>
+    public IReadOnlyDictionary<string, Spaarke.Dataverse.AccessRights> Privileges { get; }
+
+    /// <summary>Why the role is unavailable (for logs only); null when available.</summary>
+    public string? UnavailableReason { get; }
+
+    /// <summary>A role that was read. The map is copied with a case-insensitive comparer.</summary>
+    public static WorkforceRoleCeiling Available(IReadOnlyDictionary<string, Spaarke.Dataverse.AccessRights> privileges)
+    {
+        ArgumentNullException.ThrowIfNull(privileges);
+        var copy = new Dictionary<string, Spaarke.Dataverse.AccessRights>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (table, rights) in privileges)
+            copy[table] = copy.TryGetValue(table, out var existing) ? existing | rights : rights;
+        return new WorkforceRoleCeiling(true, copy, null);
+    }
+
+    /// <summary>A role that could not be used: every check against it denies.</summary>
+    public static WorkforceRoleCeiling Unavailable(string reason) => new(false, NoPrivileges, reason);
+
+    /// <summary>
+    /// True only when the role was read AND holds every operation in <paramref name="required"/> on
+    /// <paramref name="tableLogicalName"/>. <see cref="Spaarke.Dataverse.AccessRights.None"/> required is never "held":
+    /// a check that names no operation is a programming error and fails closed.
+    /// </summary>
+    public bool Holds(string tableLogicalName, Spaarke.Dataverse.AccessRights required)
+    {
+        if (!IsAvailable || required == Spaarke.Dataverse.AccessRights.None || string.IsNullOrWhiteSpace(tableLogicalName))
+            return false;
+
+        return Privileges.TryGetValue(tableLogicalName, out var held) && (held & required) == required;
+    }
 }

@@ -311,7 +311,7 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
 
         // Dispatch via Service Bus — non-fatal try/catch.
         // This is the Phase 1 pattern. MUST only be called for MI-written files
-        // (Office Add-in finalize, Email-to-Document, post-analysis re-index).
+        // (Office Add-in finalize, Email-to-Document, post-analysis re-index, external SPA upload — task 063).
         try
         {
             // Task 029: a version of an already-indexed item. Its key is per-save (the item-keyed one was marked
