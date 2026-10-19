@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
@@ -130,6 +131,24 @@ public class InvoiceSubmissionAfterStepsTests
         public HashSet<string> SkipPolicyCodes { get; } = new(StringComparer.Ordinal);
         public bool CloseChanges { get; set; }
 
+        // ── D-122 (notes 13c) ──
+        /// <summary>The invoice's line ids, as the line query returns them (the outcome's lines by default).</summary>
+        public List<Guid> Lines { get; }
+        /// <summary>Every automated close: (signal, record, setReadAt, policy code).</summary>
+        public List<(Guid Signal, Guid Record, DateTime SetReadAt, string PolicyCode)> Closes { get; } = [];
+        /// <summary>A forced close answer per Signal (instead of the writer's read-then-decide rule).</summary>
+        public Dictionary<Guid, SignalAutomatedCloseOutcome> CloseAnswers { get; } = [];
+        /// <summary>A close that throws, per Signal.</summary>
+        public Dictionary<Guid, Exception> CloseFaults { get; } = [];
+        public List<QueryExpression> LineQueries { get; } = [];
+        /// <summary>Every decision handed to the recorder (after a record crash point).</summary>
+        public List<BillingDecision> RecordedDecisions { get; } = [];
+        /// <summary>Automated closes that WROTE (Closed), as opposed to answered.</summary>
+        public int ClosedWrites { get; private set; }
+        public FakeTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 10, 19, 9, 0, 0, TimeSpan.Zero));
+        /// <summary>Called inside the open-set read, after the rows are copied (a writer acting after the read).</summary>
+        public Action? OnSetRead { get; set; }
+
         // Crash points (a fault at that call; the next run is the redelivery)
         public int CrashAtWrite { get; set; } = -1;
         public Exception? RecordFault { get; set; }
@@ -151,6 +170,7 @@ public class InvoiceSubmissionAfterStepsTests
         {
             var json = JsonNode.Parse(InvoiceSubmissionPersister.BuildFindingsJson(outcome, InvoiceId))!.AsObject();
             json = editFindings?.Invoke(json) ?? json;
+            Lines = Enumerable.Range(0, outcome.Read?.Lines.Count ?? 0).Select(i => InvoiceSubmissionPersister.LineIdFor(Submission, i)).ToList();
             Row = new Entity(FinanceBaseValues.SubmissionEntity, Submission)
             {
                 [InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference("sprk_invoice", InvoiceId),
@@ -170,6 +190,7 @@ public class InvoiceSubmissionAfterStepsTests
                     "sprk_signal" => SignalRows(q),
                     "sprk_policy" => PolicyRows(q),
                     "sprk_policyversion" => VersionRows(q),
+                    "sprk_billingevent" => LineRows(q),
                     _ => throw new InvalidOperationException($"unexpected query on {q.EntityName}"),
                 });
 
@@ -280,6 +301,7 @@ public class InvoiceSubmissionAfterStepsTests
                 Log,
                 WriteAsync,
                 SupersedeAsync,
+                CloseActedAsync,
                 (decision, ct) =>
                 {
                     if (CrashAtRecord)
@@ -287,7 +309,24 @@ public class InvoiceSubmissionAfterStepsTests
                         throw new Crash();
                     }
 
-                    return RecordFault is { } fault ? Task.FromException<BillingDecisionRecordResult>(fault) : Recorder.RecordAsync(decision, ct);
+                    RecordedDecisions.Add(decision);
+                    if (RecordFault is { } fault)
+                    {
+                        return Task.FromException<BillingDecisionRecordResult>(fault);
+                    }
+
+                    // The writer reads the resolved Signals through its own reader (the Signal table as it is now, filed as the writer files them).
+                    foreach (var key in Records.Rows.Keys.Where(k => k.Item1 == "sprk_signal").ToList())
+                    {
+                        Records.Rows.Remove(key);
+                    }
+
+                    foreach (var signal in Signals.Values)
+                    {
+                        Records.Rows[("sprk_signal", signal.Id)] = Copy(signal);
+                    }
+
+                    return Recorder.RecordAsync(decision, ct);
                 },
                 decision =>
                 {
@@ -303,12 +342,73 @@ public class InvoiceSubmissionAfterStepsTests
 
                     Jobs.Add(job);
                     return Task.CompletedTask;
-                });
+                },
+                Clock);
+        }
+
+        /// <summary>The writer's rule (SignalWriter.CloseActedByAutomatedDecisionAsync), over the in-memory table.</summary>
+        private Task<SignalAutomatedCloseOutcome> CloseActedAsync(Guid id, Guid recordId, DateTime setReadAt, string policyCode, CancellationToken _)
+        {
+            setReadAt.Kind.Should().Be(DateTimeKind.Utc);
+            Closes.Add((id, recordId, setReadAt, policyCode));
+            if (CloseFaults.TryGetValue(id, out var fault))
+            {
+                return Task.FromException<SignalAutomatedCloseOutcome>(fault);
+            }
+
+            if (CloseAnswers.TryGetValue(id, out var answer))
+            {
+                return Task.FromResult(answer);
+            }
+
+            var row = Signals.Values.Single(s => s.Id == id);
+            var status = row.GetAttributeValue<OptionSetValue>("sprk_signalstatus").Value;
+            if (status == SignalWriter.SignalStatusResolved && row.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id == recordId)
+            {
+                return Task.FromResult(SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord);
+            }
+
+            if (status is not (SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged))
+            {
+                return Task.FromResult(SignalAutomatedCloseOutcome.LeftAsIs);
+            }
+
+            row["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved);
+            row["sprk_resolutiontype"] = new OptionSetValue(SignalWriter.ResolutionActed);
+            row["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", recordId);
+            row.RowVersion = (long.Parse(row.RowVersion!) + 1).ToString();
+            ClosedWrites++;
+            return Task.FromResult(SignalAutomatedCloseOutcome.Closed);
+        }
+
+        private EntityCollection LineRows(QueryExpression q)
+        {
+            LineQueries.Add(q);
+            q.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "sprk_invoice" && (Guid)c.Values[0] == InvoiceId);
+            return new EntityCollection(Lines.Select(id => new Entity("sprk_billingevent", id)).ToList());
         }
 
         private EntityCollection SignalRows(QueryExpression q)
         {
             SignalQueries.Add(q);
+            if (q.Criteria.Conditions.SingleOrDefault(c => c.AttributeName == "sprk_signalid" && c.Operator == ConditionOperator.In) is { } byId)
+            {
+                return new EntityCollection(Signals.Values.Where(s => byId.Values.Contains(s.Id)).Select(Copy).ToList());
+            }
+
+            if (!q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_dedupekey"))
+            {
+                // The D-122 open-set read: by subject lookup (invoice OR its lines).
+                q.Criteria.FilterOperator.Should().Be(LogicalOperator.Or);
+                var set = new EntityCollection(Signals.Values.Where(s => q.Criteria.Conditions.Any(c => c.Operator switch
+                {
+                    ConditionOperator.Equal or ConditionOperator.In => s.GetAttributeValue<EntityReference>(c.AttributeName)?.Id is { } id && c.Values.Contains(id),
+                    _ => throw new NotSupportedException(c.Operator.ToString()),
+                })).Select(Copy).ToList());
+                OnSetRead?.Invoke();
+                return set;
+            }
+
             var prefix = (string)q.Criteria.Conditions.Single(c => c.AttributeName == "sprk_dedupekey" && c.Operator == ConditionOperator.BeginsWith).Values[0];
             var rows = new EntityCollection(Signals.Where(s => s.Key.StartsWith(prefix, StringComparison.Ordinal)).Select(s => Copy(s.Value)).ToList());
             OnSignalRead?.Invoke(prefix); // after the copy: what happens now is after this read
@@ -410,18 +510,22 @@ public class InvoiceSubmissionAfterStepsTests
 
         public Entity Seed(string key, int status, string evidence)
         {
+            SignalWriter.TryParseDedupeKey(key, out _, out var subjectEntity, out var subjectId, out _).Should().BeTrue();
             var row = new Entity("sprk_signal", Guid.NewGuid())
             {
                 ["sprk_dedupekey"] = key,
                 ["sprk_signalstatus"] = new OptionSetValue(status),
                 ["sprk_evidencerefs"] = evidence,
+                // Filed as the writer files a Signal: the pair id and the subject lookup that repeats it.
+                ["sprk_regardingrecordid"] = subjectId.ToString("D"),
+                [SignalWriter.RegardingLookupByEntity[subjectEntity]] = new EntityReference(subjectEntity, subjectId),
                 RowVersion = "1",
             };
             Signals[key] = row;
             return row;
         }
 
-        private static Entity Copy(Entity source)
+        public static Entity Copy(Entity source)
         {
             var copy = new Entity(source.LogicalName, source.Id) { RowVersion = source.RowVersion };
             foreach (var (k, v) in source.Attributes)
@@ -592,7 +696,7 @@ public class InvoiceSubmissionAfterStepsTests
         decision.Reason.Should().Be(string.Join(", ", deciding.Select(f => f.ReasonCode).Distinct()));
         decision.PolicyVersionId.Should().Be(deciding[0].PolicyVersionId);
         decision.Values!.Values.Should().OnlyContain(v => v is string);
-        decision.ResolvedSignalIds.Should().BeNull("D-122 is blocked: no path closes a Signal as resolved by a billing decision (notes s13)");
+        decision.ResolvedSignalIds.Should().BeNull("without a set (the I/O-free preflight) the decision lists none; RunAsync passes the stored set (13c)");
         decision.Facts.Should().ContainKeys("reasons", "decidingReasonCodes", "reliabilityThreshold", "trackingNumber");
     }
 
@@ -1024,7 +1128,7 @@ public class InvoiceSubmissionAfterStepsTests
 
         var result = await world.Build().RunAsync(Persisted(outcome) with { TerminalStatus = claimed, TerminalReasonCode = claimedCode }, null);
 
-        result.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Refused, result.ReasonCode);
         result.ReasonCode.Should().Be(SubmissionReasonCodes.StoredStateMismatch);
         world.Writes.Should().BeEmpty();
         world.RecordCreates.Should().Be(0);
@@ -1323,11 +1427,288 @@ public class InvoiceSubmissionAfterStepsTests
 
         var result = await world.Build().RunAsync(Persisted(outcome), null);
 
-        result.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Refused, result.ReasonCode);
         result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.SignalPlanMissingCode);
         world.Writes.Should().BeEmpty();
         world.RecordCreates.Should().Be(0);
         world.Notified.Should().BeEmpty();
         world.TerminalWrites.Should().BeEmpty();
+    }
+
+    // ── 13c: D-122 - the automatic rejection resolves every open Signal on the invoice and its lines ──
+
+    private static readonly Guid OtherInvoice = Guid.Parse("04900000-0000-4000-8000-0000000000e9");
+
+    private static InvoiceSubmissionAfterSteps.ResolvedSignalSet? StoredSet(World world) =>
+        InvoiceSubmissionAfterSteps.StoredFindings.Parse(world.Row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson))!.ResolvedSet;
+
+    private static int StatusOf(Entity signal) => signal.GetAttributeValue<OptionSetValue>("sprk_signalstatus").Value;
+
+    private static Guid? RecordOf(Entity signal) => signal.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id;
+
+    [Fact(DisplayName = "049 13c: AutoRejected - the record resolves and closes every open Signal on the invoice and its lines (written now, an earlier episode's, Acknowledged); resolved and other-invoice Signals are untouched")]
+    public async Task AutoRejected_ResolvesEveryOpenSignal_OnTheInvoiceAndItsLines()
+    {
+        var outcome = await AutoRejected(readNumber: "INV-999"); // step 1 writes the rule Signal (line) and the system mismatch Signal (invoice)
+        var world = new World(outcome);
+        world.Seed(InvoiceKey("BILL-THRESHOLD", 1), SignalWriter.SignalStatusResolved, "[]");
+        var earlier = world.Seed(InvoiceKey("BILL-THRESHOLD", 2), SignalWriter.SignalStatusOpen, "[]");
+        var acknowledged = world.Seed(LineKey("BILL-RATE", 1), SignalWriter.SignalStatusAcknowledged, "[]");
+        var resolvedByPerson = world.Seed(LineKey("BILL-NOTE", 1), SignalWriter.SignalStatusResolved, "[]");
+        var elsewhere = world.Seed(SignalWriter.BuildDedupeKey("BILL-THRESHOLD", "sprk_invoice", OtherInvoice.ToString("D"), 1), SignalWriter.SignalStatusOpen, "[]");
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        var written = new[] { world.Signals[LineKey("BILL-AGE", 1)].Id, world.Signals[InvoiceKey(BillingRuleCatalogue.SystemPolicyCode, 1)].Id };
+        var expected = written.Concat([earlier.Id, acknowledged.Id]).ToList();
+        var set = StoredSet(world)!;
+        set.Signals.Select(s => s.Id).Should().BeEquivalentTo(expected);
+        set.Signals.Single(s => s.Id == earlier.Id).PolicyCode.Should().Be("BILL-THRESHOLD");
+        set.Signals.Single(s => s.Id == written[0]).PolicyCode.Should().Be("BILL-AGE");
+        set.SetReadAtUtc.Should().Be(world.Clock.GetUtcNow().UtcDateTime);
+        set.SetReadAtUtc.Kind.Should().Be(DateTimeKind.Utc);
+        set.RecordPredatesSet.Should().BeFalse();
+        world.RecordedDecisions.Should().ContainSingle().Which.ResolvedSignalIds.Should().BeEquivalentTo(expected);
+        world.RecordCreates.Should().Be(1);
+        world.Closes.Select(c => c.Signal).Should().BeEquivalentTo(expected);
+        world.Closes.Should().OnlyContain(c => c.Record == result.DecisionRecordId && c.SetReadAt == set.SetReadAtUtc);
+        world.Closes.Single(c => c.Signal == acknowledged.Id).PolicyCode.Should().Be("BILL-RATE");
+        foreach (var id in expected)
+        {
+            var row = world.Signals.Values.Single(s => s.Id == id);
+            StatusOf(row).Should().Be(SignalWriter.SignalStatusResolved);
+            RecordOf(row).Should().Be(result.DecisionRecordId!.Value);
+        }
+
+        RecordOf(resolvedByPerson).Should().BeNull("a Signal resolved before the read is not in the set");
+        StatusOf(elsewhere).Should().Be(SignalWriter.SignalStatusOpen, "another invoice's Signal is not on this invoice");
+        world.LineQueries.Should().ContainSingle("the set is read once");
+        world.TerminalWrites.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "049 13c: Accepted and Blocked close nothing, store no set and read no set")]
+    public async Task AcceptedAndBlocked_CloseNothing()
+    {
+        foreach (var outcome in new[] { await Accepted(readNumber: "INV-999"), await Blocked() })
+        {
+            var world = new World(outcome);
+            var openElsewhere = world.Seed(InvoiceKey("BILL-THRESHOLD", 1), SignalWriter.SignalStatusOpen, "[]");
+
+            var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+            result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+            world.Writes.Should().NotBeEmpty();
+            world.Closes.Should().BeEmpty(outcome.Kind.ToString());
+            world.LineQueries.Should().BeEmpty();
+            StoredSet(world).Should().BeNull();
+            world.Signals.Values.Should().OnlyContain(s => StatusOf(s) == SignalWriter.SignalStatusOpen);
+            StatusOf(openElsewhere).Should().Be(SignalWriter.SignalStatusOpen);
+        }
+    }
+
+    [Fact(DisplayName = "049 13c: the set is stored BEFORE the record; a crash between them resumes (ResumeAsync) from the stored set with no fresh read; a Signal opened after the read stays open")]
+    public async Task StoredSet_IsWrittenBeforeTheRecord_ResumeUsesIt()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome) { CrashAtRecord = true };
+        var sut = world.Build();
+
+        (await Run(sut, Persisted(outcome))).Should().BeNull("the crash at the record");
+        var set = StoredSet(world)!;
+        set.Signals.Select(s => s.Id).Should().Equal(world.Signals[LineKey("BILL-AGE", 1)].Id);
+        world.RecordCreates.Should().Be(0);
+        world.Closes.Should().BeEmpty();
+
+        world.CrashAtRecord = false;
+        world.Clock.Advance(TimeSpan.FromMinutes(5));
+        var late = world.Seed(InvoiceKey("BILL-LATE", 1), SignalWriter.SignalStatusOpen, "[]");
+        var resumed = await sut.ResumeAsync(Submission, null);
+
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed, resumed.ReasonCode);
+        world.LineQueries.Should().ContainSingle("a stored set is never read again");
+        StoredSet(world).Should().BeEquivalentTo(set, "the stored set is frozen");
+        world.RecordedDecisions.Should().ContainSingle().Which.ResolvedSignalIds.Should().Equal(set.Signals.Select(s => s.Id));
+        world.Closes.Should().ContainSingle().Which.SetReadAt.Should().Be(set.SetReadAtUtc, "the close uses the stored read time, not the resume's clock");
+        StatusOf(late).Should().Be(SignalWriter.SignalStatusOpen);
+        world.Closes.Should().NotContain(c => c.Signal == late.Id);
+    }
+
+    [Fact(DisplayName = "049 13c: a Signal opened just after the set was read is not in the record and stays open")]
+    public async Task ASignalOpenedAfterTheRead_StaysOpen()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome);
+        Entity? late = null;
+        world.OnSetRead = () =>
+        {
+            late = world.Seed(InvoiceKey("BILL-LATE", 1), SignalWriter.SignalStatusOpen, "[]");
+            world.Clock.Advance(TimeSpan.FromSeconds(3));
+        };
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        StoredSet(world)!.Signals.Should().NotContain(s => s.Id == late!.Id);
+        StoredSet(world)!.SetReadAtUtc.Should().BeBefore(world.Clock.GetUtcNow().UtcDateTime, "the read time is taken before the read");
+        world.RecordedDecisions.Single().ResolvedSignalIds.Should().NotContain(late!.Id);
+        StatusOf(late).Should().Be(SignalWriter.SignalStatusOpen);
+    }
+
+    [Fact(DisplayName = "049 13c: a resume after a partial close set re-closes from the stored set only; each Signal is written once")]
+    public async Task ResumeAfterAPartialClose_ReclosesFromTheStoredSetOnly()
+    {
+        var outcome = await AutoRejected(readNumber: "INV-999");
+        var world = new World(outcome);
+        world.Seed(InvoiceKey("BILL-THRESHOLD", 1), SignalWriter.SignalStatusOpen, "[]");
+        // The set is closed in id order: the crash hits the LAST Signal, after the others were closed.
+        world.OnSetRead = () => world.CloseFaults[world.Signals.Values.Max(s => s.Id)] = new Crash();
+        var sut = world.Build();
+
+        (await Run(sut, Persisted(outcome))).Should().BeNull("the crash in the close step");
+        var set = StoredSet(world)!;
+        set.Signals.Should().HaveCount(3);
+        world.ClosedWrites.Should().Be(2, "the other two were closed before the crash");
+        world.TerminalWrites.Should().BeEmpty();
+
+        world.CloseFaults.Clear();
+        var late = world.Seed(LineKey("BILL-LATE", 1), SignalWriter.SignalStatusOpen, "[]");
+        var resumed = await sut.ResumeAsync(Submission, null);
+
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed, resumed.ReasonCode);
+        world.LineQueries.Should().ContainSingle();
+        world.RecordCreates.Should().Be(1, "AlreadyRecorded on the resume");
+        world.ClosedWrites.Should().Be(3, "no double write: the two closed ones answer AlreadyClosedByThisRecord");
+        world.Closes.Select(c => c.Signal).Distinct().Should().BeEquivalentTo(set.Signals.Select(s => s.Id));
+        StatusOf(late).Should().Be(SignalWriter.SignalStatusOpen);
+        world.TerminalWrites.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "049 13c: ChangedSinceRead on a close is a Retry (still Processing, every Signal attempted, nothing notified); the redelivery completes")]
+    public async Task ChangedSinceRead_Retries()
+    {
+        var outcome = await AutoRejected(readNumber: "INV-999");
+        var world = new World(outcome);
+        var sut = world.Build();
+        var ruleSignal = () => world.Signals[LineKey("BILL-AGE", 1)].Id;
+        world.OnSetRead = () => world.CloseAnswers[ruleSignal()] = SignalAutomatedCloseOutcome.ChangedSinceRead;
+
+        var first = await sut.RunAsync(Persisted(outcome), null);
+
+        first.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
+        first.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.SignalChangedCode);
+        first.DecisionRecordId.Should().NotBeNull();
+        world.Closes.Should().HaveCount(2, "every Signal is attempted");
+        world.Status.Should().Be(InvoiceSubmissionStatus.Processing);
+        world.TerminalWrites.Should().BeEmpty();
+        world.Notified.Should().BeEmpty();
+
+        world.CloseAnswers.Clear();
+        var second = await sut.ResumeAsync(Submission, null);
+
+        second.Status.Should().Be(SubmissionAfterStepsStatus.Completed, second.ReasonCode);
+        StatusOf(world.Signals[LineKey("BILL-AGE", 1)]).Should().Be(SignalWriter.SignalStatusResolved);
+        world.RecordCreates.Should().Be(1);
+        world.TerminalWrites.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "049 13c: LeftAsIs stays listed in the record; one Information line with ids and the policy code; the run completes")]
+    public async Task LeftAsIs_StaysListed()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome);
+        world.OnSetRead = () => world.CloseAnswers[world.Signals[LineKey("BILL-AGE", 1)].Id] = SignalAutomatedCloseOutcome.LeftAsIs;
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        var id = world.Signals[LineKey("BILL-AGE", 1)].Id;
+        world.RecordedDecisions.Single().ResolvedSignalIds.Should().Equal(id);
+        StoredSet(world)!.Signals.Should().ContainSingle(s => s.Id == id);
+        world.Log.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Information && e.Message.Contains("resolved otherwise", StringComparison.Ordinal))
+            .Should().ContainSingle().Which.Message.Should().Contain(id.ToString()).And.Contain("BILL-AGE").And.Contain(result.DecisionRecordId!.Value.ToString());
+    }
+
+    [Fact(DisplayName = "049 13c: a record written before D-122 (no stored set, hash over no Signals) - the resume does not fail; the stored set becomes empty; nothing is closed")]
+    public async Task PreD122Record_ResumeDoesNotFail()
+    {
+        var outcome = await AutoRejected(readNumber: "INV-999");
+        var world = new World(outcome);
+        var stored = InvoiceSubmissionAfterSteps.StoredFindings.Parse(world.Row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson))!;
+        stored.ResolvedSet.Should().BeNull("written before this change");
+        // The pre-D-122 run recorded the rejection listing no Signal (its hash is over the empty list), then stopped before the terminal status.
+        var prior = await world.Recorder.RecordAsync(InvoiceSubmissionAfterSteps.BuildRejectionDecision(stored, Submission, InvoiceId)!);
+        var sut = world.Build();
+
+        var result = await sut.ResumeAsync(Submission, null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        result.DecisionRecordId.Should().Be(prior.RecordId);
+        world.RecordCreates.Should().Be(1, "the pre-D-122 record answers; no second record");
+        var set = StoredSet(world)!;
+        set.Signals.Should().BeEmpty();
+        set.RecordPredatesSet.Should().BeTrue();
+        world.Closes.Should().BeEmpty("the record lists no Signal, so it closes none");
+        world.Signals.Should().HaveCount(2);
+        world.Signals.Values.Should().OnlyContain(s => StatusOf(s) == SignalWriter.SignalStatusOpen);
+        world.TerminalWrites.Should().ContainSingle();
+
+        // A later resume uses the stored empty set directly (no read, one recorder call).
+        world.Row[InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Processing);
+        world.RecordedDecisions.Clear();
+        (await sut.ResumeAsync(Submission, null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        world.RecordedDecisions.Should().ContainSingle().Which.ResolvedSignalIds.Should().BeEmpty();
+        world.LineQueries.Should().ContainSingle();
+        world.RecordCreates.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "049 13c: a Signal of the stored set that no longer exists - the writer refuses (owner_refused) and the run is Refused with resolved_signal_missing; another owner refusal keeps its code")]
+    public async Task MissingListedSignal_IsRefusedWithItsOwnCode()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome) { CrashAtRecord = true };
+        var sut = world.Build();
+        (await Run(sut, Persisted(outcome))).Should().BeNull();
+        var listed = StoredSet(world)!.Signals.Single().Id;
+
+        world.CrashAtRecord = false;
+        world.Signals.Remove(LineKey("BILL-AGE", 1)); // deleted after the set was stored
+        var result = await sut.ResumeAsync(Submission, null);
+
+        world.Signals[LineKey("BILL-AGE", 1)].Id.Should().NotBe(listed, "step 1 wrote the plan's Signal again as a new row");
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Refused, result.ReasonCode);
+        result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.ResolvedSignalMissingCode);
+        StoredSet(world)!.Signals.Single().Id.Should().Be(listed, "the stored set is frozen");
+        world.RecordCreates.Should().Be(0);
+        world.Closes.Should().BeEmpty();
+        world.TerminalWrites.Should().BeEmpty();
+
+        var owner = new World(outcome) { RecordFault = new DecisionRecordRefusedException(DecisionRecordRefusalReason.OwnerRefused, "x") };
+        var refused = await owner.Build().RunAsync(Persisted(outcome), null);
+        refused.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
+        refused.ReasonCode.Should().Be(DecisionRecordRefusalReason.OwnerRefused, "every listed Signal exists");
+    }
+
+    [Fact(DisplayName = "049 13c: a listed Signal deleted after the record has nothing to close (one Warning); a transient close fault propagates and leaves the submission Processing")]
+    public async Task CloseFaults_NotFoundIsSkipped_OtherFaultsPropagate()
+    {
+        var outcome = await AutoRejected(readNumber: "INV-999");
+        var notFound = new World(outcome);
+        notFound.OnSetRead = () => notFound.CloseFaults[notFound.Signals[LineKey("BILL-AGE", 1)].Id] =
+            new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }); // ObjectDoesNotExist
+
+        var result = await notFound.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        notFound.ClosedWrites.Should().Be(1, "the other Signal is closed");
+        notFound.Log.Entries.Should().ContainSingle(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("no longer exists", StringComparison.Ordinal));
+
+        var transient = new World(outcome);
+        transient.OnSetRead = () => transient.CloseFaults[transient.Signals[LineKey("BILL-AGE", 1)].Id] = new TimeoutException("dataverse");
+        var act = () => transient.Build().RunAsync(Persisted(outcome), null);
+
+        await act.Should().ThrowAsync<TimeoutException>();
+        transient.Status.Should().Be(InvoiceSubmissionStatus.Processing);
+        transient.TerminalWrites.Should().BeEmpty();
     }
 }

@@ -89,6 +89,8 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         public List<Entity> Created { get; } = [];
         public List<Guid> TotalsCalls { get; } = [];
         public List<SignalWriteRequest> SignalWrites { get; } = [];
+        /// <summary>D-122: every automated close (signal, record).</summary>
+        public List<(Guid Signal, Guid Record)> Closes { get; } = [];
         public Dictionary<string, Entity> Signals { get; } = new(StringComparer.Ordinal);
         public List<JobContract> Jobs { get; } = [];
         public List<SubmissionDecidedNotification> Notified { get; } = [];
@@ -283,12 +285,19 @@ public sealed class InvoiceSubmissionProcessingFlowTests
             NullLogger<InvoiceSubmissionAfterSteps>.Instance,
             WriteSignalAsync,
             (_, _, _, _) => Task.FromResult(SignalCloseOutcome.Closed),
+            CloseActedAsync,
             (decision, ct) =>
             {
                 // F4-1: the record's policy versions exist (the evaluation named them).
                 foreach (var version in (LastOutcome?.Evaluation?.Findings ?? []).Select(f => f.PolicyVersionId).Distinct())
                 {
                     Records.Rows[("sprk_policyversion", version)] = new Entity("sprk_policyversion", version);
+                }
+
+                // D-122: the writer reads the resolved Signals through its own reader (the Signal table as it is now).
+                foreach (var signal in Signals.Values)
+                {
+                    Records.Rows[("sprk_signal", signal.Id)] = Copy(signal);
                 }
 
                 return Recorder.RecordAsync(decision, ct);
@@ -299,6 +308,27 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 Jobs.Add(job);
                 return Task.CompletedTask;
             });
+
+        /// <summary>D-122: SignalWriter.CloseActedByAutomatedDecisionAsync's rule over the in-memory table (open -> Acted + the record).</summary>
+        private Task<SignalAutomatedCloseOutcome> CloseActedAsync(Guid id, Guid recordId, DateTime setReadAt, string policyCode, CancellationToken _)
+        {
+            Closes.Add((id, recordId));
+            var row = Signals.Values.Single(s => s.Id == id);
+            var status = row.GetAttributeValue<OptionSetValue>("sprk_signalstatus").Value;
+            if (status == SignalWriter.SignalStatusResolved && row.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id == recordId)
+            {
+                return Task.FromResult(SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord);
+            }
+
+            if (status is not (SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged))
+            {
+                return Task.FromResult(SignalAutomatedCloseOutcome.LeftAsIs);
+            }
+
+            row["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved);
+            row["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", recordId);
+            return Task.FromResult(SignalAutomatedCloseOutcome.Closed);
+        }
 
         private Task<SignalWriteResult> WriteSignalAsync(SignalWriteRequest request, CancellationToken _)
         {
@@ -323,6 +353,9 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 ["sprk_dedupekey"] = key,
                 ["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusOpen),
                 ["sprk_evidencerefs"] = evidence,
+                // Filed as the writer files a Signal: the pair id and the subject lookup that repeats it.
+                ["sprk_regardingrecordid"] = request.SubjectId.ToString("D"),
+                [SignalWriter.RegardingLookupByEntity[request.SubjectEntityLogicalName]] = new EntityReference(request.SubjectEntityLogicalName, request.SubjectId),
                 RowVersion = "1",
             };
             Signals[key] = row;
@@ -331,6 +364,13 @@ public sealed class InvoiceSubmissionProcessingFlowTests
 
         private EntityCollection SignalRows(QueryExpression q)
         {
+            if (!q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_dedupekey"))
+            {
+                // D-122: the open-set read by subject lookup (the invoice OR its lines).
+                return new EntityCollection(Signals.Values.Where(s => q.Criteria.Conditions.Any(c =>
+                    s.GetAttributeValue<EntityReference>(c.AttributeName)?.Id is { } id && c.Values.Contains(id))).Select(Copy).ToList());
+            }
+
             var prefix = (string)q.Criteria.Conditions.Single(c => c.AttributeName == "sprk_dedupekey" && c.Operator == ConditionOperator.BeginsWith).Values[0];
             return new EntityCollection(Signals.Where(s => s.Key.StartsWith(prefix, StringComparison.Ordinal)).Select(s => Copy(s.Value)).ToList());
         }
@@ -471,6 +511,19 @@ public sealed class InvoiceSubmissionProcessingFlowTests
             n.Outcome == SubmissionDecisionOutcome.Rejected && n.InvoiceId == InvoiceId && n.ReasonCode == flow.LastOutcome.ReasonCode);
         flow.SignalWrites.Should().NotBeEmpty();
         flow.StatusHistory.Should().Equal([(int)InvoiceSubmissionStatus.Processing, (int)InvoiceSubmissionStatus.Rejected]);
+
+        // D-122 (13c): the record resolves every open Signal on the invoice and its lines; each is closed as Acted by that one record, and
+        // the set is stored in the findings JSON.
+        flow.Signals.Should().NotBeEmpty();
+        flow.Closes.Select(c => c.Signal).Should().BeEquivalentTo(flow.Signals.Values.Select(s => s.Id));
+        flow.Closes.Select(c => c.Record).Distinct().Should().ContainSingle();
+        flow.Signals.Values.Should().OnlyContain(s => s.GetAttributeValue<OptionSetValue>("sprk_signalstatus").Value == SignalWriter.SignalStatusResolved
+            && s.GetAttributeValue<EntityReference>("sprk_decisionrecord").Id == flow.Closes[0].Record);
+        using (var findings = JsonDocument.Parse(flow.Row.GetAttributeValue<string>("sprk_findingsjson")))
+        {
+            findings.RootElement.GetProperty("resolvedSignalSet").GetProperty("signals").EnumerateArray()
+                .Select(e => Guid.Parse(e.GetProperty("id").GetString()!)).Should().BeEquivalentTo(flow.Signals.Values.Select(s => s.Id));
+        }
     }
 
     [Fact(DisplayName = "049 E (D-101): a blocked internal submission is created In Review with its approval and ends Rejected + ebilling.submission.blocked; no Decision Record")]
@@ -487,6 +540,9 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         flow.Status.Should().Be((int)InvoiceSubmissionStatus.Rejected);
         flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(SubmissionReasonCodes.Blocked);
         flow.RecordCreates.Should().Be(0);
+        flow.SignalWrites.Should().NotBeEmpty();
+        flow.Closes.Should().BeEmpty("D-122 applies to the automatic rejection only; a blocked invoice's Signals stay open for review");
+        flow.Signals.Values.Should().OnlyContain(s => s.GetAttributeValue<OptionSetValue>("sprk_signalstatus").Value == SignalWriter.SignalStatusOpen);
     }
 
     // ── reason-code mapping ──

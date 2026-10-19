@@ -24,6 +24,7 @@ using System.Text.Json.Nodes;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -39,7 +40,9 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <item><b>Signals.</b> The rule Signals from the stored plan (<see cref="InvoiceSubmissionPersister.SignalPlanJson"/>) and the system
 /// Signals (D-123 / D-125) mapped from the stored pipeline and coding findings under <c>BILL-SYSTEM-SUBMISSION</c>, each through the
 /// option-a lifecycle (notes section 6).</item>
-/// <item><b>Decision Record</b>, AutoRejected only, after the Signals (D-122 moved it there).</item>
+/// <item><b>Decision Record</b>, AutoRejected only, after the Signals (D-122 moved it there). It resolves every open Signal on the invoice
+/// and its lines: the set is read once and stored in the findings JSON before the record, and each Signal in it is closed as Acted by the
+/// record after it (D-122, notes 13c).</item>
 /// <item><b>Indexing</b> (Accepted, AcceptedUncoded, Blocked).</item>
 /// <item><b>Notification</b>, once per submission (an idempotency marker).</item>
 /// <item><b>Terminal status</b>, last: derived from the STORED kind and root reason (<see cref="InvoiceSubmissionPersister.TerminalFor(SubmissionEvaluationKind, string?)"/>),
@@ -96,6 +99,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     private readonly ILogger<InvoiceSubmissionAfterSteps> _logger;
     private readonly Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>> _writeSignal;
     private readonly Func<Guid, string, string, CancellationToken, Task<SignalCloseOutcome>> _supersedeSignal;
+    private readonly Func<Guid, Guid, DateTime, string, CancellationToken, Task<SignalAutomatedCloseOutcome>> _closeActed;
+    private readonly TimeProvider _time;
     private readonly Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> _record;
     private readonly Action<BillingDecision> _preflight;
     private readonly Func<JobContract, CancellationToken, Task> _submitJob;
@@ -117,6 +122,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             logger,
             (signals ?? throw new ArgumentNullException(nameof(signals))).WriteAsync,
             (id, rowVersion, policyCode, ct) => signals.CloseAsync(id, rowVersion, SignalWriter.ResolutionSuperseded, policyCode, ct),
+            signals.CloseActedByAutomatedDecisionAsync,
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
             recorder.Preflight,
             (jobs ?? throw new ArgumentNullException(nameof(jobs))).SubmitJobAsync)
@@ -132,9 +138,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         ILogger<InvoiceSubmissionAfterSteps> logger,
         Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>> writeSignal,
         Func<Guid, string, string, CancellationToken, Task<SignalCloseOutcome>> supersedeSignal,
+        Func<Guid, Guid, DateTime, string, CancellationToken, Task<SignalAutomatedCloseOutcome>> closeActed,
         Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> record,
         Action<BillingDecision> preflight,
-        Func<JobContract, CancellationToken, Task> submitJob)
+        Func<JobContract, CancellationToken, Task> submitJob,
+        TimeProvider? time = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
@@ -143,6 +151,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _writeSignal = writeSignal ?? throw new ArgumentNullException(nameof(writeSignal));
         _supersedeSignal = supersedeSignal ?? throw new ArgumentNullException(nameof(supersedeSignal));
+        _closeActed = closeActed ?? throw new ArgumentNullException(nameof(closeActed));
+        _time = time ?? TimeProvider.System;
         _record = record ?? throw new ArgumentNullException(nameof(record));
         _preflight = preflight ?? throw new ArgumentNullException(nameof(preflight));
         _submitJob = submitJob ?? throw new ArgumentNullException(nameof(submitJob));
@@ -299,8 +309,9 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
         // ── The totals refusal (map row 6c): recorded in the findings JSON, once; the invoice stands ──
         if (totals?.Refusal is { } refusal
-            && await RecordTotalsRefusalAsync(submissionId, findingsJson!, refusal, ct).ConfigureAwait(false))
+            && await RecordTotalsRefusalAsync(submissionId, findingsJson!, refusal, ct).ConfigureAwait(false) is { } withRefusal)
         {
+            findingsJson = withRefusal;
             rowVersion = null; // our own write moved the row version: the terminal write re-reads it first
         }
 
@@ -335,30 +346,47 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         }
 
         // ── 2. Decision Record: the automatic rejection only (Blocked and Accepted get none; 105's Override / Return record those) ──
+        //    D-122 (notes 13c): (a) the open Signals on the invoice and its lines, read ONCE and stored before the record; (b) the record
+        //    lists that stored set; (c) each Signal in it is closed as Acted by the record.
         Guid? recordId = null;
         if (stored.Kind == SubmissionEvaluationKind.AutoRejected)
         {
-            var decision = BuildRejectionDecision(stored, submissionId, invoiceId);
-            if (decision is null)
+            if (BuildRejectionDecision(stored, submissionId, invoiceId) is null)
             {
                 _logger.LogWarning("Invoice submission {SubmissionId}: an automatic rejection with no deciding finding in its findings JSON", submissionId);
                 return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, FindingsUnreadableCode) with { SignalsWritten = written };
             }
 
-            try
+            // (a) A stored set is frozen: a resume never reads again (the record's hash covers the set).
+            var set = stored.ResolvedSet;
+            if (set is null)
             {
-                var recorded = await _record(decision, ct).ConfigureAwait(false);
-                recordId = recorded.RecordId;
-                _logger.LogInformation("Invoice submission {SubmissionId}: automatic rejection of invoice {InvoiceId} recorded as {RecordId} (already recorded: {Already})",
-                    submissionId, invoiceId, recorded.RecordId, recorded.AlreadyRecorded);
+                set = await ReadOpenSignalSetAsync(invoiceId, ct).ConfigureAwait(false);
+                findingsJson = await StoreResolvedSetAsync(submissionId, findingsJson!, set, ct).ConfigureAwait(false);
+                rowVersion = null; // our own write moved the row version
             }
-            catch (DecisionRecordRefusedException ex)
+
+            // (b)
+            var step = await RecordRejectionAsync(stored, submissionId, invoiceId, set, findingsJson!, ct).ConfigureAwait(false);
+            if (step.Stop is { } refused)
             {
-                var permanent = PermanentRecordRefusals.Contains(ex.Reason);
-                _logger.LogWarning("Invoice submission {SubmissionId}: the automatic rejection's Decision Record was refused ({Reason}); {Next}",
-                    submissionId, ex.Reason, permanent ? "a retry cannot succeed" : "it stays Processing for a retry");
-                return Stop(permanent ? SubmissionAfterStepsStatus.Refused : SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, ex.Reason)
-                    with { SignalsWritten = written };
+                return refused with { SignalsWritten = written };
+            }
+
+            if (!ReferenceEquals(step.FindingsJson, findingsJson))
+            {
+                findingsJson = step.FindingsJson;
+                rowVersion = null;
+            }
+
+            recordId = step.Recorded!.RecordId;
+            _logger.LogInformation("Invoice submission {SubmissionId}: automatic rejection of invoice {InvoiceId} recorded as {RecordId} (already recorded: {Already}), resolving {Count} Signals",
+                submissionId, invoiceId, recordId, step.Recorded.AlreadyRecorded, step.Set.Signals.Count);
+
+            // (c)
+            if (await CloseResolvedSetAsync(step.Set, recordId.Value, submissionId, ct).ConfigureAwait(false) is { } closeFailure)
+            {
+                return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, closeFailure) with { SignalsWritten = written, DecisionRecordId = recordId };
             }
         }
 
@@ -519,24 +547,250 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
     /// <summary>
     /// Records the totals refusal's code in <c>sprk_findingsjson</c> (the invoice is not undone, map row 6c). Idempotent: no write when the
-    /// stored member already holds the same code. Returns true when it wrote.
+    /// stored member already holds the same code. Returns the JSON it wrote (later findings writes build on it), or null when it wrote nothing.
     /// </summary>
-    private async Task<bool> RecordTotalsRefusalAsync(Guid submissionId, string findingsJson, InvoiceTotalsRefusal refusal, CancellationToken ct)
+    private async Task<string?> RecordTotalsRefusalAsync(Guid submissionId, string findingsJson, InvoiceTotalsRefusal refusal, CancellationToken ct)
     {
         var root = JsonNode.Parse(findingsJson)!.AsObject();
         if (root[TotalsRefusalMember] is JsonObject existing && string.Equals(Text(existing, "code"), refusal.Code, StringComparison.Ordinal))
         {
-            return false;
+            return null;
         }
 
         root[TotalsRefusalMember] = new JsonObject { ["code"] = refusal.Code, ["lineId"] = refusal.LineId?.ToString("D") };
+        var json = root.ToJsonString();
         await _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, new Dictionary<string, object>
         {
-            [InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString(),
+            [InvoiceSubmissionPersister.SubmissionFindingsJson] = json,
         }, ct).ConfigureAwait(false);
         _logger.LogWarning("Invoice submission {SubmissionId}: the invoice totals were refused ({Code}); recorded in the findings, the invoice stands",
             submissionId, refusal.Code);
-        return true;
+        return json;
+    }
+
+    // ── D-122: the resolved Signal set (notes 13c) ──
+
+    /// <summary>The findings JSON member that freezes the set the automatic rejection resolves:
+    /// <c>{ "setReadAtUtc": "...Z", "signals": [ { "id": ..., "policyCode": ... } ], "recordPredatesSet"?: true }</c>.</summary>
+    internal const string ResolvedSetMember = "resolvedSignalSet";
+
+    /// <summary>A Signal in the frozen set no longer exists, so the writer refuses the record (owner_refused); a retry cannot change it.</summary>
+    internal const string ResolvedSignalMissingCode = "ebilling.submission.resolved_signal_missing";
+
+    /// <summary>One Signal the automatic rejection resolves: its id and its policy code (from its dedupe key).</summary>
+    internal sealed record ResolvedSignal(Guid Id, string PolicyCode);
+
+    /// <summary>
+    /// The set the automatic rejection's record resolves (D-122), as stored: <paramref name="SetReadAtUtc"/> is the instant taken just
+    /// before the read (the close re-closes a Signal the SYSTEM closed at or after it). <paramref name="RecordPredatesSet"/>: a record
+    /// written before D-122 already exists and lists no Signal, so the set is empty (its hash is over the empty list).
+    /// </summary>
+    internal sealed record ResolvedSignalSet(DateTime SetReadAtUtc, IReadOnlyList<ResolvedSignal> Signals, bool RecordPredatesSet = false)
+    {
+        public JsonObject ToJson()
+        {
+            var json = new JsonObject
+            {
+                ["setReadAtUtc"] = SetReadAtUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["signals"] = new JsonArray(Signals.Select(s => (JsonNode)new JsonObject { ["id"] = s.Id.ToString("D"), ["policyCode"] = s.PolicyCode }).ToArray()),
+            };
+            if (RecordPredatesSet)
+            {
+                json["recordPredatesSet"] = true;
+            }
+
+            return json;
+        }
+
+        /// <exception cref="FormatException">A member is missing or unreadable (the findings are then unreadable: never re-read).</exception>
+        public static ResolvedSignalSet Parse(JsonObject json)
+        {
+            if (!DateTime.TryParseExact(Text(json, "setReadAtUtc"), "O", CultureInfo.InvariantCulture,
+                    DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var readAt))
+            {
+                throw new FormatException("The stored resolved set has no readable setReadAtUtc.");
+            }
+
+            var signals = (json["signals"] as JsonArray ?? throw new FormatException("The stored resolved set has no signals array."))
+                .Select(n => n is JsonObject s && Guid.TryParse(Text(s, "id"), out var id) && id != Guid.Empty
+                    && Text(s, "policyCode") is { Length: > 0 } code
+                        ? new ResolvedSignal(id, code)
+                        : throw new FormatException("A stored resolved Signal has no id or policy code."))
+                .ToList();
+            return new ResolvedSignalSet(DateTime.SpecifyKind(readAt, DateTimeKind.Utc), signals, json["recordPredatesSet"]?.GetValue<bool>() == true);
+        }
+    }
+
+    /// <summary>
+    /// D-122: every OPEN Signal (Open or Acknowledged) on the invoice and each of its lines, read once, app-only. The lines are the
+    /// invoice's rows (the persister's resume query); the Signals are found by their subject lookups and grouped by dedupe key, the latest
+    /// episode per (policy, subject) deciding, as <see cref="LatestEpisodeAsync"/> does. Never the write results (a skipped or refreshed
+    /// write returns no id). The clock is read BEFORE the query, so a system close after the read is at or after it.
+    /// </summary>
+    private async Task<ResolvedSignalSet> ReadOpenSignalSetAsync(Guid invoiceId, CancellationToken ct)
+    {
+        var setReadAt = _time.GetUtcNow().UtcDateTime;
+
+        var lineQuery = new QueryExpression(InvoiceSubmissionPersister.LineEntity) { ColumnSet = new ColumnSet(false), NoLock = true };
+        lineQuery.Criteria.AddCondition(InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, ConditionOperator.Equal, invoiceId);
+        var lineIds = (await _entities.RetrieveMultipleAsync(lineQuery, ct).ConfigureAwait(false)).Entities
+            .Select(r => r.Id).Where(id => id != Guid.Empty).Distinct().ToList();
+
+        var query = new QueryExpression(SignalEntity) { ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_signalstatus"), NoLock = true };
+        query.Criteria.FilterOperator = LogicalOperator.Or;
+        query.Criteria.AddCondition(SignalWriter.RegardingLookupByEntity[InvoiceReviewService.InvoiceEntity], ConditionOperator.Equal, invoiceId);
+        if (lineIds.Count > 0)
+        {
+            query.Criteria.AddCondition(SignalWriter.RegardingLookupByEntity[InvoiceSubmissionPersister.LineEntity], ConditionOperator.In, lineIds.Cast<object>().ToArray());
+        }
+
+        var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        var subjects = new HashSet<(string Entity, Guid Id)>(lineIds.Select(id => (InvoiceSubmissionPersister.LineEntity, id)))
+        {
+            (InvoiceReviewService.InvoiceEntity, invoiceId),
+        };
+        var latest = new Dictionary<(string Code, string Entity, Guid Id), (int Episode, Entity Row)>();
+        foreach (var row in rows.Entities)
+        {
+            if (row.Id == Guid.Empty
+                || !SignalWriter.TryParseDedupeKey(row.GetAttributeValue<string>("sprk_dedupekey"), out var code, out var entity, out var id, out var episode)
+                || !subjects.Contains((entity, id)))
+            {
+                continue;
+            }
+
+            if (!latest.TryGetValue((code, entity, id), out var seen) || episode > seen.Episode)
+            {
+                latest[(code, entity, id)] = (episode, row);
+            }
+        }
+
+        var open = latest
+            .Where(l => l.Value.Row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value is SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged)
+            .Select(l => new ResolvedSignal(l.Value.Row.Id, l.Key.Code))
+            .DistinctBy(s => s.Id)
+            .OrderBy(s => s.Id)
+            .ToList();
+        return new ResolvedSignalSet(setReadAt, open);
+    }
+
+    /// <summary>Writes <paramref name="set"/> into <c>sprk_findingsjson</c> (<see cref="ResolvedSetMember"/>) and returns the JSON written.</summary>
+    private async Task<string> StoreResolvedSetAsync(Guid submissionId, string findingsJson, ResolvedSignalSet set, CancellationToken ct)
+    {
+        var root = JsonNode.Parse(findingsJson)!.AsObject();
+        root[ResolvedSetMember] = set.ToJson();
+        var json = root.ToJsonString();
+        await _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, new Dictionary<string, object>
+        {
+            [InvoiceSubmissionPersister.SubmissionFindingsJson] = json,
+        }, ct).ConfigureAwait(false);
+        _logger.LogInformation("Invoice submission {SubmissionId}: the automatic rejection resolves {Count} open Signals (stored before the record{Predates})",
+            submissionId, set.Signals.Count, set.RecordPredatesSet ? "; a record written before D-122 lists none" : string.Empty);
+        return json;
+    }
+
+    private sealed record RejectionStep(BillingDecisionRecordResult? Recorded, ResolvedSignalSet Set, string FindingsJson, SubmissionAfterStepsResult? Stop);
+
+    /// <summary>
+    /// Records the automatic rejection with <c>ResolvedSignalIds</c> = the stored set. Two refusals are read further when the set is not empty:
+    /// <list type="bullet">
+    /// <item><b>review_invalid</b>: a record written BEFORE D-122 exists under this decision id, its hash over the empty list. The decision is
+    /// recorded again with the empty list; a success means that record (or, after a concurrent delete, a new one) lists no Signal, so the
+    /// stored set becomes empty (<see cref="ResolvedSignalSet.RecordPredatesSet"/>) and nothing is closed. A refusal there is classified as
+    /// any refusal.</item>
+    /// <item><b>owner_refused</b>: when a Signal of the set no longer exists, <see cref="ResolvedSignalMissingCode"/> (permanent: the set is
+    /// frozen once stored, see notes 13c); otherwise owner_refused as before.</item>
+    /// </list>
+    /// </summary>
+    private async Task<RejectionStep> RecordRejectionAsync(
+        StoredFindings stored, Guid submissionId, Guid invoiceId, ResolvedSignalSet set, string findingsJson, CancellationToken ct)
+    {
+        var ids = set.Signals.Select(s => s.Id).ToList();
+        try
+        {
+            return new RejectionStep(await _record(BuildRejectionDecision(stored, submissionId, invoiceId, ids)!, ct).ConfigureAwait(false), set, findingsJson, null);
+        }
+        catch (DecisionRecordRefusedException ex) when (ex.Reason == DecisionRecordRefusalReason.ReviewInvalid && ids.Count > 0)
+        {
+            BillingDecisionRecordResult prior;
+            try
+            {
+                prior = await _record(BuildRejectionDecision(stored, submissionId, invoiceId, [])!, ct).ConfigureAwait(false);
+            }
+            catch (DecisionRecordRefusedException again)
+            {
+                return new RejectionStep(null, set, findingsJson, RecordRefused(submissionId, invoiceId, again.Reason));
+            }
+
+            _logger.LogInformation("Invoice submission {SubmissionId}: Decision Record {RecordId} predates D-122 and lists no Signal; none is closed by it",
+                submissionId, prior.RecordId);
+            var empty = set with { Signals = [], RecordPredatesSet = true };
+            return new RejectionStep(prior, empty, await StoreResolvedSetAsync(submissionId, findingsJson, empty, ct).ConfigureAwait(false), null);
+        }
+        catch (DecisionRecordRefusedException ex) when (ex.Reason == DecisionRecordRefusalReason.OwnerRefused && ids.Count > 0)
+        {
+            var missing = await MissingSignalCountAsync(ids, ct).ConfigureAwait(false);
+            return new RejectionStep(null, set, findingsJson, RecordRefused(submissionId, invoiceId, missing > 0 ? ResolvedSignalMissingCode : ex.Reason));
+        }
+        catch (DecisionRecordRefusedException ex)
+        {
+            return new RejectionStep(null, set, findingsJson, RecordRefused(submissionId, invoiceId, ex.Reason));
+        }
+    }
+
+    private SubmissionAfterStepsResult RecordRefused(Guid submissionId, Guid invoiceId, string reason)
+    {
+        var permanent = PermanentRecordRefusals.Contains(reason);
+        _logger.LogWarning("Invoice submission {SubmissionId}: the automatic rejection's Decision Record was refused ({Reason}); {Next}",
+            submissionId, reason, permanent ? "a retry cannot succeed" : "it stays Processing for a retry");
+        return Stop(permanent ? SubmissionAfterStepsStatus.Refused : SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, reason);
+    }
+
+    /// <summary>How many of <paramref name="ids"/> no longer exist (one query by id, app-only).</summary>
+    private async Task<int> MissingSignalCountAsync(IReadOnlyList<Guid> ids, CancellationToken ct)
+    {
+        var query = new QueryExpression(SignalEntity) { ColumnSet = new ColumnSet(false), NoLock = true, TopCount = ids.Count };
+        query.Criteria.AddCondition("sprk_signalid", ConditionOperator.In, ids.Cast<object>().ToArray());
+        var found = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Select(e => e.Id).ToHashSet();
+        return ids.Count(id => !found.Contains(id));
+    }
+
+    /// <summary>
+    /// Closes every Signal of the set as Acted by <paramref name="recordId"/> (<see cref="SignalWriter.CloseActedByAutomatedDecisionAsync"/>).
+    /// Closed and AlreadyClosedByThisRecord are done; LeftAsIs (a person or another record resolved it) stays listed in the record, one
+    /// Information line; a Signal that no longer exists has nothing to close, one Warning; ChangedSinceRead is a retry (every Signal is still
+    /// attempted). Any other exception propagates (transient, as a Signal write's). Returns the retry code, or null.
+    /// </summary>
+    private async Task<string?> CloseResolvedSetAsync(ResolvedSignalSet set, Guid recordId, Guid submissionId, CancellationToken ct)
+    {
+        string? failure = null;
+        foreach (var signal in set.Signals)
+        {
+            SignalAutomatedCloseOutcome outcome;
+            try
+            {
+                outcome = await _closeActed(signal.Id, recordId, set.SetReadAtUtc, signal.PolicyCode, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsRecordNotFound(ex))
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: Signal {SignalId} (policy {PolicyCode}) listed in Decision Record {RecordId} no longer exists; nothing to close",
+                    submissionId, signal.Id, signal.PolicyCode, recordId);
+                continue;
+            }
+
+            switch (outcome)
+            {
+                case SignalAutomatedCloseOutcome.LeftAsIs:
+                    _logger.LogInformation("Invoice submission {SubmissionId}: Signal {SignalId} (policy {PolicyCode}) was resolved otherwise; it stays listed in Decision Record {RecordId}",
+                        submissionId, signal.Id, signal.PolicyCode, recordId);
+                    break;
+                case SignalAutomatedCloseOutcome.ChangedSinceRead:
+                    failure ??= SignalChangedCode;
+                    break;
+            }
+        }
+
+        return failure;
     }
 
     private async Task<Entity?> ReadSubmissionAsync(Guid submissionId, string[] columns, CancellationToken ct)
@@ -867,6 +1121,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         DecisionRecordRefusalReason.ReviewInvalid, DecisionRecordRefusalReason.FactSnapshotMissing, DecisionRecordRefusalReason.SubjectUnsupported,
         DecisionRecordRefusalReason.SubjectUnfileable, DecisionRecordRefusalReason.RecordClassUnderivable, DecisionRecordRefusalReason.CoreUnsupported,
         DecisionRecordRefusalReason.OwnerRefused, DecisionRecordRefusalReason.OwnerMissing,
+        ResolvedSignalMissingCode, // D-122: the stored set is frozen, so a listed Signal that no longer exists stays missing (notes 13c)
     };
 
     /// <summary>
@@ -874,12 +1129,12 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// same one (074 K-5): <c>reject-invoice</c> on the invoice, the deterministic decision id, an <c>automated:</c> decider with no confirmer;
     /// Reason = the deciding reason codes; PolicyVersionId = the first deciding finding's version; Values strings only; Facts = the decision,
     /// the threshold and every merged reason of the stored, scrubbed Signal plan (D-112: never the raw findings).
-    /// <para><b>ResolvedSignalIds is empty.</b> D-122 (resolve every open Signal on the rejected invoice) is NOT implemented: no path exists to
-    /// close a Signal as resolved by a billing decision (SignalWriter.CloseAsync takes system resolutions only; the commit route's close is
-    /// private; the recorder leaves closing to its caller), and listing Signals the record cannot close would half-resolve them. Notes
-    /// section 13, open item 1.</para>
+    /// <para><b>ResolvedSignalIds</b> = <paramref name="resolvedSignalIds"/>: the STORED set (D-122, notes 13c), every open Signal on the
+    /// invoice and its lines read once before the record; the record's hash covers it, so a resume passes the same set. Null (the preflight,
+    /// which does no I/O) lists none.</para>
     /// </summary>
-    internal static BillingDecision? BuildRejectionDecision(StoredFindings stored, Guid submissionId, Guid invoiceId)
+    internal static BillingDecision? BuildRejectionDecision(
+        StoredFindings stored, Guid submissionId, Guid invoiceId, IReadOnlyList<Guid>? resolvedSignalIds = null)
     {
         var deciding = stored.DecidingIndexes
             .Select(i => stored.Findings.TryGetValue(i, out var f) ? f : null)
@@ -931,7 +1186,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             Reason: reason,
             Values: values,
             PolicyVersionId: deciding[0].PolicyVersionId,
-            ResolvedSignalIds: null,
+            ResolvedSignalIds: resolvedSignalIds,
             Written: [new DecisionRecordRef(InvoiceReviewService.InvoiceEntity, invoiceId)]);
     }
 
@@ -993,6 +1248,9 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
         /// <summary>False when the stored JSON has no <c>signalPlan</c> array (G: that is not an empty plan; the run is Refused).</summary>
         public bool HasSignalPlan { get; init; }
+
+        /// <summary>The frozen D-122 set (<see cref="ResolvedSetMember"/>); null when none is stored yet.</summary>
+        public ResolvedSignalSet? ResolvedSet { get; init; }
 
         public required Guid InvoiceId { get; init; }
         public required string TrackingNumber { get; init; }
@@ -1122,6 +1380,12 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                     CodingFindings = root["codingFindings"] as JsonArray ?? [],
                     CodeSet = root["codeSet"] as JsonObject,
                     InvoiceNumberReadConfidence = root["invoiceNumberReadConfidence"]?.GetValue<decimal>(),
+                    ResolvedSet = root[ResolvedSetMember] switch
+                    {
+                        null => null,
+                        JsonObject set => ResolvedSignalSet.Parse(set),
+                        _ => throw new FormatException("The stored resolved set is not an object."),
+                    },
                 };
             }
             catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException or ArgumentException)
