@@ -88,8 +88,9 @@ service refusal for an AiObservation Reject rule through the real endpoint and a
 drafts or edits a Reject onto TimeIncrement or DailyHoursCap, which is the behaviour this task forbids:
 `RuleSetServiceDraftTests` (the `Increment()` helper and 2 assertions), `RuleSetServiceCompensationTests` (the same helper),
 `BillingRuleDraftSeamTests` (the model reply), `RuleSetServiceTests` (2 edit tests: the consequence edit now goes from a stored
-Reject to Flag, since a DailyHoursCap rule can only Flag). No assertion was weakened; the expected consequence changed from Reject to
-Flag. After the change: 0 failures.
+Reject to Flag, since a DailyHoursCap rule can only Flag). After the change: 0 failures. **Correction (review fix round, F3):** an
+assertion *was* weakened. The flips removed the only checks that a Reject is stored as `billing-reject` in `sprk_proposedaction`; the
+review fix round restores one (section 10, F3).
 
 **Suites after the change.**
 - `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
@@ -204,3 +205,117 @@ facade does not apply), no new ceiling count (no interface). Unconditional regis
   - ADR-038: pure logic in `tests/unit/domain`, rule-set behaviour over the 076 harness.
 - **Process note:** the repository's `lint-staged` pre-commit hook takes a temporary `git stash` of the working tree while it formats and drops it again; each commit here restored the tree cleanly and left no entry. I ran no `git stash` myself.
 - **Adversarial review (one pass per task):** not run by this agent. The caller schedules it.
+
+## 10. Review fix round (2026-10-18)
+
+> Base `194ad556f` on `work/ebilling-r1`. Range `194ad556f..` (ten code/test commits plus this notes commit). Owner decision D-117 (read at
+> `28f407fdd`) was added to F1-a mid-round by the coordinator.
+
+### Item map
+
+| Item | Commit | What changed | Evidence (fail before / mutation) |
+|---|---|---|---|
+| F1-c | `321c696ac` | `RejectionInvariantProblem` also requires `ArithmeticFailCap < ReliabilityThreshold` (same direction as the reference cap). The rejection tests' `Settings` helper keeps the arithmetic cap at or below the reference cap, so each case is about the pair it names. | New: threshold 0.50 with `ArithmeticFailCap` 0.50 (the NFR-06 grid setting) is invalid; 0.49 is valid. Mutation MF1c below |
+| K1 | `807159239` | `settings_unavailable` split into `settings_read_failed` (the read threw; transient, 049 may retry) and `settings_invalid` (invariant broken; lasting). Both never reject. | Each code asserted on its own path (null settings, a throwing reader, a broken reference cap, a broken arithmetic cap). Mutation MK1 below |
+| F-ALLOW | `a563007bb` | `BillingRuleCatalogue.RejectCapableReasons` / `IsRejectCapableReason` (own block after `ConsequenceRefusal`); the decider holds any other reason as `reason_not_reject_capable`, after the type-specific holds. | Must fire: an unlisted reason (`billing.currency.missing`, `<type>.a_new_reason`) under Reject holds for every rejecting type; `required_data.currency_not_usd` holds. Must not fire: every listed (type, reason) rejects. Guard: each listed code is exactly one `BillingReasonCodes` constant and its type's handler source names it. Mutation MALLOW below |
+| F1-a | `8a82e8bb9` | `BillingFieldNames.AiAssigned` / `IsAiAssigned` (TaskCode, ActivityCode, ExpenseCode, and `Observation.*` by `ObservationPrefix`); the decider holds a finding that read any of them as `ai_assigned_input` (the AI fields are its `UnreliableFields`). | Mutation (hold disabled): 6 tests fail, including the E101-billed / E109-assigned real-evaluator case |
+| F1-a / D-117 | `1b20fff88` | `ExpenseRuleHandler` judges the firm-billed code (`BilledExpenseCode`, extracted, D-47 score). **Fallback:** when a line has no billed code, the AI-assigned `ExpenseCode` is used; that finding reads an AI field, so it only ever holds (`ai_assigned_input`). The cap finding names the same code (billed, else the fallback), so a cap finding on a line with no billed code also holds. The catalogue `Describe` text names no code source; unchanged. | Old handler put back: 13 tests fail. New: billed E101 / assigned E109 with a rule on E109 gives no finding, accepted; a rule on E101 fires on the billed code and rejects; a reliably read billed E109 with Reject rejects (the hold does not fire); no billed code, the fallback on E109 at coding 0.92 holds |
+| Owner Q3 | `8f2d9e44b` | `ValidateForSave` refuses Reject on a Duplicate whose `matchFields` lack `firmInvoiceNumber` (`consequence_not_allowed`, message names `firmInvoiceNumber`). Save only (`atSave`): the gate still evaluates such a stored row and the decider holds its line findings. | Mutations: save check off, 2 fail (validator, publish); check applied at the gate, 1 fails |
+| F1-b | `83c1edc17` | `CheckDraft`: when the only errors are `consequence_not_allowed` and the rule is valid as Flag, it is stored Proposed with Flag; `sprk_proposedaction` = `billing-flag: drafted as <X>, lowered to Flag. <refusal>` (capped at 400). Prompt: each offered type's description ends `Allowed consequences: ...` (from the catalogue; Duplicate adds the `firmInvoiceNumber` condition); the consequence constraint says to use only those, else Flag; the example's TimeIncrement proposal is Flag. | Mutation (lowering off): 5 fail. Description sentence removed: 1 fails. The new contract test fails on the old action JSON |
+| F3 | `f813411c8` | The drafting row-shape test's first rule is InvoiceAge / Reject and asserts `billing-reject`; the second asserts `billing-flag`. | Mutation (Reject maps to `billing-rule`): 5 fail, including the row-shape test |
+| ontology K1 | `7d1eb1970` | `OntologyBillingConsequenceIsolationGuardTests` (source scan of `Services/Ontology/**`, `SignalEvaluator.cs`, `SignalReevaluationJob.cs`). | 8 must-fire and 5 must-not-fire synthetic controls; real file: a sixth argument on `SignalEvaluator`'s snapshot fails the guard (restored) |
+| ontology K2 | `1d52c4c45` | Comment: "one of the bounded set of policy-validation sub-reasons ..., including". | Comment only |
+
+**Allowlist (F-ALLOW): the codes that legitimately rejected before this round.** ApprovedRate `approved_rate.above_approved`;
+ExpenseRule `expense_rule.code_not_reimbursable`, `expense_rule.amount_over_cap`; InvoiceAge `invoice_age.too_old`; CoreRecordWindow
+`core_record_window.before_open`, `core_record_window.after_close`, `core_record_window.core_record_closed`; Duplicate
+`duplicate.invoice_number`; RequiredData `required_data.missing_field`. Empty for ApprovedTimekeeper (D-89), TimeIncrement,
+DailyHoursCap, NonBillableActivity and AiObservation. Not listed on purpose: the ApprovedRate reference-missing reasons (already held as
+`reference_missing_holds`), the line-level Duplicate reasons (held as `duplicate_at_line_level`), and `required_data.currency_not_usd`
+(flag-only, D-115; it rejected before this round).
+
+**Decision order now:** consequence; type (not eligible, hold-only, ApprovedRate reference missing, line-level Duplicate, reason not on
+the allowlist); settings (`settings_read_failed`, `settings_invalid`); read fields (none listed, AI-assigned, confidence unknown, below
+the threshold).
+
+### Behaviour changes a caller sees
+
+- `SubmissionHoldReasons.SettingsUnavailable` is gone (nothing outside 073 used it); two codes replace it.
+- A foreign-currency RequiredData finding no longer rejects (D-115). The old real-evaluator test that asserted it rejected is now a
+  hand-built flag-only case, so it does not depend on 072 part E's change to `RequiredDataHandler`.
+- ExpenseRule rejects only on a reliably read billed code (D-117). On a line with no billed code it can only flag.
+- A drafted rule is no longer lost for its consequence alone. **Known gap:** the note is in `sprk_proposedaction`, the only free-text,
+  billing-owned, admin-only column on the version. The Rule Review read (077) does not return that column, so the page does not show the
+  note yet, and an edit rewrites the column to the plain code. Showing it is a read-model addition for 077 (not done here: it adds API
+  contract surface).
+- The dev `billing-rule-draft` Action row must be re-synced from the mirror with `scripts/ebilling/Ensure-ActionRow.ps1` (no live write
+  was made).
+
+### Test files changed beyond the new tests
+
+- `SubmissionRejectionRuleTests`: the `Settings` helper (F1-c), the `SettingsUnavailable` references (K1), the foreign-currency case
+  (F-ALLOW), the F1-a real-evaluator case reworked for D-117.
+- `ExpenseRuleHandlerTests`: the cases set `BilledExpenseCode` instead of `ExpenseCode` (D-117 changes which field is judged); the
+  read-fields test is renamed for the billed field.
+- `InvoiceComplianceEvaluatorTests` (072's file): one line sets `BilledExpenseCode = "E109"` in the D-20 case. **Merge note:** 072 part E
+  may touch the same currency test; the change is one line.
+- `RuleSetServiceConsequenceTests`: the drafting test that expected "not converted" now expects a lowered Flag rule (F1-b).
+- `RuleSetServiceDraftTests`: F3.
+
+### Known limits (documented, not changed)
+
+- **K3, caps at extraction versus the invariant at decide time.** 046 caps a field with the settings it read at extraction; the decider
+  checks the invariant against the settings it reads at decide time. If the settings change between the two (say threshold 0.90 and
+  reference cap 0.80 at extraction, then threshold 0.80 and cap 0.70 at decide), both rows are valid, but a reference-missing field
+  capped at 0.80 under the old row now meets the new threshold of 0.80. The window is one submission's extraction-to-decision time plus
+  the 30 s settings cache, and it opens only when an admin lowers the threshold mid-flight.
+- **Body-first precedence in `ValidateBilling`.** It returns one error per round, the first that fails (length, schema, template, then
+  consequence). An admin with a bad body and a bad consequence sees the body error first and the consequence error on the next save.
+  F1-b relies on it: lowering applies only when the consequence is the only error, so a lowered rule never hides a bad body.
+- **A null-consequence firm row overrides a client default's Reject (D-39).** Firm scope replaces the client default, and the decider
+  treats a version with no consequence as a Flag, so such a firm row turns a client Reject into a Flag. Publish requires a consequence,
+  so only a row written around publish can do this.
+
+### Owner questions: status
+
+- **Q1 (arithmetic cap):** done in this round (F1-c).
+- **Q2 (no write-side guard for the settings pair):** the reviewer's engineering answer stands: keep the read-time guard (fails closed,
+  now as `settings_invalid` so 049 does not retry it), no plugin (ADR-002); add the pair to the 025 settings checklist.
+- **Q3 (line-level Duplicate with Reject):** done in this round (refused at save; drafting lowers it to Flag).
+- **Q4 (RequiredData and currency):** closed. `required_data.currency_not_usd` becomes flag-only (072 part E, D-115), and F-ALLOW holds any
+  unlisted code.
+- **Q5 (drafting prompt):** done in this round (F1-b).
+- **Q6 (pre-existing stored rows):** the reviewer's engineering answer stands: the gate refusing such a row (no finding) is kept; run the
+  one-time dev query before 049 goes live. **Deferred:** the reviewer's gate-downgrade suggestion (refuse only Reject and pass Suggest
+  through, or downgrade a disallowed consequence to Flag at the gate) touches `InvoiceComplianceEvaluator`, which 072 part E is editing;
+  it is left for a later round.
+- **Q7 (Suggest-adjustment rows of the matrix):** the reviewer's engineering answer stands: keep design 6.1 as implemented (ApprovedRate
+  and NonBillableActivity only).
+- **From D-117:** "it may still use the AI-assigned code to flag" is implemented only as the no-billed-code fallback; the handler does not
+  add a separate AI-code Flag finding when a billed code is present.
+
+### Mutation proofs not listed in the table
+
+Same method as section 4 (apply to the committed source, rebuild, run the filter, restore; script: session scratchpad `mutate.py`).
+
+| # | Mutation | Failing tests |
+|---|---|---|
+| MF1c | arithmetic-cap comparison made unreachable (`> 1m`) | 2: the NFR-06 grid setting test, the K1 two-reasons test |
+| MK1 | a broken invariant reported as `settings_read_failed` | 12: invariant theory (6), D-89 cap theory (4), the K1 two-reasons test, the invariant-logged test |
+| MALLOW | allowlist check disabled | 6: unlisted reason for five rejecting types, foreign currency |
+| MGUARD | a code not emitted by the handler (`approved_rate.above_approved`) and a non-constant (`invoice_age.renamed`) added to InvoiceAge's list | 2: the allowlist guard, once per bad entry |
+
+New tests that could not compile against the old source (new constants and members) are proved by these mutations instead.
+
+### Suites after the round
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
+- `Sprk.Bff.Api.Tests`, filter `Billing|Rejection|RuleSet|Finance|PolicyVersion|Signal|Ontology`: **4,997 passed, 6 skipped (live), 0 failed**
+  (before the round: 4,939 passed, 6 skipped, 0 failed).
+- `Spaarke.ArchTests`: **1,189 / 1,189** (14 new).
+
+**Publish delta:** not re-measured. No package, no csproj or props change, no new type in `Sprk.Bff.Api`; the change is method bodies
+plus small members on existing types (`BillingFieldNames.AiAssigned` / `IsAiAssigned` / `ObservationPrefix`,
+`BillingRuleCatalogue.RejectCapableReasons` / `IsRejectCapableReason`, four `SubmissionHoldReasons` constants replacing one,
+`RuleSetService.LoweredConsequenceNote`, `BillingRuleDraftTranslator.AllowedConsequencesSentence`). The previous measurement for the
+whole of 073 was +7,110 B.
