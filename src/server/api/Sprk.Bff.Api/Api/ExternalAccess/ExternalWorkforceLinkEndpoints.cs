@@ -74,6 +74,7 @@ public static class ExternalWorkforceLinkEndpoints
 
         group.MapPost("/workforce/link", LinkAsync)
             .WithName("LinkExternalWorkforceHomeIdentity")
+            .ExemptFromWorkforceCeiling("Sign-in bootstrap: stores the link from a home identity to a licensed user (R3); no table operation by a workforce contact.")
             .WithSummary("Link a licensed user's home-directory account to their Spaarke systemuser")
             .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes))
             .WithDescription(

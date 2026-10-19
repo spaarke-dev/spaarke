@@ -89,7 +89,7 @@ public class ExistingCiamAccountInviteTests
     private Task<IResult> InviteAndGrant(ILogger<Program>? logger = null, ContactIdentityBinder? binder = null) =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             Request() with { RecordId = _matter },
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities),
             PortalConfig(), Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey),
             _h.Materializer, _h.Notifier, Context(), logger ?? NullLogger<Program>.Instance, _h.Time, CancellationToken.None);

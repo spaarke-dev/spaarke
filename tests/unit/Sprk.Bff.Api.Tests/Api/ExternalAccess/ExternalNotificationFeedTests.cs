@@ -17,6 +17,7 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Dataverse.Privileges;
 using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -120,6 +121,108 @@ public class ExternalNotificationFeedTests
             ? new[] { CallerProjectAccess.FromLevel(p, ExternalAccessLevel.FullAccess) }
             : Array.Empty<CallerProjectAccess>(),
     };
+
+    // ── The workforce ceiling (unified-access-control-r2 task 186, review round 1 F1) ─────────────────────────────
+    // The feed mixes tables, so it FILTERS rather than refuses: a table the Workforce role cannot Read contributes no item
+    // and is not read. The predicate is the one the route handler builds from the role (WorkforceRoleCeilingGate.CanRead).
+
+    private Task<IResult> FeedUnderCeiling(CallerPrincipal caller, WorkforceRoleCeiling ceiling) =>
+        ExternalNotificationFeedEndpoints.GetFeedCoreAsync(
+            caller, Tenant, ProductionRegistry(), _data, ReadService(), _cache, Now, NullLogger.Instance, CancellationToken.None,
+            table => WorkforceRoleCeilingGate.CanRead(ceiling, table));
+
+    private static WorkforceRoleCeiling EveryRoutePrivilegeWithout(string table, AccessRights removed)
+    {
+        var map = Sprk.Bff.Api.Tests.AccessControl.WorkforceCeilingDouble.OwnerPrerequisite.ToDictionary(kv => kv.Key, kv => kv.Value);
+        map[table] &= ~removed;
+        return WorkforceRoleCeiling.Available(map);
+    }
+
+    [Fact]
+    public async Task Ceiling_WithoutServiceRequestRead_DropsTheRequestsMessages_AndNeverQueriesTheRequests_ButKeepsTheProjects()
+    {
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var mine = _data.AddServiceRequest(requestedBy: me, "NDA with Contoso");
+        Message("sprk_regardingservicerequest", mine, Now.AddHours(-1), senderName: "Legal");
+        var onProject = Message("sprk_regardingproject", project, Now.AddHours(-2), senderName: "Pat Lawyer");
+        _data.Name(project, "Project Alpha");
+
+        var feed = Body(await FeedUnderCeiling(
+            WorkforceContact(me, project), EveryRoutePrivilegeWithout("sprk_servicerequest", AccessRights.Read)));
+
+        feed.Value.Select(i => i.Id).Should().Equal(new[] { IdOf(onProject) }, "the feed is filtered, not refused");
+        _data.ServiceRequestReads.Should().BeEmpty("a table the role cannot Read is not read");
+        _queries.Single().Should().NotContain(mine.ToString());
+    }
+
+    [Fact]
+    public async Task Ceiling_WithoutCommunicationRead_ReadsNoMessage_ButKeepsTheGrant()
+    {
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var grant = _data.AddGrant(me, ExternalGrantRootType.Project, project, Now.AddDays(-1));
+        Message("sprk_regardingproject", project, Now.AddHours(-2));
+        _data.Name(project, "Project Alpha");
+
+        var feed = Body(await FeedUnderCeiling(
+            WorkforceContact(me, project), EveryRoutePrivilegeWithout("sprk_communication", AccessRights.Read)));
+
+        feed.Value.Select(i => i.Id).Should().Equal(grant.ToString("D"));
+        _queries.Should().BeEmpty("no message is read without Read on sprk_communication");
+    }
+
+    [Fact]
+    public async Task Ceiling_WithoutProjectRead_DropsTheProjectsGrantAndMessages()
+    {
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        _data.AddGrant(me, ExternalGrantRootType.Project, project, Now.AddDays(-1));
+        Message("sprk_regardingproject", project, Now.AddHours(-2));
+        _data.Name(project, "Project Alpha");
+
+        var feed = Body(await FeedUnderCeiling(
+            WorkforceContact(me, project), EveryRoutePrivilegeWithout("sprk_project", AccessRights.Read)));
+
+        feed.Value.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AnUnavailableCeiling_IsAnEmptyFeed_NotAnError_AndReadsNothing()
+    {
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        _data.AddGrant(me, ExternalGrantRootType.Project, project, Now.AddDays(-1));
+        _data.AddServiceRequest(requestedBy: me, "NDA with Contoso");
+        Message("sprk_regardingproject", project, Now.AddHours(-2));
+
+        var feed = Body(await FeedUnderCeiling(WorkforceContact(me, project), WorkforceRoleCeiling.Unavailable("read_failed")));
+
+        feed.Value.Should().BeEmpty();
+        feed.UnreadCount.Should().Be(0);
+        _data.GrantReads.Should().BeEmpty();
+        _data.ServiceRequestReads.Should().BeEmpty();
+        _queries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ACeilingThatHoldsEveryRoutePrivilege_FiltersNothing()
+    {
+        // Must-not-fire: the same items as a caller the ceiling does not apply to.
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var grant = _data.AddGrant(me, ExternalGrantRootType.Project, project, Now.AddDays(-1));
+        var mine = _data.AddServiceRequest(requestedBy: me, "NDA with Contoso");
+        var onMine = Message("sprk_regardingservicerequest", mine, Now.AddHours(-1), senderName: "Legal");
+        var onProject = Message("sprk_regardingproject", project, Now.AddHours(-2), senderName: "Pat Lawyer");
+        _data.Name(project, "Project Alpha");
+
+        var feed = Body(await FeedUnderCeiling(
+            WorkforceContact(me, project),
+            WorkforceRoleCeiling.Available(Sprk.Bff.Api.Tests.AccessControl.WorkforceCeilingDouble.OwnerPrerequisite)));
+
+        feed.Value.Select(i => i.Id).Should().BeEquivalentTo(new[] { IdOf(onMine), IdOf(onProject), grant.ToString("D") });
+    }
 
     // ── fixture ─────────────────────────────────────────────────────────────────────────────────────
 
