@@ -1642,3 +1642,21 @@ The full record is in `notes/185-invite-code-design.md` §11.
    - attachments deleted with their communication.
    This reading was stated back to the owner so they can correct it. Next: a design note, then the build. D9 (commit the `sprk_policy_matter` Cascade to the solution XML) needs no decision.
 5. **036 flag:** R3 is tasked and has acknowledged. R3 acts after three things: the 036 merge sha, a dev deploy that contains it, and the owner's direct confirmation in R3's session.
+
+## Round 104 (owner, 2026-10-19)
+
+1. **#2084 policy role change: APPROVED** ("approve policy role change - yes approved"). Applied to spaarkedev1 with `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` against master's config: dry run, then -Apply, then -Verify.
+   - Added: prvReadsprk_Policy and prvReadsprk_PolicyVersion at Basic. The role went from 38 to 40 privileges. VERIFY PASS: 32 of 32 tables.
+   - Outside the file, unchanged by this apply:
+     - the SharePoint four at Global, from an earlier apply (§5.4 strip pending the owner);
+     - 4 ebilling Basic Reads (externalidentifier, invoiceapproval, invoicecorrection, invoicesubmission), not in the config, raised with ebilling.
+   - Ontology was sent before and after notices.
+2. **036:** the owner asked for the options, with details and a recommendation. Sent plainly; the answer is pending.
+3. **Delete Q1–Q5:** the owner asked for the questions. Re-sent; pending.
+4. **186 guest sign-in live gate:** the owner is available now (2026-10-19).
+   - Preconditions checked:
+     - BFF 44f802a1d carries 186;
+     - the SPA is deployed from R3 ebc74b331, tenant-pinned (A8);
+     - `WorkforceIdentity__CustomerTenantIds__1` holds bc3aa7f4;
+     - the Workforce role holds the sprk_servicerequest privileges.
+   - Still needed: a new, unlicensed guest, invited manually by the owner (dev only, 186 §7 Q5).
