@@ -293,7 +293,7 @@ public class InvoiceComplianceEvaluatorTests
     public void AnExpenseRule_KeepsItsCodeCheck_ButDropsItsAmountCap_OnANonUsdInvoice_D20()
     {
         var rule = Version("CD-EXPENSE", RuleType.ExpenseRule);
-        var expense = Expense(0) with { ExpenseCode = "E109", Amount = 600m };
+        var expense = Expense(0) with { ExpenseCode = "E109", BilledExpenseCode = "E109", Amount = 600m }; // D-117: the billed code is judged
 
         var usd = Evaluate(Request(expense), Loaded(rule));
         var eur = Evaluate(Request(expense) with { Currency = "EUR" }, Loaded(rule));

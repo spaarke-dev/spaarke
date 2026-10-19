@@ -17,10 +17,50 @@ public class ExpenseRuleHandlerTests
     private static readonly BillingRuleDefinition CodesOnly = Rule("""{"type":"ExpenseRule","nonReimbursableCodes":["E109"]}""");
     private static readonly BillingRuleDefinition CapOnly = Rule("""{"type":"ExpenseRule","maxAmountPerItem":500}""");
 
+    // ── D-117: the code check judges the code the firm billed ────────────────────────────────────────────────────
+
+    [Fact]
+    public void TheCodeCheck_JudgesTheFirmBilledCode_NotTheAiAssignedOne_D117()
+    {
+        // The firm billed E101; the coding Action assigned E109.
+        var line = Expense(0) with { BilledExpenseCode = "E101", ExpenseCode = "E109" };
+
+        Run(CodesOnly, Facts(line)).Should().BeEmpty("the firm did not bill E109");
+
+        var onE101 = Rule("""{"type":"ExpenseRule","nonReimbursableCodes":["E101"]}""");
+        var finding = Run(onE101, Facts(line)).Should().ContainSingle().Subject;
+        finding.ReasonCode.Should().Be(BillingReasonCodes.ExpenseCodeNotReimbursable);
+        finding.ReadFields.Should().Contain(new FieldRef(0, BillingFieldNames.BilledExpenseCode))
+            .And.NotContain(new FieldRef(0, BillingFieldNames.ExpenseCode));
+        finding.Value("line.expenseCode").Value.Should().Be("E101");
+    }
+
+    [Fact]
+    public void WithNoBilledCode_TheAiAssignedCodeIsTheFallback_AndTheFindingReadsIt_D117()
+    {
+        var line = Expense(0) with { BilledExpenseCode = null, ExpenseCode = "E109" };
+
+        var finding = Run(CodesOnly, Facts(line)).Should().ContainSingle().Subject;
+
+        finding.ReadFields.Should().Contain(new FieldRef(0, BillingFieldNames.ExpenseCode), "the fallback reads the AI-assigned field, so it can only flag")
+            .And.NotContain(new FieldRef(0, BillingFieldNames.BilledExpenseCode));
+        finding.Value("line.expenseCode").Value.Should().Be("E109");
+    }
+
+    [Fact]
+    public void TheCapFinding_NamesTheBilledCode_D117()
+    {
+        var line = Expense(0) with { BilledExpenseCode = "E101", ExpenseCode = "E109", Amount = 900m };
+
+        var finding = Run(CapOnly, Facts(line)).Should().ContainSingle().Subject;
+
+        finding.ReadFields.Should().Contain(new FieldRef(0, BillingFieldNames.BilledExpenseCode)).And.NotContain(new FieldRef(0, BillingFieldNames.ExpenseCode));
+    }
+
     [Fact]
     public void MustFire_ForANonReimbursableCode()
     {
-        var finding = Run(Both, Facts(Expense(0) with { ExpenseCode = "E109" })).Should().ContainSingle().Subject;
+        var finding = Run(Both, Facts(Expense(0) with { BilledExpenseCode = "E109" })).Should().ContainSingle().Subject;
 
         finding.ReasonCode.Should().Be(BillingReasonCodes.ExpenseCodeNotReimbursable);
         finding.Subject.Should().Be(BillingSubject.ForLine(0));
@@ -40,13 +80,13 @@ public class ExpenseRuleHandlerTests
     [Fact]
     public void MustNotFire_ForAnAmountExactlyAtTheCap_OrAnAllowedCode()
     {
-        Run(Both, Facts(Expense(0) with { Amount = 500m }, Expense(1) with { ExpenseCode = "E101", Amount = 12m })).Should().BeEmpty();
+        Run(Both, Facts(Expense(0) with { Amount = 500m }, Expense(1) with { BilledExpenseCode = "E101", Amount = 12m })).Should().BeEmpty();
     }
 
     [Fact]
     public void ALineThatBreaksBothChecks_GetsTwoFindings_TheCodeFirst()
     {
-        var facts = Facts(Expense(0) with { ExpenseCode = "E110", Amount = 900m });
+        var facts = Facts(Expense(0) with { BilledExpenseCode = "E110", Amount = 900m });
 
         Run(Both, facts).Select(f => f.ReasonCode).Should().Equal(
             BillingReasonCodes.ExpenseCodeNotReimbursable, BillingReasonCodes.ExpenseAmountOverCap);
@@ -56,25 +96,25 @@ public class ExpenseRuleHandlerTests
     public void ACodesOnlyRule_IgnoresTheAmount_AndACapOnlyRule_IgnoresTheCode()
     {
         Run(CodesOnly, Facts(Expense(0) with { Amount = 9999m })).Should().BeEmpty();
-        Run(CapOnly, Facts(Expense(0) with { ExpenseCode = "E109" })).Should().BeEmpty();
+        Run(CapOnly, Facts(Expense(0) with { BilledExpenseCode = "E109" })).Should().BeEmpty();
     }
 
     [Fact]
     public void TheListedCodesMatchWithoutRegardToCase()
     {
-        Run(CodesOnly, Facts(Expense(0) with { ExpenseCode = "e109" })).Should().ContainSingle();
+        Run(CodesOnly, Facts(Expense(0) with { BilledExpenseCode = "e109" })).Should().ContainSingle();
     }
 
     [Fact]
     public void ALineWithNoCodeOrNoAmount_IsNotJudgedOnThatCheck()
     {
-        Run(Both, Facts(Expense(0) with { ExpenseCode = null, Amount = null })).Should().BeEmpty();
+        Run(Both, Facts(Expense(0) with { BilledExpenseCode = null, Amount = null })).Should().BeEmpty();
     }
 
     [Fact]
     public void FeeLines_AreNotJudged()
     {
-        Run(Both, Facts(Fee(0) with { ExpenseCode = "E109", Amount = 99999m })).Should().BeEmpty();
+        Run(Both, Facts(Fee(0) with { BilledExpenseCode = "E109", Amount = 99999m })).Should().BeEmpty();
     }
 
     // ── D-105: a credit line is never judged as a charge ────────────────────────────────────────────────────────
@@ -85,8 +125,8 @@ public class ExpenseRuleHandlerTests
     [InlineData("e109", "-900.00")]
     public void MustNotFire_ForACreditOnANonReimbursableCode_D105(string code, string amount)
     {
-        Run(Both, Facts(Expense(0) with { ExpenseCode = code, Amount = D(amount) })).Should().BeEmpty("a credit is a refund, not a charge");
-        Run(CodesOnly, Facts(Expense(0) with { ExpenseCode = code, Amount = D(amount) })).Should().BeEmpty();
+        Run(Both, Facts(Expense(0) with { BilledExpenseCode = code, Amount = D(amount) })).Should().BeEmpty("a credit is a refund, not a charge");
+        Run(CodesOnly, Facts(Expense(0) with { BilledExpenseCode = code, Amount = D(amount) })).Should().BeEmpty();
     }
 
     [Fact]
@@ -99,9 +139,9 @@ public class ExpenseRuleHandlerTests
     public void MustFire_ForTheChargeLinesAroundACredit_TheCreditIsSkippedAndTheRestAreStillJudged_D105()
     {
         var facts = Facts(
-            Expense(0) with { ExpenseCode = "E109", Amount = 50m },
-            Expense(1) with { ExpenseCode = "E109", Amount = -50m },
-            Expense(2) with { ExpenseCode = "E101", Amount = 600m });
+            Expense(0) with { BilledExpenseCode = "E109", Amount = 50m },
+            Expense(1) with { BilledExpenseCode = "E109", Amount = -50m },
+            Expense(2) with { BilledExpenseCode = "E101", Amount = 600m });
 
         var findings = Run(Both, facts);
 
@@ -112,19 +152,19 @@ public class ExpenseRuleHandlerTests
     [Fact]
     public void AZeroAmountOnANonReimbursableCode_IsNotACredit_AndStillFires_D105()
     {
-        Run(Both, Facts(Expense(0) with { ExpenseCode = "E109", Amount = 0m })).Should().ContainSingle()
+        Run(Both, Facts(Expense(0) with { BilledExpenseCode = "E109", Amount = 0m })).Should().ContainSingle()
             .Which.ReasonCode.Should().Be(BillingReasonCodes.ExpenseCodeNotReimbursable);
     }
 
     [Fact]
-    public void ReadFields_AreTheExpenseCode_TheAmountAndTheDate_AndTheHoursWhenTheLineHasThem()
+    public void ReadFields_AreTheBilledExpenseCode_TheAmountAndTheDate_AndTheHoursWhenTheLineHasThem_D117()
     {
-        Run(Both, Facts(Expense(7) with { ExpenseCode = "E109" })).Single().ReadFields.Should().Equal(
-            new FieldRef(7, BillingFieldNames.ExpenseCode), new FieldRef(7, BillingFieldNames.Amount), new FieldRef(7, BillingFieldNames.Date));
+        Run(Both, Facts(Expense(7) with { BilledExpenseCode = "E109" })).Single().ReadFields.Should().Equal(
+            new FieldRef(7, BillingFieldNames.BilledExpenseCode), new FieldRef(7, BillingFieldNames.Amount), new FieldRef(7, BillingFieldNames.Date));
 
         // The credit test reads the hours too, so an expense line that carries them lists them (F4).
-        Run(Both, Facts(Expense(7) with { ExpenseCode = "E109", Hours = 1m })).Single().ReadFields.Should().Equal(
-            new FieldRef(7, BillingFieldNames.ExpenseCode), new FieldRef(7, BillingFieldNames.Amount), new FieldRef(7, BillingFieldNames.Date),
+        Run(Both, Facts(Expense(7) with { BilledExpenseCode = "E109", Hours = 1m })).Single().ReadFields.Should().Equal(
+            new FieldRef(7, BillingFieldNames.BilledExpenseCode), new FieldRef(7, BillingFieldNames.Amount), new FieldRef(7, BillingFieldNames.Date),
             new FieldRef(7, BillingFieldNames.Hours));
     }
 
@@ -133,7 +173,7 @@ public class ExpenseRuleHandlerTests
     {
         var line = Expense(0) with
         {
-            ExpenseCode = "E109",
+            BilledExpenseCode = "E109",
             Hours = 1m,
             FieldConfidence = Confidence().With(BillingFieldNames.Hours, 0.40m),
         };
@@ -148,13 +188,13 @@ public class ExpenseRuleHandlerTests
     public void ALineWithNegativeHoursAndAPositiveAmount_IsSkippedAsACredit_NeitherCheckFires_K2()
     {
         // Negative hours alone make a credit (D-105): the amount is positive and over the cap, on a non-reimbursable code.
-        Run(Both, Facts(Expense(0) with { ExpenseCode = "E109", Hours = -1m, Amount = 900m })).Should().BeEmpty();
+        Run(Both, Facts(Expense(0) with { BilledExpenseCode = "E109", Hours = -1m, Amount = 900m })).Should().BeEmpty();
     }
 
     [Fact]
     public void ALowConfidenceExpenseCode_IsCarriedAndFlagged()
     {
-        var line = Expense(0) with { ExpenseCode = "E109", FieldConfidence = Confidence().With(BillingFieldNames.ExpenseCode, 0.55m) };
+        var line = Expense(0) with { BilledExpenseCode = "E109", FieldConfidence = Confidence().With(BillingFieldNames.BilledExpenseCode, 0.55m) };
 
         var finding = Run(Both, Facts(line)).Single();
 

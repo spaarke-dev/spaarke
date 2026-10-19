@@ -923,19 +923,58 @@ public class SubmissionRejectionRuleTests
 
     // ── 073 review F1-a: never reject on an AI-assigned input ────────────────────────────────────────────────────
 
-    [Fact]
-    public async Task ARealEvaluation_ExpenseRuleOnTheAiAssignedCode_DoesNotReject_EvenAtHighCodingConfidence_F1a()
+    private static BillingRuleCandidate ExpenseRejectRule(string code) =>
+        Version("BILL-EXP-" + code, RuleType.ExpenseRule, $$"""{"type":"ExpenseRule","nonReimbursableCodes":["{{code}}"]}""") with { Consequence = Reject };
+
+    /// <summary>The F1-a scenario: the firm billed <paramref name="billed"/> (read at 0.97); the coding Action assigned E109 (its self-reported 0.92).</summary>
+    private static BillingLineFacts BilledAndAssigned(string? billed) => Expense(0) with
     {
-        // The firm billed E101 (read at 0.97); the coding Action assigned E109 (its self-reported 0.92). An ExpenseRule that lists E109 as
-        // non-reimbursable fires on the AI's code. 0.92 clears the 0.90 threshold, but it is not a D-47 combined score: hold, never reject.
-        var rule = Version("BILL-EXP", RuleType.ExpenseRule, """{"type":"ExpenseRule","nonReimbursableCodes":["E109"]}""") with { Consequence = Reject };
-        var line = Expense(0) with
-        {
-            ExpenseCode = "E109",
-            BilledExpenseCode = "E101",
-            FieldConfidence = Confidence().With(BillingFieldNames.ExpenseCode, 0.92m).With(BillingFieldNames.BilledExpenseCode, 0.97m),
-        };
-        var result = Evaluator().Evaluate(Request(line), Loaded(rule));
+        ExpenseCode = "E109",
+        BilledExpenseCode = billed,
+        FieldConfidence = Confidence().With(BillingFieldNames.ExpenseCode, 0.92m).With(BillingFieldNames.BilledExpenseCode, billed is null ? null : 0.97m),
+    };
+
+    [Fact]
+    public async Task ARealEvaluation_BilledE101_AssignedE109_ARuleOnE109_DoesNotReject_F1a_D117()
+    {
+        // D-117: ExpenseRule judges the code the firm billed, so a rule on the AI's E109 does not fire at all; nothing can reject.
+        var result = Evaluator().Evaluate(Request(BilledAndAssigned("E101")), Loaded(ExpenseRejectRule("E109")));
+        result.Findings.Should().BeEmpty();
+
+        var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SubmissionOutcome.Accepted);
+    }
+
+    [Fact]
+    public async Task ARealEvaluation_BilledE101_ARuleOnE101_FiresOnTheBilledCode_AndRejects_D117()
+    {
+        var result = Evaluator().Evaluate(Request(BilledAndAssigned("E101")), Loaded(ExpenseRejectRule("E101")));
+        var finding = result.Findings.Should().ContainSingle().Subject;
+        finding.ReadFields.Should().Contain(new FieldRef(0, BillingFieldNames.BilledExpenseCode)).And.NotContain(new FieldRef(0, BillingFieldNames.ExpenseCode));
+
+        var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SubmissionOutcome.Rejected);
+    }
+
+    [Fact]
+    public async Task ARealEvaluation_ABilledE109ReadReliably_WithReject_StillRejects_TheHoldDoesNotFire_F1a()
+    {
+        var result = Evaluator().Evaluate(Request(BilledAndAssigned("E109")), Loaded(ExpenseRejectRule("E109")));
+        result.Findings.Should().ContainSingle().Which.ReasonCode.Should().Be(BillingReasonCodes.ExpenseCodeNotReimbursable);
+
+        var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SubmissionOutcome.Rejected);
+    }
+
+    [Fact]
+    public async Task ARealEvaluation_NoBilledCode_TheFallbackOnTheAiAssignedE109_Holds_EvenAtHighCodingConfidence_F1a()
+    {
+        // The fallback finding reads the AI's E109 (0.92 clears the 0.90 threshold), but that is the model's self-report, not a D-47
+        // combined score: hold, never reject.
+        var result = Evaluator().Evaluate(Request(BilledAndAssigned(null)), Loaded(ExpenseRejectRule("E109")));
         result.Findings.Should().ContainSingle().Which.ReasonCode.Should().Be(BillingReasonCodes.ExpenseCodeNotReimbursable);
 
         var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
