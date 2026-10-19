@@ -11,13 +11,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. 50/79 complete. 049 in progress. On the branch: the map; parts A, B and C; spend D-102/D-104 (ontology PASS 295aa332a); the D-125 system policy (ontology PASS 183c2cf47); credit totals D-127/D-128/D-129 (c88d1ccbc, 25205467f). Running from base afaf52f0e: impl049c2 (sonnet; D-130 (1) rules run on uncoded, D-130 (3) sprk_createdbyperson, D-130 (a) submission stays Processing in the transaction with the terminal status exposed for part D, D-130 (b) reason code on AcceptedUncoded, trim the approval record number) and impl130spend (sonnet; D-130 (2) counted spend and pending sum the approved total, else billed, on both paths; ontology-r1 reviews) |
-| **Step** | HEAD a70eedc24 (local; origin is 33723dbdc; ask the owner before any push). Last full verify at 9c0372171 (A+B+C+totals): build 0/0; broad filter 7696/0; ArchTests 1209/0. ADR-010 ceiling is now 168 (A +1, C +1) |
+| **Task** | Parallel mode. 50/79 complete. 049 in progress. On the branch: the map; parts A, B, C and C2 (6cf404162); spend D-102/D-104 and D-130 approved-total spend (1549ff165) with its review round (ae5197e25); the D-125 system policy; credit totals D-127/D-128/D-129. Running from base ae5197e25: impl049sub (sonnet; D-131 Submitted By: invoice sprk_submittedby = the submission's sprk_submitter contact; a missing systemuser no longer refuses, only "neither recorded" refuses) and impl049d (opus; part D after-commit steps: Signals, the D-122 rejection DR after the Signals, system-policy Signals, indexing, notify, terminal status last, resume; D-125 (a)/(b)) |
+| **Step** | HEAD ae5197e25 (local; origin is 33723dbdc; ask the owner before any push). Last full verify at ae5197e25: build 0/0; broad filter (+DerivedBaseColumns) 7827/0; ArchTests 1214/0. ADR-010 ceiling is 168 |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | (1) On C2 and spend: cherry-pick, run the BROAD filter (incl. Lifecycle, Totals, Dataverse, RuleReview, Submission, Adjustment, Correction), rewrite note hashes, send the spend range to ontology-r1. (2) Brief part D (opus) from SubmissionPersistResult (Status Committed/Resumed/ReEvaluate/Retry/Refused/SubmissionMissing, InvoiceId, LineIds, ApprovalId, Totals) and C2's terminal fields. Scope: Signals via the mapper, supersede on a changed fingerprint (episode n+1); a Rejected submission's primary comes from 073's deciding findings; held presentation; the D-122 rejection DR resolving EVERY open Signal on the invoice under the IIdempotencyService lock, with a concurrent test; system-policy Signals read by sprk_policycode (enabled + Active, else none + Warning); the terminal status as the LAST write (D-130 (a)); indexing; notify once; resume. Plus D-125 (a) InvoiceNumberMismatch precedence among flag-only reasons, with a MapAll test, and (b) code-shaped AI codes only, with NotApplicableToLineType wording. (3) Part E: handler; step-0 re-read (Accepted/Rejected → no-op; linked invoice on Processing → resume after-steps); the download with its container check, copied from InvoiceExtractionJobHandler; DI for processor, persister and handler; ArchTests; publish delta vs fresh master; CVE; one Opus adversarial review; ontology-r1 review. (4) Queued: the 077 F1-b note |
+| **Next Action** | (1) When impl049sub reports: pick, run the broad filter, then add D-131 to the owner-actions list (export sprk_invoice.sprk_submittedby, created live on dev 2026-10-19, into SpaarkeMaster). (2) When impl049d reports: pick (the notes file 049-submission-processing-job.md may conflict with impl049sub; keep both sections), run the broad filter, send the range to ontology-r1 (they review part D and D-125 (a)/(b)). (3) Part E: handler; step-0 re-read (Accepted/Rejected → no-op; linked invoice on Processing → resume after-steps); lock invoice-submission:{id:N}; the download with its container check, copied from InvoiceExtractionJobHandler; part D's preflight before the persister; DI for processor, persister, after-steps and handler; ArchTests; publish delta vs fresh master; CVE; one Opus adversarial review; mark 049 done. (4) Queued: the 077 F1-b note |
 
 ### Ranges out for review
-- None open. ontology-r1 PASS: 072 (3ce07e0e3), 049 D-104 (295aa332a), D-125 (183c2cf47). Send them part D with D-125 (a)/(b).
+- ontology-r1: D-130 review round 0a13eab57..ae5197e25 sent 2026-10-19, awaiting their review. Earlier PASS: 072 (3ce07e0e3), 049 D-104 (295aa332a), D-125 (183c2cf47). Part D goes to them next.
 
 ### Owner decisions this session
 D-111 to D-120 are in the decisions log.
@@ -26,6 +26,7 @@ D-111 to D-120 are in the decisions log.
 - D-119: a bare "$" is USD.
 - D-121: credit amounts may be negative (lower sprk_amount min). D-122: an automatic rejection resolves every open Signal on the invoice. D-123: D-91 / coding findings become Signals under a system billing policy (needs ontology-r1). D-124: new sprk_invoice tracking-number column.
 - D-129: credit memo arithmetic. D-130: rules on uncoded; spend = approved total; submitter stamped; Processing until after-steps.
+- D-131 (being recorded by impl049sub): the invoice records the external submitter contact in the new sprk_submittedby (Submitted By, contact lookup, created live on dev); a submitter with no linked systemuser still gets an invoice.
 - D-125: SubmissionIntegrity rule type for the system policy; an admin may disable it. D-126: a read but uncoded submission still creates its invoice, held. D-127: negative invoice totals (credit memos). D-128: a reviewer may disallow a credit line.
 - D-120: core-record delete. Finance history blocks the delete. A rate card scoped 1:1 to the record is deleted with it; a shared card is kept. Budgets are kept, unlinked, and never block. uac-r2 adopted it.
 
@@ -71,7 +72,7 @@ D-111 to D-120 are in the decisions log.
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 071/072 (awaiting ontology-r1 re-check); 049 running (two agents) |
+| **Task ID** | 049 (parts D and C3 running; part E next) |
 
 ## Next Action
 
