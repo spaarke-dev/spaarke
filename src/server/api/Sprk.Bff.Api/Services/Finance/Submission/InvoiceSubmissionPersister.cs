@@ -316,7 +316,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             }
         }
 
-        var findingsJson = BuildFindingsJson(outcome, invoiceId);
+        var findingsJson = BuildFindingsJson(outcome, invoiceId, out var planRefusals);
+        if (planRefusals.Count > 0)
+        {
+            // 049 F1-3: the writer would refuse these on every attempt; they are left out of the plan and recorded (codes only, ADR-015).
+            _logger.LogWarning("Invoice submission {SubmissionId}: {Count} Signal plan entries the writer would refuse are left out of the plan ({Refusals})",
+                submissionId, planRefusals.Count, string.Join(", ", planRefusals.Select(r => r.PolicyCode + ":" + r.Code)));
+        }
+
         if (findingsJson.Length > FindingsJsonMaxLength)
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: findings JSON is {Length} characters, over the column; nothing persisted",
@@ -810,7 +817,18 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// <para><b>D-112.</b> In a (policy, subject) group that holds a withheld finding no finding carries values read or fact values, so the
     /// stored copy can never show a prior's detail the Signal hides.</para>
     /// </summary>
-    internal static string BuildFindingsJson(SubmissionEvaluationOutcome outcome, Guid invoiceId)
+    internal static string BuildFindingsJson(SubmissionEvaluationOutcome outcome, Guid invoiceId) => BuildFindingsJson(outcome, invoiceId, out _);
+
+    /// <summary>The findings JSON member that records the plan entries the writer's preflight refused (049 F1-3): <c>[{ policyCode, subject:
+    /// { entity, id }, code }]</c>, no values. Present only when an entry was refused.</summary>
+    internal const string SignalPlanRefusalsMember = "signalPlanRefusals";
+
+    /// <summary>One plan entry <see cref="SignalWriter.PreflightRefusal"/> refused at persist (049 F1-3): it is not in the plan.</summary>
+    internal sealed record SignalPlanRefusal(string PolicyCode, string SubjectEntity, Guid SubjectId, string Code);
+
+    /// <inheritdoc cref="BuildFindingsJson(SubmissionEvaluationOutcome, Guid)"/>
+    /// <param name="planRefusals">The plan entries left out because the writer would refuse them (<see cref="SignalPlanJson(SubmissionEvaluationOutcome, Guid, out IReadOnlyList{SignalPlanRefusal})"/>).</param>
+    internal static string BuildFindingsJson(SubmissionEvaluationOutcome outcome, Guid invoiceId, out IReadOnlyList<SignalPlanRefusal> planRefusals)
     {
         var findings = outcome.Evaluation?.Findings ?? [];
         var decisions = (outcome.Decision?.Findings ?? []).ToDictionary(d => d.Index);
@@ -919,8 +937,18 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             ["codingFindings"] = coding,
             ["invoiceName"] = InvoiceNameFor(outcome),
             ["invoiceNumberReadConfidence"] = outcome.InvoiceNumber?.ReadConfidence,
-            ["signalPlan"] = SignalPlanJson(outcome, invoiceId),
+            ["signalPlan"] = SignalPlanJson(outcome, invoiceId, out planRefusals),
         };
+        if (planRefusals.Count > 0)
+        {
+            root[SignalPlanRefusalsMember] = new JsonArray(planRefusals.Select(r => (JsonNode)new JsonObject
+            {
+                ["policyCode"] = r.PolicyCode,
+                ["subject"] = new JsonObject { ["entity"] = r.SubjectEntity, ["id"] = r.SubjectId.ToString("D") },
+                ["code"] = r.Code,
+            }).ToArray());
+        }
+
         return root.ToJsonString(Json);
     }
 
@@ -933,9 +961,17 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// re-runs AI or the evaluation. The system findings are not in the plan: part D maps them from the pipeline and coding findings under
     /// the system policy it reads at run time (D-125).
     /// </summary>
-    internal static JsonArray SignalPlanJson(SubmissionEvaluationOutcome outcome, Guid invoiceId)
+    internal static JsonArray SignalPlanJson(SubmissionEvaluationOutcome outcome, Guid invoiceId) => SignalPlanJson(outcome, invoiceId, out _);
+
+    /// <inheritdoc cref="SignalPlanJson(SubmissionEvaluationOutcome, Guid)"/>
+    /// <remarks>049 F1-3: every entry is first checked by <see cref="SignalWriter.PreflightRefusal"/>, the writer's own I/O-free checks. An
+    /// entry it refuses (a sentence over 2,000 characters, a headline over 200, an unrenderable template, ...) would be refused on every
+    /// write attempt, so it is left out of the plan and returned in <paramref name="refusals"/>; the rest of the plan is kept.</remarks>
+    internal static JsonArray SignalPlanJson(SubmissionEvaluationOutcome outcome, Guid invoiceId, out IReadOnlyList<SignalPlanRefusal> refusals)
     {
         var plan = new JsonArray();
+        var refused = new List<SignalPlanRefusal>();
+        refusals = refused;
         if (outcome.Evaluation is not { } evaluation)
         {
             return plan;
@@ -945,6 +981,12 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         foreach (var mapping in mappings)
         {
             var request = mapping.Request;
+            if (SignalWriter.PreflightRefusal(request) is { } code)
+            {
+                refused.Add(new SignalPlanRefusal(request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, code));
+                continue;
+            }
+
             var facts = new JsonObject();
             foreach (var (name, value) in request.FactValues)
             {

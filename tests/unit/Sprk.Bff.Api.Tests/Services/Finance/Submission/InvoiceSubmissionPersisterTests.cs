@@ -671,6 +671,82 @@ public class InvoiceSubmissionPersisterTests
             .Should().OnlyContain(e => e.GetProperty("text").ValueKind == JsonValueKind.Null);
     }
 
+    // ── 049 F1-3: the writer's preflight at persist ──
+
+    /// <summary>An AutoRejected outcome whose plan has two entries: BILL-AGE (writable) and BILL-LONG, whose authored template renders to
+    /// 2,100 characters (over <c>sprk_sentence</c>), so the writer would refuse it on every attempt.</summary>
+    internal static async Task<SubmissionEvaluationOutcome> OutcomeWithAnOverLongPlanEntryAsync()
+    {
+        var harness = new ProcessorHarness { Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()] };
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20))];
+        var outcome = await harness.RunAsync();
+        var evaluation = outcome.Evaluation!;
+        var age = evaluation.Findings.Single();
+        var longRule = InvoiceSubmissionProcessorTests.InvoiceAgeReject() with
+        {
+            PolicyId = Id("policy:BILL-LONG"),
+            PolicyCode = "BILL-LONG",
+            PolicyVersionId = Id("version:BILL-LONG:1"),
+            MessageTemplate = new string('x', 2100),
+        };
+        var rules = evaluation.RulesByVersion.ToDictionary(kv => kv.Key, kv => kv.Value);
+        rules[longRule.PolicyVersionId] = longRule;
+        var longFinding = age with { PolicyId = longRule.PolicyId, PolicyCode = longRule.PolicyCode, PolicyVersionId = longRule.PolicyVersionId };
+        var decision = outcome.Decision!;
+        var ageDecision = decision.Findings.Single();
+        return outcome with
+        {
+            Evaluation = evaluation with { Findings = [age, longFinding], RulesByVersion = rules },
+            Decision = decision with { Findings = [ageDecision, ageDecision with { Index = 1, Finding = longFinding, Rejects = false }] },
+        };
+    }
+
+    [Fact(DisplayName = "049 F1-3: an entry the writer would refuse is left out of the plan and recorded by code; the rest is kept")]
+    public async Task SignalPlan_DropsOnlyTheRefusedEntry_AndRecordsIt()
+    {
+        var outcome = await OutcomeWithAnOverLongPlanEntryAsync();
+
+        using var json = JsonDocument.Parse(InvoiceSubmissionPersister.BuildFindingsJson(outcome, InvoiceId));
+
+        var plan = json.RootElement.GetProperty("signalPlan");
+        plan.EnumerateArray().Select(e => e.GetProperty("policyCode").GetString()).Should().Equal("BILL-AGE");
+        var refusal = json.RootElement.GetProperty(InvoiceSubmissionPersister.SignalPlanRefusalsMember).EnumerateArray().Should().ContainSingle().Subject;
+        refusal.GetProperty("policyCode").GetString().Should().Be("BILL-LONG");
+        refusal.GetProperty("code").GetString().Should().Be(SignalWriteRefusal.SentenceTooLong);
+        refusal.GetProperty("subject").GetProperty("entity").GetString().Should().Be("sprk_billingevent");
+        refusal.GetProperty("subject").GetProperty("id").GetString().Should().Be(InvoiceSubmissionPersister.LineIdFor(Submission, 0).ToString("D"));
+        refusal.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["policyCode", "subject", "code"], "codes only, no values");
+        json.RootElement.GetProperty("findings").GetArrayLength().Should().Be(2, "the finding itself stays in the findings");
+    }
+
+    [Fact(DisplayName = "049 F1-3: a plan the writer accepts records no refusals member (must-not-fire)")]
+    public async Task SignalPlan_NothingRefused_NoRefusalsMember()
+    {
+        var harness = new ProcessorHarness { Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()] };
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20))];
+        var outcome = await harness.RunAsync();
+
+        using var json = JsonDocument.Parse(InvoiceSubmissionPersister.BuildFindingsJson(outcome, InvoiceId));
+
+        json.RootElement.TryGetProperty(InvoiceSubmissionPersister.SignalPlanRefusalsMember, out _).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "049 F1-3: persisting a plan with a refused entry commits, and warns once with codes only")]
+    public async Task Persist_WithARefusedPlanEntry_Commits_AndWarnsOnce()
+    {
+        var outcome = await OutcomeWithAnOverLongPlanEntryAsync();
+        var logger = new CapturingLogger();
+        var store = new Store { Logger = logger };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var warning = logger.Entries.Where(e => e.Level == LogLevel.Warning).Should().ContainSingle().Subject;
+        warning.Message.Should().Contain("BILL-LONG:" + SignalWriteRefusal.SentenceTooLong).And.NotContain("xxxx");
+        using var stored = JsonDocument.Parse(Target(store.Transactions.Single()[^1]).GetAttributeValue<string>("sprk_findingsjson"));
+        stored.RootElement.GetProperty(InvoiceSubmissionPersister.SignalPlanRefusalsMember).GetArrayLength().Should().Be(1);
+    }
+
     // ── harness ──
 
     private static Entity Target(OrganizationRequest request) => request switch
