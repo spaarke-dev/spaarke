@@ -32,11 +32,28 @@ internal static class BillingRuleDraftTranslator
     // The closed list sent to the model
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>The eleven billing types in catalogue order, each with its description and its parameter schema (without the <c>type</c> member).</summary>
+    /// <summary>
+    /// The eleven billing types in catalogue order, each with its description and its parameter schema (without the <c>type</c> member).
+    /// The description ends with the consequences the type may carry (<see cref="AllowedConsequencesSentence"/>), so the drafting prompt
+    /// never suggests one the catalogue refuses (073 review F1-b).
+    /// </summary>
     internal static IReadOnlyList<BillingRuleTypeOption> RuleTypeOptions() =>
         BillingRuleCatalogue.Types
-            .Select(t => new BillingRuleTypeOption(t.ToString(), Description(t), ParameterSchemaJson(t)))
+            .Select(t => new BillingRuleTypeOption(t.ToString(), Description(t) + " " + AllowedConsequencesSentence(t), ParameterSchemaJson(t)))
             .ToList();
+
+    /// <summary>
+    /// The sentence the drafting prompt reads for a type's consequences, from <see cref="BillingRuleCatalogue.AllowedConsequences"/>, plus the
+    /// Duplicate narrowing (Reject only with <c>firmInvoiceNumber</c> among the match fields; 073 review, owner question 3).
+    /// </summary>
+    internal static string AllowedConsequencesSentence(RuleType ruleType)
+    {
+        var allowed = string.Join(", ", BillingRuleCatalogue.AllowedConsequences(ruleType).OrderBy(c => (int)c).Select(c => c.ToString()));
+        var sentence = $"Allowed consequences: {allowed}.";
+        return ruleType == RuleType.Duplicate
+            ? sentence + " Reject only when matchFields include firmInvoiceNumber; a rule that compares lines only uses Flag."
+            : sentence;
+    }
 
     /// <summary>The embedded body schema of a type with the members the application adds itself (<c>type</c>) and the long prose removed.</summary>
     internal static string ParameterSchemaJson(RuleType ruleType)

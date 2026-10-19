@@ -118,6 +118,28 @@ public class BillingRuleDraftActionContractTests
         sawNotConverted.Should().BeTrue("the examples show that leaving a clause out of the proposals is the right answer when no type fits");
     }
 
+    [Fact]
+    public void ThePrompt_NeverSuggestsAConsequenceTheCatalogueDisallows_ForTheType_F1b()
+    {
+        // ebilling-r1 073 review F1-b: a consequence the type may not carry is refused at save, so the prompt must not teach it. The
+        // examples use only allowed consequences, and the constraints tell the model to read them from each type's description.
+        var action = LoadAction();
+        var constraints = string.Join('\n', action.GetProperty("instruction").GetProperty("constraints").EnumerateArray().Select(c => c.GetString()));
+        constraints.Should().Contain("Allowed consequences", "the model reads each type's allowed consequences from its description")
+            .And.Contain("does not allow, use Flag");
+
+        foreach (var example in action.GetProperty("examples").EnumerateArray())
+        {
+            foreach (var proposal in InvoiceAiOutputParser.ParseDraftRules(example.GetProperty("output")).Proposals)
+            {
+                var type = Enum.Parse<RuleType>(proposal.RuleType);
+                var consequence = Enum.Parse<Sprk.Bff.Api.Services.Finance.BillingConsequence>(proposal.Consequence);
+                BillingRuleCatalogue.AllowedConsequences(type).Should().Contain(
+                    consequence, $"the example proposes {proposal.Consequence} for {proposal.RuleType}");
+            }
+        }
+    }
+
     // ── The output schema sidecar ───────────────────────────────────────────────────────────────
 
     [Fact]

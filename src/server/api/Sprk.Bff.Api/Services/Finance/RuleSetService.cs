@@ -841,7 +841,7 @@ public class RuleSetService
 
         // 1. Validate everything before the first write. A refusal is listed, never dropped.
         var listed = new List<NotConvertedClause>(notConverted);
-        var valid = new List<(DraftedRule Rule, int RuleType, int Consequence)>();
+        var valid = new List<(DraftedRule Rule, int RuleType, int Consequence, string? Note)>();
         foreach (var (rule, index) in rules.Select((r, i) => (r, i)))
         {
             if (index >= MaxDraftedRules)
@@ -851,14 +851,14 @@ public class RuleSetService
                 continue;
             }
 
-            var problem = CheckDraft(rule, out var ruleType, out var consequence);
+            var problem = CheckDraft(rule, out var ruleType, out var consequence, out var note);
             if (problem is not null)
             {
                 listed.Add(new NotConvertedClause(rule.ClauseQuote, rule.ClauseLocation, problem));
                 continue;
             }
 
-            valid.Add((rule, ruleType, consequence));
+            valid.Add((rule, ruleType, consequence, note));
         }
 
         try
@@ -881,7 +881,7 @@ public class RuleSetService
                 }
 
                 var next = existing.NextIndex;
-                foreach (var (rule, ruleType, consequence) in valid)
+                foreach (var (rule, ruleType, consequence, note) in valid)
                 {
                     ct.ThrowIfCancellationRequested();
                     if (!existing.Fingerprints.Add(Fingerprint(ruleType, rule.RuleBody, rule.ClauseQuote)))
@@ -901,7 +901,7 @@ public class RuleSetService
                     }
 
                     var code = $"{DraftCodePrefix}{ruleSetId:N}-{next++.ToString("D3", CultureInfo.InvariantCulture)}";
-                    await CreateDraftRuleAsync(ruleSetId, code, rule, ruleType, consequence, owner, ct);
+                    await CreateDraftRuleAsync(ruleSetId, code, rule, ruleType, consequence, note, owner, ct);
                     stored++;
                 }
             }
@@ -928,11 +928,18 @@ public class RuleSetService
         }
     }
 
-    /// <summary>The one validation of a drafted rule. Returns a plain-sentence reason, or null when it is valid.</summary>
-    private string? CheckDraft(DraftedRule rule, out int ruleTypeValue, out int consequenceValue)
+    /// <summary>
+    /// The one validation of a drafted rule. Returns a plain-sentence reason, or null when it is valid. When the ONLY problem is that the
+    /// rule's type may not carry the drafted consequence (Reject on a TimeIncrement rule, say), the rule is kept as a Flag instead of being
+    /// lost (073 review F1-b: there is no route to create a rule by hand): <paramref name="consequenceValue"/> is Flag and
+    /// <paramref name="loweredNote"/> says what the model drafted and why it was lowered. Any other problem still lists the clause as not
+    /// converted.
+    /// </summary>
+    private string? CheckDraft(DraftedRule rule, out int ruleTypeValue, out int consequenceValue, out string? loweredNote)
     {
         ruleTypeValue = 0;
         consequenceValue = 0;
+        loweredNote = null;
         if (!TryParseConsequence(rule.Consequence, out var consequence))
         {
             return "Not stored: the consequence was not Reject, Flag or SuggestAdjustment.";
@@ -944,10 +951,25 @@ public class RuleSetService
             return $"Not stored: the clause quote is missing or longer than {MaxClauseQuoteChars} characters.";
         }
 
-        var errors = ValidateRule(
+        List<RuleSetError> Validate(int consequenceToCheck) => ValidateRule(
             new PolicyRow(Guid.Empty, "draft", rule.ShortHeadline, null),
             rule.RuleType,
-            new VersionRow(Guid.Empty, 1, null, rule.RuleBody, rule.MessageTemplate, rule.ShortHeadline, consequenceValue, null, null, null, null, null));
+            new VersionRow(Guid.Empty, 1, null, rule.RuleBody, rule.MessageTemplate, rule.ShortHeadline, consequenceToCheck, null, null, null, null, null));
+
+        var errors = Validate(consequenceValue);
+        if (errors.Count > 0
+            && consequenceValue != (int)BillingConsequence.Flag
+            && errors.All(e => e.Reason == OntologyWriterFailureReason.ConsequenceNotAllowed))
+        {
+            var asFlag = Validate((int)BillingConsequence.Flag);
+            if (asFlag.Count == 0)
+            {
+                loweredNote = LoweredConsequenceNote(consequence, errors[0].Message);
+                consequenceValue = (int)BillingConsequence.Flag;
+                errors = asFlag;
+            }
+        }
+
         if (errors.Count > 0)
         {
             return "Not stored: the drafted rule was not valid (" + string.Join("; ", errors.Select(e => $"{e.Field}: {e.Message}")) + ").";
@@ -958,6 +980,19 @@ public class RuleSetService
         ruleTypeValue = (int)ruleType;
         return null;
     }
+
+    /// <summary>
+    /// The <c>sprk_proposedaction</c> of a drafted rule whose consequence was lowered to Flag (073 review F1-b): the usual code first, so a
+    /// reader that matches the code still can, then what the model drafted and the refusal sentence. Capped at the column's 400 characters.
+    /// </summary>
+    internal static string LoweredConsequenceNote(BillingConsequence drafted, string refusal)
+    {
+        var note = $"{ProposedActionText((int)BillingConsequence.Flag)}: drafted as {drafted}, lowered to Flag. {refusal}";
+        return note.Length <= MaxProposedActionChars ? note : note[..(MaxProposedActionChars - 3)] + "...";
+    }
+
+    /// <summary>The length of <c>sprk_policyversion.sprk_proposedaction</c> (text 400, task 019).</summary>
+    private const int MaxProposedActionChars = 400;
 
     private sealed record DraftedFingerprints(HashSet<string> Fingerprints, int NextIndex, HashSet<string> CoveredClauses);
 
@@ -1019,7 +1054,7 @@ public class RuleSetService
     }
 
     private async Task CreateDraftRuleAsync(
-        Guid ruleSetId, string code, DraftedRule rule, int ruleType, int consequence, RecordOwnerResolution owner, CancellationToken ct)
+        Guid ruleSetId, string code, DraftedRule rule, int ruleType, int consequence, string? note, RecordOwnerResolution owner, CancellationToken ct)
     {
         var policy = new Entity(PolicyEntity)
         {
@@ -1046,7 +1081,8 @@ public class RuleSetService
                 ["sprk_messagetemplate"] = rule.MessageTemplate,
                 ["sprk_shortheadline"] = rule.ShortHeadline,
                 ["sprk_consequence"] = new OptionSetValue(consequence),
-                ["sprk_proposedaction"] = ProposedActionText(consequence),
+                // A consequence lowered to Flag at drafting carries its note here (073 review F1-b); an edit rewrites the column.
+                ["sprk_proposedaction"] = note ?? ProposedActionText(consequence),
                 ["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Proposed),
                 ["sprk_clausereference"] = rule.ClauseQuote,
                 // Required column; provisional until publish sets the effective date. No reader treats a non-current version as in force.

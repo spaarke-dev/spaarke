@@ -60,6 +60,22 @@ public sealed class BillingRuleDraftTranslatorTests
         }
     }
 
+    [Fact]
+    public void RuleTypeOptions_EachDescriptionNamesExactlyTheConsequencesTheCatalogueAllows_F1b()
+    {
+        // 073 review F1-b: the drafting prompt reads the allowed consequences from the description, so it never suggests one the
+        // catalogue refuses (Reject on TimeIncrement, say).
+        foreach (var option in BillingRuleDraftTranslator.RuleTypeOptions())
+        {
+            var type = Enum.Parse<RuleType>(option.RuleType);
+            var allowed = string.Join(", ", BillingRuleCatalogue.AllowedConsequences(type).OrderBy(c => (int)c));
+            option.Description.Should().Contain($"Allowed consequences: {allowed}.", option.RuleType);
+        }
+
+        BillingRuleDraftTranslator.RuleTypeOptions().Single(o => o.RuleType == "TimeIncrement").Description.Should().NotContain("Reject");
+        BillingRuleDraftTranslator.RuleTypeOptions().Single(o => o.RuleType == "Duplicate").Description.Should().Contain("firmInvoiceNumber");
+    }
+
     [Theory]
     [MemberData(nameof(ValidBodies))]
     public void ParameterSchema_LeavesOutTheTypeMemberTheApplicationAdds_AndTheProse(string type, string _)

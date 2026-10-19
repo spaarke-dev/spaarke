@@ -242,23 +242,82 @@ public sealed class RuleSetServiceConsequenceTests
         return new DraftedRule(type.ToString(), Domain.Signals.Billing.BillingEvaluationKit.Bodies[type], template, headline, consequence, quote, "Section 1");
     }
 
+    // 073 review F1-b: there is no route to create a rule by hand, so a drafted rule whose ONLY problem is a consequence its type may not
+    // carry is kept as a Proposed Flag rule with a note, not dropped into the not-converted list.
+
     [Theory]
-    [InlineData(RuleType.AiObservation)]
-    [InlineData(RuleType.TimeIncrement)]
-    [InlineData(RuleType.ApprovedTimekeeper)]
-    public async Task AddDrafts_AModelProposalToRejectOnATypeThatMayNotReject_IsListedAsNotConverted_NeverStored(RuleType type)
+    [InlineData(RuleType.ApprovedTimekeeper, "Reject", "D-89")]
+    [InlineData(RuleType.AiObservation, "Reject", "I-5")]
+    [InlineData(RuleType.TimeIncrement, "Reject", "FR-26")]
+    [InlineData(RuleType.TimeIncrement, "SuggestAdjustment", "design.md 6.1")]
+    public async Task AddDrafts_AProposalWhoseOnlyProblemIsTheConsequence_IsStoredAsAProposedFlagRule_WithANote_F1b(
+        RuleType type, string drafted, string citation)
     {
         var h = new Harness();
         var id = RuleSetWithSource(h);
         var kept = Drafted(RuleType.InvoiceAge, "Reject", "Invoices older than 90 days will be rejected.");
-        var refused = Drafted(type, "Reject", "Reject anything the model dislikes.");
+        var lowered = Drafted(type, drafted, "Invoices that break this will be returned.");
 
-        var outcome = await h.Service().AddDraftsAsync(id, new[] { kept, refused }, Array.Empty<NotConvertedClause>(), CallerOid, CancellationToken.None);
+        var outcome = await h.Service().AddDraftsAsync(id, new[] { kept, lowered }, Array.Empty<NotConvertedClause>(), CallerOid, CancellationToken.None);
+
+        outcome.Value!.Stored.Should().Be(2, "the clause is not lost");
+        outcome.Value.NotConverted.Should().BeEmpty();
+        var row = h.Rows["sprk_policyversion"].Single(v => v.GetAttributeValue<string>("sprk_clausereference") == "Invoices that break this will be returned.");
+        row.GetAttributeValue<OptionSetValue>("sprk_consequence").Value.Should().Be(Flag);
+        row.GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Proposed);
+        var note = row.GetAttributeValue<string>("sprk_proposedaction");
+        note.Should().StartWith("billing-flag").And.Contain($"drafted as {drafted}").And.Contain("lowered to Flag").And.Contain(citation);
+        note.Length.Should().BeLessThanOrEqualTo(400, "sprk_proposedaction is text 400");
+
+        // The untouched Reject rule keeps its code, and the lowered rule passes the review's own validation (it can be accepted).
+        h.Rows["sprk_policyversion"].Single(v => v.GetAttributeValue<string>("sprk_clausereference") == "Invoices older than 90 days will be rejected.")
+            .GetAttributeValue<string>("sprk_proposedaction").Should().Be("billing-reject");
+        var detail = await h.Service().GetAsync(id, CancellationToken.None);
+        detail.Value!.Proposals.Should().OnlyContain(p => p.ValidationErrors.Count == 0);
+    }
+
+    [Fact]
+    public async Task AddDrafts_ALineLevelDuplicateDraftedAsReject_IsLoweredToFlag_OwnerQuestion3()
+    {
+        var h = new Harness();
+        var id = RuleSetWithSource(h);
+        var (headline, template) = BillingRuleDraftTranslator.Wording(RuleType.Duplicate);
+        var lines = new DraftedRule(
+            nameof(RuleType.Duplicate), """{"type":"Duplicate","matchFields":["timekeeper","lineDate","hours"]}""", template, headline,
+            "Reject", "Duplicate entries will be rejected.", "Section 2");
+
+        var outcome = await h.Service().AddDraftsAsync(id, new[] { lines }, Array.Empty<NotConvertedClause>(), CallerOid, CancellationToken.None);
 
         outcome.Value!.Stored.Should().Be(1);
-        h.Rows["sprk_policyversion"].Should().ContainSingle().Which.GetAttributeValue<OptionSetValue>("sprk_consequence").Value.Should().Be(Reject);
-        var listed = outcome.Value.NotConverted.Should().ContainSingle().Subject;
-        listed.Text.Should().Be("Reject anything the model dislikes.");
-        listed.Reason.Should().StartWith("Not stored: the drafted rule was not valid").And.Contain("consequence");
+        var row = h.Rows["sprk_policyversion"].Should().ContainSingle().Subject;
+        row.GetAttributeValue<OptionSetValue>("sprk_consequence").Value.Should().Be(Flag);
+        row.GetAttributeValue<string>("sprk_proposedaction").Should().Contain("drafted as Reject").And.Contain("firmInvoiceNumber");
+    }
+
+    [Fact]
+    public async Task AddDrafts_AProposalWithAnInvalidBody_IsStillNotConverted_EvenWhenItsConsequenceIsAlsoDisallowed()
+    {
+        // Lowering applies only when the consequence is the ONLY problem; an invalid body is a real refusal (body-first precedence).
+        var h = new Harness();
+        var id = RuleSetWithSource(h);
+        var (headline, template) = BillingRuleDraftTranslator.Wording(RuleType.TimeIncrement);
+        var broken = new DraftedRule(
+            nameof(RuleType.TimeIncrement), """{"type":"TimeIncrement","incrementHours":"a tenth"}""", template, headline, "Reject",
+            "Time must be billed in tenths.", "Section 4");
+
+        var outcome = await h.Service().AddDraftsAsync(id, new[] { broken }, Array.Empty<NotConvertedClause>(), CallerOid, CancellationToken.None);
+
+        outcome.Value!.Stored.Should().Be(0);
+        h.Rows.GetValueOrDefault("sprk_policyversion").Should().BeNullOrEmpty();
+        outcome.Value.NotConverted.Should().ContainSingle().Which.Reason.Should().StartWith("Not stored: the drafted rule was not valid").And.Contain("ruleBody");
+    }
+
+    [Fact]
+    public void TheLoweredNote_IsCappedAtTheColumnLength()
+    {
+        var note = RuleSetService.LoweredConsequenceNote(BillingConsequence.Reject, new string('x', 1_000));
+
+        note.Should().StartWith("billing-flag: drafted as Reject, lowered to Flag.").And.EndWith("...");
+        note.Length.Should().Be(400);
     }
 }

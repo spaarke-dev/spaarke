@@ -20,7 +20,7 @@
       "parameters holds only the parameters of the chosen type, taken from its parameterSchema. Fill the parameters the clause states (a number of days, an hours increment, a percentage, a list of codes) and set every other parameter to null. Never guess a number the clause does not state: when the clause needs a value it does not give, put the clause in notConverted with that reason. All parameters are null for a type that has none.",
       "Convert a number only in the unit the parameter uses (hours as a decimal, percent as 0 to 100, days as a whole number). 'Quarter hour' is 0.25 hours; 'tenth of an hour' is 0.1.",
       "Codes (task, activity or expense codes) are copied exactly as written in the text, without descriptions. If a clause names a code only by description and gives no code, put it in notConverted.",
-      "consequence is Reject when the text says the invoice or line will be returned, rejected or not paid at all; Flag when the text only asks for review or says the line may be questioned; SuggestAdjustment when the text says the amount will be reduced, written off or adjusted. When the text states no consequence, use Flag.",
+      "consequence is Reject when the text says the invoice or line will be returned, rejected or not paid at all; Flag when the text only asks for review or says the line may be questioned; SuggestAdjustment when the text says the amount will be reduced, written off or adjusted. When the text states no consequence, use Flag. Each entry of ruleTypes ends its description with 'Allowed consequences: ...': use only a consequence listed there for the chosen type (and follow any condition stated with it). When the text implies a consequence the type does not allow, use Flag; never change the type to fit the consequence.",
       "clauseQuote is the clause copied word for word from documentText, long enough to be understood alone and no longer than about 600 characters. Never paraphrase it, never join separated sentences, never add words. clauseLocation is the section number, heading or page the clause appears under as the text shows it (for example 'Section 4.2' or 'Page 3, Expenses'), or null when the text shows no location.",
       "One proposal per rule. When one clause states several separate rules (for example two different caps), return one proposal for each, with the same clauseQuote. Do not return the same rule twice when the text repeats it.",
       "notConverted lists clauses that state a billing requirement but cannot become a proposal: text is the clause copied word for word (no longer than about 600 characters), location is as for clauseLocation, and reason is one plain sentence for an administrator saying why (no matching rule type, a value the text does not give, or an ambiguous clause). Do not list general statements of intent, headings or contact details.",
@@ -56,7 +56,7 @@
   },
   "examples": [
     {
-      "input": "{\"documentText\":\"4.2 Time entries shall be recorded in increments of one tenth (0.1) of an hour. Invoices that bill in other increments will be returned for correction.\\n7.1 Firms shall not bill for secretarial overtime. Such charges will be written off.\\n9.3 Firms should staff matters sensibly and use the lowest cost timekeeper who can do the work competently.\",\"ruleTypes\":[{\"ruleType\":\"TimeIncrement\",\"description\":\"Each line's hours are a multiple of a fixed increment.\",\"parameterSchema\":{\"type\":\"object\",\"properties\":{\"incrementHours\":{\"type\":\"number\"}},\"required\":[\"incrementHours\"]}},{\"ruleType\":\"DailyHoursCap\",\"description\":\"A timekeeper bills at most a number of hours per day.\",\"parameterSchema\":{\"type\":\"object\",\"properties\":{\"maxHoursPerDay\":{\"type\":\"number\"}},\"required\":[\"maxHoursPerDay\"]}}]}",
+      "input": "{\"documentText\":\"4.2 Time entries shall be recorded in increments of one tenth (0.1) of an hour. Invoices that bill in other increments will be returned for correction.\\n7.1 Firms shall not bill for secretarial overtime. Such charges will be written off.\\n9.3 Firms should staff matters sensibly and use the lowest cost timekeeper who can do the work competently.\",\"ruleTypes\":[{\"ruleType\":\"TimeIncrement\",\"description\":\"Each line's hours are a multiple of a fixed increment. Allowed consequences: Flag.\",\"parameterSchema\":{\"type\":\"object\",\"properties\":{\"incrementHours\":{\"type\":\"number\"}},\"required\":[\"incrementHours\"]}},{\"ruleType\":\"DailyHoursCap\",\"description\":\"A timekeeper bills at most a number of hours per day. Allowed consequences: Flag.\",\"parameterSchema\":{\"type\":\"object\",\"properties\":{\"maxHoursPerDay\":{\"type\":\"number\"}},\"required\":[\"maxHoursPerDay\"]}}]}",
       "output": {
         "proposals": [
           {
@@ -75,7 +75,7 @@
               "observation": null,
               "minConfidence": null
             },
-            "consequence": "Reject",
+            "consequence": "Flag",
             "clauseQuote": "Time entries shall be recorded in increments of one tenth (0.1) of an hour. Invoices that bill in other increments will be returned for correction.",
             "clauseLocation": "Section 4.2"
           }
