@@ -15,7 +15,7 @@ public enum BillingMessageSource
     WithheldDuplicate,
 
     /// <summary>The reason's own message (<see cref="BillingRuleCatalogue.ReasonTemplate"/>), whatever the version's template says:
-    /// a reason about the invoice's currency, not a breach of the rule.</summary>
+    /// a reason about the invoice's currency, or one whose date wording would be false (a Closed core record, a close date it lacks).</summary>
     ReasonTemplate,
 
     /// <summary>The type's default wording (<c>BillingRuleDraftTranslator.Wording</c>): the version's template is blank or names a

@@ -120,6 +120,84 @@ public class BillingFindingSignalMapperTests
             .Should().Be("The invoice currency is not USD.");
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("blank")]
+    [InlineData("default wording")]
+    public void AClosedCoreRecord_SaysTheRecordIsClosedToBilling_AndNamesNoDates_F1a(string? templates)
+    {
+        // Closed matter, opened 2026-01-01, closing 2026-12-31, line dated 2026-03-01: the line is INSIDE both dates. The version's
+        // template and the type's default wording say "outside the open date ... and close date ...", which is false here.
+        var rule = Version("CD-WINDOW", RuleType.CoreRecordWindow, template: templates switch
+        {
+            "blank" => " ",
+            "default wording" => BillingRuleDraftTranslator.Wording(RuleType.CoreRecordWindow).Template,
+            _ => "The line dated {{line.date}} is outside {{coreRecord.openDate}} to {{coreRecord.closeDate}}.",
+        }) with { Consequence = Reject };
+        var request = Request(Fee(0) with { Date = new DateOnly(2026, 3, 1) });
+        var loaded = Loaded(rule) with
+        {
+            CoreRecord = new BillingCoreRecordFacts
+            {
+                OpenDate = new DateOnly(2026, 1, 1), CloseDate = new DateOnly(2026, 12, 31), BillingStatus = CoreRecordBillingStatus.Closed,
+            },
+        };
+        var result = Evaluator().Evaluate(request, loaded);
+        result.Findings.Should().ContainSingle().Which.ReasonCode.Should().Be(BillingReasonCodes.CoreRecordClosedToBilling);
+
+        var mapping = MapAll(request, result).Should().ContainSingle().Subject;
+
+        mapping.MessageSource.Should().Be(BillingMessageSource.ReasonTemplate);
+        var sentence = SignalWriter.RenderSentence(mapping.Request.MessageTemplate, mapping.Request.FactValues);
+        sentence.Should().Be(BillingRuleCatalogue.ClosedToBillingTemplate);
+        sentence.Should().NotContain("2026", "the line is inside the dates; a date in the sentence would say the opposite").And.NotContain("outside");
+        mapping.Request.MessageTemplate.Should().NotContain("{{", "the reason's own message names no token");
+    }
+
+    [Fact]
+    public void AFinalCoreRecordWithNoCloseDate_SaysThereIsNoCloseDate_NotThatTheLineIsOutsideOne_F1a()
+    {
+        var rule = Version("CD-WINDOW", RuleType.CoreRecordWindow,
+            template: BillingRuleDraftTranslator.Wording(RuleType.CoreRecordWindow).Template) with { Consequence = Reject };
+        var request = Request(Fee(0));
+        var loaded = Loaded(rule) with
+        {
+            CoreRecord = new BillingCoreRecordFacts { OpenDate = new DateOnly(2026, 1, 1), BillingStatus = CoreRecordBillingStatus.Final },
+        };
+        var result = Evaluator().Evaluate(request, loaded);
+        result.Findings.Should().ContainSingle().Which.ReasonCode.Should().Be(BillingReasonCodes.CoreRecordClosed);
+
+        var mapping = MapAll(request, result).Should().ContainSingle().Subject;
+
+        mapping.MessageSource.Should().Be(BillingMessageSource.ReasonTemplate);
+        var sentence = SignalWriter.RenderSentence(mapping.Request.MessageTemplate, mapping.Request.FactValues);
+        sentence.Should().Be(BillingRuleCatalogue.NoCloseDateTemplate);
+        sentence.Should().Contain("no close date").And.NotContain("outside").And.NotContain("2026");
+    }
+
+    [Fact]
+    public void TheDateReasons_StillUseTheVersionsTemplate_F1a()
+    {
+        // Control: before_open / after_close really are about the dates, so they keep the version's template.
+        var rule = Version("CD-WINDOW", RuleType.CoreRecordWindow,
+            template: BillingRuleDraftTranslator.Wording(RuleType.CoreRecordWindow).Template) with { Consequence = Reject };
+        var request = Request(Fee(0) with { Date = new DateOnly(2026, 3, 2) });
+        var loaded = Loaded(rule) with
+        {
+            CoreRecord = new BillingCoreRecordFacts
+            {
+                OpenDate = new DateOnly(2026, 3, 10), CloseDate = new DateOnly(2026, 12, 31), BillingStatus = CoreRecordBillingStatus.Open,
+            },
+        };
+        var result = Evaluator().Evaluate(request, loaded);
+
+        var mapping = MapAll(request, result).Should().ContainSingle().Subject;
+
+        result.Findings.Should().ContainSingle().Which.ReasonCode.Should().Be(BillingReasonCodes.BeforeCoreRecordOpened);
+        mapping.MessageSource.Should().Be(BillingMessageSource.PolicyVersion);
+        SignalWriter.RenderSentence(mapping.Request.MessageTemplate, mapping.Request.FactValues).Should().Contain("2026-03-02").And.Contain("2026-03-10");
+    }
+
     [Fact]
     public void AFindingOnALineWithNoRow_IsRefused()
     {

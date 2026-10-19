@@ -121,6 +121,16 @@ public static class BillingRuleCatalogue
     /// type's default wording ("The required data {{missingField}} is missing.") would tell the firm a currency it read was missing.</summary>
     public const string CurrencyNotUsdTemplate = "The invoice currency is not USD.";
 
+    /// <summary>The message of CoreRecordWindow's <see cref="BillingReasonCodes.CoreRecordClosedToBilling"/> finding (D-116; 072 review
+    /// F1-a). The version's template and the type's default wording name the open and close dates ("outside the open date ... and
+    /// close date ..."), which is false for a Closed record whose dates the line is inside; this names no date.</summary>
+    public const string ClosedToBillingTemplate = "The matter, project or work assignment this line is billed to is closed to billing.";
+
+    /// <summary>The message of CoreRecordWindow's <see cref="BillingReasonCodes.CoreRecordClosed"/> finding (D-111, D-116; 072 review
+    /// F1-a): a Final record with no close date, or (billing status empty) an inactive one with none. There is no date the line is
+    /// outside of, so the date wording would be false; this names none.</summary>
+    public const string NoCloseDateTemplate = "This line cannot be checked against a close date: the record is closed or final but has no close date.";
+
     /// <summary>
     /// The reason's own message, used instead of the policy version's template and the type's default wording, or <c>null</c> when the
     /// reason has none. Names no token, so it always renders.
@@ -128,6 +138,8 @@ public static class BillingRuleCatalogue
     public static string? ReasonTemplate(string reasonCode) => reasonCode switch
     {
         BillingReasonCodes.CurrencyNotUsd => CurrencyNotUsdTemplate,
+        BillingReasonCodes.CoreRecordClosedToBilling => ClosedToBillingTemplate,
+        BillingReasonCodes.CoreRecordClosed => NoCloseDateTemplate,
         BillingEvaluationReasons.CurrencyMissing => RatesNotCheckedPrefix + "missing.",
         BillingEvaluationReasons.CurrencyUnreliable => RatesNotCheckedPrefix + "unclear.",
         BillingEvaluationReasons.CurrencyNotUsd => RatesNotCheckedPrefix + "not USD.",
