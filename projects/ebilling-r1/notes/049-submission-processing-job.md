@@ -600,7 +600,7 @@ Test-only follow-up to ontology-r1's review of `SignalWriter.CloseActedByAutomat
 - New: `Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandler.cs` (`IJobHandler`, `JobType` = `InvoiceSubmissionService.JobType`, payload `{ submissionId }`).
 - Changed:
   - `Infrastructure/DI/FinanceModule.cs`: scoped `IInvoiceSubmissionProcessor`, `IInvoiceSubmissionPersister`, `IInvoiceSubmissionAfterSteps` and the handler as `IJobHandler`. Unconditional (ADR-032); `NullInvoiceAi` keeps the AI-off case a data outcome.
-  - `IInvoiceSubmissionAfterSteps.cs` / `InvoiceSubmissionAfterSteps.cs`: only `ResumeAsync(Guid submissionId, string? correlationId, CancellationToken)` is added (interface plus a `NotImplementedException` stub). The real body is the D-122 change.
+  - `IInvoiceSubmissionAfterSteps.cs` / `InvoiceSubmissionAfterSteps.cs`: only `ResumeAsync(Guid submissionId, string? correlationId, CancellationToken)` was added (interface plus a `NotImplementedException` stub). Superseded: the real body is the after-steps core fix (13a, 5a04a41fb); the stub and the duplicate member were removed in 8b66c6dac.
   - `SubmissionReasonCodes.cs`: `DocumentUnavailable`, `DocumentStorageUnverified`, `ProcessingFailed`.
 - Tests: `InvoiceSubmissionProcessingJobHandlerTests` (strict doubles for the processor, persister, after-steps, lock and Dataverse), `InvoiceSubmissionProcessingFlowTests` (one in-memory Dataverse double, the real processor, persister and a spy), and a `Build()` / `LoadDocument` addition to the part B processor harness.
 
@@ -652,7 +652,7 @@ The handler writes only Processing, Failed and (RejectedUnreadable only) Rejecte
 - Criterion 2, superseded by D-101 (a read submission always gets its invoice; a Rejected SPA invoice is created Rejected; no approval): `RejectedSpa_InvoiceCreatedRejected_NoApproval`, `BlockedInternal_InvoiceInReview_SubmissionRejectedBlocked`. Only a pre-read failure has no invoice: `DocumentLevelReadFailure_IsRejected_NoInvoice`.
 - Criterion 3 (a fault commits nothing, never Accepted): `TransactionFault_CommitsNothing_NeverAccepted`.
 - Criterion 4 (redelivery of a completed job is a no-op): `RedeliveryOfACompletedJob_IsANoOp`.
-- Criterion 5 (redelivery after a Signal-write failure completes, never a second invoice): `RedeliveryAfterASignalWriteFailure_CompletesWithoutASecondInvoice`. It uses a test-only `ResumingAfterSteps` stand-in until D-122's real `ResumeAsync` merges.
+- Criterion 5 (redelivery after a Signal-write failure completes, never a second invoice): `RedeliveryAfterASignalWriteFailure_CompletesWithoutASecondInvoice`. It now goes through the real `ResumeAsync` (14a; the test-only stand-in is gone).
 - Serialisation (074 K1): `TwoConcurrentDeliveries_OneRuns_TheOtherFails`.
 - Reason codes: `ServiceFailed_RetriesThenFailed_NoInvoice`, `FlagOff_IsFailed_EbillingDisabled`, `NullAiFacade_IsFailed_AiInvoiceDisabled`, plus the unit theories.
 - I-5 (no AI output alone rejects): part B `AiObservationAlone_NeverRejects` and `NoAiOutputAloneRejects_EndToEnd`.
@@ -660,7 +660,7 @@ The handler writes only Processing, Failed and (RejectedUnreadable only) Rejecte
 
 **Open questions.**
 1. A persister `Resumed` result routes to `ResumeAsync`, not `RunAsync` (brief step 4): the terminal derived from this run's outcome could contradict the committed one.
-2. Until D-122 merges, `InvoiceSubmissionAfterSteps.ResumeAsync` throws `NotImplementedException`, so production resume does not work before then (the handler maps the exception to Failure; Failed on the final delivery without a link, stays Processing with one).
+2. Closed: `ResumeAsync` is implemented (13a). An exception from it still maps to Failure (Failed on the final delivery without a link; stays Processing with one).
 3. Should a dead-letter replay of a Failed-without-link submission be reprocessable? Today it is a no-op.
 4. Final delivery with an invoice link: stays Processing + Poisoned (so the replay can resume). Confirm.
 5. The flag check sits after the terminal rule (a finished submission is never overwritten).
