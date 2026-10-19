@@ -571,35 +571,25 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     // ── D-122: the resolved Signal set (notes 13c) ──
 
     /// <summary>The findings JSON member that freezes the set the automatic rejection resolves:
-    /// <c>{ "setReadAtUtc": "...Z", "signals": [ { "id": ..., "policyCode": ... } ], "recordPredatesSet"?: true }</c>.</summary>
+    /// <c>{ "setReadAtUtc": "...Z", "signals": [ { "id": ..., "policyCode": ... } ] }</c>.</summary>
     internal const string ResolvedSetMember = "resolvedSignalSet";
-
-    /// <summary>A Signal in the frozen set no longer exists, so the writer refuses the record (owner_refused); a retry cannot change it.</summary>
-    internal const string ResolvedSignalMissingCode = "ebilling.submission.resolved_signal_missing";
 
     /// <summary>One Signal the automatic rejection resolves: its id and its policy code (from its dedupe key).</summary>
     internal sealed record ResolvedSignal(Guid Id, string PolicyCode);
 
     /// <summary>
     /// The set the automatic rejection's record resolves (D-122), as stored: <paramref name="SetReadAtUtc"/> is the instant taken just
-    /// before the read (the close re-closes a Signal the SYSTEM closed at or after it). <paramref name="RecordPredatesSet"/>: a record
-    /// written before D-122 already exists and lists no Signal, so the set is empty (its hash is over the empty list).
+    /// before the read (the close re-closes a Signal the SYSTEM closed at or after it).
     /// </summary>
-    internal sealed record ResolvedSignalSet(DateTime SetReadAtUtc, IReadOnlyList<ResolvedSignal> Signals, bool RecordPredatesSet = false)
+    internal sealed record ResolvedSignalSet(DateTime SetReadAtUtc, IReadOnlyList<ResolvedSignal> Signals)
     {
         public JsonObject ToJson()
         {
-            var json = new JsonObject
+            return new JsonObject
             {
                 ["setReadAtUtc"] = SetReadAtUtc.ToString("O", CultureInfo.InvariantCulture),
                 ["signals"] = new JsonArray(Signals.Select(s => (JsonNode)new JsonObject { ["id"] = s.Id.ToString("D"), ["policyCode"] = s.PolicyCode }).ToArray()),
             };
-            if (RecordPredatesSet)
-            {
-                json["recordPredatesSet"] = true;
-            }
-
-            return json;
         }
 
         /// <exception cref="FormatException">A member is missing or unreadable (the findings are then unreadable: never re-read).</exception>
@@ -617,25 +607,29 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                         ? new ResolvedSignal(id, code)
                         : throw new FormatException("A stored resolved Signal has no id or policy code."))
                 .ToList();
-            return new ResolvedSignalSet(DateTime.SpecifyKind(readAt, DateTimeKind.Utc), signals, json["recordPredatesSet"]?.GetValue<bool>() == true);
+            return new ResolvedSignalSet(DateTime.SpecifyKind(readAt, DateTimeKind.Utc), signals);
         }
     }
 
     /// <summary>
     /// D-122: every OPEN Signal (Open or Acknowledged) on the invoice and each of its lines, read once, app-only. The lines are the
-    /// invoice's rows (the persister's resume query); the Signals are found by their subject lookups and grouped by dedupe key, the latest
-    /// episode per (policy, subject) deciding, as <see cref="LatestEpisodeAsync"/> does. Never the write results (a skipped or refreshed
-    /// write returns no id). The clock is read BEFORE the query, so a system close after the read is at or after it.
+    /// invoice's rows (the persister's resume query); the Signals are found by their subject lookups. EVERY Open or Acknowledged Signal of an
+    /// in-scope subject is listed, not the latest episode per (policy, subject): two open episodes of one (policy, subject) are both
+    /// resolved (K1, notes 13c). A row whose dedupe key does not parse, or names a subject outside the invoice and its lines, is skipped
+    /// (fails closed). Never the write results (a skipped or refreshed write returns no id). The clock is read BEFORE the query, so a
+    /// system close after the read is at or after it.
     /// </summary>
     private async Task<ResolvedSignalSet> ReadOpenSignalSetAsync(Guid invoiceId, CancellationToken ct)
     {
         var setReadAt = _time.GetUtcNow().UtcDateTime;
 
+        // K2 (notes 13c): a single RetrieveMultiple with no paging, fine below 5,000 lines per invoice.
         var lineQuery = new QueryExpression(InvoiceSubmissionPersister.LineEntity) { ColumnSet = new ColumnSet(false), NoLock = true };
         lineQuery.Criteria.AddCondition(InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, ConditionOperator.Equal, invoiceId);
         var lineIds = (await _entities.RetrieveMultipleAsync(lineQuery, ct).ConfigureAwait(false)).Entities
             .Select(r => r.Id).Where(id => id != Guid.Empty).Distinct().ToList();
 
+        // K2 (notes 13c): a single RetrieveMultiple with no paging, fine below 5,000 Signals per invoice.
         var query = new QueryExpression(SignalEntity) { ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_signalstatus"), NoLock = true };
         query.Criteria.FilterOperator = LogicalOperator.Or;
         query.Criteria.AddCondition(SignalWriter.RegardingLookupByEntity[InvoiceReviewService.InvoiceEntity], ConditionOperator.Equal, invoiceId);
@@ -649,29 +643,22 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         {
             (InvoiceReviewService.InvoiceEntity, invoiceId),
         };
-        var latest = new Dictionary<(string Code, string Entity, Guid Id), (int Episode, Entity Row)>();
+        var open = new List<ResolvedSignal>();
         foreach (var row in rows.Entities)
         {
             if (row.Id == Guid.Empty
-                || !SignalWriter.TryParseDedupeKey(row.GetAttributeValue<string>("sprk_dedupekey"), out var code, out var entity, out var id, out var episode)
-                || !subjects.Contains((entity, id)))
+                || !SignalWriter.TryParseDedupeKey(row.GetAttributeValue<string>("sprk_dedupekey"), out var code, out var entity, out var id, out _)
+                || !subjects.Contains((entity, id))
+                || row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value is not (SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged))
             {
                 continue;
             }
 
-            if (!latest.TryGetValue((code, entity, id), out var seen) || episode > seen.Episode)
-            {
-                latest[(code, entity, id)] = (episode, row);
-            }
+            open.Add(new ResolvedSignal(row.Id, code));
         }
 
-        var open = latest
-            .Where(l => l.Value.Row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value is SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged)
-            .Select(l => new ResolvedSignal(l.Value.Row.Id, l.Key.Code))
-            .DistinctBy(s => s.Id)
-            .OrderBy(s => s.Id)
-            .ToList();
-        return new ResolvedSignalSet(setReadAt, open);
+        // Ordered by id so the record's hash is stable.
+        return new ResolvedSignalSet(setReadAt, open.DistinctBy(s => s.Id).OrderBy(s => s.Id).ToList());
     }
 
     /// <summary>Writes <paramref name="set"/> into <c>sprk_findingsjson</c> (<see cref="ResolvedSetMember"/>) and returns the JSON written.</summary>
@@ -684,58 +671,59 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         {
             [InvoiceSubmissionPersister.SubmissionFindingsJson] = json,
         }, ct).ConfigureAwait(false);
-        _logger.LogInformation("Invoice submission {SubmissionId}: the automatic rejection resolves {Count} open Signals (stored before the record{Predates})",
-            submissionId, set.Signals.Count, set.RecordPredatesSet ? "; a record written before D-122 lists none" : string.Empty);
+        _logger.LogInformation("Invoice submission {SubmissionId}: the automatic rejection resolves {Count} open Signals (stored before the record)",
+            submissionId, set.Signals.Count);
         return json;
     }
 
     private sealed record RejectionStep(BillingDecisionRecordResult? Recorded, ResolvedSignalSet Set, string FindingsJson, SubmissionAfterStepsResult? Stop);
 
     /// <summary>
-    /// Records the automatic rejection with <c>ResolvedSignalIds</c> = the stored set. Two refusals are read further when the set is not empty:
-    /// <list type="bullet">
-    /// <item><b>review_invalid</b>: a record written BEFORE D-122 exists under this decision id, its hash over the empty list. The decision is
-    /// recorded again with the empty list; a success means that record (or, after a concurrent delete, a new one) lists no Signal, so the
-    /// stored set becomes empty (<see cref="ResolvedSignalSet.RecordPredatesSet"/>) and nothing is closed. A refusal there is classified as
-    /// any refusal.</item>
-    /// <item><b>owner_refused</b>: when a Signal of the set no longer exists, <see cref="ResolvedSignalMissingCode"/> (permanent: the set is
-    /// frozen once stored, see notes 13c); otherwise owner_refused as before.</item>
-    /// </list>
+    /// Records the automatic rejection with <c>ResolvedSignalIds</c> = the stored set. A refusal is classified by <see cref="RecordRefused"/>
+    /// (<c>review_invalid</c> is permanent: it means a bug, there is no fallback). One refusal is read further when the set is not empty:
+    /// <b>owner_refused</b> with some listed Signals no longer existing (one query by id). Then ONLY those ids are removed, the same
+    /// <see cref="ResolvedSignalSet.SetReadAtUtc"/> is kept, the shrunk set is stored again, and the record is tried ONCE more with it; if
+    /// that fails too, its refusal is classified as any refusal. When nothing is missing, owner_refused stands (notes 13c).
     /// </summary>
     private async Task<RejectionStep> RecordRejectionAsync(
         StoredFindings stored, Guid submissionId, Guid invoiceId, ResolvedSignalSet set, string findingsJson, CancellationToken ct)
     {
-        var ids = set.Signals.Select(s => s.Id).ToList();
         try
         {
-            return new RejectionStep(await _record(BuildRejectionDecision(stored, submissionId, invoiceId, ids)!, ct).ConfigureAwait(false), set, findingsJson, null);
+            return await RecordOnceAsync(stored, submissionId, invoiceId, set, findingsJson, ct).ConfigureAwait(false);
         }
-        catch (DecisionRecordRefusedException ex) when (ex.Reason == DecisionRecordRefusalReason.ReviewInvalid && ids.Count > 0)
+        catch (DecisionRecordRefusedException ex) when (ex.Reason == DecisionRecordRefusalReason.OwnerRefused && set.Signals.Count > 0)
         {
-            BillingDecisionRecordResult prior;
+            var missing = await MissingSignalIdsAsync(set.Signals.Select(s => s.Id).ToList(), ct).ConfigureAwait(false);
+            if (missing.Count == 0)
+            {
+                return new RejectionStep(null, set, findingsJson, RecordRefused(submissionId, invoiceId, ex.Reason));
+            }
+
+            var shrunk = set with { Signals = set.Signals.Where(s => !missing.Contains(s.Id)).ToList() };
+            _logger.LogWarning("Invoice submission {SubmissionId}: {Missing} of {Count} Signals listed for the automatic rejection no longer exist; the set shrinks to {Left} and the record is tried once more",
+                submissionId, missing.Count, set.Signals.Count, shrunk.Signals.Count);
+            var shrunkJson = await StoreResolvedSetAsync(submissionId, findingsJson, shrunk, ct).ConfigureAwait(false);
             try
             {
-                prior = await _record(BuildRejectionDecision(stored, submissionId, invoiceId, [])!, ct).ConfigureAwait(false);
+                return await RecordOnceAsync(stored, submissionId, invoiceId, shrunk, shrunkJson, ct).ConfigureAwait(false);
             }
             catch (DecisionRecordRefusedException again)
             {
-                return new RejectionStep(null, set, findingsJson, RecordRefused(submissionId, invoiceId, again.Reason));
+                return new RejectionStep(null, shrunk, shrunkJson, RecordRefused(submissionId, invoiceId, again.Reason));
             }
-
-            _logger.LogInformation("Invoice submission {SubmissionId}: Decision Record {RecordId} predates D-122 and lists no Signal; none is closed by it",
-                submissionId, prior.RecordId);
-            var empty = set with { Signals = [], RecordPredatesSet = true };
-            return new RejectionStep(prior, empty, await StoreResolvedSetAsync(submissionId, findingsJson, empty, ct).ConfigureAwait(false), null);
-        }
-        catch (DecisionRecordRefusedException ex) when (ex.Reason == DecisionRecordRefusalReason.OwnerRefused && ids.Count > 0)
-        {
-            var missing = await MissingSignalCountAsync(ids, ct).ConfigureAwait(false);
-            return new RejectionStep(null, set, findingsJson, RecordRefused(submissionId, invoiceId, missing > 0 ? ResolvedSignalMissingCode : ex.Reason));
         }
         catch (DecisionRecordRefusedException ex)
         {
             return new RejectionStep(null, set, findingsJson, RecordRefused(submissionId, invoiceId, ex.Reason));
         }
+    }
+
+    private async Task<RejectionStep> RecordOnceAsync(
+        StoredFindings stored, Guid submissionId, Guid invoiceId, ResolvedSignalSet set, string findingsJson, CancellationToken ct)
+    {
+        var ids = set.Signals.Select(s => s.Id).ToList();
+        return new RejectionStep(await _record(BuildRejectionDecision(stored, submissionId, invoiceId, ids)!, ct).ConfigureAwait(false), set, findingsJson, null);
     }
 
     private SubmissionAfterStepsResult RecordRefused(Guid submissionId, Guid invoiceId, string reason)
@@ -746,13 +734,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         return Stop(permanent ? SubmissionAfterStepsStatus.Refused : SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, reason);
     }
 
-    /// <summary>How many of <paramref name="ids"/> no longer exist (one query by id, app-only).</summary>
-    private async Task<int> MissingSignalCountAsync(IReadOnlyList<Guid> ids, CancellationToken ct)
+    /// <summary>The ones of <paramref name="ids"/> that no longer exist (one query by id, app-only).</summary>
+    private async Task<HashSet<Guid>> MissingSignalIdsAsync(IReadOnlyList<Guid> ids, CancellationToken ct)
     {
         var query = new QueryExpression(SignalEntity) { ColumnSet = new ColumnSet(false), NoLock = true, TopCount = ids.Count };
         query.Criteria.AddCondition("sprk_signalid", ConditionOperator.In, ids.Cast<object>().ToArray());
         var found = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Select(e => e.Id).ToHashSet();
-        return ids.Count(id => !found.Contains(id));
+        return ids.Where(id => !found.Contains(id)).ToHashSet();
     }
 
     /// <summary>
@@ -1121,7 +1109,6 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         DecisionRecordRefusalReason.ReviewInvalid, DecisionRecordRefusalReason.FactSnapshotMissing, DecisionRecordRefusalReason.SubjectUnsupported,
         DecisionRecordRefusalReason.SubjectUnfileable, DecisionRecordRefusalReason.RecordClassUnderivable, DecisionRecordRefusalReason.CoreUnsupported,
         DecisionRecordRefusalReason.OwnerRefused, DecisionRecordRefusalReason.OwnerMissing,
-        ResolvedSignalMissingCode, // D-122: the stored set is frozen, so a listed Signal that no longer exists stays missing (notes 13c)
     };
 
     /// <summary>

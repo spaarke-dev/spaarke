@@ -152,6 +152,8 @@ public class InvoiceSubmissionAfterStepsTests
         // Crash points (a fault at that call; the next run is the redelivery)
         public int CrashAtWrite { get; set; } = -1;
         public Exception? RecordFault { get; set; }
+        /// <summary>Called at the start of every record call, after the decision is noted (another writer acting between two record calls).</summary>
+        public Action<BillingDecision>? OnRecordCall { get; set; }
         public bool CrashAtRecord { get; set; }
         public Exception? JobFault { get; set; }
         public bool CrashAtNotifyRead { get; set; }
@@ -310,6 +312,7 @@ public class InvoiceSubmissionAfterStepsTests
                     }
 
                     RecordedDecisions.Add(decision);
+                    OnRecordCall?.Invoke(decision);
                     if (RecordFault is { } fault)
                     {
                         return Task.FromException<BillingDecisionRecordResult>(fault);
@@ -1468,7 +1471,6 @@ public class InvoiceSubmissionAfterStepsTests
         set.Signals.Single(s => s.Id == written[0]).PolicyCode.Should().Be("BILL-AGE");
         set.SetReadAtUtc.Should().Be(world.Clock.GetUtcNow().UtcDateTime);
         set.SetReadAtUtc.Kind.Should().Be(DateTimeKind.Utc);
-        set.RecordPredatesSet.Should().BeFalse();
         world.RecordedDecisions.Should().ContainSingle().Which.ResolvedSignalIds.Should().BeEquivalentTo(expected);
         world.RecordCreates.Should().Be(1);
         world.Closes.Select(c => c.Signal).Should().BeEquivalentTo(expected);
@@ -1629,64 +1631,159 @@ public class InvoiceSubmissionAfterStepsTests
             .Should().ContainSingle().Which.Message.Should().Contain(id.ToString()).And.Contain("BILL-AGE").And.Contain(result.DecisionRecordId!.Value.ToString());
     }
 
-    [Fact(DisplayName = "049 13c: a record written before D-122 (no stored set, hash over no Signals) - the resume does not fail; the stored set becomes empty; nothing is closed")]
-    public async Task PreD122Record_ResumeDoesNotFail()
+    [Fact(DisplayName = "049 13c: review_invalid (a record under other content exists) is a permanent Refused after exactly ONE record call; no fallback record; the submission stays Processing")]
+    public async Task ReviewInvalid_IsRefused_WithExactlyOneRecordCall()
     {
         var outcome = await AutoRejected(readNumber: "INV-999");
         var world = new World(outcome);
         var stored = InvoiceSubmissionAfterSteps.StoredFindings.Parse(world.Row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson))!;
-        stored.ResolvedSet.Should().BeNull("written before this change");
-        // The pre-D-122 run recorded the rejection listing no Signal (its hash is over the empty list), then stopped before the terminal status.
-        var prior = await world.Recorder.RecordAsync(InvoiceSubmissionAfterSteps.BuildRejectionDecision(stored, Submission, InvoiceId)!);
+        // A record under this decision id whose hash is over another list (here none) - the writer refuses the run's set as review_invalid.
+        await world.Recorder.RecordAsync(InvoiceSubmissionAfterSteps.BuildRejectionDecision(stored, Submission, InvoiceId)!);
+
+        var result = await world.Build().ResumeAsync(Submission, null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Refused, result.ReasonCode);
+        result.ReasonCode.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        StoredSet(world)!.Signals.Should().NotBeEmpty("the stored set is untouched");
+        world.RecordedDecisions.Should().ContainSingle("no second record call re-records with an empty list");
+        world.RecordCreates.Should().Be(1, "only the record that was there");
+        world.Closes.Should().BeEmpty();
+        world.TerminalWrites.Should().BeEmpty();
+        world.Status.Should().Be(InvoiceSubmissionStatus.Processing);
+
+        var faulted = new World(outcome) { RecordFault = new DecisionRecordRefusedException(DecisionRecordRefusalReason.ReviewInvalid, "x") };
+        var again = await faulted.Build().RunAsync(Persisted(outcome), null);
+        again.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
+        again.ReasonCode.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        faulted.RecordedDecisions.Should().ContainSingle();
+        faulted.Closes.Should().BeEmpty();
+    }
+
+    /// <summary>A run that stored a set of two Signals (the rule Signal on a line, an open invoice Signal) and stopped at the record.</summary>
+    private static async Task<(World World, InvoiceSubmissionAfterSteps Sut, SubmissionEvaluationOutcome Outcome, Entity Gone, Guid Kept, DateTime ReadAt)> StoredPairAsync()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome) { CrashAtRecord = true };
+        var gone = world.Seed(InvoiceKey("BILL-THRESHOLD", 1), SignalWriter.SignalStatusOpen, "[]");
         var sut = world.Build();
+        (await Run(sut, Persisted(outcome))).Should().BeNull("the crash at the record");
+        var set = StoredSet(world)!;
+        set.Signals.Should().HaveCount(2);
+        world.CrashAtRecord = false;
+        return (world, sut, outcome, gone, world.Signals[LineKey("BILL-AGE", 1)].Id, set.SetReadAtUtc);
+    }
+
+    [Fact(DisplayName = "049 13c: a listed Signal missing before the record - ONLY that id is removed, the read time is kept, the shrunk set is stored, the record is tried once more and the run completes")]
+    public async Task MissingListedSignal_ShrinksTheSet_AndRetriesOnce()
+    {
+        var (world, sut, _, gone, kept, readAt) = await StoredPairAsync();
+        world.Signals.Remove(InvoiceKey("BILL-THRESHOLD", 1)); // deleted after the set was stored
+        world.Clock.Advance(TimeSpan.FromMinutes(5));
 
         var result = await sut.ResumeAsync(Submission, null);
 
         result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
-        result.DecisionRecordId.Should().Be(prior.RecordId);
-        world.RecordCreates.Should().Be(1, "the pre-D-122 record answers; no second record");
+        world.RecordedDecisions.Should().HaveCount(2);
+        world.RecordedDecisions[0].ResolvedSignalIds.Should().Contain([gone.Id, kept]);
+        world.RecordedDecisions[1].ResolvedSignalIds.Should().Equal(kept);
         var set = StoredSet(world)!;
-        set.Signals.Should().BeEmpty();
-        set.RecordPredatesSet.Should().BeTrue();
-        world.Closes.Should().BeEmpty("the record lists no Signal, so it closes none");
-        world.Signals.Should().HaveCount(2);
-        world.Signals.Values.Should().OnlyContain(s => StatusOf(s) == SignalWriter.SignalStatusOpen);
+        set.Signals.Select(s => s.Id).Should().Equal(new[] { kept }, "the stored set is the shrunk one");
+        set.SetReadAtUtc.Should().Be(readAt, "the read time does not move");
+        world.RecordCreates.Should().Be(1);
+        world.Closes.Select(c => c.Signal).Should().Equal(kept);
+        world.Closes.Should().OnlyContain(c => c.Record == result.DecisionRecordId && c.SetReadAt == readAt);
+        world.FindingsWrites.Should().HaveCount(2, "the first store and the shrunk store");
+        world.Log.Entries.Should().ContainSingle(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("no longer exist", StringComparison.Ordinal));
         world.TerminalWrites.Should().ContainSingle();
 
-        // A later resume uses the stored empty set directly (no read, one recorder call).
+        // A later resume uses the shrunk set directly: one record call, AlreadyRecorded, no new store.
         world.Row[InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Processing);
         world.RecordedDecisions.Clear();
         (await sut.ResumeAsync(Submission, null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
-        world.RecordedDecisions.Should().ContainSingle().Which.ResolvedSignalIds.Should().BeEmpty();
-        world.LineQueries.Should().ContainSingle();
+        world.RecordedDecisions.Should().ContainSingle().Which.ResolvedSignalIds.Should().Equal(kept);
         world.RecordCreates.Should().Be(1);
+        world.FindingsWrites.Should().HaveCount(2);
     }
 
-    [Fact(DisplayName = "049 13c: a Signal of the stored set that no longer exists - the writer refuses (owner_refused) and the run is Refused with resolved_signal_missing; another owner refusal keeps its code")]
-    public async Task MissingListedSignal_IsRefusedWithItsOwnCode()
+    [Fact(DisplayName = "049 13c: owner_refused with every listed Signal present keeps its code after one record call and does not shrink; a retry that is refused again is classified as any refusal (no third call)")]
+    public async Task OwnerRefused_NothingMissing_Stands_AndASecondRefusalIsFinal()
     {
         var outcome = await AutoRejected();
-        var world = new World(outcome) { CrashAtRecord = true };
-        var sut = world.Build();
-        (await Run(sut, Persisted(outcome))).Should().BeNull();
-        var listed = StoredSet(world)!.Signals.Single().Id;
-
-        world.CrashAtRecord = false;
-        world.Signals.Remove(LineKey("BILL-AGE", 1)); // deleted after the set was stored
-        var result = await sut.ResumeAsync(Submission, null);
-
-        world.Signals[LineKey("BILL-AGE", 1)].Id.Should().NotBe(listed, "step 1 wrote the plan's Signal again as a new row");
-        result.Status.Should().Be(SubmissionAfterStepsStatus.Refused, result.ReasonCode);
-        result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.ResolvedSignalMissingCode);
-        StoredSet(world)!.Signals.Single().Id.Should().Be(listed, "the stored set is frozen");
-        world.RecordCreates.Should().Be(0);
-        world.Closes.Should().BeEmpty();
-        world.TerminalWrites.Should().BeEmpty();
-
         var owner = new World(outcome) { RecordFault = new DecisionRecordRefusedException(DecisionRecordRefusalReason.OwnerRefused, "x") };
+
         var refused = await owner.Build().RunAsync(Persisted(outcome), null);
+
         refused.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
         refused.ReasonCode.Should().Be(DecisionRecordRefusalReason.OwnerRefused, "every listed Signal exists");
+        owner.RecordedDecisions.Should().ContainSingle("nothing is missing, so there is no retry");
+        owner.FindingsWrites.Should().ContainSingle("the set was stored once");
+
+        var (world, sut, _, gone, kept, _) = await StoredPairAsync();
+        world.Signals.Remove(InvoiceKey("BILL-THRESHOLD", 1));
+        world.RecordFault = new DecisionRecordRefusedException(DecisionRecordRefusalReason.OwnerRefused, "x");
+
+        var second = await sut.ResumeAsync(Submission, null);
+
+        second.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
+        second.ReasonCode.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        world.RecordedDecisions.Should().HaveCount(2, "one retry with the shrunk set, then the refusal stands");
+        world.RecordedDecisions[1].ResolvedSignalIds.Should().Equal(kept);
+        StoredSet(world)!.Signals.Select(s => s.Id).Should().Equal(kept);
+        gone.Id.Should().NotBe(Guid.Empty);
+        world.Closes.Should().BeEmpty();
+        world.TerminalWrites.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 13c: a record already exists under other content - the shrunk call gets review_invalid and the run is a permanent Refused; no wrong record is written")]
+    public async Task MissingListedSignal_RecordAlreadyExists_ShrunkCallIsReviewInvalid()
+    {
+        var (world, sut, _, _, _, _) = await StoredPairAsync();
+        world.Signals.Remove(InvoiceKey("BILL-THRESHOLD", 1));
+        var stored = InvoiceSubmissionAfterSteps.StoredFindings.Parse(world.Row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson))!;
+        // Another writer records the decision (under other content) between the refused first call and the shrunk call.
+        world.OnRecordCall = _ =>
+        {
+            if (world.RecordedDecisions.Count == 2)
+            {
+                world.Recorder.RecordAsync(InvoiceSubmissionAfterSteps.BuildRejectionDecision(stored, Submission, InvoiceId, [])!).GetAwaiter().GetResult();
+            }
+        };
+
+        var result = await sut.ResumeAsync(Submission, null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Refused, result.ReasonCode);
+        result.ReasonCode.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        world.RecordedDecisions.Should().HaveCount(2);
+        world.RecordCreates.Should().Be(1, "only the other writer's record; the shrunk call wrote none");
+        world.Closes.Should().BeEmpty();
+        world.TerminalWrites.Should().BeEmpty();
+        world.Status.Should().Be(InvoiceSubmissionStatus.Processing);
+    }
+
+    [Fact(DisplayName = "049 13c K1: EVERY open or acknowledged Signal of the invoice and its lines is listed and closed - two open episodes of one (policy, subject), an open earlier episode under a resolved later one")]
+    public async Task EveryOpenSignal_IsListed_NotTheLatestEpisodePerSubject()
+    {
+        var outcome = await AutoRejected(readNumber: "INV-999");
+        var world = new World(outcome);
+        var first = world.Seed(InvoiceKey("BILL-THRESHOLD", 1), SignalWriter.SignalStatusOpen, "[]");
+        var second = world.Seed(InvoiceKey("BILL-THRESHOLD", 2), SignalWriter.SignalStatusOpen, "[]");
+        var earlierOpen = world.Seed(LineKey("BILL-RATE", 1), SignalWriter.SignalStatusAcknowledged, "[]");
+        var laterResolved = world.Seed(LineKey("BILL-RATE", 2), SignalWriter.SignalStatusResolved, "[]");
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        var written = new[] { world.Signals[LineKey("BILL-AGE", 1)].Id, world.Signals[InvoiceKey(BillingRuleCatalogue.SystemPolicyCode, 1)].Id };
+        var expected = written.Concat([first.Id, second.Id, earlierOpen.Id]).ToList();
+        var set = StoredSet(world)!;
+        set.Signals.Select(s => s.Id).Should().BeEquivalentTo(expected);
+        set.Signals.Select(s => s.Id).Should().BeInAscendingOrder("ordered by id so the hash is stable");
+        set.Signals.Where(s => s.PolicyCode == "BILL-THRESHOLD").Should().HaveCount(2);
+        world.Closes.Select(c => c.Signal).Should().BeEquivalentTo(expected);
+        StatusOf(first).Should().Be(SignalWriter.SignalStatusResolved);
+        StatusOf(second).Should().Be(SignalWriter.SignalStatusResolved);
+        StatusOf(earlierOpen).Should().Be(SignalWriter.SignalStatusResolved);
+        RecordOf(laterResolved).Should().BeNull("a resolved Signal is not in the set");
     }
 
     [Fact(DisplayName = "049 13c: a listed Signal deleted after the record has nothing to close (one Warning); a transient close fault propagates and leaves the submission Processing")]
