@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-19 (077 done; dev BFF live on 283466d40; 059 stage A next, owner-gated)
+> **Last Updated**: 2026-10-19 (059 stage A done: client 5859e812 created; stage B next, owner-gated)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **077 done 2026-10-19**: the default scheme also accepts aud = the bare BFF app id (v2 tokens; separate PostConfigure, GUID ClientId only) and refuses ID tokens for the app (aud = bare id without azpacr/appidacr; falls back to principal claims). 2 adversarial passes (F4 ID token, F3 link harness fixed) + scoped re-check (K hardening). Commits f68d0f312, 77d74f305, 283466d40. Notes `notes/task-077-notes.md`. 076/075 done earlier the same day |
-| **Step** | **059 in progress**: stage R done (record §11). Owner 2026-10-19: S-1 "follow recommended" (077 first, done and deployed), S-2 "yes proceed" (dormant secret not touched). Stage B now carries the v2 switch (precondition: live build contains 077 → met). Stages A–F each still need owner approval; nothing in Entra/settings/GitHub has changed |
+| **Step** | **059 in progress**: R done; owner S-1/S-2 decided; 077 deployed (`283466d40`). **Stage A DONE** ~21:00Z: "Spaarke Workforce SPA" `5859e812-e5e7-452c-be21-1e5aa7b4d478` (obj `e97e41bf…`, SP `afe6ad3c…`), 5 SPA redirects incl. brk-multihub (Graph accepted it), 1 scope (1e40baad user_impersonation), 0 secrets/certs/FICs, removeUnverifiedEmailClaim true. Rollback: `az ad app delete --id 5859e812…`. Record §11 |
 | **Status** | **Dev BFF = `283466d40`** (R3 + master `30324eeac`: UAC #2102 `947d98e31`, ontology 042b #2109; + 077). Deployed with the owner's direct approval 2026-10-19 20:30:09–20:32:01Z. Verified: ProductVersion `1.0.0+283466d40…`; 4 critical files SHA-256; `/healthz` and `/healthz/dataverse` 200; 2 CORS origins; workforce token 200 on `/api/me`, anonymous 401. OKs: UAC (SRO Read on sprk_policy* applied, 32/32), ontology, word-add-in, provisioning; ebilling no reply (busy); SPE-admin and field-mapping held. After-notices sent. **Rollback: `Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261019T202854Z` (= 44f802a1d). Do NOT roll back below 077 once 1e40baad is on v2 (059 §10).** Dev external SPA = `ebc74b331` |
-| **Next Action** | Ask the owner to approve 059 stage A (create the "Spaarke Workforce SPA" client; record §4). Then B (incl. v2 switch + per-surface smoke), C, D, E, F, each with its own approval |
+| **Next Action** | Ask the owner to approve 059 stage B (1e40baad: requestedAccessTokenVersion 2, knownClientApplications += 5859e812, accessToken optional claims += given_name/family_name (whole object), authenticationBehaviors removeUnverifiedEmailClaim true; then per-surface fresh-sign-in smoke). Rollback per record §5 |
 
 ### Uncommitted files
 - `.claude/agent-memory/researcher/MEMORY.md` (modified) and `.claude/agent-memory/researcher/dataverse-duplicate-detection-api-default-2026-10-15.md` (untracked) belong to the OWNER. Never commit or discard them. The 2026-10-18 master merge re-applied the owner's index line next to master's new line. Backups are in the session scratchpad (`owner-researcher-memory.patch`, `owner-researcher-MEMORY.md.bak`).
@@ -31,6 +31,7 @@
 5. Close DEF-004 (#1829) as superseded when ebilling 051 merges (successor answers posted on the issue).
 
 ## Open owner questions
+0. Observation for the owner: `spaarke-bff-api-prod` has tenant-wide consent (`SDAP.Access`) to the DEV BFF app 1e40baad: intended? (059 R3)
 1. (none: the 102b deploy was approved and done)
 2. (none: R3 registered under Epic #2099)
 3. `/upload` has no in-app link (known limit, task 042 notes): add an entry point, or retire the route?

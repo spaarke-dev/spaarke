@@ -226,6 +226,34 @@ Output masked; full snapshots are in the session scratchpad (`before-1e40baad-fu
 
 R3 shows **`spaarke-bff-api-prod` with tenant-wide consent to the DEV BFF app** (`SDAP.Access`). A production identity able to call a dev API may be a leftover. The owner decides whether it is intended.
 
+### Owner decisions 2026-10-19
+
+- "S-1: follow recommended": task 077 first. It was done and deployed to dev as `283466d40` (20:30–20:32Z). This meets stage B's precondition.
+- "S-2: yes proceed": the dormant secret is not touched.
+
+### Stage A — 2026-10-19 ~21:00Z, owner approval "proceed 059 A"
+
+- S-4 re-checked just before: 0 apps named "Spaarke Workforce SPA".
+- C1: `az ad app create` created **`NEW_APP_ID` = `5859e812-e5e7-452c-be21-1e5aa7b4d478`**, object `e97e41bf…`; SP `afe6ad3c…`.
+- C2: the PATCH succeeded. Graph accepted `brk-multihub://` in `spa.redirectUris`, so the portal fallback was not needed.
+- C3: `removeUnverifiedEmailClaim` = true.
+- **Read after (matches §4):**
+  - `AzureADMultipleOrgs`;
+  - 5 SPA redirects (dev origin, `/auth-callback.html`, `brk-multihub://green-dune…`, localhost and its callback);
+  - 0 web or public-client redirects;
+  - `requiredResourceAccess` = `1e40baad` → `18afc847` (`user_impersonation`, Scope) only;
+  - 0 secrets, 0 certificates, 0 federated credentials;
+  - `authenticationBehaviors.removeUnverifiedEmailClaim` = true.
+- Ids are saved in the scratchpad (`stageA-ids.json`). Rollback: `az ad app delete --id 5859e812-e5e7-452c-be21-1e5aa7b4d478`.
+
+### Side finding (owner-approved App Insights read, 2026-10-19): `IDX10214` and `IDX40001` on dev are log noise, not failures
+
+- App Insights `spe-insights-dev-67e2xz`, last 6 h.
+- `IDX10214` (142): logged by IdentityModel itself with no request attached. **All of them fall within 2 s of an `/api/v1/external/*` request** (mostly the SPA's once-a-minute `GET /notifications` poll, also grid-config and metadata reads). Those requests returned 200/204 (some 499s, where the client closed the request).
+- `IDX40001` (167): logged by the default scheme's `OnAuthenticationFailed`. All have `aud` = the CIAM API app `4a4d5126`, a ciamlogin.com issuer, and `appid` `bd57e54e` (the CIAM SPA).
+- Cause: the `ExternalCollaboration` policy tries every scheme. A CIAM token fails the default scheme (issuer) and the WorkforceHome scheme (audience) before the Ciam scheme accepts it.
+- Behaviour is correct. Reducing the noise would need a scheme selector by issuer: a design change, not done.
+
 ## 12. Research used by this plan (researcher, 2026-10-19; V = in current Microsoft docs, I = inferred)
 
 Saved in the researcher's memory as `entra-multitenant-api-a9-dev-setup-2026-10-19.md`.
