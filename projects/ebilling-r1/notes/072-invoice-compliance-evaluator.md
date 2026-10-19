@@ -420,13 +420,13 @@ Model: Opus 5.5 @ high (implementer). Base `work/ebilling-r1` `db4eee636` (parts
 
 | Item | Commit | Change |
 |---|---|---|
-| (base red) | `f58768889`, `2f3244fca` | Test-only. The base failed 9 cases in the filtered suite: part E was written before D-117 and F-ALLOW. `Expense()` bills E101, so fixtures that set only `ExpenseCode = "E109"` never fired the code reason (the 150-line fixture, the A4 two-reasons test, 073's `ARejectCapableReason_OfTheSameMoneyPolicy_...`); they now bill E109, and the union-of-reads assertion expects `line[0].BilledExpenseCode`. 073's `AnUnlistedReasonCode_...` theory no longer uses `billing.currency.missing` as its "new" reason (flag-only since part E, held as `reason_flag_only`); that case is asserted separately |
-| A6 + A8 (D-116) | `57eb49096` | CoreRecordWindow reads the billing status; Describe text and schema description say what it does, "every charge line (credits excluded)"; docs/data-model lists the columns |
-| A7 (071 round 3 F4) | `c39da7f8a` | A line with NEITHER Hours NOR Amount lists both as null-valued reads with unknown confidence |
-| D-119 | `18738ed67` | `BillingCurrency.Normalise` / `IsUsd`, used by the evaluator's money skip and by RequiredData: a bare `"$"` is USD in both |
-| A5 placement (049 rule 5) | `f4aca8bdb` | The D-115 finding hangs on a skipped ApprovedRate version; ExpenseRule only when no ApprovedRate version is in force |
-| K2 (073 review, deferred) | `bc69be34b` | A stored consequence the type may not carry is evaluated as Flag, not dropped |
-| ReceivedOn (main session) | `debbffa1d` | `Evaluate` / `EvaluateAsync` throw `ArgumentException` on a default `ReceivedOn`; documented as a UTC date |
+| (base red) | `df771f186`, `d4a52a2e5` | Test-only. The base failed 9 cases in the filtered suite: part E was written before D-117 and F-ALLOW. `Expense()` bills E101, so fixtures that set only `ExpenseCode = "E109"` never fired the code reason (the 150-line fixture, the A4 two-reasons test, 073's `ARejectCapableReason_OfTheSameMoneyPolicy_...`); they now bill E109, and the union-of-reads assertion expects `line[0].BilledExpenseCode`. 073's `AnUnlistedReasonCode_...` theory no longer uses `billing.currency.missing` as its "new" reason (flag-only since part E, held as `reason_flag_only`); that case is asserted separately |
+| A6 + A8 (D-116) | `ffe12af4b` | CoreRecordWindow reads the billing status; Describe text and schema description say what it does, "every charge line (credits excluded)"; docs/data-model lists the columns |
+| A7 (071 round 3 F4) | `017503b2a` | A line with NEITHER Hours NOR Amount lists both as null-valued reads with unknown confidence |
+| D-119 | `b1a6d27f3` | `BillingCurrency.Normalise` / `IsUsd`, used by the evaluator's money skip and by RequiredData: a bare `"$"` is USD in both |
+| A5 placement (049 rule 5) | `1991539ae` | The D-115 finding hangs on a skipped ApprovedRate version; ExpenseRule only when no ApprovedRate version is in force |
+| K2 (073 review, deferred) | `56c9f585d` | A stored consequence the type may not carry is evaluated as Flag, not dropped |
+| ReceivedOn (main session) | `e310220d4` | `Evaluate` / `EvaluateAsync` throw `ArgumentException` on a default `ReceivedOn`; documented as a UTC date |
 | B5 (rest) | this notes commit | Guard "Not covered" lists, section 7 item 11, the D-112 known limits below, `.unreliable` in section 2 |
 
 ### W.2 Behaviour
@@ -510,7 +510,7 @@ must-fire theory uses `"US$"` where it used `"$"`, and `"$"` / `" $ "` moved to 
   9 failed, 5 skipped; tip 4,805 passed, 0 failed, 5 skipped (live Dataverse).
 - `Spaarke.ArchTests`: 1,207 / 1,207 (the D-34 failure part L reported is no longer present at this base), including `OntologyBillingConsequenceIsolationGuardTests`.
 
-**Publish delta.** `dotnet publish -c Release -r linux-x64`, short paths, `Compress-Archive` (Optimal). Fresh `origin/master` `d7eabba3b`: 39,237,970 bytes; base `db4eee636`: 39,742,544; tip `debbffa1d`: 39,743,814. 192 files in all three. Tip vs master +505,844 bytes (+0.48 MB, all of it ebilling-r1 work already on the branch); part W alone (tip vs base) +1,270 bytes. Total 39.7 MB, under the +5 MB per-task and 55 MB review thresholds.
+**Publish delta.** `dotnet publish -c Release -r linux-x64`, short paths, `Compress-Archive` (Optimal). Fresh `origin/master` `d7eabba3b`: 39,237,970 bytes; base `db4eee636`: 39,742,544; tip `e310220d4`: 39,743,814. 192 files in all three. Tip vs master +505,844 bytes (+0.48 MB, all of it ebilling-r1 work already on the branch); part W alone (tip vs base) +1,270 bytes. Total 39.7 MB, under the +5 MB per-task and 55 MB review thresholds.
 
 ### W.4 Deviations and judgment calls
 

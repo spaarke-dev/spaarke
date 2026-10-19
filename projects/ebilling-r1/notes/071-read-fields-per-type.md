@@ -365,8 +365,8 @@ Two 071 items were carried by 072's review fix round, part W (branch `fix/072-pa
 
 | Item | Commit | Change | Evidence |
 |---|---|---|---|
-| F4 (round 3) | `c39da7f8a` | `HandlerContext.WithCreditTestReads`: when a line has NEITHER Hours NOR Amount, both are listed as null-valued reads with unknown confidence (below the floor). One absent (an expense line has no hours) is unchanged: nothing is listed | Old `HandlerContext.cs` with the new tests: `AnApprovedRateFinding_OnALineWithNeitherHoursNorAmount_IsHeld_NotRejected_071Round3` fails (the finding rejected); the negative case `OnlyOneOfHoursAndAmountAbsent_IsNotInvented_TheFindingStillRejects_071Round3` passes on both trees |
-| D-119 | `18738ed67` | `BillingCurrency.Normalise` / `IsUsd` (in `HandlerContext.cs`) is the one USD test. `RequiredDataHandler` uses it, so a bare `"$"` is USD there too (it was "not USD"); the evaluator's money skip uses the same one | Old `RequiredDataHandler.cs` with the new tests: 4 fail (`"$"` and `" $ "` in the handler's must-not-fire theory and in the evaluator's `TheMoneySkip_AndRequiredData_AgreeOnTheCurrency_D119`). The handler's must-fire theory now uses `"US$"` (not a bare `"$"`) where it used `"$"` |
+| F4 (round 3) | `017503b2a` | `HandlerContext.WithCreditTestReads`: when a line has NEITHER Hours NOR Amount, both are listed as null-valued reads with unknown confidence (below the floor). One absent (an expense line has no hours) is unchanged: nothing is listed | Old `HandlerContext.cs` with the new tests: `AnApprovedRateFinding_OnALineWithNeitherHoursNorAmount_IsHeld_NotRejected_071Round3` fails (the finding rejected); the negative case `OnlyOneOfHoursAndAmountAbsent_IsNotInvented_TheFindingStillRejects_071Round3` passes on both trees |
+| D-119 | `b1a6d27f3` | `BillingCurrency.Normalise` / `IsUsd` (in `HandlerContext.cs`) is the one USD test. `RequiredDataHandler` uses it, so a bare `"$"` is USD there too (it was "not USD"); the evaluator's money skip uses the same one | Old `RequiredDataHandler.cs` with the new tests: 4 fail (`"$"` and `" $ "` in the handler's must-not-fire theory and in the evaluator's `TheMoneySkip_AndRequiredData_AgreeOnTheCurrency_D119`). The handler's must-fire theory now uses `"US$"` (not a bare `"$"`) where it used `"$"` |
 
 **A deliberate exception to "absent fields are not invented" (F4).** This file's read-field contract says a field the line does not
 have was not read. The credit test (`IsCreditLine`, D-105) is the one place where two absences together are themselves the problem:
@@ -379,7 +379,7 @@ does not stop the unknown read being added.
 **Read-field table (above), row update.** ApprovedRate, ExpenseRule, InvoiceAge, CoreRecordWindow and NonBillableActivity also list
 `Hours` and `Amount` (null value, unknown confidence) on a line that has neither.
 
-**CoreRecordWindow (D-116, 072 part W `57eb49096`).** The core record's facts gain `BillingStatus`; the handler reads it first
+**CoreRecordWindow (D-116, 072 part W `ffe12af4b`).** The core record's facts gain `BillingStatus`; the handler reads it first
 (Open: opened date only; Final: also after the close date, every charge line with no close date; Closed: every charge line,
 `core_record_window.closed_to_billing`; empty: D-111). Credits stay excluded. Its findings add the reference value
 `coreRecord.billingStatus`; the read fields are unchanged.
