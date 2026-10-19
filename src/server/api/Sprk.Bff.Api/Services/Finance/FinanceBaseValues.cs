@@ -78,9 +78,8 @@ public static class FinanceBaseValues
     internal const string SubmissionStatusColumn = "sprk_processingstatus";
     internal const string SubmissionReasonColumn = "sprk_outcomereasoncode";
 
-    /// <summary>The outcome reason code of a submission blocked by a rule and awaiting Override / Return.</summary>
-    // TODO(049): replace with SubmissionReasonCodes.Blocked when the pipeline's Submission/SubmissionReasonCodes.cs is on this branch.
-    public const string BlockedReasonCode = "ebilling.submission.blocked";
+    /// <summary>The outcome reason code of a submission blocked by a rule and awaiting Override / Return (<see cref="SubmissionReasonCodes.Blocked"/>).</summary>
+    public const string BlockedReasonCode = SubmissionReasonCodes.Blocked;
 
     /// <summary>
     /// What makes an In Review invoice HELD (owner decisions D-101, D-102, D-104): some submission linked to it

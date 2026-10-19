@@ -1,0 +1,91 @@
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Finance.Coding;
+
+namespace Sprk.Bff.Api.Services.Finance.Submission;
+
+/// <summary>
+/// The outcome reason codes the InvoiceSubmissionProcessing job (ebilling-r1 task 049) writes to
+/// <c>sprk_invoicesubmission.sprk_outcomereasoncode</c>, and the pipeline finding codes it records. One definition: the job, the
+/// spend predicate (<see cref="FinanceBaseValues.BlockedReasonCode"/>) and the review flows (104 / 105) read these, never a literal.
+/// </summary>
+/// <remarks>
+/// Codes owned by another component are referenced, not re-spelled: the <c>invoice.read.*</c> codes are 043's
+/// (<see cref="InvoiceAiException"/>), the reader's "not configured" code is <see cref="InvoiceAi.ReadNotConfiguredCode"/>, and the
+/// coding code is 047's (<see cref="LineCodingException.NoCodeSet"/>). Two kill-switch codes are spelled here because their owners
+/// keep them private or outside PublicContracts: <see cref="AiInvoiceDisabled"/> (<c>NullInvoiceAi</c>) and
+/// <see cref="AiLinearConsumersDisabled"/> (<c>NullActionResolver</c>); tests pin both to the owners' values.
+/// </remarks>
+public static class SubmissionReasonCodes
+{
+    // ── Held (D-101; notes 049 section 2) ──
+
+    /// <summary>
+    /// A blocked internal submission: the decider (073) said Rejected on an Internal-channel submission. The invoice is created In
+    /// Review and held from approval until Override / Return (105); the submission is Rejected with this code.
+    /// </summary>
+    public const string Blocked = "ebilling.submission.blocked";
+
+    // ── Failed: no invoice is created ──
+
+    /// <summary>ADR-018: <c>Ebilling:Enabled</c> is false.</summary>
+    public const string EbillingDisabled = "ebilling.disabled";
+
+    /// <summary>ADR-032: the AI kill switch (<c>NullInvoiceAi</c>'s <c>FeatureDisabledException.ErrorCode</c>).</summary>
+    public const string AiInvoiceDisabled = "ai.invoice.disabled";
+
+    /// <summary>ADR-032: the linear-consumer kill switch, raised by line coding (<c>NullActionResolver.ErrorCode</c>).</summary>
+    public const string AiLinearConsumersDisabled = "ai.linear-consumers.disabled";
+
+    /// <summary>043: no Content Understanding endpoint is configured.</summary>
+    public const string ReadNotConfigured = InvoiceAi.ReadNotConfiguredCode;
+
+    /// <summary>D-87: the submission carries no tracking number (<c>sprk_submissionsequence</c> / <c>sprk_trackingnumber</c>). The job never allocates one.</summary>
+    public const string TrackingMissing = "ebilling.submission.tracking_missing";
+
+    /// <summary>The submission has no <c>createdon</c>, so the date its rules are judged on (072 <c>ReceivedOn</c>) is unknown. Never defaulted.</summary>
+    public const string ReceivedOnMissing = "ebilling.submission.received_on_missing";
+
+    /// <summary>The submission names no firm (<c>sprk_vendororg</c>).</summary>
+    public const string FirmMissing = "ebilling.submission.firm_missing";
+
+    /// <summary>FR-05: the submission names no core record, or more than one.</summary>
+    public const string CoreRecordMissing = "ebilling.submission.core_record_missing";
+
+    /// <summary>D-91: the submission has no typed firm invoice number (intake refuses that, so this is a defect, not a case to repair).</summary>
+    public const string FirmInvoiceNumberMissing = InvoiceSubmissionErrors.FirmInvoiceNumberRequired;
+
+    /// <summary>The submission's channel is not SPA or Internal, so a rejection could not be classified as rejected or blocked.</summary>
+    public const string ChannelUnsupported = "ebilling.submission.channel_unsupported";
+
+    /// <summary>The submission names no document (<c>sprk_document</c>).</summary>
+    public const string DocumentMissing = "ebilling.submission.document_missing";
+
+    /// <summary>047: no code set resolved for the submission's core record.</summary>
+    public const string NoCodeSet = LineCodingException.NoCodeSet;
+
+    // ── Rejected, not read: no invoice (FR-21, D-101) ──
+
+    /// <summary>043: the document could not be opened.</summary>
+    public const string ReadUnreadable = InvoiceAiException.ReadUnreadable;
+
+    /// <summary>043: the document has too many pages.</summary>
+    public const string ReadPageLimit = InvoiceAiException.ReadPageLimit;
+
+    /// <summary>043: the document holds no invoice.</summary>
+    public const string ReadNoInvoice = InvoiceAiException.ReadNoInvoice;
+
+    /// <summary>043: the read service failed. Retryable: the job retries, then marks the submission Failed with this code.</summary>
+    public const string ReadServiceFailed = InvoiceAiException.ReadServiceFailed;
+
+    // ── Pipeline findings (hold for review, never reject) ──
+
+    /// <summary>D-91: the firm invoice number read from the PDF differs from the typed one (normalised for case, whitespace and punctuation).</summary>
+    public const string InvoiceNumberMismatch = "ebilling.submission.invoice_number_mismatch";
+
+    /// <summary>
+    /// The document-level read failures (FR-21): the submission is Rejected with the code and no invoice is created. Every other read
+    /// failure is retried.
+    /// </summary>
+    public static bool IsDocumentLevelReadFailure(string? reasonCode) =>
+        reasonCode is ReadUnreadable or ReadPageLimit or ReadNoInvoice;
+}
