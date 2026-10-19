@@ -919,6 +919,13 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
     public Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable RecordShares { get; } = new();
 
     /// <summary>
+    /// The Workforce-role ceiling (unified-access-control-r2 task 186) this host answers with: every privilege the
+    /// <c>/api/v1/external</c> routes need, so the "workforce" plane's contacts (no systemuser) keep the contract these
+    /// tests pin. The role read needs a live ServiceClient; the per-user Read questions still go to the real checker.
+    /// </summary>
+    internal Sprk.Bff.Api.Tests.AccessControl.WorkforceCeilingDouble WorkforceCeiling { get; } = new();
+
+    /// <summary>
     /// The instant the fixture's clock is fixed at (task 097). Grant-expiry decisions read "today" from the
     /// injected <see cref="TimeProvider"/>, so every expiry assertion here is deterministic. Never advanced —
     /// <see cref="FakeTimeProvider"/> cannot move backwards, so a test that advanced it would leak.
@@ -1061,6 +1068,14 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             });
 
             services.RemoveAll<IHostedService>();
+
+            // Task 186: the Workforce role ceiling, scripted (see WorkforceCeiling).
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker>(sp =>
+            {
+                WorkforceCeiling.Inner = ActivatorUtilities.CreateInstance<Sprk.Bff.Api.Services.Dataverse.Privileges.UserPrivilegeChecker>(sp);
+                return WorkforceCeiling;
+            });
 
             // Avoid real MSAL on incidental Graph paths.
             services.RemoveAll<IGraphClientFactory>();

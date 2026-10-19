@@ -107,6 +107,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects — list all projects the user has access to
         group.MapGet("/projects", GetProjects)
             .WithName("GetExternalProjects")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjects)
             .WithSummary("List all Secure Projects the authenticated user can access")
             .Produces<ExternalCollectionResponse<ExternalProjectDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -115,6 +116,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id} — single project
         group.MapGet("/projects/{id:guid}", GetProjectById)
             .WithName("GetExternalProjectById")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjects)
             .WithSummary("Get a single Secure Project by ID")
             .Produces<ExternalProjectDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -124,6 +126,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id}/documents
         group.MapGet("/projects/{id:guid}/documents", GetDocuments)
             .WithName("GetExternalProjectDocuments")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectDocuments)
             .WithSummary("Get documents for a Secure Project")
             .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -134,6 +137,7 @@ public static class ExternalProjectDataEndpoints
         // scoping are enforced BEFORE any SPE pointer resolution or Graph read (ADR-028 A1, NFR-03).
         group.MapGet("/projects/{id:guid}/documents/{documentId:guid}/content", DownloadDocumentContent)
             .WithName("DownloadExternalProjectDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectDocuments)
             .WithSummary("Download a Secure Project document's content (authz-before-stream, app-only)")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -144,6 +148,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id}/todos
         group.MapGet("/projects/{id:guid}/todos", GetTodos)
             .WithName("GetExternalProjectTodos")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectTodos)
             .WithSummary("Get to-dos for a Secure Project (sprk_todo records regarding the project)")
             .Produces<ExternalCollectionResponse<ExternalTodoDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -152,6 +157,7 @@ public static class ExternalProjectDataEndpoints
         // POST /api/v1/external/projects/{id}/todos — create a new to-do regarding the project
         group.MapPost("/projects/{id:guid}/todos", CreateTodo)
             .WithName("CreateExternalProjectTodo")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.CreateProjectTodo)
             .WithSummary("Create a new sprk_todo regarding a Secure Project (ADR-024 resolver fields applied)")
             .Produces<ExternalTodoDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -175,6 +181,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/matters/{id:guid}/todos", GetMatterTodos)
             .WithName("GetExternalMatterTodos")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadMatterTodos)
             .WithSummary("Get to-dos regarding an accessible matter (sprk_regardingmatter)")
             .Produces<ExternalCollectionResponse<ExternalTodoDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -182,6 +189,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapPost("/matters/{id:guid}/todos", CreateMatterTodo)
             .WithName("CreateExternalMatterTodo")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.CreateMatterTodo)
             .WithSummary("Create a new sprk_todo regarding a matter (ADR-024 resolver fields applied)")
             .Produces<ExternalTodoDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -191,6 +199,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/workassignments/{id:guid}/todos", GetWorkAssignmentTodos)
             .WithName("GetExternalWorkAssignmentTodos")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadWorkAssignmentTodos)
             .WithSummary("Get to-dos regarding an accessible work assignment (sprk_regardingworkassignment)")
             .Produces<ExternalCollectionResponse<ExternalTodoDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -198,6 +207,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapPost("/workassignments/{id:guid}/todos", CreateWorkAssignmentTodo)
             .WithName("CreateExternalWorkAssignmentTodo")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.CreateWorkAssignmentTodo)
             .WithSummary("Create a new sprk_todo regarding a work assignment (ADR-024 resolver fields applied)")
             .Produces<ExternalTodoDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -210,6 +220,7 @@ public static class ExternalProjectDataEndpoints
         // ConflictBehavior.Fail so a same-named file can never be overwritten by an external caller.
         group.MapPost("/projects/{id:guid}/documents", UploadDocument)
             .WithName("UploadExternalProjectDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UploadProjectDocument)
             .WithSummary("Upload a document to a Secure Project (server-derived container, app-only)")
             .Accepts<IFormFile>("multipart/form-data")
             .DisableAntiforgery() // multipart upload; auth is the JWT + participation gate, not a form token
@@ -223,6 +234,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id}/documents/{documentId}/versions — SPE version history
         group.MapGet("/projects/{id:guid}/documents/{documentId:guid}/versions", GetDocumentVersions)
             .WithName("GetExternalDocumentVersions")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectDocuments)
             .WithSummary("Get SPE version history for a document in a Secure Project")
             .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -242,6 +254,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/matters/{id:guid}/documents", GetMatterDocuments)
             .WithName("GetExternalMatterDocuments")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadMatterDocuments)
             .WithSummary("Get documents for a matter the caller can read")
             .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -249,6 +262,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/matters/{id:guid}/documents/{documentId:guid}/content", DownloadMatterDocumentContent)
             .WithName("DownloadExternalMatterDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadMatterDocuments)
             .WithSummary("Download a matter document's content (authz-before-stream, app-only)")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -258,6 +272,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapPost("/matters/{id:guid}/documents", UploadMatterDocument)
             .WithName("UploadExternalMatterDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UploadMatterDocument)
             .WithSummary("Upload a document to a matter (server-derived container, app-only)")
             .Accepts<IFormFile>("multipart/form-data")
             .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
@@ -270,6 +285,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/matters/{id:guid}/documents/{documentId:guid}/versions", GetMatterDocumentVersions)
             .WithName("GetExternalMatterDocumentVersions")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadMatterDocuments)
             .WithSummary("Get SPE version history for a document on a matter")
             .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -278,6 +294,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/workassignments/{id:guid}/documents", GetWorkAssignmentDocuments)
             .WithName("GetExternalWorkAssignmentDocuments")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadWorkAssignmentDocuments)
             .WithSummary("Get documents for a work assignment the caller can read")
             .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -285,6 +302,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/workassignments/{id:guid}/documents/{documentId:guid}/content", DownloadWorkAssignmentDocumentContent)
             .WithName("DownloadExternalWorkAssignmentDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadWorkAssignmentDocuments)
             .WithSummary("Download a work assignment document's content (authz-before-stream, app-only)")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -294,6 +312,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapPost("/workassignments/{id:guid}/documents", UploadWorkAssignmentDocument)
             .WithName("UploadExternalWorkAssignmentDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UploadWorkAssignmentDocument)
             .WithSummary("Upload a document to a work assignment (server-derived container, app-only)")
             .Accepts<IFormFile>("multipart/form-data")
             .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
@@ -306,6 +325,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/workassignments/{id:guid}/documents/{documentId:guid}/versions", GetWorkAssignmentDocumentVersions)
             .WithName("GetExternalWorkAssignmentDocumentVersions")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadWorkAssignmentDocuments)
             .WithSummary("Get SPE version history for a document on a work assignment")
             .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -314,6 +334,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/servicerequests/{id:guid}/documents", GetServiceRequestDocuments)
             .WithName("GetExternalServiceRequestDocuments")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadServiceRequestDocuments)
             .WithSummary("Get documents for a service request the caller submitted")
             .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -321,6 +342,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/servicerequests/{id:guid}/documents/{documentId:guid}/content", DownloadServiceRequestDocumentContent)
             .WithName("DownloadExternalServiceRequestDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadServiceRequestDocuments)
             .WithSummary("Download a service request document's content (authz-before-stream, app-only)")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -330,6 +352,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapPost("/servicerequests/{id:guid}/documents", UploadServiceRequestDocument)
             .WithName("UploadExternalServiceRequestDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UploadServiceRequestDocument)
             .WithSummary("Upload a document to a service request the caller submitted (server-derived container, app-only)")
             .Accepts<IFormFile>("multipart/form-data")
             .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
@@ -342,6 +365,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/servicerequests/{id:guid}/documents/{documentId:guid}/versions", GetServiceRequestDocumentVersions)
             .WithName("GetExternalServiceRequestDocumentVersions")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadServiceRequestDocuments)
             .WithSummary("Get SPE version history for a document on a service request the caller submitted")
             .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -353,6 +377,7 @@ public static class ExternalProjectDataEndpoints
         // sprk_matter and sprk_project (RightsForInvoiceAsync). Read lists, downloads and reads versions; Create uploads.
         group.MapGet("/invoices/{id:guid}/documents", GetInvoiceDocuments)
             .WithName("GetExternalInvoiceDocuments")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceDocuments)
             .WithSummary("Get documents for an invoice whose matter or project the caller can read")
             .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -361,6 +386,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/invoices/{id:guid}/documents/{documentId:guid}/content", DownloadInvoiceDocumentContent)
             .WithName("DownloadExternalInvoiceDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceDocuments)
             .WithSummary("Download an invoice document's content (authz-before-stream, app-only)")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -371,6 +397,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapPost("/invoices/{id:guid}/documents", UploadInvoiceDocument)
             .WithName("UploadExternalInvoiceDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UploadInvoiceDocument)
             .WithSummary("Upload a document to an invoice (Create inherited from its matter or project; server-derived container, app-only)")
             .Accepts<IFormFile>("multipart/form-data")
             .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
@@ -384,6 +411,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/invoices/{id:guid}/documents/{documentId:guid}/versions", GetInvoiceDocumentVersions)
             .WithName("GetExternalInvoiceDocumentVersions")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceDocuments)
             .WithSummary("Get SPE version history for a document on an invoice")
             .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -394,6 +422,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id}/events — calendar events for the project
         group.MapGet("/projects/{id:guid}/events", GetEvents)
             .WithName("GetExternalProjectEvents")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectEvents)
             .WithSummary("Get calendar events for a Secure Project (sprk_event records regarding the project)")
             .Produces<ExternalCollectionResponse<ExternalEventDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -403,6 +432,7 @@ public static class ExternalProjectDataEndpoints
         // project route's own, so the Read check and the DTO are identical. Read only: event CREATE stays project-only.
         group.MapGet("/matters/{id:guid}/events", GetMatterEvents)
             .WithName("GetExternalMatterEvents")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadMatterEvents)
             .WithSummary("Get calendar events regarding an accessible matter (sprk_event, sprk_regardingmatter)")
             .Produces<ExternalCollectionResponse<ExternalEventDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -410,6 +440,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapGet("/workassignments/{id:guid}/events", GetWorkAssignmentEvents)
             .WithName("GetExternalWorkAssignmentEvents")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadWorkAssignmentEvents)
             .WithSummary("Get calendar events regarding an accessible work assignment (sprk_event, sprk_regardingworkassignment)")
             .Produces<ExternalCollectionResponse<ExternalEventDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -418,6 +449,7 @@ public static class ExternalProjectDataEndpoints
         // POST /api/v1/external/projects/{id}/events — create a calendar event on the project
         group.MapPost("/projects/{id:guid}/events", CreateEvent)
             .WithName("CreateExternalProjectEvent")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.CreateProjectEvent)
             .WithSummary("Create a new sprk_event regarding a Secure Project")
             .Produces<ExternalEventDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -428,6 +460,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id}/contacts
         group.MapGet("/projects/{id:guid}/contacts", GetContacts)
             .WithName("GetExternalProjectContacts")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectContacts)
             .WithSummary("Get contacts with access to a Secure Project")
             .Produces<ExternalCollectionResponse<ExternalContactDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -436,6 +469,7 @@ public static class ExternalProjectDataEndpoints
         // GET /api/v1/external/projects/{id}/organizations
         group.MapGet("/projects/{id:guid}/organizations", GetOrganizations)
             .WithName("GetExternalProjectOrganizations")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadProjectOrganizations)
             .WithSummary("Get organizations linked to contacts on a Secure Project")
             .Produces<ExternalCollectionResponse<ExternalOrganizationDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -444,6 +478,7 @@ public static class ExternalProjectDataEndpoints
         // PATCH /api/v1/external/todos/{id} — update a to-do
         group.MapPatch("/todos/{id:guid}", UpdateTodo)
             .WithName("UpdateExternalTodo")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.UpdateTodo)
             .WithSummary("Update a to-do (PATCH semantics — only provided fields are changed)")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -463,6 +498,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapDelete("/documents/{id:guid}", DeleteOwnDocument)
             .WithName("DeleteOwnExternalDocument")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.DeleteDocument)
             .WithSummary("Delete a document the caller created, and its file (creator stamp + Read on its parent)")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -473,6 +509,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapDelete("/todos/{id:guid}", DeleteOwnTodo)
             .WithName("DeleteOwnExternalTodo")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.DeleteTodo)
             .WithSummary("Delete a to-do the caller created (creator stamp + Read on its root)")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -481,6 +518,7 @@ public static class ExternalProjectDataEndpoints
 
         group.MapDelete("/events/{id:guid}", DeleteOwnEvent)
             .WithName("DeleteOwnExternalEvent")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.DeleteEvent)
             .WithSummary("Delete a calendar event the caller created (creator stamp + Read on its root)")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -493,6 +531,7 @@ public static class ExternalProjectDataEndpoints
         // (POST /servicerequests/{id}/messages, task 034). Hard delete.
         group.MapDelete("/servicerequests/{id:guid}", DeleteOwnServiceRequest)
             .WithName("DeleteOwnExternalServiceRequest")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.DeleteServiceRequest)
             .WithSummary("Delete a service request the caller requested, while it is open and has no related records (else 409 service_request_closed or has_related_records)")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
