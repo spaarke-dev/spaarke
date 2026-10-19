@@ -48,6 +48,8 @@
 
 - **uac-r2 #2091 follow-up** (`fix/uac-2091-thread-join-refile` from `30324eeac`; touches `SecureChildReconciler`/`RefileStepsAsync`): review when sent. Check (a) gate-DR step still runs on thread join/reply re-file, (b) same-parent skip hides no real parent change, (c) gate-DR failure logs 50317 and never fails the re-file.
 
+- **ebilling D-130 (2) approved-total spend** (`1549ff165..cd690dbe2`, review worktree `C:\wts-eb130`): PASS 2026-10-19 (unit 410/0, guard 11/0). Sent K1 (race comment wrong: double count moves spend either way under credit memos / `le`/`lt`; fix comment+note, optional billed re-read guard), K2 (fake null-vs-absent `SignalReevaluationJobTests.cs:3395`). Q8 answer: NOT AuthorableColumns; expose `SpendAmountColumns` from FinanceBaseValues + extend `SignalPredicateTests.cs:174` not-field-secured assert (ebilling may do it; else our post-074 lane). Reported outside-diff: approved total not recalculated after reviewer decisions (only caller `InvoiceSubmissionPersister.cs:347`). Re-check their fix range.
+
 ## Promises to peers
 
 - **R3** owns the dev BFF line and the external SPA: message first for any BFF change.
