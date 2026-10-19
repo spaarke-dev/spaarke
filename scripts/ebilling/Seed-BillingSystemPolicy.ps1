@@ -221,6 +221,14 @@ if ($null -eq $row) {
     }
 }
 else {
+    # ontology-r1 review: never take over a row this script did not create. A policy that holds the code but is in another domain, or
+    # has another id, belongs to someone else; PATCHing its domain and name would move it into Billing. Refuse before any write.
+    if ([int]$row.sprk_domain -ne [int]$DomainBilling) {
+        throw "$PolicyCode exists in another domain (sprk_domain $($row.sprk_domain), id $($row.sprk_policyid)); this script owns only the Billing system policy. Not touched: owner decision needed."
+    }
+    if ([string]$row.sprk_policyid -ne [string]$PolicyId) {
+        throw "$PolicyCode exists with id $($row.sprk_policyid), not this script's $PolicyId; refusing to adopt a row it did not create. Not touched: owner decision needed."
+    }
     $d = @(Get-PolicyDiffs $row | Where-Object { $_ -notlike 'sprk_ruleset*' })
     if (@(Get-PolicyDiffs $row | Where-Object { $_ -like 'sprk_ruleset*' }).Count -gt 0) {
         throw "$PolicyCode is attached to a rule set ($($row._sprk_ruleset_value)); the system policy belongs to none. Not touched: owner decision needed."
