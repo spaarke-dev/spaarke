@@ -46,6 +46,8 @@
 - Policies: six on, including POL-MATTER-NOBUDGET (D-163); none has a matter.
 - Roles: Ontology Service 58; Ontology Administrator 38 (keeps Signal Assign/Delete, D-162); Console User 21.
 
+- **uac-r2 #2091 follow-up** (`fix/uac-2091-thread-join-refile` from `30324eeac`; touches `SecureChildReconciler`/`RefileStepsAsync`): review when sent. Check (a) gate-DR step still runs on thread join/reply re-file, (b) same-parent skip hides no real parent change, (c) gate-DR failure logs 50317 and never fails the re-file.
+
 ## Promises to peers
 
 - **R3** owns the dev BFF line and the external SPA: message first for any BFF change.
