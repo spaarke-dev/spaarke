@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
@@ -35,6 +36,7 @@ public class InvoiceSubmissionPersisterTests
     private static readonly Guid RecordTypeId = Guid.Parse("04900000-0000-4000-8000-0000000000e8");
 
     private static readonly Guid Submitter = Guid.Parse("04900000-0000-4000-8000-0000000000c9");
+    private static readonly Guid SubmitterContact = Guid.Parse("04900000-0000-4000-8000-0000000000ca");
 
     private static readonly Guid InvoiceId =InvoiceSubmissionPersister.InvoiceIdFor(Submission);
 
@@ -257,6 +259,71 @@ public class InvoiceSubmissionPersisterTests
                 && c.GetAttributeValue<EntityReference>("sprk_createdbyperson")!.LogicalName == "systemuser",
             "the submitter is the person on all three kinds of row");
         Target(store.Transactions.Single()[^1]).Attributes.Should().NotContainKey("sprk_createdbyperson", "the submission carries its own stamp from intake");
+    }
+
+    [Fact(DisplayName = "049 C3 (D-131): a SPA submission with a person and a contact stamps both on the invoice; lines and approval carry the person only")]
+    public async Task PersonAndContact_InvoiceCarriesBoth_LinesAndApprovalCarryThePersonOnly()
+    {
+        var harness = new ProcessorHarness();
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(), InvoiceSubmissionProcessorTests.FeeLine(hours: 2m, amount: 1000m)];
+        var outcome = await harness.RunAsync();
+        var store = new Store();
+        store.Submission["sprk_submitter"] = new EntityReference("contact", SubmitterContact);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var creates = store.Transactions.Single().OfType<CreateRequest>().Select(c => c.Target).ToList();
+        creates.Select(c => c.LogicalName).Should().Equal("sprk_invoice", "sprk_billingevent", "sprk_billingevent", "sprk_invoiceapproval");
+        var invoice = creates[0];
+        invoice.GetAttributeValue<EntityReference>("sprk_createdbyperson")!.Id.Should().Be(Submitter);
+        var submittedBy = invoice.GetAttributeValue<EntityReference>("sprk_submittedby")!;
+        submittedBy.LogicalName.Should().Be("contact");
+        submittedBy.Id.Should().Be(SubmitterContact);
+        creates.Should().OnlyContain(c => c.GetAttributeValue<EntityReference>("sprk_createdbyperson")!.Id == Submitter);
+        creates.Skip(1).Should().OnlyContain(c => !c.Attributes.ContainsKey("sprk_submittedby"), "lines and the approval have no such column");
+        store.SubmissionReadColumns.Should().OnlyContain(columns => columns.Contains("sprk_submitter"), "the re-read must ask for the contact");
+    }
+
+    [Fact(DisplayName = "049 C3 (D-131): a SPA submission with a contact and no linked user commits without sprk_createdbyperson and warns once")]
+    public async Task ContactOnly_CommitsWithoutCreatorPerson_AndWarnsOnce()
+    {
+        var harness = new ProcessorHarness();
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(), InvoiceSubmissionProcessorTests.FeeLine(hours: 2m, amount: 1000m)];
+        var outcome = await harness.RunAsync();
+        var logger = new CapturingLogger();
+        var store = new Store { Logger = logger };
+        store.Submission.Attributes.Remove("sprk_createdbyperson");
+        store.Submission["sprk_submitter"] = new EntityReference("contact", SubmitterContact);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var creates = store.Transactions.Single().OfType<CreateRequest>().Select(c => c.Target).ToList();
+        creates.Select(c => c.LogicalName).Should().Equal("sprk_invoice", "sprk_billingevent", "sprk_billingevent", "sprk_invoiceapproval");
+        creates.Should().OnlyContain(c => !c.Attributes.ContainsKey("sprk_createdbyperson"), "an unknown person refuses nothing; the row records nobody");
+        creates[0].GetAttributeValue<EntityReference>("sprk_submittedby")!.Id.Should().Be(SubmitterContact);
+        var warnings = logger.Entries.Where(e => e.Level == LogLevel.Warning).ToList();
+        warnings.Should().ContainSingle();
+        warnings[0].Message.Should().Contain("sprk_createdbyperson").And.Contain(Submission.ToString())
+            .And.NotContain(SubmitterContact.ToString(), "no personal data in a log (ADR-015)");
+    }
+
+    [Fact(DisplayName = "049 C3 (D-131): an internal submission (person, no contact) stamps the person and no sprk_submittedby")]
+    public async Task PersonOnly_NoSubmittedBy()
+    {
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var logger = new CapturingLogger();
+        var store = new Store { Logger = logger };
+        store.Submission["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var creates = store.Transactions.Single().OfType<CreateRequest>().Select(c => c.Target).ToList();
+        creates.Should().OnlyContain(c => c.GetAttributeValue<EntityReference>("sprk_createdbyperson")!.Id == Submitter);
+        creates.Should().OnlyContain(c => !c.Attributes.ContainsKey("sprk_submittedby"));
+        logger.Entries.Should().NotContain(e => e.Level == LogLevel.Warning);
     }
 
     [Fact(DisplayName = "049 C2 (D-130 3): a submission that records no submitter is refused before any write (fails closed)")]
@@ -569,6 +636,18 @@ public class InvoiceSubmissionPersisterTests
     private static string Describe(OrganizationRequest request) =>
         $"{request.GetType().Name.Replace("Request", string.Empty)} {Target(request).LogicalName}";
 
+    private sealed class CapturingLogger : ILogger<InvoiceSubmissionPersister>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
     private sealed class Store
     {
         public Entity Submission { get; } = new("sprk_invoicesubmission", InvoiceSubmissionPersisterTests.Submission)
@@ -596,15 +675,19 @@ public class InvoiceSubmissionPersisterTests
         public Exception? TotalsFault { get; set; }
         public bool SubmissionDeleted { get; init; }
         public RecordOwnerResolution Owner { get; init; } = RecordOwnerResolution.Owned(TeamId);
+        public ILogger<InvoiceSubmissionPersister> Logger { get; init; } = NullLogger<InvoiceSubmissionPersister>.Instance;
+
+        /// <summary>The column set of every submission re-read.</summary>
+        public List<string[]> SubmissionReadColumns { get; } = [];
 
         public InvoiceSubmissionPersister Build()
         {
             var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
             entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) => entity switch
+                .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) => entity switch
                 {
                     "sprk_invoicesubmission" when SubmissionDeleted => throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"),
-                    "sprk_invoicesubmission" => Copy(Submission),
+                    "sprk_invoicesubmission" => Capture(columns, Copy(Submission)),
                     _ => new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = MatterNumber },
                 });
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
@@ -646,7 +729,7 @@ public class InvoiceSubmissionPersisterTests
                 ownership.Object,
                 new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance),
                 totals.Object,
-                NullLogger<InvoiceSubmissionPersister>.Instance);
+                Logger);
         }
 
         /// <summary>The committed transaction's effect on the submission row (the only row a later read looks at).</summary>
@@ -659,6 +742,12 @@ public class InvoiceSubmissionPersisterTests
                     Submission[column] = value;
                 }
             }
+        }
+
+        private Entity Capture(string[] columns, Entity row)
+        {
+            SubmissionReadColumns.Add(columns);
+            return row;
         }
 
         private static Entity Copy(Entity row)

@@ -326,3 +326,27 @@ invoice (column length not documented in the data-model doc) and on the submissi
 **Verification.** Build 0 errors. Filtered unit suite 5,156 passed / 0 failed / 11 skipped (the part C figure of 5,563 came from another base).
 ArchTests 1,209 passed. Fail-before: against the part B processor 9 tests fail (the three D-126 tests and six C2 ones); with the persister mutated
 (no line / approval stamp, status written in the transaction, no trim) 7 tests fail.
+
+## Part C3 - Submitted By (D-131)
+
+Owner decision (2026-10-19, D-131): `sprk_invoice.sprk_submittedby` (Submitted By), a lookup to `contact`, created live on dev (spaarkedev1). The BFF sets
+it from the external submitter's contact. This supersedes the C2 note that `sprk_submitter` "is not used".
+
+- **Read.** The persister's submission re-read (`SubmissionColumns`) now includes `sprk_submitter` (set at intake for the SPA channel by
+  `InvoiceSubmissionService`); it was not in the explicit column set before.
+- **Write.** When `sprk_submitter` is present, `sprk_submittedby` = that contact is stamped on the INVOICE only (lines and the approval have no such
+  column). Constants: `InvoiceSubmissionPersister.SubmissionSubmitter` and `InvoiceSubmittedBy`.
+- **`sprk_createdbyperson` now follows the BFF-created-row rule** (`RecordOwnershipResolver.ResolveOwnerAsync`: an unknown person refuses nothing, the row
+  records nobody):
+
+| Person (`sprk_createdbyperson`) | Contact (`sprk_submitter`) | Result |
+|---|---|---|
+| present | any | Committed; person on invoice, every line and the approval; contact (if any) as `sprk_submittedby` on the invoice |
+| absent | present | Committed with no `sprk_createdbyperson` on any row; `sprk_submittedby` on the invoice; one Warning (submission id and column name only, ADR-015) |
+| absent | absent | `Refused`, `ebilling.submission.submitter_missing`, before any write (intake recorded nobody: a data fault) |
+
+- **Tests** (`InvoiceSubmissionPersisterTests`): person + contact (invoice carries both, lines and approval the person only, the re-read asks for
+  `sprk_submitter`); contact only (Committed, no row has the person, exactly one Warning without the contact id); internal person only (no
+  `sprk_submittedby`, no warning); the existing neither-case refusal is unchanged.
+- **Owner actions.** The column must reach the SpaarkeMaster solution source by an export from dev. `ExternalAccessModule`'s column allow-list was NOT
+  changed: no SPA surface reads `sprk_submittedby` yet.

@@ -40,7 +40,10 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// automatic rejection), the document's <c>sprk_invoice</c> link, and the submission update (<c>sprk_invoice</c>, the reason code,
 /// <c>sprk_findingsjson</c>). A linked <c>sprk_invoice</c> therefore proves the commit; it is the resume marker. <b>The status is not
 /// written here (D-130 a):</b> the submission stays Processing, and part D writes <see cref="SubmissionPersistResult.TerminalStatus"/> last.
-/// Every created row carries the submitter as <c>sprk_createdbyperson</c> (D-130 3), read from the submission's own stamp.</para>
+/// Every created row carries the submitter as <c>sprk_createdbyperson</c> (D-130 3), read from the submission's own stamp, and the invoice
+/// also carries the external submitter's contact as <c>sprk_submittedby</c> (D-131), read from the submission's <c>sprk_submitter</c>.
+/// A submission that records a contact but no linked user persists without <c>sprk_createdbyperson</c> (the rule for every BFF-created
+/// row: an unknown person refuses nothing, the row records nobody); one that records neither is refused.</para>
 /// <para><b>Deterministic ids.</b> The invoice, line and approval ids derive from the submission id, so a retry after an unknown outcome can
 /// never create a second invoice (a second create of the same id fails), and part D keys Signals before reading anything back.</para>
 /// <para><b>Faults.</b> A transaction fault is <see cref="SubmissionPersistStatus.Retry"/> with nothing persisted and the submission
@@ -59,6 +62,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     internal const string SubmissionReasonCode = "sprk_outcomereasoncode";
     internal const string SubmissionFindingsJson = "sprk_findingsjson";
     internal const string SubmissionCorrelationId = "sprk_correlationid";
+
+    /// <summary><c>sprk_invoicesubmission.sprk_submitter</c> (lookup to contact): the external submitter, set at intake for the SPA channel.</summary>
+    internal const string SubmissionSubmitter = "sprk_submitter";
+
+    /// <summary><c>sprk_invoice.sprk_submittedby</c> (lookup to contact, "Submitted By", D-131): the invoice only, never a line or the approval.</summary>
+    internal const string InvoiceSubmittedBy = "sprk_submittedby";
+
+    internal const string ContactEntity = "contact";
 
     /// <summary><c>sprk_invoicesubmission.sprk_findingsjson</c> MaxLength (1,048,576).</summary>
     internal const int FindingsJsonMaxLength = 1_048_576;
@@ -146,8 +157,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    /// <summary>The submission columns the persister re-reads: the snapshot's (core record, link, status) and the correlation id.</summary>
-    internal static string[] SubmissionColumns { get; } = [.. SubmissionSnapshot.Columns, SubmissionCorrelationId, RecordCreatorPerson.Column];
+    /// <summary>The submission columns the persister re-reads: the snapshot's (core record, link, status), the correlation id and the submitters.</summary>
+    internal static string[] SubmissionColumns { get; } = [.. SubmissionSnapshot.Columns, SubmissionCorrelationId, SubmissionSubmitter, RecordCreatorPerson.Column];
 
     /// <summary>The invoice id for a submission: deterministic, so a retry reuses it and can never create a second invoice.</summary>
     public static Guid InvoiceIdFor(Guid submissionId) => IdOf($"ebilling-invoice-{submissionId:D}");
@@ -194,13 +205,30 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             };
         }
 
-        // D-130 (3): the submitter, recorded at intake as the submission's own sprk_createdbyperson (a systemuser; the SPA caller's linked
-        // user or the internal caller). Read before anything is built; absent fails closed, since a created row would carry no creator.
-        var submitter = current.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)?.Id;
-        if (submitter is not { } submitterId || submitterId == Guid.Empty)
+        // D-130 (3) / D-131: the submitter, recorded at intake on the submission as sprk_createdbyperson (a systemuser: the SPA caller's linked
+        // user or the internal caller) and, for the SPA channel, as sprk_submitter (the caller's contact). Read before anything is built.
+        //   person present                  -> stamped on the invoice, every line and the approval (D-130 3);
+        //   person absent, contact present  -> an external user with no linked Dataverse user: persist WITHOUT sprk_createdbyperson (the rule of
+        //                                      RecordOwnershipResolver for BFF-created rows: an unknown person refuses nothing), and warn once;
+        //   both absent                     -> intake recorded nobody at all, a data fault: refused before any write.
+        // The contact, when present, is also stamped on the invoice only as sprk_submittedby (D-131).
+        var submitter = current.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)?.Id is { } person && person != Guid.Empty
+            ? person
+            : (Guid?)null;
+        var submittedBy = current.GetAttributeValue<EntityReference>(SubmissionSubmitter)?.Id is { } contact && contact != Guid.Empty
+            ? contact
+            : (Guid?)null;
+        if (submitter is null && submittedBy is null)
         {
-            _logger.LogWarning("Invoice submission {SubmissionId}: it records no submitter ({Column} is empty); nothing persisted", submissionId, RecordCreatorPerson.Column);
+            _logger.LogWarning("Invoice submission {SubmissionId}: it records no submitter ({Column} and {ContactColumn} are empty); nothing persisted",
+                submissionId, RecordCreatorPerson.Column, SubmissionSubmitter);
             return Result(SubmissionPersistStatus.Refused, submissionId, SubmitterMissingCode);
+        }
+
+        if (submitter is null)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: it records a contact but no linked user ({Column} is empty); persisting without it",
+                submissionId, RecordCreatorPerson.Column);
         }
 
         // ── Core-record fields (013) and owner (uac-r2), once: every row is filed under the same core record ──
@@ -232,10 +260,18 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         var correlation = Cap(correlationId ?? current.GetAttributeValue<string>(SubmissionCorrelationId));
         var lines = BuildLines(outcome, invoiceId, core, resolverFields, owner, correlation);
         FillInvoice(invoice, outcome, resolverFields, owner, correlation);
-        RecordCreatorPerson.Stamp(invoice, submitterId);
-        foreach (var line in lines)
+        if (submitter is { } creator)
         {
-            RecordCreatorPerson.Stamp(line, submitterId);
+            RecordCreatorPerson.Stamp(invoice, creator);
+            foreach (var line in lines)
+            {
+                RecordCreatorPerson.Stamp(line, creator);
+            }
+        }
+
+        if (submittedBy is { } contactId)
+        {
+            invoice[InvoiceSubmittedBy] = new EntityReference(ContactEntity, contactId);
         }
 
         var initial = outcome.Kind == SubmissionEvaluationKind.AutoRejected ? InvoiceLifecycleStatus.Rejected : InvoiceLifecycleStatus.InReview;
@@ -249,7 +285,10 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         if (outcome.Kind != SubmissionEvaluationKind.AutoRejected)
         {
             approval = BuildApproval(outcome, invoiceId, core, resolverFields, owner);
-            RecordCreatorPerson.Stamp(approval, submitterId);
+            if (submitter is { } approvalCreator)
+            {
+                RecordCreatorPerson.Stamp(approval, approvalCreator);
+            }
         }
 
         var findingsJson = BuildFindingsJson(outcome, invoiceId);
