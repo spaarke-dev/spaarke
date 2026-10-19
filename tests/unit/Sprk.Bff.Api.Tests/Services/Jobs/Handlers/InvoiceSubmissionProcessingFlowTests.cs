@@ -252,13 +252,7 @@ public sealed class InvoiceSubmissionProcessingFlowTests
             var ownership = new Mock<IRecordOwnershipResolver>(MockBehavior.Strict);
             ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(RecordOwnerResolution.Owned(TeamId));
-            var totals = new Mock<IInvoiceTotalsService>(MockBehavior.Strict);
-            totals.Setup(t => t.RecalculateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-                .Returns((Guid id, CancellationToken _) =>
-                {
-                    TotalsCalls.Add(id);
-                    return Task.FromResult(new InvoiceTotalsCalculation(0m, 0m, 0m, 0m, 0m, new Dictionary<Guid, decimal>(), null));
-                });
+            var totals = BuildTotals();
             return new InvoiceSubmissionPersister(
                 Entities.Object,
                 recordTypes.Object,
@@ -268,9 +262,23 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 NullLogger<InvoiceSubmissionPersister>.Instance);
         }
 
+        // One totals double for the persister and the after-steps (the after-steps re-run the totals on resume, 13a A).
+        private Mock<IInvoiceTotalsService> BuildTotals()
+        {
+            var totals = new Mock<IInvoiceTotalsService>(MockBehavior.Strict);
+            totals.Setup(t => t.RecalculateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken _) =>
+                {
+                    TotalsCalls.Add(id);
+                    return Task.FromResult(new InvoiceTotalsCalculation(0m, 0m, 0m, 0m, 0m, new Dictionary<Guid, decimal>(), null));
+                });
+            return totals;
+        }
+
         private InvoiceSubmissionAfterSteps BuildAfterSteps() => new(
             Entities.Object,
             Locks,
+            BuildTotals().Object,
             BuildSink(),
             NullLogger<InvoiceSubmissionAfterSteps>.Instance,
             WriteSignalAsync,
