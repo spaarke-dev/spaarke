@@ -21,6 +21,7 @@ import {
   CLOSURE_ENUMERATION_FAILED_REASON_CODE,
   CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE,
   CLOSURE_PARTIAL_REVOCATION_REASON_CODE,
+  CLOSURE_PERMISSION_AMBIGUOUS_REASON_CODE,
   CLOSURE_TOO_MANY_GRANTS_REASON_CODE,
 } from '../closureService';
 import { apiErrorFor } from '../../../__tests__/helpers/authenticatedFetchDouble';
@@ -175,5 +176,22 @@ describe('CloseProjectDialog — failure outcomes (#2104)', () => {
     expect(screen.getByText(detail)).toBeInTheDocument();
     expect(screen.queryByText(RETRY_LINE)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', TRY_AGAIN)).not.toBeInTheDocument();
+  });
+
+  it('#2104 round 3 — permission_ambiguous: a warning with the server detail, and no retry (a retry refuses again)', async () => {
+    const detail =
+      'All 1 external grants for project p-1 were revoked, but 1 revoked grantee(s) match more than one permission on ' +
+      'the project’s SPE container, or a permission whose holder cannot be verified, so none of those permissions was ' +
+      'removed and they may retain file access. Retrying the closure will not change this. An administrator must ' +
+      'resolve the container’s permissions in the SPE admin app (the project’s container, its Permissions).';
+    renderDialog(jest.fn().mockRejectedValue(closureProblem(CLOSURE_PERMISSION_AMBIGUOUS_REASON_CODE, detail)));
+    await confirmClosure();
+
+    expect(await screen.findByText('Closure incomplete')).toBeInTheDocument();
+    expect(screen.queryByText('Closure failed')).not.toBeInTheDocument();
+    expect(screen.getByText(detail)).toBeInTheDocument();
+    expect(screen.queryByText(RETRY_LINE)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', TRY_AGAIN)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /close this dialog/i })).toBeInTheDocument();
   });
 });

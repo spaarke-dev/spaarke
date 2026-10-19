@@ -10,6 +10,7 @@ import {
   CLOSURE_ENUMERATION_FAILED_REASON_CODE,
   CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE,
   CLOSURE_PARTIAL_REVOCATION_REASON_CODE,
+  CLOSURE_PERMISSION_AMBIGUOUS_REASON_CODE,
   CLOSURE_TOO_MANY_GRANTS_REASON_CODE,
   NON_RETRYABLE_CLOSURE_REASON_CODES,
   closeSecureProject,
@@ -77,14 +78,20 @@ describe('closeSecureProject — thrown failures', () => {
 });
 
 describe('closure reason codes (#2104 round 2)', () => {
-  it('mirror ProjectClosureEndpoint literally, and only the two bounded leaves are non-retryable', () => {
+  it('mirror ProjectClosureEndpoint literally, and only the three unfixable leaves are non-retryable', () => {
     expect(CLOSURE_ENUMERATION_FAILED_REASON_CODE).toBe('sdap.closure.incomplete.enumeration_failed');
     expect(CLOSURE_PARTIAL_REVOCATION_REASON_CODE).toBe('sdap.closure.incomplete.partial_revocation');
     expect(CLOSURE_CONTAINER_NOT_CLEARED_REASON_CODE).toBe('sdap.closure.incomplete.container_not_cleared');
     expect(CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE).toBe('sdap.closure.incomplete.organization_too_large');
     expect(CLOSURE_TOO_MANY_GRANTS_REASON_CODE).toBe('sdap.closure.incomplete.too_many_grants');
+    // #2104 round 3
+    expect(CLOSURE_PERMISSION_AMBIGUOUS_REASON_CODE).toBe('sdap.closure.incomplete.permission_ambiguous');
     expect([...NON_RETRYABLE_CLOSURE_REASON_CODES].sort()).toEqual(
-      [CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE, CLOSURE_TOO_MANY_GRANTS_REASON_CODE].sort()
+      [
+        CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE,
+        CLOSURE_TOO_MANY_GRANTS_REASON_CODE,
+        CLOSURE_PERMISSION_AMBIGUOUS_REASON_CODE,
+      ].sort()
     );
   });
 });

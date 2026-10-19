@@ -32,6 +32,14 @@ export const CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE = 'sdap.closure.incomple
 export const CLOSURE_TOO_MANY_GRANTS_REASON_CODE = 'sdap.closure.incomplete.too_many_grants';
 
 /**
+ * #2104 round 3: the closure's third NON-retryable leaf. A revoked grantee matches more than one permission on the
+ * project's container, or a permission whose holder cannot be verified, so nothing was removed for them; a retry reads
+ * the same permissions and refuses again. The server's `detail` tells an administrator to resolve the container's
+ * permissions in the SPE admin app. MUST match `ProjectClosureEndpoint.ClosurePermissionAmbiguousReason`.
+ */
+export const CLOSURE_PERMISSION_AMBIGUOUS_REASON_CODE = 'sdap.closure.incomplete.permission_ambiguous';
+
+/**
  * #2104 round 2: the grants WERE revoked, but some grantee's file access on the project's container could not be
  * confirmed removed. Retryable. MUST match `ProjectClosureEndpoint.ClosureContainerNotClearedReason`.
  */
@@ -53,6 +61,7 @@ export const CLOSURE_ENUMERATION_FAILED_REASON_CODE = 'sdap.closure.incomplete.e
 export const NON_RETRYABLE_CLOSURE_REASON_CODES: readonly string[] = [
   CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE,
   CLOSURE_TOO_MANY_GRANTS_REASON_CODE,
+  CLOSURE_PERMISSION_AMBIGUOUS_REASON_CODE,
 ];
 
 // ---------------------------------------------------------------------------

@@ -18,7 +18,9 @@
  *                   happened for the server's reason code (#2104 round 2): e.g. `container_not_cleared` revoked the
  *                   access records, so it never says "The project was not closed".
  *   5. Incomplete — #2104: a failure a retry cannot fix (a revoked organization too large for one closure to
- *                   sweep, `organization_too_large`; more grant rows than one closure reads, `too_many_grants`).
+ *                   sweep, `organization_too_large`; more grant rows than one closure reads, `too_many_grants`;
+ *                   a grantee whose container permission match is ambiguous or unverifiable,
+ *                   `permission_ambiguous`, #2104 round 3).
  *                   Warning MessageBar with the server's detail (what an administrator must do) + "Close" — never
  *                   "Try Again", which would promise a retry that meets the same bound.
  *
