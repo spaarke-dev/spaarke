@@ -17,7 +17,7 @@
 | **Next Action** | Sequence after impl049core: (1) D-122 wiring: after Signals read the open set on invoice+lines ONCE via the dedupe-key lookup (latest episode, incl. ones Acted by this record), store with setReadAtUtc in findings JSON BEFORE the record; record over stored set; close each via CloseActedByAutomatedDecisionAsync (LeftAsIs listed + Info log; ChangedSinceRead → Retry); existing record with no stored set → empty set (pre-D-122 hash); a listed Signal deleted later → OwnerRefused is permanent, handle it; test fake must tell findings writes from terminal writes. (2) F1-3: code-shape/cap firmCode, the D-91 read invoice number (no spaces, up to 40 chars, else cite no value), raw-text rule facts; run PreflightRefusal on every plan entry at persist; deterministic refusals + permanent skip codes = permanent; a permanently refused Signal does not block the record (log, count, record in findings). (3) Held presentation for Blocked: headline "Invoice held for review", sentence "The rejection rule would reject this invoice: <deciding reason>", Held evidence text ebilling.submission.blocked; CODE_PATTERN pin vs RuleReview ruleTypes.ts:63 (or reword); one after-steps test over the real SignalWriter harness; notes for K4 planner, Held reason stripped on read, K2 raw codes for 130/133, K3 interleaving. (4) Pick part E (replace the stub), full verify, send all to ontology-r1, one Opus adversarial review, publish delta, mark 049 done |
 
 ### Ranges out for review
-- ontology-r1 PASS: D-130 closed (review round ae5197e25 + re-check fixes 77690aa4f). Earlier PASS: 072 (3ce07e0e3), 049 D-104 (295aa332a), D-125 (183c2cf47). Part D 29e91a285..8e3930c8d under their review (C:\wts-eb130); D-122 close path spec received from them.
+- ontology-r1 PASS: D-130 closed (review round ae5197e25 + re-check fixes 77690aa4f). PASS 2026-10-19: 452acb6c0 PreflightRefusal, 07a2f67b3 D-170 sweep; 650109d97 close method approved once the F3-1..3 tests land. Earlier PASS: 072 (3ce07e0e3), 049 D-104 (295aa332a), D-125 (183c2cf47). Part D 29e91a285..8e3930c8d under their review (C:\wts-eb130); D-122 close path spec received from them.
 
 ### Owner decisions this session
 D-111 to D-120 are in the decisions log.
@@ -66,7 +66,7 @@ D-111 to D-120 are in the decisions log.
   - no line upload route before #2047;
   - the dev BFF and SPA deploy only through SPA-r3;
   - never use bare git stash or --no-verify.
-- **Open:** G-18 (lint-staged shared stash, not filed); DEF-015; ISS-009; #2010, #2011, #2045, #2077, #2087, #2090, #2100, #2106, #2107, #2108.
+- **Open:** G-18 (lint-staged shared stash, not filed); DEF-015; ISS-009; #2010, #2011, #2045, #2077, #2087, #2090, #2100, #2106, #2107, #2108, #2118 (DEF-026, billing Duplicate detail after a later Secure transition; ontology DI-120).
 
 ---
 

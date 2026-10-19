@@ -906,3 +906,19 @@ Each restamps afterwards, but none refuses any of these:
 **Suggested fix**: Remove the arm or make it throw; add a loop over the system types with the system expectations (Flag only, never reject-capable, never authorable).
 
 ---
+
+### DEF-026 — Billing Duplicate Signal keeps the prior invoice's detail after a later Secure transition
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner picks the scope and the owning project when scheduled) |
+| **Urgency** | medium (information exposure across a secure wall, after the fact) |
+| **Filed** | 2026-10-19 (by ontology-r1 as their DI-120, label ontology-deferred) |
+| **Source** | ontology-r1 review of the D-170 billing PolicyRetired sweep (`07a2f67b3`); facts from ebilling-r1 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2118 |
+
+**Description**: D-112 withholds a Duplicate finding's detail only at write time. A same-partition Duplicate renders `duplicateOf.trackingNumber` (the earlier invoice's tracking number) and, for line reasons, the matched line's date and timekeeper into `sprk_sentence` and the fact snapshot (`BillingRuleCatalogue.cs:131`, `Handlers/DuplicateHandler.cs`). If the prior's core record later becomes Secure, or the subject ends up behind a different wall, the stored Signal still shows that detail. Nothing re-derives the root sets (`SecureChildShareSynchronizer.SecureRootsAboveAsync`) after the write. No other billing type quotes a record outside its own subject family. The D-123 stored-evidence redaction never runs on billing Signals.
+
+**Suggested fix (owner options)**: (a) re-check on a Secure transition and redact or close the affected Duplicate Signals; (b) re-check on read in `SignalReadService`; (c) accept as a known limit (a tracking number plus one line's date and timekeeper).
+
+---
