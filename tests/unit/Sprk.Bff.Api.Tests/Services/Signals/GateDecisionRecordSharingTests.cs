@@ -451,6 +451,8 @@ public sealed class GateDecisionRecordSharingTests
             .WithUser(Reader)
             .WithGateRecord(RecordId, CommunicationId, Owner)
             .Share(GateSharingWorld.Communication, CommunicationId, Reader);
+        // At write a team-owned communication is asked of the resolver; the Secure answer is the reconciler's, so nothing is assigned.
+        world.OwnerAnswers(RecordOwnerResolution.Owned(secureTeam) with { IsSecureOwner = true });
 
         if (path == Via.AtWrite)
             await world.Sharing.ShareAtWriteAsync(RecordId, CommunicationId, Owner);
@@ -458,6 +460,8 @@ public sealed class GateDecisionRecordSharingTests
             await world.Sharing.MirrorCommunicationSharesAsync(CommunicationId, CancellationToken.None);
 
         world.RecordSharees(RecordId).Should().BeEmpty("D-123: a Secure-team-owned communication's sharees are the synchronizer's");
+        world.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning, "the Secure answer is a defined outcome, not a failed re-own");
+        world.Calls.Should().NotContain(c => c.StartsWith("assign:", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -750,6 +754,10 @@ public sealed class GateDecisionRecordSharingTests
 
         await world.Sharing.ShareAtWriteAsync(RecordId, CommunicationId, Owner);
 
+        // The Secure answer is left to SecureChildReconciler, whose recent-changes pass picks up sprk_decisionrecord (SecureChildLineage);
+        // nothing is re-owned here, so the record stays user-owned until that pass runs.
+        world.Ownership.Verify(r => r.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Times.Once);
+        world.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning, "a Secure answer is a defined outcome, not a failed re-own");
         world.Calls.Should().NotContain(c => c.StartsWith("assign:", StringComparison.Ordinal), "a Secure answer is the SecureChildReconciler's");
         world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owninguser")?.Id.Should().Be(Owner);
         world.Calls.Should().NotContain(c => c.StartsWith("grant:", StringComparison.Ordinal));

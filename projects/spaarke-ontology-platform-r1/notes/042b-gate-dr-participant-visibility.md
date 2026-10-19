@@ -227,3 +227,9 @@ value; the only other caller of `ShareAtWriteAsync` is `DecisionRecordWriter`, w
 
 **Known limit (from the #2110 review).** uac-r2's same-parent skip (`ChildRecordEndpoints.cs:542`, `DataverseDocumentsEndpoints.cs:225`, on their
 branch) removes one retry path for a gate record whose earlier re-own failed (EventId 50317). A real move still retries it.
+
+**Known limits (review round, 2026-10-19).**
+- (a) A thread join that lands AFTER the at-write read of the communication is covered only by uac-r2 PR #2110 (`JoinThreadAsync` -> `AfterRefileAsync` -> `ReownAfterFilingAsync`). That PR is not yet on master or on this branch. Until it merges, a late join leaves the record owned by the user who decided.
+- (b) For a team-owned communication the resolver answers either Secure or the communication BU's default team (`RecordOwnershipResolver.cs` ~:1529, ~:1615); it never answers Unchanged. A communication reassigned to a queue team or to another BU's team inside the window therefore re-owns the record to that BU's default team, and the decider can lose read. This is not a regression: the writer already does the same when the communication is team-owned at decision time. It is consistent with D-169.
+- (c) The Secure answer adds no participant share and keeps the record user-owned until the `SecureChildReconciler` recent-changes pass picks it up (`SecureChildLineage` covers `sprk_decisionrecord`). A Refused answer now logs `FilingReownFailed` (50317), where before it was skipped silently.
+- (d) The team-owned check reads only `owningteam`. A row with an `ownerid` of type team and no `owningteam` would fall through to "not owned by a user". Dataverse always populates `owningteam`, so this is not reachable today.

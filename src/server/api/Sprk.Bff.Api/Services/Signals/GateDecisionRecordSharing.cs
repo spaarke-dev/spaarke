@@ -32,7 +32,7 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// again: when the record is now owned by a team (a filing re-owned it in between) or the owner cannot be read, every grant the pass made is
 /// revoked. A communication owned by any team (the Secure Record team, or a category-routed team) is never mirrored.</para>
 /// <para><b>Filing</b> (<see cref="ReownAfterFilingAsync"/>, called by <c>SecureChildReconciler.AfterRefileAsync</c>; and at write when the
-/// communication was filed between the writer's owner decision and its create). Each user-owned gate record of the
+/// communication was filed or team-owned between the writer's owner decision and its create). Each user-owned gate record of the
 /// communication is asked of <see cref="IRecordOwnershipResolver"/> with the gate writer's own question (the communication first, as content
 /// of it, plus the record's live core-ancestor stamps). An ordinary team answer is assigned through the ontology writer's identity
 /// (<c>prvAssignsprk_DecisionRecord</c>, D-33c; it holds no Write on the table), the access caches are evicted, and the owner is read back;
@@ -105,7 +105,7 @@ public sealed class GateDecisionRecordSharing
     /// <summary>
     /// After the gate record of an unfiled communication was created owned by <paramref name="ownerUserId"/>: shares it, Read only, with the
     /// communication's current internal sharees. When the communication now reads as FILED (a filing landed between the writer's owner decision
-    /// and its create, and that filing's <c>AfterRefileAsync</c> found no record yet) or the communication became team-owned through a thread join (which stamps
+    /// and its create, and that filing's <c>AfterRefileAsync</c> found no record yet) or the communication became team-owned (for example by a thread join, which stamps
     /// no parent lookup), the record is re-owned as a filing would. Never throws; runs on <see cref="CancellationToken.None"/> (the record has landed).
     /// </summary>
     public async Task ShareAtWriteAsync(Guid recordId, Guid communicationId, Guid ownerUserId)
@@ -229,8 +229,8 @@ public sealed class GateDecisionRecordSharing
         {
             // A thread join stamps only the thread and a team owner, never the communication's own parent lookups, so IsFiled is false here.
             _logger.LogInformation(
-                "Communication {CommunicationId} is team-owned; its gate Decision Records follow the communication's owner and no participant share " +
-                "is added (D-169).", communicationId);
+                "Communication {CommunicationId} is team-owned; no participant share is added (D-169); at write the record is re-owned " +
+                "through the ownership resolver.", communicationId);
             return true;
         }
 
