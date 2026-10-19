@@ -110,6 +110,9 @@ A submission that fails before it is read has no invoice. Two consequences:
 - Record before mutating, or run the recorder's reads first. Its refusals that depend on Dataverse reads (unknown policy version, missing Signal, undetermined subject, contact read fault) happen after Preflight, so a caller that changes invoice status first can be left with a changed status and no Decision Record (K-3).
 - Serialise decisions per invoice (one at a time per invoice). The recorder's "already recorded" check and its create are not atomic (K-4).
 - Build Values the same way on every attempt (same types, same decimal scale), so that an honest retry hashes to the same content (K-5, unless 074's follow-up normalises decimals).</constraint>
+    <constraint source="072 part L adversarial passes (2026-10-18)">Two more caller obligations for the evaluation request:
+- Build BillingEvaluationRequest.CoreRecord from the same submission read that files the invoice, and file the invoice under that core record. If the submission's core record changed between evaluation and persistence (a re-file is a real operation since the master merge), re-evaluate; never persist findings judged under a different core. Otherwise a finding judged under a secure core could show a prior's detail on an invoice filed under an ordinary one (D-112).
+- Pass the allocated tracking number (sprk_submissionsequence, D-87) as BillingEvaluationRequest.TrackingNumber. A null tracking number makes Duplicate findings fall back to the headline text.</constraint>
   </constraints>
 
   <knowledge>
