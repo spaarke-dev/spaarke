@@ -1,83 +1,55 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Format:** this file holds the CURRENT state only. Rewrite it at each checkpoint, never prepend to it, and keep it at or under 10 KB.
+> **Format:** this file holds the CURRENT state only. Rewrite it at each checkpoint (never prepend), and keep it at or under 10 KB.
 > - **Standing rules:** the project `CLAUDE.md`.
-> - **Decisions:** the round log `notes/session27-owner-decisions-and-research.md`, now at **round 103 (2026-10-18)**.
+> - **Decisions:** `notes/session27-owner-decisions-and-research.md`, now at **round 104 (2026-10-19)**.
 > - **Defer list:** `notes/defer-issues.md`.
-> - **Delete inventory:** `notes/core-record-delete-inventory.md`.
-> - **Narrative:** the checkpoint commit messages.
+> - **Delete design:** `notes/core-record-delete-design.md`.
+> - **Gates:** `notes/batch7-live-gates-2026-10-17.md`.
+> - **Narrative:** the commit messages.
 
-> **Last Updated**: 2026-10-19 (checkpoint #51).
+> **Last Updated**: 2026-10-19 (checkpoint #52).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Mode** | Final push to release. Run the fix-round loop, then merge when BOTH required checks (Router + "Client lint (type-aware ratchet)") are green, then deploy via R3. A task closes on merge + deploy + a server-side gate. |
-| **Fix bar** | Choose the most technically correct, best-practice, code-efficient fix. Never take the quick route. Add no complexity without value. Every defect found is fixed or filed. |
-| **Order** | ~~186~~ → ~~099b~~ → ~~#2084~~ (947d98e31) → 036 (each merges after the owner items below), then #2084 (after 099b), then the #2091 thread-join follow-up (after ontology 042b merges), then the 090 wrap-up and the UAT checklist. |
+| **Mode** | Final push. Fix-round loop; merge only when BOTH required checks (Router + "Client lint (type-aware ratchet)") are green; deploy via R3. A task closes on merge + deploy + a server-side gate. |
+| **Fix bar** | The most technically correct fix; no complexity without value. Every defect found is fixed or filed. |
+| **Agents** | Opus for executors and verifiers. Helper scripts get a unique prefix in a private folder; the scratchpad is shared (memory `agent-scratch-script-names`). |
 
-## OWNER items outstanding (round 103, 2026-10-18)
-1. **036 ADR conflict (auth): STILL OPEN.** The owner leans C and asked what the conflict is. It was explained plainly on 2026-10-18; the C / B / A answer is pending. 036 is held until then.
-2. Role changes on dev: **DONE** (round 103 item 2). Other environments need the same edits at provisioning.
-3. Model 1, ACME: the dry run found 0 changes, so nothing was applied (round 103 item 3).
-4. Core-record delete: **APPROVED as D1–D8** (round 103 item 4). The design is `notes/core-record-delete-design.md` (4a353772b). D9 is already on master. **Owner Q1–Q5 are pending:** the named role A/B, SPE recycle bin vs permanent, empty dedicated containers, a DR for the delete, and Signals cited by kept DRs. Q6 (rate cards, eBilling tables) is with ebilling.
-5. 036 flag: R3 is tasked and has acknowledged. It needs the merge sha, a deploy, and the owner's confirmation in R3's session.
+## OWNER items outstanding (asked 2026-10-19)
+1. **A Secure dev matter:** make one, or name one. The #2102 gate steps 2 and 4a are blocked: dev has 0 Secure matters. Ontology's `rule_held_secure` smoke waits on a probe UAC holds for it.
+2. **"Strip the SharePoint four"** from the SRO role on dev. Remove those 4 by name ONLY; never run the §5.4 "everything outside the file" loop until ebilling #1911 merges (4 invoice-family Reads are not yet in master's config). An approval relayed by ebilling was NOT accepted; it must come in this session.
+3. **036: C / B / A.** Explained in full with the recommendation (C: app-only named-principal for every systemuser, so no OBO). Pending.
+4. **Delete Q1–Q5** (re-sent 2026-10-19): the named role A/B, the SPE recycle bin vs permanent, keeping empty dedicated containers, a DR for each delete, and Signals cited by kept DRs.
+5. **186 guest sign-in gate:** the owner is available. Needed from them: a NEW unlicensed guest whose home is bc3aa7f4 (manual invite, dev only), its sign-in name, and "OK to remove and restore Create" on the Workforce role's sprk_servicerequest Create (step 3).
+   - Preconditions verified: the SPA is tenant-pinned (R3 ebc74b331); `WorkforceIdentity__CustomerTenantIds__1` holds bc3aa7f4; the Workforce role has the servicerequest privileges.
+   - SPA: `https://green-dune-0c4f1221e.7.azurestaticapps.net`. Steps: 186 design §6.
+   - Watch the `email` claim after R3 stage B (`removeUnverifiedEmailClaim`); without it, registration answers `registration_email_missing`.
+
+## Done 2026-10-19
+- **SRO role (round 104):** prvReadsprk_Policy and prvReadsprk_PolicyVersion added on spaarkedev1; VERIFY PASS, 32/32 tables, 40 privileges. Ontology re-probed: stable over 3 polls.
+- **#2104 → `d301c0675`, DEPLOYED** (R3 00aba6d99, 21:11Z). It covers the no-email revoke 500 (#2103) and the internal user's role deletion (#2105), plus three-state container answers. **Server gate RUNNING** (agent, `gate2104/`). Filed: #2111 (email PII in logs), #2112 (group permissions), #2116 (50-page cap), #2117 (systemuser-oid trust).
+- **#2110 → `2b07480ab`, merged, NOT deployed** (sent to R3 for the next deploy). Thread join and reply-into-thread run the after-re-file step; same-parent skip; guarded thread reconcile. Ontology PASS. Follow-ups are on #2115.
+- **#2102 (#2084): DEPLOYED** (R3 283466d40). Gate PARTIAL: literals, must-not-fire, ordinary publish and App Insights PASS; the Secure steps are blocked (item 1).
+- **Ontology #2113** (team-owned communication → DR re-own): UAC OK at 09ba17258. Filed #2114 (stale DR after an owner-only change).
+- Live dev BFF: `1.0.0+00aba6d99`; rollback 283466d40.
 
 ## Open PRs (UAC)
 | PR | Issue | Worktree / branch | State |
 |---|---|---|---|
-| **#2078** (draft) | #1074, #1567 (036) | C:/wt036 `feat/uac-036-fr20-flag-gated-swap` @ **e7a8392bb** (pushed; master merged at 953fd6446) | Owner decisions (a) and (f) are built.<br>- **(a)**: a WorkforceHome-linked systemuser is confirmed app-only, naming the principal.<br>- **(f)**: `$orderby=modifiedon desc`, CacheVersion 2.<br>**Adversarial pass 1: 0 F.** Its K-items, to fix in the next round (batched with the owner's ADR answer):<br>- add a Verify bullet (vi) to guide §12.8 for a WorkforceHome live check;<br>- soften the guide's "exactly what the model-driven app allows" (team-inherited roles are an open question);<br>- add a 15 s linked timeout on the app-only calls;<br>- update the probe comments at :11 and :192-196.<br>The ADR edits are drafted in `notes/036-adr-edits-owner-a-f.md`. They are **NOT applied**: hold them until the owner's C/B/A answer. B1 wording note: the app-only calls DO send MSCRMCallerID, so "impersonating" is accurate. Pass 2 runs after that round. |
+| **#2078** (draft) | #1074, #1567 (036) | C:/wt036 `feat/uac-036-fr20-flag-gated-swap` @ e7a8392bb | Held for owner item 3.<br>- **Next round:** pass-1 K-items (guide §12.8 bullet vi; soften "exactly what the MDA allows"; a 15 s linked timeout on app-only calls; probe comments :11 and :192-196), plus Path C if chosen.<br>- **ADR edits:** drafted in `notes/036-adr-edits-owner-a-f.md`; the main session applies them.<br>- **Then:** pass 2, merge, R3 deploy, then the flag flip in R3's session and gates (i)–(v); close #1074 and #1567. |
 
-## Merged 2026-10-18/19
-- **#2102 (#2084) `947d98e31`**: matter-scoped rules and their versions join the secure family. Publish is refuse-before-write (409 `rule_held_secure`, 400 `scope_matter_secured` only when the requested matter is the sole cause, 503 `owner_unavailable`). One citation predicate, `(sprk_signal, sprk_policy)`. Ontology ran 2 passes plus 2 re-checks, and is CLEAN. **Next:** the owner approves SRO Read on policy/policyversion on dev (send ontology before and after notices), R3 deploys (BFF before or with the Console), then the live gate.
-- **#2063 (099b) `d7eabba3b`**: DEPLOYED (44f802a1d). Backfill of 101 rows, VERIFY PASS. **Live gate PASS** (batch7 notes); #1010 closed and commented. The gate found **#2103** (secure revoke of a no-email contact 500s permanently; task-017 code). Fix in progress in C:/wt2103.
-- **#2061 (186) `49279def1`**: DEPLOYED (44f802a1d). Server side clean. **Live gate needs the owner:** an unlicensed guest's sign-in and registration (186 design §6, 7 steps).
-- **#2094 `1473b34c6`** (#2091, part): the playbook update node, DataverseUpdateHandler and the field-mapping push now call `SecureChildReconciler.AfterRefileAsync`.
-  - **Parent changes:** bind-string parent changes are handled in `RecordReparent.ParentChangesWithClearsIn`, with fail-closed bind validation.
-  - **Predicates and reads:** the shared predicate is `RecordReparent.MayRefile`, and its map is `FilingParentOf`. `RefileIsolationRead` (one retry) is used by all 4 writers. `ParentsUnchanged` skips no-op re-files.
-  - **Push:** the push re-files per child; a move out of Secure needs F3 rights.
-  - **Node:** the entity set is resolved by metadata.
-  - **Guard:** the IL guard is `RefileWriterAfterRefileGuardTests`. Its baseline is ThreadResolver, CommunicationService and InvoiceReviewService.
-  - **Reviews:** 2 adversarial passes, 5 rounds.
-  - **Deploy:** R3 has been told to include it in the next deploy. **Next: the live gate after the deploy.**
-  - **Still open on #2091:** the thread join and reply-into-thread. This needs an `AfterRefileAsync` option to skip `ReconcileThreadForFilingAsync`, which must be added AFTER ontology 042b merges (it restructures AfterRefileAsync into RefileStepsAsync). Also fix SecureChildReconciler's stale writer list then.
-- Earlier merges and gates: #2083 (gate PASS, closed), #2074, #2062, #2035, #2025 and earlier. Details are in the git log and the batch6/7 gate notes.
-
-## Filed today (tracked)
-- **#2091**: remaining ThreadResolver/CommunicationService wiring (UAC).
-- **#2095**: InvoiceReviewService document refile skips the hook (ebilling).
-- **#2097**: OutputOrchestrator's EntityReference/Money values are unwritable (orchestrator owner).
-- **#2098**: the push costs about 17 calls per child, and a 500-child push can exceed 230 s (queue it).
-- **#2101**: DELETE /api/v1/documents/{id} orphans the SPE file (found by the delete design).
-- **#2100**: per-family Secure-team guard follow-up for task 178 (ebilling D-112 A1(b), K-i).
-- **#2087**: commented that the UAC part was already fixed by #2083.
+## Next actions
+1. On the #2104 gate result: commit the notes, close #2103 and #2105 if PASS, and report the guest permission shape (does `grantedToV2.user.id` equal the oid?).
+2. After R3 deploys #2110: run the server gate (thread join → step once; same parent → no step).
+3. When the owner names or makes a Secure matter: re-run #2102 steps 2 and 4a, holding the Secure probe for ontology, then delete it after ontology's reply.
+4. Worktrees to remove when idle: C:/wt099b, C:/wt2103, C:/wt2091b (all merged).
+5. Wrap-up 090: the 058 docs and the UAT checklist (include 099c Expiration, the #2076 note and the CIAM UAT PASS from round 102).
 
 ## Peers (state)
-- **R3**: deploy candidate `f111de2b7` (live ad0e9e1a7 + 186 + 099b) has the UAC OK and waits on the owner. #2084 is to follow. The dev backfill dry run planned 101 grant rows (73 / 26 / 2 Secure).
-- **R3 (036)**: the 036 flag flip is tasked and acknowledged. The next deploy includes 186, plus 099b if it has merged by then.
-- **R3 (earlier)**: deploying the dev BFF from master (20e7b71a1; ontology 102b + #2043). UAC said OK. UAC asked R3 to include #2094 next and to send an after-notice.
-- **Ontology**:
-  - **042b (#1876, PR #2096 → docs branch, head 0846c2b8d):** UAC-owned files were verified unchanged since the accepted round-2 diffs. It has the required GateDecisionRecordSharing dependency, the AfterRefileAsync hook for communications, and the Secure end-to-end test. Owner: DRs are internal-only (round 102 item 10). Known limits: #2092 and #2093.
-  - **#2084:** the plan is agreed. UAC builds it after 099b merges, in one PR:
-    - SecureChildLineage `sprk_policy` (via sprk_matter) and `sprk_policyversion` (via sprk_policy);
-    - SRO Read on both tables (an owner role change);
-    - RecordOwnershipResolver treats them as reparentable;
-    - OntologyAdminAuthoringService :1154 `VersionPayload` binds `ownerid@odata.bind` from the resolver, failing closed via `Failure.Unavailable`, leaving :969/:989 untouched;
-    - tests: must-fire, must-not-fire and resolver failure.
-    Ontology runs 2 adversarial passes on it. The code-uniqueness oracle is an accepted known limit.
-- **ebilling**:
-  - **#2095:** fix c7c53ec8b re-check **PASS** (F1 and K1 closed; the FakeRecordShareTable cancelled-token change is approved). It closes once ebilling merges and deploys.
-  - **D-120** (delete design: rate cards, budgets, finance blockers) is folded into the design note (43bd1ccc5).
-  - **015:** re-check PASS.
-  - **D-112:** a secure-root-set subset rule, with 4 conditions on `SecureRootsAboveAsync` (in their 072 POML).
-  - **#2081 invoice part:** rounds 1–3 PASS (update-only impersonated overload plus wire tests). #2090 filed (Optimistic mode is a no-op).
-  - **051:** rounds 2–3 PASS, and UAC's shared-reader change a93d97c49 is accepted.
-  - **On their next master merge**, they resolve the FieldMappingEndpoints conflict with #2094: their guard first, then `UpdateExistingAsync` for invoice tables, then the gone code. UAC re-checks that hunk.
-  - **Still open on #2081:** the other tables, the 4 invoice-family tables, InvoiceReviewService:716 and OwnedChildWrite:421/445.
-- **Provisioning**: #2027 code is done (c28d9dc48, retention -1 plus read-back). Dev is not yet set: they're asking the owner directly. UAC does a read-only check after that.
-
-## Remaining wrap-up 090
-- 058 docs.
-- Keep #1059, #1063 and #1077 open until their owner gates. Keep #961 until 099, and #1074/#1567 until 036. #1014 and #1564 are PARTIAL.
-- The UAT checklist by user type. Include 099c Expiration, the #2076 note, and the **CIAM external user UAT, which the owner reported PASSED (round 102 item 9)**.
+- **R3:** deploys go through R3 with owner approval. Stage B in progress (1e40baad → v2 tokens; BFF accepts both since 283466d40). Every candidate includes 077. The 036 flag flip is tasked to R3.
+- **Ontology:** 042b on master (#2109); 042c compatible. #2113 OK'd. Waiting for a Secure matter for the `rule_held_secure` smoke. Their next docs→master sync must keep `ParentsOf(attrs, table)`.
+- **ebilling:** #1911 (draft) carries the 4 invoice-family SRO Reads (D-86). #2095 re-check PASS; it closes on their merge and deploy. D-120 is folded into the delete design.
+- **Provisioning:** #2027 needs the owner to set it on dev; then UAC runs a read-only check.
