@@ -1236,12 +1236,12 @@ public sealed class DecisionRecordWriter
             d => d.Code is "accept-line" or "reduce-line" or "disallow-line" ? BillingLineEntity : BillingInvoiceEntity,
             StringComparer.Ordinal);
 
-    /// <summary>The subject table a billing code's record is filed under, or null for a code that is not a billing code. The recorder uses
-    /// it so a caller names only the record id and can never pair a code with the wrong table.</summary>
     /// <summary>K4 (ontology-r1): the billing codes, as the "already recorded" lookup's <c>sprk_actioncode In</c> values (ordinal order, so
     /// the query is stable).</summary>
     private static readonly object[] BillingLookupCodes = [.. BillingSubjectByCode.Keys.Order(StringComparer.Ordinal)];
 
+    /// <summary>The subject table a billing code's record is filed under, or null for a code that is not a billing code. The recorder uses
+    /// it so a caller names only the record id and can never pair a code with the wrong table.</summary>
     internal static string? BillingSubjectEntityOf(string? actionCode) =>
         actionCode is not null && BillingSubjectByCode.TryGetValue(actionCode, out var entity) ? entity : null;
 
