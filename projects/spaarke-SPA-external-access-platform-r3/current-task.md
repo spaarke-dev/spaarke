@@ -45,6 +45,9 @@
 - **Next-after-`f111de2b7` dev BFF deploy:** include UAC #2102 (#2084, master `947d98e31`, matter-scoped rules in the secure family).
   - Order: BFF before or with the Console. The RuleWizard maps `ontology.admin.rule_held_secure` and `ontology.admin.owner_unavailable`; an older Console shows the detail text, so there is no regression either way.
   - Dev prerequisite: SRO Read on `sprk_policy`/`sprk_policyversion`, pending the owner's approval in UAC.
+- **UAC #2103** (revoke on a Secure root for a contact with no email always returns 500 `container_not_cleared`; SPE membership is keyed by email):
+  - UAC added the SPA's `POST /api/v1/external/contact-grants/revoke` (`IssuedGrantsList` → `revokeContactGrant`) to the scope.
+  - Any reason-code or status change on either route comes to R3, with its consumers, before merge. Review it against `IssuedGrantsList.tsx` failure handling.
 - **036 live gate:** (UAC relayed 2026-10-18 that the owner tasks R3 with this flip; still needs the owner's DIRECT confirmation here, plus UAC's merge sha.) set `ExternalAccess__ImpersonatedRootSets__Enabled=true` on spaarke-bff-dev, done by R3, ONLY after #2078 is merged and deployed to dev, and after the owner confirms DIRECTLY in this session. UAC's relay doesn't count. Show the exact `az webapp config appsettings set` command first. Rollback: delete the setting, or set it to `false`.
 - **Ontology:** wants before/after restart notices; BFF before Console bundle for 102b.
 - Older items (verify before relying): Copilot agent still on `access_as_user` (`1e40baad`); operator mailbox/Exchange RBAC (H14a); BFF app user `prvDelete` on `sprk_servicerequest`; ISS-001…ISS-005; DEF-001 #1736, DEF-002 #1737, DEF-003 #1828.
