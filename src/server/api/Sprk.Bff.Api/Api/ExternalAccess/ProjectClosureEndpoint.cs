@@ -345,7 +345,7 @@ public static class ProjectClosureEndpoint
                 httpContext,
                 ClosureTooManyGrantsReason,
                 $"{GrantsClause(request.ProjectId, activeRecords.Count, revokedCount)} "
-                + TooManyRevokedGrantsSentence("this")
+                + TooManyRevokedGrantsText("this")
                 + NonRetryableGranteeSentences(container, "this"),
                 accessRecordsRevoked: revokedCount,
                 container);
@@ -474,12 +474,21 @@ public static class ProjectClosureEndpoint
            $"closure will not change {retryScope}. An administrator must remove those members' permissions from the " +
            "project's container in the SPE admin app (the container's Permissions).";
 
-    /// <summary>#2104 round 2 (F2): the too-many-revoked-grants sentence and its NON-retryable administrator instruction.</summary>
-    private static string TooManyRevokedGrantsSentence(string retryScope)
-        => $"The project has more than {MaxRevokedGrantsPerSweep} revoked external grants, more than one closure may "
+    /// <summary>#2104 round 2 (F2): the too-many-revoked-grants text and its NON-retryable administrator instruction,
+    /// starting lower-case so it continues <see cref="GrantsClause"/>'s "…, but" (round 4);
+    /// <see cref="TooManyRevokedGrantsSentence"/> is the same text as a sentence of its own.</summary>
+    private static string TooManyRevokedGrantsText(string retryScope)
+        => $"the project has more than {MaxRevokedGrantsPerSweep} revoked external grants, more than one closure may "
            + "read, and its SPE container could not be confirmed to hold no permission of theirs, so those grantees may "
            + $"retain file access. Retrying the closure will not change {retryScope}. An administrator must remove those "
            + "grantees' permissions from the project's container in the SPE admin app (the container's Permissions).";
+
+    /// <summary><see cref="TooManyRevokedGrantsText"/> as a sentence of its own (after a full stop).</summary>
+    private static string TooManyRevokedGrantsSentence(string retryScope)
+    {
+        var text = TooManyRevokedGrantsText(retryScope);
+        return char.ToUpperInvariant(text[0]) + text[1..];
+    }
 
     /// <summary>#2104 round 3: the ambiguous-match sentence and its NON-retryable administrator instruction. A count only —
     /// the detail names no person and no address.</summary>

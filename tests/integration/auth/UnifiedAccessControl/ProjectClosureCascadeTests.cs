@@ -1294,10 +1294,13 @@ public class ProjectClosureCascadeTests
         problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
         problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureTooManyGrantsReason);
         ProjectClosureEndpoint.ClosureTooManyGrantsReason.Should().Be("sdap.closure.incomplete.too_many_grants");
-        problem.ProblemDetails.Detail.Should().NotContain("Retry the closure")
-            .And.Contain("will not change this")
-            .And.Contain("administrator")
-            .And.Contain($"more than {ProjectClosureEndpoint.MaxRevokedGrantsPerSweep} revoked external grants");
+        problem.ProblemDetails.Detail.Should().Be(
+            $"Project {ProjectId} had no active external grants left to revoke, but the project has more than "
+            + $"{ProjectClosureEndpoint.MaxRevokedGrantsPerSweep} revoked external grants, more than one closure may read, "
+            + "and its SPE container could not be confirmed to hold no permission of theirs, so those grantees may retain "
+            + "file access. Retrying the closure will not change this. An administrator must remove those grantees' "
+            + "permissions from the project's container in the SPE admin app (the container's Permissions).",
+            "round 4: the sentence continues the clause's \"but\" in lower case — not \"…, but The project has…\"");
         problem.ProblemDetails.Extensions["containerCleared"].Should().Be(false);
         problem.ProblemDetails.Extensions["granteesNotCleared"].Should().BeNull("the revoked grantees could not be counted");
         calls.Should().ContainSingle("the truncated list is not swept; the container is only asked whether a contact "
