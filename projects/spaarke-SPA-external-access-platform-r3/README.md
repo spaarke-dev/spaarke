@@ -1,5 +1,7 @@
 # Spaarke External Access Platform R3
 
+> **Portfolio**: [Project #1734](https://github.com/spaarke-dev/spaarke/issues/1734) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Epic [#2099 EXTERNAL ACCESS SPA](https://github.com/spaarke-dev/spaarke/issues/2099) — _registered 2026-10-12; Epic linked 2026-10-18_
+
 > **Last Updated**: 2026-10-10
 >
 > **Status**: In Progress (initialized by `/project-pipeline` 2026-10-10; execution not started)
