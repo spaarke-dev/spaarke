@@ -11,7 +11,11 @@
  * out of the sign-in instance) and "Choose a different sign-in" (back to the landing chooser, with the account still
  * signed in - so the text tells the person to sign out first to use a different company account).
  *
- * ADR-021: Fluent v9 semantic tokens only. ADR-012: the shared `EmptyState` shell, with a real `h1`.
+ * Teams variant (task 075): the tab's tenant is the Teams context tenant and Teams has no realm chooser and no account of
+ * ours to sign out of, so the screen has NO actions at all - no "Sign out", no "Choose a different sign-in".
+ *
+ * ADR-021: Fluent v9 semantic tokens only (the Teams theme reaches them through the FluentProvider). ADR-012: the shared
+ * `EmptyState` shell, with a real `h1`.
  */
 import * as React from 'react';
 import { Button, makeStyles, tokens } from '@fluentui/react-components';
@@ -22,12 +26,16 @@ import { clearStoredRealm } from '../../auth/realm';
 import { clearInviteCode } from '../../auth/invite-code';
 import { clearActiveBackend } from '../../auth/backend-selection';
 
-export interface OrganizationNotSetUpProps {
-  /** The sign-in instance that holds the account; "Sign out" signs it out. */
-  instance: IPublicClientApplication;
-  /** "Choose a different sign-in": forget the realm and return to the landing chooser. */
-  onChooseDifferent: () => void;
-}
+export type OrganizationNotSetUpProps =
+  | {
+      variant?: 'browser';
+      /** The sign-in instance that holds the account; "Sign out" signs it out. */
+      instance: IPublicClientApplication;
+      /** "Choose a different sign-in": forget the realm and return to the landing chooser. */
+      onChooseDifferent: () => void;
+    }
+  /** The Teams tab: a message only. */
+  | { variant: 'teams' };
 
 const useStyles = makeStyles({
   root: {
@@ -54,17 +62,34 @@ const useStyles = makeStyles({
   },
 });
 
-export const OrganizationNotSetUp: React.FC<OrganizationNotSetUpProps> = ({ instance, onChooseDifferent }) => {
+export const OrganizationNotSetUp: React.FC<OrganizationNotSetUpProps> = props => {
   const s = useStyles();
   const [signOutFailed, setSignOutFailed] = React.useState(false);
+  const instance = props.variant === 'teams' ? null : props.instance;
 
   const signOut = React.useCallback(() => {
+    if (!instance) return;
     clearStoredRealm();
     clearInviteCode();
     clearActiveBackend();
     setSignOutFailed(false);
     void Promise.resolve(instance.logoutRedirect()).catch(() => setSignOutFailed(true));
   }, [instance]);
+
+  if (props.variant === 'teams') {
+    return (
+      <div className={s.root}>
+        <EmptyState
+          icon={<Building48Regular className={s.icon} />}
+          heading="Your organization is not set up for Spaarke"
+          headingAs="h1"
+          description="This Teams app is not connected to a Spaarke customer for your organization yet. Contact your Spaarke administrator, or the person who added this app, to add your organization."
+          descriptionClassName={s.description}
+        />
+      </div>
+    );
+  }
+  const { onChooseDifferent } = props;
 
   return (
     <div className={s.root}>

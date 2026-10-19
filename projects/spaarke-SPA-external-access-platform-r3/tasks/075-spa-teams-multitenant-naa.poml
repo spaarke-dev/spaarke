@@ -4,7 +4,7 @@
     <title>SPA Teams strategy → multitenant client via NAA (Teams context tid), registration and link in Teams</title>
     <phase>4b A9 workforce home sign-in</phase>
     <gate>after 058</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags auth, frontend; client sign-in code</rigor-reason>
     <model-tier>sonnet</model-tier>

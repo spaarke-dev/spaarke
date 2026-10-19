@@ -61,7 +61,12 @@ function makeFakeInstance(name: string, behaviour: Behaviour, config: any): any 
     if (result?.account && !accounts.includes(result.account)) accounts.push(result.account);
     return result;
   };
-  const tokenFor = (req: any) => ({ accessToken: `token:${req.scopes[0]}`, account: accounts[0] ?? null });
+  // NAA-honest: the account is the host's; the token's own tenant is the tid claim (msal-browser 5.5.0).
+  const tokenFor = (req: any) => ({
+    accessToken: `token:${req.scopes[0]}`,
+    idTokenClaims: { tid: accounts[0]?.tenantId },
+    account: accounts[0] ?? null,
+  });
   return {
     name,
     config,
@@ -132,6 +137,8 @@ vi.mock('@microsoft/teams-js', () => ({
 }));
 
 function stubWorkforceEnv(): void {
+  // Task 075: the Teams strategy uses the multitenant home client (a different application from the A8 client).
+  vi.stubEnv('VITE_WORKFORCE_HOME_MSAL_CLIENT_ID', '66666666-7777-8888-9999-000000000001');
   vi.stubEnv('VITE_TEAMS_MSAL_CLIENT_ID', CLIENT_ID);
   vi.stubEnv('VITE_TEAMS_MSAL_TENANT_ID', SPAARKE_TENANT);
   vi.stubEnv('VITE_TEAMS_MSAL_BFF_SCOPE', scopeOf('99999999-8888-7777-6666-555555555555'));
@@ -762,12 +769,14 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
     async () => {
       stubTwoBackends();
       stubWorkforceEnv();
+      // The NAA host account belongs to the Teams context tenant (task 075: a token for any other tenant is refused).
+      h.accounts = [{ homeAccountId: 'n', username: 'n@fabrikam.test', tenantId: SPAARKE_TENANT }];
       h.nestable = async config => makeFakeInstance('naa', {}, config);
       const { selection, msalAuth, bff } = await load();
       const { createTeamsHostAdapter } = await import('../src/host/TeamsHostAdapter');
 
       selection.activateBackend('workforce', { ...FABRIKAM });
-      await createTeamsHostAdapter().initialize();
+      await createTeamsHostAdapter(SPAARKE_TENANT).initialize();
       await bff.bffApiCall('/api/v1/external/me');
       await expect(msalAuth.acquireActiveBffToken()).resolves.toBe(`token:${scopeOf(FABRIKAM.bffAppId)}`);
 

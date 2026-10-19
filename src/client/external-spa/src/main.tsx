@@ -11,13 +11,16 @@ import {
   createTeamsHostAdapter,
   notifyTeamsAppLoaded,
   notifyTeamsFailureOther,
+  readTeamsPreAuthContext,
   type ITeamsHostAdapter,
 } from './host/TeamsHostAdapter';
 import { getStoredRealm, setStoredRealm, clearStoredRealm, type Realm } from './auth/realm';
-import { syncActiveAccountOnInteractiveSignIn } from './auth/msal-auth';
+import { syncActiveAccountOnInteractiveSignIn, TeamsGuestAccountError } from './auth/msal-auth';
 import {
   resolveStandalonePlane,
   applyStandalonePlane,
+  clearStaleTeamsInteractionLock,
+  pickedKeyListsTenant,
   prepareWorkforceHomePlane,
   type StandalonePlane,
 } from './auth/standalone-plane';
@@ -27,12 +30,13 @@ import {
   clearActiveBackend,
   landingCustomerName,
   resolveBackendSelection,
+  resolveHomeBackendSelection,
   type Backend,
-  type BackendPlane,
 } from './auth/backend-selection';
 import { RealmChooser } from './components/auth/RealmChooser';
 import { CustomerPicker } from './components/auth/CustomerPicker';
 import { TeamsAuthError } from './components/auth/TeamsAuthError';
+import { TeamsGuestAccount, TEAMS_GUEST_HEADING } from './components/auth/TeamsGuestAccount';
 import { OrganizationNotSetUp } from './components/auth/OrganizationNotSetUp';
 import { App } from './App';
 import { isDevMockEnabled } from './dev-mock';
@@ -297,27 +301,42 @@ const StandaloneBootstrap: React.FC = () => {
 };
 
 /**
- * Teams tab bootstrap. Delegates ALL Teams-specific concerns (app.initialize, context, theme,
- * deep-link, auth-strategy selection) to the host adapter - this function only sequences
- * "initialize, then render the SAME App" and handles the fail-loud error path.
+ * Teams tab bootstrap (ADR-028 A9 Teams amendment; task 075). Delegates ALL Teams-specific concerns (app.initialize,
+ * context, theme, deep-link, auth-strategy selection) to the host adapter - this function only sequences "read the Teams
+ * context tenant, find it in the directory, initialize, then render the SAME App" and handles the fail-loud paths.
+ *
+ * The backend is chosen by the Teams context tenant id (`user.tenant.id`) BEFORE anything is requested: a missing or
+ * invalid tid, or one no directory entry lists, shows the Teams "not set up" screen with zero token requests and zero BFF
+ * calls (the same guarantee as the browser home plane).
  */
 async function bootstrapTeams(root: Root): Promise<void> {
-  // Backend first (task 041, FR-17): the Teams token scope is the active workforce backend's.
-  const selection = await resolveBackendSelection('workforce');
+  // Teams never redirects, so an interaction lock found at page load is a popup the iframe reload interrupted: remove it
+  // before any MSAL instance is used, or every popup (guest link, BFF fallback, "Sign in") fails until Teams restarts.
+  clearStaleTeamsInteractionLock();
+  const { tenantId } = await readTeamsPreAuthContext();
+  if (!tenantId) {
+    renderTeamsNotSetUp(root);
+    return;
+  }
+  const selection = await resolveHomeBackendSelection(tenantId);
   if (selection.kind === 'none') {
     renderBackendUnavailable(root, selection.reason);
     return;
   }
+  if (selection.kind === 'notSetUp') {
+    renderTeamsNotSetUp(root);
+    return;
+  }
   if (selection.kind === 'pick') {
-    renderTeamsCustomerPicker(root, 'workforce', selection.options);
+    renderTeamsCustomerPicker(root, tenantId, selection.options);
     return;
   }
   activateBackend('workforce', selection.backend);
-  await bootstrapTeamsAuth(root);
+  await bootstrapTeamsAuth(root, tenantId);
 }
 
-/** Teams: the customer picker (several workforce backends, none active); the choice continues the bootstrap. */
-function renderTeamsCustomerPicker(root: Root, plane: BackendPlane, options: Backend[]): void {
+/** Teams: the customer picker (several entries list the tenant, none active); the choice continues the bootstrap. */
+function renderTeamsCustomerPicker(root: Root, tenantId: string, options: Backend[]): void {
   // The host's spinner stops once there is a screen to show (app.initialize() already ran in detectTeamsHost()).
   notifyTeamsAppLoaded();
   root.render(
@@ -326,15 +345,38 @@ function renderTeamsCustomerPicker(root: Root, plane: BackendPlane, options: Bac
         <CustomerPicker
           options={options}
           onChoose={key => {
-            try {
-              chooseBackend(plane, options, key);
-            } catch (err) {
-              renderBackendUnavailable(root, err instanceof Error ? err.message : String(err));
-              return;
-            }
-            void bootstrapTeamsAuth(root);
+            void (async () => {
+              try {
+                chooseBackend('workforce', options, key);
+                // Re-check the picked key against the tenant (as the browser does): a key that does not list it never
+                // reaches a token request.
+                if (!(await pickedKeyListsTenant(tenantId, key))) {
+                  clearActiveBackend();
+                  renderTeamsNotSetUp(root);
+                  return;
+                }
+              } catch (err) {
+                renderBackendUnavailable(root, err instanceof Error ? err.message : String(err));
+                return;
+              }
+              await bootstrapTeamsAuth(root, tenantId);
+            })();
           }}
         />
+      </FluentProvider>
+    </React.StrictMode>
+  );
+}
+
+/** Teams: the tenant is not set up - missing, invalid or listed by no customer. A message only; nothing was requested. */
+function renderTeamsNotSetUp(root: Root): void {
+  // Same signals as a failed start (loaded: a screen is showing; failed: Other), so Teams stops its spinner and records it.
+  notifyTeamsAppLoaded();
+  notifyTeamsFailureOther('This organization is not set up for Spaarke.');
+  root.render(
+    <React.StrictMode>
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <OrganizationNotSetUp variant="teams" />
       </FluentProvider>
     </React.StrictMode>
   );
@@ -363,18 +405,39 @@ function renderBackendUnavailable(root: Root, reason: string): void {
 }
 
 /** Teams auth bootstrap once a backend is active: adapter initialize (NAA, then popup) → the SAME App. */
-async function bootstrapTeamsAuth(root: Root): Promise<void> {
-  const adapter = createTeamsHostAdapter();
+async function bootstrapTeamsAuth(root: Root, tenantId: string): Promise<void> {
+  const adapter = createTeamsHostAdapter(tenantId);
 
   try {
     await adapter.initialize();
   } catch (err) {
+    if (err instanceof TeamsGuestAccountError) {
+      renderTeamsGuestAccount(root);
+      return;
+    }
     console.error('[SecureProjectWorkspace] Teams workforce authentication failed:', err);
     renderTeamsAuthError(root, adapter, err);
     return;
   }
 
   renderTeamsApp(root, adapter);
+}
+
+/**
+ * Teams: the signed-in account is a B2B guest of the Teams tenant (found right after the token was acquired, in bootstrap or
+ * in recovery). A message only, and NO BFF call: the customer BFF would refuse the guest token (401) and a reload would loop.
+ */
+function renderTeamsGuestAccount(root: Root): void {
+  // Same signals as the not-set-up screen: loaded (a screen is showing) and failed (Other).
+  notifyTeamsAppLoaded();
+  notifyTeamsFailureOther(TEAMS_GUEST_HEADING);
+  root.render(
+    <React.StrictMode>
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <TeamsGuestAccount />
+      </FluentProvider>
+    </React.StrictMode>
+  );
 }
 
 /** Render the SAME shared <App> under the Teams-signed-in MSAL instance (after bootstrap or after recovery). */
@@ -408,7 +471,16 @@ function renderTeamsAuthError(root: Root, adapter: ITeamsHostAdapter, err: unkno
           message={message}
           diagnostics={diagnostics}
           onSignIn={async () => {
-            await adapter.signInWithPopup();
+            try {
+              await adapter.signInWithPopup();
+            } catch (signInError) {
+              // A guest of the Teams tenant: another sign-in loops into the same 401, so the guest screen replaces this one.
+              if (signInError instanceof TeamsGuestAccountError) {
+                renderTeamsGuestAccount(root);
+                return;
+              }
+              throw signInError;
+            }
             renderTeamsApp(root, adapter);
           }}
         />

@@ -323,15 +323,19 @@ export function workforceAuthorityConfig(params: {
 }
 
 /**
- * The multitenant HOME sign-in descriptor (ADR-028 A9): the browser "company account" client on authority
- * `organizations`, no BFF scope. Built only after `config.ts` `getWorkforceHomeClientConfig()` has validated the
- * client id; {@link buildMsalConfiguration} re-checks it against the same env value.
+ * The multitenant HOME sign-in descriptor (ADR-028 A9): the "company account" client, no BFF scope. Built only after
+ * `config.ts` `getWorkforceHomeClientConfig()` has validated the client id; {@link buildMsalConfiguration} re-checks it
+ * against the same env value.
+ *
+ * Without `tenantId` (the browser) the authority is `organizations`, for discovery and login. With `tenantId` (the Teams
+ * tab, task 075) it is `https://login.microsoftonline.com/{tid}` - the Teams context tenant, a tenant-specific authority
+ * with no multi-tenant alias at all.
  */
-export function workforceHomeAuthorityConfig(params: { clientId: string }): StandaloneMsalConfig {
+export function workforceHomeAuthorityConfig(params: { clientId: string; tenantId?: string }): StandaloneMsalConfig {
   return {
     kind: 'workforceHome',
     clientId: params.clientId,
-    authority: WORKFORCE_HOME_DISCOVERY_AUTHORITY,
+    authority: params.tenantId ? workforceHomeTokenAuthority(params.tenantId) : WORKFORCE_HOME_DISCOVERY_AUTHORITY,
     bffScope: '',
   };
 }

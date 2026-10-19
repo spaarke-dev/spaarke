@@ -145,16 +145,52 @@ const MSAL_INTERACTION_STATUS_KEY = 'msal.interaction.status';
  * @returns true when a stale A8 lock was removed.
  */
 export function clearStaleGuestInteractionLock(guestClientId: string): boolean {
+  return clearStaleInteractionLock([guestClientId]);
+}
+
+/**
+ * Remove the tab's interaction lock when its owner is one of `ownerClientIds` (case-insensitive); any other owner, an
+ * unparsable lock and every other key are left alone. The generalized form of {@link clearStaleGuestInteractionLock}.
+ *
+ * @returns true when a lock was removed.
+ */
+export function clearStaleInteractionLock(ownerClientIds: readonly string[]): boolean {
   try {
     const raw = window.sessionStorage.getItem(MSAL_INTERACTION_STATUS_KEY);
     if (!raw) return false;
     const owner = (JSON.parse(raw) as { clientId?: unknown } | null)?.clientId;
-    if (typeof owner !== 'string' || owner.toLowerCase() !== guestClientId.toLowerCase()) return false;
+    if (typeof owner !== 'string') return false;
+    const lower = owner.toLowerCase();
+    if (!ownerClientIds.some(id => id.toLowerCase() === lower)) return false;
     window.sessionStorage.removeItem(MSAL_INTERACTION_STATUS_KEY);
     return true;
   } catch {
     return false; // unreadable lock or no storage: msal-browser itself handles an unparsable value
   }
+}
+
+/**
+ * Teams: remove a stale interaction lock at page load, BEFORE any MSAL instance is used (`bootstrapTeams`).
+ *
+ * The lock is one per-tab sessionStorage key that survives an iframe reload. Teams never redirects (NAA, then a popup), so a
+ * lock found at page load can only be left over from a popup that the reload interrupted - and until it is removed every
+ * `acquireTokenPopup` (the guest "Link my account" click, the BFF popup fallback, the "Sign in" button) throws
+ * `interaction_in_progress`, until Teams restarts. Only the two clients that popup in Teams are cleared: the A8 client (the
+ * guest link) and the multitenant home client (the BFF popup fallback). A lock owned by any other client (CIAM) and every
+ * other key are left alone. A client id that is not configured is skipped.
+ *
+ * @returns true when a stale lock was removed.
+ */
+export function clearStaleTeamsInteractionLock(): boolean {
+  const owners: string[] = [];
+  for (const read of [getWorkforceClientConfig, getWorkforceHomeClientConfig]) {
+    try {
+      owners.push(read().clientId);
+    } catch {
+      /* not configured: that client could not have opened a popup */
+    }
+  }
+  return clearStaleInteractionLock(owners);
 }
 
 async function getHomeInstance(clientId: string): Promise<IPublicClientApplication> {
@@ -186,6 +222,23 @@ async function getHomeInstance(clientId: string): Promise<IPublicClientApplicati
     });
   }
   return homeInstancePromise;
+}
+
+/**
+ * Re-check a picked customer key against the signed-in tenant (the browser home plane and the Teams bootstrap share it):
+ * true only when a directory entry that LISTS the tid has that key. `search` is empty so a `?customer=` key cannot stand in
+ * for the picked one. A directory failure throws (fail closed, no default host).
+ */
+export async function pickedKeyListsTenant(
+  tid: string,
+  pickedKey: string,
+  directory?: BackendDirectory
+): Promise<boolean> {
+  const recheck = await resolveHomeBackendSelection(tid, { directory, search: '' });
+  if (recheck.kind === 'none') throw new Error(recheck.reason);
+  return recheck.kind === 'pick'
+    ? recheck.options.some(o => o.customerKey === pickedKey)
+    : recheck.kind === 'selected' && recheck.backend.customerKey === pickedKey;
 }
 
 /**
@@ -225,15 +278,8 @@ export async function prepareWorkforceHomePlane(options: PrepareHomePlaneOptions
       throw new BackendSelectionError('[BackendSelection] The picked customer is not the active backend.');
     }
     // The picker offered only entries that list this tid, but the activated backend is re-checked against it here, so a
-    // key that does not list the signed-in tenant can never reach a token request (fail closed to "not set up"). `search`
-    // is empty so a `?customer=` key cannot stand in for the picked one.
-    const recheck = await resolveHomeBackendSelection(tid, { directory: options.directory, search: '' });
-    if (recheck.kind === 'none') throw new Error(recheck.reason);
-    const listsTid =
-      recheck.kind === 'pick'
-        ? recheck.options.some(o => o.customerKey === options.pickedKey)
-        : recheck.kind === 'selected' && recheck.backend.customerKey === options.pickedKey;
-    if (!listsTid) {
+    // key that does not list the signed-in tenant can never reach a token request (fail closed to "not set up").
+    if (!(await pickedKeyListsTenant(tid, options.pickedKey, options.directory))) {
       clearActiveBackend();
       return { kind: 'notSetUp', instance };
     }

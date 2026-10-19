@@ -136,7 +136,7 @@ const AppShell: React.FC<{
   const { inProgress } = useMsal();
   // The workforce home plane holds the workspace back until the contact is registered or linked (A9, task 058); every
   // other plane is ready at once.
-  const [homeReady, setHomeReady] = React.useState(() => !isHomeGateActive(teamsHost));
+  const [homeReady, setHomeReady] = React.useState(() => !isHomeGateActive());
 
   return (
     <div className={styles.root}>
@@ -157,7 +157,7 @@ const AppShell: React.FC<{
       <main className={styles.content}>
         <AuthGuard teamsHost={teamsHost}>
           <ErrorBoundary>
-            <WorkforceHomeGate teamsHost={teamsHost} onReady={setHomeReady}>
+            <WorkforceHomeGate onReady={setHomeReady}>
               {/* Opens the record a `?record={type}:{id}` link names, once signed in (task 055, FR-07). */}
               <RecordDeepLink teamsHost={teamsHost} />
               <Routes>

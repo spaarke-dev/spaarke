@@ -22,6 +22,8 @@ const SPAARKE_TENANT = 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
 const A8_CLIENT_ID = '11111111-2222-3333-4444-555555555555';
 const HOME_CLIENT_ID = '66666666-7777-8888-9999-000000000001';
 const CIAM_TENANT = '00000000-0000-0000-0000-000000000141';
+/** The tenant id of personal Microsoft accounts: never a customer's home directory. */
+const CONSUMER_TENANT = '9188040d-6c67-4c5b-b112-36a304b66dad';
 const CONTOSO_TID = 'c0c0c0c0-0000-4000-8000-000000000001';
 const FABRIKAM_TID = 'f0f0f0f0-0000-4000-8000-000000000002';
 const UNLISTED_TID = 'dddddddd-0000-4000-8000-000000000003';
@@ -425,7 +427,13 @@ describe('tid -> directory entry (homeTenantIds) -> backend', () => {
   it('an entry that lists Spaarke tenant or the CIAM tenant is refused at validation (must-fire); other tenants and plain entries still validate (must-not-fire)', async () => {
     stubEnv();
     const { selection } = await loadAuth();
-    for (const reserved of [SPAARKE_TENANT, SPAARKE_TENANT.toUpperCase(), CIAM_TENANT]) {
+    for (const reserved of [
+      SPAARKE_TENANT,
+      SPAARKE_TENANT.toUpperCase(),
+      CIAM_TENANT,
+      CONSUMER_TENANT,
+      CONSUMER_TENANT.toUpperCase(),
+    ]) {
       expect(() => selection.validateBackend({ ...CONTOSO, homeTenantIds: [CONTOSO_TID, reserved] })).toThrow(
         /never a customer's home directory/
       );
@@ -985,7 +993,7 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
   };
 
   /** A signed-in contoso user on the home plane, the gate rendered over a marker child. */
-  async function renderGate(options: { guest?: Behaviour; teamsHost?: boolean } = {}) {
+  async function renderGate(options: { guest?: Behaviour } = {}) {
     stubEnv();
     sessionStorage.setItem(INVITE_CODE_STORAGE_KEY, JSON.stringify({ code: INVITE_CODE, customerKey: null }));
     h.byClient[HOME_CLIENT_ID] = { accounts: [JANE] };
@@ -1008,7 +1016,7 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
         { theme: webLightTheme },
         React.createElement(
           WorkforceHomeGate,
-          { teamsHost: options.teamsHost ?? false, onReady } as any,
+          { onReady } as any,
           React.createElement('div', { 'data-testid': 'workspace' }, 'workspace')
         )
       )
@@ -1339,13 +1347,9 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
     expect(calls()).toEqual([ME]);
   });
 
-  it('the gate does nothing outside the home plane: Teams and the CIAM browser plane render the children at once, with no /me probe', async () => {
-    h.script = { [ME]: [REG_REQUIRED] };
-    const teams = await renderGate({ teamsHost: true });
-    expect(await teams.screen.findByTestId('workspace')).toBeTruthy();
-    expect(h.fetches).toEqual([]);
-    teams.view.unmount();
-
+  // Task 075 (A9 Teams amendment): the Teams tab is the home plane too, so the gate is ACTIVE there (it used to be skipped
+  // for a Teams host flag). Its Teams behaviour is tested in tests/teams-home-auth.test.ts; here only the CIAM plane is left.
+  it('the gate does nothing outside the home plane: the CIAM browser plane renders the children at once, with no /me probe', async () => {
     // CIAM: applying the CIAM plane clears the home-plane flag.
     const { plane, selection } = await loadAuth();
     selection.activateBackend('ciam', CONTOSO);
@@ -1359,7 +1363,7 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
         { theme: webLightTheme },
         React.createElement(
           WorkforceHomeGate,
-          { teamsHost: false } as any,
+          {} as any,
           React.createElement('div', { 'data-testid': 'ciam-workspace' }, 'workspace')
         )
       )

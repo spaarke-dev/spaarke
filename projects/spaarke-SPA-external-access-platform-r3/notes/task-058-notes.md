@@ -235,3 +235,5 @@ Notes for the next reader:
   - the new real-MSAL test fails 6/6 on the pre-fix code.
 - **Final verification (main session):** typecheck clean; lint clean; vitest 38 files / 1072 passed; build OK; check:dist clean.
 - **Carry-over to 075:** recorded in its POML `<notes>`.
+
+rework: fix-round-1 task 058

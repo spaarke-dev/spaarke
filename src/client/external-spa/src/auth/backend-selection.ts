@@ -187,13 +187,17 @@ export function validateBackend(raw: unknown): Backend {
   };
 }
 
+/** The tenant id Entra reports for personal Microsoft accounts (MSA): never a customer directory. */
+const CONSUMER_ACCOUNT_TENANT_ID = '9188040d-6c67-4c5b-b112-36a304b66dad';
+
 /**
  * The tenants that are never a customer's HOME directory: Spaarke's own (its employees are licensed users, not workforce
- * contacts, and the A8 tenant-pinned sign-in serves them) and the CIAM tenant (partners). Lower-case. Spaarke's tenant id
+ * contacts, and the A8 tenant-pinned sign-in serves them), the CIAM tenant (partners) and the Microsoft consumer-account tenant
+ * (personal accounts are not an organization's directory). Lower-case. Spaarke's tenant id
  * is read when the build configures it (`VITE_TEAMS_MSAL_TENANT_ID`); a build that does not has no Spaarke tenant to compare.
  */
 function reservedHomeTenantIds(): Set<string> {
-  const reserved = new Set<string>();
+  const reserved = new Set<string>([CONSUMER_ACCOUNT_TENANT_ID]);
   if (isTenantId(MSAL_TENANT_ID)) reserved.add(MSAL_TENANT_ID.toLowerCase());
   const spaarke = readOptionalEnv('VITE_TEAMS_MSAL_TENANT_ID');
   if (isTenantId(spaarke)) reserved.add(spaarke.toLowerCase());

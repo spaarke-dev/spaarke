@@ -9,8 +9,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **058 done 2026-10-19** (SPA multitenant sign-in, profile form, link). 2 adversarial passes; fix round 1 closed the no-account `clearCache()` session wipe (real-MSAL regression test). Final: vitest 1072/1072, typecheck, lint, build, check:dist clean. Next task **075** (Teams → multitenant NAA; carry-over recorded in its POML notes) |
-| **Step** | 058 closed. Next: task 075 (Teams → multitenant NAA) via task-execute. Watch for UAC's backfill + 186/099b live-gate results |
+| **Task** | **075 done 2026-10-19** (Teams → multitenant NAA at the Teams context tid; per-request authority; token-`tid` check; guest link via NAA with a 10 s timeout, then the form, then the popup on click (owner-confirmed); B2B guest screen; stale-lock clear). 2 adversarial passes + fix round 1. Final: vitest 1189/1189, typecheck, lint, build, check:dist, ExternalSpa ArchTests 231/231. Next task **076** (Teams package + registration for A9) |
+| **Step** | Next: task 076 via task-execute. Watch for UAC #2102/#2104 merges (next dev BFF deploy) |
 | **Status** | **Dev BFF = `44f802a1d`** (= candidate `f111de2b7` + a state-file commit: live `ad0e9e1a7` + master `d7eabba3b` UAC 186 #2061 + 099b #2063). Deployed with the owner's direct approval 2026-10-19 11:35:09–11:37:07Z. Verified: ProductVersion `1.0.0+44f802a1d…`; 4 critical files SHA-256 match; `/healthz` 200; 2 CORS origins; MIs `mi-bff-api-dev` + `mi-ontology-writer-dev`. Session OKs: UAC, ontology, ebilling (no `sprk_invoicestatus` delete yet), word-add-in, provisioning; field-mapping unreachable. After-notices sent. **Rollback: redeploy `ad0e9e1a7`.** Dev external SPA = `ebc74b331`, not redeployed (058's SPA waits for 059) |
 | **Next Action** | Start task 075 via task-execute. 058's SPA is not deployed: it waits for 059 (multitenant client redirect URIs; GitHub env `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID` and `VITE_BACKENDS` with `homeTenantIds`; the workflow fails closed without them) |
 
@@ -27,7 +27,7 @@
 ## Next actions (in order)
 1. Read UAC's backfill + 186/099b live-gate results for `44f802a1d`; on a failure, decide on rollback (`ad0e9e1a7`) with the owner.
 2. Partner UAT passed (2026-10-18). UI changes are a new round (not R3 scope unless the owner says otherwise).
-4. 075 → 076 → 074 (074 and 059 are live and owner-gated); 070/071/072; the final R3 PR.
+4. 076 → 074 (074 needs 059's live setup) (074 and 059 are live and owner-gated); 070/071/072; the final R3 PR.
 5. Close DEF-004 (#1829) as superseded when ebilling 051 merges (successor answers posted on the issue).
 
 ## Open owner questions

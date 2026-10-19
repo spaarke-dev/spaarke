@@ -1,5 +1,9 @@
 // Workforce client switch (spaarke-SPA-external-access-platform-r3 task 040, FR-16; ADR-028 Amendment A8).
 //
+// RETARGETED by task 075 (ADR-028 A9 Teams amendment): the Teams BFF token now comes from the MULTITENANT home client on
+// authority /{Teams context tid} (see tests/teams-home-auth.test.ts); the Teams cases below keep their assertions with the
+// home client id and the per-request authority. The single-tenant A8 client stays tenant-pinned (guest-token link).
+//
 // The Teams tab (and the stored-link guest token) signs in through ONE single-tenant Spaarke
 // client: authority https://login.microsoftonline.com/{Spaarke tenant id} (never /organizations or /common), scope
 // api://{customer BFF app id}/user_impersonation (the A2-era scope is retired). In Teams: NAA first, then an MSAL
@@ -17,8 +21,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const SPAARKE_TENANT = 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
 const CLIENT_ID = '11111111-2222-3333-4444-555555555555';
+// The multitenant home client (task 075: the Teams BFF token client). Different from the A8 client above.
+const HOME_CLIENT_ID = '66666666-7777-8888-9999-000000000001';
 const BFF_SCOPE = 'api://99999999-8888-7777-6666-555555555555/user_impersonation';
 const AUTHORITY = `https://login.microsoftonline.com/${SPAARKE_TENANT}`;
+// The Teams context tenant of the Teams tests: a customer's directory, NOT Spaarke's (production refuses the Spaarke tid in
+// Teams: validateHomeTenantIds), so every Teams authority assertion below is on this tid.
+const TEAMS_TID = 'c0c0c0c0-0000-4000-8000-000000000001';
+const TEAMS_AUTHORITY = `https://login.microsoftonline.com/${TEAMS_TID}`;
 // The retired A2-era scope name, assembled so that this file, too, passes the "nowhere in the SPA" grep.
 const RETIRED_SCOPE = ['access', 'as', 'user'].join('_');
 
@@ -135,15 +145,23 @@ function stubWorkforceEnv(overrides: Partial<Record<string, string>> = {}): void
     VITE_TEAMS_MSAL_CLIENT_ID: CLIENT_ID,
     VITE_TEAMS_MSAL_TENANT_ID: SPAARKE_TENANT,
     VITE_TEAMS_MSAL_BFF_SCOPE: BFF_SCOPE,
+    VITE_WORKFORCE_HOME_MSAL_CLIENT_ID: HOME_CLIENT_ID,
     ...overrides,
   } as Record<string, string>;
   for (const [key, value] of Object.entries(values)) vi.stubEnv(key, value);
 }
 
-const teamsCfg = { clientId: CLIENT_ID, tenantId: SPAARKE_TENANT, bffScope: BFF_SCOPE };
+// Teams config (A9): the multitenant client, and the Teams context tid (a customer's tenant, never Spaarke's).
+const teamsCfg = { clientId: HOME_CLIENT_ID, tenantId: TEAMS_TID, bffScope: BFF_SCOPE };
+// The single-tenant A8 client config (the guest-token link; tenant-pinned to Spaarke).
+const a8Cfg = { clientId: CLIENT_ID, tenantId: SPAARKE_TENANT, bffScope: BFF_SCOPE };
+// A Teams token result modelled on NAA (msal-browser 5.5.0): `tenantId` and the account come from the HOST's account, the
+// token's own tenant is the `tid` claim.
 const token = (n: string) => ({
   accessToken: `token-${n}`,
-  account: { homeAccountId: n, username: `${n}@spaarke.test`, tenantId: SPAARKE_TENANT },
+  tenantId: TEAMS_TID,
+  idTokenClaims: { tid: TEAMS_TID },
+  account: { homeAccountId: n, username: `${n}@contoso.test`, tenantId: TEAMS_TID },
 });
 const failing = (message: string) => async () => {
   throw new Error(message);
@@ -171,6 +189,8 @@ beforeEach(() => {
   h.naaRecommended.mockReset();
   h.naaRecommended.mockReturnValue(true);
   h.accountQueries.length = 0;
+  // The Teams strategy builds its MSAL configuration for the multitenant home client (task 075).
+  vi.stubEnv('VITE_WORKFORCE_HOME_MSAL_CLIENT_ID', HOME_CLIENT_ID);
 });
 
 afterEach(() => {
@@ -193,7 +213,7 @@ function expectOnlyUserImpersonationRequests(): void {
 describe('Workforce authority is pinned to the Spaarke tenant (A8)', () => {
   it('builds https://login.microsoftonline.com/{tenant id} with the configured client id', async () => {
     const { msalConfig } = await loadAuth();
-    const descriptor = msalConfig.workforceAuthorityConfig(teamsCfg);
+    const descriptor = msalConfig.workforceAuthorityConfig(a8Cfg);
     expect(descriptor).toEqual({ kind: 'workforce', clientId: CLIENT_ID, bffScope: BFF_SCOPE, authority: AUTHORITY });
 
     const built = msalConfig.buildMsalConfiguration(descriptor);
@@ -207,7 +227,7 @@ describe('Workforce authority is pinned to the Spaarke tenant (A8)', () => {
     'refuses the tenant %j — no multi-tenant alias, no non-GUID tenant',
     async tenantId => {
       const { msalConfig } = await loadAuth();
-      expect(() => msalConfig.workforceAuthorityConfig({ ...teamsCfg, tenantId })).toThrow(/tenant/i);
+      expect(() => msalConfig.workforceAuthorityConfig({ ...a8Cfg, tenantId })).toThrow(/tenant/i);
     }
   );
 
@@ -313,18 +333,18 @@ describe('Browser workforce plane is no longer built on the single-tenant A8 cli
 // ---------------------------------------------------------------------------------------------------------------
 
 describe('Teams workforce sign-in', () => {
-  it('uses NAA first, on the Spaarke-tenant authority, and does not build the popup fallback when NAA succeeds', async () => {
+  it('uses NAA first, on the Teams-tenant authority (multitenant client), and does not build the popup fallback when NAA succeeds', async () => {
     const { msalAuth } = await loadAuth();
     h.nestable = async config => makeFakeInstance('naa', { sso: async () => token('naa') }, config);
 
     await expect(msalAuth.acquireTeamsWorkforceBffToken(teamsCfg)).resolves.toBe('token-naa');
 
     expect(h.nestableConfigs).toHaveLength(1);
-    expect(h.nestableConfigs[0].auth.authority).toBe(AUTHORITY);
-    expect(h.nestableConfigs[0].auth.clientId).toBe(CLIENT_ID);
+    expect(h.nestableConfigs[0].auth.authority).toBe(TEAMS_AUTHORITY);
+    expect(h.nestableConfigs[0].auth.clientId).toBe(HOME_CLIENT_ID);
     expect(h.nestableConfigs[0].auth.redirectUri).toBe(`${window.location.origin}/auth-callback.html`);
     // Only the CIAM singleton was built as a standard PCA; no popup fallback instance.
-    expect(h.pcas.filter(p => p.config.auth.authority === AUTHORITY)).toHaveLength(0);
+    expect(h.pcas.filter(p => p.config.auth.authority === TEAMS_AUTHORITY)).toHaveLength(0);
     expect(h.requests.map(r => `${r.instance}:${r.call}`)).toEqual(['naa:ssoSilent']);
     expectOnlyUserImpersonationRequests();
     expect(h.getAuthToken).not.toHaveBeenCalled();
@@ -343,15 +363,16 @@ describe('Teams workforce sign-in', () => {
       'naa:ssoSilent',
       'pca:acquireTokenPopup',
     ]);
-    const popupPca = h.pcas.find(p => p.config.auth.authority === AUTHORITY);
+    const popupPca = h.pcas.find(p => p.config.auth.authority === TEAMS_AUTHORITY);
     expect(popupPca).toBeDefined();
-    expect(popupPca!.config.auth.clientId).toBe(CLIENT_ID);
+    expect(popupPca!.config.auth.clientId).toBe(HOME_CLIENT_ID);
     expect(popupPca!.config.auth.redirectUri).toBe(`${window.location.origin}/auth-callback.html`);
     expect(popupPca!.config.cache.cacheLocation).toBe('sessionStorage');
     expect(popupPca!.instance.initialize).toHaveBeenCalled();
     // No cached account: the popup asks the user to pick one (OfficeNaaStrategy._tryAcquireWith).
     expect(popupPca!.instance.acquireTokenPopup).toHaveBeenCalledWith({
       scopes: [BFF_SCOPE],
+      authority: TEAMS_AUTHORITY,
       loginHint: undefined,
       prompt: 'select_account',
     });
@@ -437,10 +458,10 @@ describe('Teams workforce sign-in', () => {
       const { createTeamsHostAdapter } = await import('../src/host/TeamsHostAdapter');
       const msalAuth = await import('../src/auth/msal-auth');
 
-      const adapter = createTeamsHostAdapter();
+      const adapter = createTeamsHostAdapter(TEAMS_TID);
       await adapter.initialize();
 
-      const popupPca = h.pcas.find(p => p.config.auth.authority === AUTHORITY);
+      const popupPca = h.pcas.find(p => p.config.auth.authority === TEAMS_AUTHORITY);
       expect(adapter.getMsalInstance()).toBe(popupPca!.instance);
       // The active BFF acquirer is the Teams strategy: a BFF call resolves a user_impersonation token.
       await expect(msalAuth.acquireActiveBffToken()).resolves.toBe('token-popup-silent');
@@ -939,7 +960,7 @@ describe('Teams NAA step is skipped on a bridge-less host; a cancelled sign-in o
     // No window was opened. (The standard popup instance is built ahead of time so the "Sign in" click does not
     // wait on initialize(), but nothing is asked of it.)
     expect(h.requests.map(r => r.call)).toEqual(['ssoSilent']);
-    const prewarmed = h.pcas.filter(p => p.config.auth.authority === AUTHORITY);
+    const prewarmed = h.pcas.filter(p => p.config.auth.authority === TEAMS_AUTHORITY);
     expect(prewarmed).toHaveLength(1);
     expect(prewarmed[0].instance.acquireTokenPopup).not.toHaveBeenCalled();
   });
@@ -1041,7 +1062,7 @@ describe('Teams error screen: a "Sign in" button runs the popup path on click (u
       };
       const { createTeamsHostAdapter } = await import('../src/host/TeamsHostAdapter');
       const msalAuth = await import('../src/auth/msal-auth');
-      const adapter = createTeamsHostAdapter();
+      const adapter = createTeamsHostAdapter(TEAMS_TID);
       await expect(adapter.initialize()).rejects.toBeInstanceOf(msalAuth.TeamsWorkforceAuthError);
       expect(popupAttempts).toBe(1);
       expect(() => adapter.getMsalInstance()).toThrow();
@@ -1071,9 +1092,22 @@ describe('Teams error screen: a "Sign in" button runs the popup path on click (u
       await waitFor(() => expect(signedIn).toHaveBeenCalledTimes(1));
 
       expect(popupAttempts).toBe(2);
-      const popupPca = h.pcas.find(p => p.config.auth.authority === AUTHORITY);
+      const popupPca = h.pcas.find(p => p.config.auth.authority === TEAMS_AUTHORITY);
       expect(adapter.getMsalInstance()).toBe(popupPca!.instance);
       expect(adapter.isInitialized()).toBe(true);
+      // The recovery path wires the Teams tab as the home plane exactly like initialize() does (review F3): the registration
+      // gate flag, the signed-in-tenant account filter and the Teams guest-link host. The Teams tid is NOT Spaarke's tenant.
+      expect(TEAMS_TID).not.toBe(SPAARKE_TENANT);
+      expect(msalAuth.isWorkforceHomePlaneActive()).toBe(true);
+      const own = { homeAccountId: 'own', tenantId: TEAMS_TID };
+      const spaarkeGuest = { homeAccountId: 'spaarke', tenantId: SPAARKE_TENANT };
+      const noTenant = { homeAccountId: 'none' };
+      expect(msalAuth.accountsForActivePlane([own, spaarkeGuest, noTenant])).toEqual([own]);
+      // The guest-link host is 'teams': the silent guest token goes through a NAA (nestable) instance of the A8 client; the
+      // browser host would build none.
+      const nestableBefore = h.nestableConfigs.length;
+      await msalAuth.acquireSpaarkeGuestToken('silent', 'jane@contoso.test', BFF_SCOPE);
+      expect(h.nestableConfigs.slice(nestableBefore).map(c => c.auth.clientId)).toEqual([CLIENT_ID]);
       // The active BFF acquirer is the Teams strategy now (popup path: silent from the signed-in account).
       await expect(msalAuth.acquireActiveBffToken()).resolves.toBe('token-popup-silent');
       expect(h.getAuthToken).not.toHaveBeenCalled();
@@ -1088,7 +1122,7 @@ describe('Teams error screen: a "Sign in" button runs the popup path on click (u
     await expect(msalAuth.signInTeamsWorkforceViaPopup(teamsCfg)).resolves.toBe('token-popup');
     await expect(msalAuth.signInTeamsWorkforceViaPopup(teamsCfg)).resolves.toBe('token-popup');
     expect(h.requests.map(r => r.call)).toEqual(['acquireTokenPopup', 'acquireTokenPopup']);
-    expect(h.requests[1].request).toMatchObject({ loginHint: 'popup@spaarke.test' });
+    expect(h.requests[1].request).toMatchObject({ loginHint: 'popup@contoso.test' });
   });
 
   it('the bootstrap (non-click) popup path still tries the cached account silently first', async () => {
