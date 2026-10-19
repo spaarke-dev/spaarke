@@ -205,3 +205,25 @@ in the tens of kilobytes; not re-measured (the brief: re-measure only if the cod
 | 2 | the leftover pass ignores the Secure answer | `CommunicationFiling_IntoASecureMatter_…` (the round-3 version, over an empty world, did not see it) | 1 failed | pass |
 | 3 | `IsFiled` counts any lookup (a contact too) as filed | `GateRecordSharing_OverTheRealResolver_…` | 1 failed | pass |
 | 4 | the round-3 helper | `AnOwnerThatCannotBeRead_IsLoggedOnce_…` (both), `Filing_ALeftoverRevokeThatFailsAgain_…` | 3 failed | pass |
+
+## 042c: thread-filed communications at write (2026-10-19)
+
+**Defect (F1, #2110 review).** `ShareAtWriteAsync` re-owns a just-created gate record only when `ShareWithCommunicationShareesAsync` returns
+`true` ("filed"). A communication filed by a THREAD JOIN (uac-r2 `ThreadResolver.JoinCoreAsync`) carries only `sprk_communicationthread` plus a
+team owner and never its own parent lookups, so `IsFiled` is false and the team-owned branch returned `false`. Race: the gate job decides owner
+U while the email is unfiled; the join re-owns the email to the matter's team, and its `AfterRefileAsync` finds no record yet; the writer then
+creates the record owned by U; `ShareAtWriteAsync` sees "not filed" and returns. The record stays U-owned with no shares, so the matter's team
+reads the email but not its gate record.
+
+**Fix.** In `ShareWithCommunicationShareesAsync` the combined "team-owned or not a systemuser" condition is split. (a) A team-owned
+communication (`owningteam` set) logs that its gate records follow the communication's owner (no participant share, D-169) and returns `true`,
+so the caller at write re-owns through the resolver. (b) Any other non-user owner keeps the old log and `false`. `IsFiled` and its
+`ParentsOf(...)` call are untouched (master has a different overload there). `ReownAsync` is unchanged: it asks `RecordOwnershipResolver`, a
+Secure answer is left to `SecureChildReconciler`, and Unchanged leaves the record as it is. `MirrorCommunicationSharesAsync` ignores the return
+value; the only other caller of `ShareAtWriteAsync` is `DecisionRecordWriter`, which ignores it too.
+
+**Tests.** `AtWrite_ACommunicationFiledByAThreadJoin_ReownsTheRecordToTheResolversTeam_WithNoParticipantShare` and
+`AtWrite_ACommunicationFiledByAThreadJoin_UnderASecureTeam_LeavesTheRecordToTheReconciler`.
+
+**Known limit (from the #2110 review).** uac-r2's same-parent skip (`ChildRecordEndpoints.cs:542`, `DataverseDocumentsEndpoints.cs:225`, on their
+branch) removes one retry path for a gate record whose earlier re-own failed (EventId 50317). A real move still retries it.

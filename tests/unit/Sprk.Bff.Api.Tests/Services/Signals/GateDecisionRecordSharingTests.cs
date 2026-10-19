@@ -712,6 +712,50 @@ public sealed class GateDecisionRecordSharingTests
         world.RecordSharees(RecordId).Should().BeEmpty();
     }
 
+    // ── 042c: a communication filed by a thread join is team-owned but carries no ownership-parent lookup ──────────
+
+    /// <summary>The communication a thread join leaves: a team owner and <c>sprk_communicationthread</c>, none of its own parent lookups.</summary>
+    private static GateSharingWorld ThreadFiledCommunication()
+    {
+        var world = new GateSharingWorld()
+            .WithCommunication(CommunicationId, Owner, owningTeam: MatterTeam)
+            .WithUser(Reader)
+            .WithGateRecord(RecordId, CommunicationId, Owner)
+            .Share(GateSharingWorld.Communication, CommunicationId, Reader);
+        world.Rows[(GateSharingWorld.Communication, CommunicationId)]["sprk_communicationthread"] =
+            new EntityReference("sprk_communicationthread", Guid.NewGuid());
+        return world;
+    }
+
+    [Fact]
+    public async Task AtWrite_ACommunicationFiledByAThreadJoin_ReownsTheRecordToTheResolversTeam_WithNoParticipantShare()
+    {
+        var world = ThreadFiledCommunication();
+        world.OwnerAnswers(RecordOwnerResolution.Owned(MatterTeam));
+
+        await world.Sharing.ShareAtWriteAsync(RecordId, CommunicationId, Owner);
+
+        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam")?.Id.Should().Be(MatterTeam,
+            "a join owns the communication to the matter's team without stamping its parents; its record must follow, not stay user-owned");
+        world.Rows[(GateSharingWorld.Record, RecordId)].Contains("owningteam").Should().BeTrue("the record must have been re-owned to a team");
+        world.Calls.Should().NotContain(c => c.StartsWith("grant:", StringComparison.Ordinal));
+        world.RecordSharees(RecordId).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AtWrite_ACommunicationFiledByAThreadJoin_UnderASecureTeam_LeavesTheRecordToTheReconciler()
+    {
+        var world = ThreadFiledCommunication();
+        world.OwnerAnswers(RecordOwnerResolution.Owned(MatterTeam) with { IsSecureOwner = true });
+
+        await world.Sharing.ShareAtWriteAsync(RecordId, CommunicationId, Owner);
+
+        world.Calls.Should().NotContain(c => c.StartsWith("assign:", StringComparison.Ordinal), "a Secure answer is the SecureChildReconciler's");
+        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owninguser")?.Id.Should().Be(Owner);
+        world.Calls.Should().NotContain(c => c.StartsWith("grant:", StringComparison.Ordinal));
+        world.RecordSharees(RecordId).Should().BeEmpty();
+    }
+
     // ── 042b round 3 K2: a share a failed revoke left on the team-owned record goes on the next filing ──────────
 
     [Fact]

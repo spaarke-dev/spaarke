@@ -105,8 +105,8 @@ public sealed class GateDecisionRecordSharing
     /// <summary>
     /// After the gate record of an unfiled communication was created owned by <paramref name="ownerUserId"/>: shares it, Read only, with the
     /// communication's current internal sharees. When the communication now reads as FILED (a filing landed between the writer's owner decision
-    /// and its create, and that filing's <c>AfterRefileAsync</c> found no record yet), the record is re-owned as a filing would. Never throws;
-    /// runs on <see cref="CancellationToken.None"/> (the record has landed).
+    /// and its create, and that filing's <c>AfterRefileAsync</c> found no record yet) or the communication became team-owned through a thread join (which stamps
+    /// no parent lookup), the record is re-owned as a filing would. Never throws; runs on <see cref="CancellationToken.None"/> (the record has landed).
     /// </summary>
     public async Task ShareAtWriteAsync(Guid recordId, Guid communicationId, Guid ownerUserId)
     {
@@ -200,7 +200,8 @@ public sealed class GateDecisionRecordSharing
 
     // ── Share ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-    /// <returns><c>true</c> when nothing was shared because the communication is FILED (the caller at write re-owns the record).</returns>
+    /// <returns><c>true</c> when nothing was shared because the communication is FILED or team-owned (a thread join owns it to a team without stamping
+    /// its parent lookups); the caller at write re-owns the record.</returns>
     private async Task<bool> ShareWithCommunicationShareesAsync(Guid communicationId, IReadOnlyList<GateRecord> records)
     {
         var ct = CancellationToken.None;
@@ -224,8 +225,16 @@ public sealed class GateDecisionRecordSharing
             return true;
         }
 
-        if (communication.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is { } team && team != Guid.Empty
-            || communication.GetAttributeValue<EntityReference>(OwnerColumn) is not { LogicalName: SystemUserTable })
+        if (communication.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is { } team && team != Guid.Empty)
+        {
+            // A thread join stamps only the thread and a team owner, never the communication's own parent lookups, so IsFiled is false here.
+            _logger.LogInformation(
+                "Communication {CommunicationId} is team-owned; its gate Decision Records follow the communication's owner and no participant share " +
+                "is added (D-169).", communicationId);
+            return true;
+        }
+
+        if (communication.GetAttributeValue<EntityReference>(OwnerColumn) is not { LogicalName: SystemUserTable })
         {
             _logger.LogInformation(
                 "Communication {CommunicationId} is not owned by a user; its gate Decision Records get no participant share (D-169, D-123).",
