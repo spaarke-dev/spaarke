@@ -113,13 +113,21 @@ public static class FinanceBaseValues
     /// evaluator reads these org-wide with its own identity, so none may be field-secured: a secured column would read as empty for
     /// the evaluator and silently fall back (the approved total) or read as 0 (the others). Checked live by
     /// <c>SignalPredicateTests.AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema</c> and offline against the SpaarkeMaster
-    /// Entity.xml by <c>DerivedBaseColumnsFieldSecurityTests</c>. The submission columns are the held anti-join pending spend reads.</summary>
+    /// Entity.xml by <c>DerivedBaseColumnsFieldSecurityTests</c>. The submission columns are the held anti-join pending spend reads.
+    /// <para>It lists every attribute the grouped queries group by, filter on, sum or join on (except each table's primary key), the
+    /// parent lookups <c>sprk_matter</c> and <c>sprk_project</c> included: a secured group key reads as null, the row is skipped and
+    /// spend reads 0 with no guard failing (ontology-r1 re-check K1, 2026-10-19). <c>SpendHeldAndPendingTests</c> builds the real
+    /// queries and fails when a column they use is missing here.</para></summary>
     public static readonly IReadOnlyList<(string Entity, string Column)> DerivedBaseColumns = new (string, string)[]
     {
         (InvoiceEntity, InvoiceTotalAmount),
         (InvoiceEntity, InvoiceApprovedTotal),
         (InvoiceEntity, InvoiceStatusCodeColumn),
+        (InvoiceEntity, MatterEntity),
+        (InvoiceEntity, ProjectEntity),
         (BudgetEntity, BudgetTotalBudget),
+        (BudgetEntity, MatterEntity),
+        (BudgetEntity, ProjectEntity),
         (SubmissionEntity, SubmissionStatusColumn),
         (SubmissionEntity, SubmissionReasonColumn),
         (SubmissionEntity, SubmissionInvoiceLookup),

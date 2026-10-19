@@ -893,4 +893,134 @@ public class SpendHeldAndPendingTests
         logger.Entries.Should().ContainSingle().Which.Level.Should().Be(LogLevel.Warning);
     }
 
+    // ---- ontology-r1 re-check F3: a parent present ONLY in the re-check billed read (the other half of the key union) ----
+
+    private static async Task<decimal> ReadSpendOf(IGenericEntityService service, bool pending, ILogger logger) =>
+        pending
+            ? (await FinanceBaseValues.ReadPendingSpendAsync(service, "sprk_matter", new[] { Matter }, CancellationToken.None, logger))[Matter]
+            : (await FinanceBaseValues.ReadAsync(service, "sprk_matter", new[] { Matter }, needSpend: true, needBudget: false, CancellationToken.None, logger))[Matter].Spend;
+
+    [Theory(DisplayName = "F3: a parent that appears ONLY in the re-check billed read is a mismatch; the retry that is stable returns the second attempt's sums and logs one Warning (counted and pending)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task F3_AParentOnlyInTheRecheck_RetriesOnce_AndReturnsTheSecondAttemptsSums(bool pending)
+    {
+        var calls = new List<bool>();
+        var logger = new CapturingLogger();
+        // Attempt 1 (calls 0-2): billed EMPTY, approved 5, re-check billed 40 (the parent appears: an invoice entered the billed part). Attempt 2 (calls 3-5): billed 40, approved 5, re-check 40.
+        var service = Scripted((n, approved) => n switch
+        {
+            0 => new EntityCollection(),
+            2 or 3 or 5 => Rows(Matter, new Money(40m)),
+            _ => Rows(Matter, new Money(5m)),
+        }, calls);
+
+        var spend = await ReadSpendOf(service, pending, logger);
+
+        spend.Should().Be(45m, "the second attempt's 40 + 5; comparing only the first read's keys would accept attempt 1 and return 5");
+        calls.Should().HaveCount(6, "the mismatch forces a second attempt of three reads");
+        logger.Entries.Should().ContainSingle().Which.Level.Should().Be(LogLevel.Warning);
+    }
+
+    [Theory(DisplayName = "F3 fail-closed: a parent that appears only in the re-check billed read on BOTH attempts throws (counted and pending)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task F3_AParentOnlyInTheRecheck_OnBothAttempts_Throws(bool pending)
+    {
+        var calls = new List<bool>();
+        var service = Scripted((n, approved) => n % 3 == 2 ? Rows(Matter, new Money(40m)) : new EntityCollection(), calls);
+
+        await FluentActions.Invoking(() => ReadSpendOf(service, pending, new CapturingLogger()))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*Spend could not be read consistently*two consecutive attempts*");
+        calls.Should().HaveCount(6);
+    }
+
+    // ---- ontology-r1 re-check K1: DerivedBaseColumns must list every attribute the real queries touch ----
+
+    /// <summary>Every (entity, attribute) a FetchXML names: attributes (selected, summed, grouped), condition attributes (resolved
+    /// through <c>entityname</c> to a link alias), order attributes, and each link-entity's <c>from</c> (on the linked entity) and
+    /// <c>to</c> (on its parent entity).</summary>
+    private static IReadOnlyCollection<(string Entity, string Attribute)> ReferencedColumns(string fetchXml)
+    {
+        var root = XElement.Parse(fetchXml).Element("entity")!;
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var link in root.Descendants("link-entity"))
+        {
+            names[link.Attribute("alias")?.Value ?? link.Attribute("name")!.Value] = link.Attribute("name")!.Value;
+        }
+
+        var found = new HashSet<(string, string)>();
+        void Visit(XElement node)
+        {
+            var entity = node.Attribute("name")!.Value;
+            foreach (var a in node.Elements("attribute").Concat(node.Elements("order")))
+            {
+                found.Add((entity, a.Attribute("name")?.Value ?? a.Attribute("attribute")!.Value));
+            }
+
+            foreach (var c in node.Elements("filter").Descendants("condition"))
+            {
+                var owner = c.Attribute("entityname") is { } alias ? names[alias.Value] : entity;
+                found.Add((owner, c.Attribute("attribute")!.Value));
+            }
+
+            foreach (var link in node.Elements("link-entity"))
+            {
+                found.Add((link.Attribute("name")!.Value, link.Attribute("from")!.Value));
+                found.Add((entity, link.Attribute("to")!.Value));
+                Visit(link);
+            }
+        }
+
+        Visit(root);
+        return found;
+    }
+
+    private static IEnumerable<string> ColumnsMissingFromDerivedBaseColumns(string fetchXml) =>
+        ReferencedColumns(fetchXml)
+            .Where(c => c.Attribute != c.Entity + "id"
+                && !FinanceBaseValues.DerivedBaseColumns.Contains((c.Entity, c.Attribute)))
+            .Select(c => c.Entity + "." + c.Attribute)
+            .OrderBy(c => c, StringComparer.Ordinal);
+
+    [Fact(DisplayName = "K1 (re-check): every attribute the counted, pending and budget queries group, filter, sum or join on (matter and project) is in DerivedBaseColumns or is a primary key")]
+    public void K1_EveryColumnTheQueriesTouch_IsInDerivedBaseColumns()
+    {
+        var queries = new List<string>();
+        foreach (var parent in new[] { "sprk_matter", "sprk_project" })
+        {
+            foreach (var part in Enum.GetValues<FinanceBaseValues.SpendAmountPart>())
+            {
+                queries.Add(FinanceBaseValues.BuildGroupedSpendFetchXml(parent, part, new[] { Matter }));
+                queries.Add(FinanceBaseValues.BuildGroupedPendingSpendFetchXml(parent, part, new[] { Matter }));
+            }
+
+            queries.Add(FinanceBaseValues.BuildGroupedBudgetFetchXml(parent, new[] { Matter }));
+        }
+
+        foreach (var fetch in queries)
+        {
+            ColumnsMissingFromDerivedBaseColumns(fetch).Should().BeEmpty($"every attribute of {fetch} must be guarded against field security");
+        }
+
+        // The parent lookups the queries group by are the ones that must be there (a secured group key reads null and the row is skipped).
+        FinanceBaseValues.DerivedBaseColumns.Should().Contain(new (string, string)[]
+        {
+            ("sprk_invoice", "sprk_matter"), ("sprk_invoice", "sprk_project"), ("sprk_budget", "sprk_matter"), ("sprk_budget", "sprk_project"),
+        });
+    }
+
+    [Fact(DisplayName = "K1 (re-check) control: the collector sees grouped, filtered, condition-on-link and join attributes, and flags one that is not listed")]
+    public void K1_TheCollector_FindsEveryKindOfReference_AndFlagsAnUnlistedColumn()
+    {
+        const string fetch = "<fetch aggregate=\"true\"><entity name=\"sprk_invoice\">"
+            + "<attribute name=\"sprk_totalamount\" alias=\"total\" aggregate=\"sum\" /><attribute name=\"sprk_unlisted_group\" alias=\"parent\" groupby=\"true\" />"
+            + "<link-entity name=\"sprk_invoicesubmission\" from=\"sprk_invoice\" to=\"sprk_unlisted_join\" alias=\"held\"><filter><condition attribute=\"sprk_unlisted_link\" operator=\"eq\" value=\"1\" /></filter></link-entity>"
+            + "<filter><condition attribute=\"sprk_unlisted_filter\" operator=\"null\" /><condition entityname=\"held\" attribute=\"sprk_invoicesubmissionid\" operator=\"null\" /></filter>"
+            + "</entity></fetch>";
+
+        ColumnsMissingFromDerivedBaseColumns(fetch).Should().Equal(
+            "sprk_invoice.sprk_unlisted_filter", "sprk_invoice.sprk_unlisted_group", "sprk_invoice.sprk_unlisted_join", "sprk_invoicesubmission.sprk_unlisted_link");
+    }
+
 }
