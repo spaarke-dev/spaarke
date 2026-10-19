@@ -458,6 +458,52 @@ public sealed partial class DecisionRecordWriterTests
         DecisionRecordWriter.BillingDecisionHash(Reduce(800m)).Should().Be("13A35E02CEC9F2B513A9246A3B807C3350012543825A4B13B1DF5075E3F88347");
     }
 
+    // ── Follow-up item 3: of several rows with the code, the one whose hash matches answers ──────────────────────────
+
+    private static Entity StoredBillingRow(string hash, string code = "approve-invoice") => new("sprk_decisionrecord", Guid.NewGuid())
+    {
+        ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", InvoiceId),
+        ["sprk_steps"] = $"{{\"reviewId\":\"{BillingDecisionKey.IdOf("sprk_invoice", InvoiceId, BillingDecision):D}\",\"reviewHash\":\"{hash}\",\"steps\":[{{\"code\":\"{code}\"}}]}}",
+        ["sprk_actioncode"] = code,
+        ["createdby"] = new EntityReference("systemuser", WriterUser),
+    };
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Billing_Item3_TwoStoredRowsOfOneCodeWithDifferentHashes_AnswerWithTheRowThatMatchesTheHash(bool matchingRowFirst)
+    {
+        // A concurrent pair (the known limit: lookup then create, no unique key) can leave two rows under one key with different content.
+        // The repeat of the SECOND one must find it, whichever row the lookup returns first.
+        var h = BillingHarness();
+        var other = StoredBillingRow("0000000000000000000000000000000000000000000000000000000000000000");
+        var mine = StoredBillingRow(DecisionRecordWriter.BillingDecisionHash(Billing()));
+        foreach (var row in matchingRowFirst ? new[] { mine, other } : new[] { other, mine })
+        {
+            h.Seeded.Add(row);
+        }
+
+        var result = await h.Writer.WriteBillingDecisionAsync(Billing());
+
+        result.AlreadyRecorded.Should().BeTrue();
+        result.RecordId.Should().Be(mine.Id, "the row with this decision's hash, not the first row of the code");
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Billing_Item3_TwoStoredRowsOfOneCode_NeitherMatchingTheHash_IsStillReviewInvalid()
+    {
+        var h = BillingHarness();
+        h.Seeded.Add(StoredBillingRow("1111111111111111111111111111111111111111111111111111111111111111"));
+        h.Seeded.Add(StoredBillingRow("2222222222222222222222222222222222222222222222222222222222222222"));
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing())).Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        ex.Message.Should().Contain("other content");
+        h.Created.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Billing_K2_AWriterRecordWithTheSameKeyAndCodeButNoReadableHash_IsRefused_NeverAnsweredNorWrittenOver()
     {

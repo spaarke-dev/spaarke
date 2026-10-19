@@ -1300,19 +1300,22 @@ public sealed class DecisionRecordWriter
             }
 
             var hash = BillingDecisionHash(request);
-            var existing = recorded.FirstOrDefault(r => string.Equals(r.Code, request.ActionCode, StringComparison.Ordinal));
+            // Of the rows with this code (two can exist after a concurrent pair, see above), the one with THIS decision's hash answers, whichever
+            // row the lookup returned first.
+            var sameCode = recorded.Where(r => string.Equals(r.Code, request.ActionCode, StringComparison.Ordinal)).ToList();
+            var existing = sameCode.FirstOrDefault(r => string.Equals(r.Hash, hash, StringComparison.Ordinal));
+            if (existing.Id == Guid.Empty && sameCode.Count > 0)
+            {
+                // K2 (ontology-r1): the same id and code with other content (reduce-line 800, then 700) is not a repeat of the recorded
+                // decision; answering AlreadyRecorded would tell the caller its 700 was recorded when 800 was. A record whose hash cannot
+                // be read proves nothing either, so it is refused the same way, never written over with a second record.
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.ReviewInvalid,
+                    "This decision id is already recorded on its subject with the same billing action but other content; nothing was written.");
+            }
+
             if (existing.Id != Guid.Empty)
             {
-                if (!string.Equals(existing.Hash, hash, StringComparison.Ordinal))
-                {
-                    // K2 (ontology-r1): the same id and code with other content (reduce-line 800, then 700) is not a repeat of the recorded
-                    // decision; answering AlreadyRecorded would tell the caller its 700 was recorded when 800 was. A record whose hash cannot
-                    // be read proves nothing either, so it is refused the same way, never written over with a second record.
-                    throw new DecisionRecordRefusedException(
-                        DecisionRecordRefusalReason.ReviewInvalid,
-                        "This decision id is already recorded on its subject with the same billing action but other content; nothing was written.");
-                }
-
                 _logger.LogInformation(
                     "Billing decision {DecisionId} ({ActionCode}) already recorded as Decision Record {RecordId}; nothing written.",
                     request.DecisionId, request.ActionCode, existing.Id);
