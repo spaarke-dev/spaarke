@@ -7,7 +7,7 @@ namespace Spaarke.ArchTests;
 /// ebilling-r1 task 073, ontology-r1 review K1: the billing consequence (<c>sprk_consequence</c>) never reaches an Ontology save or
 /// evaluation path. Task 073 gave <c>PolicyVersionSnapshot</c> an optional sixth parameter, <c>Consequence</c>, and
 /// <c>PolicyVersionValidator.ValidateForSave</c> an optional fifth, <c>billingConsequence</c>; both are billing-only. Inside
-/// <c>Services/Ontology/**</c>, <c>Services/Signals/SignalEvaluator.cs</c> and <c>Services/Signals/SignalReevaluationJob.cs</c> this guard
+/// <c>Services/Ontology/**</c>, <c>Services/Signals/SignalEvaluator.cs</c> and <c>Services/Signals/SignalReevaluationJob.cs</c> and <c>Services/Signals/RuleBodyDescriber.cs</c> this guard
 /// fails on: a <c>new PolicyVersionSnapshot(...)</c> with more than five arguments; a <c>ValidateForSave(...)</c> call with more than
 /// four; and any <c>billingConsequence</c> token or <c>Consequence</c> passed as a named argument, an initializer or a <c>with</c>
 /// member.
@@ -82,6 +82,7 @@ public sealed class OntologyBillingConsequenceIsolationGuardTests
             : new List<string>();
         files.Add(Path.Combine(api, "Signals", "SignalEvaluator.cs"));
         files.Add(Path.Combine(api, "Signals", "SignalReevaluationJob.cs"));
+        files.Add(Path.Combine(api, "Signals", "RuleBodyDescriber.cs")); // the other non-billing ValidateForSave caller (ontology-r1 K2)
         return files.Where(File.Exists);
     }
 

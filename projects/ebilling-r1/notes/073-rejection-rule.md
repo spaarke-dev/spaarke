@@ -19,7 +19,11 @@
 | Telemetry reason | `OntologyWriterFailureReason.ConsequenceNotAllowed` | Shared vocabulary; same instrument as 070's billing refusals |
 
 No endpoint, no column, no package, no interface, no background work. The decider is a concrete singleton (ADR-010). Ontology save
-and evaluation paths are unchanged: `PolicyVersionValidatorTests.cs` and every other Ontology test are untouched and green.
+and evaluation behaviour is unchanged: `PolicyVersionValidatorTests.cs` and every other Ontology test are untouched and green. The
+file `PolicyVersionValidator.cs` itself is not unchanged: the review fix round added about 35 lines to its billing section (:414-578):
+`ValidateBilling` gained an `atSave` flag, the line-level Duplicate Reject refusal (:508) and `DuplicateComparesInvoiceNumber`. No
+Ontology path reaches them: `ValidateForAuthoring` refuses billing types first (:559), and `RuleBodyDescriber.cs:127` passes a null
+consequence (ontology-r1 re-check, 2026-10-18; the isolation guard now also scans `RuleBodyDescriber.cs`).
 
 ## 2. Behaviour
 
