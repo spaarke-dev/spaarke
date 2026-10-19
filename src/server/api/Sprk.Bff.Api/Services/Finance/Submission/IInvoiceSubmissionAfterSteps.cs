@@ -59,7 +59,7 @@ public enum SubmissionAfterStepsStatus
     Completed,
 
     /// <summary>
-    /// A step did not complete (a Signal write the writer skipped, an open Signal that changed while it was being superseded, a transient
+    /// A step did not complete (a Signal write the writer skipped for a retryable reason, an open Signal that changed while it was being superseded, a transient
     /// Decision Record refusal, an indexing enqueue fault, or the persister's totals Retry; a notification fault is logged and does not
     /// retry, per <see cref="IEbillingNotificationSink"/>'s contract). The submission stays Processing with
     /// its invoice link, so a re-delivery resumes here (part E's step 0). <see cref="SubmissionAfterStepsResult.ReasonCode"/> says which;
@@ -102,4 +102,8 @@ public sealed record SubmissionAfterStepsResult
 
     /// <summary>The Signal requests sent to the writer this run (created or refreshed), skips of resolved Signals excluded.</summary>
     public int SignalsWritten { get; init; }
+
+    /// <summary>The Signals the writer refused permanently this run (049 F1-3): not written, recorded in the findings JSON's
+    /// <c>signalWriteRefusals</c>; the run continued without them.</summary>
+    public int SignalsRefused { get; init; }
 }

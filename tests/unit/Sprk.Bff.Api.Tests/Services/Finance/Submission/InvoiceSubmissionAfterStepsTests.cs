@@ -129,6 +129,13 @@ public class InvoiceSubmissionAfterStepsTests
         public List<BillingDecision> Preflighted { get; } = [];
         public PolicyState Policy { get; set; } = PolicyState.Present;
         public HashSet<string> SkipPolicyCodes { get; } = new(StringComparer.Ordinal);
+        /// <summary>F1-3: the writer throws this for the policy's Signal (after recording the attempt in <see cref="Writes"/>).</summary>
+        public Dictionary<string, Exception> WriteFaults { get; } = new(StringComparer.Ordinal);
+        /// <summary>F1-3: the writer skips the policy's Signal with this <see cref="SignalWriteResult.SkippedRefusalCode"/>.</summary>
+        public Dictionary<string, string> SkipCodes { get; } = new(StringComparer.Ordinal);
+        /// <summary>F1-3: these policies' Signals go to the REAL <see cref="SignalWriter"/> (<see cref="RealWriter"/>).</summary>
+        public HashSet<string> RealWriterPolicies { get; } = new(StringComparer.Ordinal);
+        public SignalWriter? RealWriter { get; set; }
         public bool CloseChanges { get; set; }
 
         // ── D-122 (notes 13c) ──
@@ -470,7 +477,7 @@ public class InvoiceSubmissionAfterStepsTests
             return row;
         }
 
-        private Task<SignalWriteResult> WriteAsync(SignalWriteRequest request, CancellationToken _)
+        private Task<SignalWriteResult> WriteAsync(SignalWriteRequest request, CancellationToken ct)
         {
             if (Writes.Count == CrashAtWrite)
             {
@@ -479,6 +486,21 @@ public class InvoiceSubmissionAfterStepsTests
             }
 
             Writes.Add(request);
+            if (RealWriterPolicies.Contains(request.PolicyCode))
+            {
+                return RealWriter!.WriteAsync(request, ct);
+            }
+
+            if (WriteFaults.TryGetValue(request.PolicyCode, out var fault))
+            {
+                return Task.FromException<SignalWriteResult>(fault);
+            }
+
+            if (SkipCodes.TryGetValue(request.PolicyCode, out var skipCode))
+            {
+                return Task.FromResult(new SignalWriteResult(Guid.Empty, false, Guid.Empty, Guid.Empty) { SkippedRefusalCode = skipCode });
+            }
+
             if (SkipPolicyCodes.Contains(request.PolicyCode))
             {
                 return Task.FromResult(new SignalWriteResult(Guid.Empty, false, Guid.Empty, Guid.Empty) { SkippedRefusalCode = "signal_core_unresolved" });
@@ -1807,5 +1829,230 @@ public class InvoiceSubmissionAfterStepsTests
         await act.Should().ThrowAsync<TimeoutException>();
         transient.Status.Should().Be(InvoiceSubmissionStatus.Processing);
         transient.TerminalWrites.Should().BeEmpty();
+    }
+
+    // ── F1-3: a permanent Signal-write refusal never strands the automatic rejection ──
+
+    private static System.ServiceModel.FaultException<OrganizationServiceFault> AccessDenied() =>
+        new(new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040220) }, "Principal user is missing prvCreatesprk_signal privilege");
+
+    /// <summary>Each permanent class (F1-3) and the code it is recorded under.</summary>
+    public static TheoryData<string, string> PermanentRefusals => new()
+    {
+        { "argument", InvoiceSubmissionAfterSteps.RequestRefusedCode },
+        { "template", SignalWriteRefusal.SentenceTemplateInvalid },
+        { "escalation", Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.CoreRecordUnresolved },
+        { "escalation-argument", Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.SubjectPairUnresolved },
+        { "access-denied", Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.DataverseAccessDenied },
+        { "skip-core-changed", Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.CoreRecordChanged },
+        { "skip-owner", Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoDefaultOwnerTeam },
+    };
+
+    /// <summary>Makes the BILL-AGE Signal fail as <paramref name="kind"/>. "argument": an argument refusal of a request the writer's preflight
+    /// passes (the code is then <see cref="InvoiceSubmissionAfterSteps.RequestRefusedCode"/>; the real-writer test below covers the preflight's
+    /// own code).</summary>
+    private static void FailBillAge(World world, string kind)
+    {
+        switch (kind)
+        {
+            case "argument":
+                world.WriteFaults["BILL-AGE"] = new ArgumentException("The rendered sentence is too long.", "request");
+                break;
+            case "template":
+                world.WriteFaults["BILL-AGE"] = new SignalSentenceTemplateException("token missing");
+                break;
+            case "escalation":
+                world.WriteFaults["BILL-AGE"] = new SignalWriterEscalationException("no core", Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.CoreRecordUnresolved);
+                break;
+            case "escalation-argument":
+                world.WriteFaults["BILL-AGE"] = new SignalWriterEscalationException("no pair", Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.SubjectPairUnresolved,
+                    new ArgumentException("Regarding entity name is required."));
+                break;
+            case "access-denied":
+                world.WriteFaults["BILL-AGE"] = AccessDenied();
+                break;
+            case "skip-core-changed":
+                world.SkipCodes["BILL-AGE"] = Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.CoreRecordChanged;
+                break;
+            case "skip-owner":
+                world.SkipCodes["BILL-AGE"] = Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoDefaultOwnerTeam;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+    }
+
+    private static JsonArray StoredWriteRefusals(World world) =>
+        JsonNode.Parse(world.Row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson))![InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] as JsonArray ?? [];
+
+    [Theory(DisplayName = "049 F1-3: a permanent Signal refusal is recorded and the run continues - the other Signals, the record, the terminal (AutoRejected)")]
+    [MemberData(nameof(PermanentRefusals))]
+    public async Task PermanentRefusal_IsRecorded_TheRejectionCompletesWithItsRecord(string kind, string code)
+    {
+        var outcome = await AutoRejected(readNumber: "INV-999"); // the rule Signal (BILL-AGE, written first) and the D-91 system Signal
+        var world = new World(outcome);
+        FailBillAge(world, kind);
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        result.TerminalStatus.Should().Be(InvoiceSubmissionStatus.Rejected);
+        result.SignalsRefused.Should().Be(1);
+        result.SignalsWritten.Should().Be(1, "the system Signal after the refused one is still written");
+        world.Writes.Select(w => w.PolicyCode).Should().Equal("BILL-AGE", BillingRuleCatalogue.SystemPolicyCode);
+        world.RecordCreates.Should().Be(1, "074 K-3: the automatic rejection ends with its record");
+        result.DecisionRecordId.Should().NotBeNull();
+        world.TerminalWrites.Should().ContainSingle().Which[InvoiceSubmissionPersister.SubmissionStatus]
+            .Should().Be(new OptionSetValue((int)InvoiceSubmissionStatus.Rejected));
+        world.Status.Should().Be(InvoiceSubmissionStatus.Rejected);
+        world.KeysFor("BILL-AGE").Should().BeEmpty("the refused Signal was not written, so the record cannot list it");
+
+        var refusal = StoredWriteRefusals(world).Should().ContainSingle().Subject!.AsObject();
+        refusal["policyCode"]!.GetValue<string>().Should().Be("BILL-AGE");
+        refusal["code"]!.GetValue<string>().Should().Be(code);
+        refusal["subject"]!["entity"]!.GetValue<string>().Should().Be("sprk_billingevent");
+        refusal["subject"]!["id"]!.GetValue<string>().Should().Be(LineId.ToString("D"));
+        var error = world.Log.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error).Should().ContainSingle().Subject;
+        error.Message.Should().Contain(Submission.ToString()).And.Contain(LineId.ToString()).And.Contain(code).And.Contain("BILL-AGE");
+    }
+
+    public static TheoryData<string> TransientFaults => new() { "read-back", "catalog-fault", "dataverse-fault" };
+
+    [Theory(DisplayName = "049 F1-3: a transient Signal fault still propagates (retry): no record, no terminal, nothing recorded")]
+    [MemberData(nameof(TransientFaults))]
+    public async Task TransientFault_StillRetries(string kind)
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome);
+        world.WriteFaults["BILL-AGE"] = kind switch
+        {
+            "read-back" => new SignalWriterEscalationException("read back failed", Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.OwnerReadBackFailed,
+                new HttpRequestException("503")),
+            "catalog-fault" => new SignalWriterEscalationException("no pair", Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.SubjectPairUnresolved,
+                new InvalidOperationException("Dataverse request failed")),
+            _ => new TimeoutException("Dataverse timed out"),
+        };
+
+        var act = () => world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        await act.Should().ThrowAsync<Exception>();
+        world.RecordCreates.Should().Be(0);
+        world.TerminalWrites.Should().BeEmpty();
+        world.Status.Should().Be(InvoiceSubmissionStatus.Processing);
+        StoredWriteRefusals(world).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 F1-3: a skip code not known to be permanent (parent undetermined) still retries (must-not-fire)")]
+    public async Task UndeterminedParentSkip_StillRetries()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome);
+        world.SkipCodes["BILL-AGE"] = Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined;
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
+        result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.SignalWriteSkippedCode);
+        world.RecordCreates.Should().Be(0);
+        StoredWriteRefusals(world).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 F1-3: a permanent refusal is recorded once across a resume (idempotent); the resume completes")]
+    public async Task PermanentRefusal_RecordedOnce_AcrossAResume()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome) { CrashAtTerminal = true };
+        FailBillAge(world, "escalation");
+
+        var first = () => world.Build().RunAsync(Persisted(outcome), "corr-1");
+        await first.Should().ThrowAsync<Crash>();
+        var writesAfterFirst = world.FindingsWrites.Count;
+        StoredWriteRefusals(world).Should().ContainSingle();
+
+        world.CrashAtTerminal = false;
+        var resumed = await world.Build().ResumeAsync(Submission, "corr-2");
+
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed, resumed.ReasonCode);
+        resumed.SignalsRefused.Should().Be(1, "refused again on the resume, and counted");
+        world.FindingsWrites.Count.Should().Be(writesAfterFirst, "the same refusal is already stored: no second write");
+        StoredWriteRefusals(world).Should().ContainSingle();
+        world.RecordCreates.Should().Be(1);
+        world.Status.Should().Be(InvoiceSubmissionStatus.Rejected);
+    }
+
+    [Fact(DisplayName = "049 F1-3: a permanent refusal on an Accepted-path Signal does not stop the run either (Blocked: indexed, terminal)")]
+    public async Task PermanentRefusal_Blocked_Completes()
+    {
+        var outcome = await Blocked();
+        var world = new World(outcome);
+        FailBillAge(world, "access-denied");
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        result.SignalsRefused.Should().Be(1);
+        world.Jobs.Should().ContainSingle();
+        world.TerminalWrites.Should().ContainSingle();
+    }
+
+    /// <summary>A REAL <see cref="SignalWriter"/> whose every Dataverse dependency throws: only its I/O-free request checks can run.</summary>
+    private static SignalWriter RealWriterWithoutDataverse()
+    {
+        var noIo = new Mock<IGenericEntityService>(MockBehavior.Strict).Object;
+        return new SignalWriter(
+            new OntologyWriterDataverseClient(() => throw new InvalidOperationException("no Dataverse in this test"), NullLogger<OntologyWriterDataverseClient>.Instance),
+            noIo,
+            new Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver(noIo, (_, _) => throw new InvalidOperationException("no probe"),
+                NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
+            new Mock<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(MockBehavior.Strict).Object,
+            new Mock<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(MockBehavior.Strict).Object,
+            TimeProvider.System,
+            NullLogger<SignalWriter>.Instance);
+    }
+
+    [Fact(DisplayName = "049 F1-3 (real SignalWriter): an over-long sentence is caught at persist; a plan stored before the fix is refused by the real writer, recorded, and the record still happens")]
+    public async Task OverLongSentence_RealWriter_CaughtAtPersist_AndAtWriteTime_TheRecordStillHappens()
+    {
+        var outcome = await InvoiceSubmissionPersisterTests.OutcomeWithAnOverLongPlanEntryAsync();
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AutoRejected);
+
+        // (a) The persister's plan no longer holds the entry: the real writer is never asked, the record happens.
+        var world = new World(outcome) { RealWriter = RealWriterWithoutDataverse() };
+        world.RealWriterPolicies.Add("BILL-LONG");
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        world.Writes.Select(w => w.PolicyCode).Should().Equal("BILL-AGE");
+        world.RecordCreates.Should().Be(1);
+        world.Status.Should().Be(InvoiceSubmissionStatus.Rejected);
+        JsonNode.Parse(world.Row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson))![InvoiceSubmissionPersister.SignalPlanRefusalsMember]!
+            .AsArray().Should().ContainSingle();
+
+        // (b) A plan stored before the preflight (the entry is in it): the REAL writer refuses it before any I/O (ArgumentException,
+        //     sentence_too_long); it is recorded and the record and the terminal still happen.
+        var stale = new World(outcome, json =>
+        {
+            var plan = json["signalPlan"]!.AsArray();
+            var copy = plan[0]!.DeepClone().AsObject();
+            copy["policyCode"] = "BILL-LONG";
+            copy["policyId"] = Sprk.Bff.Api.Tests.Domain.Signals.Billing.BillingEvaluationKit.Id("policy:BILL-LONG").ToString("D");
+            copy["policyVersionId"] = Sprk.Bff.Api.Tests.Domain.Signals.Billing.BillingEvaluationKit.Id("version:BILL-LONG:1").ToString("D");
+            copy["template"] = new string('x', 2100);
+            plan.Insert(0, copy);
+            json.Remove(InvoiceSubmissionPersister.SignalPlanRefusalsMember);
+            return json;
+        })
+        { RealWriter = RealWriterWithoutDataverse() };
+        stale.RealWriterPolicies.Add("BILL-LONG");
+
+        var staleResult = await stale.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        staleResult.Status.Should().Be(SubmissionAfterStepsStatus.Completed, staleResult.ReasonCode);
+        staleResult.SignalsRefused.Should().Be(1);
+        stale.Writes.Select(w => w.PolicyCode).Should().Equal("BILL-LONG", "BILL-AGE");
+        stale.RecordCreates.Should().Be(1);
+        stale.Status.Should().Be(InvoiceSubmissionStatus.Rejected);
+        StoredWriteRefusals(stale).Should().ContainSingle().Which!["code"]!.GetValue<string>().Should().Be(SignalWriteRefusal.SentenceTooLong);
     }
 }

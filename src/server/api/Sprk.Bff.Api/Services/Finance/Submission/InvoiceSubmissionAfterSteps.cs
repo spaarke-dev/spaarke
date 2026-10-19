@@ -31,6 +31,7 @@ using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Services.Signals.Billing;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Finance.Submission;
 
@@ -326,23 +327,50 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
         var written = 0;
         string? signalFailure = null;
+        var refusedSignals = new List<SignalWriteRefused>();
         foreach (var (request, fingerprint) in requests)
         {
-            var step = await WriteWithLifecycleAsync(request, fingerprint, submissionId, ct).ConfigureAwait(false);
+            // F1-3: a refusal the writer would repeat on every attempt (PermanentWriteRefusal, PermanentSkipCodes) is recorded and the run goes
+            // on: one refused Signal never stops the others, the Decision Record or the terminal status. Any other exception (a Dataverse
+            // read or write fault) still propagates, as before: the job retries, and every write here is idempotent.
+            SignalStep step;
+            try
+            {
+                step = await WriteWithLifecycleAsync(request, fingerprint, submissionId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when ((ex is not OperationCanceledException || !ct.IsCancellationRequested) && PermanentWriteRefusal(request, ex) is { } code)
+            {
+                step = new SignalStep(false, null, code);
+            }
+
             if (step.Wrote)
             {
                 written++;
             }
 
-            // The rest are still written (each is idempotent); the run stops before the Decision Record.
+            if (step.RefusedCode is { } refusedCode)
+            {
+                _logger.LogError("Invoice submission {SubmissionId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} is refused permanently ({Code}); recorded in the findings, the run continues without it",
+                    submissionId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, refusedCode);
+                refusedSignals.Add(new SignalWriteRefused(request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, refusedCode));
+            }
+
+            // A retryable failure is remembered and the remaining Signals are still attempted (each write is idempotent); the run then
+            // stops before the Decision Record.
             signalFailure ??= step.FailureCode;
+        }
+
+        if (refusedSignals.Count > 0 && await RecordSignalWriteRefusalsAsync(submissionId, findingsJson!, refusedSignals, ct).ConfigureAwait(false) is { } withRefusals)
+        {
+            findingsJson = withRefusals;
+            rowVersion = null; // our own write moved the row version: the terminal write re-reads it first
         }
 
         if (signalFailure is not null)
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: {Failed} of {Count} Signals did not complete ({Code}); it stays Processing for a retry",
-                submissionId, requests.Count - written, requests.Count, signalFailure);
-            return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, signalFailure) with { SignalsWritten = written };
+                submissionId, requests.Count - written - refusedSignals.Count, requests.Count, signalFailure);
+            return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, signalFailure) with { SignalsWritten = written, SignalsRefused = refusedSignals.Count };
         }
 
         // ── 2. Decision Record: the automatic rejection only (Blocked and Accepted get none; 105's Override / Return record those) ──
@@ -437,8 +465,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             return stopped with { InvoiceId = stopped.InvoiceId ?? invoiceId, SignalsWritten = written, DecisionRecordId = recordId };
         }
 
-        _logger.LogInformation("Invoice submission {SubmissionId}: after-commit steps complete for invoice {InvoiceId} ({Kind}): {Written} Signals, status {Status} ({ReasonCode})",
-            submissionId, invoiceId, stored.Kind, written, terminal, terminalReasonCode);
+        _logger.LogInformation("Invoice submission {SubmissionId}: after-commit steps complete for invoice {InvoiceId} ({Kind}): {Written} Signals ({Refused} refused), status {Status} ({ReasonCode})",
+            submissionId, invoiceId, stored.Kind, written, refusedSignals.Count, terminal, terminalReasonCode);
         return new SubmissionAfterStepsResult
         {
             Status = SubmissionAfterStepsStatus.Completed,
@@ -447,6 +475,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             TerminalStatus = terminal,
             DecisionRecordId = recordId,
             SignalsWritten = written,
+            SignalsRefused = refusedSignals.Count,
         };
     }
 
@@ -858,13 +887,110 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
     // ── Signals ──
 
-    private readonly record struct SignalStep(bool Wrote, string? FailureCode);
+    /// <summary>One Signal's step: written, a retryable <paramref name="FailureCode"/>, or a permanent <paramref name="RefusedCode"/> (F1-3).</summary>
+    private readonly record struct SignalStep(bool Wrote, string? FailureCode, string? RefusedCode = null);
+
+    // ── F1-3: permanent Signal-write refusals ──
+
+    /// <summary>The findings JSON member that records the Signals the writer refused permanently: <c>[{ policyCode, subject: { entity, id },
+    /// code }]</c>, no values; idempotent (one entry per Signal and code).</summary>
+    internal const string SignalWriteRefusalsMember = "signalWriteRefusals";
+
+    /// <summary>One Signal the writer refused permanently: its policy, subject and the writer's code.</summary>
+    internal sealed record SignalWriteRefused(string PolicyCode, string SubjectEntity, Guid SubjectId, string Code);
+
+    /// <summary>
+    /// The <see cref="SignalWriteResult.SkippedRefusalCode"/> values a redelivery cannot change (F1-3): the reconcile met a Signal whose core
+    /// record or no-core owner changed (<see cref="OntologyWriterFailureReason.CoreRecordChanged"/>, re-grouping is task 031's), and the
+    /// ownership resolver's refusals of the data or configuration it read (<see cref="RecordOwnerRefusal"/>). Not here, so retried:
+    /// <see cref="RecordOwnerRefusal.ParentUndetermined"/> (a derivation that FAILED, which a retry can pass) and any code not listed.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> PermanentSkipCodes = new HashSet<string>(StringComparer.Ordinal)
+    {
+        OntologyWriterFailureReason.CoreRecordChanged,
+        RecordOwnerRefusal.ParentUnresolved,
+        RecordOwnerRefusal.SecureParentNotIsolated,
+        RecordOwnerRefusal.SecureOwnerTeamUnresolved,
+        RecordOwnerRefusal.SecureBusinessUnitAmbiguous,
+        RecordOwnerRefusal.NoDefaultOwnerTeam,
+        RecordOwnerRefusal.ActingUserUnresolved,
+        RecordOwnerRefusal.NoOwnerSource,
+        RecordOwnerRefusal.RecordMissing,
+    };
+
+    /// <summary>
+    /// The code of a Signal-write exception the writer would throw again on every attempt (F1-3), or null for a retryable one:
+    /// <list type="bullet">
+    /// <item><see cref="ArgumentException"/> and <see cref="SignalSentenceTemplateException"/>: the request itself (a sentence over 2,000
+    /// characters, a headline over 200, an unrenderable template, ...); the code is <see cref="SignalWriter.PreflightRefusal"/>'s.</item>
+    /// <item><see cref="SignalWriterEscalationException"/> that wraps no fault (or an argument error): a state the writer refuses (an
+    /// unverified subject, a core record it cannot derive or that is ambiguous, an owner that does not read back, a reconcile meeting a
+    /// mis-owned row); the code is its <see cref="SignalWriterEscalationException.Reason"/>. One that wraps a read or resolver fault
+    /// (<see cref="OntologyWriterFailureReason.OwnerReadBackFailed"/>, a catalog read fault) is the writer's refusal of an UNKNOWN state and
+    /// is retried, as <see cref="SignalWriter.IsDeterministicPrivilegeRefusal"/> treats it.</item>
+    /// <item>A privilege refusal (<see cref="SignalWriter.IsDeterministicPrivilegeRefusal"/>): the team's role lacks a privilege.</item>
+    /// </list>
+    /// </summary>
+    internal static string? PermanentWriteRefusal(SignalWriteRequest request, Exception ex) => ex switch
+    {
+        SignalSentenceTemplateException => SignalWriter.PreflightRefusal(request) ?? SignalWriteRefusal.SentenceTemplateInvalid,
+        ArgumentException => SignalWriter.PreflightRefusal(request) ?? RequestRefusedCode,
+        SignalWriterEscalationException { InnerException: null or ArgumentException } escalation => escalation.Reason,
+        _ when SignalWriter.IsDeterministicPrivilegeRefusal(ex) => OntologyWriterFailureReason.DataverseAccessDenied,
+        _ => null,
+    };
+
+    /// <summary>An argument refusal the writer's preflight does not name (it passed the request; something it sent was refused).</summary>
+    internal const string RequestRefusedCode = "request_refused";
+
+    /// <summary>
+    /// Adds <paramref name="refused"/> to <c>sprk_findingsjson</c>'s <see cref="SignalWriteRefusalsMember"/>. Idempotent: an entry already
+    /// stored (same policy, subject and code) is not added again, and nothing is written when every entry is stored. Returns the JSON
+    /// written, or null when nothing was written.
+    /// </summary>
+    private async Task<string?> RecordSignalWriteRefusalsAsync(Guid submissionId, string findingsJson, IReadOnlyList<SignalWriteRefused> refused, CancellationToken ct)
+    {
+        var root = JsonNode.Parse(findingsJson)!.AsObject();
+        var stored = root[SignalWriteRefusalsMember] as JsonArray ?? [];
+        var keys = stored.OfType<JsonObject>()
+            .Select(e => (Text(e, "policyCode"), (e["subject"] as JsonObject) is { } s ? (Text(s, "entity"), Text(s, "id")) : (null, null), Text(e, "code")))
+            .ToHashSet();
+        var added = 0;
+        foreach (var r in refused)
+        {
+            var id = r.SubjectId.ToString("D");
+            if (keys.Add((r.PolicyCode, (r.SubjectEntity, id), r.Code)))
+            {
+                stored.Add(new JsonObject
+                {
+                    ["policyCode"] = r.PolicyCode,
+                    ["subject"] = new JsonObject { ["entity"] = r.SubjectEntity, ["id"] = id },
+                    ["code"] = r.Code,
+                });
+                added++;
+            }
+        }
+
+        if (added == 0)
+        {
+            return null;
+        }
+
+        root[SignalWriteRefusalsMember] = stored;
+        var json = root.ToJsonString();
+        await _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, new Dictionary<string, object>
+        {
+            [InvoiceSubmissionPersister.SubmissionFindingsJson] = json,
+        }, ct).ConfigureAwait(false);
+        return json;
+    }
 
     /// <summary>
     /// The option-a lifecycle (notes section 6) for one (policy, subject): the latest episode by the dedupe-key prefix, its status and its
     /// stored reason-set fingerprint decide: none → episode 1; open + same → refresh it; open + different → Superseded, then episode n+1;
     /// resolved + same → skip (a resume never re-raises what was resolved); resolved + different → episode n+1. A skipped write
-    /// (<see cref="SignalWriteResult.SkippedRefusalCode"/>) or an open Signal that changed while being superseded is a failure: retry.
+    /// (<see cref="SignalWriteResult.SkippedRefusalCode"/>) is permanent when its code is in <see cref="PermanentSkipCodes"/> (F1-3: recorded,
+    /// the run continues), otherwise a failure; an open Signal that changed while being superseded is a failure: retry.
     /// </summary>
     private async Task<SignalStep> WriteWithLifecycleAsync(SignalWriteRequest request, string fingerprint, Guid submissionId, CancellationToken ct)
     {
@@ -907,6 +1033,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         var result = await _writeSignal(request with { Episode = episode }, ct).ConfigureAwait(false);
         if (result.IsSkipped)
         {
+            if (PermanentSkipCodes.Contains(result.SkippedRefusalCode!))
+            {
+                return new SignalStep(false, null, result.SkippedRefusalCode);
+            }
+
             _logger.LogWarning("Invoice submission {SubmissionId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} was skipped ({Refusal})",
                 submissionId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, result.SkippedRefusalCode);
             return new SignalStep(false, SignalWriteSkippedCode);
