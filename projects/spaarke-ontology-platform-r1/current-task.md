@@ -51,8 +51,8 @@
 - **ebilling D-130 (2) approved-total spend** (`1549ff165..cd690dbe2`, review worktree `C:\wts-eb130`): PASS 2026-10-19 (unit 410/0, guard 11/0). Sent K1 (race comment wrong: double count moves spend either way under credit memos / `le`/`lt`; fix comment+note, optional billed re-read guard), K2 (fake null-vs-absent `SignalReevaluationJobTests.cs:3395`). Q8 answer: NOT AuthorableColumns; expose `SpendAmountColumns` from FinanceBaseValues + extend `SignalPredicateTests.cs:174` not-field-secured assert (ebilling may do it; else our post-074 lane). Reported outside-diff: approved total not recalculated after reviewer decisions (only caller `InvoiceSubmissionPersister.cs:347`). Re-check their fix range.
 
 - **uac-r2 #2110** (#2091 follow-up, `6b7cb018e`, review worktree `C:\wts-2110`): gate-DR interaction PASS sent (K1 same-parent skip removes a 50317 retry path; K2 sweep-job join R2 no step; K3 thread lookup not an ownership parent). uac-r2 merges after their own pass.
-- **Lane 042c** (`fix/ontology-042c-gate-dr-thread-filed`, `C:\wts-042c`, implementer running): F1 from the #2110 review: `GateDecisionRecordSharing.ShareWithCommunicationShareesAsync` returns false for a team-owned communication filed only through its thread, so `ShareAtWriteAsync` never re-owns the new gate DR. Fix: team-owned -> true (resolver decides). Then: measure §10 publish size (implementer told to skip; do it before merge), 2 adversarial passes + uac-r2 look (access), PR into docs branch.
-- **ebilling D-130 fix `ae5197e25`**: scoped re-check running in `C:\wts-eb130` (ignore 6cf404162, ebilling-only). Part D range coming next.
+- **Lane 042c** PR #2113 (`fix/ontology-042c-gate-dr-thread-filed`, `C:\wts-042c`, head `910261d84`): thread-filed (team-owned) communication -> gate DR re-owned at write. 2 adversarial passes clean after fix round; publish +234 B zipped, 192 files. Awaiting uac-r2 OK + green CI, then merge into docs branch (merge script with base docs/ontology-platform-design).
+- **ebilling D-130**: CLOSED from our side (`77690aa4f` PASS 381/0). Keep `C:\wts-eb130` for part D review.
 
 ## Promises to peers
 
