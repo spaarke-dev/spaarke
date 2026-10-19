@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | No POML task is active. Next task: **058** (SPA multitenant sign-in, A9), via task-execute. 044–048 and 061–068 are done and on master |
-| **Step** | R3 registered: Project #1734 on Board #2, parent Epic #2099 (EXTERNAL ACCESS SPA), README pointer added 2026-10-18. Ready to start 058 |
+| **Task** | **058** — SPA multitenant sign-in, tid → backend, silent/interactive link, profile form (`tasks/058-spa-multitenant-signin-profile-form.poml`). Rigor FULL; Opus session (POML: sonnet @ xhigh). 044–048 and 061–068 are done and on master |
+| **Step** | Step 0 done (knowledge, BFF contracts and SPA code read; escalation trigger evaluated: does not fire, link flow unchanged). **Implementation plan is in `notes/task-058-notes.md` — follow it.** Next: Step 1 (tests in `tests/workforce-home-auth.test.ts`), then Steps 2–6. No code written yet |
 | **Status** | **Dev BFF = `ad0e9e1a7`** (R3 + master `1473b34c6`: ontology 102b #2088 + UAC #2094), deployed with the owner's direct approval, finished 2026-10-18 22:30:58Z. Pre-deploy live was `ebc74b331` (an ancestor). Verified: ProductVersion `1.0.0+ad0e9e1a7…`, 4 critical files SHA-256 match, `/healthz` 200, 2 CORS origins, MIs `mi-bff-api-dev` + `mi-ontology-writer-dev`. Tests at this head: targeted 1064/1064, ArchTests 1130/1130. After-notices sent to ontology (authoring routes + nightly sweep), UAC (#2094 live gate + #2083 smoke) and word-add-in. Rollback: redeploy `ebc74b331`. Dev external SPA = `ebc74b331` (run `39094144398`), not redeployed. **Owner Partner UAT passed 2026-10-18; UI changes go to a new round** |
-| **Next Action** | task-execute 058. Watch for the UAC post-deploy result (ontology confirmed OK; it checks the nightly sweep on 2026-10-19) |
+| **Next Action** | Continue 058 per `notes/task-058-notes.md` "Implementation plan" (SPA dir `src/client/external-spa`; npm typecheck/lint/test/build/check:dist). Watch for the UAC post-deploy result (ontology confirmed OK; it checks the nightly sweep on 2026-10-19) |
 
 ### Uncommitted files
 - `.claude/agent-memory/researcher/MEMORY.md` (modified) and `.claude/agent-memory/researcher/dataverse-duplicate-detection-api-default-2026-10-15.md` (untracked) belong to the OWNER. Never commit or discard them. The 2026-10-18 master merge re-applied the owner's index line next to master's new line. Backups are in the session scratchpad (`owner-researcher-memory.patch`, `owner-researcher-MEMORY.md.bak`).
