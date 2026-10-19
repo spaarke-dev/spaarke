@@ -38,7 +38,7 @@ Execution is owner-gated: nothing has started. The owner reviews first and start
 | 041 | SessionStart coordination banner (FR-18) | 4 | 🔲 [open] | 035 | owner "surface" at 035 | P4-A | FULL · sonnet/high |
 | 042 | Optional live inbox notice (FR-18b) | 4 | 🔲 [open] | 041 | owner wants it | — | STANDARD · sonnet/high |
 | 050 | task-execute Step 0 items, Step 9 diff check (FR-20, FR-21) | 5 | 🔲 [open] | 040 | 040 done | P5-A (main session) | FULL · opus/high |
-| 051 | Router critical-area `ack` (FR-22) | 5 | 🔲 [open] | 035 | D-1 agreed before merge | P5-A | FULL · opus/high |
+| 051 | Router critical-area `ack` (FR-22) | 5 | 🔲 [open] | 035 | owner approval (D-1) before merge | P5-A | FULL · opus/high |
 | 052 | /conflict-check reuses detector (FR-16) | 5 | 🔲 [open] | 035, 050 | owner confirmed FR-16 at 035 | — (.claude) | STANDARD · sonnet/high |
 | 053 | Owned-area handover at close (FR-23) | 5 | 🔲 [open] | 031, 052 | 052 done | — (.claude) | MINIMAL · sonnet/medium |
 | 090 | Project wrap-up | wrap-up | 🔲 [open] | all | all others done/deferred | — | FULL · opus/high |
@@ -86,7 +86,7 @@ Phase 4:
   Wave 9: 040, 041 [P4-A] — goal-eligible: NO (two tasks)
   Wave 10: 042 (optional)
 Phase 5:
-  Wave 11: 050 (main) ‖ 051 [P5-A] — NO (Router: D-1 before merge)
+  Wave 11: 050 (main) ‖ 051 [P5-A] — NO (Router: owner approval before merge)
   Wave 12: 052 → 053 (main)
 Wrap-up: 090
 ```

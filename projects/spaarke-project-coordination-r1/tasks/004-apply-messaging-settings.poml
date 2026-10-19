@@ -18,7 +18,7 @@
     <estimated-effort>1 hour</estimated-effort>
   </metadata>
 
-  <prompt>Show the owner the exact user-settings JSON and the PATH claude fix. Once the owner has applied them, verify FR-00 acceptance (b), (c) and (d) between two live worktree sessions, and record the date FR-00 took effect. That date starts the 14-day phase 0 clock.</prompt>
+  <prompt>Back up and then apply the two user settings and the PATH claude fix (the owner authorized the session on 2026-10-18), then verify FR-00 acceptance (b), (c) and (d) between two live worktree sessions, and record the date FR-00 took effect. That date starts the 14-day phase 0 clock.</prompt>
   <role>SPAARKE tooling developer assisting the owner with machine configuration.</role>
   <goal>notes/phase0-applied-{date}.md records what was applied, the date, the messaging-config check output (empty), and the results of (b), (c) and (d).</goal>
 
@@ -30,7 +30,8 @@
   </context>
 
   <constraints>
-    <constraint source="project CLAUDE.md section 5">Scope: the session shows the exact JSON and the exact command. The owner applies them, or explicitly tells the session to apply them. Without that OK, the session does not touch ~/.claude/settings.json or the npm global.</constraint>
+    <constraint source="owner 2026-10-18">Scope: the session is authorized to edit ~/.claude/settings.json and to update or remove the npm global claude. Before editing, confirm the backup ~/.claude/settings.json.bak-2026-10-18-pre-coordination-r1 exists and is byte-identical to the current file; if the file has changed since, make a new timestamped backup.</constraint>
+    <constraint source="owner 2026-10-18">Scope: the user settings file is about 197 KB of UTF-8 (1,328 allow rules, 365 additional directories). Add the two keys by inserting text after the opening brace, never by loading and re-dumping the JSON. Afterwards: the file parses as UTF-8 JSON; the diff against the backup is exactly the two added key lines; the permissions.allow and additionalDirectories counts are unchanged.</constraint>
     <constraint source="spec FR-00">Scope: apply only FR-00 (crossSessionInbound "accept", dialogExpiry "never", the PATH claude at least 2.1.236, and the address mechanism from task 002). Nothing from phases 1–5 is applied in the same window, so the checkpoint measures FR-00 alone.</constraint>
     <constraint source="spec FR-00 negatives">Scope: no permissions.deny entry naming SendMessage or ListAgents, and no isolatePeerMachines, in any scope.</constraint>
   </constraints>
@@ -43,7 +44,7 @@
   </knowledge>
 
   <steps mode="prescriptive">
-    <step order="1">Print the JSON fragment for ~/.claude/settings.json and the npm command, and ask the owner to apply them (or to authorize the session to).</step>
+    <step order="1">Verify the backup; insert crossSessionInbound "accept" and dialogExpiry "never"; check the diff and counts. Update or remove the npm global claude (npm install -g @anthropic-ai/claude-code@latest, or npm uninstall -g @anthropic-ai/claude-code); confirm claude --version on PATH is at least 2.1.236, or that PATH no longer has it.</step>
     <step order="2">Start a new session (or ask the owner to restart one) and confirm the messaging-config check prints nothing.</step>
     <step order="3">(b) From this session, find a second active worktree session by project slug (or by the mechanism 3 lookup) in ListAgents. (c) Exchange one message with a session in a different permission mode and confirm no approval dialog appeared. (d) Ask the owner to restart that session under the same address, send to it, and confirm delivery.</step>
     <step order="4">Write notes/phase0-applied-{date}.md with the applied values, the date, and the (b)–(d) results.</step>
@@ -59,6 +60,7 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion testable="true">The diff of ~/.claude/settings.json against the backup shows exactly the two added keys; allow and additionalDirectories counts are unchanged; the file parses as UTF-8 JSON.</criterion>
     <criterion testable="true">The messaging-config check prints nothing in a fresh session after the change.</criterion>
     <criterion testable="true">(b) Two active same-machine worktree sessions find each other by project slug or the documented lookup.</criterion>
     <criterion testable="true">(c) A message between sessions in different permission modes is delivered with no approval dialog.</criterion>

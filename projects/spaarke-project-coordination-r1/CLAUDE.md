@@ -32,12 +32,14 @@ ADR tensions approved for this project (root CLAUDE.md §6.5): none.
 - 2026-10-17 — `ack` applied by the owning project's session (autonomous) — `notes/decisions.md#ack`
 - 2026-10-15 — Deploy guard on all .NET App Services; dev log is a pinned issue; critical areas = access control, auth, ownership + secure records, Dataverse write path; ack folded into Router; detector also reads local worktrees — spec C-3 to C-7
 - 2026-10-18 — Parent Epic #429 (DevOps & Code Quality)
+- 2026-10-18 — Phase 6 (FR-24) deferred until after this project; critical-area globs are proved by evidence and approved by the owner in task 020; task 004 is authorized to edit user settings and the npm `claude`; the baseline excludes this project's spike sessions; task 024 uses uac-r2; D-1 is owner approval — `notes/decisions.md#pre-start`
+- 2026-10-18 — **Settings safety:** before editing any settings file (repo or user), back it up; afterwards, the diff against the backup shows only the intended additions. User settings are 197 KB and UTF-8, so edit them by inserting text, never by rewriting the file through a JSON load and dump. Backup: `~/.claude/settings.json.bak-2026-10-18-pre-coordination-r1`.
 
 ## 4. Coordination
 
 - **Every active project** uses the skills this project edits (`task-execute`, `task-create`, `project-pipeline`, `design-to-spec`, `conflict-check`, `devops-*`, `project-defer-issue-tracking`). Land each as a small PR after `/conflict-check` (NFR-06).
-- **`ci-cd-unit-test-remediation-r1`** — Router's `docs_only` skip stays with that project. Agree the FR-22 change (D-1) before task 051 merges.
-- **PR #2043** (`feat/context-checkpoint-hooks`) edits `.claude/settings.json` and root `CLAUDE.md`. Rebase onto it, or merge after it, for tasks 003, 014, 020 and 041.
+- **Router (`ci-router.yml`)** — `ci-cd-unit-test-remediation-r1` is no longer active (owner, 2026-10-18). D-1 is the owner's approval of the FR-22 change before task 051 merges. Leave Router's `docs_only` handling unchanged.
+- **PR #2043** (context-checkpoint hooks) merged 2026-10-18 and is in this branch. `.claude/settings.json` now also registers `context-checkpoint.py` on PostToolUse, UserPromptSubmit, PreCompact and SessionStart compact. Tasks 003, 014 and 015 keep those entries unchanged.
 - **uac-r2** — pilot source. Its 208 pending decisions are uac-r2's work, not ours.
 
 ## 5. Environment and live actions

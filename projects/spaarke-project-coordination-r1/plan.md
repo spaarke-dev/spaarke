@@ -109,7 +109,7 @@ Wrap-up: 090
 - Tasks 011/012 (wiring) BLOCKED BY 010 (shared guard)
 - Tasks 031–033 BLOCKED BY 030 (registry parser)
 - Phase 4 BLOCKED BY 035 (report-only checkpoint)
-- Task 051 (Router) BLOCKED BY D-1 agreement (merge only)
+- Task 051 (Router) BLOCKED BY D-1, owner approval (merge only)
 
 **Critical path:** `001 ‖ 002 → 003 → 004 → (14 days) → 005 → 030 → 033 → 034 → (report period) → 035 → 040 → 050 → 052 → 053 → 090`
 
@@ -229,8 +229,8 @@ Wrap-up: 090
 |------------|----------|--------|
 | Board #2 triage fields | GitHub Project 2 | Ready |
 | Registration MUST | `.claude/skills/project-pipeline/SKILL.md` Step 4.2 | Merged (#1983) |
-| `ci-router.yml` ownership (D-1) | `ci-cd-unit-test-remediation-r1` | Pending |
-| PR #2043 (hooks in `.claude/settings.json`, root `CLAUDE.md`) | open | Merge first or rebase onto it |
+| `ci-router.yml` change (D-1) | Owner approval (CI project no longer active) | Pending |
+| PR #2043 (hooks in `.claude/settings.json`, root `CLAUDE.md`) | Merged 2026-10-18; in branch | Keep its entries unchanged |
 
 ---
 
@@ -276,7 +276,7 @@ Wrap-up: 090
 | R1 | Process wording suppresses messaging | Low | High | No guidance text; FR-26 gates the next phase |
 | R2 | VS Code rename doesn't set the address | Medium | Medium | Mechanism 3 fallback (task 002) |
 | R3 | The guard refuses a legitimate deploy | Medium | Medium | `-Supersede "<reason>"`, logged |
-| R4 | Router change collides with CI ownership | Medium | Medium | D-1 before the 051 merge |
+| R4 | Router gate blocks the wrong PRs | Medium | Medium | Globs proved by replay (020); owner approves before the 051 merge (D-1) |
 | R5 | Write-boundary false positives slow sessions | Medium | Low | `ask` not `deny`; fail-open; must-not-fire fixtures for measurement worktrees and scratchpad |
 | R6 | Shared skill files collide with other projects | High | Medium | Small PRs after `/conflict-check`; sequential `.claude/**` tasks |
 

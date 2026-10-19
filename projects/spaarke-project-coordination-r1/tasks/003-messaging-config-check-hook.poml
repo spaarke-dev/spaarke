@@ -44,7 +44,7 @@
     <constraint source="spec FR-00 negatives">Scope: the script adds no permissions entry, never sets isolatePeerMachines, and never writes any settings file. It only reads.</constraint>
     <constraint source="spec MUST NOT">Scope: every printed line and every comment in the script states a configuration fact or the exact fix. No line says when, whether or how to message.</constraint>
     <constraint source="root CLAUDE.md section 16">Scope: the registration in .claude/settings.json records "Enforced by: scripts/quality/messaging-config-check.py + scripts/quality/tests/test_messaging_config_check.py" in the script's header docstring.</constraint>
-    <constraint source="project">Scope: before the PR, check whether PR #2043 (which also edits .claude/settings.json) has merged; rebase onto it if it has.</constraint>
+    <constraint source="owner 2026-10-18">Scope: before editing .claude/settings.json, confirm the branch contains PR #2043 (merged 2026-10-18), then copy the file to the scratchpad. After editing, the diff against that copy shows only this task's added entries. Every existing hook entry, including the four context-checkpoint.py entries, is unchanged.</constraint>
   </constraints>
 
   <knowledge>

@@ -2,6 +2,21 @@
 
 Full rationale for the binding one-liners in `CLAUDE.md` §3. Newest first.
 
+## 2026-10-18 — Owner answers before start {#pre-start}
+
+1. **Phase 6 deferred** until after this project (C-9 confirmed). FR-24 has no task.
+2. **Critical-area globs.** The owner asked how to judge them. Answer: by evidence, not assumption. The globs are derived from the documents that define each area, checked for coverage, and replayed against recent merged PRs. The owner approves the result (task 020). Checked 2026-10-18: every A-2 glob matches files. But A-2 misses at least `Services/Dataverse/RecordOwnershipResolver.cs`, `Api/Filters/RecordRouteAccessAuthorizationFilter.cs`, `config/secure-record-owner-role.json`, `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs`, and the write-path services named in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` (`RecordCreationService`, `RegardingResolver`, `RecordContainerResolver`).
+3. **PR #2043** merged 2026-10-18 and is merged into this branch (`f9a8f9fa4`). Every settings edit backs up first and diffs to additions only. User settings backed up to `~/.claude/settings.json.bak-2026-10-18-pre-coordination-r1` (197,590 bytes; 1,328 allow rules, 365 additional directories). Repo `.claude/settings.json` is in git.
+4. Task 002: the owner will do the rename.
+5. **Task 004: the session is authorized** to edit `~/.claude/settings.json` and update or remove the npm `claude`.
+6. **Baseline excludes this project's own spike sessions** (2026-10-17).
+7. **Task 016:** the owner agrees to a deploy. It redeploys the commit already live, so no product code changes (see task 016).
+8. **Task 024** uses a uac-r2 sample (up to 30 issues).
+9. **`ci-cd-unit-test-remediation-r1` is no longer active.** Don't rely on it. D-1 becomes owner approval of the Router change (task 051).
+10. Checkpoint decisions are made when they arrive.
+11. Target Date stays blank.
+12. Board Status stays Active (already set).
+
 ## 2026-10-18 — Parent Epic {#epic}
 
 #429 DevOps & Code Quality (owner, at `/project-pipeline` Step 4.2).

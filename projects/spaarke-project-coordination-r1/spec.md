@@ -465,7 +465,7 @@ Deferred and not built: the status digest (FR-24).
 > No ADR tensions surfaced at design time. All listed ADRs and standards apply without exception. K-1 removes the one anonymous-endpoint change the design came close to.
 
 Coordination dependencies (not tensions; agree before the dependent tasks merge):
-- **D-1** — `ci-router.yml` (FR-22): Router's `docs_only` skip "stays with `ci-cd-unit-test-remediation-r1`". Agree the FR-22 change with that project, or with the owner if it is closed.
+- **D-1** — `ci-router.yml` (FR-22): `ci-cd-unit-test-remediation-r1` is no longer active (owner, 2026-10-18), so the owner approves the FR-22 change before it merges. Router's `docs_only` handling is left unchanged.
 - **D-2** — rev 1's INDEX.md contract change is withdrawn (C-8), so there is no FR-C02 dependency.
 - **D-3** — every active project uses the edited skills (NFR-06).
 
@@ -495,7 +495,7 @@ Coordination dependencies (not tensions; agree before the dependent tasks merge)
 ### External
 
 - Azure CLI management-token access to Kudu for the guarded App Services.
-- D-1 agreed before FR-22 merges.
+- D-1: the owner approves the Router change before FR-22 merges.
 
 ## Owner Clarifications
 
@@ -509,14 +509,14 @@ Coordination dependencies (not tensions; agree before the dependent tasks merge)
 | C-6 | Gate wiring | How does the ack block? | Folded into `Router`; no ruleset change | FR-22 |
 | C-7 | Detector source | Remote only, or local too? | Pushed branches, PRs, committed POMLs, plus local worktrees when run locally | FR-14 |
 | C-8 | Registry storage (K-4) | Shared file or per project? | **README frontmatter per project** (2026-10-17) | FR-13; INDEX.md untouched |
-| C-9 | Phase 6 | Defer the status digest? | **Recommended, to be confirmed** | FR-24 deferred |
+| C-9 | Phase 6 | Defer the status digest? | **Yes — deferred until after this project** (2026-10-18) | FR-24 deferred |
 | C-10 | Acknowledgement | Who applies `ack`? | **The owning project's session — autonomous** (2026-10-17) | FR-22 |
 | C-11 | Session naming | Run the spike? | **Yes — run 2026-10-17**; results in `notes/naming-spike-2026-10-17.md`; interactive step pending (FR-00 a) | FR-00 |
 
 ## Assumptions
 
 - **A-1 — Detector and checks in Python**, matching the existing hooks.
-- **A-2 — Critical-area globs (initial; refined at task review):**
+- **A-2 — Critical-area globs (initial).** Proved and owner-approved in task 020: derived from the documents that define each area, checked for coverage, replayed against recent merged PRs. Known gaps, 2026-10-18: `RecordOwnershipResolver.cs`, `Api/Filters/RecordRouteAccessAuthorizationFilter.cs`, `config/secure-record-owner-role.json`, `RouteAuthorizationGuardTests.Ledger.cs`, and the write-path services named in the architecture doc.
   - access control: `src/server/api/Sprk.Bff.Api/Services/Access/**`, `Infrastructure/ExternalAccess/**`, `Api/ExternalAccess/**`;
   - auth: `src/server/shared/Spaarke.Core/Auth/**`, `Infrastructure/Graph/GraphClientFactory.cs`, `.claude/adr/ADR-028*`, `.claude/constraints/auth.md`;
   - ownership and secure records: the ownership and secure-project code under `Services/Access/**` and the `sprk_externalrecordaccess` paths;
@@ -529,7 +529,7 @@ Coordination dependencies (not tensions; agree before the dependent tasks merge)
 ## Unresolved Questions
 
 - [ ] **FR-00 (a): does the VS Code rename, or an interactive hook `sessionTitle`, become the messaging address?** Blocks only the choice between mechanisms 1, 2 and 3. It takes about 30 seconds by hand. The headless "hook title ≠ address" result may be a Claude Code defect; report it with `/feedback`.
-- [ ] **D-1: Router change ownership.** Blocks the FR-22 merge only.
+- [x] **D-1: Router change ownership.** Resolved 2026-10-18: owner approval (the CI project is no longer active). Blocks the FR-22 merge only.
 - [ ] **Dataverse role-privilege writes** have no single CLI signature, so FR-04 catches `az` role writes only; Dataverse role changes rely on FR-03 logging. Blocks nothing.
 - [ ] **Owning Project text vs single-select.** Blocks nothing; affects FR-09 validation.
 

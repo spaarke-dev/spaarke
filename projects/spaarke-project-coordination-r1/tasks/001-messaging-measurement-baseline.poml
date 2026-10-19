@@ -89,7 +89,7 @@
     <criterion testable="true">Test scope: cover the stated contract and the edge cases above. Anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>The baseline transcript window may include this project's own spike sessions (2026-10-17). Count them, and list the spike project folder separately so task 005 can exclude it if the owner wants.</notes>
+  <notes>Owner 2026-10-18: exclude this project's own spike sessions (the headless naming-spike runs of 2026-10-17, which ran in this worktree and its scratch folders) from the baseline. Add an --exclude-project option, apply it for the baseline, and state the exclusion in the report.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

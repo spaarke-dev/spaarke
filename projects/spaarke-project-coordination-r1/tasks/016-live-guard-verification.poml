@@ -23,14 +23,14 @@
   <goal>notes/phase1-live-verification-{date}.md shows the read-only refusal from a branch lacking the live commit, the check-only pass from current master, and one parseable dev-log entry per deploy type exercised.</goal>
 
   <context>
-    <background>Spec success criteria 1–3. -CheckOnly (task 010) lets the guard run against the live app without deploying. A real deploy is shared-dev-visible and needs the owner's explicit OK, going through /bff-deploy.</background>
+    <background>Spec success criteria 1–3. This project changes no BFF or product code; it changes only the scripts that deploy it. So the proof deploy redeploys the commit already live on spaarke-bff-dev (guard case f): the app runs the same build afterwards, and the run proves that the guarded script passes the guard and writes its dev-log entry. -CheckOnly (task 010) covers the refusal case without deploying. The owner agreed to the deploy (2026-10-18). It still goes through /bff-deploy, and the session confirms the moment of the deploy with the owner, because other sessions share the dev app.</background>
     <relevant-files>
       <file role="output">projects/spaarke-project-coordination-r1/notes/phase1-live-verification-{date}.md</file>
     </relevant-files>
   </context>
 
   <constraints>
-    <constraint source="project CLAUDE.md section 5">Scope: steps 1–2 are read-only (Assert-LiveBuildAncestry -CheckOnly). Step 3 runs only if the owner explicitly approves a deploy in this session, and goes through /bff-deploy. Otherwise step 3 is recorded as "pending the next owner-approved deploy" and the task completes with that noted.</constraint>
+    <constraint source="owner 2026-10-18">Scope: steps 1–2 are read-only (Assert-LiveBuildAncestry -CheckOnly). Step 3 deploys only the commit already live (built from that SHA in a temporary checkout), through /bff-deploy, after the owner confirms the timing in this session. If the live SHA is not on origin, step 3 is skipped and recorded as "pending the next owner-approved deploy".</constraint>
     <constraint source="project">Scope: the branch lacking the live commit is a local throwaway branch at a commit before the live SHA. It is never pushed and is deleted afterwards.</constraint>
   </constraints>
 
@@ -44,7 +44,7 @@
   <steps mode="prescriptive">
     <step order="1">From a fresh master checkout in this worktree, run Assert-LiveBuildAncestry -CheckOnly against spaarke-bff-dev. Record the live SHA and the decision (expected: proceed, or a refusal naming a branch, which itself is a finding to report).</step>
     <step order="2">Create a local throwaway branch at a commit that is not a descendant of the live SHA, and run the guard with -CheckOnly. Record the refusal message (expected: SHA, containing branches, -Supersede). Delete the branch.</step>
-    <step order="3">Only with owner approval: one deploy through /bff-deploy, then read the dev-log issue's latest comment and parse it back into fields.</step>
+    <step order="3">With the owner's timing confirmed: redeploy the live SHA through /bff-deploy using the guarded Deploy-BffApi.ps1; confirm the guard reported equal or "includes live"; confirm the live DLL ProductVersion is unchanged afterwards; then read the dev-log issue's latest comment and parse it back into fields.</step>
     <step order="4">Write the notes file.</step>
     <step order="5">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
   </steps>
@@ -60,8 +60,8 @@
   <acceptance-criteria>
     <criterion testable="true">The notes show the live SHA read from the real DLL.</criterion>
     <criterion testable="true">The notes show a refusal from the throwaway branch naming the SHA and -Supersede.</criterion>
-    <criterion testable="true">Either one parsed dev-log entry from an owner-approved deploy, or the line "pending the next owner-approved deploy".</criterion>
-    <criterion testable="true">Negative: no deploy happened without the owner's explicit approval; the throwaway branch does not exist locally or remotely.</criterion>
+    <criterion testable="true">Either one parsed dev-log entry from the redeploy, with the live ProductVersion unchanged afterwards, or the line "pending the next owner-approved deploy".</criterion>
+    <criterion testable="true">Negative: no commit other than the live SHA was deployed; no deploy happened without the owner confirming the timing; the throwaway branch does not exist locally or remotely.</criterion>
   </acceptance-criteria>
 
   <execution>

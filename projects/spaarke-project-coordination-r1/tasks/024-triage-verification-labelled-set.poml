@@ -22,7 +22,7 @@
   <goal>notes/triage-verification-{date}.md holds the decision table for the set, and pass/fail for the two checks.</goal>
 
   <context>
-    <background>Success criterion 4. The pilot (notes/pilot-issue-triage-2026-10-15.md) triaged uac-r2's 208 issues and found L1–L8. Ask the owner which project label to use; default to a sample of at most 30 issues from unified-access-control-r2.</background>
+    <background>Success criterion 4. The pilot (notes/pilot-issue-triage-2026-10-15.md) triaged uac-r2's 208 issues and found L1–L8. Owner 2026-10-18: use a sample of at most 30 open issues labelled unified-access-control-r2, including at least 3 tracking issues and at least 3 with an on-issue ruling.</background>
     <relevant-files>
       <file role="output">projects/spaarke-project-coordination-r1/notes/triage-verification-{date}.md</file>
     </relevant-files>
@@ -42,7 +42,7 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="1">Confirm the label and sample size with the owner.</step>
+    <step order="1">Select the sample (uac-r2 label, at most 30, the minimums above) and list it in the notes.</step>
     <step order="2">For each issue: tracking issue (skip) or finding; any on-issue ruling; the six prompt answers; the decision.</step>
     <step order="3">Check both criteria and write the notes file.</step>
     <step order="4">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>

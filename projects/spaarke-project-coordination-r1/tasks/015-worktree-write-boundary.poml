@@ -39,6 +39,7 @@
     <constraint source="NFR-02">Scope: ask, never deny; under 5 s; no network; fails open; every existing test still passes unchanged; the header docstring's "Enforced by:" line lists the new rules.</constraint>
     <constraint source="spec FR-25">Scope: the docstring records that the Claude Code sandbox was evaluated and rejected, and why.</constraint>
     <constraint source="project">Scope: in .claude/settings.json, add guard-worktree-links.py to PreToolUse for "Edit|Write" (a new PreToolUse entry if none exists for that matcher). Do not change the existing Bash|PowerShell entry or any PostToolUse entry.</constraint>
+    <constraint source="owner 2026-10-18">Scope: before editing .claude/settings.json, confirm the branch contains PR #2043 (merged 2026-10-18), then copy the file to the scratchpad. After editing, the diff against that copy shows only this task's added entries. Every existing hook entry, including the four context-checkpoint.py entries, is unchanged.</constraint>
   </constraints>
 
   <knowledge>

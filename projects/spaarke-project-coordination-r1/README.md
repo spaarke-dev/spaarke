@@ -94,7 +94,7 @@ The project is **complete** when (spec success criteria 1–11):
 |------|--------|------------|------------|
 | Written process suppresses unprompted messaging | High | Low | No guidance text; FR-26 measurement blocks the next phase on a drop |
 | VS Code rename doesn't set the messaging address | Medium | Medium | FR-00 mechanism 3 (lookup fallback); task 002 decides |
-| Router change conflicts with CI ownership | Medium | Medium | D-1 agreed before task 051 merges |
+| Router change blocks the wrong PRs | Medium | Medium | Globs proved by replay (task 020); owner approves before the task 051 merge (D-1) |
 | Shared skill edits collide with other projects | Medium | High | Small PRs after `/conflict-check` (NFR-06); `.claude/**` tasks run sequentially |
 
 ## Dependencies
@@ -104,7 +104,7 @@ The project is **complete** when (spec success criteria 1–11):
 | Board #2 triage fields | Internal | Ready | Added 2026-10-15 |
 | `/project-pipeline` registration MUST (PR #1983) | Internal | Ready | Merged 2026-10-16 |
 | `gh` authenticated; Kudu management-token access | External | Ready | Same access `Deploy-BffApi.ps1` uses |
-| D-1: `ci-router.yml` change agreed | Internal | Pending | Blocks the task 051 merge only |
+| D-1: owner approves the `ci-router.yml` change | Internal | Pending | Blocks the task 051 merge only |
 
 ## Team
 

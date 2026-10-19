@@ -3,7 +3,7 @@
   <metadata>
     <title>Router: critical-area acknowledgement gate with stale-ack removal (FR-22)</title>
     <phase>5 Resolution and critical areas</phase>
-    <gate>035 complete; D-1 agreed with ci-cd-unit-test-remediation-r1 (or the owner) before merge</gate>
+    <gate>035 complete; owner approval (D-1) before merge</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds blocking behaviour to the only required master check.</rigor-reason>
@@ -22,7 +22,7 @@
   <goal>ci-router.yml enforces the rule, the fixtures pass, and Router behaves identically for PRs with no critical-area touch.</goal>
 
   <context>
-    <background>Spec FR-22, C-6 (fold into Router; no ruleset change), C-10 (autonomous: the owning project's session applies ack), A-4 (stale ack removed). Critical-area globs are in .claude/constraints/cross-session.md section B; owners come from README frontmatter via project_registry.py. D-1: Router's docs_only skip stays with ci-cd-unit-test-remediation-r1; agree this change with them before merge.</background>
+    <background>Spec FR-22, C-6 (fold into Router; no ruleset change), C-10 (autonomous: the owning project's session applies ack), A-4 (stale ack removed). Critical-area globs are in .claude/constraints/cross-session.md section B; owners come from README frontmatter via project_registry.py. D-1: ci-cd-unit-test-remediation-r1 is no longer active (owner, 2026-10-18), so the owner approves this change before merge. Leave docs_only handling unchanged. The globs are the owner-approved list from task 020.</background>
     <relevant-files>
       <file role="modify">.github/workflows/ci-router.yml</file>
       <file role="new">scripts/quality/critical-area-ack.py</file>
@@ -41,7 +41,7 @@
     <constraint source="spec FR-22, A-4">Scope: on a pull_request synchronize event, if the new commits change any critical-area path and the PR has ack, the workflow removes ack (gh pr edit --remove-label) and the check fails until it is re-applied.</constraint>
     <constraint source="spec FR-22 negatives">Scope: no ruleset change; no comment parsing; Router's verdict is unchanged for PRs with no critical-area touch; docs_only handling is untouched. Only the job that edits labels gets pull-requests: write.</constraint>
     <constraint source="project">Scope: the ack check runs on pull_request only. push and merge_group events skip it and keep today's behaviour.</constraint>
-    <constraint source="escalation-boundary">Scope: this task does not merge until D-1 is recorded in notes/decisions.md.</constraint>
+    <constraint source="owner 2026-10-18">Scope: this task does not merge until the owner's approval (D-1) is recorded in notes/decisions.md, with the draft-PR run URLs in front of the owner.</constraint>
   </constraints>
 
   <knowledge>
@@ -62,12 +62,12 @@
     <step order="2">Write critical-area-ack.py and its fixtures.</step>
     <step order="3">Wire it into the workflow, with the stale-ack removal on synchronize.</step>
     <step order="4">Run the tests and actionlint; open a draft PR touching a fixture-only critical path to watch Router fail, apply ack, and watch it pass. Record the run URLs.</step>
-    <step order="5">Record D-1 agreement in notes/decisions.md before marking the PR ready.</step>
+    <step order="5">Present the fixtures and the draft-PR runs to the owner; record the approval (D-1) in notes/decisions.md before marking the PR ready.</step>
     <step order="6">Update tasks/TASK-INDEX.md: set this task to ✅ [done] AND set this POML status to completed; run pwsh scripts/check-task-status-drift.ps1.</step>
   </steps>
 
   <escalation>
-    <trigger>If ci-cd-unit-test-remediation-r1 (or the owner, if that project is closed) does not agree to the Router change, STOP before merge and escalate (spec D-1).</trigger>
+    <trigger>If the owner does not approve the Router change, STOP before merge (spec D-1).</trigger>
     <trigger>If any existing Router test or fixture changes outcome, STOP and escalate rather than adjusting the fixture.</trigger>
   </escalation>
 
