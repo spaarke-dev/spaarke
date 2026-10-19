@@ -1,6 +1,6 @@
 # Task 059 — dev Entra and settings setup for A9 (plan and record)
 
-> **Status: PLAN for owner review (2026-10-19). Nothing below has run.** Each stage runs only after the owner approves that stage.
+> **Status (2026-10-19): stage R (read-only) DONE with owner approval ("proceed"). Stop checks S-1 and S-2 fired, so no change has run. Waiting for the owner's decision (§11).** Each stage runs only after the owner approves that stage.
 > Task: `tasks/059-dev-entra-and-settings-a9.poml` (prescriptive). Design: `notes/a9-bff-design.md` §8, §9, §12.
 > Ids appear masked to 8 characters. Commands use the shell variables set in §1; the session fills them from the reads and shows each value masked.
 > No secret, certificate, token or key value is created, read or printed. Every "before" snapshot is saved to the session scratchpad and is the rollback input.
@@ -182,7 +182,44 @@ F (SPA) → E (variables) → D (BFF settings) → C (consent) → B (BFF app) �
 
 ## 11. Record (filled in as each stage runs)
 
-_Nothing has run._
+### Stage R — 2026-10-19, owner approval "proceed"; read-only, exactly as written in §2
+
+Output masked; full snapshots are in the session scratchpad (`before-1e40baad-full.json`, `before-bff-settings.json`, `r3-grants.json`).
+
+| # | Result |
+|---|---|
+| R0 | Repository-level variables: `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT` and `SIDECAR_ACR_LOGIN_SERVER` only. **No `VITE_*` and no `TEAMS_APP_ID`**, so a missing environment value cannot be silently filled (answers the owner's 076 K3 question; S-6 clear). `spaarke-dev` is a user account, so there are no organisation variables |
+| R1 | Tenant `a221a95e…`, `ralph.schroeder@spaarke.com` |
+| R2 | `1e40baad`, object `c2aab303…`:<br>- `signInAudience` = **AzureADMultipleOrgs already**<br>- `requestedAccessTokenVersion` = **null, i.e. v1** (S-1 fires)<br>- known clients: [`170c98e1…` SDAP-PCF-CLIENT]<br>- scopes: `access_as_user`, `access_as_external_user`, `SDAP.Access`, `user_impersonation` = `18afc847…`, all enabled<br>- 10 pre-authorized clients<br>- identifier URIs: `api://1e40baad…`, `api://auth-3e04ab58…/1e40baad…`, `api://green-dune…/1e40baad…`<br>- access-token optional claims: `email`, `preferred_username`, `upn`, `acct` (missing: `given_name`, `family_name`)<br>- **1 password credential** (S-2 fires), metadata only: `Dataverse-Checkout-20251218`, valid 2025-12-19 → 2027-12-19<br>- 0 certificates<br>- SPA redirects already include `brk-multihub://green-dune…` |
+| R2b | Federated credentials: `mi-bff-api-dev-assertion` (Spaarke-tenant issuer, the MI) and `github-actions-deploy-staging` |
+| R2c | `authenticationBehaviors`: not set (default) |
+| R3 | SP `d93c832e…`, enabled. Tenant-wide consents to `1e40baad`:<br>- Spaarke Office Add-in [`SDAP.Access user_impersonation`]<br>- **spaarke-bff-api-prod** [`SDAP.Access`]<br>- SPE File Viewer PCF [`SDAP.Access`]<br>- SDAP-External-Workspace [`user_impersonation`]<br>- SDAP-PCF-CLIENT [`user_impersonation`]<br>- spaarke-external-access-SPA [`access_as_external_user SDAP.Access user_impersonation`]<br>Pre-authorized: Spaarke Workspace (A8), SDAP-PCF-CLIENT, Spaarke Office Add-in, Azure CLI, spaarke-external-access-SPA, Microsoft Teams Graph Service, and four app ids with no SP in this tenant (`1fec8e78…`, `5e3ce6c0…`, `29d9ed98…`, `f257a0a9…`) |
+| R4 | No app named "Spaarke Workforce SPA" (S-4 clear) |
+| R5 | `spaarke-bff-dev`:<br>- `AzureAd__Audience` = `api://1e40baad…`; `AzureAd__ClientId` = `1e40baad…`; `AzureAd__TenantId` = `a221a95e…`; `Ciam__TenantId` = `7052feba…`<br>- `WorkforceIdentity__CustomerTenantIds__0` = `a221a95e…` (NFR-07), `__1` = **`bc3aa7f4…` already listed**<br>- **`ExternalAccess__CustomerBusinessUnitId` absent**<br>- `AzureAd__ValidAudiences__0..2` (`api://1e40baad…`, `1e40baad…`, `api://green-dune…/1e40baad…`) exist, but no BFF code reads them. The default scheme's audiences come from `AzureAd:Audience` plus `AgentToken:CopilotAudience` (`AuthorizationModule.cs`) |
+| R6 | `bc3aa7f4…` = **Dewey Cheatham & Howe PC** (`deweycheatham.onmicrosoft.com`) (S-5 clear) |
+| R7 | BU1 = "Spaarke Business Unit 1", enabled; exactly one default team (`cf15f587…`) (S-5 clear) |
+| R8 | `external-spa-dev`: `VITE_BFF_API_URL`, `VITE_MSAL_AUTHORITY`, `VITE_MSAL_BFF_SCOPE` (`4a4d5126…`), `VITE_MSAL_CLIENT_ID`, `VITE_MSAL_TENANT_ID`, `VITE_TEAMS_MSAL_BFF_SCOPE` (`1e40baad…`), `VITE_TEAMS_MSAL_CLIENT_ID` (`9f1da340…`), `VITE_TEAMS_MSAL_TENANT_ID`. `VITE_BACKENDS` and `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID` unset |
+| R9 | `/healthz` 200 |
+
+### Stop checks
+
+- **S-1 FIRED.** `1e40baad` issues v1 tokens. A9 cannot work on dev as is: a v1 home token's issuer is `sts.windows.net/{tid}/`, and the `WorkforceHome` scheme requires `login.microsoftonline.com/{tid}/v2.0`.
+  - Switching to v2 changes every dev caller's token (§12 research item 1). `aud` becomes the bare GUID, and the default scheme accepts only `api://1e40baad…` plus the Copilot URI (R5), so every dev surface (PCFs, Console, Office add-in, A8 SPA) would likely get 401. This is inferred from the code and must be proved by a test before any switch.
+  - Claim-shape reads checked in code (2026-10-19): harmless. `unique_name` is only the last fallback after `upn`/`preferred_username` (`DailyBriefingEndpoints.cs`, `CommunicationService.cs`); the `appid` reads in logs fall back to `azp` or are logging only (`MiddlewarePipelineExtensions.cs`, `AuthorizationModule.cs`, `KeylessProofAuthorizationFilter.cs`, `GraphClientFactory.cs`); `CallerIdentity.cs` also reads `azp`; `WorkforceIdentityOptions.cs` accepts both issuer forms. **The audience is the real blocker.**
+  - **The switch therefore needs a BFF change and a deploy first.**
+- **S-2 FIRED.** The BFF app has one password credential: `Dataverse-Checkout-20251218`, expiring 2027-12-19. It is already known: `docs/architecture/auth-azure-resources.md` records it as no longer used by the BFF since 2026-08-24 (auth-v4 task 033). It was left valid on the app; removing it is auth-v4/provisioning's item. 059 adds no credential and changes none.
+- S-3: not separately fired. The audience is already multitenant, so stage B's audience change is unnecessary. The callers in R3 matter only for S-1.
+- S-4, S-5 and S-6: clear.
+
+### What the reads change in the plan (if the owner goes ahead)
+
+- **Stage B:** no audience change. Only `knownClientApplications` += the new client, access-token claims += `given_name`, `family_name`, `removeUnverifiedEmailClaim` = true, and **the v2 switch, after the BFF change**.
+- **Stage D:** only `ExternalAccess__CustomerBusinessUnitId` = BU1. Dewey Cheatham is already allowed.
+- **Stage A:** unchanged.
+
+### Observation for the owner (not 059 scope)
+
+R3 shows **`spaarke-bff-api-prod` with tenant-wide consent to the DEV BFF app** (`SDAP.Access`). A production identity able to call a dev API may be a leftover. The owner decides whether it is intended.
 
 ## 12. Research used by this plan (researcher, 2026-10-19; V = in current Microsoft docs, I = inferred)
 
