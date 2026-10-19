@@ -1,0 +1,125 @@
+using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Tests.Services.Communication; // CapturingLogger<T>
+using Sprk.Bff.Api.Tests.Services.Signals;
+using Xunit;
+
+namespace Sprk.Bff.Api.Tests.Services.Access;
+
+/// <summary>
+/// Ontology task 042b round 2 (D-169, uac-r2 choice A): <see cref="SecureChildReconciler.AfterRefileAsync"/>, the one step every re-file writer
+/// runs, re-owns a re-filed communication's user-owned gate Decision Records after UAC's own steps — on every communication re-file, never on
+/// another table, never thrown. The reconciler's own steps run over loose doubles (it never throws by contract); the gate records live in a
+/// <see cref="GateSharingWorld"/>.
+/// </summary>
+public sealed class SecureChildReconcilerGateDecisionRecordTests
+{
+    private static readonly Guid CommunicationId = Guid.Parse("c0c0c0c0-0000-4000-8000-0000000000c2");
+    private static readonly Guid RecordId = Guid.Parse("d0d0d0d0-0000-4000-8000-0000000000c2");
+    private static readonly Guid Owner = Guid.Parse("a0000000-0000-4000-8000-0000000000c0");
+    private static readonly Guid Sharee = Guid.Parse("a0000000-0000-4000-8000-0000000000c1");
+    private static readonly Guid MatterTeam = Guid.Parse("e0000000-0000-4000-8000-0000000000c3");
+
+    private readonly Mock<IThreadResolver> _threads = new();
+    private readonly CapturingLogger<SecureChildReconciler> _log = new();
+
+    private SecureChildReconciler Reconciler(GateDecisionRecordSharing gate)
+    {
+        var entities = new Mock<IGenericEntityService>();
+        var configuration = new ConfigurationBuilder().Build();
+        return new SecureChildReconciler(
+            entities.Object, Mock.Of<IRecordOwnershipResolver>(),
+            new SecureChildShareSynchronizer(entities.Object, Mock.Of<IDataverseRecordShareService>(), null!, configuration,
+                NullLogger<SecureChildShareSynchronizer>.Instance),
+            null!, configuration, _log, gate, threads: _threads.Object);
+    }
+
+    /// <summary>The re-filed communication's user-owned gate record, shared with a participant, and the resolver's ordinary answer.</summary>
+    private static GateSharingWorld SharedGateRecord()
+    {
+        var gate = new GateSharingWorld()
+            .WithGateRecord(RecordId, CommunicationId, Owner)
+            .Share(GateSharingWorld.Record, RecordId, Sharee);
+        gate.OwnerAnswers(RecordOwnerResolution.Owned(MatterTeam));
+        return gate;
+    }
+
+    private static Task<bool> NotIsolated() => Task.FromResult(false);
+
+    [Fact]
+    public async Task AfterRefile_OfACommunication_ReownsItsGateDecisionRecord_AfterTheReconcilersOwnSteps_AndRevokesItsShares()
+    {
+        var gate = SharedGateRecord();
+        _threads.Setup(t => t.ReconcileThreadForFilingAsync(CommunicationId, It.IsAny<CancellationToken>()))
+            .Callback(() => gate.Calls.Add("thread-reconcile"))
+            .Returns(Task.CompletedTask);
+
+        await Reconciler(gate.Sharing).AfterRefileAsync("sprk_communication", CommunicationId, NotIsolated, CancellationToken.None);
+
+        gate.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(MatterTeam);
+        gate.RecordSharees(RecordId).Should().BeEmpty();
+        gate.Calls.IndexOf("thread-reconcile").Should().BeGreaterThanOrEqualTo(0)
+            .And.BeLessThan(gate.Calls.FindIndex(c => c.StartsWith("assign:", StringComparison.Ordinal)), "after UAC's own steps");
+    }
+
+    [Theory]
+    [InlineData("sprk_event")]
+    [InlineData("sprk_document")]
+    [InlineData("sprk_todo")]
+    public async Task AfterRefile_OfAnotherTable_NeverCallsTheGateHelper(string table)
+    {
+        var gate = SharedGateRecord();
+
+        await Reconciler(gate.Sharing).AfterRefileAsync(table, CommunicationId, NotIsolated, CancellationToken.None);
+
+        gate.Entities.Verify(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never);
+        gate.Calls.Should().BeEmpty();
+        gate.RecordSharees(RecordId).Should().Equal(Sharee);
+    }
+
+    [Fact]
+    public async Task AfterRefile_AGateHelperFault_IsLoggedAtError_AndNeverThrown()
+    {
+        var act = () => Reconciler(GateSharingWorld.Faulting())
+            .AfterRefileAsync("sprk_communication", CommunicationId, NotIsolated, CancellationToken.None);
+
+        await act.Should().NotThrowAsync("the re-file it follows has landed");
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("gate Decision Records were not re-owned")
+            && e.Message.Contains(CommunicationId.ToString()));
+    }
+
+    [Fact]
+    public async Task AfterRefile_IntoASecureRecord_TheGateHelperAssignsAndRevokesNothing()
+    {
+        var gate = SharedGateRecord();
+        gate.OwnerAnswers(RecordOwnerResolution.Owned(Guid.NewGuid()) with { IsSecureOwner = true });
+
+        await Reconciler(gate.Sharing).AfterRefileAsync("sprk_communication", CommunicationId, NotIsolated, CancellationToken.None);
+
+        gate.Calls.Should().NotContain(c => c.StartsWith("assign:", StringComparison.Ordinal) || c.StartsWith("revoke:", StringComparison.Ordinal));
+        gate.RecordSharees(RecordId).Should().Equal(Sharee);
+    }
+
+    [Fact]
+    public async Task AfterRefile_Twice_ReownsOnce()
+    {
+        var gate = SharedGateRecord();
+        var reconciler = Reconciler(gate.Sharing);
+
+        await reconciler.AfterRefileAsync("sprk_communication", CommunicationId, NotIsolated, CancellationToken.None);
+        await reconciler.AfterRefileAsync("sprk_communication", CommunicationId, NotIsolated, CancellationToken.None);
+
+        gate.Calls.Count(c => c.StartsWith("assign:", StringComparison.Ordinal)).Should().Be(1);
+        gate.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(MatterTeam);
+    }
+}

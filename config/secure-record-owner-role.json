@@ -246,6 +246,22 @@
       "addedBy": "spaarke-ontology-platform-r1 task 039"
     },
     {
+      "logicalName": "sprk_policy",
+      "privilegeName": "prvReadsprk_Policy",
+      "kind": "child",
+      "reason": "Owner decision, unified-access-control-r2 round 102 item 4 (#2084, agreed with spaarke-ontology-platform-r1): a rule scoped to a matter (sprk_policy.sprk_matter) is that matter's child. When the matter turns Secure, SecureChildReconciler / SecureChildReconciliationJob re-own the rule to the Secure Record Owners team, so non-members no longer read the rule text or its link to the matter (D-123). A rule with no matter is never reached.",
+      "evidence": "unified-access-control-r2 #2084 (spaarkedev1, 2026-10-19T04:10:06Z): a probe sprk_policy created with ownerid bound to the Secure Record Owners team, before this privilege was added, was refused with HTTP 403, code 0x80040299 (no row was created), verbatim: 'Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=38, MetadataCachePrivilegesCount=7430, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_Policy privilege (Id=eda1df58-8428-4b7a-827c-d9c9ebf6140f) on OTC=11000 for entity 'sprk_policy' (LocalizedName='Policy'). context.Caller=1d02f31c-1872-f011-b4cb-7c1e52671ad0. Consider adding missed privilege to one of the principal (user/team) roles.'",
+      "addedBy": "unified-access-control-r2 #2084"
+    },
+    {
+      "logicalName": "sprk_policyversion",
+      "privilegeName": "prvReadsprk_PolicyVersion",
+      "kind": "child",
+      "reason": "Owner decision, unified-access-control-r2 round 102 item 4 (#2084): a rule's versions (sprk_policyversion.sprk_policy) follow the rule into a Secure matter's team, re-owned by SecureChildReconciler / SecureChildReconciliationJob; their text can name what is watched on the matter. OntologyAdminAuthoringService refuses to publish a version of a rule the Secure team holds (ontology.admin.rule_held_secure), so no version is created owned by it.",
+      "evidence": "unified-access-control-r2 #2084 (spaarkedev1, 2026-10-19T04:10:07Z): a probe sprk_policyversion created with ownerid bound to the Secure Record Owners team, before this privilege was added, was refused with HTTP 403, code 0x80040299 (no row was created), verbatim: 'Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=38, MetadataCachePrivilegesCount=7430, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_PolicyVersion privilege (Id=22640ee9-da29-474e-87db-18e04b320ded) on OTC=11001 for entity 'sprk_policyversion' (LocalizedName='Policy Version'). context.Caller=1d02f31c-1872-f011-b4cb-7c1e52671ad0. Consider adding missed privilege to one of the principal (user/team) roles.'",
+      "addedBy": "unified-access-control-r2 #2084"
+    },
+    {
       "logicalName": "sprk_externalrecordaccess",
       "privilegeName": "prvReadsprk_ExternalRecordAccess",
       "kind": "grant",
