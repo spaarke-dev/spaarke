@@ -215,15 +215,85 @@ public sealed class InvoiceTotalsCalculatorTests
         result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.BilledTotalMissing);
     }
 
+    // D-121 (ebilling-r1 task 049 part A): credit lines keep their negative amount and are summed as signed values. These replace
+    // NegativeFeeOrExpenseAmount_IsRefused, which pinned the pre-D-121 refusal of any negative Fee or Expense amount.
+
     [Fact]
-    public void NegativeFeeOrExpenseAmount_IsRefused()
+    public void CreditFeeLine_IsSummedAsASignedAmount()
     {
-        var credit = Expense(-50m);
+        // 1000 of work, a 100 credit: the billed total is the net 900 and nothing is adjusted.
+        var result = InvoiceTotalsCalculator.Calculate(900m, new[] { Fee(1000m), Fee(-100m) });
 
-        var result = InvoiceTotalsCalculator.Calculate(100m, new[] { Fee(150m), credit });
+        result.IsRefused.Should().BeFalse();
+        result.FeesTotal.Should().Be(900m);
+        result.ApprovedTotal.Should().Be(900m);
+    }
 
-        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.LineAmountNegative);
+    [Fact]
+    public void CreditExpenseLine_IsSummedInTheExpenseTotal_AndNotTheFees()
+    {
+        var result = InvoiceTotalsCalculator.Calculate(1150m, new[] { Fee(1000m), Expense(200m), Expense(-50m) });
+
+        result.IsRefused.Should().BeFalse();
+        result.FeesTotal.Should().Be(1000m);
+        result.ExpensesTotal.Should().Be(150m);
+        result.ApprovedTotal.Should().Be(1150m);
+    }
+
+    [Fact]
+    public void PercentAdjustment_IsTakenOnTheFeesNetOfTheCredit()
+    {
+        // Base = 1000 - 200 = 800, so 10% = 80; the approved total is 800 - 80.
+        var result = InvoiceTotalsCalculator.Calculate(800m, new[] { Fee(1000m), Fee(-200m), Percent(10m) });
+
+        result.IsRefused.Should().BeFalse();
+        result.InvoiceAdjustmentsTotal.Should().Be(80m);
+        result.ApprovedTotal.Should().Be(720m);
+    }
+
+    [Fact]
+    public void CreditsThatExceedTheirTypesCharges_AreRefused_BecauseTheStoredTotalCannotBeNegative()
+    {
+        // The expense credit has no expense charge to offset it: sprk_expensestotal (minimum 0) could not hold -50.
+        var result = InvoiceTotalsCalculator.Calculate(950m, new[] { Fee(1000m), Expense(-50m) });
+
+        result.IsRefused.Should().BeTrue();
+        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.TotalBelowStorableMinimum);
+        result.FeesTotal.Should().Be(0m, "a refused result carries no figures that could be stored");
+        result.ExpensesTotal.Should().Be(0m);
+    }
+
+    [Fact]
+    public void AllCreditInvoice_IsRefused_BecauseTheFeesTotalWouldBeNegative()
+    {
+        var result = InvoiceTotalsCalculator.Calculate(-300m, new[] { Fee(-300m) });
+
+        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.TotalBelowStorableMinimum);
+    }
+
+    [Fact]
+    public void ReducedCreditLine_IsRefused_BecauseNoApprovedAmountIsValidForIt()
+    {
+        var credit = Fee(-100m, InvoiceLineStatus.Reduced, approved: 0m);
+
+        var result = InvoiceTotalsCalculator.Calculate(900m, new[] { Fee(1000m), credit });
+
+        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.LineApprovedAmountInvalid);
         result.Refusal.LineId.Should().Be(credit.Id);
+    }
+
+    [Fact]
+    public void DisallowedCreditLine_WithNothingToOffsetIt_IsRefused_ButIsSummedWhenTheChargesCoverIt()
+    {
+        // Disallowing a credit puts a negative figure in the line-adjustments total; alone it could not be stored.
+        var alone = InvoiceTotalsCalculator.Calculate(900m, new[] { Fee(1000m), Fee(-100m, InvoiceLineStatus.Disallowed) });
+        alone.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.TotalBelowStorableMinimum);
+
+        // Offset by a disallowed charge of 100: line adjustments = 100 + (-100) = 0, so the approved total is the billed total.
+        var offset = InvoiceTotalsCalculator.Calculate(
+            900m, new[] { Fee(1000m), Fee(100m, InvoiceLineStatus.Disallowed), Fee(-100m, InvoiceLineStatus.Disallowed) });
+        offset.IsRefused.Should().BeFalse();
+        offset.LineAdjustmentsTotal.Should().Be(0m);
     }
 
     [Fact]

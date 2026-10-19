@@ -47,7 +47,10 @@ All new lookups: relationship delete = RemoveLink, assign / share / unshare / re
 | `sprk_costtype` (global choice) | Option **Adjustment = 100000002** added; Fee 100000000 and Expense 100000001 unchanged. This is the line type; there is no `sprk_linetype` column. |
 | `sprk_timekeeper` (text, 100) | Display name changed to "Timekeeper (as billed)"; logical name and type unchanged. Holds the name as extracted from the invoice. |
 | `sprk_matter`, `sprk_project` (typed lookups) | Reused as the line's Matter and Project core lookups. No `sprk_regardingmatter` / `sprk_regardingproject` is added to this table. |
-| `sprk_amount`, `sprk_quantity`, `sprk_rate`, `sprk_eventdate`, `sprk_description`, `sprk_invoice`, `sprk_linesequence` | Unchanged; they are the line's billed values (FR-04). |
+| `sprk_amount` | **Minimum lowered 2026-10-19 (D-121, task 049 part A): 0 -> -922337203685477**, the minimum `sprk_rate` already has, by `scripts/ebilling/Deploy-EbillingBillingEventAmountRange.ps1` (idempotent, widen-only; the maximum 1,000,000,000 and precision 2 are unchanged). A credit line (a reversal, D-105) keeps its negative amount as billed; `InvoiceTotalsCalculator` sums it as a signed value. Not yet run on dev (owner's OK); 053 adds it to SpaarkeMaster. |
+| `sprk_quantity`, `sprk_rate`, `sprk_eventdate`, `sprk_description`, `sprk_invoice`, `sprk_linesequence` | Unchanged; they are the line's billed values (FR-04). `sprk_quantity` and `sprk_rate` already accepted negatives. |
+
+**Credit lines and the stored totals.** Only `sprk_amount` was widened. The invoice's own totals (`sprk_feestotal`, `sprk_expensestotal`, `sprk_lineadjustmentstotal`, `sprk_invoiceadjustmentstotal`, `sprk_approvedtotal`, and the header's `sprk_totalamount`) keep their minimum of 0 (see `sprk_invoice.md`), so `InvoiceTotalsCalculator` refuses (`invoice-totals.total-below-storable-minimum`, nothing written) an invoice whose credits take a total below zero. An all-credit invoice cannot be created at all: its `sprk_totalamount` would be negative.
 
 ### Option values
 

@@ -51,8 +51,13 @@ public static class InvoiceTotalsRefusalCodes
     /// <summary>The invoice has no billed total (<c>sprk_totalamount</c>), so no approved total can be derived.</summary>
     public const string BilledTotalMissing = "invoice-totals.billed-total-missing";
 
-    /// <summary>A Fee or Expense line has a negative amount; the platform minimum for the totals is 0, so the result could not be stored.</summary>
-    public const string LineAmountNegative = "invoice-totals.line-amount-negative";
+    /// <summary>
+    /// A stored total (fees, expenses, line adjustments or invoice adjustments) would be below zero, which the platform minimum of 0 on those
+    /// columns refuses to store. Credit lines (D-121) make this reachable: a cost type whose credits exceed its charges sums below zero, and so does
+    /// a credit line that is Disallowed with nothing to offset it. Replaces the earlier per-line refusal of any negative Fee or Expense amount,
+    /// which D-121 lifted.
+    /// </summary>
+    public const string TotalBelowStorableMinimum = "invoice-totals.total-below-storable-minimum";
 
     /// <summary>A Reduced line has no approved amount, or one that is negative or above the billed amount.</summary>
     public const string LineApprovedAmountInvalid = "invoice-totals.line-approved-amount-invalid";
@@ -98,6 +103,10 @@ public sealed record InvoiceTotalsCalculation(
 /// <para><b>Fail closed.</b> Input that the formula cannot place (a line with no cost type, a Reduced line with no usable approved amount,
 /// an Adjustment line with no method/value, a missing billed total) refuses the whole calculation rather than being skipped, because a
 /// skipped line silently changes what the firm is paid. An Adjustment line's own status is never read: only Fee and Expense lines are decided.</para>
+/// <para><b>Credit lines (D-121).</b> A Fee or Expense line may be negative (a credit or reversal) and is summed as a signed value; the stored
+/// <c>sprk_amount</c> accepts it since the column's minimum was lowered. The stored totals still have a minimum of 0, so a result that would put
+/// the fees, expenses or either adjustments total below zero is refused (<see cref="InvoiceTotalsRefusalCodes.TotalBelowStorableMinimum"/>), as is a
+/// negative approved total.</para>
 /// </remarks>
 public static class InvoiceTotalsCalculator
 {
@@ -122,12 +131,8 @@ public static class InvoiceTotalsCalculator
             {
                 case InvoiceLineCostType.Fee:
                 case InvoiceLineCostType.Expense:
-                    if (line.Amount < 0m)
-                    {
-                        return Refused(new InvoiceTotalsRefusal(
-                            InvoiceTotalsRefusalCodes.LineAmountNegative, "A Fee or Expense line has a negative amount.", line.Id));
-                    }
-
+                    // D-121: a credit line keeps its negative amount and is summed as a signed value. A Reduced credit has no valid
+                    // approved amount (0 .. a negative billed amount is empty), so TryLineAdjustment refuses it, fail closed.
                     if (!TryLineAdjustment(line, out var lineAdjustment, out var refusal))
                     {
                         return Refused(refusal!);
@@ -181,6 +186,16 @@ public static class InvoiceTotalsCalculator
         }
 
         invoiceAdjustments = Round(invoiceAdjustments);
+
+        // The four stored totals have a platform minimum of 0. With credit lines (D-121) a sum can fall below it, and the write would fault
+        // after the invoice is committed; refuse here instead, as every other unstorable result is (nothing is written).
+        if (fees < 0m || expenses < 0m || lineAdjustmentsTotal < 0m || invoiceAdjustments < 0m)
+        {
+            return Refused(new InvoiceTotalsRefusal(
+                InvoiceTotalsRefusalCodes.TotalBelowStorableMinimum,
+                "A fees, expenses or adjustments total would be below zero (credit lines exceed the charges they credit), and the platform minimum of 0 would refuse it."));
+        }
+
         var approved = Round(billed - lineAdjustmentsTotal - invoiceAdjustments);
 
         InvoiceTotalsRefusal? negative = approved < 0m

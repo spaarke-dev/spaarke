@@ -86,6 +86,48 @@ public sealed class InvoiceTotalsServiceTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // D-121 (ebilling-r1 task 049 part A): a credit line is read with its negative sprk_amount and summed as a signed value.
+    [Fact]
+    public async Task Recalculate_WithACreditLine_SumsItSigned_AndWritesTheNetTotals()
+    {
+        GivenInvoice(1050L, version: 9L);
+        GivenLines(
+            Line(InvoiceLineCostType.Fee, 1000m),
+            Line(InvoiceLineCostType.Fee, -100m),   // credit
+            Line(InvoiceLineCostType.Expense, 200m),
+            Line(InvoiceLineCostType.Expense, -50m)); // credit
+
+        Dictionary<string, object?>? invoiceWrite = null;
+        _records
+            .Setup(r => r.UpdateRecordFieldsIfUnchangedAsync("sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), 9L, It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, long, CancellationToken>((_, _, f, _, _) => invoiceWrite = f)
+            .Returns(Task.CompletedTask);
+
+        var result = await CreateService().RecalculateAsync(InvoiceId);
+
+        result.IsRefused.Should().BeFalse();
+        invoiceWrite.Should().BeEquivalentTo(new Dictionary<string, object?>
+        {
+            ["sprk_feestotal"] = 900m,
+            ["sprk_expensestotal"] = 150m,
+            ["sprk_lineadjustmentstotal"] = 0m,
+            ["sprk_invoiceadjustmentstotal"] = 0m,
+            ["sprk_approvedtotal"] = 1050m,
+        });
+    }
+
+    [Fact]
+    public async Task Recalculate_WhenCreditsWouldTakeAStoredTotalBelowZero_ReturnsTheRefusal_AndWritesNothing()
+    {
+        GivenInvoice(950L);
+        GivenLines(Line(InvoiceLineCostType.Fee, 1000m), Line(InvoiceLineCostType.Expense, -50m));
+
+        var result = await CreateService().RecalculateAsync(InvoiceId);
+
+        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.TotalBelowStorableMinimum);
+        VerifyNothingWritten();
+    }
+
     [Fact]
     public async Task Recalculate_LeavesAnAdjustmentLineAlone_WhenItsStoredAmountIsAlreadyRight()
     {
