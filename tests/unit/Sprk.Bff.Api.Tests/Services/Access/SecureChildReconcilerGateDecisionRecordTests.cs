@@ -33,9 +33,9 @@ public sealed class SecureChildReconcilerGateDecisionRecordTests
     private readonly Mock<IThreadResolver> _threads = new();
     private readonly CapturingLogger<SecureChildReconciler> _log = new();
 
-    private SecureChildReconciler Reconciler(GateDecisionRecordSharing gate)
+    private SecureChildReconciler Reconciler(GateDecisionRecordSharing gate, Mock<IGenericEntityService>? uacEntities = null)
     {
-        var entities = new Mock<IGenericEntityService>();
+        var entities = uacEntities ?? new Mock<IGenericEntityService>();
         var configuration = new ConfigurationBuilder().Build();
         return new SecureChildReconciler(
             entities.Object, Mock.Of<IRecordOwnershipResolver>(),
@@ -70,6 +70,33 @@ public sealed class SecureChildReconcilerGateDecisionRecordTests
         gate.RecordSharees(RecordId).Should().BeEmpty();
         gate.Calls.IndexOf("thread-reconcile").Should().BeGreaterThanOrEqualTo(0)
             .And.BeLessThan(gate.Calls.FindIndex(c => c.StartsWith("assign:", StringComparison.Ordinal)), "after UAC's own steps");
+    }
+
+    [Fact]
+    public async Task AfterRefile_OfACommunication_RunsTheThreadReconcileFirst_ThenTheMirror_ThenTheGateStepOnce_2110()
+    {
+        // #2110 (UAC F1): the thread reconcile runs BEFORE the row's own mirror (a join it makes can re-own the email into a
+        // Secure record's isolation, so the mirror must see it), and the gate Decision Record step runs ONCE, after both.
+        var gate = SharedGateRecord();
+        _threads.Setup(t => t.ReconcileThreadForFilingAsync(CommunicationId, It.IsAny<CancellationToken>()))
+            .Callback(() => gate.Calls.Add("thread-reconcile"))
+            .Returns(Task.CompletedTask);
+        var uac = new Mock<IGenericEntityService>();
+        uac.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((query, _) => gate.Calls.Add($"uac-query:{query.EntityName}"))
+            .ReturnsAsync(new EntityCollection());
+
+        await Reconciler(gate.Sharing, uac).AfterRefileAsync("sprk_communication", CommunicationId, NotIsolated, CancellationToken.None);
+
+        var reconcile = gate.Calls.IndexOf("thread-reconcile");
+        var firstUacRead = gate.Calls.FindIndex(c => c.StartsWith("uac-query:", StringComparison.Ordinal));
+        var lastUacRead = gate.Calls.FindLastIndex(c => c.StartsWith("uac-query:", StringComparison.Ordinal));
+        var assign = gate.Calls.FindIndex(c => c.StartsWith("assign:", StringComparison.Ordinal));
+        gate.Calls.Count(c => c == "thread-reconcile").Should().Be(1);
+        reconcile.Should().BeGreaterThanOrEqualTo(0);
+        firstUacRead.Should().BeGreaterThan(reconcile, "the mirror (its Secure team read first) runs after the thread reconcile");
+        assign.Should().BeGreaterThan(lastUacRead, "the gate step runs after the mirror and the pass");
+        gate.Calls.Count(c => c.StartsWith("assign:", StringComparison.Ordinal)).Should().Be(1, "the gate step runs once per re-file");
     }
 
     [Fact]

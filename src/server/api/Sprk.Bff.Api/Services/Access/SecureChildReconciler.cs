@@ -834,9 +834,12 @@ public sealed class SecureChildReconciler
     /// then it is logged as an ERROR naming the row. Every row it could not move is left as it was — an isolated row stays
     /// isolated (an under-share); an ordinary row under a secure record is moved in by the two-minute recent-changes pass,
     /// which sees the re-filed row's modification.</para>
-    /// <para><b>A re-filed communication</b> also has its thread follow the filing (between (1) and (2); skipped when the writer
-    /// placed the thread itself — <see cref="RefileThreadStep.PlacedByWriter"/>), and, last, its gate Decision Records re-owned
-    /// (ontology task 042b, D-169) — on EVERY communication re-file, whichever <see cref="RefileThreadStep"/>.</para>
+    /// <para><b>A re-filed communication</b> also has its thread follow the filing — FIRST, before (1) (#2110: a join the
+    /// reconcile makes can re-own the email into a Secure record's isolation, and (1), (2) and the gate step must see it; a row
+    /// that LEFT isolation has its old mirror taken off just before the reconcile, whose read grant to the new record the
+    /// removal would otherwise take off too); skipped when the writer placed the thread itself —
+    /// <see cref="RefileThreadStep.PlacedByWriter"/>. Last, ONCE, its gate Decision Records are re-owned (ontology task 042b,
+    /// D-169) — on EVERY communication re-file, whichever <see cref="RefileThreadStep"/>.</para>
     /// </remarks>
     /// <param name="childLogicalName">The re-filed row's table.</param>
     /// <param name="childId">The re-filed row.</param>
@@ -893,18 +896,35 @@ public sealed class SecureChildReconciler
             beforeFault = ex;
         }
 
-        // (1) The row's own mirror — one implementation (task 149's synchronizer); it logs a fault reading `before`.
-        await _shares.AfterRefileAsync(
-            table, childId,
-            () => beforeFault is null ? Task.FromResult(before!.Value) : Task.FromException<bool>(beforeFault),
-            ct).ConfigureAwait(false);
+        Func<Task<bool>> isolatedBefore =
+            () => beforeFault is null ? Task.FromResult(before!.Value) : Task.FromException<bool>(beforeFault);
 
         // spaarkeai-word-add-in-r1 task 129: a re-filed communication's thread follows the filing, so the email shows on the
         // record's Messages panel (the panel lists threads by the thread's own regarding). Never throws. #2091: not when the
         // writer IS the thread placement (a join) — the reconcile could move the message straight back out of the thread it
-        // just joined.
-        if (table == CommunicationTable && _threads is not null && thread == RefileThreadStep.Reconcile)
-            await _threads.ReconcileThreadForFilingAsync(childId, CancellationToken.None).ConfigureAwait(false);
+        // just joined. #2110 (UAC F1): FIRST, so the mirror, the pass and the gate step below all see the thread the email ends
+        // in — a join it makes (a threadless email joining the thread its conversation key finds, anchored to another record)
+        // re-owns the email to that record's owner, a Secure one included.
+        var reconcilesThread = table == CommunicationTable && _threads is not null && thread == RefileThreadStep.Reconcile;
+        var mirrorTakenOff = false;
+        if (reconcilesThread)
+        {
+            // The one thing the mirror did first that must stay first: a row that LEFT isolation in this re-file loses every
+            // direct share it holds (SecureChildShareSynchronizer.RemoveMirrorAsync), so taken off after the reconcile it would
+            // also take off the #1629 read grant the reconcile gives the record the email now sits under.
+            if (before == true && await LeftIsolationAsync(table, childId, ct).ConfigureAwait(false))
+            {
+                await _shares.AfterRefileAsync(table, childId, isolatedBefore, ct).ConfigureAwait(false);
+                mirrorTakenOff = true;
+            }
+
+            await _threads!.ReconcileThreadForFilingAsync(childId, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        // (1) The row's own mirror, on the owner and thread the reconcile left — one implementation (task 149's synchronizer);
+        // it logs a fault reading `before`. After the removal above it only mirrors a row a join took back into isolation.
+        await _shares.AfterRefileAsync(
+            table, childId, mirrorTakenOff ? static () => Task.FromResult(false) : isolatedBefore, ct).ConfigureAwait(false);
 
         if (!SecureChildLineage.IsChild(table))
             return null;
@@ -953,6 +973,25 @@ public sealed class SecureChildReconciler
             report!.Status, report.Tables.Sum(t => t.Refused), report.Tables.Sum(t => t.Failed),
             report.Tables.Sum(t => t.NeedsF3), report.Detail ?? "-");
         return report;
+    }
+
+    /// <summary>
+    /// #2110: whether a row that was isolated before its re-file is no longer owned by the Secure team — it LEFT isolation, so
+    /// its mirror comes off before the thread reconcile (<see cref="RefileStepsAsync"/>). <c>true</c> when that cannot be read:
+    /// the mirror step then runs first, as it always did, and decides on its own read.
+    /// </summary>
+    private async Task<bool> LeftIsolationAsync(string table, Guid childId, CancellationToken ct)
+    {
+        try
+        {
+            return !await _shares.IsSecureTeamOwnedAsync(table, childId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id}: whether it is still isolated could not be read before its " +
+                "thread reconcile; its mirror step runs first.", table, childId);
+            return true;
+        }
     }
 
     /// <summary>One pass over the descendants of a re-filed CHILD row (never its platform-cascade rows: only a root has those).</summary>

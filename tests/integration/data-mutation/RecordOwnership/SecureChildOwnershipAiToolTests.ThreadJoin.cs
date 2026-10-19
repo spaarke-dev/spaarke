@@ -183,6 +183,83 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _stepThreads.Invocations.Should().BeEmpty();
     }
 
+    // ── #2110: the filing reconcile's own join — the threadless email whose conversation key finds a record thread ─────────
+
+    private static readonly Guid StaleSharee = Guid.Parse("a2110000-0000-4000-8000-0000000000b2");
+
+    [Fact(DisplayName = "#2110 (UAC F1): in the step after a re-file, a threadless email joining a SECURE matter's thread is mirrored after the join — the matter's sharee sees it, no stale share stays, the gate step runs once")]
+    public async Task FilingReconcile_InTheStep_AThreadlessEmailJoiningASecureMattersThread_IsMirroredOnThePostJoinState_2110()
+    {
+        var (gate, gateOrg, gateLog) = GateHelperOverTheShareWorld();
+        _gateOverShareWorld = gate;
+        AMessageFiledUnderTheOrdinaryMatter_AndAThreadOf(SecureMatter);
+        AThreadlessEmail();
+        // A share the ordinary message carried (a #1629 grant to the ordinary matter's members): not the secure matter's mirror.
+        _shareTable.Seed("sprk_communication", JoiningMessage, DataversePrincipalRef.User(StaleSharee), CollaborateMask);
+
+        // The step every re-file writer runs, its thread reconcile the REAL resolver. A strict scope factory: a join that ran a
+        // step of its own would open a scope, and the join would fail.
+        await Children(JoiningResolver(new Mock<IServiceScopeFactory>(MockBehavior.Strict).Object)).AfterRefileAsync(
+            "sprk_communication", JoiningMessage, () => Task.FromResult(false), CancellationToken.None);
+
+        _threadStamps.Should().ContainSingle("the reconcile joined the thread its conversation key found, running no step of its own");
+        _world.Assignments.Should().Equal(("sprk_communication", JoiningMessage, Directory.SecureNamedTeam));
+        ShareWorld.OwnerOf("sprk_communication", JoiningMessage).Should().Be(DataversePrincipalRef.Team(Directory.SecureNamedTeam));
+        _shareTable.MaskOf("sprk_communication", JoiningMessage, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "the mirror ran AFTER the join, on the Secure owner the join gave the email");
+        _shareTable.MaskOf("sprk_communication", JoiningMessage, DataversePrincipalRef.User(StaleSharee)).Should().BeNull(
+            "a Secure-team-owned email carries only its mirror: the ordinary share is revoked now, not by the two-minute pass");
+        ShareWorld.OwnerOf("sprk_todo", TodoOfJoiningMessage).Should().Be(DataversePrincipalRef.Team(Directory.SecureNamedTeam));
+        ShareWorld.OwnerOf("sprk_decisionrecord", GateRecordOfJoiningMessage).Should().Be(DataversePrincipalRef.Team(Directory.SecureNamedTeam));
+        GateStepRuns(gateLog).Should().Be(1, "the gate Decision Record step runs once per re-file, after the reconcile and the mirror");
+        gateOrg.Verify(o => o.ExecuteAsync(It.IsAny<Microsoft.Crm.Sdk.Messages.AssignRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private static readonly Guid GrantSharee = Guid.Parse("a2110000-0000-4000-8000-0000000000b3");
+
+    [Fact(DisplayName = "#2110 (UAC F1): a message that LEFT isolation loses its old mirror BEFORE the thread reconcile, so the reconcile's #1629 read grant to its new record survives")]
+    public async Task Refile_OutOfIsolation_TheOldMirrorComesOffBeforeTheThreadReconcile_AndItsGrantSurvives_2110()
+    {
+        // The message is ordinary now (re-filed out of the secure matter), still carrying the secure matter's mirror share.
+        ShareWorld.OrdinaryChild("sprk_communication", JoiningMessage, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+        _shareTable.Seed("sprk_communication", JoiningMessage, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        int? oldMirrorAtTheReconcile = -1;
+        var threads = new Mock<IThreadResolver>();
+        threads
+            .Setup(t => t.ReconcileThreadForFilingAsync(JoiningMessage, It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                oldMirrorAtTheReconcile = _shareTable.MaskOf("sprk_communication", JoiningMessage, DataversePrincipalRef.User(Sharee));
+                // The reconcile's #1629 grant to a member of the record the email now sits under.
+                _shareTable.Seed("sprk_communication", JoiningMessage, DataversePrincipalRef.User(GrantSharee), 1);
+            })
+            .Returns(Task.CompletedTask);
+
+        await Children(threads.Object).AfterRefileAsync(
+            "sprk_communication", JoiningMessage, () => Task.FromResult(true), CancellationToken.None);
+
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(JoiningMessage, It.IsAny<CancellationToken>()), Times.Once);
+        oldMirrorAtTheReconcile.Should().BeNull("the old mirror came off before the reconcile ran");
+        _shareTable.MaskOf("sprk_communication", JoiningMessage, DataversePrincipalRef.User(Sharee)).Should().BeNull();
+        _shareTable.MaskOf("sprk_communication", JoiningMessage, DataversePrincipalRef.User(GrantSharee)).Should().Be(1,
+            "the mirror removal (which revokes every direct share) ran before the grant, never after it");
+    }
+
+    /// <summary>How many times the gate Decision Record step ran for the joining message's gate record (its one log line per run).</summary>
+    private static int GateStepRuns(Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<GateDecisionRecordSharing> gateLog) =>
+        gateLog.Entries.Count(e => e.Message.Contains($"Gate Decision Record {GateRecordOfJoiningMessage}", StringComparison.Ordinal));
+
+    /// <summary>The joining message as the filing reconcile reads it: an email filed under the ordinary matter, with no thread.</summary>
+    private void AThreadlessEmail() =>
+        _joiningEmailRow = new Entity("sprk_communication", JoiningMessage)
+        {
+            ["sprk_communicationtype"] = new OptionSetValue((int)CommunicationType.Email),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter),
+            ["sprk_subject"] = "Re: filing",
+        };
+
+    private Entity? _joiningEmailRow;
+
     // ── assertions ────────────────────────────────────────────────────────────────────────────────────────────────
 
     private void AssertTheJoinRanTheStepIntoSecure(
@@ -258,6 +335,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
         entities
             .Setup(e => e.RetrieveAsync("sprk_communicationthread", JoinedThread, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => _joinedThreadRow!);
+        // #2110: the email the filing reconcile reads (unset → not found, as before).
+        entities
+            .Setup(e => e.RetrieveAsync("sprk_communication", JoiningMessage, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _joiningEmailRow!);
         entities
             .Setup(e => e.CreateAsync(It.Is<Entity>(r => r.LogicalName == "sprk_communication"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(JoiningMessage);
