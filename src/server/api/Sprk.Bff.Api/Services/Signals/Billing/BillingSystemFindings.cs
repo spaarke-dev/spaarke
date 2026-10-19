@@ -40,25 +40,31 @@ public static class BillingSystemFindings
     {
         Require(typedNumber, nameof(typedNumber));
         Require(readNumber, nameof(readNumber));
+
+        // 049 F1-3: the number read is extracted text; it is cited only when it is an invoice number (IsInvoiceNumberShaped), otherwise the
+        // finding holds under the reason that names no read value. The read stays as evidence (field and confidence) without its text.
+        var shown = BillingRuleCatalogue.IsInvoiceNumberShaped(readNumber);
+        var facts = new Dictionary<string, string>(StringComparer.Ordinal) { ["submission.invoiceNumber"] = typedNumber };
+        if (shown)
+        {
+            facts["invoice.invoiceNumber"] = readNumber;
+        }
+
         return Build(
             policy,
             BillingSubject.ForInvoice(),
-            BillingReasonCodes.SubmissionInvoiceNumberMismatch,
+            shown ? BillingReasonCodes.SubmissionInvoiceNumberMismatch : BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown,
             [
                 new BillingValueRead { Name = "submission.invoiceNumber", Value = typedNumber },
                 new BillingValueRead
                 {
                     Name = "invoice.invoiceNumber",
-                    Value = readNumber,
+                    Value = shown ? readNumber : null,
                     ExtractedField = new Finance.Resolution.FieldRef(null, BillingFieldNames.FirmInvoiceNumber),
                     Confidence = readConfidence,
                 },
             ],
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["submission.invoiceNumber"] = typedNumber,
-                ["invoice.invoiceNumber"] = readNumber,
-            });
+            facts);
     }
 
     /// <summary>
@@ -112,21 +118,26 @@ public static class BillingSystemFindings
         Require(firmCode, nameof(firmCode));
         Require(suggestedCode, nameof(suggestedCode));
         var kindText = KindText(kind);
+
+        // 049 F1-3: the firm's code is extracted text; cited only when it is a code identifier, as CodeRefused. The suggested code is a code
+        // of the line's code set (reference data), not firm text.
+        var shown = BillingRuleCatalogue.IsCodeShaped(firmCode);
+        var values = new List<BillingValueRead> { new() { Name = "line.codeKind", Value = kindText } };
+        var facts = new Dictionary<string, string>(StringComparer.Ordinal) { ["line.codeKind"] = kindText };
+        if (shown)
+        {
+            values.Add(new BillingValueRead { Name = "line.firmCode", Value = firmCode });
+            facts["line.firmCode"] = firmCode;
+        }
+
+        values.Add(new BillingValueRead { Name = "line.suggestedCode", Value = suggestedCode });
+        facts["line.suggestedCode"] = suggestedCode;
         return Build(
             policy,
             BillingSubject.ForLine(lineIndex),
-            BillingReasonCodes.CodingFirmCodeMismatch,
-            [
-                new BillingValueRead { Name = "line.codeKind", Value = kindText },
-                new BillingValueRead { Name = "line.firmCode", Value = firmCode },
-                new BillingValueRead { Name = "line.suggestedCode", Value = suggestedCode },
-            ],
-            new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["line.codeKind"] = kindText,
-                ["line.firmCode"] = firmCode,
-                ["line.suggestedCode"] = suggestedCode,
-            });
+            shown ? BillingReasonCodes.CodingFirmCodeMismatch : BillingReasonCodes.CodingFirmCodeMismatchNotShown,
+            values,
+            facts);
     }
 
     /// <summary>047 (FR-22 step 4): the code set used for the invoice was itself a suggestion. Invoice level.</summary>

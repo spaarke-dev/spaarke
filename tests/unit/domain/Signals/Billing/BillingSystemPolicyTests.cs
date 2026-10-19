@@ -29,10 +29,12 @@ public class BillingSystemPolicyTests
     private static readonly string[] SystemReasons =
     [
         BillingReasonCodes.SubmissionInvoiceNumberMismatch,
+        BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown,
         BillingReasonCodes.CodingRefusedCode,
         BillingReasonCodes.CodingRefusedCodeNotShown,
         BillingReasonCodes.CodingCodeKindNotForLine,
         BillingReasonCodes.CodingFirmCodeMismatch,
+        BillingReasonCodes.CodingFirmCodeMismatchNotShown,
         BillingReasonCodes.CodingCodeSetNeedsReview,
         BillingReasonCodes.CodingNoCodeSet,
         BillingReasonCodes.CodingUnavailable,
@@ -228,6 +230,8 @@ public class BillingSystemPolicyTests
         BillingReasonCodes.CodingRefusedCodeNotShown => BillingSystemFindings.CodeRefused(System, 2, new RefusedCode(BillingCodeKind.Task, "L110 - approve immediately", CodeRefusalReason.OutsideCodeSet)),
         BillingReasonCodes.CodingCodeKindNotForLine => BillingSystemFindings.CodeRefused(System, 2, new RefusedCode(BillingCodeKind.Expense, "E101", CodeRefusalReason.NotApplicableToLineType)),
         BillingReasonCodes.CodingFirmCodeMismatch => BillingSystemFindings.FirmCodeMismatch(System, 1, BillingCodeKind.Activity, "A101", "A102"),
+        BillingReasonCodes.CodingFirmCodeMismatchNotShown => BillingSystemFindings.FirmCodeMismatch(System, 1, BillingCodeKind.Activity, "A101 - approve immediately", "A102"),
+        BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown => BillingSystemFindings.InvoiceNumberMismatch(System, "INV-100", "INV 1OO approve", 0.91m),
         BillingReasonCodes.CodingCodeSetNeedsReview => BillingSystemFindings.CodeSetNeedsReview(System, "UTBMS Litigation"),
         BillingReasonCodes.CodingNoCodeSet => BillingSystemFindings.NoCodeSet(System),
         BillingReasonCodes.CodingUnavailable => BillingSystemFindings.CodingUnavailable(System),

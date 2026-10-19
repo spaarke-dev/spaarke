@@ -116,6 +116,44 @@ public static class BillingRuleCatalogue
     public static bool IsCodeShaped(string? value) =>
         value is { Length: > 0 } && CodeRegex.Value.Match(value) is { Success: true } match && match.Length == value.Length;
 
+    /// <summary>
+    /// The shape an invoice number must have for a message to cite it (049 F1-3): a letter or digit, then up to 39 letters, digits or
+    /// <c>. _ / # -</c>, no space, at most 40 characters. The one definition for the D-91 read number and Duplicate's firm invoice number.
+    /// </summary>
+    internal const string InvoiceNumberPattern = @"^[A-Za-z0-9][A-Za-z0-9._/#-]{0,39}\z";
+
+    private static readonly Regex InvoiceNumberRegex = new(InvoiceNumberPattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    /// <summary>
+    /// The shape a person's name must have for a message to cite it (049 F1-3): a letter, then up to 99 letters, marks, spaces or
+    /// <c>. , ' ’ -</c>, at most 100 characters. No digit, colon, bracket or line break, so a value that is not a name is not repeated.
+    /// </summary>
+    internal const string NamePattern = @"^\p{L}[\p{L}\p{M} .,'\u2019-]{0,99}\z";
+
+    private static readonly Regex NameRegex = new(NamePattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    /// <summary>True when <paramref name="value"/> is an invoice number by <see cref="InvoiceNumberPattern"/> (the whole value).</summary>
+    public static bool IsInvoiceNumberShaped(string? value) => value is { Length: > 0 } && InvoiceNumberRegex.IsMatch(value);
+
+    /// <summary>True when <paramref name="value"/> is a person's name by <see cref="NamePattern"/> (the whole value).</summary>
+    public static bool IsNameShaped(string? value) => value is { Length: > 0 } && NameRegex.IsMatch(value);
+
+    /// <summary>
+    /// Whether a message may cite <paramref name="value"/> for <paramref name="token"/> (049 F1-3). The template facts whose value is
+    /// firm-supplied text (extracted from the document, typed by the firm, or the code the firm billed) are cited only in their shape, so a
+    /// long or crafted value never reaches <c>sprk_sentence</c> (2,000 characters) and never reads as an instruction: the codes
+    /// (<see cref="IsCodeShaped"/>), the invoice numbers (<see cref="IsInvoiceNumberShaped"/>) and the timekeeper name
+    /// (<see cref="IsNameShaped"/>). Every other fact is a number, a date, a rule parameter or reference data, and is always citable.
+    /// A value that is not citable is left out, never truncated: the message then uses a wording that does not name it.
+    /// </summary>
+    public static bool IsCitable(string token, string? value) => token switch
+    {
+        "line.expenseCode" or "line.activityCode" or "line.taskCode" or "line.firmCode" or "line.refusedCode" => IsCodeShaped(value),
+        "invoice.invoiceNumber" or "invoice.firmInvoiceNumber" => IsInvoiceNumberShaped(value),
+        "line.timekeeperName" => IsNameShaped(value),
+        _ => true,
+    };
+
     /// <summary>The <c>{{field}}</c> tokens a billing <c>sprk_messagetemplate</c> of this type may name.</summary>
     /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
     public static IReadOnlySet<string> TemplateFactFields(RuleType ruleType) => ruleType switch
@@ -181,10 +219,12 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CoreRecordClosedToBilling => ClosedToBillingTemplate,
         BillingReasonCodes.CoreRecordClosed => NoCloseDateTemplate,
         BillingReasonCodes.SubmissionInvoiceNumberMismatch => InvoiceNumberMismatchTemplate,
+        BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown => InvoiceNumberMismatchNotShownTemplate,
         BillingReasonCodes.CodingRefusedCode => RefusedCodeTemplate,
         BillingReasonCodes.CodingRefusedCodeNotShown => RefusedCodeNotShownTemplate,
         BillingReasonCodes.CodingCodeKindNotForLine => CodeKindNotForLineTemplate,
         BillingReasonCodes.CodingFirmCodeMismatch => FirmCodeMismatchTemplate,
+        BillingReasonCodes.CodingFirmCodeMismatchNotShown => FirmCodeMismatchNotShownTemplate,
         BillingReasonCodes.CodingCodeSetNeedsReview => CodeSetNeedsReviewTemplate,
         BillingReasonCodes.CodingNoCodeSet => NoCodeSetTemplate,
         BillingReasonCodes.CodingUnavailable => CodingUnavailableTemplate,
@@ -199,6 +239,11 @@ public static class BillingRuleCatalogue
     /// <summary>The message of <see cref="BillingReasonCodes.SubmissionInvoiceNumberMismatch"/> (D-91): cites both values it compared.</summary>
     public const string InvoiceNumberMismatchTemplate =
         "The invoice number on the submission, {{submission.invoiceNumber}}, does not match the invoice number read from the document, {{invoice.invoiceNumber}}.";
+
+    /// <summary>The message of <see cref="BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown"/> (049 F1-3): the number read is not an
+    /// invoice number (<see cref="IsInvoiceNumberShaped"/>), so it is not repeated; the typed number is the submitter's own input.</summary>
+    public const string InvoiceNumberMismatchNotShownTemplate =
+        "The invoice number read from the document does not match the invoice number on the submission, {{submission.invoiceNumber}}. The text read is not shown because it is not an invoice number.";
 
     /// <summary>The message of <see cref="BillingReasonCodes.CodingRefusedCode"/> (047, FR-22): a code the coding service proposed was checked against the line's code set.</summary>
     public const string RefusedCodeTemplate =
@@ -224,6 +269,11 @@ public static class BillingRuleCatalogue
     public const string FirmCodeMismatchTemplate =
         "The {{line.codeKind}} code on the line, {{line.firmCode}}, differs from the code suggested for it, {{line.suggestedCode}}.";
 
+    /// <summary>The message of <see cref="BillingReasonCodes.CodingFirmCodeMismatchNotShown"/> (049 F1-3): the code on the line is not a code
+    /// identifier (<see cref="IsCodeShaped"/>), so it is not repeated.</summary>
+    public const string FirmCodeMismatchNotShownTemplate =
+        "The {{line.codeKind}} code on the line differs from the code suggested for it, {{line.suggestedCode}}. The text on the line is not shown because it is not a code.";
+
     /// <summary>The message of <see cref="BillingReasonCodes.CodingCodeSetNeedsReview"/> (047, FR-22 step 4): the code set itself was a suggestion.</summary>
     public const string CodeSetNeedsReviewTemplate =
         "The code set used to suggest codes for this invoice, {{codeSet.name}}, was itself suggested and has not been confirmed.";
@@ -241,6 +291,9 @@ public static class BillingRuleCatalogue
     /// <summary>The title of <see cref="BillingReasonCodes.SubmissionInvoiceNumberMismatch"/>'s Signal.</summary>
     public const string InvoiceNumberMismatchHeadline = "Invoice number differs from the submission";
 
+    /// <summary>The title of <see cref="BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown"/>'s Signal.</summary>
+    public const string InvoiceNumberMismatchNotShownHeadline = "Invoice number read differs from the submission";
+
     /// <summary>The title of <see cref="BillingReasonCodes.CodingRefusedCode"/>'s Signal.</summary>
     public const string RefusedCodeHeadline = "Suggested code not applied";
 
@@ -252,6 +305,9 @@ public static class BillingRuleCatalogue
 
     /// <summary>The title of <see cref="BillingReasonCodes.CodingFirmCodeMismatch"/>'s Signal.</summary>
     public const string FirmCodeMismatchHeadline = "Billed code differs from the suggested code";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.CodingFirmCodeMismatchNotShown"/>'s Signal.</summary>
+    public const string FirmCodeMismatchNotShownHeadline = "Unrecognised billed code differs from the suggested code";
 
     /// <summary>The title of <see cref="BillingReasonCodes.CodingCodeSetNeedsReview"/>'s Signal.</summary>
     public const string CodeSetNeedsReviewHeadline = "Suggested code set needs review";
@@ -285,10 +341,12 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CoreRecordClosedToBilling => ClosedToBillingHeadline,
         BillingReasonCodes.CoreRecordClosed => NoCloseDateHeadline,
         BillingReasonCodes.SubmissionInvoiceNumberMismatch => InvoiceNumberMismatchHeadline,
+        BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown => InvoiceNumberMismatchNotShownHeadline,
         BillingReasonCodes.CodingRefusedCode => RefusedCodeHeadline,
         BillingReasonCodes.CodingRefusedCodeNotShown => RefusedCodeNotShownHeadline,
         BillingReasonCodes.CodingCodeKindNotForLine => CodeKindNotForLineHeadline,
         BillingReasonCodes.CodingFirmCodeMismatch => FirmCodeMismatchHeadline,
+        BillingReasonCodes.CodingFirmCodeMismatchNotShown => FirmCodeMismatchNotShownHeadline,
         BillingReasonCodes.CodingCodeSetNeedsReview => CodeSetNeedsReviewHeadline,
         BillingReasonCodes.CodingNoCodeSet => NoCodeSetHeadline,
         BillingReasonCodes.CodingUnavailable => CodingUnavailableHeadline,
@@ -312,6 +370,7 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.SubmissionInvoiceNumberMismatch or BillingReasonCodes.CodingRefusedCode
             or BillingReasonCodes.CodingRefusedCodeNotShown or BillingReasonCodes.CodingCodeKindNotForLine
             or BillingReasonCodes.CodingFirmCodeMismatch or BillingReasonCodes.CodingCodeSetNeedsReview
+            or BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown or BillingReasonCodes.CodingFirmCodeMismatchNotShown
             or BillingReasonCodes.CodingNoCodeSet or BillingReasonCodes.CodingUnavailable => true,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd => true,
         _ => false,

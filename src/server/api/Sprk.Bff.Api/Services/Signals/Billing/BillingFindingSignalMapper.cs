@@ -277,7 +277,8 @@ public static class BillingFindingSignalMapper
             ? deciding[0]
             : members.Where(m => m.Consequence == consequence)
                 .OrderBy(m => BillingRuleCatalogue.IsFlagOnlyReason(m.Finding.ReasonCode) ? 1 : 0)
-                .ThenBy(m => m.Finding.ReasonCode == BillingReasonCodes.SubmissionInvoiceNumberMismatch ? 0 : 1)
+                .ThenBy(m => m.Finding.ReasonCode is BillingReasonCodes.SubmissionInvoiceNumberMismatch
+                    or BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown ? 0 : 1)
                 .First();
         var groupDecision = !decided ? BillingGroupDecision.NotDecided
             : deciding.Count > 0 ? BillingGroupDecision.Rejects
@@ -318,7 +319,8 @@ public static class BillingFindingSignalMapper
 
         evidence.AddRange(members
             .SelectMany(m => m.Finding.ValuesRead)
-            .Select(v => ValueEvidence(v, withheld || v.Value is null ? null : v.Value))
+            // 049 F1-3: a value read that is not citable (IsCitable) keeps its evidence line (field, confidence) without its text.
+            .Select(v => ValueEvidence(v, withheld || v.Value is null || !BillingRuleCatalogue.IsCitable(v.Name, v.Value) ? null : v.Value))
             .DistinctBy(e => (e.Kind, e.Ref, e.Text)));
 
         var request = new SignalWriteRequest(
@@ -418,8 +420,11 @@ public static class BillingFindingSignalMapper
         }
 
         var allowed = BillingRuleCatalogue.TemplateFactFields(finding.RuleType);
+        // 049 F1-3: a fact whose value is firm-supplied text is cited only in its shape (BillingRuleCatalogue.IsCitable); otherwise it is left
+        // out, never truncated, and a wording below that does not name it is used. A reason's own message is built by BillingSystemFindings,
+        // which picks the variant that names no such value, so this never removes a token an own message names.
         var facts = finding.FactValues
-            .Where(kv => allowed.Contains(kv.Key) && kv.Value is not null)
+            .Where(kv => allowed.Contains(kv.Key) && kv.Value is not null && BillingRuleCatalogue.IsCitable(kv.Key, kv.Value))
             .OrderBy(kv => kv.Key, StringComparer.Ordinal)
             .ToDictionary(kv => kv.Key, kv => (object?)kv.Value, StringComparer.Ordinal);
 
