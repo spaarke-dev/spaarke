@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-19 (task 076 done)
+> **Last Updated**: 2026-10-19 (task 059 plan written, waiting for owner review; checkpoint at 85% context)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **076 done 2026-10-19** (Teams package for A9: the deploy-teams-app.yml preflight fails closed before the build (home client required, a GUID, ≠ A8; prod TEAMS_APP_ID); `match()` is now a whole-string `[[ =~ ]]` in BOTH SPA workflows (grep matched line by line); CI checks the SPA host is in validDomains and the tabs are https; env files and comments say A9; manifest unchanged (no client in a manifest without webApplicationInfo). Stale 075 text fixed (config.ts error message, docs, design §8.2/§12). 059 POML gained `/auth-callback.html` and step 7b `VITE_BACKENDS` with `homeTenantIds` + `ciamBffAppId`. 2 adversarial passes + fix round 1. Provisioning sent the items 5/7 confirmation (+ `/auth-callback.html` addition)). 075 done earlier the same day |
-| **Step** | Next: task 059 (live, owner-gated, prescriptive): write the plan with masked reads, commands and rollbacks into `notes/task-059-dev-setup-record.md` and show it to the owner BEFORE any live call. Watch for UAC #2102/#2104 merges (next dev BFF deploy) |
+| **Step** | **059 in progress**, step 1 of 8 DONE: plan in `notes/task-059-dev-setup-record.md` (stages R reads → stop checks S-1..S-6 → A client → B 1e40baad → C consent → D BFF settings → E GitHub vars → F SPA deploy; rollbacks per stage). NOTHING live has run. Waiting for the owner to approve stage R (read-only). Biggest risk: S-1 — if 1e40baad `requestedAccessTokenVersion` ≠ 2, A9 needs a v2 flip that changes aud to the GUID for every dev caller; the default scheme may pin `AzureAd:Audience` = api://… → 401s; then a BFF change must come first (owner decision) |
 | **Status** | **Dev BFF = `44f802a1d`** (= candidate `f111de2b7` + a state-file commit: live `ad0e9e1a7` + master `d7eabba3b` UAC 186 #2061 + 099b #2063). Deployed with the owner's direct approval 2026-10-19 11:35:09–11:37:07Z. Verified: ProductVersion `1.0.0+44f802a1d…`; 4 critical files SHA-256 match; `/healthz` 200; 2 CORS origins; MIs `mi-bff-api-dev` + `mi-ontology-writer-dev`. Session OKs: UAC, ontology, ebilling (no `sprk_invoicestatus` delete yet), word-add-in, provisioning; field-mapping unreachable. After-notices sent. **Rollback: redeploy `ad0e9e1a7`.** Dev external SPA = `ebc74b331`, not redeployed (058's SPA waits for 059) |
-| **Next Action** | Start task 059 via task-execute (step 1 = the plan for the owner; nothing live without approval). Its steps 7/7b set external-spa-dev `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID` and `VITE_BACKENDS` (`homeTenantIds`, `ciamBffAppId`); then the SPA deploy (058 + 075 SPA code; dev SPA is still `ebc74b331`), then 074 |
+| **Next Action** | On the owner's approval of stage R: run R0–R9 exactly as written in the record (masked output), write them into §11, evaluate S-1..S-6, report, then ask for stage A. R0 answers the owner's 076 question (repo-level variable names) |
 
 ### Uncommitted files
 - `.claude/agent-memory/researcher/MEMORY.md` (modified) and `.claude/agent-memory/researcher/dataverse-duplicate-detection-api-default-2026-10-15.md` (untracked) belong to the OWNER. Never commit or discard them. The 2026-10-18 master merge re-applied the owner's index line next to master's new line. Backups are in the session scratchpad (`owner-researcher-memory.patch`, `owner-researcher-MEMORY.md.bak`).

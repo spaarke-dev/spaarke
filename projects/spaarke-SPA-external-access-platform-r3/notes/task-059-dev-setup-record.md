@@ -1,0 +1,197 @@
+# Task 059 — dev Entra and settings setup for A9 (plan and record)
+
+> **Status: PLAN for owner review (2026-10-19). Nothing below has run.** Each stage runs only after the owner approves that stage.
+> Task: `tasks/059-dev-entra-and-settings-a9.poml` (prescriptive). Design: `notes/a9-bff-design.md` §8, §9, §12.
+> Ids appear masked to 8 characters. Commands use the shell variables set in §1; the session fills them from the reads and shows each value masked.
+> No secret, certificate, token or key value is created, read or printed. Every "before" snapshot is saved to the session scratchpad and is the rollback input.
+
+## 0. What this sets up, and why
+
+After 059, a Dewey Cheatham employee can sign in to the dev SPA, in the browser or in Teams, with their own company account. The BFF then accepts that token.
+
+| # | Thing | Why |
+|---|---|---|
+| A | New app **"Spaarke Workforce SPA"**: multitenant public client in the Spaarke tenant | The A9 sign-in client (tasks 058 and 075). Nothing uses it until the SPA is redeployed with its id |
+| B | Dev BFF app `1e40baad`: multitenant, known client = A, access-token claims | So a customer directory can consent to it and issue it tokens that the BFF's `WorkforceHome` scheme accepts |
+| C | Admin consent in Dewey Cheatham (`bc3aa7f4`), by its admin | One consent covers A and B for that directory |
+| D | `spaarke-bff-dev` settings: `CustomerTenantIds` += `bc3aa7f4`, `ExternalAccess__CustomerBusinessUnitId` = BU1 | The BFF allowlist; the owner team for new contacts |
+| E | GitHub `external-spa-dev`: `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID`, `VITE_BACKENDS` | The SPA build. Without `VITE_BACKENDS` + `homeTenantIds`, every A9 sign-in shows "not set up" |
+| F | SPA deploy (`deploy-external-spa.yml`, dev) | Ships the 058 and 075 code. Today's dev SPA is `ebc74b331`, built before both |
+
+**Two things the POML did not list, which the code needs (found while planning):**
+1. **Access-token optional claims on `1e40baad`.** The registration endpoint takes the address only from the access token's `email` claim (`ExternalRegistrationEndpoints.cs:256-265`). Without it every registration is refused with `registration_email_missing`. The prefill reads `given_name` and `family_name` (`WorkforceIdentityOptions.cs:180-181`), and the BFF scheme requires `acct` = 0 (`AuthorizationModule.cs` `WorkforceHomeDenyReason`). v2 access tokens carry these only when they are configured as optional claims. So step B reads them and adds any that are missing.
+2. **Token version.** The `WorkforceHome` scheme requires the issuer to be exactly `https://login.microsoftonline.com/{tid}/v2.0`, which only v2 tokens have. If `1e40baad` is not already on `requestedAccessTokenVersion` = 2, changing it also changes the tokens issued to every dev caller of `1e40baad`: PCFs, code pages, the Console, the Office add-ins, the Copilot agent and the SPA. **In that case this plan stops** and puts the change to the owner as its own decision (§3, stop S-1).
+
+## 1. Variables (set by the session from the reads; shown masked)
+
+| Variable | Value | Source |
+|---|---|---|
+| `$SPAARKE_TID` | `a221a95e…` | Spaarke tenant (R1 confirms the CLI sign-in is there) |
+| `$CUST_TID` | `bc3aa7f4…` | Dewey Cheatham home directory. The full id is in `scripts/Set-ExternalFlagForB2BGuests.ps1:77`; R6 and the owner confirm it is Dewey Cheatham |
+| `$BFF_APP_ID` / `$BFF_OBJ` / `$BFF_SP` | `1e40baad…` / from R2 / from R2 | Dev BFF app |
+| `$UI_SCOPE_ID` | from R2 | Id of `user_impersonation` on `1e40baad` |
+| `$NEW_APP_ID` / `$NEW_OBJ` | from C1 | The new client |
+| `$CIAM_BFF_APP_ID` | `4a4d5126…` | The app id inside `external-spa-dev` `VITE_MSAL_BFF_SCOPE` (R8 re-reads it) |
+| `$BU1` | `cb15f587…` | Dev business unit for new contacts (ISS-005 option A) |
+| `$SWA` | `https://green-dune-0c4f1221e.7.azurestaticapps.net` | Dev SPA origin |
+
+## 2. Stage R — read-only reads (approve once; nothing changes)
+
+Run as the session's current `az` sign-in (`ralph.schroeder@spaarke.com`, Spaarke tenant) and `gh` sign-in. Output is recorded masked.
+
+| # | Command | What it answers |
+|---|---|---|
+| R0 | `gh variable list -R spaarke-dev/spaarke --json name --jq '.[].name'` | **Your 076 question:** the names of repository-level Actions variables (names only, no values). A `VITE_*` or `TEAMS_APP_ID` name here would silently fill a missing environment value. `spaarke-dev` is a user account, so organization-level variables don't exist |
+| R1 | `az account show --query "{tenant:tenantId, user:user.name}" -o json` | The sign-in is in the Spaarke tenant |
+| R2 | `az ad app show --id $BFF_APP_ID --query "{obj:id, audience:signInAudience, tokenVersion:api.requestedAccessTokenVersion, known:api.knownClientApplications, scopes:api.oauth2PermissionScopes[].{v:value,id:id,on:isEnabled}, preAuth:api.preAuthorizedApplications[].appId, idUris:identifierUris, accessClaims:optionalClaims.accessToken[].name, passwordCreds:length(passwordCredentials), keyCreds:length(keyCredentials), fics:'see R2b'}" -o json` → saved as `before-1e40baad.json` | The current audience, token version, known clients, claims and scope id. **Escalation trigger:** `passwordCreds` > 0 (a client secret on the BFF app) → STOP (no-secret rule) |
+| R2b | `az rest --method GET --url "https://graph.microsoft.com/v1.0/applications/$BFF_OBJ/federatedIdentityCredentials?\$select=name,issuer,subject"` | How the BFF app authenticates (expect the MI federated credential, ADR-028 A4). Recorded, not changed |
+| R2c | `az rest --method GET --url "https://graph.microsoft.com/beta/applications/$BFF_OBJ?\$select=authenticationBehaviors"` | The current `removeUnverifiedEmailClaim` |
+| R3 | `az ad sp show --id $BFF_APP_ID --query "{sp:id, enabled:accountEnabled}" -o json`, then `az rest --method GET --url "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?\$filter=resourceId eq '$BFF_SP'&\$select=clientId,consentType,scope"` | **Who depends on `1e40baad` in the Spaarke tenant** (the escalation trigger "read its other clients first"). Each `clientId` is resolved to a display name |
+| R4 | `az ad app list --display-name "Spaarke Workforce SPA" --query "[].{appId:appId, audience:signInAudience}" -o json` | No app with that name exists yet (else stop and ask) |
+| R5 | `az webapp config appsettings list -g rg-spaarke-dev -n spaarke-bff-dev -o json`, piped to a local filter that prints only the names and masked values of `AzureAd__ClientId`, `AzureAd__TenantId`, `AzureAd__Audience` (S-1), `Ciam__TenantId`, `WorkforceIdentity__CustomerTenantIds__*`, `ExternalAccess__CustomerBusinessUnitId` → full output saved as `before-bff-settings.json` | The current allowlist (append, never replace) and whether the BU setting exists |
+| R6 | `az rest --method GET --url "https://graph.microsoft.com/v1.0/tenantRelationships/findTenantInformationByTenantId(tenantId='$CUST_TID')" --query "{name:displayName, domain:defaultDomainName}"` | That `$CUST_TID` is Dewey Cheatham |
+| R7 | `az rest --resource https://spaarkedev1.crm.dynamics.com --method GET --url "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/teams?\$filter=_businessunitid_value eq $BU1 and isdefault eq true&\$select=teamid,name"` and `…/businessunits($BU1)?\$select=name,isdisabled` | BU1 exists, is enabled and has exactly one default team (else registration returns 500 `registration_owner_unconfigured`) |
+| R8 | `gh variable list -R spaarke-dev/spaarke --env external-spa-dev --json name,value`, printed masked | The current `external-spa-dev` values (expect `VITE_BACKENDS` unset, as on 2026-10-13) |
+| R9 | `curl.exe -s -o NUL -w "%{http_code}" https://spaarke-bff-dev.azurewebsites.net/healthz` | Baseline before any change |
+
+**After R, the session reports the results and the stop checks (§3) before asking for stage A.**
+
+## 3. Stop checks after the reads (no change runs if one fires)
+
+| Stop | Condition | What happens |
+|---|---|---|
+| S-1 | `1e40baad` `tokenVersion` is not 2 (null means 1) | Stop. A9 cannot work without the change: v1 home tokens have issuer `sts.windows.net`, which the `WorkforceHome` scheme refuses. But the change is not local. Every dev caller of `1e40baad` then gets v2 tokens: `aud` becomes the bare GUID, `appid` becomes `azp`, and `upn`/`unique_name` drop out. The BFF's default scheme may pin `AzureAd:Audience` to `api://…` (R5 reads it), and a v2 token would then be refused, so every dev surface would get 401 (research item 1). The decision goes to the owner with options: (a) a BFF change first (accept both audience forms on the default scheme, plus a test that sends it a v2 token), deployed, then the flip; (b) postpone A9 on dev. |
+| S-2 | `1e40baad` has a client secret (`passwordCreds` > 0) | Stop (POML escalation trigger) |
+| S-3 | R3 shows a caller that a multitenant audience would change | Stop and present it |
+| S-4 | An app named "Spaarke Workforce SPA" already exists (R4) | Stop and ask |
+| S-5 | R6 does not name Dewey Cheatham, or R7 finds no single default team | Stop and ask |
+| S-6 | R0 lists a `VITE_*` or `TEAMS_APP_ID` name at repository level | Report it. Removing it is a separate approval |
+
+## 4. Stage A — create the multitenant client (approval 1)
+
+```powershell
+# C1: create (public client; no secret, no certificate)
+az ad app create --display-name "Spaarke Workforce SPA" --sign-in-audience AzureADMultipleOrgs
+#  -> $NEW_APP_ID, $NEW_OBJ
+az ad sp create --id $NEW_APP_ID
+
+# C2: SPA redirects, delegated permission, unverified-email removal
+az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/$NEW_OBJ" --headers Content-Type=application/json --body "@new-client.json"
+```
+
+`new-client.json`:
+```json
+{
+  "spa": { "redirectUris": [
+    "https://green-dune-0c4f1221e.7.azurestaticapps.net",
+    "https://green-dune-0c4f1221e.7.azurestaticapps.net/auth-callback.html",
+    "brk-multihub://green-dune-0c4f1221e.7.azurestaticapps.net",
+    "http://localhost:3000",
+    "http://localhost:3000/auth-callback.html"
+  ] },
+  "requiredResourceAccess": [
+    { "resourceAppId": "<BFF_APP_ID>", "resourceAccess": [ { "id": "<UI_SCOPE_ID>", "type": "Scope" } ] }
+  ]
+}
+```
+```powershell
+# C3: drop emails from unverified domains (Graph v1.0; research item 3)
+az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/$NEW_OBJ/authenticationBehaviors" --headers Content-Type=application/json --body '{"removeUnverifiedEmailClaim":true}'
+```
+- No Microsoft Graph sign-in permissions (`openid`, `profile`, `email`, `offline_access`) are declared: they are implicit and need no admin consent (research item 7). `user_impersonation` on the BFF is the only declared permission.
+- **If Graph refuses `brk-multihub://…` in `spa.redirectUris`** (that route is not documented, research item 5): the PATCH runs again without it, and the owner adds it in the portal (App registrations → Authentication → Single-page application). That is the documented way and the one the Office add-in app used.
+
+- **Read after:** `az ad app show --id $NEW_APP_ID --query "{audience:signInAudience, spa:spa.redirectUris, rra:requiredResourceAccess, secrets:length(passwordCredentials), certs:length(keyCredentials)}"`, plus `GET …/applications/$NEW_OBJ?$select=authenticationBehaviors`. Expect 5 redirects, the 1 delegated scope, 0 secrets, 0 certificates and `removeUnverifiedEmailClaim` true.
+- **Rollback:** `az ad app delete --id $NEW_APP_ID`. Nothing depends on the app until stage E. It stays soft-deleted for 30 days and can be restored.
+
+## 5. Stage B — change the dev BFF app `1e40baad` (approval 2; only if stops S-1 to S-3 did not fire)
+
+One PATCH, built from `before-1e40baad.json` so the lists are extended, never replaced:
+
+```powershell
+az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/$BFF_OBJ" --headers Content-Type=application/json --body "@bff-after.json"
+```
+
+`bff-after.json` sets only:
+- `signInAudience`: `AzureADMultipleOrgs`;
+- `api.knownClientApplications`: the existing list + `$NEW_APP_ID`;
+- `optionalClaims`: the **whole** object from `before-1e40baad.json`, because Graph replaces collections. Its `accessToken` array gets every existing entry plus any of these that are missing: `{"name":"acct","essential":false}`, `{"name":"email","essential":false}`, `{"name":"given_name","essential":false}`, `{"name":"family_name","essential":false}` (research item 2). ID-token and SAML claims are copied unchanged.
+
+Then, as a separate call: `az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/$BFF_OBJ/authenticationBehaviors" --headers Content-Type=application/json --body '{"removeUnverifiedEmailClaim":true}'`. This is explicit because the default for a converted single-tenant app is not documented (research item 3).
+
+`requestedAccessTokenVersion` is not touched, since S-1 requires it to be 2 already.
+
+- **Read after:** the R2 query again. Expect `AzureADMultipleOrgs`, token version 2, `known` containing the new client, the four access-token claims, and `removeUnverifiedEmailClaim` true.
+- **Effect on existing callers:** none intended. Spaarke-tenant tokens keep the same issuer, audience and version. The new access-token claims are additive.
+  - Check right after: a Console or PCF sign-in on dev still reaches the BFF. The owner checks it in the browser, and the session reads the BFF log for 401s.
+- **Rollback:** PATCH back the `signInAudience`, `knownClientApplications`, `optionalClaims` and `authenticationBehaviors` saved in `before-1e40baad.json`. One caveat: a multitenant app that another directory has consented to (stage C) must first have that consent removed. Rollback order is therefore C, then B.
+
+## 6. Stage C — admin consent in Dewey Cheatham (the owner, as that directory's admin)
+
+- The session gives the owner the consent URL: `https://login.microsoftonline.com/<CUST_TID>/adminconsent?client_id=<NEW_APP_ID>`. This is the v1 admin-consent endpoint, documented without `redirect_uri` and driven by the client's `requiredResourceAccess`. Through `knownClientApplications`, one consent creates the service principals of both the client and the BFF app in Dewey Cheatham (research item 4).
+- The account must be able to grant tenant-wide consent for an API permission there (a Global, Privileged Role or Cloud/Application Administrator, as that directory's consent policy allows).
+- The owner opens it, signs in as a Dewey Cheatham administrator and accepts.
+- **Read after** (owner's sign-in to `bc3aa7f4`, read-only): in the Entra admin center for Dewey Cheatham, Enterprise applications should list "Spaarke Workforce SPA" and the dev BFF app, each with admin-granted delegated permissions. The CLI alternative needs a sign-in to that directory; the owner chooses.
+- **Rollback:** in Dewey Cheatham, delete the two enterprise applications (owner, admin center).
+
+## 7. Stage D — `spaarke-bff-dev` settings (approval 3)
+
+```powershell
+# Index N = the next free index after the existing WorkforceIdentity__CustomerTenantIds__* (from R5); existing entries untouched.
+az webapp config appsettings set -g rg-spaarke-dev -n spaarke-bff-dev --settings "WorkforceIdentity__CustomerTenantIds__N=$CUST_TID" "ExternalAccess__CustomerBusinessUnitId=$BU1"
+```
+- If R5 shows `bc3aa7f4` already listed, only the BU setting is set.
+- **Effect:** App Service restarts the BFF (brief interruption on dev). `CustomerTenantIds` is read per request, but a settings change restarts the app anyway.
+- **Before the change:** tell the UAC, ontology and ebilling sessions (they want restart notices).
+- **Read after:** the R5 filter again (the old entries are kept and the new ones present), and `/healthz` returns 200.
+- **Rollback:** `az webapp config appsettings delete -g rg-spaarke-dev -n spaarke-bff-dev --setting-names WorkforceIdentity__CustomerTenantIds__N ExternalAccess__CustomerBusinessUnitId`, or restore the previous value of each setting from `before-bff-settings.json`.
+
+## 8. Stage E — GitHub `external-spa-dev` (approval 4)
+
+```powershell
+gh variable set VITE_WORKFORCE_HOME_MSAL_CLIENT_ID -R spaarke-dev/spaarke --env external-spa-dev --body $NEW_APP_ID
+gh variable set VITE_BACKENDS -R spaarke-dev/spaarke --env external-spa-dev --body (Get-Content backends-dev.json -Raw)
+```
+`backends-dev.json` (one line in practice):
+```json
+[{"customerKey":"default","displayName":"Spaarke (dev)","bffBaseUrl":"https://spaarke-bff-dev.azurewebsites.net","bffAppId":"<BFF_APP_ID>","ciamBffAppId":"<CIAM_BFF_APP_ID>","homeTenantIds":["<CUST_TID>"]}]
+```
+- `customerKey` `default` keeps the key the one-entry fallback uses today, so a stored backend choice stays valid.
+- `ciamBffAppId` keeps CIAM sign-in on the CIAM API app. Without it the CIAM plane would request `1e40baad` (AADSTS500207).
+- `displayName` is shown on the backend chooser; the owner may want a different text.
+- **Read after:** R8 again.
+- **Rollback:** `gh variable delete VITE_BACKENDS -R spaarke-dev/spaarke --env external-spa-dev` (the fallback returns), and the same for `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID`. Neither changes the live SPA until stage F.
+
+## 9. Stage F — SPA deploy to dev (approval 5)
+
+```powershell
+gh workflow run deploy-external-spa.yml --ref work/spaarke-SPA-external-access-platform-r3 -f environment=dev
+gh run watch <run id> --exit-status
+```
+- **Ref:** the R3 branch. 058 and 075 are not on master yet (the final R3 PR). The alternative is to wait for that PR and deploy from master; the owner chooses.
+- **Impact:**
+  - Everyone on the dev SPA gets the 058/075 build on their next page load.
+  - CIAM partners and licensed users should see no change in behaviour.
+  - Workforce contacts get the A9 company-account path.
+- **Verify:** `/auth-callback.html` returns the bridge page. Then the owner's browser checks hand over to task 074: CIAM sign-in still works; a Dewey Cheatham sign-in reaches the profile form; the licensed-user silent link works.
+- **Rollback:** redeploy `ebc74b331`, the live dev build today, by tag, the way task 040 did (`git tag external-spa-dev-rollback-ebc74b331 ebc74b331`, push it, run the workflow on that ref). A Static Web App keeps no previous build.
+
+## 10. Rollback order (whole task)
+
+F (SPA) → E (variables) → D (BFF settings) → C (consent) → B (BFF app) → A (delete the client).
+
+## 11. Record (filled in as each stage runs)
+
+_Nothing has run._
+
+## 12. Research used by this plan (researcher, 2026-10-19; V = in current Microsoft docs, I = inferred)
+
+Saved in the researcher's memory as `entra-multitenant-api-a9-dev-setup-2026-10-19.md`.
+
+1. **Token version (V).** The resource app sets it for every caller. v2: `iss` = `login.microsoftonline.com/{tid}/v2.0`, `aud` = the GUID, `azp` replaces `appid`, no `upn`/`unique_name` unless configured. v2 is not required for `AzureADMultipleOrgs`. Microsoft.Identity.Web accepts both issuer forms; a configured `Audience` is used as-is (I), hence S-1.
+2. **Access-token optional claims (V).** They come from the resource app. `acct` and `email` must be added; `given_name`/`family_name` are v2 optional claims and also need the `profile` scope, which MSAL sends. `email` is emitted only when the user has a mail attribute, and is removed when its domain is unverified and `removeUnverifiedEmailClaim` is true.
+3. **`removeUnverifiedEmailClaim` (V).** Graph v1.0: `PATCH /applications/{objectId}/authenticationBehaviors`. Its default for a converted app is not documented, so it is set explicitly.
+4. **Admin consent (V).** `/{tid}/adminconsent?client_id=` (v1, no `redirect_uri`). `knownClientApplications` lets one consent create both service principals; both apps must be in the same tenant. The interactive "on behalf of your organization" checkbox is not offered to every admin role, so the link is used.
+5. **`brk-multihub` (V for the portal; not documented for Graph).** Teams NAA needs an SPA-type redirect `brk-multihub://{fqdn}`, origin only; the portal fallback is in stage A.
+6. **Audience change (V/I).** The documented refusal is a non-unique App ID URI. `api://{appId}` is unique, so it is expected to pass (I). Same-tenant token `iss`/`aud` are not changed by the audience change itself (I).
+7. **OIDC scopes (I).** Not declared; implicit, and not admin-restricted.
