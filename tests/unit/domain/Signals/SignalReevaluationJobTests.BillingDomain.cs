@@ -164,9 +164,164 @@ public partial class SignalReevaluationJobTests
             "the existence read must see billing policies too, or their Signals would look orphaned");
 
         evaluation.Should().NotBeEmpty();
-        evaluation.Should().OnlyContain(q => HasOntologyAllowlist(q),
-            "the enabled read and both not-in-force reads filter on sprk_domain null OR Ontology");
+        // D-170: the Off and Retired reads of the CLOSE (and only those two) also admit Billing; every other read stays Ontology-only.
+        var closure = evaluation.Where(HasClosableOnRetirementAllowlist).ToList();
+        closure.Should().HaveCount(2, "the Off read and the Retired read of the closure");
+        evaluation.Except(closure).Should().OnlyContain(q => HasOntologyAllowlist(q),
+            "the enabled read and the redaction's not-in-force reads filter on sprk_domain null OR Ontology");
         evaluation.Should().OnlyContain(q => q.ColumnSet.Columns.Contains(RuleDomains.PolicyDomainColumn));
+    }
+
+    internal static bool HasClosableOnRetirementAllowlist(QueryExpression query) =>
+        query.Criteria.FilterOperator == LogicalOperator.And
+        && query.Criteria.Filters.Any(f =>
+            f.FilterOperator == LogicalOperator.Or
+            && f.Conditions.Count == 3
+            && f.Conditions.Any(c => c.AttributeName == RuleDomains.PolicyDomainColumn && c.Operator == ConditionOperator.Null)
+            && f.Conditions.Count(c => c.AttributeName == RuleDomains.PolicyDomainColumn && c.Operator == ConditionOperator.Equal) == 2
+            && f.Conditions.Any(c => c.Operator == ConditionOperator.Equal && (int)c.Values[0] == RuleDomains.PolicyDomainOntology)
+            && f.Conditions.Any(c => c.Operator == ConditionOperator.Equal && (int)c.Values[0] == RuleDomains.PolicyDomainBilling));
+
+    // =====================================================================================
+    // D-132 / ontology-r1 D-170 (owner 2026-10-19): a billing policy that is Off or Retired closes its open Signals as PolicyRetired.
+    // The fake World ignores nested query filters, so these exercise the per-row predicate (RuleDomains.IsClosableOnRetirement).
+    // =====================================================================================
+
+    private const string SystemSubmissionCode = "BILL-SYSTEM-SUBMISSION";
+
+    private static (Guid Open, Guid Acknowledged, Guid Resolved) SeedBillingSignals(Harness h, string code)
+    {
+        var policyId = h.Sysadmin.PolicyIdOf(code);
+        var version = h.Sysadmin.CurrentVersionOf(code);
+        var open = h.Org.SeedSignal(Key(code, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: policyId, versionId: version);
+        var acknowledged = h.Org.SeedSignal(Key(code, "sprk_matter", OtherMatterId, 1), SignalWriter.SignalStatusAcknowledged,
+            coreId: OtherMatterId, policyId: policyId, versionId: version);
+        var resolved = h.Org.SeedSignal(Key(code, "sprk_matter", Guid.NewGuid(), 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionActed, resolvedOn: new DateTime(2026, 10, 9, 0, 0, 0, DateTimeKind.Utc),
+            policyId: policyId, versionId: version);
+        return (open, acknowledged, resolved);
+    }
+
+    private static Harness BillingHarness(string code, bool enabled, int statecode = 0)
+    {
+        var h = new Harness().WithPathBPolicy();
+        h.Sysadmin.AddPolicy(code, SignalWriter.LaneDecide, true, ApprovedRateBody, "Billed {{line.rate}}.", ruleType: ApprovedRateOption);
+        SetDomain(h, code, RuleDomains.PolicyDomainBilling);
+        h.Sysadmin.SetPolicyState(code, enabled, statecode);
+        return h;
+    }
+
+    [Theory]
+    [InlineData(BillingCode)]
+    [InlineData(SystemSubmissionCode)]
+    public async Task Run_BillingPolicyOff_ClosesItsOpenAndAcknowledgedSignalsPolicyRetired_LeavesResolvedAlone(string code)
+    {
+        var h = BillingHarness(code, enabled: false);
+        var (open, acknowledged, resolved) = SeedBillingSignals(h, code);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        AssertSystemClosure(h.Org.Rows[open], SignalWriter.ResolutionPolicyRetired);
+        AssertSystemClosure(h.Org.Rows[acknowledged], SignalWriter.ResolutionPolicyRetired);
+        h.Org.Rows[resolved].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value
+            .Should().Be(SignalWriter.ResolutionActed, "a Resolved Signal is never touched");
+        h.Org.ConditionalUpdates.Should().HaveCount(2, "row-version conditional, Open and Acknowledged only");
+        result.ResultJson.Should().Contain("\"policyRetiredClosed\":2");
+    }
+
+    [Fact]
+    public async Task Run_BillingPolicyRetired_ClosesItsOpenSignalsPolicyRetired()
+    {
+        var h = BillingHarness(BillingCode, enabled: true, statecode: 1); // Retired: Inactive (the predicate the Ontology path uses)
+        var (open, _, _) = SeedBillingSignals(h, BillingCode);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        AssertSystemClosure(h.Org.Rows[open], SignalWriter.ResolutionPolicyRetired);
+    }
+
+    [Fact]
+    public async Task Run_EnabledBillingPolicy_LeavesItsOpenSignalsUntouched()
+    {
+        var h = BillingHarness(BillingCode, enabled: true);
+        var (open, acknowledged, _) = SeedBillingSignals(h, BillingCode);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        h.Org.Rows[open].GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value.Should().Be(SignalWriter.SignalStatusOpen);
+        h.Org.Rows[acknowledged].GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value.Should().Be(SignalWriter.SignalStatusAcknowledged);
+        h.Org.ConditionalUpdates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Run_BillingPolicyOffThenOn_ReRaisesNothing_AndNeverEvaluatesIt()
+    {
+        var h = BillingHarness(BillingCode, enabled: false);
+        var (open, _, _) = SeedBillingSignals(h, BillingCode);
+        (await h.RunAsync()).ResultJson.Should().Contain("\"policiesEvaluated\":1", "only the Ontology policy is evaluated, even while the billing policy is Off");
+        AssertSystemClosure(h.Org.Rows[open], SignalWriter.ResolutionPolicyRetired);
+        var closedAs = h.Org.Rows[open].Attributes.ToDictionary(a => a.Key, a => a.Value);
+        h.Org.ResetCounts();
+
+        h.Sysadmin.SetPolicyState(BillingCode, enabled: true); // On again: unlike an Ontology policy (D-32), nothing re-raises
+        h.Clock.Advance(TimeSpan.FromDays(1));
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.ResultJson.Should().Contain("\"policiesEvaluated\":1");
+        h.Org.CreatedPayloads.Should().BeEmpty("billing has no evaluator, so re-enabling raises nothing");
+        h.Org.ConditionalUpdates.Should().BeEmpty();
+        h.Org.Rows[open].Attributes.ToDictionary(a => a.Key, a => a.Value).Should().BeEquivalentTo(closedAs);
+    }
+
+    [Fact]
+    public async Task Run_OffPolicyOfAnyOtherDomain_IsNotClosed_FailClosed()
+    {
+        // The reserved Docketing value (100000002) is neither Ontology nor Billing: the closure leaves its Signals alone.
+        var h = BillingHarness(BillingCode, enabled: false);
+        SetDomain(h, BillingCode, 100000002);
+        var (open, _, _) = SeedBillingSignals(h, BillingCode);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        h.Org.Rows[open].GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value.Should().Be(SignalWriter.SignalStatusOpen);
+    }
+
+    [Fact]
+    public async Task PoliciesNotInForce_StillExcludesABillingPolicy_ForTheRedactionSweep()
+    {
+        // D-170 widens only the close; the stored-evidence redaction reads PoliciesNotInForceAsync, which stays Ontology-only.
+        var h = BillingHarness(BillingCode, enabled: false);
+
+        (await h.Closure.PoliciesNotInForceAsync(default)).Values.Should().NotContain(BillingCode);
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData(RuleDomains.PolicyDomainOntology, true)]
+    [InlineData(RuleDomains.PolicyDomainBilling, true)]
+    [InlineData(100000002, false)]
+    public void IsClosableOnRetirement_AdmitsEmptyOntologyAndBilling_Only(int? domain, bool expected)
+    {
+        var policy = new Entity("sprk_policy", Guid.NewGuid());
+        if (domain is { } d) policy[RuleDomains.PolicyDomainColumn] = new OptionSetValue(d);
+
+        RuleDomains.IsClosableOnRetirement(policy).Should().Be(expected);
+        // The evaluator gate is unchanged: Billing is still not an Ontology policy.
+        RuleDomains.IsOntologyPolicy(policy).Should().Be(domain is null or RuleDomains.PolicyDomainOntology);
+    }
+
+    [Fact]
+    public void IsClosableOnRetirement_ARawIntDomain_IsNotTrusted()
+    {
+        var policy = new Entity("sprk_policy", Guid.NewGuid()) { [RuleDomains.PolicyDomainColumn] = RuleDomains.PolicyDomainBilling };
+
+        RuleDomains.IsClosableOnRetirement(policy).Should().BeFalse();
     }
 
     internal static bool HasOntologyAllowlist(QueryExpression query) =>

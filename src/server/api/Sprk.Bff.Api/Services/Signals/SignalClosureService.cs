@@ -124,11 +124,14 @@ public sealed class SignalClosureService
     /// <summary>
     /// The job's Off/Retired step: for every policy that is Off (<c>sprk_enabled = No</c>) or Inactive (Retired), closes its open
     /// Signals as <c>PolicyRetired</c>. Idempotent: a policy with no open Signal writes nothing (D-61). The Signals keep their
-    /// policy, subject and episode, so switching the policy On again re-raises from them (D-32).
+    /// policy, subject and episode, so switching an Ontology policy On again re-raises from them (D-32). A Billing-domain policy closes
+    /// the same way (D-170, owner 2026-10-19) but is never re-raised.
     /// </summary>
     internal async Task<SignalClosureOutcome> ClosePoliciesNotInForceAsync(CancellationToken ct)
     {
-        var policies = await PoliciesNotInForceAsync(ct).ConfigureAwait(false);
+        // D-170: the Off/Retired CLOSE reads Billing policies too (their open Signals close PolicyRetired). Re-enabling a Billing policy
+        // re-raises nothing, unlike an Ontology policy (D-32): Billing has no evaluator, so nothing ever re-raises its Signals.
+        var policies = await ReadPoliciesNotInForceAsync(includeBilling: true, ct).ConfigureAwait(false);
 
         var total = SignalClosureOutcome.None;
         foreach (var (policyId, code) in policies)
@@ -151,19 +154,27 @@ public sealed class SignalClosureService
         return total;
     }
 
-    /// <summary>Every policy that is Off (<c>sprk_enabled = No</c>) or Inactive (Retired), by id, with its code. The one query of
-    /// "not in force": the Off/Retired close above and the job's stored-evidence redaction of those policies' Signals (task 145).</summary>
-    internal async Task<IReadOnlyDictionary<Guid, string>> PoliciesNotInForceAsync(CancellationToken ct)
+    /// <summary>Every ONTOLOGY policy that is Off (<c>sprk_enabled = No</c>) or Inactive (Retired), by id, with its code. The job's
+    /// stored-evidence redaction of those policies' Signals (task 145) reads this; it stays Ontology-only (D-170 widens only the close,
+    /// <see cref="ClosePoliciesNotInForceAsync"/>).</summary>
+    internal Task<IReadOnlyDictionary<Guid, string>> PoliciesNotInForceAsync(CancellationToken ct) =>
+        ReadPoliciesNotInForceAsync(includeBilling: false, ct);
+
+    /// <summary>The one query of "not in force" (Off = <c>sprk_enabled</c> No, Retired = <c>statecode</c> Inactive), by id with its code.
+    /// <paramref name="includeBilling"/> adds Billing-domain policies (<see cref="RuleDomains.IsClosableOnRetirement"/>); false is the
+    /// Ontology allowlist every other reader uses.</summary>
+    private async Task<IReadOnlyDictionary<Guid, string>> ReadPoliciesNotInForceAsync(bool includeBilling, CancellationToken ct)
     {
         var policies = new Dictionary<Guid, string>();
         foreach (var (attribute, value) in new (string, object)[] { ("sprk_enabled", false), ("statecode", 1) })
         {
             var query = new QueryExpression("sprk_policy") { ColumnSet = new ColumnSet("sprk_policycode", RuleDomains.PolicyDomainColumn) };
             query.Criteria.AddCondition(attribute, ConditionOperator.Equal, value);
-            // ebilling-r1 task 070: the same Ontology allowlist as the enabled-policies readers, kept consistent.
-            RuleDomains.AddOntologyPolicyAllowlist(query);
+            // ebilling-r1 task 070: the same Ontology allowlist as the enabled-policies readers, kept consistent; D-170 adds Billing for the close.
+            if (includeBilling) RuleDomains.AddClosableOnRetirementAllowlist(query);
+            else RuleDomains.AddOntologyPolicyAllowlist(query);
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            foreach (var row in rows.Entities.Where(RuleDomains.IsOntologyPolicy))
+            foreach (var row in rows.Entities.Where(includeBilling ? RuleDomains.IsClosableOnRetirement : RuleDomains.IsOntologyPolicy))
             {
                 policies[row.Id] = row.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
             }

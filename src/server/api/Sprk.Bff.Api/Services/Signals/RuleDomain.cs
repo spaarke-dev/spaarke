@@ -104,4 +104,24 @@ public static class RuleDomains
 
         return value is OptionSetValue { Value: PolicyDomainOntology };
     }
+
+    /// <summary>Adds <c>(sprk_domain is null OR sprk_domain = Ontology OR sprk_domain = Billing)</c> to <paramref name="query"/>'s criteria
+    /// (AND): the query form of <see cref="IsClosableOnRetirement"/>. Used only by the Off/Retired closure read (D-170); every evaluator
+    /// reader keeps <see cref="AddOntologyPolicyAllowlist"/>.</summary>
+    public static void AddClosableOnRetirementAllowlist(QueryExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var domain = new FilterExpression(LogicalOperator.Or);
+        domain.AddCondition(PolicyDomainColumn, ConditionOperator.Null);
+        domain.AddCondition(PolicyDomainColumn, ConditionOperator.Equal, PolicyDomainOntology);
+        domain.AddCondition(PolicyDomainColumn, ConditionOperator.Equal, PolicyDomainBilling);
+        query.Criteria.AddFilter(domain);
+    }
+
+    /// <summary>True when an Off or Retired policy's open Signals are closed as <c>PolicyRetired</c>: an Ontology policy (empty or
+    /// Ontology) or a Billing one (ebilling-r1 D-132 / ontology-r1 D-170, owner 2026-10-19: a billing policy that is no longer used closes
+    /// its open Signals). Docketing (reserved), any later value and a value of the wrong type are not closable (fail closed). This does NOT
+    /// widen <see cref="IsOntologyPolicy"/>: that gate stays Ontology-only on every evaluator path, so a Billing policy's Signals are still
+    /// never evaluated, superseded or re-raised by the nightly job.</summary>
+    public static bool IsClosableOnRetirement(Entity policy) => IsOntologyPolicy(policy) || IsBillingRow(policy);
 }
