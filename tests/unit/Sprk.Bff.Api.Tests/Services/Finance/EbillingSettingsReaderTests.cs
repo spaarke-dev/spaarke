@@ -291,6 +291,24 @@ public sealed class EbillingSettingsReaderTests
         (settings.RejectionInvariantProblem is not null).Should().Be(broken);
     }
 
+    [Fact]
+    public void RejectionInvariantProblem_AnArithmeticFailCapAtTheThreshold_IsInvalid_TheNfr06GridSetting()
+    {
+        // 073 review F1-c: the NFR-06 grid's threshold 0.50 with 046's default arithmetic cap 0.50. A field whose arithmetic check failed
+        // would be capped at 0.50 and still reach the threshold, so it could support a rejection. The reference cap is fine here.
+        var settings = new EbillingSettings { ReliabilityThreshold = 0.50m, ReferenceMissingCap = 0.40m, ArithmeticFailCap = 0.50m };
+
+        settings.RejectionInvariantProblem.Should().NotBeNull().And.Contain("arithmetic-fail cap");
+    }
+
+    [Fact]
+    public void RejectionInvariantProblem_AnArithmeticFailCapBelowTheThreshold_IsValid()
+    {
+        var settings = new EbillingSettings { ReliabilityThreshold = 0.50m, ReferenceMissingCap = 0.40m, ArithmeticFailCap = 0.49m };
+
+        settings.RejectionInvariantProblem.Should().BeNull();
+    }
+
     private void VerifyError(string messageFragment, Times times) =>
         _logger.Verify(
             x => x.Log(

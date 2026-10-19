@@ -49,8 +49,10 @@ public class SubmissionRejectionRuleTests
 
     // ── Builders ─────────────────────────────────────────────────────────────────────────────────────────────────
 
+    // The arithmetic cap is kept at or below the reference cap (046's default 0.50 when that is lower), so a case is about the threshold and
+    // the reference cap it names, not about the arithmetic cap's half of the invariant (073 review F1-c).
     private static EbillingSettings Settings(decimal threshold = 0.90m, decimal cap = 0.80m) =>
-        new() { ReliabilityThreshold = threshold, ReferenceMissingCap = cap };
+        new() { ReliabilityThreshold = threshold, ReferenceMissingCap = cap, ArithmeticFailCap = Math.Min(0.50m, cap) };
 
     private static readonly string[] FieldNames =
     [

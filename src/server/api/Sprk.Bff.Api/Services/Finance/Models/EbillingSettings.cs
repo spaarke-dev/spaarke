@@ -85,8 +85,9 @@ public sealed record EbillingSettings
 
     /// <summary>
     /// Why these settings cannot back a rejection (FR-26, I-5, D-89), or <c>null</c> when they can. The rule: the reliability threshold
-    /// is above 0 and at most 1, and <see cref="ReferenceMissingCap"/> is below it, so a field with no reference match can never reach
-    /// the threshold and so can never support a rejection. The platform checks each column's range but not this pair (a cross-field
+    /// is above 0 and at most 1, and <see cref="ReferenceMissingCap"/> and <see cref="ArithmeticFailCap"/> are both below it, so a field
+    /// with no reference match, or one whose arithmetic check failed, can never reach the threshold and so can never support a rejection
+    /// (D-47, D-89; 073 review F1-c added the arithmetic cap). The platform checks each column's range but not these pairs (a cross-field
     /// rule, and ADR-002 allows no plugin or business rule to own it), so the readers check it when they use the row:
     /// <see cref="EbillingSettingsReader"/> logs it, and <c>SubmissionRejectionRule</c> then rejects nothing until it is fixed.
     /// </summary>
@@ -95,5 +96,7 @@ public sealed record EbillingSettings
             ? $"The reliability threshold ({ReliabilityThreshold}) must be above 0 and at most 1."
             : ReferenceMissingCap >= ReliabilityThreshold
                 ? $"The reference-missing cap ({ReferenceMissingCap}) must be below the reliability threshold ({ReliabilityThreshold}); otherwise a field with no reference match can support a rejection."
-                : null;
+                : ArithmeticFailCap >= ReliabilityThreshold
+                    ? $"The arithmetic-fail cap ({ArithmeticFailCap}) must be below the reliability threshold ({ReliabilityThreshold}); otherwise a field whose arithmetic check failed can support a rejection."
+                    : null;
 }
