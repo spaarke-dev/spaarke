@@ -482,6 +482,9 @@ public class InvoiceComplianceEvaluatorTests
         { BillingEvaluationReasons.CurrencyUnreliable, "USD", 0.50m },
         { BillingEvaluationReasons.CurrencyUnreliable, "USD", null },
         { BillingEvaluationReasons.CurrencyUnreliable, "$", 0.50m },
+        // 072 W review: confidence is checked BEFORE the not-USD test, so a foreign code read with doubt is "unclear", not "not USD".
+        { BillingEvaluationReasons.CurrencyUnreliable, "EUR", 0.50m },
+        { BillingEvaluationReasons.CurrencyUnreliable, "EUR", null },
     };
 
     [Theory]
@@ -513,6 +516,9 @@ public class InvoiceComplianceEvaluatorTests
     [InlineData("usd")]
     [InlineData("$")]
     [InlineData(" $ ")]
+    [InlineData("US$")] // 072 W review: unambiguous
+    [InlineData("us$")]
+    [InlineData("USD$")]
     public void AMoneyRule_IsJudged_OnAReliablyReadUsdInvoice(string currency)
     {
         // 049 caller obligation: "$" is read as USD.
@@ -677,7 +683,9 @@ public class InvoiceComplianceEvaluatorTests
         { " $ ", null, false },
         { "usd", null, false },
         { "EUR", BillingEvaluationReasons.CurrencyNotUsd, true },
-        { "US$", BillingEvaluationReasons.CurrencyNotUsd, true },
+        { "US$", null, false },
+        { "USD$", null, false },
+        { "CA$", BillingEvaluationReasons.CurrencyNotUsd, true },
         { null, BillingEvaluationReasons.CurrencyMissing, false },
         { "  ", BillingEvaluationReasons.CurrencyMissing, false },
     };

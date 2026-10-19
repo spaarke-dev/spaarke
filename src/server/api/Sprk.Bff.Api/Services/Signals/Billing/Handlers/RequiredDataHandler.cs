@@ -13,7 +13,7 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// line. The header fields are checked once. A value of only whitespace is missing. The codes are the ones the firm billed
 /// (<see cref="BillingLineFacts.BilledTaskCode"/> and its siblings), not the AI's: the rule asks what the invoice carries.</para>
 /// <para><b>Currency (FR-21, D-20, D-119).</b> R1 is USD only. Whenever this rule runs, an invoice whose currency is read and is not
-/// USD by the one shared normaliser (<see cref="BillingCurrency.IsUsd"/>: <c>USD</c> in any case, or a bare <c>"$"</c>) gets one
+/// USD by the one shared normaliser (<see cref="BillingCurrency.IsUsd"/>: <c>USD</c> in any case, a bare <c>"$"</c>, <c>"US$"</c> or <c>"USD$"</c>) gets one
 /// invoice-level finding, reason <c>required_data.currency_not_usd</c>, <c>missingField</c> =
 /// <c>currency</c>, message <see cref="BillingRuleCatalogue.CurrencyNotUsdTemplate"/>; that reason is flag-only
 /// (<see cref="BillingRuleCatalogue.IsFlagOnlyReason"/>). It is a finding, never an exception, and it does not depend on the rule listing a field: the rule's

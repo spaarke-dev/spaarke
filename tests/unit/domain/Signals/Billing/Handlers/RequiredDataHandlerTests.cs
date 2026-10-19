@@ -152,7 +152,7 @@ public class RequiredDataHandlerTests
     [InlineData("EUR")]
     [InlineData("GBP")]
     [InlineData("cad")]
-    [InlineData("US$")] // not a bare "$": not USD
+    [InlineData("CA$")] // a dollar of another country: not USD
     public void MustFire_ForACurrencyOtherThanUsd_AsAFindingOnTheInvoice_FR21(string currency)
     {
         var facts = Facts(Fee(0)) with { Invoice = Invoice() with { Currency = currency } };
@@ -180,6 +180,8 @@ public class RequiredDataHandlerTests
     [InlineData(" Usd ")]
     [InlineData("$")] // D-119: a bare "$" is USD
     [InlineData(" $ ")]
+    [InlineData("US$")] // 072 W review: unambiguous
+    [InlineData("USD$")]
     [InlineData(null)] // not read: no evidence of a foreign currency
     [InlineData("")]
     public void MustNotFire_ForUsd_OrForACurrencyThatWasNotRead(string? currency)

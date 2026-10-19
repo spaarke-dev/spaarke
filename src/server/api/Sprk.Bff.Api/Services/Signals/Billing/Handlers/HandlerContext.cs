@@ -35,20 +35,21 @@ internal static class BillingCurrency
 
     /// <summary>
     /// The currency as an upper-case code, or <c>null</c> when none was read (absent or blank). A bare <c>"$"</c> is
-    /// <see cref="UsDollars"/> (D-119, owner); anything else is the trimmed text upper-cased with the invariant culture.
+    /// <see cref="UsDollars"/> (D-119, owner), and so are <c>"US$"</c> and <c>"USD$"</c> (unambiguous; 072 W review); anything else
+    /// is the trimmed text upper-cased with the invariant culture (so <c>"CA$"</c> stays a foreign currency).
     /// </summary>
     internal static string? Normalise(string? currency)
     {
-        var text = BillingText.Text(currency);
+        var text = BillingText.Text(currency)?.ToUpperInvariant();
         return text switch
         {
             null => null,
-            "$" => UsDollars,
-            _ => text.ToUpperInvariant(),
+            "$" or "US$" or "USD$" => UsDollars,
+            _ => text,
         };
     }
 
-    /// <summary>True when the currency read is US dollars (<c>USD</c> in any case, or a bare <c>"$"</c>). A currency that was not
+    /// <summary>True when the currency read is US dollars (<c>USD</c> in any case, a bare <c>"$"</c>, <c>"US$"</c> or <c>"USD$"</c>). A currency that was not
     /// read is not USD here; whether that is "missing" is the caller's question (D-115).</summary>
     internal static bool IsUsd(string? currency) => Normalise(currency) == UsDollars;
 }

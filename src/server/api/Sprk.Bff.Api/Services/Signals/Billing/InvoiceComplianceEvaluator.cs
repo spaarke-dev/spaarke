@@ -82,7 +82,7 @@ public sealed record BillingEvaluationResult
 /// rule of a type the default does not cover. It is not a refusal and is not listed in <see cref="BillingEvaluationResult.Refusals"/>.
 /// A version whose body the gate refuses is still refused. A downgraded FIRM version runs (as a Flag) but does not displace the
 /// client default of its type (D-39, D-116; 072 W review F1-b): the client default stays in force beside it.</para>
-/// <para><b>Currency (D-20, D-115).</b> R1 judges money in USD only (<c>"$"</c> is read as USD). When the currency is missing, is
+/// <para><b>Currency (D-20, D-115).</b> R1 judges money in USD only (<c>"$"</c>, <c>"US$"</c> and <c>"USD$"</c> are read as USD). When the currency is missing, is
 /// not USD, or its confidence (<c>HeaderConfidence["Currency"]</c>) is unknown or below the reliability threshold, ApprovedRate is
 /// not run and ExpenseRule's amount-cap findings are dropped (its code check still runs); each such skip is logged with its reason
 /// and listed in <see cref="BillingEvaluationResult.Skips"/>. When anything was skipped, ONE invoice-level finding says so (D-115:
@@ -399,8 +399,9 @@ public sealed class InvoiceComplianceEvaluator
 
     /// <summary>
     /// D-20: why money cannot be judged on this invoice, or <c>null</c> when it can (USD, read reliably). USD is decided by the one
-    /// shared normaliser (<see cref="BillingCurrency"/>, D-119: a bare <c>"$"</c> is USD), which RequiredData uses too; the
-    /// confidence is <c>HeaderConfidence["Currency"]</c> under exactly that key.
+    /// shared normaliser (<see cref="BillingCurrency"/>, D-119: a bare <c>"$"</c>, <c>"US$"</c> or <c>"USD$"</c> is USD), which RequiredData
+    /// uses too; the confidence is <c>HeaderConfidence["Currency"]</c> under exactly that key. Order: missing, then unclear (confidence
+    /// unknown or below the floor, whatever the code says), then not USD.
     /// </summary>
     internal static string? CurrencySkipReason(BillingEvaluationRequest request, decimal reliabilityThreshold)
     {
@@ -409,15 +410,14 @@ public sealed class InvoiceComplianceEvaluator
             return BillingEvaluationReasons.CurrencyMissing;
         }
 
-        if (!BillingCurrency.IsUsd(request.Currency))
+        // The confidence is checked BEFORE the code (072 W review): a "EUR" read with doubt may be a misread "USD", so it is unclear,
+        // not "not USD". Unknown confidence counts as below the floor, as it does for every extracted value (HandlerContext).
+        if (!(request.HeaderConfidence.TryGetValue(BillingFieldNames.Currency, out var confidence) && confidence >= reliabilityThreshold))
         {
-            return BillingEvaluationReasons.CurrencyNotUsd;
+            return BillingEvaluationReasons.CurrencyUnreliable;
         }
 
-        // Unknown confidence counts as below the floor, as it does for every extracted value (HandlerContext).
-        return request.HeaderConfidence.TryGetValue(BillingFieldNames.Currency, out var confidence) && confidence >= reliabilityThreshold
-            ? null
-            : BillingEvaluationReasons.CurrencyUnreliable;
+        return BillingCurrency.IsUsd(request.Currency) ? null : BillingEvaluationReasons.CurrencyNotUsd;
     }
 
     /// <summary>
