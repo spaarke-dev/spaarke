@@ -280,6 +280,40 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "the mirror removal (which revokes every direct share) ran before the grant, never after it");
     }
 
+    [Theory(DisplayName = "#2110 (ontology K3): the ONE re-file core re-binding a communication's held matter runs the step once only when it also MOVES the thread")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RefileCore_TheHeldMatterAndAThread_RunsTheStepOnlyWhenTheThreadMoves_2110(bool movesTheThread)
+    {
+        var heldThread = Guid.Parse("a2110000-0000-4000-8000-0000000000e5");
+        var otherThread = Guid.Parse("a2110000-0000-4000-8000-0000000000e6");
+        _world.WithRecord("sprk_communication", JoiningMessage, Directory.ChildBu, owningTeam: Directory.ChildTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter),
+            ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", heldThread),
+        });
+        ShareWorld.OrdinaryChild("sprk_communication", JoiningMessage, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+        var threads = new Mock<IThreadResolver>();
+
+        // The core every child re-file route calls (ChildRecordEndpoints.UpdateAsync), with no filing-only shape: no route of
+        // today names a communication's thread, so this pins the core for any that will.
+        var result = await Sprk.Bff.Api.Api.ChildRecordEndpoints.UpdateAsync(
+            "sprk_communication", JoiningMessage,
+            Payload(new()
+            {
+                ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+                ["sprk_CommunicationThread@odata.bind"] = $"/sprk_communicationthreads({(movesTheThread ? otherThread : heldThread):D})",
+            }),
+            _user, _world.Resolver(), Restamper(), Children(threads.Object), HttpContextOfCaller(), NullLogger<Program>.Instance,
+            CancellationToken.None);
+
+        Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
+        _world.Assignments.Should().BeEmpty("the thread decides no owner, and the matter is the one held");
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(JoiningMessage, It.IsAny<CancellationToken>()),
+            movesTheThread ? Times.Once() : Times.Never(),
+            movesTheThread ? "the thread moved: the step after a re-file ran once" : "nothing moved: no step");
+    }
+
     /// <summary>How many times the gate Decision Record step ran for the joining message's gate record (its one log line per run).</summary>
     private static int GateStepRuns(Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<GateDecisionRecordSharing> gateLog) =>
         gateLog.Entries.Count(e => e.Message.Contains($"Gate Decision Record {GateRecordOfJoiningMessage}", StringComparison.Ordinal));

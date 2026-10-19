@@ -1565,6 +1565,12 @@ internal static class OwnedChildWrite
                 : new RefileOutcome { NotARefile = true };
         }
 
+        // #2110 (ontology K3): a lineage lookup the update sets that files the row under no ownership parent — a message's
+        // thread — rides along, so the reparent can tell whether this change moved it (RecordOwnerResolution.ParentsUnchanged).
+        // It decides no owner, and it made no update a re-file above.
+        foreach (var lookup in item.Lookups.Where(l => RecordReparent.LineageOnlyTargetOf(table, l.Column) is not null))
+            changes.TryAdd(lookup.Column, new Microsoft.Xrm.Sdk.EntityReference(lookup.RelatedTable, lookup.RecordId));
+
         // The caller must see the row before anything is decided about it (their own 404/403 otherwise).
         var row = await user.GetAsync(
             $"{entitySetName}({recordId:D})?$select={primaryIdAttribute ?? table + "id"}", ct).ConfigureAwait(false);

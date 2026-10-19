@@ -1080,8 +1080,13 @@ public static class FieldMappingEndpoints
                     // it — its owner is re-derived before the write and the ONE step after a re-file runs after it, as on
                     // every other re-file writer. A malformed bind, an owner that cannot be decided, or a host that cannot
                     // re-own refuses THIS child only (per-row, like every other failure here).
+                    // #2110 (ontology K3): with the lineage lookups the push sets that are no ownership parent (a message's
+                    // thread), so the reparent can tell whether it moved one (ParentsUnchanged).
                     var parentChanges = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(targetEntity)
-                        ? Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesWithClearsIn(targetEntity, updatePayload)
+                        ? Sprk.Bff.Api.Services.Dataverse.RecordReparent.WithLineageLookupsIn(
+                            targetEntity,
+                            Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesWithClearsIn(targetEntity, updatePayload),
+                            updatePayload)
                         : new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>();
                     var mayRefile = Sprk.Bff.Api.Services.Dataverse.RecordReparent.MayRefile(targetEntity, parentChanges);
                     using var refileScope = mayRefile ? scopes?.CreateScope() : null;

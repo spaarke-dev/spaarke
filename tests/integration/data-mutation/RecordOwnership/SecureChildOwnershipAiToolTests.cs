@@ -709,6 +709,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["team"] = "teams", ["businessunit"] = "businessunits",
             // #2084 round 2: a Signal and the rule it cites.
             ["sprk_signal"] = "sprk_signals", ["sprk_policy"] = "sprk_policies",
+            // #2110: a communication's thread.
+            ["sprk_communicationthread"] = "sprk_communicationthreads",
         };
 
         /// <summary>
@@ -786,6 +788,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
                 // #2091 (b): a communication's project filing (SecureChildLineage: sprk_communication.sprk_regardingproject).
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                // #2110: a communication's thread — a lineage parent, not an ownership parent (SecureChildLineage).
+                ("sprk_communicationthread", "sprk_communicationthread", "sprk_CommunicationThread"),
             },
             ["sprk_document"] = new[]
             {

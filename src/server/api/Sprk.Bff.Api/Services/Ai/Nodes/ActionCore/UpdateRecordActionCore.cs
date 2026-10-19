@@ -342,7 +342,9 @@ internal sealed class UpdateRecordActionCore
             changes.TryAdd(column, parent);
         }
 
-        return changes;
+        // #2110 (ontology K3): with the lineage lookups the update sets that are no ownership parent (a message's thread) — the
+        // typed lookups are binds in the payload by now — so the reparent can tell whether it moved one (ParentsUnchanged).
+        return RecordReparent.WithLineageLookupsIn(input.EntityLogicalName, changes, payload);
     }
 
     /// <summary>
