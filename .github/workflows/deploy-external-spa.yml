@@ -79,7 +79,7 @@ jobs:
           # not constrained: the SPA accepts any https authority host (src/auth/msal-config.ts).
           authority='^https://[^/?#[:space:]]+/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?$'
           need() { if [ -z "${!1}" ]; then echo "::error::GitHub environment variable $1 is not set for the '$TARGET' environment"; fail=1; fi; }
-          match() { if [ -n "${!1}" ] && ! printf '%s' "${!1}" | grep -Eq "$2"; then echo "::error::$1 has the wrong format ($3)"; fail=1; fi; }
+          match() { if [ -n "${!1}" ] && ! [[ ${!1} =~ $2 ]]; then echo "::error::$1 has the wrong format ($3)"; fail=1; fi; }
           for k in VITE_MSAL_AUTHORITY VITE_MSAL_CLIENT_ID VITE_MSAL_TENANT_ID VITE_MSAL_BFF_SCOPE \
                    VITE_TEAMS_MSAL_CLIENT_ID VITE_TEAMS_MSAL_TENANT_ID VITE_TEAMS_MSAL_BFF_SCOPE \
                    VITE_WORKFORCE_HOME_MSAL_CLIENT_ID; do need "$k"; done
@@ -93,7 +93,7 @@ jobs:
           match VITE_TEAMS_MSAL_TENANT_ID "$guid" "GUID"
           match VITE_WORKFORCE_HOME_MSAL_CLIENT_ID "$guid" "GUID"
           # The multitenant home client (ADR-028 A9) and the single-tenant A8 client are separate applications: the SPA
-          # refuses a build where they are the same id, so refuse it here, before building.
+          # refuses the pair at run time (config.ts getWorkforceHomeClientConfig), so refuse it here, before building.
           if [ -n "$VITE_WORKFORCE_HOME_MSAL_CLIENT_ID" ] && [ "$(printf '%s' "$VITE_WORKFORCE_HOME_MSAL_CLIENT_ID" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$VITE_TEAMS_MSAL_CLIENT_ID" | tr '[:upper:]' '[:lower:]')" ]; then
             echo "::error::VITE_WORKFORCE_HOME_MSAL_CLIENT_ID must differ from VITE_TEAMS_MSAL_CLIENT_ID (separate applications, ADR-028 A8/A9)"; fail=1
           fi

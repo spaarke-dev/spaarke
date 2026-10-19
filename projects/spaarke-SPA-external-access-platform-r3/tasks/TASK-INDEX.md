@@ -60,7 +60,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 073 | Production deploy to external.spaarke.com (gated) | P7 | 🔲 [open] | 072 + T240c, T240d, DNS, owner go | S/h | STANDARD | — (blocked until gates) |
 | 074 | A9 live probes on dev | P7 | 🔲 [open] | 058, 059, 075 | S/h | STANDARD | — (live, owner-gated) |
 | 075 | SPA Teams strategy → multitenant NAA (Teams context tid), registration + link in Teams | P4b | ✅ [done] 2026-10-19 | 058 | S/h | FULL | A9 Wave 6 |
-| 076 | Teams package + registration for A9 (manifest, brk-multihub, 043 pipeline) | P4b | 🔲 [open] | 075 | S/h | STANDARD | A9 Wave 7 |
+| 076 | Teams package + registration for A9 (manifest, brk-multihub, 043 pipeline) | P4b | ✅ [done] 2026-10-19 | 075 | S/h | FULL | A9 Wave 7 |
 | 090 | Project wrap-up | Wrap-up | 🔲 [open] | all | S/h | FULL | — (serial) |
 
 ## Parallel Execution Plan

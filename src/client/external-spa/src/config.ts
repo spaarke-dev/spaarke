@@ -234,7 +234,7 @@ export function getWorkforceEnvConfig(): WorkforceEnvConfig {
 // Workforce HOME plane — the multitenant client (ADR-028 Amendment A9; task 058)
 // ---------------------------------------------------------------------------
 
-/** The multitenant workforce HOME sign-in client (A9): the browser "company account" sign-in, one client for all customers. */
+/** The multitenant workforce HOME sign-in client (A9): the Teams tab (NAA, task 075) and the browser "company account" sign-in; one client for all customers. */
 export interface WorkforceHomeClientConfig {
   clientId: string;
 }
@@ -247,8 +247,8 @@ export function isGuid(value: string | undefined | null): value is string {
 /**
  * Read + validate the multitenant HOME sign-in client id (A9, task 058): `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID`. It is
  * a DIFFERENT application from the single-tenant A8 client (`VITE_TEAMS_MSAL_CLIENT_ID`): the A8 client stays
- * tenant-pinned (the Teams tab and the guest-token link); this one signs a workforce contact in to THEIR OWN
- * directory. Read lazily (a CIAM-only build needs neither); missing, an un-substituted placeholder, not a GUID, or
+ * tenant-pinned (the guest-token link only, under A9); this one signs everyone in the Teams tab (task 075) and the
+ * browser "company account" sign-in in to THEIR OWN directory. Read lazily (a CIAM-only build needs neither); missing, an un-substituted placeholder, not a GUID, or
  * equal to the A8 client id (case-insensitive) is a fail-loud error.
  */
 export function getWorkforceHomeClientConfig(): WorkforceHomeClientConfig {
@@ -257,7 +257,7 @@ export function getWorkforceHomeClientConfig(): WorkforceHomeClientConfig {
   if (isUnsetOrPlaceholder(clientId)) {
     throw new Error(
       '[ExternalSPA] Missing or unsubstituted workforce home environment variable VITE_WORKFORCE_HOME_MSAL_CLIENT_ID. ' +
-        'Required only when running the browser workforce ("company account") sign-in — see .env.example.'
+        'Required for the Teams tab and the browser workforce ("company account") sign-in — see .env.example.'
     );
   }
 
@@ -276,12 +276,4 @@ export function getWorkforceHomeClientConfig(): WorkforceHomeClientConfig {
   }
 
   return { clientId };
-}
-
-/**
- * Back-compat alias for the Teams host adapter (task 012). Delegates to {@link getWorkforceEnvConfig}
- * — the Teams tab and the browser workforce realm read the SAME single-tenant client values.
- */
-export function getTeamsWorkforceEnvConfig(): WorkforceEnvConfig {
-  return getWorkforceEnvConfig();
 }

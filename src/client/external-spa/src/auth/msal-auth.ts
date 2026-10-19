@@ -718,7 +718,7 @@ export function accountsForActivePlane<T extends { tenantId?: string }>(accounts
  *   - Fail loud: an unauthenticated / consent-missing caller throws `TeamsWorkforceAuthError` - never silently degraded.
  */
 
-/** Config the Teams host supplies to select the workforce strategy (values from `getWorkforceEnvConfig()`). */
+/** Config the Teams host supplies to select the workforce strategy (the client id from `getWorkforceHomeClientConfig()`). */
 export interface TeamsWorkforceAuthConfig {
   /** The MULTITENANT home public client id (A9, `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID`), not the single-tenant A8 client. */
   clientId: string;

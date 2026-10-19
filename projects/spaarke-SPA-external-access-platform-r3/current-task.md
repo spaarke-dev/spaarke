@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-19 11:40Z (after the owner-approved dev BFF deploy of `44f802a1d`)
+> **Last Updated**: 2026-10-19 (task 076 done)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **075 done 2026-10-19** (Teams → multitenant NAA at the Teams context tid; per-request authority; token-`tid` check; guest link via NAA with a 10 s timeout, then the form, then the popup on click (owner-confirmed); B2B guest screen; stale-lock clear). 2 adversarial passes + fix round 1. Final: vitest 1189/1189, typecheck, lint, build, check:dist, ExternalSpa ArchTests 231/231. Next task **076** (Teams package + registration for A9) |
-| **Step** | Next: task 076 via task-execute. Watch for UAC #2102/#2104 merges (next dev BFF deploy) |
+| **Task** | **076 done 2026-10-19** (Teams package for A9: the deploy-teams-app.yml preflight fails closed before the build (home client required, a GUID, ≠ A8; prod TEAMS_APP_ID); `match()` is now a whole-string `[[ =~ ]]` in BOTH SPA workflows (grep matched line by line); CI checks the SPA host is in validDomains and the tabs are https; env files and comments say A9; manifest unchanged (no client in a manifest without webApplicationInfo). Stale 075 text fixed (config.ts error message, docs, design §8.2/§12). 059 POML gained `/auth-callback.html` and step 7b `VITE_BACKENDS` with `homeTenantIds` + `ciamBffAppId`. 2 adversarial passes + fix round 1. Provisioning sent the items 5/7 confirmation (+ `/auth-callback.html` addition)). 075 done earlier the same day |
+| **Step** | Next: task 059 (live, owner-gated, prescriptive): write the plan with masked reads, commands and rollbacks into `notes/task-059-dev-setup-record.md` and show it to the owner BEFORE any live call. Watch for UAC #2102/#2104 merges (next dev BFF deploy) |
 | **Status** | **Dev BFF = `44f802a1d`** (= candidate `f111de2b7` + a state-file commit: live `ad0e9e1a7` + master `d7eabba3b` UAC 186 #2061 + 099b #2063). Deployed with the owner's direct approval 2026-10-19 11:35:09–11:37:07Z. Verified: ProductVersion `1.0.0+44f802a1d…`; 4 critical files SHA-256 match; `/healthz` 200; 2 CORS origins; MIs `mi-bff-api-dev` + `mi-ontology-writer-dev`. Session OKs: UAC, ontology, ebilling (no `sprk_invoicestatus` delete yet), word-add-in, provisioning; field-mapping unreachable. After-notices sent. **Rollback: redeploy `ad0e9e1a7`.** Dev external SPA = `ebc74b331`, not redeployed (058's SPA waits for 059) |
-| **Next Action** | Start task 075 via task-execute. 058's SPA is not deployed: it waits for 059 (multitenant client redirect URIs; GitHub env `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID` and `VITE_BACKENDS` with `homeTenantIds`; the workflow fails closed without them) |
+| **Next Action** | Start task 059 via task-execute (step 1 = the plan for the owner; nothing live without approval). Its steps 7/7b set external-spa-dev `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID` and `VITE_BACKENDS` (`homeTenantIds`, `ciamBffAppId`); then the SPA deploy (058 + 075 SPA code; dev SPA is still `ebc74b331`), then 074 |
 
 ### Uncommitted files
 - `.claude/agent-memory/researcher/MEMORY.md` (modified) and `.claude/agent-memory/researcher/dataverse-duplicate-detection-api-default-2026-10-15.md` (untracked) belong to the OWNER. Never commit or discard them. The 2026-10-18 master merge re-applied the owner's index line next to master's new line. Backups are in the session scratchpad (`owner-researcher-memory.patch`, `owner-researcher-MEMORY.md.bak`).
@@ -27,7 +27,7 @@
 ## Next actions (in order)
 1. Read UAC's backfill + 186/099b live-gate results for `44f802a1d`; on a failure, decide on rollback (`ad0e9e1a7`) with the owner.
 2. Partner UAT passed (2026-10-18). UI changes are a new round (not R3 scope unless the owner says otherwise).
-4. 076 → 074 (074 needs 059's live setup) (074 and 059 are live and owner-gated); 070/071/072; the final R3 PR.
+4. 059 (live, owner-gated) → SPA deploy → 074 (live probes) → 070/071/072 (Teams package, live check, catalog); the final R3 PR. Teams package publishing waits for the SPA deploy (task-076 notes K2).
 5. Close DEF-004 (#1829) as superseded when ebilling 051 merges (successor answers posted on the issue).
 
 ## Open owner questions
