@@ -64,6 +64,15 @@ public static class SubmissionReasonCodes
     /// <see cref="CodingNoCodeSetHold"/>.</summary>
     public const string NoCodeSet = LineCodingException.NoCodeSet;
 
+    /// <summary>Part E: the submission's document row is gone or has no SharePoint Embedded file pointer. Permanent.</summary>
+    public const string DocumentUnavailable = "ebilling.submission.document_unavailable";
+
+    /// <summary>Part E: the document pointer's container could not be verified (<c>RecordContainerResolver</c>'s check, fail closed). Permanent.</summary>
+    public const string DocumentStorageUnverified = "ebilling.submission.document_storage_unverified";
+
+    /// <summary>Part E: a transient fault outlived the job's last delivery and no invoice was committed.</summary>
+    public const string ProcessingFailed = "ebilling.submission.processing_failed";
+
     // ── Rejected, not read: no invoice (FR-21, D-101) ──
 
     /// <summary>043: the document could not be opened.</summary>

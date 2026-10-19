@@ -149,6 +149,21 @@ public static class FinanceModule
         // Callers: 049, 100, 103, 104, 105.
         services.AddSingleton<BillingDecisionRecorder>();
 
+        // Invoice submission processing (ebilling-r1 task 049 parts B-E, FR-20 / FR-21, D-101; Processing Pipeline steps 1-9). The pipeline is
+        // three scoped components behind the seams the handler tests fake, plus the ADR-004 job handler that composes them:
+        //   * IInvoiceSubmissionProcessor  - read (043), resolve (046), code (047), evaluate (072), decide (073); writes nothing.
+        //   * IInvoiceSubmissionPersister  - the one all-or-nothing transaction (invoice, lines, approval, document link, submission link).
+        //   * IInvoiceSubmissionAfterSteps - Signals, the automatic rejection's Decision Record, indexing, notification, terminal status last.
+        //   * InvoiceSubmissionProcessingJobHandler - payload, the eBilling flag (read by the handler itself), the per-submission lock, the
+        //     step-0 re-read, the document download, and the mapping of every result to a JobOutcome.
+        // Scoped like their scoped dependencies (IGenericEntityService, IInvoiceAi, the evaluator, the lifecycle and totals services). Every
+        // dependency is registered unconditionally (the flag rule above; IInvoiceAi has its Null peer, so AI-off is a Failed submission with
+        // ai.invoice.disabled, not a missing registration). The queue consumer is the handler's job type, InvoiceSubmissionService.JobType.
+        services.AddScoped<IInvoiceSubmissionProcessor, InvoiceSubmissionProcessor>();
+        services.AddScoped<IInvoiceSubmissionPersister, InvoiceSubmissionPersister>();
+        services.AddScoped<IInvoiceSubmissionAfterSteps, InvoiceSubmissionAfterSteps>();
+        services.AddScoped<IJobHandler, InvoiceSubmissionProcessingJobHandler>();
+
         // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)
         // ============================================================================
