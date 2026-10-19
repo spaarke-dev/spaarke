@@ -544,3 +544,111 @@ full adversarial pass over `d249e9a50..HEAD` is recorded here.
 
 **Left for ontology-r1 (unchanged by brief):** `DecisionRecordContextImmutabilityTests.CreateEntryPoints` and the five stale ontology
 writer comments. The POML stays `in-progress` for ontology-r1's re-check.
+
+### 8.8 Follow-up round (2026-10-18)
+
+Base `bf5ca1305` (branch work/ebilling-r1, after the 8.7 round and the master merge). Six items from the main session's review of 8.7. No
+live Dataverse write, no schema or package change, and `DecisionRecordContextImmutabilityTests` is untouched. In `DecisionRecordWriter.cs`
+only 074's billing entry and its helpers changed (the Ontology paths and the shared `Content` are untouched).
+
+| # | Item | Commit |
+|---|---|---|
+| 1 | A resolved Signal that carries a core but no pair id is refused `OwnerRefused` / `ParentUndetermined` | `a4755c45c` |
+| 2 | The content hash is canonical: decimal scale and nested-map key order no longer change it | `fcb8e642e` |
+| 3 | The already-recorded lookup answers with the row that matches both the code and the hash | `ca6c7b0ab` |
+| 4 | A true retry is answered before the deciding contact is read; a new decision with an identity fault is still refused before any write | `93025a8fb` |
+| 5 | Nit: `BillingLookupCodes` no longer sits between `BillingSubjectEntityOf` and its doc comment | `1003b2a5f` |
+| 6 | These notes | the commit that adds this section |
+
+**Item 1.** The commit route first requires every resolved Signal to be on the request's own core (R-7 and the core checks in
+`DecisionCommitService.PrepareAsync`), so a Signal's core is always one of the record's parents. The billing request's core is derived from
+its subject, so the F4-1 code copied the "a Signal with no pair id adds no parent" skip without that precondition: a Signal on some other
+core, with no pair id, added nothing and its core was never asked. The Signal read now returns `sprk_corerecordtype` and
+`sprk_corerecordid`, and `BillingSignalSubjectsAsync` refuses a Signal that has a core (`SignalRow.HasCore`) and no pair id. A core that
+cannot be read as a pair (`CoreMalformed`: one half set, or text that is not a Guid) is treated the same way when there is no pair id,
+because that Signal also carries a core the question cannot name. A Signal with a pair id, and a Signal with neither a core nor a pair id,
+are unchanged.
+- Tests (`DecisionRecordWriterTests.Billing.cs`): `Billing_F41_ASignalThatCarriesACoreButNoPairId_IsRefused_BeforeAnyCreate` (must-fire);
+  `..._ASignalThatCarriesACoreAndAPairId_IsNotRefused_AndAsksTheOwnerAboutItsSubject` and
+  `..._ASignalWithNeitherACoreNorAPairId_AddsNoParent_AndIsNotRefused` (must-not-fire); `..._TheSignalRead_AsksForTheCorePairColumns` (the
+  harness returns every column it holds whatever the query asks for, so the column list is pinned separately).
+- Fail-before: against `bf5ca1305`'s writer, 2 of the 4 new tests fail (the must-fire and the column list); the two must-not-fire tests pass.
+
+**Item 2.** `BillingDecisionHash` passes each value through `CanonicalHashValue`: a decimal, and a `JsonElement` / `JsonNode` number that
+fits one, has its trailing zeros removed (`800.00` is `800`, `0.00` is `0`; the serializer writes numbers with the invariant culture, so
+culture never reaches the hash); every map (a dictionary or a JSON object) is written in ordinal key order, recursively; a list keeps its
+order, because order is content. The envelope is unchanged.
+- Tests: `Billing_Item2_ARepeatOf800AgainstAStored800Point00_IsAlreadyRecorded`;
+  `..._ARepeatOf800AgainstAStored700Point00_IsStillReviewInvalid`;
+  `..._TheHash_IgnoresTrailingZerosOnDecimals_AtTheTopAndNested_AndOnJsonNumbers`; `..._TheHash_NormalisesDecimalsAtTheExtremes` (decimal max
+  and min, 7 decimal places, negative); `..._TheHash_IgnoresTheKeyOrderOfNestedMaps_ButNotTheirContent`; and
+  `..._ASimpleRequest_KeepsTheHashItHadBeforeTheCanonicalForm` (golden `13A35E02...F88347` for `Reduce(800m)`, captured from the pre-change
+  code).
+- Fail-before: against `bf5ca1305`'s writer, 4 of the 5 first-written tests fail (the 800 / 800.00 repeat, the trailing-zero hash, the
+  nested-key hash, and the golden placeholder, which printed the golden value); the 800-against-700 test passes before and after (a
+  must-not-fire).
+- **Hashes stored before this change.** The hash is stored only as `reviewHash` in `sprk_steps` (`Content`, the review path's slot), and
+  only by `WriteBillingDecisionAsync`. 074 has not shipped and made no live write (the seam test was never run, 8.4), so no billing record
+  with a hash exists in any environment. The format is also unchanged for a request without a trailing-zero decimal or a nested map: its
+  hash is byte-identical to the old one (the golden test). A stored hash from a request WITH one (800.00m, or a nested map in unsorted
+  order) would no longer match a repeat and would be refused `ReviewInvalid`; there are no such rows.
+- K-5 of the caller constraints ("build Values the same way on every attempt") is now met by the writer for decimal scale and map order;
+  callers still must not vary the values themselves.
+
+**Item 3.** `WriteBillingDecisionAsync` took `FirstOrDefault` on the code alone. After a concurrent pair (the known limit, 8.6 K1) two rows
+can sit under one key with different content, and a true repeat of the second was refused `ReviewInvalid`. It now takes, of the rows with
+the code, the one whose hash equals this decision's; when rows carry the code and none carries the hash, the refusal is today's
+`ReviewInvalid`.
+- Tests: `Billing_Item3_TwoStoredRowsOfOneCodeWithDifferentHashes_AnswerWithTheRowThatMatchesTheHash` (both row orders);
+  `..._TwoStoredRowsOfOneCode_NeitherMatchingTheHash_IsStillReviewInvalid`.
+- Fail-before: 1 fails (the matching row second); the other order and the none-matching case pass before and after.
+
+**Item 4.** `BillingDecisionRecorder.RecordAsync` read the contact before the writer's already-recorded check. The writer gains an
+`internal` overload, `WriteBillingDecisionAsync(request, Func<CancellationToken, Task<Guid?>>? deciderContact, ct)`; the public
+two-argument entry delegates to it with no supplier, so its signature and behaviour are unchanged. The recorder supplies
+`DeciderContactAsync` lazily, and the writer calls it only for a confirmed decision that has no contact yet, after the already-recorded
+check and before the policy-version read, the Signal read, the core derivation and the create. So:
+- a true repeat gets `AlreadyRecorded` while the identity read faults, and the identity service is not called at all;
+- a changed decision under a recorded id is still refused `ReviewInvalid`, not answered;
+- a NEW decision with an identity fault is refused `BillingRecordLookupFailed` with nothing created and no owner question asked.
+
+One behavioural difference: the recorder's contact refusal is now thrown inside the writer's try, so it is logged and counted with the
+writer's other refusals (`LogRefusal`, `ontology.writer.failures`); before, it was thrown outside.
+- Tests (`BillingDecisionRecorderTests`): `ATrueRepeat_IsAlreadyRecorded_EvenWhenTheIdentityLookupWouldNowFault` (the service throws; the
+  service reports `ContactUnreadable`); `ADifferentDecisionUnderTheSameId_DuringAnIdentityFault_IsRefusedForItsContent_NotAnswered`; and the
+  existing `ADecidersContactThatCannotBeRead_IsRefused_AndNothingIsWritten`, whose assertion "the writer made no read at all" is replaced by
+  "nothing created, no owner question" (the writer now reads first, by design). Writer level:
+  `Billing_Item4_TheLazyDeciderContact_IsReadOnceForANewDecision_AndNeverForARepeatOrAnInvalidOrASystemDecision` and
+  `..._AFaultFromTheLazyDeciderContact_WritesNothing_AndIsLoggedAsARefusal`.
+- Fail-before: 3 of the recorder tests fail against `bf5ca1305` (both repeat cases, and the changed-decision case, which got
+  `BillingRecordLookupFailed`). The writer-level tests cannot compile against it (the overload does not exist).
+
+**Item 5.** Moved the field above the doc comment; no code change.
+
+**Decisions and standing facts recorded here.**
+- **ADR-013, path C (comply).** `BillingDecisionRecorder` injects `Services.Ai.Membership.IIdentityNormalizationService`. ontology-r1 agreed
+  on 2026-10-18: it is an identity utility, not an AI capability; about 29 non-AI files consume it; and the FR-C6 boundary test covers
+  Finance. This closes the "ontology-r1 / the reviewer should confirm this reading" request in 8.7 (K3).
+- **Caller constraints.** The review's known limits K-2 to K-5 (derive Signal and policy-version ids server-side; record before mutating,
+  or run the reads first; serialise per invoice; build Values the same way on every attempt) are now caller constraints on tasks 049, 100,
+  103, 104 and 105 (commit `194ad556f`). This round narrows two of them: K-5 for decimal scale and map order (item 2), and K-3 is slightly
+  changed, because the contact read now happens after the already-recorded check (item 4); a caller that changes the invoice first can
+  still be left with a changed status and no record when a new decision's contact read faults.
+- **Live seam test.** `DecisionRecordWriterBillingSeamTests` (one live billing case) still compiles and has NOT been run: live writes wait
+  for the owner's approval. Until it runs, the writer's lookup (`createdby`, `sprk_actioncode In`, the `sprk_steps` LIKE) is proven
+  against the unit harness only.
+
+**Verification (final code).**
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 warnings, 0 errors |
+| Unit filter DecisionRecord, BillingDecisionRecorder, DecisionCommitService, DecisionActionCatalog | 681 / 681 |
+| `tests/Spaarke.ArchTests` (full) | 1,190 / 1,190 |
+
+**Known limits and things noticed, not changed.**
+- K4: the item 1 check does not look at a Signal's core when the Signal also has a pair id (the pair id's subject is the parent). Whether
+  that Signal's core should also be a parent is the commit route's rule (R-7: also-resolve is same-core only) and is not restated on the
+  billing path.
+- K4: `BillingDecisionHash` does not canonicalise `double` / `float` (the serializer already writes `800.0` as `800`), nor the property
+  order of an object that is not a map (a record or anonymous type). Internal callers pass decimals and strings.
