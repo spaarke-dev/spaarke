@@ -40,7 +40,7 @@
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
 - **First nightly sweep on 102b BFF (2026-10-19 02:30Z) OK:** `[SIGNAL-EVALUATOR] heartbeat outcome=succeeded policies=6 hits=142 written=0 unchanged=142 closed=0 policyRetiredClosed=0 policyFailures=0` (36.7 s). 0 PolicyRetired is expected: the 102b live-check rows (S2) were deleted at cleanup. Rows are not re-stamped when unchanged (D-61). App Insights app `6a76b012-…` (spe-insights-dev-67e2xz), query via `az rest` to api.applicationinsights.io.
-- BFF `1.0.0+ad0e9e1a7…` (R3, 2026-10-18 22:31Z; owner-approved directly to R3) = master 20fb86dc4 (#2088, 102b) + UAC #2094 + R3. Rollback `ebc74b331`. Does NOT contain ebilling 015 (`e0df77339`) nor 042b.
+- BFF `1.0.0+44f802a1d…` (R3, 2026-10-19 11:37Z) = `ad0e9e1a7` + master `d7eabba3b` (UAC 186 #2061, 099b #2063; no ontology code) + R3 state. Rollback `ad0e9e1a7`. Does NOT contain ebilling 015 (`e0df77339`), 042b, or #2102 (`947d98e31`, next R3 deploy). Console auto-deploying #2102's RuleWizard ahead of the BFF is safe: it only maps two codes the old BFF never returns.
 - Console from master `20fb86dc4` (04:36Z). Console and BFF aligned for 102b. **Landing tab = Worklist** (D-164; revert `Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing'`).
 - **`sprk_policy_matter` CascadeDelete = Cascade** since 2026-10-18 ~03:35Z (D-167; Archive RemoveLink). Live facts: an admin delete removes only the rule; a Core User's matter delete also deletes the matter's rules (no privilege check on the child; audited). See notes/102b "Live on spaarkedev1".
 - Policies: six on, including POL-MATTER-NOBUDGET (D-163); none has a matter.
