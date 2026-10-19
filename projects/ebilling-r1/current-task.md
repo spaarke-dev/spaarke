@@ -11,13 +11,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. 48/79 complete. 071/072: ontology-r1 re-checked the W fixes, raising F4 (EventId) and F2 (Flag-tie primary); both are fixed in 3ce07e0e3 and that commit is out for re-check, after which 071/072 should PASS. 049: the pipeline agent stopped after writing the step-to-component map (notes/049-submission-processing-job.md, plan parts A to E). The owner answered D-121 to D-124. The spend part has landed (be84b2a8f..bafa0cb9e). Running now: impl049a (sonnet xhigh: ExecuteTransactionAsync, the 014 create-in-status, the notification sink, the D-121 amount script, the D-124 sprk_trackingnumber column) and impl049b (opus: SubmissionReasonCodes, the FinanceBaseValues TODO swap, processor steps 1-5 and the outcome type), both from base bafa0cb9e |
-| **Step** | HEAD bafa0cb9e (local; origin is 33723dbdc; ask the owner before any push). Verified: build 0/0; broad filter incl. Spend and Rollup 6196/0; ArchTests 1209/0 |
+| **Task** | Parallel mode. 50/79 complete (071 and 072 ✅). 049 in progress. On the branch: the map, part A (foundation), part B (processor steps 1-5), spend D-102/D-104 (ontology PASS at 295aa332a), and the D-125 system policy (ontology PASS with 183c2cf47). Running: impl049c (opus; part C persistence: one ExecuteTransactionAsync, BuildCreateRequest made a list, D-126 held invoice, core-record re-check, OutcomeUnknown re-read) and impl016t (sonnet; D-127 negative totals script plus removing total-below-storable-minimum; D-128 a disallowed credit sums signed), both from base 76c1386e5 |
+| **Step** | HEAD b29f85bb1 (local; origin is 33723dbdc; ask the owner before any push). Last full verify at 13094bb8c: build 0/0; broad filter 7653/0; ArchTests 1209/0 |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | (1) On ontology-r1 PASS: mark 071/072 ✅ (POML + TASK-INDEX; run check-task-status-drift.ps1). (2) On parts A and B: cherry-pick, run the broad filter, then brief part C (persistence: row builders, ownership and core fields, the transaction, 016 totals, re-evaluate on a CoreRecord change, fault injection) from B's outcome type. Then part D (after commit: Signal supersede, deciding primary, held presentation, the D-122 rejection DR resolving every open Signal under the IIdempotencyService lock with a concurrent test, D-123 system-policy Signals once ontology-r1 agrees the shape, terminal status, indexing, notify, resume). Then part E (handler, DI, ArchTests, publish delta vs fresh master, CVE check, one Opus adversarial review). (3) ontology-r1 is also reviewing the D-104 range and the D-123 system-policy design (asked). (4) Queued 077 follow-up: show the F1-b "lowered to Flag" note in Rule Review |
+| **Next Action** | (1) When C and the totals agent report: cherry-pick, run the BROAD filter (add Lifecycle, Totals, Dataverse, RuleReview, Submission), rewrite hashes in the notes. (2) Brief part D from C's result shape: Signals via the mapper (supersede on a fingerprint change, episode n+1); a Rejected submission's primary comes from 073's deciding findings; held presentation; the D-122 rejection DR resolving EVERY open Signal on the invoice under the IIdempotencyService lock, with a concurrent test; system-policy Signals read by sprk_policycode (enabled + Active, else none); terminal status, indexing, notify, resume. ALSO in part D, from ontology-r1's D-125 review: (a) BillingFindingSignalMapper gives InvoiceNumberMismatch precedence among flag-only reasons, plus a MapAll test with code_set_needs_review; (b) BillingSystemFindings.CodeRefused / FirmCodeMismatch cite an AI code only if it matches `^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$`, otherwise no value, and NotApplicableToLineType gets its own template. (3) Part E: handler (download with the container check, copied from InvoiceExtractionJobHandler), DI, ArchTests (ADR-010 ceiling is 167 after A), publish delta vs fresh master, CVE check, one Opus adversarial review. (4) Queued: the 077 F1-b note in Rule Review |
 
 ### Ranges out for review
-- ontology-r1: 3ce07e0e3 (072 F4/F2); be84b2a8f..bafa0cb9e (049 D-104, their hot path); D-123 system-policy design ask.
+- None open. ontology-r1 PASS: 072 (3ce07e0e3), 049 D-104 (295aa332a), D-125 (183c2cf47). Send them part D with D-125 (a)/(b).
 
 ### Owner decisions this session
 D-111 to D-120 are in the decisions log.
@@ -25,13 +25,14 @@ D-111 to D-120 are in the decisions log.
 - D-118: client workforce users may use the partner portal.
 - D-119: a bare "$" is USD.
 - D-121: credit amounts may be negative (lower sprk_amount min). D-122: an automatic rejection resolves every open Signal on the invoice. D-123: D-91 / coding findings become Signals under a system billing policy (needs ontology-r1). D-124: new sprk_invoice tracking-number column.
+- D-125: SubmissionIntegrity rule type for the system policy; an admin may disable it. D-126: a read but uncoded submission still creates its invoice, held. D-127: negative invoice totals (credit memos). D-128: a reviewer may disallow a credit line.
 - D-120: core-record delete. Finance history blocks the delete. A rate card scoped 1:1 to the record is deleted with it; a shared card is kept. Budgets are kept, unlinked, and never block. uac-r2 adopted it.
 
 ### Queued owner actions (live writes need the owner's OK)
 - Re-sync the drafting Action row (scripts/ebilling/Ensure-ActionRow.ps1; 073 prompt change).
 - The 074 live seam test.
 - The IfRowVersionMatches probe (076).
-- Run the schema scripts on dev before a BFF that reads them: rejection reason; D-104 sprk_pendingspend (Deploy-EbillingPendingSpendSchema.ps1; rollups 400 without it); D-121 amount min; D-124 tracking column. Then a read-only live check of the pending-spend FetchXML shape.
+- Run the schema scripts on dev, with the owner's OK and notices before and after to ontology-r1 and uac-r2, BEFORE a BFF that reads them: rejection reason; D-104 sprk_pendingspend; D-121 Deploy-EbillingBillingEventAmountRange.ps1; D-124 Deploy-EbillingInvoiceTrackingNumberSchema.ps1; D-125 rule-type option and Seed-BillingSystemPolicy.ps1 (fix #2107, the owning team, first); D-127 invoice totals range. The pending-spend query shapes are already verified read-only on dev.
 - Add the 7 new tables to the apps.
 - Grant Write on sprk_ruleset before 079.
 
@@ -61,7 +62,7 @@ D-111 to D-120 are in the decisions log.
   - no line upload route before #2047;
   - the dev BFF and SPA deploy only through SPA-r3;
   - never use bare git stash or --no-verify.
-- **Open:** G-18 (lint-staged shared stash, not filed); DEF-015; ISS-009; #2010, #2011, #2045, #2077, #2087, #2090, #2100.
+- **Open:** G-18 (lint-staged shared stash, not filed); DEF-015; ISS-009; #2010, #2011, #2045, #2077, #2087, #2090, #2100, #2106, #2107, #2108.
 
 ---
 
