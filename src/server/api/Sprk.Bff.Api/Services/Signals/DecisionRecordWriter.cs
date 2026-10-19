@@ -1344,7 +1344,7 @@ public sealed class DecisionRecordWriter
             }
 
             await RequireBillingPolicyVersionAsync(request.PolicyVersionId, ct).ConfigureAwait(false);
-            var signalSubjects =await BillingSignalSubjectsAsync(request.ResolvedSignalIds, ct).ConfigureAwait(false);
+            var signalSubjects = await BillingSignalSubjectsAsync(request.ResolvedSignalIds, ct).ConfigureAwait(false);
             var (core, derived) = await ResolveBillingCoreAsync(request.Subject, ct).ConfigureAwait(false);
             var written = await CreateAsync(
                     BillingReview(request, plan, key, core) with { SignalSubjects = signalSubjects, ReviewHash = hash },
@@ -1429,7 +1429,7 @@ public sealed class DecisionRecordWriter
                 {
                     JsonValueKind.Object => SortedMap(element.EnumerateObject().Select(p => KeyValuePair.Create<string, object?>(p.Name, p.Value))),
                     JsonValueKind.Array => element.EnumerateArray().Select(e => CanonicalHashValue(e)).ToList(),
-                    JsonValueKind.Number => element.TryGetDecimal(out var number) ? NormalizedDecimal(number) : element.GetDouble(),
+                    JsonValueKind.Number => CanonicalJsonNumber(element),
                     JsonValueKind.String => element.GetString(),
                     JsonValueKind.True => true,
                     JsonValueKind.False => false,
@@ -1460,6 +1460,30 @@ public sealed class DecisionRecordWriter
 
     /// <summary>The same number with its trailing zeros removed (<c>800.00</c> is <c>800</c>, <c>0.50</c> is <c>0.5</c>, <c>0.00</c> is <c>0</c>).</summary>
     private static decimal NormalizedDecimal(decimal value) => value / 1.0000000000000000000000000000m;
+
+    /// <summary>
+    /// A JSON number as a hash value: the normalised decimal when it fits one without losing its non-zero value, otherwise its raw text under a
+    /// marker (so a value outside the decimal range neither throws, as <c>1e400</c> did through <c>GetDouble</c>, nor collapses to zero, as
+    /// <c>1e-30</c> did). Residual: a number with more than 28 significant digits is rounded by the decimal and can still equal its rounded
+    /// neighbour; callers pass decimals, so no such value reaches the hash today (ontology-r1 re-check of the 074 follow-up).
+    /// </summary>
+    private static object CanonicalJsonNumber(JsonElement element)
+    {
+        var raw = element.GetRawText();
+        if (element.TryGetDecimal(out var number) && (number != 0m || !MantissaHasNonZeroDigit(raw)))
+        {
+            return NormalizedDecimal(number);
+        }
+
+        return "json-number:" + raw;
+    }
+
+    private static bool MantissaHasNonZeroDigit(string raw)
+    {
+        var exponent = raw.IndexOfAny(['e', 'E']);
+        var mantissa = exponent >= 0 ? raw[..exponent] : raw;
+        return mantissa.Any(c => c is >= '1' and <= '9');
+    }
 
     /// <summary>The review shape the shared builders read (<see cref="Content"/>, <see cref="FiledAndOwnedAsync"/>): <see cref="Guid.Empty"/>
     /// means "none" for the policy version and the confirmer, as on the gate and closure paths.</summary>

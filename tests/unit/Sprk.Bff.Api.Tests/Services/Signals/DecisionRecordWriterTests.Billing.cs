@@ -428,6 +428,20 @@ public sealed partial class DecisionRecordWriterTests
     }
 
     [Fact]
+    public void Billing_Item2_TheHash_KeepsAJsonNumberOutsideTheDecimalRange_AsItsText_NeitherThrowingNorCollapsingToZero()
+    {
+        // ontology-r1 re-check of the 074 follow-up: GetDouble threw on 1e400 and 1e-30 hashed as 0.
+        string HashOf(string json) => DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?> { ["approvedAmount"] = Json(json) }));
+
+        var huge = new Func<string>(() => HashOf("1e400"));
+        huge.Should().NotThrow();
+        HashOf("1e-30").Should().NotBe(HashOf("0"), "a tiny non-zero number is not zero");
+        HashOf("1e400").Should().NotBe(HashOf("1e401"));
+        HashOf("0e5").Should().Be(HashOf("0"), "a zero in any spelling is still zero");
+        HashOf("8.00e2").Should().Be(HashOf("800"), "a number that fits a decimal keeps the decimal form");
+    }
+
+    [Fact]
     public void Billing_Item2_TheHash_IgnoresTheKeyOrderOfNestedMaps_ButNotTheirContent()
     {
         static IReadOnlyDictionary<string, object?> Values(IDictionary<string, object?> inner) =>
