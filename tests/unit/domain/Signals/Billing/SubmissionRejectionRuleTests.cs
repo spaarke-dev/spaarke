@@ -1001,6 +1001,44 @@ public class SubmissionRejectionRuleTests
         decision.Outcome.Should().Be(SubmissionOutcome.Rejected);
     }
 
+    [Fact]
+    public async Task AnApprovedRateFinding_OnAFeeLineWithHoursButNoAmount_IsHeld_NotRejected_A7Extension()
+    {
+        // 072 W review, A7 extension: "2.5 @ 650 = (1,625.00)" - the hours parsed and are positive, the bracketed amount did not. The
+        // credit test (hours < 0 or amount < 0) has nothing to say about the amount, and the amount may be the negative one.
+        var rule = Version("BILL-RATE", RuleType.ApprovedRate) with { Consequence = Reject };
+        var request = Request(Fee(0) with { BilledRate = 650m, Hours = 2.5m, Amount = null });
+        var result = Evaluator().Evaluate(request, Loaded(rule));
+        var finding = result.Findings.Should().ContainSingle().Subject;
+        finding.ReasonCode.Should().Be(BillingReasonCodes.RateAboveApproved);
+        var amount = finding.ValuesRead.Where(v => v.ExtractedField == new FieldRef(0, BillingFieldNames.Amount)).Should().ContainSingle(
+            "the credit test's Amount is listed although the line has none").Subject;
+        amount.Value.Should().BeNull();
+        amount.Confidence.Should().BeNull();
+        amount.BelowReliabilityThreshold.Should().BeTrue();
+        finding.ValuesRead.Where(v => v.ExtractedField == new FieldRef(0, BillingFieldNames.Hours)).Should().ContainSingle()
+            .Which.BelowReliabilityThreshold.Should().BeFalse("the hours were read reliably and stay a normal read");
+
+        var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
+
+        decision.Outcome.Should().NotBe(SubmissionOutcome.Rejected);
+        ShouldHold(decision, SubmissionHoldReasons.ReadFieldConfidenceUnknown);
+        decision.Findings.Single().UnreliableFields.Should().BeEquivalentTo([new FieldRef(0, BillingFieldNames.Amount)]);
+    }
+
+    [Fact]
+    public async Task AnApprovedRateFinding_OnAFeeLineWithHoursAndAnAmount_StillRejects_A7Extension()
+    {
+        // Control: both parsed, nothing is added, the Reject stands.
+        var rule = Version("BILL-RATE", RuleType.ApprovedRate) with { Consequence = Reject };
+        var request = Request(Fee(0) with { BilledRate = 650m, Hours = 2.5m, Amount = 1625m });
+        var result = Evaluator().Evaluate(request, Loaded(rule));
+
+        var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SubmissionOutcome.Rejected);
+    }
+
     // ── 073 review F1-a: never reject on an AI-assigned input ────────────────────────────────────────────────────
 
     private static BillingRuleCandidate ExpenseRejectRule(string code) =>

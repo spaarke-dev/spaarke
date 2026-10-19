@@ -172,6 +172,10 @@ internal sealed class HandlerContext
     /// whose bracketed numbers did not parse would otherwise be judged as a charge with every read reliable, and 073 could reject a
     /// credit. Both are then listed as null-valued reads with unknown confidence (below the floor), so 073 holds the finding. One
     /// absent is normal (an expense line has no hours) and is not listed.</para>
+    /// <para><b>Hours present, Amount absent (072 W review, A7 extension).</b> A fee line whose hours parsed (not negative) but whose
+    /// amount did not is judged a charge on the hours alone, and the amount may have been the negative one. The missing Amount is
+    /// listed as an unknown read (null value, unknown confidence, below the floor) so 073 holds the finding, as in the both-absent case.
+    /// A line with an Amount and no hours (an expense line) is unchanged.</para>
     /// </summary>
     internal IReadOnlyList<BillingValueRead> WithCreditTestReads(BillingLineFacts line, IEnumerable<BillingValueRead> values)
     {
@@ -204,6 +208,12 @@ internal sealed class HandlerContext
         if (line.Amount is not null && !all.Any(v => v.ExtractedField == amount))
         {
             all.Add(LineField(line, "line.amount", BillingFieldNames.Amount, BillingText.Money(line.Amount)));
+        }
+        else if (line.Amount is null && line.Hours >= 0m && !all.Any(v => v.ExtractedField == amount && v.Confidence is null))
+        {
+            // A fee line whose hours parsed but whose amount did not (072 W review, A7 extension): nothing shows the amount is not
+            // the negative one, so it is listed as an unknown read as well. An expense line (no hours, amount present) is unchanged.
+            all.Add(Extracted("line.amount", amount, null, (decimal?)null));
         }
 
         return all;
