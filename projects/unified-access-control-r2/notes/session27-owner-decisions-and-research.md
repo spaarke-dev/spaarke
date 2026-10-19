@@ -1621,3 +1621,24 @@ The full record is in `notes/185-invite-code-design.md` §11.
 8. **ebilling:** firms may see every invoice status, including Sent to AP (matches ebilling D-107). Relayed.
 9. **External CIAM user UAT:** the owner reports it PASSED UAC's checklist. Recorded for wrap-up 090's UAT section.
 10. **#1876 follow-up (owner, via ontology-r1, 2026-10-18):** gate Decision Records are visible to INTERNAL participants only. They are never shared with `sprk_isexternal` users or B2B guests, and a principal whose flag cannot be read is skipped (fail closed). This is ontology task 042b; UAC reviews its DirectThreadAccessService diff before the PR.
+
+## Round 103 (2026-10-18): OWNER — answers to the "still waiting" list
+1. **036 ADR conflict:** the owner leans **C** but asked what the conflict is. UAC explained it in plain terms (below), and the choice C / B / A is still open. 036 stays held until the owner answers.
+   - **The conflict:** ADR-028 forbids exchanging the caller's token (OBO) on the external collaboration path. Under 036's flag, `CallerRecordAccessProbe` confirms a Spaarke-tenant user's write by OBO-exchanging their token.
+   - **Path C:** every systemuser goes through the app-only, named-principal check that decision (a) built, and OBO is dropped there.
+2. **Role changes:** "yes you make role changes". UAC applied both on **dev only**. Other environments need the same edits at provisioning.
+   - **Secure Record Owner** (`e4ebabd9…`): `prvReadsprk_ExternalRecordAccess` at Basic. The platform also added SharePointDocument/Data privileges, as on any role edit. `Set-SecureRecordOwnerRolePrivileges.ps1 -Verify` PASS, 30/30.
+   - **Workforce** (root `9deaac9c…`): sprk_servicerequest Create/Read/AppendTo/Delete and sprk_document Create, all at Basic. Read back on all 6 BU copies.
+3. **Model 1, ACME:** the owner gave the environment and org ids. The tenant was resolved from the guests' domain: `78195073-407e-4788-8198-70fad63a73f5` (acmecorpdemo.onmicrosoft.com).
+   - Dry run on spaarke-acme: 2 guests, both ACME staff. **0 to tag, 0 to review**, so `-Apply` would change nothing and was not run.
+4. **Core-record delete:** "yes you can delete". UAC reads this as approval of recommendations D1–D8 in `core-record-delete-inventory.md` as written:
+   - a BFF delete operation with a preview and a confirm message;
+   - Decision Records kept, Signals deleted;
+   - finance rows block the delete;
+   - grants and the ledger kept, and project→assignedaccess switched to RemoveLink;
+   - rows also filed elsewhere are unlinked, not deleted;
+   - a named role only, and the AI tool refuses core tables;
+   - SPE files deleted, never containers;
+   - attachments deleted with their communication.
+   This reading was stated back to the owner so they can correct it. Next: a design note, then the build. D9 (commit the `sprk_policy_matter` Cascade to the solution XML) needs no decision.
+5. **036 flag:** R3 is tasked and has acknowledged. R3 acts after three things: the 036 merge sha, a dev deploy that contains it, and the owner's direct confirmation in R3's session.

@@ -2,12 +2,12 @@
 
 > **Format:** this file holds the CURRENT state only. Rewrite it at each checkpoint, never prepend to it, and keep it at or under 10 KB.
 > - **Standing rules:** the project `CLAUDE.md`.
-> - **Decisions:** the round log `notes/session27-owner-decisions-and-research.md`, now at **round 102 (2026-10-18), items 1–10**.
+> - **Decisions:** the round log `notes/session27-owner-decisions-and-research.md`, now at **round 103 (2026-10-18)**.
 > - **Defer list:** `notes/defer-issues.md`.
 > - **Delete inventory:** `notes/core-record-delete-inventory.md`.
 > - **Narrative:** the checkpoint commit messages.
 
-> **Last Updated**: 2026-10-18 (checkpoint #47).
+> **Last Updated**: 2026-10-18 (checkpoint #48).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -15,32 +15,23 @@
 |---|---|
 | **Mode** | Final push to release. Run the fix-round loop, then merge when BOTH required checks (Router + "Client lint (type-aware ratchet)") are green, then deploy via R3. A task closes on merge + deploy + a server-side gate. |
 | **Fix bar** | Choose the most technically correct, best-practice, code-efficient fix. Never take the quick route. Add no complexity without value. Every defect found is fixed or filed. |
-| **Order** | 186 → 099b → 036 (each merges after the owner items below), then #2084 (after 099b), then the #2091 thread-join follow-up (after ontology 042b merges), then the 090 wrap-up and the UAT checklist. |
+| **Order** | ~~186~~ (merged 49279def1) → 099b → 036 (each merges after the owner items below), then #2084 (after 099b), then the #2091 thread-join follow-up (after ontology 042b merges), then the 090 wrap-up and the UAT checklist. |
 
-## OWNER items outstanding (asked 2026-10-18; do not act without an explicit answer)
-1. **036 ADR conflict (auth)**: ADR-028 says "no OBO on the collaboration path", but the external-write confirmation uses an OBO probe. Answer **C / B / A**. Recommended **C**: use the app-only named-principal confirmation for every systemuser and drop OBO there. 036 is held until the owner answers.
-2. **Role changes on dev**: the SRO role needs `prvReadsprk_ExternalRecordAccess` at Basic (script `Set-SecureRecordOwnerRolePrivileges.ps1 -Apply` then `-Verify`). The Workforce role (root `9deaac9c…`) needs sprk_servicerequest C/R/AppendTo/Delete at Basic plus sprk_document Create. The owner asked whether UAC can apply these. UAC applies them ONLY on an explicit "apply both role changes on dev".
-3. **Model 1 `Set-ExternalFlagForB2BGuests.ps1 -Apply`**: NOT a go yet. Ask for the customer tenant id(s), run a dry-run list, then get an explicit "go".
-4. **Core-record delete decisions 1–8**: see `notes/core-record-delete-inventory.md`. Recommendations:
-   - a BFF delete operation with a preview, not cascades;
-   - keep Decision Records; delete Signals;
-   - block the delete while finance rows exist;
-   - keep grants and the ledger;
-   - unlink rows that are also filed elsewhere;
-   - a named role only; the AI tool refuses;
-   - delete SPE files, never containers;
-   - delete attachments with their communication.
-   Also, without needing a decision: commit `sprk_policy_matter` Cascade to the solution XML.
-5. **036 flag**: the owner confirms the dev flip directly in R3's session after 036 deploys.
+## OWNER items outstanding (round 103, 2026-10-18)
+1. **036 ADR conflict (auth): STILL OPEN.** The owner leans C and asked what the conflict is. It was explained plainly on 2026-10-18; the C / B / A answer is pending. 036 is held until then.
+2. Role changes on dev: **DONE** (round 103 item 2). Other environments need the same edits at provisioning.
+3. Model 1, ACME: the dry run found 0 changes, so nothing was applied (round 103 item 3).
+4. Core-record delete: **APPROVED as D1–D8** (round 103 item 4). The owner may still correct UAC's reading. Next: a design note, then the build, plus D9 (the sprk_policy_matter Cascade in the solution XML).
+5. 036 flag: R3 is tasked and has acknowledged. It needs the merge sha, a deploy, and the owner's confirmation in R3's session.
 
 ## Open PRs (UAC)
 | PR | Issue | Worktree / branch | State |
 |---|---|---|---|
 | **#2078** (draft) | #1074, #1567 (036) | C:/wt036 `feat/uac-036-fr20-flag-gated-swap` @ **e7a8392bb** (pushed; master merged at 953fd6446) | Owner decisions (a) and (f) are built.<br>- **(a)**: a WorkforceHome-linked systemuser is confirmed app-only, naming the principal.<br>- **(f)**: `$orderby=modifiedon desc`, CacheVersion 2.<br>**Adversarial pass 1: 0 F.** Its K-items, to fix in the next round (batched with the owner's ADR answer):<br>- add a Verify bullet (vi) to guide §12.8 for a WorkforceHome live check;<br>- soften the guide's "exactly what the model-driven app allows" (team-inherited roles are an open question);<br>- add a 15 s linked timeout on the app-only calls;<br>- update the probe comments at :11 and :192-196.<br>The ADR edits are drafted in `notes/036-adr-edits-owner-a-f.md`. They are **NOT applied**: hold them until the owner's C/B/A answer. B1 wording note: the app-only calls DO send MSCRMCallerID, so "impersonating" is accurate. Pass 2 runs after that round. |
-| #2063 (099b) | #1010 D-11 half | C:/wt099b @ a74a7d159 | Review complete. Waiting on the SRO role change (owner item 2). Then: merge, R3 deploy, backfill -Apply, VERIFY, live gate, close #1010. |
-| #2061 (186, draft) | task 186 | C:/wt186 (master merged at 8d10c1155) | Review complete. Waiting on the Workforce role edit (owner item 2) and the owner's sign-off. Then: mark it ready and merge FIRST. |
+| #2063 (099b) | #1010 D-11 half | C:/wt099b | The SRO role change on dev is DONE. Next, in order:<br>1. An implementer agent resolves the master-merge conflict with 186 in `IDataversePrivilegeChecker` and `UserPrivilegeChecker`, by union.<br>2. Push, wait for both checks, run merge-tree, then squash-merge.<br>3. Send the sha to R3 for the next deploy.<br>4. Run the backfill with -Apply, then VERIFY, then the live gate, then close #1010. |
 
 ## Merged 2026-10-18
+- **#2061 (186) `49279def1`**: the Workforce role on dev was edited. R3 includes it in the next deploy, after their task 058 agent finishes. **Next: the 186 live gate after R3's after-notice.**
 - **#2094 `1473b34c6`** (#2091, part): the playbook update node, DataverseUpdateHandler and the field-mapping push now call `SecureChildReconciler.AfterRefileAsync`.
   - **Parent changes:** bind-string parent changes are handled in `RecordReparent.ParentChangesWithClearsIn`, with fail-closed bind validation.
   - **Predicates and reads:** the shared predicate is `RecordReparent.MayRefile`, and its map is `FilingParentOf`. `RefileIsolationRead` (one retry) is used by all 4 writers. `ParentsUnchanged` skips no-op re-files.
@@ -60,7 +51,8 @@
 - **#2087**: commented that the UAC part was already fixed by #2083.
 
 ## Peers (state)
-- **R3**: deploying the dev BFF from master (20e7b71a1; ontology 102b + #2043). UAC said OK. UAC asked R3 to include #2094 next and to send an after-notice.
+- **R3**: the 036 flag flip is tasked and acknowledged. The next deploy includes 186, plus 099b if it has merged by then.
+- **R3 (earlier)**: deploying the dev BFF from master (20e7b71a1; ontology 102b + #2043). UAC said OK. UAC asked R3 to include #2094 next and to send an after-notice.
 - **Ontology**:
   - **042b (#1876, PR #2096 → docs branch, head 0846c2b8d):** UAC-owned files were verified unchanged since the accepted round-2 diffs. It has the required GateDecisionRecordSharing dependency, the AfterRefileAsync hook for communications, and the Secure end-to-end test. Owner: DRs are internal-only (round 102 item 10). Known limits: #2092 and #2093.
   - **#2084:** the plan is agreed. UAC builds it after 099b merges, in one PR:
