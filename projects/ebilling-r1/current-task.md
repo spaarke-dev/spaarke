@@ -56,7 +56,7 @@ D-111 to D-120 are in the decisions log.
 - **ontology-r1:**
   - no seeding of dev invoices until REAL-2026-123456.01 is answered;
   - after 074 reaches master they add the immutability ArchTest entry, the 5 comments and the ExistingPolicyCodesAsync comment.
-- **uac-r2:** #2100 (K-i: any Secure-BU team, with task 178).
+- **uac-r2:** #2100 (K-i: any Secure-BU team, with task 178). Secure Record Owner role: dev holds our 4 Reads (submission, approval, external identifier, correction; 013, D-86, 35ce457f2) that master's config/secure-record-owner-role.json lacks until #1911 merges. uac-r2 will not run the §5.4 "outside master's file" strip until then; no separate PR (agreed 2026-10-19).
 - **Standing rules:**
   - agents work only in their own worktree, never in the main worktree;
   - run filtered tests; then the broad filter after multi-range picks;
