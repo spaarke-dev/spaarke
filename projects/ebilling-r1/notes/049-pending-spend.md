@@ -66,6 +66,13 @@ Limit of the evidence: there is no FetchXML or QueryExpression evaluator in the 
 - Extension: actual spend cannot be widened to include In Review (D-103 excludes it), and a computed-on-read value would not be visible on the matter form or usable as a stored column; so one additive Money column per parent, same shape as `sprk_totalspendtodate`, written by the existing rollup.
 - Cost of doing nothing: the matter and project forms cannot show Pending Spend and there is nothing stored for the Threshold follow-up; the owner approved the additive column (D-104).
 
+## Gates
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
+- Unit filter (Finance, Billing, Signal, Threshold, Ontology, Rollup, Budget): 5522 passed, 0 failed, 6 skipped (pre-existing skips).
+- `tests/Spaarke.ArchTests`: 1209 passed, 0 failed.
+- Publish size (`.claude/rules/bff-hygiene.md` item 4): baseline = `c342f4b9a` (the branch base, so only this change is measured), after = the commit before this note. Both built Release from fresh detached worktrees at `C:\wt049m` / `C:\wt049b`, zipped with `Compress-Archive` (Optimal), 192 files each. Before 39,746,211 bytes (37.905 MB), after 39,748,261 bytes (37.907 MB), delta +2,050 bytes. No package added. Worktrees removed with `Remove-WorktreeSafe.ps1`.
+
 ## Needs a decision or a sequencing step
 
 1. **Deploy order.** `BuildRollupFields` now PATCHes `sprk_pendingspend`. Until the schema script has run on an environment, every `FinanceRollupService` recalculation there fails at the write with an unknown-property 400. The script must run (053 syncs SpaarkeMaster, 079 runs it) BEFORE this code is deployed to that environment. Not guarded in code (a silent skip would hide a missing column).
