@@ -32,6 +32,10 @@ public sealed class RuleSetServiceDraftTests
     private static DraftedRule Increment(string quote = "Time must be billed in tenth-hour increments.", string? location = "Section 4.2") =>
         Drafted("TimeIncrement", """{"type":"TimeIncrement","incrementHours":0.1}""", "Flag", quote, location); // task 073: TimeIncrement may not reject (FR-26)
 
+    // 073 review F3: an eligible type with Reject, so the drafted Reject -> "billing-reject" mapping stays asserted.
+    private static DraftedRule Age(string quote = "Time older than 90 days before the invoice date will be rejected.", string? location = "Section 4.2") =>
+        Drafted("InvoiceAge", """{"type":"InvoiceAge","maxAgeDays":90}""", "Reject", quote, location);
+
     private static DraftedRule Cap(int hours, string quote) =>
         Drafted("DailyHoursCap", $$"""{"type":"DailyHoursCap","maxHoursPerDay":{{hours}}}""", "Flag", quote, "Section 5");
 
@@ -139,7 +143,7 @@ public sealed class RuleSetServiceDraftTests
     {
         var h = new Harness();
         var id = RuleSetWithSource(h);
-        var rules = new[] { Increment(), Cap(10, "Max ten hours a day.") };
+        var rules = new[] { Age(), Cap(10, "Max ten hours a day.") };
 
         var outcome = await h.Service().AddDraftsAsync(id, rules, None, CallerOid, CancellationToken.None);
 
@@ -162,12 +166,15 @@ public sealed class RuleSetServiceDraftTests
         var first = h.Rows["sprk_policyversion"].First();
         first.GetAttributeValue<int>("sprk_versionnumber").Should().Be(1);
         first.GetAttributeValue<OptionSetValue>("sprk_proposalstatus").Value.Should().Be((int)ProposalState.Proposed);
-        first.GetAttributeValue<OptionSetValue>("sprk_ruletype").Value.Should().Be((int)RuleType.TimeIncrement);
-        first.GetAttributeValue<OptionSetValue>("sprk_consequence").Value.Should().Be((int)BillingConsequence.Flag);
-        first.GetAttributeValue<string>("sprk_clausereference").Should().Be("Time must be billed in tenth-hour increments.");
+        first.GetAttributeValue<OptionSetValue>("sprk_ruletype").Value.Should().Be((int)RuleType.InvoiceAge);
+        first.GetAttributeValue<OptionSetValue>("sprk_consequence").Value.Should().Be((int)BillingConsequence.Reject);
+        first.GetAttributeValue<string>("sprk_clausereference").Should().Be("Time older than 90 days before the invoice date will be rejected.");
         first.GetAttributeValue<string>("sprk_clauselocation").Should().Be("Section 4.2");
-        first.GetAttributeValue<string>("sprk_rulebody").Should().Be("""{"type":"TimeIncrement","incrementHours":0.1}""");
-        first.GetAttributeValue<string>("sprk_proposedaction").Should().Be("billing-flag");
+        first.GetAttributeValue<string>("sprk_rulebody").Should().Be("""{"type":"InvoiceAge","maxAgeDays":90}""");
+        first.GetAttributeValue<string>("sprk_proposedaction").Should().Be("billing-reject");
+        var second = h.Rows["sprk_policyversion"].Skip(1).First();
+        second.GetAttributeValue<OptionSetValue>("sprk_consequence").Value.Should().Be((int)BillingConsequence.Flag);
+        second.GetAttributeValue<string>("sprk_proposedaction").Should().Be("billing-flag");
         first.GetAttributeValue<DateTime?>("sprk_inforcefrom").Should().NotBeNull();
         first.Contains("sprk_inforceto").Should().BeFalse();
 
