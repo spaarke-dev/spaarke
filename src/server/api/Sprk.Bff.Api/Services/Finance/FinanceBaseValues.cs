@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Globalization;
 using System.Xml.Linq;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -95,11 +96,34 @@ public static class FinanceBaseValues
         BilledWhereNoApprovedTotal,
     }
 
-    /// <summary>The parts in the order the reader runs them. The billed fallback runs FIRST so that the one race between the two
-    /// queries (an invoice's approved total going from empty to set between them) can only count that invoice twice, never in
-    /// neither: a Threshold must not read a transient shortfall as headroom. An approved total never goes back to empty.</summary>
+    /// <summary>The parts in the order the reader first runs them: billed fallback, then approved. The reader then runs the billed
+    /// part a THIRD time and compares it with the first read (see <see cref="ReadSpendPartsAsync"/>).
+    /// <para><b>Why the re-read.</b> The two parts are two queries, so a write between them can move the sum EITHER way, under every
+    /// operator. An invoice's approved total going from empty to set between the two is counted twice (once billed, once approved),
+    /// and the double count can LOWER spend when the invoice is a credit memo (negative); for a <c>le</c> / <c>lt</c> Threshold an
+    /// over-count is the harmful direction, and for <c>ge</c> / <c>gt</c> an under-count is. A status change or a new invoice can
+    /// likewise be seen by one part and missed by the other. Any of these changes the invoice's membership in the billed part, so
+    /// the third read (billed again) differs from the first, and the reader retries once and then throws rather than return a sum no
+    /// single moment of the data ever held. An approved total never goes back to empty, so a stable billed part across the approved
+    /// read means no invoice moved between the parts.</para></summary>
     internal static readonly IReadOnlyList<SpendAmountPart> SpendAmountPartsInReadOrder =
         new[] { SpendAmountPart.BilledWhereNoApprovedTotal, SpendAmountPart.ApprovedTotal };
+
+    /// <summary>The columns the derived Threshold reads, as (entity, column), stated ONCE so a guard can check them all. The
+    /// evaluator reads these org-wide with its own identity, so none may be field-secured: a secured column would read as empty for
+    /// the evaluator and silently fall back (the approved total) or read as 0 (the others). Checked live by
+    /// <c>SignalPredicateTests.AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema</c> and offline against the SpaarkeMaster
+    /// Entity.xml by <c>DerivedBaseColumnsFieldSecurityTests</c>. The submission columns are the held anti-join pending spend reads.</summary>
+    public static readonly IReadOnlyList<(string Entity, string Column)> DerivedBaseColumns = new (string, string)[]
+    {
+        (InvoiceEntity, InvoiceTotalAmount),
+        (InvoiceEntity, InvoiceApprovedTotal),
+        (InvoiceEntity, InvoiceStatusCodeColumn),
+        (BudgetEntity, BudgetTotalBudget),
+        (SubmissionEntity, SubmissionStatusColumn),
+        (SubmissionEntity, SubmissionReasonColumn),
+        (SubmissionEntity, SubmissionInvoiceLookup),
+    };
 
     /// <summary>The parent column that stores Pending Spend (matter and project; ebilling-r1 owner decision D-104). Written only by
     /// <see cref="FinanceRollupService"/>. It is NOT in <see cref="IsDerived"/> yet: a Threshold cannot name it until ontology-r1
@@ -214,13 +238,13 @@ public static class FinanceBaseValues
 
     /// <summary>
     /// The base values of <paramref name="parentIds"/> read with GROUPED aggregate queries: per chunk of
-    /// <see cref="ParentChunkSize"/> parents, two queries for the invoices (when spend is needed: the two parts of
-    /// <see cref="SpendAmount"/>, added here) and one for the budgets (when budget is needed), never one query per parent. A parent with no rows has spend/budget 0 (a sum of nothing, as the rollup
+    /// <see cref="ParentChunkSize"/> parents, three queries for the invoices (when spend is needed: the two parts of
+    /// <see cref="SpendAmount"/> plus a re-read of the billed part, which must match the first read; see <see cref="ReadSpendPartsAsync"/>) and one for the budgets (when budget is needed), never one query per parent. A parent with no rows has spend/budget 0 (a sum of nothing, as the rollup
     /// computes). A Dataverse failure propagates: the caller must treat the value as unknown.
     /// </summary>
     public static async Task<IReadOnlyDictionary<Guid, (decimal Spend, decimal Budget)>> ReadAsync(
         IGenericEntityService entities, string parentEntity, IReadOnlyCollection<Guid> parentIds,
-        bool needSpend, bool needBudget, CancellationToken ct)
+        bool needSpend, bool needBudget, CancellationToken ct, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(parentIds);
@@ -228,7 +252,7 @@ public static class FinanceBaseValues
         foreach (var chunk in parentIds.Distinct().Chunk(ParentChunkSize))
         {
             var spend = needSpend
-                ? await ReadSpendPartsAsync(entities, part => BuildGroupedSpendFetchXml(parentEntity, part, chunk), ct).ConfigureAwait(false)
+                ? await ReadSpendPartsAsync(entities, part => BuildGroupedSpendFetchXml(parentEntity, part, chunk), chunk.Length, logger, ct).ConfigureAwait(false)
                 : new Dictionary<Guid, decimal>();
             var budget = needBudget
                 ? ReadGroupedSums(await entities.RetrieveMultipleAsync(
@@ -244,8 +268,8 @@ public static class FinanceBaseValues
     }
 
     /// <summary>
-    /// The live PENDING spend (D-104) of <paramref name="parentIds"/>: per chunk of <see cref="ParentChunkSize"/> parents, two
-    /// grouped queries (the two parts of <see cref="SpendAmount"/>, D-130) over the In Review invoices that are not held. A parent with no such invoice has 0. A Dataverse failure or a
+    /// The live PENDING spend (D-104) of <paramref name="parentIds"/>: per chunk of <see cref="ParentChunkSize"/> parents, three
+    /// grouped queries (the two parts of <see cref="SpendAmount"/>, D-130, and the billed re-read) over the In Review invoices that are not held. A parent with no such invoice has 0. A Dataverse failure or a
     /// result of a shape <see cref="ReadGroupedSums"/> does not know propagates: pending spend is never read as zero by default.
     /// </summary>
     /// <remarks><b>Call it only with an application identity</b> (ontology-r1 review K2, 2026-10-19). The held exclusion is an
@@ -253,14 +277,14 @@ public static class FinanceBaseValues
     /// read the blocking submission would see a held invoice counted as pending (fail open). The ontology evaluator calls it with its
     /// own app identity; there is no user-identity caller.</remarks>
     public static async Task<IReadOnlyDictionary<Guid, decimal>> ReadPendingSpendAsync(
-        IGenericEntityService entities, string parentEntity, IReadOnlyCollection<Guid> parentIds, CancellationToken ct)
+        IGenericEntityService entities, string parentEntity, IReadOnlyCollection<Guid> parentIds, CancellationToken ct, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(parentIds);
         var result = new Dictionary<Guid, decimal>(parentIds.Count);
         foreach (var chunk in parentIds.Distinct().Chunk(ParentChunkSize))
         {
-            var pending = await ReadSpendPartsAsync(entities, part => BuildGroupedPendingSpendFetchXml(parentEntity, part, chunk), ct).ConfigureAwait(false);
+            var pending = await ReadSpendPartsAsync(entities, part => BuildGroupedPendingSpendFetchXml(parentEntity, part, chunk), chunk.Length, logger, ct).ConfigureAwait(false);
             foreach (var id in chunk)
             {
                 result[id] = pending.GetValueOrDefault(id);
@@ -273,24 +297,56 @@ public static class FinanceBaseValues
     internal const string ParentAlias = "parent";
     internal const string SumAlias = "total";
 
-    /// <summary>Runs both parts of <see cref="SpendAmount"/> (<see cref="SpendAmountPartsInReadOrder"/>) and adds them per parent.
-    /// Each result goes through <see cref="ReadGroupedSums"/>, so a row of a shape it does not know throws from either part: a
-    /// half-read spend never comes back as a smaller number.</summary>
+    /// <summary>Runs the two parts of <see cref="SpendAmount"/> (billed fallback, then approved) and RE-READS the billed part;
+    /// the parts are added per parent only when the two billed reads agree. Each result goes through <see cref="ReadGroupedSums"/>,
+    /// so a row of a shape it does not know throws from any read: a half-read spend never comes back as a smaller number.</summary>
+    /// <remarks>
+    /// The three reads are not one snapshot. A write between them can move the sum either way (see
+    /// <see cref="SpendAmountPartsInReadOrder"/>). A mismatch between the first and the re-read billed sums means an invoice
+    /// entered or left the billed part meanwhile, so the whole three-read attempt is retried ONCE (a single concurrent write then
+    /// costs one extra read, not a failed run) and a Warning is logged with the parent count only, never the amounts (ADR-015). If
+    /// the second attempt also differs the read throws: fail closed, and the caller retries on its next run.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The billed sums differed on two consecutive attempts.</exception>
     private static async Task<Dictionary<Guid, decimal>> ReadSpendPartsAsync(
-        IGenericEntityService entities, Func<SpendAmountPart, string> fetchXmlFor, CancellationToken ct)
+        IGenericEntityService entities, Func<SpendAmountPart, string> fetchXmlFor, int parentCount, ILogger? logger, CancellationToken ct)
     {
-        var total = new Dictionary<Guid, decimal>();
-        foreach (var part in SpendAmountPartsInReadOrder)
+        const int attempts = 2;
+        for (var attempt = 1; attempt <= attempts; attempt++)
         {
-            var sums = ReadGroupedSums(await entities.RetrieveMultipleAsync(new FetchExpression(fetchXmlFor(part)), ct).ConfigureAwait(false));
-            foreach (var (parent, amount) in sums)
+            var billed = await ReadPartAsync(entities, fetchXmlFor, SpendAmountPart.BilledWhereNoApprovedTotal, ct).ConfigureAwait(false);
+            var approved = await ReadPartAsync(entities, fetchXmlFor, SpendAmountPart.ApprovedTotal, ct).ConfigureAwait(false);
+            var recheck = await ReadPartAsync(entities, fetchXmlFor, SpendAmountPart.BilledWhereNoApprovedTotal, ct).ConfigureAwait(false);
+            if (SameSums(billed, recheck))
             {
-                total[parent] = total.GetValueOrDefault(parent) + amount;
+                var total = new Dictionary<Guid, decimal>(billed);
+                foreach (var (parent, amount) in approved)
+                {
+                    total[parent] = total.GetValueOrDefault(parent) + amount;
+                }
+
+                return total;
+            }
+
+            if (attempt < attempts)
+            {
+                logger?.LogWarning(
+                    "Spend read raced a write: the billed-fallback sums changed between two reads of {ParentCount} parent(s); re-reading once.",
+                    parentCount);
             }
         }
 
-        return total;
+        throw new InvalidOperationException(
+            "Spend could not be read consistently: invoices changed while the grouped spend queries ran, on two consecutive attempts. "
+            + "Failing closed rather than returning a sum no single moment of the data held; the caller retries on its next run.");
     }
+
+    private static async Task<Dictionary<Guid, decimal>> ReadPartAsync(
+        IGenericEntityService entities, Func<SpendAmountPart, string> fetchXmlFor, SpendAmountPart part, CancellationToken ct) =>
+        ReadGroupedSums(await entities.RetrieveMultipleAsync(new FetchExpression(fetchXmlFor(part)), ct).ConfigureAwait(false));
+
+    private static bool SameSums(Dictionary<Guid, decimal> first, Dictionary<Guid, decimal> second) =>
+        first.Keys.Union(second.Keys).All(id => first.GetValueOrDefault(id) == second.GetValueOrDefault(id));
 
     /// <summary>One grouped aggregate query for counted spend: the <paramref name="part"/> of <see cref="SpendAmount"/> over the
     /// parents' invoices in <see cref="CountedInvoiceStatuses"/>, grouped by the parent lookup, over the given parents. The two parts

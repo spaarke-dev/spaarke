@@ -69,6 +69,54 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
         Assert.Contains("FinanceBaseValues.SpendAmount(", code, StringComparison.Ordinal);
     }
 
+    // ebilling-r1 D-130 (ontology-r1 review): widened from the three named consumers to ALL of src/server/**. A new reader that names an
+    // invoice amount column can be a second copy of the spend rule (and drift back to the billed total). The files below already name a
+    // column and are NOT spend sums (reasons from projects/ebilling-r1/notes/049-spend-approved-total.md "Paths left alone"); FinanceBaseValues
+    // itself is the definition. This is a RATCHET: a file not listed that names a column fails; a listed file that no longer does fails, so
+    // the baseline only shrinks. Comment lines are ignored (as in CodeOf).
+    private static readonly IReadOnlyDictionary<string, string> AmountColumnBaseline = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["Infrastructure/DI/ExternalAccessModule.cs"] = "column allow-list for the external SPA's invoice detail; no sum",
+        ["Services/Finance/FinanceSummaryService.cs"] = "recent-invoices listing: each invoice's own billed total, not a spend sum (DTO contract)",
+        ["Services/Finance/InvoiceReviewService.cs"] = "the reviewer flow that WRITES the totals; the source of the amount, not a reader of spend",
+        ["Services/Finance/InvoiceTotalsService.cs"] = "writes sprk_totalamount / sprk_approvedtotal (the source of the amount)",
+        ["Services/Insights/LiveFacts/InvoiceLiveFactResolver.cs"] = "per-invoice fact documented as the billed total; not an aggregate",
+    };
+
+    private static string RelativeToBff(string file) =>
+        Path.GetRelativePath(Path.Combine(SourceScan.RepoRoot, "src", "server", "api", "Sprk.Bff.Api"), file).Replace('\\', '/');
+
+    internal static IReadOnlyList<string> FilesNamingAnAmountColumn(IEnumerable<(string Path, string Code)> sources) =>
+        sources.Where(s => AmountRuleSpelling.IsMatch(StripComments(s.Code))).Select(s => s.Path).OrderBy(p => p, StringComparer.Ordinal).ToList();
+
+    private static string StripComments(string code) => string.Join('\n', code.Split('\n')
+        .Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal) && !l.TrimStart().StartsWith("*", StringComparison.Ordinal)));
+
+    [Fact(DisplayName = "ebilling-r1 D-130: no source under src/server/** outside FinanceBaseValues and the baselined non-spend files names an invoice amount column")]
+    public void NoServerSource_OutsideTheBaseline_NamesAnInvoiceAmountColumn()
+    {
+        var named = FilesNamingAnAmountColumn(SourceScan.ServerSourceFiles().Select(f => (RelativeToBff(f), File.ReadAllText(f))))
+            .Where(p => p != "Services/Finance/FinanceBaseValues.cs").ToList();
+
+        Assert.True(named.Except(AmountColumnBaseline.Keys).Count() == 0,
+            "names an invoice amount column (a possible second copy of the D-130 spend rule); use FinanceBaseValues.SpendAmount / SumSpend / SpendAmountColumns, "
+            + "or, if it is not a spend sum, add it to AmountColumnBaseline with the reason: " + string.Join(", ", named.Except(AmountColumnBaseline.Keys)));
+        Assert.True(AmountColumnBaseline.Keys.Except(named).Count() == 0,
+            "baseline entries that no longer name an amount column (remove them, the ratchet only shrinks): " + string.Join(", ", AmountColumnBaseline.Keys.Except(named)));
+    }
+
+    [Fact(DisplayName = "ebilling-r1 D-130 control: the widened scan fires on a new file that names an amount column, and stays quiet on a comment and on the shared call")]
+    public void TheWidenedScan_FiresOnANewFile_AndStaysQuietOnACommentAndTheSharedCall()
+    {
+        var found = FilesNamingAnAmountColumn(new[]
+        {
+            ("Services/Reports/SpendReport.cs", "var a = row.GetAttributeValue<Money>(\"sprk_approvedtotal\");"),
+            ("Services/Reports/Commented.cs", "// sprk_approvedtotal is read by FinanceBaseValues\n/// <c>sprk_totalamount</c>\nvar t = FinanceBaseValues.SumSpend(rows);"),
+        });
+
+        Assert.Equal(new[] { "Services/Reports/SpendReport.cs" }, found);
+    }
+
     [Fact(DisplayName = "Task 025b control: the detector fires on a private copy of the status set and the formula")]
     public void TheDetector_FiresOnAPrivateCopy()
     {

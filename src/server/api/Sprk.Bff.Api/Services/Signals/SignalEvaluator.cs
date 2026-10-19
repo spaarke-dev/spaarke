@@ -231,7 +231,7 @@ public sealed class SignalEvaluator
         {
             var (needSpend, needBudget) = FinanceBaseValues.Needs(derived.Field);
             var bases = await FinanceBaseValues.ReadAsync(
-                _entities, subject, candidates.Select(r => r.Id).ToList(), needSpend, needBudget, ct).ConfigureAwait(false);
+                _entities, subject, candidates.Select(r => r.Id).ToList(), needSpend, needBudget, ct, _logger).ConfigureAwait(false);
             var judged = new List<Entity>(candidates.Count);
             foreach (var row in candidates)
             {

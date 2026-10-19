@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Xml.Linq;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
@@ -711,9 +712,10 @@ public class SpendHeldAndPendingTests
     private static EntityCollection Rows(object? parent, object? total) =>
         new() { Entities = { new Entity("sprk_invoice") { ["parent"] = new AliasedValue("sprk_invoice", "sprk_matter", parent), ["total"] = new AliasedValue("sprk_invoice", "sprk_totalamount", total) } } };
 
-    [Theory(DisplayName = "D-130 fail-closed: an unreadable row in EITHER of the two spend queries throws; a half-read spend never comes back smaller")]
+    [Theory(DisplayName = "D-130 fail-closed: an unreadable row in ANY of the three spend reads throws; a half-read spend never comes back smaller")]
     [InlineData(0)]
     [InlineData(1)]
+    [InlineData(2)]
     public async Task D130_AnUnreadableShapeInEitherPart_Throws_NotAPartialSum(int badCall)
     {
         var calls = 0;
@@ -724,12 +726,13 @@ public class SpendHeldAndPendingTests
 
         await FluentActions.Invoking(() => FinanceBaseValues.ReadAsync(service.Object, "sprk_matter", new[] { Matter }, needSpend: true, needBudget: false, CancellationToken.None))
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("*sum*unexpected type*String*");
-        calls.Should().BeLessThanOrEqualTo(2);
+        calls.Should().BeLessThanOrEqualTo(3);
     }
 
-    [Theory(DisplayName = "D-130 fail-closed: a Dataverse failure in EITHER pending spend query propagates, and pending is never read as zero")]
+    [Theory(DisplayName = "D-130 fail-closed: a Dataverse failure in ANY of the three pending spend reads propagates, and pending is never read as zero")]
     [InlineData(0)]
     [InlineData(1)]
+    [InlineData(2)]
     public async Task D130_ADataverseFailureInEitherPendingPart_Propagates(int failingCall)
     {
         var calls = 0;
@@ -742,8 +745,8 @@ public class SpendHeldAndPendingTests
             .Should().ThrowAsync<TimeoutException>();
     }
 
-    [Fact(DisplayName = "D-130: the live spend read sends exactly the two parts (billed-where-no-approved first, approved second) plus one budget query when budget is needed")]
-    public async Task D130_TheLiveRead_SendsTheTwoParts_InTheDocumentedOrder()
+    [Fact(DisplayName = "D-130: the live spend read sends the two parts (billed-where-no-approved, approved) then the billed part again, plus one budget query when budget is needed")]
+    public async Task D130_TheLiveRead_SendsTheTwoParts_ThenTheBilledRecheck_InTheDocumentedOrder()
     {
         var sent = new List<XElement>();
         var service = new Mock<IGenericEntityService>();
@@ -756,8 +759,138 @@ public class SpendHeldAndPendingTests
 
         await FinanceBaseValues.ReadAsync(service.Object, "sprk_matter", new[] { Matter }, needSpend: true, needBudget: true, CancellationToken.None);
 
-        sent.Select(f => f.Element("entity")!.Attribute("name")!.Value).Should().Equal("sprk_invoice", "sprk_invoice", "sprk_budget");
-        sent.Take(2).Select(f => f.Descendants("attribute").Single(a => a.Attribute("aggregate") is not null).Attribute("name")!.Value)
-            .Should().Equal("sprk_totalamount", "sprk_approvedtotal");
+        sent.Select(f => f.Element("entity")!.Attribute("name")!.Value).Should().Equal("sprk_invoice", "sprk_invoice", "sprk_invoice", "sprk_budget");
+        sent.Take(3).Select(f => f.Descendants("attribute").Single(a => a.Attribute("aggregate") is not null).Attribute("name")!.Value)
+            .Should().Equal("sprk_totalamount", "sprk_approvedtotal", "sprk_totalamount");
+        sent[2].ToString(SaveOptions.DisableFormatting).Should().Be(sent[0].ToString(SaveOptions.DisableFormatting), "the re-check is the first billed query again");
     }
+
+    // ---- K1 (ontology-r1 review): the two parts are not one snapshot; the billed re-read detects a racing write ----
+
+    private sealed class CapturingLogger : ILogger
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
+    /// <summary>A service whose Nth invoice read is answered by <paramref name="answer"/> (call number, true when the query is the
+    /// approved part); <paramref name="calls"/> records every read (true = approved part).</summary>
+    private static IGenericEntityService Scripted(Func<int, bool, EntityCollection> answer, List<bool> calls)
+    {
+        var service = new Mock<IGenericEntityService>();
+        service.Setup(s => s.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((FetchExpression fetch, CancellationToken _) =>
+            {
+                var approvedPart = fetch.Query.Contains("not-null", StringComparison.Ordinal);
+                calls.Add(approvedPart);
+                return Task.FromResult(answer(calls.Count - 1, approvedPart));
+            });
+        return service.Object;
+    }
+
+    /// <summary>Per attempt: billed <paramref name="firstBilled"/> (call 0 of 3), approved 5, billed re-check <paramref name="recheckBilled"/>.</summary>
+    private static EntityCollection Answer(bool approvedPart, int callNumber, decimal firstBilled, decimal recheckBilled) =>
+        approvedPart ? Rows(Matter, new Money(5m)) : Rows(Matter, new Money(callNumber % 3 == 0 ? firstBilled : recheckBilled));
+
+    [Fact(DisplayName = "K1: a stable world reads the billed part once more (three reads) and sums both parts; nothing is logged")]
+    public async Task K1_AStableWorld_ReadsOnceMore_AndSumsCorrectly()
+    {
+        var calls = new List<bool>();
+        var logger = new CapturingLogger();
+        var service = Scripted((n, approved) => Answer(approved, n, 10m, 10m), calls);
+
+        var counted = await FinanceBaseValues.ReadAsync(service, "sprk_matter", new[] { Matter }, needSpend: true, needBudget: false, CancellationToken.None, logger);
+
+        counted[Matter].Spend.Should().Be(15m);
+        calls.Should().Equal(false, true, false);
+        logger.Entries.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "K1: a stable pending world reads three times and sums correctly")]
+    public async Task K1_AStablePendingWorld_ReadsOnceMore_AndSumsCorrectly()
+    {
+        var calls = new List<bool>();
+        var service = Scripted((n, approved) => Answer(approved, n, 10m, 10m), calls);
+
+        (await FinanceBaseValues.ReadPendingSpendAsync(service, "sprk_matter", new[] { Matter }, CancellationToken.None))[Matter].Should().Be(15m);
+        calls.Should().Equal(false, true, false);
+    }
+
+    [Fact(DisplayName = "K1 fail-closed: billed sums that differ between the billed reads on TWO consecutive attempts throw (counted)")]
+    public async Task K1_BilledSumsThatChangeOnBothAttempts_Throw()
+    {
+        var calls = new List<bool>();
+        var service = Scripted((n, approved) => Answer(approved, n, 10m, 99m), calls);
+
+        await FluentActions.Invoking(() => FinanceBaseValues.ReadAsync(service, "sprk_matter", new[] { Matter }, needSpend: true, needBudget: false, CancellationToken.None))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*Spend could not be read consistently*two consecutive attempts*");
+        calls.Should().HaveCount(6, "two attempts of three reads, then it gives up");
+    }
+
+    [Fact(DisplayName = "K1 fail-closed: the same on the pending read")]
+    public async Task K1_BilledSumsThatChangeOnBothAttempts_Throw_Pending()
+    {
+        var calls = new List<bool>();
+        var service = Scripted((n, approved) => Answer(approved, n, 10m, 99m), calls);
+
+        await FluentActions.Invoking(() => FinanceBaseValues.ReadPendingSpendAsync(service, "sprk_matter", new[] { Matter }, CancellationToken.None))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*Spend could not be read consistently*");
+        calls.Should().HaveCount(6);
+    }
+
+    [Fact(DisplayName = "K1: a re-check that differs on the first attempt but is stable on the second succeeds with the second attempt's sums and logs one Warning (no values)")]
+    public async Task K1_ADifferenceOnTheFirstAttemptOnly_RetriesOnce_AndLogsOneWarning()
+    {
+        var calls = new List<bool>();
+        var logger = new CapturingLogger();
+        // Attempt 1 (calls 0-2): billed 11, approved 5, re-check billed 77 (differs). Attempt 2 (calls 3-5): billed 23, approved 5, re-check 23.
+        var service = Scripted((n, approved) => n switch
+        {
+            0 => Rows(Matter, new Money(11m)),
+            2 => Rows(Matter, new Money(77m)),
+            3 or 5 => Rows(Matter, new Money(23m)),
+            _ => Rows(Matter, new Money(5m)),
+        }, calls);
+
+        var counted = await FinanceBaseValues.ReadAsync(service, "sprk_matter", new[] { Matter }, needSpend: true, needBudget: false, CancellationToken.None, logger);
+
+        counted[Matter].Spend.Should().Be(28m, "the second attempt's 23 + 5, not the first attempt's 11 + 5 or 77 + 5");
+        calls.Should().HaveCount(6);
+        var warning = logger.Entries.Should().ContainSingle().Subject;
+        warning.Level.Should().Be(LogLevel.Warning);
+        warning.Message.Should().Contain("1 parent(s)").And.NotContain("77").And.NotContain("28").And.NotContain("23").And.NotContain("11");
+    }
+
+    [Fact(DisplayName = "K1: an approved total set between the billed read and the approved read (a credit memo) would have been counted twice; the re-read catches it and the retry returns the consistent sum")]
+    public async Task K1_ARacingWrite_ThatSetsAnApprovedTotal_IsDetected_NotDoubleCounted()
+    {
+        var store = new Store();
+        var creditMemo = store.Invoice(-100m, InvoiceStatusCodes.Approved);           // billed -100, no approved total yet
+        store.Invoice(300m, InvoiceStatusCodes.Approved, approved: 300m);
+        var inner = store.AsService();
+        var raced = false;
+        var service = new Mock<IGenericEntityService>();
+        service.Setup(s => s.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Returns(async (FetchExpression fetch, CancellationToken ct) =>
+            {
+                var result = await inner.RetrieveMultipleAsync(fetch, ct);
+                if (!raced)
+                {
+                    raced = true;
+                    creditMemo["sprk_approvedtotal"] = new Money(-100m);   // the totals service lands the approved total right after the billed read
+                }
+
+                return result;
+            });
+        var logger = new CapturingLogger();
+
+        var spend = (await FinanceBaseValues.ReadAsync(service.Object, "sprk_matter", new[] { Matter }, needSpend: true, needBudget: false, CancellationToken.None, logger))[Matter].Spend;
+
+        spend.Should().Be(200m, "300 + (-100) once; a two-read order returned -100 (billed) + 200 (approved) = 100, a LOWER spend that lets a le / lt rule pass");
+        logger.Entries.Should().ContainSingle().Which.Level.Should().Be(LogLevel.Warning);
+    }
+
 }
