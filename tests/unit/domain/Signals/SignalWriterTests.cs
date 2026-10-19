@@ -37,7 +37,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Signals;
 /// <c>sprk_firstdetected</c> must be set in the SAME create call as everything else, never a second
 /// round-trip.</para>
 /// </remarks>
-public class SignalWriterTests
+public partial class SignalWriterTests
 {
     private static readonly Guid PolicyId = Guid.Parse("4d204810-61bf-f111-aaaf-0022482913fc");
     private static readonly Guid PolicyVersionId = Guid.Parse("42b3e716-61bf-f111-aaaf-0022482913fc");
@@ -2419,6 +2419,15 @@ public class SignalWriterTests
         public readonly List<(Guid Id, Dictionary<string, object> Fields)> UpdateCalls = new();
         private readonly Dictionary<(string Entity, Guid Id), Entity> _retrieveStubs = new();
 
+        /// <summary>ebilling-r1 task 049: every row-version conditional update that was applied.</summary>
+        public readonly List<(Guid Id, Dictionary<string, object> Fields)> ConditionalUpdates = new();
+
+        /// <summary>ebilling-r1 task 049: called before each conditional update (a concurrent writer acting between the read and the write).</summary>
+        public Action<Guid>? BeforeConditionalUpdate { get; set; }
+
+        /// <summary>ebilling-r1 task 049: every conditional update throws this (a Dataverse fault).</summary>
+        public Exception? ConditionalUpdateFault { get; set; }
+
         public bool ThrowDuplicateOnNextCreate { get; set; }
         public bool ThrowAccessDeniedOnNextCreate { get; set; }
         public int CreateCallCount { get; private set; }
@@ -2557,6 +2566,32 @@ public class SignalWriterTests
                 var response = new RetrieveResponse();
                 response.Results["Entity"] = Rows[id];
                 return Task.FromResult<OrganizationResponse>(response);
+            }
+
+            if (request is UpdateRequest { ConcurrencyBehavior: ConcurrencyBehavior.IfRowVersionMatches } conditional)
+            {
+                // ebilling-r1 task 049 (D-122): the conditional update OntologyWriterDataverseClient.UpdateIfRowVersionMatchesAsync sends. A
+                // fault from ConditionalUpdateFault, else a typed version mismatch when the row moved, else applied and the version bumped.
+                var target = conditional.Target;
+                BeforeConditionalUpdate?.Invoke(target.Id);
+                if (ConditionalUpdateFault is { } fault)
+                {
+                    throw fault;
+                }
+
+                var row = Rows[target.Id];
+                if (!string.Equals(row.RowVersion, target.RowVersion, StringComparison.Ordinal))
+                {
+                    throw new FaultException<OrganizationServiceFault>(
+                        new OrganizationServiceFault { ErrorCode = unchecked((int)0x80060882), Message = "The version of the existing record doesn't match." },
+                        "The version of the existing record doesn't match.");
+                }
+
+                var fields = target.Attributes.ToDictionary(a => a.Key, a => a.Value);
+                ConditionalUpdates.Add((target.Id, fields));
+                foreach (var (key, value) in fields) row[key] = value;
+                row.RowVersion = (long.Parse(row.RowVersion!, System.Globalization.CultureInfo.InvariantCulture) + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return Task.FromResult<OrganizationResponse>(new UpdateResponse());
             }
 
             throw new NotImplementedException($"ExecuteAsync not stubbed for {request.GetType().Name}.");

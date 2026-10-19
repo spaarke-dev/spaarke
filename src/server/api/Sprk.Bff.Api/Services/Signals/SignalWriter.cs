@@ -165,6 +165,23 @@ public enum SignalCloseOutcome
     ChangedSinceRead,
 }
 
+/// <summary>What <see cref="SignalWriter.CloseActedByAutomatedDecisionAsync"/> did (ebilling-r1 task 049, D-122).</summary>
+public enum SignalAutomatedCloseOutcome
+{
+    /// <summary>The Signal was closed as Acted and linked to the Decision Record.</summary>
+    Closed,
+
+    /// <summary>The Signal is already Resolved and names this Decision Record (a resumed run); nothing was written.</summary>
+    AlreadyClosedByThisRecord,
+
+    /// <summary>A person resolved the Signal, another record closed it, or the system closed it before the set was read; nothing was
+    /// written. A person's resolution is never overwritten.</summary>
+    LeftAsIs,
+
+    /// <summary>The Signal changed between the read and the write twice (its row version moved); nothing was written. The caller retries.</summary>
+    ChangedSinceRead,
+}
+
 /// <summary>What <see cref="SignalWriter.LinkConditionClearedRecordAsync"/> did (task 153).</summary>
 public enum SignalRecordLinkOutcome
 {
@@ -921,6 +938,107 @@ public sealed partial class SignalWriter
                 "Signal {SignalId} changed since the evaluator read it; NOT closed (policy {PolicyCode}). The next pass re-reads it.",
                 signalId, policyCode);
             return SignalCloseOutcome.ChangedSinceRead;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            var reason = IsDataverseAccessDenied(ex) ? OntologyWriterFailureReason.DataverseAccessDenied : OntologyWriterFailureReason.SignalCloseFailed;
+            _logger.LogError(OntologyWriterEvents.WriteRefused, ex,
+                "Signal close refused for policy {PolicyCode}, signal {SignalId} (reason={Reason}).", policyCode, signalId, reason);
+            OntologyWriterTelemetry.RecordFailure(reason);
+            throw;
+        }
+    }
+
+    private static readonly string[] AutomatedCloseColumns =
+        ["sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon", "sprk_decisionrecord", "versionnumber"];
+
+    /// <summary>
+    /// ebilling-r1 task 049 (D-122): closes ONE Signal as <see cref="ResolutionActed"/>, resolved by an AUTOMATED decision's Decision Record
+    /// <paramref name="decisionRecordId"/> (the automatic rejection of an invoice resolves every open Signal on it). A separate entry from
+    /// <see cref="CloseAsync"/>, whose system-only guard stays (FR-16), and from the commit route's close, which stamps the person who decided:
+    /// an automated decider has no person, so <c>sprk_resolvedby</c> is never written (none is invented), nor <c>sprk_resolutionnotes</c>.
+    /// <para><b>Reads, then decides</b> (the commit route's rule, as <c>DecisionCommitService.CloseSignalAsync</c> applies it):
+    /// already Resolved and naming this record → <see cref="SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord"/>, no write; Open or
+    /// Acknowledged → closed; closed by the SYSTEM (ConditionCleared, Superseded, PolicyRetired) at or after <paramref name="setReadAtUtc"/>,
+    /// the moment the caller read the set it decided against → re-closed, so the Signal and the record agree; anything else (a person's
+    /// Acted or Dismissed, another record, a system close before the set was read) → <see cref="SignalAutomatedCloseOutcome.LeftAsIs"/> and one
+    /// Information line (ids and the policy code only).</para>
+    /// <para><b>One write</b>, conditional on the row version just read: status Resolved, resolution Acted, <c>sprk_resolvedon</c> and
+    /// <c>sprk_lastevaluated</c> the same instant (D-120), <c>sprk_decisionrecord</c>. A version mismatch re-reads once and decides again; a
+    /// second one is <see cref="SignalAutomatedCloseOutcome.ChangedSinceRead"/>. Any other failure is logged at Error
+    /// (<see cref="OntologyWriterEvents.WriteRefused"/>), metered and rethrown, as <see cref="CloseAsync"/> does.</para>
+    /// </summary>
+    /// <exception cref="ArgumentException">An id is empty, or <paramref name="setReadAtUtc"/> is not UTC.</exception>
+    internal async Task<SignalAutomatedCloseOutcome> CloseActedByAutomatedDecisionAsync(
+        Guid signalId, Guid decisionRecordId, DateTime setReadAtUtc, string policyCode, CancellationToken ct = default)
+    {
+        if (signalId == Guid.Empty)
+            throw new ArgumentException("signalId must not be Guid.Empty.", nameof(signalId));
+        if (decisionRecordId == Guid.Empty)
+            throw new ArgumentException("decisionRecordId must not be Guid.Empty.", nameof(decisionRecordId));
+        if (setReadAtUtc.Kind != DateTimeKind.Utc)
+            throw new ArgumentException("setReadAtUtc must be a UTC time (DateTimeKind.Utc).", nameof(setReadAtUtc));
+
+        try
+        {
+            for (var attempt = 0; ; attempt++)
+            {
+                var row = await _writerClient.RetrieveAsync(SignalEntity, signalId, AutomatedCloseColumns, ct).ConfigureAwait(false);
+                var status = row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value;
+                var resolution = row.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value;
+                if (status == SignalStatusResolved && row.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id == decisionRecordId)
+                {
+                    return SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord;
+                }
+
+                var open = status is SignalStatusOpen or SignalStatusAcknowledged;
+                var systemClosedSinceRead = status == SignalStatusResolved
+                    && resolution is { } r && SystemResolutions.Contains(r)
+                    && row.GetAttributeValue<DateTime?>("sprk_resolvedon") is { } resolvedOn
+                    && DateTime.SpecifyKind(resolvedOn, DateTimeKind.Utc) >= setReadAtUtc;
+                if (!open && !systemClosedSinceRead)
+                {
+                    _logger.LogInformation(
+                        "Signal {SignalId} (policy {PolicyCode}) was resolved otherwise before Decision Record {RecordId} could close it; left as it is.",
+                        signalId, policyCode, decisionRecordId);
+                    return SignalAutomatedCloseOutcome.LeftAsIs;
+                }
+
+                var version = row.RowVersion ?? (row.GetAttributeValue<long?>("versionnumber") is { } v ? v.ToString(CultureInfo.InvariantCulture) : null);
+                if (string.IsNullOrWhiteSpace(version))
+                {
+                    throw new InvalidOperationException($"Signal {signalId:D} was read without a row version, so it cannot be closed conditionally.");
+                }
+
+                var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                var fields = new Dictionary<string, object>
+                {
+                    ["sprk_signalstatus"] = new OptionSetValue(SignalStatusResolved),
+                    ["sprk_resolutiontype"] = new OptionSetValue(ResolutionActed),
+                    ["sprk_resolvedon"] = nowUtc,
+                    ["sprk_lastevaluated"] = nowUtc,
+                    ["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", decisionRecordId),
+                };
+
+                try
+                {
+                    await _writerClient.UpdateIfRowVersionMatchesAsync(SignalEntity, signalId, version, fields, ct).ConfigureAwait(false);
+                    _logger.LogInformation(
+                        "Signal {SignalId} closed as Acted for policy {PolicyCode} by automated Decision Record {RecordId}{Reclosed}.",
+                        signalId, policyCode, decisionRecordId, open ? string.Empty : " (re-closed after a system resolution)");
+                    return SignalAutomatedCloseOutcome.Closed;
+                }
+                catch (Exception ex) when (IsConcurrencyVersionMismatch(ex))
+                {
+                    if (attempt > 0)
+                    {
+                        _logger.LogInformation(
+                            "Signal {SignalId} kept changing while Decision Record {RecordId} closed it; NOT closed (policy {PolicyCode}). The caller retries.",
+                            signalId, decisionRecordId, policyCode);
+                        return SignalAutomatedCloseOutcome.ChangedSinceRead;
+                    }
+                }
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
