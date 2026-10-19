@@ -4,7 +4,7 @@
     <title>Rule handlers for the 11 billing rule types</title>
     <phase>3 Rules (WP3) — wave W3-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Rule handlers decide which lines are flagged or rejected; a wrong comparison silently passes a non-compliant bill or rejects a valid one (NFR-06).</rigor-reason>
     <model-tier>sonnet</model-tier>
