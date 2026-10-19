@@ -280,7 +280,10 @@ public static class ProjectClosureEndpoint
         // container question faulted, or the step threw — a retry may yet prove it clean, so neither claim is made and
         // the closure answers the retryable container_not_cleared.
         var containerAnswerDefinite =
-            granteeRemoval is { ContainerState: not SpeContainerContactPermissionState.Unknown };
+            granteeRemoval is
+            {
+                ContainerState: SpeContainerContactPermissionState.Clean or SpeContainerContactPermissionState.ContactPermissionRemains
+            };
 
         // What the container step established, for every incomplete answer below (pass-2 F2): a partial revocation
         // must not swallow it, and an oversized organization's non-retryable instruction must reach the caller.
@@ -846,7 +849,7 @@ public static class ProjectClosureEndpoint
             {
                 logger.LogInformation(
                     "[CLOSE-PROJECT] Container {ContainerId} holds no permission a contact grant could account for (read in "
-                    + "full; every remaining user permission is Spaarke-managed), so the {Unresolved} grantee(s) that could "
+                    + "full; every remaining user permission is Spaarke-managed or an internal user's), so the {Unresolved} grantee(s) that could "
                     + "not be enumerated or keyed ({TooLarge} oversized organization(s)) and any earlier grants not read are "
                     + "confirmed absent (#2104 round 2, F1).",
                     containerId, unresolved, tooLarge);

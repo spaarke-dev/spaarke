@@ -755,7 +755,7 @@ public static class RevokeExternalAccessEndpoint
                 logger.LogInformation(
                     "[EXT-REVOKE] Organization {OrganizationId} has more than {Bound} active members, more than one " +
                     "revoke may sweep, but container {ContainerId} holds no permission a contact grant could account for " +
-                    "(read in full; every user permission is Spaarke-managed), so no member can hold one there " +
+                    "(read in full; every user permission is Spaarke-managed or an internal user's), so no member can hold one there " +
                     "(#2104 round 3).",
                     organizationId, ExternalOrganizationMembership.MaxMembersPerSweep, containerId);
                 return (SpeContainerRevokeOutcome.NoPermissionFound, UnknownMembership, false, 0);
