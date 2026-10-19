@@ -21,8 +21,11 @@ public enum SpeContainerRevokeOutcome
 {
     /// <summary>
     /// No removal was attempted — the grant's root is not a secure record with its own container (task 166: the
-    /// container is derived from the root, never supplied by the client), or a contact-grant revoke named no
-    /// contact to match.
+    /// container is derived from the root, never supplied by the client), or (#2103) the grant row's contact has
+    /// neither a bound Entra object id (<c>sprk_externalobjectid</c>) nor an <c>emailaddress1</c>, so no container
+    /// permission can be attributed to them and there is nothing to clear
+    /// (<c>RevokeExternalAccessEndpoint.HasNoContainerMembershipKey</c>). #2104: the contact is always the grant ROW's,
+    /// so a request that names no contact no longer skips the step.
     /// </summary>
     /// <remarks>
     /// <para><b>Task 020 narrowed this.</b> It used to ALSO mean "this was an organization-grant revoke",
@@ -48,7 +51,11 @@ public enum SpeContainerRevokeOutcome
 
     /// <summary>
     /// The permission could not be read, matched, or deleted. The Contact may RETAIN file access; the
-    /// revoke should be retried. For an ORGANIZATION revoke this covers BOTH "at least one member's
+    /// revoke should be retried — except for two causes a retry cannot fix, which the 500 names with their own
+    /// non-retryable reason codes: an organization too large to sweep (<c>sdap.revoke.incomplete.organization_too_large</c>,
+    /// #2103 follow-up), and a match the revoke refused to act on — more than one permission matching the grantee, or a
+    /// match whose holder cannot be verified (<c>sdap.revoke.incomplete.permission_ambiguous</c>, #2104 round 3).
+    /// For an ORGANIZATION revoke this covers BOTH "at least one member's
     /// permission could not be removed" and "the member list could not be established at all" — the two
     /// are told apart by <see cref="SpeOrgMemberCleanupSummary.MembersEnumerated"/>.
     /// </summary>
@@ -64,8 +71,10 @@ public enum SpeContainerRevokeOutcome
 /// NOT be established at all (the junction query failed, or the organization has more members than one
 /// revoke request may sweep). <c>null</c> is the load-bearing value: it is the difference between
 /// "we swept everyone and there was nothing to remove" and "we do not know who to sweep", which the
-/// counts alone cannot express. It always pairs with
-/// <see cref="SpeContainerRevokeOutcome.Failed"/>.
+/// counts alone cannot express. It pairs with <see cref="SpeContainerRevokeOutcome.Failed"/>, with one exception
+/// (#2104 round 3): an organization over the sweep bound whose container's COMPLETE read holds no permission a contact
+/// grant could account for answers <see cref="SpeContainerRevokeOutcome.NoPermissionFound"/> — the members are still
+/// unknown, but none of them can hold a permission there.
 /// </param>
 /// <param name="PermissionsRemoved">Members whose container permission was found and deleted.</param>
 /// <param name="PermissionsNotFound">
@@ -73,8 +82,9 @@ public enum SpeContainerRevokeOutcome
 /// under the broker-only model — nothing in this product grants a member a container ACL.
 /// </param>
 /// <param name="Failed">
-/// Members whose container permission could NOT be confirmed removed — their email was unreadable or
-/// absent (so their ACL entry is unfindable), or Graph refused the delete. <b>Non-zero means those people
+/// Members whose container permission could NOT be confirmed removed — their identity could not be read, Graph
+/// refused the delete, or (#2104 round 2) their match was ambiguous or its holder unverifiable, so nothing was removed. (#2103: a member with NO identity key is counted in <c>NoMembershipKey</c>, not here.)
+/// <b>Non-zero means those people
 /// may RETAIN file access</b>, so the revoke MUST NOT be reported as an SPE success.
 /// </param>
 /// <remarks>
@@ -87,12 +97,20 @@ public enum SpeContainerRevokeOutcome
 /// active, unexpired grant on the same root (their own contact grant, or another organization's) still entitles
 /// them. Additive (defaults to 0), so a client that predates it is unaffected.
 /// </param>
+/// <param name="NoMembershipKey">
+/// #2103: members with neither a bound Entra object id nor an <c>emailaddress1</c>. No container permission can be
+/// attributed to them (a permission is matched by the object id, then by the email against the permission's email
+/// and UPN — #2104), so there is nothing to clear. Not a failure, and not <paramref name="PermissionsNotFound"/>,
+/// which claims the container was read for them.
+/// Additive (defaults to 0), so a client that predates it is unaffected.
+/// </param>
 public sealed record SpeOrgMemberCleanupSummary(
     int? MembersEnumerated,
     int PermissionsRemoved,
     int PermissionsNotFound,
     int Failed,
-    int RetainedByOtherGrant = 0);
+    int RetainedByOtherGrant = 0,
+    int NoMembershipKey = 0);
 
 /// <summary>
 /// Response returned after revoking external access from a Contact.
