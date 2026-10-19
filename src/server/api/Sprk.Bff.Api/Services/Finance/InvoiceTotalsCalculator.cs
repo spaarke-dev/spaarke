@@ -54,7 +54,7 @@ public static class InvoiceTotalsRefusalCodes
     /// <summary>The invoice has no billed total (<c>sprk_totalamount</c>), so no approved total can be derived.</summary>
     public const string BilledTotalMissing = "invoice-totals.billed-total-missing";
 
-    /// <summary>A Reduced line has no approved amount, or one that is negative or above the billed amount.</summary>
+    /// <summary>A Reduced line has no approved amount, or one outside 0 .. the billed amount (for a credit: outside the billed credit .. 0, D-129 (3)).</summary>
     public const string LineApprovedAmountInvalid = "invoice-totals.line-approved-amount-invalid";
 
     /// <summary>An Adjustment line has no method or value, a negative value, or a percent above 100.</summary>
@@ -98,16 +98,14 @@ public sealed record InvoiceTotalsCalculation(
 /// <para><b>Fail closed.</b> Input that the formula cannot place (a line with no cost type, a Reduced line with no usable approved amount,
 /// an Adjustment line with no method/value, a missing billed total) refuses the whole calculation rather than being skipped, because a
 /// skipped line silently changes what the firm is paid. An Adjustment line's own status is never read: only Fee and Expense lines are decided.</para>
-/// <para><b>Credit lines and credit memos (D-121, D-127, D-128).</b> A Fee or Expense line may be negative (a credit or reversal) and is summed as a
-/// signed value, so a cost type's total, the billed total and the approved total may all be negative (an all-credit invoice is a credit memo);
-/// the stored columns accept it since their minimums were lowered. Nothing is refused for being below zero except an approved total that goes
-/// below zero on an invoice that was not itself negative. A Disallowed credit is summed signed too: its adjustment is the negative amount, so
-/// disallowing a credit raises the approved total (the reviewer does not recognise the reversal). A Reduced credit stays refused: no approved
-/// amount is valid for it.</para>
-/// <para><b>Percent adjustments on a negative fee base.</b> A percent adjustment is <c>value% x</c> the signed base, so on a net-negative fee base
-/// it is negative (a negative Adjustment-line amount, which the column accepts) and lessens the credit by that percentage. This is the same
-/// figure as taking the percentage of each fee line separately, which is the property that makes the rule predictable. The base is never
-/// clamped at zero.</para>
+/// <para><b>Credit lines and credit memos (D-121, D-127, D-128, D-129).</b> A Fee or Expense line may be negative (a credit or reversal) and is
+/// summed as a signed value, so a cost type's total, the billed total and the approved total may all be negative (an all-credit invoice is a credit
+/// memo); the stored columns accept it since their minimums were lowered. The one floor is FR-32: an approved total below zero is refused only when
+/// the billed total is zero or more (D-129 (1)); a credit memo has no extra limit. A Disallowed credit is summed signed: its adjustment is the
+/// negative amount, so disallowing a credit raises the approved total. A Reduced credit accepts part of it: the approved amount lies between the
+/// billed credit and 0 (-100 reduced to -40 raises the payable by 60); more credit than billed, or the opposite sign, is refused (D-129 (3)).</para>
+/// <para><b>Percent adjustments (D-129 (2)).</b> A percent adjustment is <c>value% x</c> the fee base, with the base clamped at zero: on a net-negative
+/// fee base it adjusts nothing (10% of -700 is 0, the invoice stays -700); on a positive base it is unchanged. Expenses are never in the base.</para>
 /// </remarks>
 public static class InvoiceTotalsCalculator
 {
@@ -171,7 +169,8 @@ public static class InvoiceTotalsCalculator
         var lineAdjustmentsTotal = Round(feeLineAdjustments + expenseLineAdjustments);
 
         // D-42: a percent adjustment is taken on fees AFTER the fee lines' own adjustments; expenses never enter the base.
-        var percentBase = fees - feeLineAdjustments;
+        // D-129 (2): the base is clamped at zero. A percent adjustment on a net-negative fee base adjusts nothing (10% of -700 is 0).
+        var percentBase = Math.Max(0m, fees - feeLineAdjustments);
 
         var adjustmentAmounts = new Dictionary<Guid, decimal>(adjustmentLines.Count);
         decimal invoiceAdjustments = 0m;
@@ -190,8 +189,8 @@ public static class InvoiceTotalsCalculator
 
         var approved = Round(billed - lineAdjustmentsTotal - invoiceAdjustments);
 
-        // FR-32 refuses adjustments that exceed the billed total. A credit memo (billed total below zero, D-127) legitimately has a negative approved
-        // total, so the refusal applies only when the billed total itself is not negative.
+        // FR-32 refuses adjustments that exceed the billed total. D-129 (1): the floor applies only when the billed total is zero or more; a credit
+        // memo (billed total below zero, D-127) legitimately has a negative approved total and has no extra limit.
         InvoiceTotalsRefusal? negative = approved < 0m && billed >= 0m
             ? new InvoiceTotalsRefusal(
                 InvoiceTotalsRefusalCodes.ApprovedTotalNegative,
@@ -214,11 +213,14 @@ public static class InvoiceTotalsCalculator
                 return true;
 
             case InvoiceLineStatus.Reduced:
-                if (line.ApprovedAmount is not { } approved || approved < 0m || approved > line.Amount)
+                // D-129 (3): the approved amount lies between 0 and the billed amount, whichever sign the line has. A charge is reduced
+                // towards 0 from above; a credit is reduced (part of it accepted) towards 0 from below: -100 reduced to -40 is valid.
+                if (line.ApprovedAmount is not { } approved
+                    || approved < Math.Min(0m, line.Amount) || approved > Math.Max(0m, line.Amount))
                 {
                     refusal = new InvoiceTotalsRefusal(
                         InvoiceTotalsRefusalCodes.LineApprovedAmountInvalid,
-                        "A Reduced line needs an approved amount between 0 and its billed amount.",
+                        "A Reduced line needs an approved amount between 0 and its billed amount (a credit: between the billed credit and 0).",
                         line.Id);
                     return false;
                 }

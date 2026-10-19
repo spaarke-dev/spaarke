@@ -305,9 +305,9 @@ public sealed class InvoiceTotalsCalculatorTests
     }
 
     [Fact]
-    public void AnInvoiceThatWasNotNegative_StillRefusesAnApprovedTotalBelowZero_D127()
+    public void D129_1_AnInvoiceThatWasNotNegative_StillRefusesAnApprovedTotalBelowZero()
     {
-        // FR-32 is about adjustments that exceed what was billed. Billed 100 (200 of work, a 100 credit), 150 of charges disallowed: -50, refused.
+        // FR-32 floor: it applies when the billed total is zero or more. Billed 100 (200 of work, a 100 credit), 150 of charges disallowed: -50, refused.
         var result = InvoiceTotalsCalculator.Calculate(
             100m, new[] { Fee(200m), Fee(-100m), Fee(150m, InvoiceLineStatus.Disallowed) });
 
@@ -316,14 +316,78 @@ public sealed class InvoiceTotalsCalculatorTests
     }
 
     [Fact]
-    public void ReducedCreditLine_IsRefused_BecauseNoApprovedAmountIsValidForIt()
+    public void D129_1_ABilledTotalOfExactlyZero_StillHasTheFloor()
     {
-        var credit = Fee(-100m, InvoiceLineStatus.Reduced, approved: 0m);
+        var result = InvoiceTotalsCalculator.Calculate(0m, new[] { Fee(100m), Fee(-100m), Fixed(10m) });
+
+        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.ApprovedTotalNegative);
+    }
+
+    [Fact]
+    public void D129_1_ACreditMemo_HasNoFloor_EvenWhenAdjustmentsPushTheApprovedTotalFurtherNegative()
+    {
+        // Billed -100; a fixed adjustment of 500 takes the approved total to -600. No refusal: a credit memo has no extra limit.
+        var result = InvoiceTotalsCalculator.Calculate(-100m, new[] { Fee(-100m), Fixed(500m) });
+
+        result.Refusal.Should().BeNull();
+        result.ApprovedTotal.Should().Be(-600m);
+    }
+
+    [Fact]
+    public void D129_3_ReducingACredit_AcceptsPartOfIt_AndRaisesThePayable()
+    {
+        // 1000 of work and a 100 credit: billed 900. The credit is reduced to -40 (only 40 of credit accepted): its adjustment is -60,
+        // so the approved total is 900 - (-60) = 960, which is 60 more than before.
+        var credit = Fee(-100m, InvoiceLineStatus.Reduced, approved: -40m);
+
+        var result = InvoiceTotalsCalculator.Calculate(900m, new[] { Fee(1000m), credit });
+
+        result.IsRefused.Should().BeFalse();
+        result.LineAdjustmentsTotal.Should().Be(-60m);
+        result.ApprovedTotal.Should().Be(960m);
+    }
+
+    [Theory]
+    [InlineData(0)]      // accept none of the credit
+    [InlineData(-100)]   // accept all of it
+    [InlineData(-0.01)]
+    public void D129_3_AReducedCredit_AtTheEdgesOfItsRange_IsAccepted(double approved)
+    {
+        var credit = Fee(-100m, InvoiceLineStatus.Reduced, approved: (decimal)approved);
+
+        InvoiceTotalsCalculator.Calculate(900m, new[] { Fee(1000m), credit }).IsRefused.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(-150)]  // more credit than billed
+    [InlineData(10)]    // flipping the sign
+    [InlineData(-100.01)]
+    public void D129_3_AReducedCredit_BeyondItsRange_IsStillRefused(double approved)
+    {
+        var credit = Fee(-100m, InvoiceLineStatus.Reduced, approved: (decimal)approved);
 
         var result = InvoiceTotalsCalculator.Calculate(900m, new[] { Fee(1000m), credit });
 
         result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.LineApprovedAmountInvalid);
         result.Refusal.LineId.Should().Be(credit.Id);
+    }
+
+    [Fact]
+    public void D129_3_AReducedCreditWithNoApprovedAmount_IsRefused()
+    {
+        var result = InvoiceTotalsCalculator.Calculate(900m, new[] { Fee(1000m), Fee(-100m, InvoiceLineStatus.Reduced) });
+
+        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.LineApprovedAmountInvalid);
+    }
+
+    [Fact]
+    public void D129_3_AReducedCharge_KeepsItsRange_AndNegativeApprovedAmountIsStillRefused()
+    {
+        InvoiceTotalsCalculator.Calculate(500m, new[] { Fee(500m, InvoiceLineStatus.Reduced, 500m) }).IsRefused.Should().BeFalse();
+        InvoiceTotalsCalculator.Calculate(500m, new[] { Fee(500m, InvoiceLineStatus.Reduced, 500.01m) }).Refusal!.Code
+            .Should().Be(InvoiceTotalsRefusalCodes.LineApprovedAmountInvalid);
+        InvoiceTotalsCalculator.Calculate(500m, new[] { Fee(500m, InvoiceLineStatus.Reduced, -1m) }).Refusal!.Code
+            .Should().Be(InvoiceTotalsRefusalCodes.LineApprovedAmountInvalid);
     }
 
     [Fact]
@@ -360,35 +424,50 @@ public sealed class InvoiceTotalsCalculatorTests
     }
 
     [Fact]
-    public void PercentAdjustment_OnANetNegativeFeeBase_IsNegative_AndLessensTheCredit_D127()
+    public void D129_2_PercentAdjustment_OnANetNegativeFeeBase_AdjustsNothing()
     {
-        // The rule: value% x the SIGNED fee base after the fee lines' own adjustments, never clamped at zero. Base = 300 - 1000 = -700,
-        // 10% = -70, so the approved total is -700 - (-70) = -630: the discount lessens the credit, as it would on each line separately.
+        // The rule: value% x the fee base after the fee lines' own adjustments, with the base clamped at zero. Base = 300 - 1000 = -700,
+        // so 10% is 0 and the invoice stays at -700.
         var percent = Percent(10m);
 
         var result = InvoiceTotalsCalculator.Calculate(-700m, new[] { Fee(300m), Fee(-1000m), percent });
 
         result.IsRefused.Should().BeFalse();
-        result.AdjustmentLineAmounts[percent.Id].Should().Be(-70m);
-        result.InvoiceAdjustmentsTotal.Should().Be(-70m);
-        result.ApprovedTotal.Should().Be(-630m);
+        result.AdjustmentLineAmounts[percent.Id].Should().Be(0m);
+        result.InvoiceAdjustmentsTotal.Should().Be(0m);
+        result.ApprovedTotal.Should().Be(-700m);
     }
 
     [Fact]
-    public void PercentAdjustment_OnANetNegativeBase_EqualsThePercentOfEachLine_D127()
+    public void D129_2_PercentAdjustment_OnAnAllCreditInvoice_AdjustsNothing_ButAFixedAdjustmentStillApplies()
     {
-        // 10% of 300 is 30 and 10% of -1000 is -100: together -70, the same as 10% of the net -700.
-        var result = InvoiceTotalsCalculator.Calculate(-700m, new[] { Fee(300m), Fee(-1000m), Percent(10m) });
+        var percent = Percent(25m);
+        var fixedLine = Fixed(20m);
 
-        result.InvoiceAdjustmentsTotal.Should().Be(300m * 0.10m + -1000m * 0.10m);
+        var result = InvoiceTotalsCalculator.Calculate(-400m, new[] { Fee(-400m), percent, fixedLine });
+
+        result.AdjustmentLineAmounts[percent.Id].Should().Be(0m);
+        result.AdjustmentLineAmounts[fixedLine.Id].Should().Be(20m);
+        result.ApprovedTotal.Should().Be(-420m);
     }
 
     [Fact]
-    public void PercentAdjustment_TakesADisallowedCreditOutOfTheBase_D128()
+    public void D129_2_PercentAdjustment_OnAPositiveBase_IsUnchanged_EvenWithACreditOnTheInvoice()
+    {
+        // Base = 1000 - 200 = 800 (positive), so 10% = 80 as before; an expense credit never enters the base.
+        var percent = Percent(10m);
+
+        var result = InvoiceTotalsCalculator.Calculate(750m, new[] { Fee(1000m), Fee(-200m), Expense(-50m), percent });
+
+        result.AdjustmentLineAmounts[percent.Id].Should().Be(80m);
+        result.ApprovedTotal.Should().Be(670m);
+    }
+
+    [Fact]
+    public void D129_2_PercentAdjustment_TakesADisallowedCreditOutOfTheBase_ThenClampsAtZero()
     {
         // Fees 300 and -1000, the credit disallowed: its adjustment is -1000, so the base is -700 - (-1000) = 300 and 10% = 30.
         var percent = Percent(10m);
-
         var result = InvoiceTotalsCalculator.Calculate(
             -700m, new[] { Fee(300m), Fee(-1000m, InvoiceLineStatus.Disallowed), percent });
 
@@ -396,6 +475,13 @@ public sealed class InvoiceTotalsCalculatorTests
         result.LineAdjustmentsTotal.Should().Be(-1000m);
         result.AdjustmentLineAmounts[percent.Id].Should().Be(30m);
         result.ApprovedTotal.Should().Be(-700m + 1000m - 30m);
+
+        // A disallowed CHARGE can also take the base below zero: fees 100 and -300 (net -200), the 100 charge disallowed: base -200 - 100 < 0 -> 0.
+        var clamped = Percent(10m);
+        var second = InvoiceTotalsCalculator.Calculate(
+            -200m, new[] { Fee(100m, InvoiceLineStatus.Disallowed), Fee(-300m), clamped });
+
+        second.AdjustmentLineAmounts[clamped.Id].Should().Be(0m);
     }
 
     [Fact]
