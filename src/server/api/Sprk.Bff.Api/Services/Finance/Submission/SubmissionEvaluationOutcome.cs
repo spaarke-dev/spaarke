@@ -93,7 +93,8 @@ public sealed record SubmissionSnapshot
             return (null, SubmissionReasonCodes.TrackingMissing);
         }
 
-        if (view.CreatedOn is not { } createdOn)
+        // 0001-01-01 is no received date either: no rule version is in force on it (072 part W).
+        if (view.CreatedOn is not { } createdOn || createdOn == default)
         {
             return (null, SubmissionReasonCodes.ReceivedOnMissing);
         }

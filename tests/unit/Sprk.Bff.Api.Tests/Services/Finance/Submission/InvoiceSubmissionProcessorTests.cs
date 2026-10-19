@@ -213,6 +213,29 @@ public class InvoiceSubmissionProcessorTests
         h.Reads.Should().Be(0);
     }
 
+    [Fact(DisplayName = "049 B (072 W): a default createdon (0001-01-01) is no received date and fails closed")]
+    public async Task DefaultCreatedOn_FailsClosed()
+    {
+        var h = new Harness();
+        h.Row["createdon"] = default(DateTime);
+
+        var outcome = await h.RunAsync();
+
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.ReceivedOnMissing);
+        h.Reads.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "049 B: a createdon late in the UTC day stays on that UTC day")]
+    public async Task CreatedOn_UnspecifiedKind_IsTreatedAsUtc()
+    {
+        var h = new Harness();
+        h.Row["createdon"] = DateTime.SpecifyKind(new DateTime(2026, 6, 5, 23, 59, 0), DateTimeKind.Unspecified);
+
+        var outcome = await h.RunAsync();
+
+        outcome.ReceivedOn.Should().Be(new DateOnly(2026, 6, 5));
+    }
+
     [Fact(DisplayName = "049 B (FR-05): a submission regarding two core records fails closed")]
     public async Task TwoCoreRecords_FailClosed()
     {

@@ -130,3 +130,57 @@ The contracts compose. No escalation trigger fires. Each gap below has an in-sco
    - fail as `ebilling.submission.credit_line_unsupported`.
 3. Should a rejected invoice's open Signals stay open? The automatic rejection resolves none of them (closing with Acted is the commit route's). Or should 049 close them as `ConditionCleared` or `PolicyRetired`?
 4. Is there an invoice column for the tracking number? The POML step 3 lists it, but `docs/data-model/sprk_invoice.md` has none. Proposed: `sprk_name` = the tracking number.
+
+## 10. Part B - processor steps 1-5 (2026-10-19)
+
+**Files.** `Services/Finance/Submission/`:
+- `SubmissionReasonCodes.cs`: every outcome and pipeline-finding code the job writes. 043 / 047 codes are referenced, not re-spelled. `FinanceBaseValues.BlockedReasonCode` now takes `SubmissionReasonCodes.Blocked` (the `TODO(049)` literal is gone).
+- `IInvoiceSubmissionProcessor.cs`, `InvoiceSubmissionProcessor.cs`, `SubmissionEvaluationOutcome.cs`.
+
+Tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/InvoiceSubmissionProcessorTests.cs`. The read, resolution and coding are faked at their interfaces. The 072 evaluation (in memory, on loaded facts, through an internal ctor seam) and the 073 decider are the real ones.
+
+**Entry point.** `EvaluateAsync(Entity submission, Func<SubmissionSnapshot, CancellationToken, Task<InvoiceReadRequest>> loadDocument, ct)`. The row is retrieved with `SubmissionSnapshot.Columns`. It writes nothing.
+- **Not in part B:** the Processing status write (step 1) and the document download with its container check (step 1a, the `InvoiceExtractionJobHandler` pattern). Those are the job's.
+- `loadDocument` is called only after the flag and the row have passed, so nothing is downloaded for a submission that fails closed.
+
+**Order.**
+1. Flag (`ebilling.disabled`).
+2. `SubmissionSnapshot.Read` fails closed on each of these, before any download or AI call:
+   - tracking number: `sprk_submissionsequence` > 0 and `sprk_trackingnumber` not blank;
+   - `createdon` (null or default);
+   - firm;
+   - exactly one core record;
+   - typed firm invoice number;
+   - document;
+   - SPA / Internal channel.
+3. Read. `unreadable` / `page_limit` / `no_invoice` → RejectedUnreadable. `FeatureDisabledException` → Failed with its `ErrorCode`. Every other `InvoiceAiException` (service_failed) and every transient fault propagates.
+4. D-91 comparison.
+5. 046, then 047. `FeatureDisabledException` → Failed. `LineCodingException` → Failed with its code. The coding `InvoiceAiException` propagates.
+6. 072, then 073.
+7. Classify: Accepted; Rejected + SPA → AutoRejected (reason = `DecidingFindings[0].Finding.ReasonCode`); Rejected + Internal → Blocked (`SubmissionReasonCodes.Blocked`).
+
+**Mapping decisions.**
+- `ReceivedOn` = createdon's UTC day (Unspecified kind is UTC).
+- `TrackingNumber` = `sprk_trackingnumber` (the text the evaluator and its priors compare; `sprk_submissionsequence` is its `n`, required too).
+- `FirmInvoiceNumber` in the request is the number **as read**, since 072 treats it as an extracted header field with a confidence. The typed one is D-91's input.
+- `Currency` is passed as read. The evaluator normalises it through `BillingCurrency` (D-119); the processor never does.
+- `HeaderConfidence` = 046 `HeaderFields` combined, so `"Currency"` is under exactly that key.
+- Line confidence:
+  - 046 combined per field;
+  - the coding confidence under `TaskCode` / `ActivityCode` / `ExpenseCode`;
+  - the highest confidence per observation kind under `Observation.*`.
+- Line index `i` is the 043 list position, the 046 `LineIndex` and the 047 `LineKey` `"i"`.
+- Credit lines pass through with negative values.
+
+**D-91.**
+- `InvoiceNumberCheck.Compare`: letters and digits only, upper-invariant.
+- Mismatch → one `SubmissionPipelineFinding(ebilling.submission.invoice_number_mismatch, {typed, read})`. It never changes the kind.
+- No number read → `NotRead`, with no finding (a missing value is RequiredData's).
+
+**Tests note.** I-5 and D-89 are proved twice:
+- through the gate, which already downgrades a stored Reject on a non-eligible type to Flag;
+- with the stored Reject restored after the gate (a row written outside publish), so the decider's own guards are proved: `type_not_reject_eligible` for AiObservation, and `type_holds_only` for ApprovedTimekeeper with `ReferenceMissingCap` 0.95 > threshold 0.90.
+
+**Deviation from the brief's name.** The kind is `Failed`, not `FailedBeforeRead`, because `ebilling.coding.no_code_set` and a coding kill switch fail after the read. `Read` is non-null in that case. Per section 2, no invoice is created for any Failed.
+
+**DI.** Not registered. FinanceModule is the shared append point agent A also edits; part E registers it scoped with the handler. Its dependencies are all registered unconditionally (`IInvoiceAi` has `NullInvoiceAi`).
