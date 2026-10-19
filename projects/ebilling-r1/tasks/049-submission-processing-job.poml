@@ -113,6 +113,7 @@ A submission that fails before it is read has no invoice. Two consequences:
     <constraint source="072 part L adversarial passes (2026-10-18)">Two more caller obligations for the evaluation request:
 - Build BillingEvaluationRequest.CoreRecord from the same submission read that files the invoice, and file the invoice under that core record. If the submission's core record changed between evaluation and persistence (a re-file is a real operation since the master merge), re-evaluate; never persist findings judged under a different core. Otherwise a finding judged under a secure core could show a prior's detail on an invoice filed under an ordinary one (D-112).
 - Pass the allocated tracking number (sprk_submissionsequence, D-87) as BillingEvaluationRequest.TrackingNumber. A null tracking number makes Duplicate findings fall back to the headline text.</constraint>
+    <constraint source="ontology-r1 re-check of 072 part E (2026-10-18)">Build the Decision Record snapshot and any stored copy of a billing Signal's reasons from the merged, scrubbed BillingSignalMapping form (the request, sentence and evidence), never from BillingSignalMapping.Findings. In a withheld group, Findings still carries the visible reason's values.</constraint>
   </constraints>
 
   <knowledge>

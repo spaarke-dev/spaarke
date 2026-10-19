@@ -66,6 +66,7 @@
 - Record before mutating, or run the recorder's reads first. Its refusals that depend on Dataverse reads (unknown policy version, missing Signal, undetermined subject, contact read fault) happen after Preflight, so a caller that changes invoice status first can be left with a changed status and no Decision Record (K-3).
 - Serialise decisions per invoice (one at a time per invoice). The recorder's "already recorded" check and its create are not atomic (K-4).
 - Build Values the same way on every attempt (same types, same decimal scale), so that an honest retry hashes to the same content (K-5, unless 074's follow-up normalises decimals).</constraint>
+    <constraint source="ontology-r1 (2026-10-18), Signal evidence read rule (D-123)">SignalReadService strips text and source from every evidence line that is not a {table}:{guid} witness (fail-closed by design; ontology-r1 will not exempt billing lines). A merged billing Signal therefore reaches a reader with its 2nd and later reasons as bare codes marked withheld. The review page renders each reason's text from its reason code and the catalogue template, using the Signal's own invoice and line facts that the reader may see. It never relies on stored per-reason text. sprk_sentence (the primary sentence) stays readable. A withheld Duplicate reason renders only the withheld template. If stored per-reason text has to be readable as-is, send ontology-r1 a design that makes those lines access-checkable (a witness ref to the invoice or line) before building it.</constraint>
   </constraints>
 
   <knowledge>
