@@ -593,3 +593,76 @@ Test-only follow-up to ontology-r1's review of `SignalWriter.CloseActedByAutomat
 **Known limits.**
 - K1: Dataverse stores `sprk_resolvedon` to the second, so a system close in the same second after the read reads as before it -> LeftAsIs. It fails safe, and matches the commit route's `SystemClosedSince`. Do not round `setReadAt` down: that would fail open.
 - K4: the extra Information logs on Closed / ChangedSinceRead carry ids and the policy code only. The row-version line duplicates the one in `LinkConditionClearedRecordAsync` (~:1096); a shared helper is optional.
+
+## 14. Part E - the handler (2026-10-19)
+
+**Files.**
+- New: `Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandler.cs` (`IJobHandler`, `JobType` = `InvoiceSubmissionService.JobType`, payload `{ submissionId }`).
+- Changed:
+  - `Infrastructure/DI/FinanceModule.cs`: scoped `IInvoiceSubmissionProcessor`, `IInvoiceSubmissionPersister`, `IInvoiceSubmissionAfterSteps` and the handler as `IJobHandler`. Unconditional (ADR-032); `NullInvoiceAi` keeps the AI-off case a data outcome.
+  - `IInvoiceSubmissionAfterSteps.cs` / `InvoiceSubmissionAfterSteps.cs`: only `ResumeAsync(Guid submissionId, string? correlationId, CancellationToken)` is added (interface plus a `NotImplementedException` stub). The real body is the D-122 change.
+  - `SubmissionReasonCodes.cs`: `DocumentUnavailable`, `DocumentStorageUnverified`, `ProcessingFailed`.
+- Tests: `InvoiceSubmissionProcessingJobHandlerTests` (strict doubles for the processor, persister, after-steps, lock and Dataverse), `InvoiceSubmissionProcessingFlowTests` (one in-memory Dataverse double, the real processor, persister and a spy), and a `Build()` / `LoadDocument` addition to the part B processor harness.
+
+**Step-0 order (coordinator correction).**
+1. Payload: no `submissionId` -> Poisoned.
+2. Processing lock `invoice-submission:{id}`, owner = job id, 20 minutes, released in `finally`. Not acquired -> Failure (Poisoned on the final delivery); the row is not touched (074 K1).
+3. Re-read. Row gone -> Success (044 compensation).
+4. **Terminal (Accepted, Rejected, Failed) -> Success, nothing written.** First, so a finished submission is never rewritten and the flag cannot overwrite it.
+5. Flag off (ADR-018): no link -> Failed `ebilling.disabled` + Poisoned; linked -> stays Processing + Poisoned (a replay resumes).
+6. **Processing + `sprk_invoice` -> `IInvoiceSubmissionAfterSteps.ResumeAsync`.** Never `EvaluateAsync` or `PersistAsync`.
+7. Snapshot check (D-87 fields) -> Failed before Processing.
+8. Processing written (skipped if already Processing), before any AI call (ADR-017).
+9. `EvaluateAsync` -> `PreflightRejection` (074 K-3) -> `PersistAsync` -> `RunAsync` / `ResumeAsync`. A `ReEvaluate` runs once more; a second one is Failure.
+
+The handler writes only Processing, Failed and (RejectedUnreadable only) Rejected. It never writes Accepted or Rejected after a commit; the after-steps do, last.
+
+**Outcome -> JobOutcome.**
+
+| Situation | Submission status | JobOutcome |
+|---|---|---|
+| Terminal on entry; row gone; after-steps `Completed` / `SubmissionMissing`; persister `SubmissionMissing` | unchanged | Success |
+| RejectedUnreadable (document-level read failure) | Rejected + code, no invoice, one notification | Success |
+| Evaluation `Failed`; persister `Refused`; after-steps `Refused`; preflight refusal; snapshot failure; flag off (no link); permanent step failure | Failed + code | Poisoned |
+| Persister `Retry` (no invoice); after-steps `Retry`; exception; second `ReEvaluate`; lock busy | unchanged (Processing) | Failure |
+| Any Failure case on the final delivery, no invoice link | Failed + code | Poisoned |
+| Any Failure case on the final delivery, invoice linked | stays Processing (resumable) | Poisoned |
+| Cancellation | unchanged | exception propagates |
+
+**Failed on redelivery.** A Failed submission is terminal, so a redelivery is a no-op Success; recovery is a resubmission. This is the choice to confirm (open question 3).
+
+**Gates.**
+- Build `Sprk.Bff.Api`: 0 warnings, 0 errors.
+- Unit, broad filtered run: 8082 passed, 0 failed, 11 skipped (live seam tests). The new classes add 84 handler and flow tests.
+- `Spaarke.ArchTests`: 1214 passed, 0 failed. ADR-010 ceiling unchanged at 169: `IInvoiceSubmissionAfterSteps` was already counted in part D; the handler adds no interface, and the interface is kept because the handler tests fake it.
+- Mutation run (12 mutants of the handler): all killed (1 to 26 failing tests each) after one added test, `AfterStepsRetry_OnTheFinalDelivery_NoLink_FailsWithTheResultCode`; the survivor was the after-steps Retry mapping, which fell back to the exception path with the same outcome but a different reason code.
+- Publish size (`dotnet publish -c Release -r linux-x64 --self-contained false -p:NuGetAudit=false`, `git archive` exports at `C:\wt049m` / `C:\wt049e`, `Compress-Archive -CompressionLevel Optimal`, PDBs included; both folders removed):
+
+| Build | Files | Zip (B) | Zip (MiB) | Uncompressed (B) | `Sprk.Bff.Api.dll` (B) |
+|---|---|---|---|---|---|
+| fresh `origin/master` | 192 | 39,250,449 | 37.43 | 131,032,744 | 19,765,248 |
+| this branch head | 192 | 39,817,317 | 37.97 | 132,718,468 | 21,190,144 |
+| Delta | 0 | +566,868 (+0.54 MiB) | | +1,685,724 | +1,424,896 |
+
+  The delta is an upper bound for part E: it holds every `work/ebilling-r1` commit not on master. Code only, no package change. Under +5 MB; 37.97 MiB total, under the 55 MB review line.
+- CVE: `dotnet list ... package --vulnerable --include-transitive` -> no vulnerable packages.
+
+**Acceptance criteria (amended) -> tests.**
+- Criterion 1 (Accepted writes everything once): `Accepted_WritesEverythingOnce`.
+- Criterion 2, superseded by D-101 (a read submission always gets its invoice; a Rejected SPA invoice is created Rejected; no approval): `RejectedSpa_InvoiceCreatedRejected_NoApproval`, `BlockedInternal_InvoiceInReview_SubmissionRejectedBlocked`. Only a pre-read failure has no invoice: `DocumentLevelReadFailure_IsRejected_NoInvoice`.
+- Criterion 3 (a fault commits nothing, never Accepted): `TransactionFault_CommitsNothing_NeverAccepted`.
+- Criterion 4 (redelivery of a completed job is a no-op): `RedeliveryOfACompletedJob_IsANoOp`.
+- Criterion 5 (redelivery after a Signal-write failure completes, never a second invoice): `RedeliveryAfterASignalWriteFailure_CompletesWithoutASecondInvoice`. It uses a test-only `ResumingAfterSteps` stand-in until D-122's real `ResumeAsync` merges.
+- Serialisation (074 K1): `TwoConcurrentDeliveries_OneRuns_TheOtherFails`.
+- Reason codes: `ServiceFailed_RetriesThenFailed_NoInvoice`, `FlagOff_IsFailed_EbillingDisabled`, `NullAiFacade_IsFailed_AiInvoiceDisabled`, plus the unit theories.
+- I-5 (no AI output alone rejects): part B `AiObservationAlone_NeverRejects` and `NoAiOutputAloneRejects_EndToEnd`.
+- D-125 ("Signals for every finding" qualified): system-policy Signals only when BILL-SYSTEM-SUBMISSION is enabled and Active; covered by part D's `InvoiceSubmissionAfterStepsTests`, not repeated here.
+
+**Open questions.**
+1. A persister `Resumed` result routes to `ResumeAsync`, not `RunAsync` (brief step 4): the terminal derived from this run's outcome could contradict the committed one.
+2. Until D-122 merges, `InvoiceSubmissionAfterSteps.ResumeAsync` throws `NotImplementedException`, so production resume does not work before then (the handler maps the exception to Failure; Failed on the final delivery without a link, stays Processing with one).
+3. Should a dead-letter replay of a Failed-without-link submission be reprocessable? Today it is a no-op.
+4. Final delivery with an invoice link: stays Processing + Poisoned (so the replay can resume). Confirm.
+5. The flag check sits after the terminal rule (a finished submission is never overwritten).
+6. The unreadable-document notification can be lost in the window between the Rejected write and the sink call (the sink contract does not retry).
+7. The step-7 snapshot check fails on every missing D-87 field, a superset of the tracking-number check in brief 0d.
