@@ -51,6 +51,23 @@ public sealed class RefileWriterReconcilerRegistrationTests : IClassFixture<Cust
             "UpdateRecordActionCore resolves the reconciler from this scope; absent, the playbook node's re-file would skip the step");
     }
 
+    [Fact]
+    public void WithScopeValidation_TheInvoiceReviewService_ResolvesWithTheReconciler()
+    {
+        // #2095: the invoice-review confirm files the document under the new invoice, then runs AfterRefileAsync.
+        using var validating = Validating();
+        using var scope = validating.Services.CreateScope();
+
+        var service = scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Services.Finance.IInvoiceReviewService>()
+            .Should().BeOfType<Sprk.Bff.Api.Services.Finance.InvoiceReviewService>().Subject;
+
+        typeof(Sprk.Bff.Api.Services.Finance.InvoiceReviewService)
+            .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+            .Single(f => f.FieldType == typeof(SecureChildReconciler))
+            .GetValue(service).Should().BeSameAs(scope.ServiceProvider.GetRequiredService<SecureChildReconciler>(),
+                "the service's reconciler is the scope's own (both scoped), never a captured or missing one");
+    }
+
     private Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> Validating() =>
         _factory.WithWebHostBuilder(builder => builder.UseDefaultServiceProvider(options => options.ValidateScopes = true));
 

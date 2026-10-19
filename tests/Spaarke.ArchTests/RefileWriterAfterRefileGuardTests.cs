@@ -3,7 +3,6 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
-using Sprk.Bff.Api.Services.Finance;
 using Xunit;
 
 namespace Spaarke.ArchTests;
@@ -76,9 +75,6 @@ public class RefileWriterAfterRefileGuardTests
         new KnownViolation(typeof(CommunicationService),
             "UAC technical follow-up (#2091): AfterRefileAsync option to skip the thread reconcile, after ontology 042b. " +
             "Respond-into-thread (AssignToThreadReconcilingOwnerAsync) — the same case as ThreadResolver's join."),
-        new KnownViolation(typeof(InvoiceReviewService),
-            "Found by this guard (#2091 review): a document filed under an invoice is re-parented (ReparentAsync, inherited " +
-            "matter) without AfterRefileAsync. Not in #2091's scope; follow-up #2095."),
     };
 
     private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());
@@ -93,6 +89,7 @@ public class RefileWriterAfterRefileGuardTests
                  {
                      "Sprk.Bff.Api.Api.ChildRecordEndpoints", "Sprk.Bff.Api.Api.DataverseDocumentsEndpoints",
                      "Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler", "Sprk.Bff.Api.Services.Office.ReconciledEmailFiling",
+                     "Sprk.Bff.Api.Services.Finance.InvoiceReviewService",
                  })
         {
             Assert.True(

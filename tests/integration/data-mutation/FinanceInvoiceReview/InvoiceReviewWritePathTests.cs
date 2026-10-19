@@ -11,6 +11,8 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Telemetry;
+using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.FinanceInvoiceReview;
@@ -51,6 +53,11 @@ public class InvoiceReviewWritePathTests
     private readonly Mock<JobSubmissionService> _jobs;
     private readonly List<JobContract> _submitted = new();
     private readonly List<(Guid Id, CancellationToken Token)> _deleted = new();
+
+    // #2095: the REAL reconciler (its real synchronizer and ownership resolver) over an in-memory Dataverse. A document the
+    // world does not hold reads as not isolated, so the tests that are not about isolation need no setup.
+    private readonly SecureChildShareWorld _world = SecureChildShareWorld.Standard();
+    private readonly FakeRecordShareTable _shares = new();
 
     public InvoiceReviewWritePathTests()
     {
@@ -949,6 +956,115 @@ public class InvoiceReviewWritePathTests
     }
 
     // =========================================================================================
+    // #2095 — filing the document under an invoice is a re-file: SecureChildReconciler.AfterRefileAsync follows it
+    // =========================================================================================
+
+    private static readonly Guid SecureMatter = Guid.Parse("20950000-0000-4000-8000-000000000001");
+    private static readonly Guid OrdinaryMatter = Guid.Parse("20950000-0000-4000-8000-000000000002");
+    private static readonly Guid Sharee = Guid.Parse("20950000-0000-4000-8000-0000000000b1");
+
+    /// <summary>Collaborate on the record, as a Manage Access share writes it (Read|Write|Append|AppendTo, no Share).</summary>
+    private const int CollaborateMask = 1 | 2 | 4 | 16;
+
+    /// <summary>
+    /// The reparent as Dataverse leaves it: the change applied, the document's matter lookup on the confirmed matter and its
+    /// owner moved to the secure team (<paramref name="intoSecure"/>) or the ordinary business unit's team.
+    /// </summary>
+    private void TheReparentMovesTheDocumentTo(Guid document, Guid matter, bool intoSecure) =>
+        _ownership.Setup(o => o.ReparentAsync(
+                It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (RecordReparent _, Func<CancellationToken, Task> apply, CancellationToken token) =>
+            {
+                await apply(token);
+                _world.Set("sprk_document", document, "sprk_matter", new EntityReference("sprk_matter", matter));
+                _world.MoveOwner("sprk_document", document, DataversePrincipalRef.Team(
+                    intoSecure ? SecureChildShareWorld.SecureTeam : SecureChildShareWorld.GeneralTeam));
+                return RecordOwnerResolution.Owned(TeamId);
+            });
+
+    [Fact(DisplayName = "#2095: confirming a Secure-owned document onto an ordinary matter runs AfterRefileAsync with wasIsolated=true (read BEFORE the reparent)")]
+    public async Task Confirm_AnIsolatedDocumentMovedOutOfSecure_RunsAfterRefile_WithWasIsolatedTrue()
+    {
+        var request = NewRequest() with { MatterId = OrdinaryMatter };
+        _world.SecureRoot("sprk_matter", SecureMatter).OrdinaryRoot("sprk_matter", OrdinaryMatter)
+            .SecureChild("sprk_document", request.DocumentId, ("sprk_matter", "sprk_matter", SecureMatter));
+        _shares.Seed("sprk_document", request.DocumentId, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _records.ExistingDocument(request.DocumentId);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+        TheReparentMovesTheDocumentTo(request.DocumentId, OrdinaryMatter, intoSecure: false);
+
+        await Sut().ConfirmInvoiceAsync(request, "corr-2095-a");
+
+        // The mirror comes off only for a row that WAS isolated, and the step reads that BEFORE the write: read after the
+        // reparent the document is ordinary (wasIsolated=false) and its share would stay. So the share going proves
+        // AfterRefileAsync ran for THIS document with wasIsolated=true.
+        _shares.MaskOf("sprk_document", request.DocumentId, DataversePrincipalRef.User(Sharee)).Should().BeNull(
+            "the secure matter's sharee is taken off a document that left every Secure record (owner round 22)");
+    }
+
+    [Fact(DisplayName = "#2095: confirming an ordinary document onto a Secure matter runs AfterRefileAsync with wasIsolated=false (mirror created, nothing released)")]
+    public async Task Confirm_AnOrdinaryDocumentMovedIntoSecure_RunsAfterRefile_WithWasIsolatedFalse()
+    {
+        var request = NewRequest() with { MatterId = SecureMatter };
+        _world.SecureRoot("sprk_matter", SecureMatter).OrdinaryRoot("sprk_matter", OrdinaryMatter)
+            .OrdinaryChild("sprk_document", request.DocumentId, ("sprk_matter", "sprk_matter", OrdinaryMatter));
+        _shares.Seed("sprk_matter", SecureMatter, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _records.ExistingDocument(request.DocumentId);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+        TheReparentMovesTheDocumentTo(request.DocumentId, SecureMatter, intoSecure: true);
+
+        await Sut().ConfirmInvoiceAsync(request, "corr-2095-b");
+
+        _shares.MaskOf("sprk_document", request.DocumentId, DataversePrincipalRef.User(Sharee)).Should().NotBeNull(
+            "the document moved under a Secure matter is shared with that matter's sharees now, not at the next two-minute pass");
+    }
+
+    [Fact(DisplayName = "#2095: an isolation read that faults twice means NO write: no invoice, no link, no reparent, no job")]
+    public async Task Confirm_WhenTheIsolationReadFaultsTwice_WritesNothing()
+    {
+        var request = NewRequest();
+        _world.SecureRoot("sprk_matter", SecureMatter)
+            .SecureChild("sprk_document", request.DocumentId, ("sprk_matter", "sprk_matter", SecureMatter));
+        _records.ExistingDocument(request.DocumentId);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+        var faults = 0;
+        _world.QueryFault = () =>
+        {
+            faults++;
+            return new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout of 100 seconds elapsing.");
+        };
+        _world.FailingQueriesOf("sprk_document");
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-2095-c");
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("Nothing was saved");
+        faults.Should().Be(2, "the read, then its one retry");
+        _records.Writes.Should().BeEmpty("fail closed: nothing is written when whether the document is isolated cannot be told");
+        _ownership.Verify(o => o.ReparentAsync(
+            It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()), Times.Never);
+        _submitted.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "#2095: a refused reparent writes nothing and does not run AfterRefileAsync")]
+    public async Task Confirm_WhenTheReparentIsRefused_DoesNotRunAfterRefile()
+    {
+        var request = NewRequest() with { MatterId = OrdinaryMatter };
+        _world.SecureRoot("sprk_matter", SecureMatter).OrdinaryRoot("sprk_matter", OrdinaryMatter)
+            .SecureChild("sprk_document", request.DocumentId, ("sprk_matter", "sprk_matter", SecureMatter));
+        _shares.Seed("sprk_document", request.DocumentId, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _records.ExistingDocument(request.DocumentId);
+        _ownership.Setup(o => o.ReparentAsync(
+                It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RecordOwnerResolution.Refused("record_owner_test", "refused for the test"));
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-2095-d");
+
+        (await act.Should().ThrowAsync<InvoiceReviewException>()).Which.Failure.Should().Be(InvoiceReviewFailure.OwnerTeamUnresolved);
+        _shares.MaskOf("sprk_document", request.DocumentId, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "nothing was re-filed, so the step did not run");
+    }
+
+    // =========================================================================================
     // Name
     // =========================================================================================
 
@@ -976,8 +1092,8 @@ public class InvoiceReviewWritePathTests
     // =========================================================================================
 
     private InvoiceReviewService Sut() => new(
-        _records, _entities.Object, _ownership.Object, _recordTypes.Object, _jobs.Object, new FinanceTelemetry(),
-        NullLogger<InvoiceReviewService>.Instance);
+        _records, _entities.Object, _ownership.Object, SecureChildShareWorld.ReconcilerOver(() => _world, _shares, null!),
+        _recordTypes.Object, _jobs.Object, new FinanceTelemetry(), NullLogger<InvoiceReviewService>.Instance);
 
     /// <summary>
     /// Deletes succeed and remove the row — unless handed an already-cancelled token, which (like the real

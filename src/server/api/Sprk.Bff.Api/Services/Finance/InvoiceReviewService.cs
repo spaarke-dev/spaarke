@@ -2,6 +2,7 @@ using System.Data;
 using System.Globalization;
 using System.Text.Json;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Telemetry;
@@ -250,6 +251,7 @@ public class InvoiceReviewService : IInvoiceReviewService
     private readonly IFieldMappingDataverseService _records;
     private readonly IGenericEntityService _entities;
     private readonly IRecordOwnershipResolver _ownership;
+    private readonly SecureChildReconciler _children;
     private readonly ICommunicationDataverseService _recordTypes;
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly FinanceTelemetry _telemetry;
@@ -341,6 +343,7 @@ public class InvoiceReviewService : IInvoiceReviewService
         IFieldMappingDataverseService records,
         IGenericEntityService entities,
         IRecordOwnershipResolver ownership,
+        SecureChildReconciler children,
         ICommunicationDataverseService recordTypes,
         JobSubmissionService jobSubmissionService,
         FinanceTelemetry telemetry,
@@ -349,6 +352,7 @@ public class InvoiceReviewService : IInvoiceReviewService
         _records = records ?? throw new ArgumentNullException(nameof(records));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _children = children ?? throw new ArgumentNullException(nameof(children));
         _recordTypes = recordTypes ?? throw new ArgumentNullException(nameof(recordTypes));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
@@ -651,10 +655,18 @@ public class InvoiceReviewService : IInvoiceReviewService
     /// throws <see cref="InvoiceReviewFailure.OwnerTeamUnresolved"/> with nothing written. After the change the
     /// document is reassigned (a separate owner write, read back) when its owner moves — into the named Secure team
     /// for a secure matter. A Dataverse fault propagates.
+    /// <para>#2095: the document's isolation (owned by the Secure Record owner team) is read BEFORE the change — it cannot
+    /// be read once the owner has moved — and, once the reparent has landed, <see cref="SecureChildReconciler.AfterRefileAsync"/>
+    /// runs, as it does after every re-file (#2091): the document's secure-child mirror, and the pass over what is filed under
+    /// it. Without it a document filed under an invoice of a Secure matter stays readable by its business unit, and one moved
+    /// out of a Secure record releases nothing, until the two-minute recent-changes net reaches it. A read that faults twice
+    /// writes nothing (fail closed — a retry re-reads it); the step itself never throws (the write stands).</para>
     /// </summary>
     private async Task RefileDocumentUnderInvoiceAsync(
         InvoiceReviewConfirmRequest request, Func<CancellationToken, Task> applyChange, CancellationToken ct)
     {
+        var wasIsolated = await ReadDocumentIsolationBeforeWriteAsync(request.DocumentId, ct);
+
         var reparent = await _ownership.ReparentAsync(
             new RecordReparent
             {
@@ -672,6 +684,36 @@ public class InvoiceReviewService : IInvoiceReviewService
                 InvoiceReviewFailure.OwnerTeamUnresolved,
                 $"The document could not be filed under the invoice because its owner could not be resolved "
                 + $"({reparent.RefusalCode}: {reparent.Reason}). Nothing was saved.");
+        }
+
+        // #2095: the ONE step after a re-file. CancellationToken.None — the change has landed, so a cancelled request must
+        // not skip the reconciliation. It never throws (it logs an ERROR naming the row when it cannot finish; the
+        // two-minute net completes it) and it is not run when the reparent moved no parent.
+        if (!reparent.ParentsUnchanged)
+        {
+            await _children.AfterRefileAsync(DocumentEntity, request.DocumentId, wasIsolated, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// #2095: whether the document is isolated now, read BEFORE the re-file writes (once more after a fault — a timeout
+    /// included; <see cref="RefileIsolationRead"/>). When it cannot be read, nothing is written: the re-file would otherwise
+    /// release nothing from a document that left a Secure record and nothing would remove its mirror.
+    /// </summary>
+    private async Task<Func<Task<bool>>> ReadDocumentIsolationBeforeWriteAsync(Guid documentId, CancellationToken ct)
+    {
+        var answer = await RefileIsolationRead.BeforeWriteAsync(_children, DocumentEntity, documentId, ct);
+        try
+        {
+            var isolated = await answer();
+            return () => Task.FromResult(isolated);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                "Whether the document is held in a Secure record could not be read, so it was not filed under the invoice. "
+                + "Nothing was saved; retry the confirmation.", ex);
         }
     }
 
