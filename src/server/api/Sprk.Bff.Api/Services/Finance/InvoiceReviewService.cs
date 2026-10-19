@@ -335,6 +335,19 @@ public class InvoiceReviewService : IInvoiceReviewService
     internal const string InvName = "sprk_name";
     internal const string InvExtractionStatus = "sprk_extractionstatus";
     internal const string InvInvoiceNumber = "sprk_invoicenumber";
+
+    /// <summary>
+    /// <c>sprk_invoice.sprk_trackingnumber</c> (ebilling-r1 task 049 part A, D-124): the D-87 tracking number <c>{firm invoice number}.{n}</c>,
+    /// copied from the submission when the invoice is created and never changed. The firm's own number stays in <see cref="InvInvoiceNumber"/>.
+    /// Same logical name as the submission's column (<c>TrackingNumberAllocator.TrackingNumberColumn</c>), by design.
+    /// </summary>
+    internal const string InvTrackingNumber = "sprk_trackingnumber";
+
+    /// <summary>
+    /// <c>sprk_invoice.sprk_trackingnumber</c> MaxLength (100, as the submission's): the allocator caps the firm invoice number at 89
+    /// characters (<c>TrackingNumberAllocator.MaxFirmInvoiceNumberLength</c>) and adds a dot and an n of up to 10 digits.
+    /// </summary>
+    internal const int InvTrackingNumberMaxLength = 100;
     internal const string InvInvoiceDate = "sprk_invoicedate";
     internal const string InvTotalAmount = "sprk_totalamount";
 
