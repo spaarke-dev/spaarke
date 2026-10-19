@@ -26,6 +26,23 @@ public enum BillingMessageSource
     HeadlineOnly,
 }
 
+/// <summary>How the rejection rule (073) decided a merged Signal's reasons, when the caller passed its decisions (task 049 part D).</summary>
+public enum BillingGroupDecision
+{
+    /// <summary>No decisions were given (the mapping is the rule's configured view only).</summary>
+    NotDecided,
+
+    /// <summary>A merged reason rejected the submission: the primary reason is the first deciding finding in reason order.</summary>
+    Rejects,
+
+    /// <summary>The group's consequence is Reject but 073 held every reason: not presented as a rejection; the evidence carries a
+    /// <see cref="BillingFindingSignalMapper.DecisionEvidenceKind"/> line <c>Held</c> with the hold reason.</summary>
+    Held,
+
+    /// <summary>The group's consequence is not Reject: nothing to present.</summary>
+    NotRejecting,
+}
+
 /// <summary>The rows 049 creates for the evaluated invoice: the invoice and each line by its <see cref="BillingLineFacts.Index"/>.</summary>
 public sealed record BillingSignalSubjects(
     Guid InvoiceId,
@@ -56,6 +73,9 @@ public sealed record BillingSignalMapping(SignalWriteRequest Request, BillingMes
     /// evidence under <see cref="BillingFindingSignalMapper.FingerprintEvidenceKind"/>. Task 049 compares it with the open Signal's to
     /// decide between a refresh and Superseded plus episode n+1; the mapper does not supersede.</summary>
     public string Fingerprint { get; init; } = string.Empty;
+
+    /// <summary>How 073 decided the group (task 049 part D); <see cref="BillingGroupDecision.NotDecided"/> when no decisions were given.</summary>
+    public BillingGroupDecision Decision { get; init; } = BillingGroupDecision.NotDecided;
 }
 
 /// <summary>
@@ -67,7 +87,7 @@ public sealed record BillingSignalMapping(SignalWriteRequest Request, BillingMes
 /// <remarks>
 /// <para><b>One Signal per (policy, subject) (ontology-r1, Signal dedupe option a, 2026-10-18).</b> The writer's key is
 /// <c>policy|subjectEntity|subjectId|episode</c> and a write to an open row only refreshes it, so a second finding of one policy on one
-/// subject (an ExpenseRule code and cap on one line, RequiredData with several missing fields) was silently dropped. <see cref="MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects)"/>
+/// subject (an ExpenseRule code and cap on one line, RequiredData with several missing fields) was silently dropped. <see cref="MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision})"/>
 /// merges them: the reason codes sorted (ordinal); the strongest consequence wins (<see cref="BillingSignalMapping.Consequence"/>);
 /// the evidence holds one <see cref="ReasonEvidenceKind"/> line per reason with that reason's own text, the union of the values read
 /// (<see cref="FieldEvidenceKind"/> for an extracted field with its confidence, <see cref="ReferenceEvidenceKind"/> for a reference
@@ -111,6 +131,13 @@ public static class BillingFindingSignalMapper
     /// <summary>Evidence kind of a reference value read (an approved rate, a tracking number): <c>Ref</c> its name, <c>Text</c> the value.</summary>
     public const string ReferenceEvidenceKind = "billing.reference";
 
+    /// <summary>Evidence kind of 073's decision on a group whose consequence is Reject but which did not reject (task 049 part D, 072 part W
+    /// K1): <c>Ref</c> <see cref="HeldDecisionRef"/>, <c>Text</c> the primary reason's <see cref="SubmissionHoldReasons"/> code.</summary>
+    public const string DecisionEvidenceKind = "billing.decision";
+
+    /// <summary>The <c>Ref</c> of a <see cref="DecisionEvidenceKind"/> line: the rule held the reasons for review.</summary>
+    public const string HeldDecisionRef = "Held";
+
     internal const string InvoiceEntity = "sprk_invoice";
     internal const string LineEntity = "sprk_billingevent";
     private const int MaxHeadlineLength = 200;
@@ -121,31 +148,43 @@ public static class BillingFindingSignalMapper
     /// <summary>The severity of a Signal whose primary reason is flag-only: the lowest, so a note never ranks like a breach.</summary>
     internal const int FlagOnlySeverity = SignalWriter.SeverityInfo;
 
-    /// <summary>The Signal writes of one evaluation: <see cref="MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects)"/>
+    /// <summary>The Signal writes of one evaluation: <see cref="MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision})"/>
     /// over its findings and rule versions.</summary>
-    public static IReadOnlyList<BillingSignalMapping> MapAll(BillingEvaluationResult evaluation, BillingSignalSubjects subjects)
+    public static IReadOnlyList<BillingSignalMapping> MapAll(
+        BillingEvaluationResult evaluation, BillingSignalSubjects subjects, IReadOnlyList<FindingDecision>? decisions = null)
     {
         ArgumentNullException.ThrowIfNull(evaluation);
-        return MapAll(evaluation.Findings, evaluation.RulesByVersion, subjects);
+        return MapAll(evaluation.Findings, evaluation.RulesByVersion, subjects, decisions);
     }
 
     /// <summary>
     /// Maps every finding onto the rows in <paramref name="subjects"/>, one request per (policy code, subject), in the order each pair
     /// first appears among <paramref name="findings"/>.
     /// </summary>
+    /// <param name="findings">The evaluation's findings, in its order.</param>
+    /// <param name="rulesByVersion">The rule version behind each finding.</param>
+    /// <param name="subjects">The invoice and line rows.</param>
+    /// <param name="decisions">Optional (task 049 part D, 072 part W K1): 073's decision about each finding, <see cref="FindingDecision.Index"/>
+    /// = the finding's position in <paramref name="findings"/>. A group holding a deciding finding (<see cref="FindingDecision.Rejects"/>) takes
+    /// the first deciding finding in reason order as its primary reason (message, headline, lane, severity), so the firm sees the reason that
+    /// actually rejected; a group whose consequence is Reject but which 073 held throughout is not presented as a rejection (a
+    /// <see cref="DecisionEvidenceKind"/> line). The fingerprint does not depend on them.</param>
     /// <exception cref="ArgumentException">A finding's version is not in <paramref name="rulesByVersion"/>, or its line has no row in
-    /// <paramref name="subjects"/>.</exception>
+    /// <paramref name="subjects"/>, or <paramref name="decisions"/> is not one decision per finding, of that finding.</exception>
     public static IReadOnlyList<BillingSignalMapping> MapAll(
-        IReadOnlyList<BillingFinding> findings, IReadOnlyDictionary<Guid, BillingRuleCandidate> rulesByVersion, BillingSignalSubjects subjects)
+        IReadOnlyList<BillingFinding> findings, IReadOnlyDictionary<Guid, BillingRuleCandidate> rulesByVersion, BillingSignalSubjects subjects,
+        IReadOnlyList<FindingDecision>? decisions = null)
     {
         ArgumentNullException.ThrowIfNull(findings);
         ArgumentNullException.ThrowIfNull(rulesByVersion);
         ArgumentNullException.ThrowIfNull(subjects);
+        var decisionOf = DecisionsByIndex(findings, decisions);
 
-        var groups = new List<List<(BillingFinding Finding, BillingRuleCandidate Rule)>>();
-        var byKey = new Dictionary<string, List<(BillingFinding, BillingRuleCandidate)>>(StringComparer.Ordinal);
-        foreach (var finding in findings)
+        var groups = new List<List<(BillingFinding Finding, BillingRuleCandidate Rule, FindingDecision? Decision)>>();
+        var byKey = new Dictionary<string, List<(BillingFinding, BillingRuleCandidate, FindingDecision?)>>(StringComparer.Ordinal);
+        for (var index = 0; index < findings.Count; index++)
         {
+            var finding = findings[index];
             if (!rulesByVersion.TryGetValue(finding.PolicyVersionId, out var rule))
             {
                 throw new ArgumentException($"No rule version {finding.PolicyVersionId} was given for a finding of policy {finding.PolicyCode}.", nameof(rulesByVersion));
@@ -159,13 +198,45 @@ public static class BillingFindingSignalMapper
                 groups.Add(group);
             }
 
-            group.Add((finding, rule));
+            group.Add((finding, rule, decisionOf?[index]));
         }
 
-        return groups.Select(g => MapGroup(g, subjects)).ToList();
+        return groups.Select(g => MapGroup(g, subjects, decided: decisionOf is not null)).ToList();
     }
 
-    /// <summary>One finding alone (a group of one). Internal: 049 maps an evaluation with <see cref="MapAll(BillingEvaluationResult, BillingSignalSubjects)"/>,
+    private static FindingDecision[]? DecisionsByIndex(IReadOnlyList<BillingFinding> findings, IReadOnlyList<FindingDecision>? decisions)
+    {
+        if (decisions is null)
+        {
+            return null;
+        }
+
+        if (decisions.Count != findings.Count)
+        {
+            throw new ArgumentException("The decisions must cover every finding, one each.", nameof(decisions));
+        }
+
+        var byIndex = new FindingDecision[findings.Count];
+        foreach (var decision in decisions)
+        {
+            if (decision is null || decision.Index < 0 || decision.Index >= findings.Count
+                || !SameFinding(decision.Finding, findings[decision.Index]) || byIndex[decision.Index] is not null)
+            {
+                throw new ArgumentException("Each decision must be the rejection rule's decision about the finding at its index.", nameof(decisions));
+            }
+
+            byIndex[decision.Index] = decision;
+        }
+
+        return byIndex;
+
+        // The decision names the finding at its index: the same version, subject and reason (a copy made with `with` still matches).
+        static bool SameFinding(BillingFinding? decided, BillingFinding finding) =>
+            decided is not null && decided.PolicyVersionId == finding.PolicyVersionId && decided.Subject == finding.Subject
+            && string.Equals(decided.ReasonCode, finding.ReasonCode, StringComparison.Ordinal);
+    }
+
+    /// <summary>One finding alone (a group of one). Internal: 049 maps an evaluation with <see cref="MapAll(BillingEvaluationResult, BillingSignalSubjects, IReadOnlyList{FindingDecision})"/>,
     /// so two findings of one policy on one subject are never sent as two requests.</summary>
     /// <exception cref="ArgumentException">The finding is not <paramref name="rule"/>'s, or its line has no row in <paramref name="subjects"/>.</exception>
     internal static BillingSignalMapping Map(BillingFinding finding, BillingRuleCandidate rule, BillingSignalSubjects subjects)
@@ -178,18 +249,19 @@ public static class BillingFindingSignalMapper
             throw new ArgumentException("The finding was not produced by this rule version.", nameof(rule));
         }
 
-        return MapGroup([(finding, rule)], subjects);
+        return MapGroup([(finding, rule, null)], subjects, decided: false);
     }
 
     /// <summary>The reason-set fingerprint: the sorted reason codes and the strongest consequence.</summary>
     internal static string FingerprintOf(IEnumerable<string> sortedReasonCodes, BillingConsequence consequence) =>
         string.Join(",", sortedReasonCodes) + "|" + consequence;
 
-    private static BillingSignalMapping MapGroup(IReadOnlyList<(BillingFinding Finding, BillingRuleCandidate Rule)> group, BillingSignalSubjects subjects)
+    private static BillingSignalMapping MapGroup(
+        IReadOnlyList<(BillingFinding Finding, BillingRuleCandidate Rule, FindingDecision? Decision)> group, BillingSignalSubjects subjects, bool decided)
     {
         // Reason order: code (ordinal), then content, so the result does not depend on the order the findings arrived in.
         var members = group
-            .Select(m => (m.Finding, m.Rule, Consequence: EffectiveConsequence(m.Finding, m.Rule)))
+            .Select(m => (m.Finding, m.Rule, Consequence: EffectiveConsequence(m.Finding, m.Rule), m.Decision))
             .OrderBy(m => m.Finding.ReasonCode, StringComparer.Ordinal)
             .ThenBy(m => ContentKey(m.Finding), StringComparer.Ordinal)
             .ToList();
@@ -198,10 +270,19 @@ public static class BillingFindingSignalMapper
         // primary it would title and rank a real Flag breach as a note. A real breach at the winning consequence takes precedence.
         // ontology-r1 D-125 review (a): among flag-only notes the D-91 invoice-number mismatch titles the Signal. It sorts after the coding
         // notes by code, and a non-primary reason survives only as an evidence line that the read path strips.
-        var primary = members.Where(m => m.Consequence == consequence)
-            .OrderBy(m => BillingRuleCatalogue.IsFlagOnlyReason(m.Finding.ReasonCode) ? 1 : 0)
-            .ThenBy(m => m.Finding.ReasonCode == BillingReasonCodes.SubmissionInvoiceNumberMismatch ? 0 : 1)
-            .First();
+        // 072 part W K1 (task 049 part D): when 073 rejected on a reason of this group, that reason is the primary one, not merely the
+        // first reject-consequence reason in code order.
+        var deciding = members.Where(m => m.Decision is { Rejects: true }).ToList();
+        var primary = deciding.Count > 0
+            ? deciding[0]
+            : members.Where(m => m.Consequence == consequence)
+                .OrderBy(m => BillingRuleCatalogue.IsFlagOnlyReason(m.Finding.ReasonCode) ? 1 : 0)
+                .ThenBy(m => m.Finding.ReasonCode == BillingReasonCodes.SubmissionInvoiceNumberMismatch ? 0 : 1)
+                .First();
+        var groupDecision = !decided ? BillingGroupDecision.NotDecided
+            : deciding.Count > 0 ? BillingGroupDecision.Rejects
+            : consequence == BillingConsequence.Reject ? BillingGroupDecision.Held
+            : BillingGroupDecision.NotRejecting;
         var withheld = members.Any(m => m.Finding.DetailWithheld);
 
         var (entity, subjectId, displayName) = SubjectOf(primary.Finding.Subject, subjects);
@@ -229,6 +310,12 @@ public static class BillingFindingSignalMapper
             Text = ReasonText(m.Finding, m.Rule, withheld),
             Source = "sprk_policyversion:" + m.Finding.PolicyVersionId.ToString("D").ToLowerInvariant(),
         }));
+        if (groupDecision == BillingGroupDecision.Held)
+        {
+            // Not presented as a rejection: lane, severity and sentence stay the policy's and the primary reason's; the evidence says 073 held it.
+            evidence.Add(new SignalEvidenceRef(DecisionEvidenceKind, HeldDecisionRef, "Fact") { Text = primary.Decision?.HeldBecause });
+        }
+
         evidence.AddRange(members
             .SelectMany(m => m.Finding.ValuesRead)
             .Select(v => ValueEvidence(v, withheld || v.Value is null ? null : v.Value))
@@ -253,6 +340,7 @@ public static class BillingFindingSignalMapper
             ReasonCodes = reasonCodes,
             Consequence = consequence,
             Fingerprint = fingerprint,
+            Decision = groupDecision,
         };
     }
 

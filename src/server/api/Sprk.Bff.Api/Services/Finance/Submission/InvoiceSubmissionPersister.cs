@@ -28,6 +28,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Resolution;
+using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance.Submission;
@@ -170,7 +171,31 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// <summary>The id of a submission's approval portion.</summary>
     public static Guid ApprovalIdFor(Guid submissionId) => IdOf($"ebilling-approval-{submissionId:D}");
 
-    private static Guid IdOf(string key) => new(SHA256.HashData(Encoding.UTF8.GetBytes(key)).AsSpan(0, 16));
+    /// <summary>A deterministic id: the first 16 bytes of the key's SHA-256 (as <c>DecisionRecordWriter.IdOf</c>). Part D's decision id uses it too.</summary>
+    internal static Guid IdOf(string key) => new(SHA256.HashData(Encoding.UTF8.GetBytes(key)).AsSpan(0, 16));
+
+    /// <summary>The invoice's <c>sprk_name</c> (<see cref="InvoiceReviewService.BuildInvoiceName"/>), also the Signals' subject display name.</summary>
+    internal static string InvoiceNameFor(SubmissionEvaluationOutcome outcome) => InvoiceReviewService.BuildInvoiceName(
+        outcome.Read!.Header.FirmName.Value, outcome.Submission!.FirmInvoiceNumber, outcome.Read.Header.InvoiceDate.Value?.ToDateTime(TimeOnly.MinValue));
+
+    /// <summary>A line's <c>sprk_name</c>: the tracking number and the 1-based line number, also the Signals' subject display name.</summary>
+    internal static string LineNameFor(string trackingNumber, int lineIndex) =>
+        $"{trackingNumber} #{(lineIndex + 1).ToString(CultureInfo.InvariantCulture)}";
+
+    /// <summary>
+    /// The rows the Signals are written on (part D): the invoice and every line by index, with the ids this persister creates them with
+    /// (deterministic, so no read is needed) and their display names.
+    /// </summary>
+    internal static BillingSignalSubjects SignalSubjectsFor(SubmissionEvaluationOutcome outcome, Guid invoiceId)
+    {
+        var tracking = outcome.Submission!.TrackingNumber;
+        var count = outcome.Read!.Lines.Count;
+        return new BillingSignalSubjects(
+            invoiceId,
+            InvoiceNameFor(outcome),
+            Enumerable.Range(0, count).ToDictionary(i => i, i => LineIdFor(outcome.SubmissionId, i)),
+            Enumerable.Range(0, count).ToDictionary(i => i, i => LineNameFor(tracking, i)));
+    }
 
     /// <inheritdoc />
     public async Task<SubmissionPersistResult> PersistAsync(SubmissionEvaluationOutcome outcome, string? correlationId, CancellationToken ct = default)
@@ -462,8 +487,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             invoice[column] = value;
         }
 
-        invoice[InvoiceReviewService.InvName] = InvoiceReviewService.BuildInvoiceName(
-            header.FirmName.Value, snapshot.FirmInvoiceNumber, header.InvoiceDate.Value?.ToDateTime(TimeOnly.MinValue));
+        invoice[InvoiceReviewService.InvName] = InvoiceNameFor(outcome);
         invoice[InvoiceReviewService.InvInvoiceNumber] = snapshot.FirmInvoiceNumber;
         invoice[InvoiceReviewService.InvTrackingNumber] = snapshot.TrackingNumber;
         invoice[InvoiceVendorOrg] = new EntityReference("sprk_organization", snapshot.FirmId);
@@ -532,7 +556,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             {
                 [InvoiceFamilyCoreRecordGuard.LineInvoiceColumn] = new EntityReference(InvoiceReviewService.InvoiceEntity, invoiceId),
                 [CoreColumn(LineEntity, core)] = new EntityReference(core.EntityLogicalName, core.RecordId),
-                [LineName] = $"{snapshot.TrackingNumber} #{(index + 1).ToString(CultureInfo.InvariantCulture)}",
+                [LineName] = LineNameFor(snapshot.TrackingNumber, index),
                 [LineSequence] = index + 1,
                 [InvoiceTotalsService.LineCostType] = new OptionSetValue(line.LineType == InvoiceLineType.Fee ? CostTypeFee : CostTypeExpense),
                 [LineVendorOrg] = new EntityReference("sprk_organization", snapshot.FirmId),
@@ -885,8 +909,73 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             ["findings"] = findingsJson,
             ["pipelineFindings"] = pipeline,
             ["codingFindings"] = coding,
+            ["invoiceName"] = InvoiceNameFor(outcome),
+            ["invoiceNumberReadConfidence"] = outcome.InvoiceNumber?.ReadConfidence,
+            ["signalPlan"] = SignalPlanJson(outcome, invoiceId),
         };
         return root.ToJsonString(Json);
+    }
+
+    /// <summary>
+    /// The Signal plan (notes section 5; part D): the billing findings mapped by <see cref="BillingFindingSignalMapper.MapAll(BillingEvaluationResult, BillingSignalSubjects, IReadOnlyList{FindingDecision})"/>
+    /// with 073's decisions (the deciding reason is the primary one; a held Reject group carries the Held line), one entry per
+    /// (policy, subject): the merged, scrubbed request (headline, lane, severity, template, facts, evidence), its rendered sentence, its
+    /// reason codes, consequence, fingerprint and 073's group decision. Never <see cref="BillingSignalMapping.Findings"/> (072 part E
+    /// re-check, D-112). Part D writes the rule Signals from this stored copy on every run, the first and a resume alike, so it never
+    /// re-runs AI or the evaluation. The system findings are not in the plan: part D maps them from the pipeline and coding findings under
+    /// the system policy it reads at run time (D-125).
+    /// </summary>
+    internal static JsonArray SignalPlanJson(SubmissionEvaluationOutcome outcome, Guid invoiceId)
+    {
+        var plan = new JsonArray();
+        if (outcome.Evaluation is not { } evaluation)
+        {
+            return plan;
+        }
+
+        var mappings = BillingFindingSignalMapper.MapAll(evaluation, SignalSubjectsFor(outcome, invoiceId), outcome.Decision?.Findings);
+        foreach (var mapping in mappings)
+        {
+            var request = mapping.Request;
+            var facts = new JsonObject();
+            foreach (var (name, value) in request.FactValues)
+            {
+                facts[name] = value?.ToString();
+            }
+
+            plan.Add(new JsonObject
+            {
+                ["policyId"] = request.PolicyId.ToString("D"),
+                ["policyCode"] = request.PolicyCode,
+                ["policyVersionId"] = request.PolicyVersionId.ToString("D"),
+                ["subjectEntity"] = request.SubjectEntityLogicalName,
+                ["subjectId"] = request.SubjectId.ToString("D"),
+                ["subjectName"] = request.SubjectDisplayName,
+                ["headline"] = request.ShortHeadline,
+                ["lane"] = request.Lane,
+                ["severity"] = request.Severity,
+                ["template"] = request.MessageTemplate,
+                ["facts"] = facts,
+                ["sentence"] = SignalWriter.RenderSentence(request.MessageTemplate, request.FactValues),
+                ["evidence"] = new JsonArray((request.EvidenceRefs ?? []).Select(e => (JsonNode)new JsonObject
+                {
+                    ["kind"] = e.Kind,
+                    ["ref"] = e.Ref,
+                    ["tier"] = e.Tier,
+                    ["confidence"] = e.Confidence,
+                    ["text"] = e.Text,
+                    ["source"] = e.Source,
+                    ["asOf"] = e.AsOf,
+                    ["clause"] = e.Clause,
+                }).ToArray()),
+                ["reasonCodes"] = new JsonArray(mapping.ReasonCodes.Select(c => (JsonNode)JsonValue.Create(c)!).ToArray()),
+                ["consequence"] = mapping.Consequence.ToString(),
+                ["fingerprint"] = mapping.Fingerprint,
+                ["decision"] = mapping.Decision.ToString(),
+            });
+        }
+
+        return plan;
     }
 
     // ── Helpers ──

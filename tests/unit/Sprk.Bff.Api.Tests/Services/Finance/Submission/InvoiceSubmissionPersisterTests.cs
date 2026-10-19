@@ -624,6 +624,53 @@ public class InvoiceSubmissionPersisterTests
         hidden.RootElement.GetProperty("findings")[0].GetProperty("detailWithheld").GetBoolean().Should().BeTrue();
     }
 
+    // ── part D: the stored Signal plan ──
+
+    [Fact(DisplayName = "049 D: the findings JSON stores the Signal plan (merged request, sentence, fingerprint, 073's decision) on the persisted row ids")]
+    public async Task FindingsJson_StoresTheSignalPlan_WithTheDecidingReasonAndTheRowIds()
+    {
+        var harness = new ProcessorHarness { Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()] };
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20))];
+        var outcome = await harness.RunAsync();
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AutoRejected);
+
+        using var json = JsonDocument.Parse(InvoiceSubmissionPersister.BuildFindingsJson(outcome, InvoiceId));
+
+        var plan = json.RootElement.GetProperty("signalPlan");
+        plan.GetArrayLength().Should().Be(1);
+        var entry = plan[0];
+        entry.GetProperty("policyCode").GetString().Should().Be("BILL-AGE");
+        entry.GetProperty("subjectEntity").GetString().Should().Be("sprk_billingevent");
+        entry.GetProperty("subjectId").GetString().Should().Be(InvoiceSubmissionPersister.LineIdFor(Submission, 0).ToString("D"), "the row the persister creates");
+        entry.GetProperty("subjectName").GetString().Should().Be("INV-100.2 #1");
+        entry.GetProperty("decision").GetString().Should().Be(nameof(BillingGroupDecision.Rejects));
+        entry.GetProperty("fingerprint").GetString().Should().EndWith("|Reject");
+        entry.GetProperty("sentence").GetString().Should().NotBeNullOrWhiteSpace().And.NotContain("{{");
+        entry.GetProperty("evidence").EnumerateArray().Should().Contain(e => e.GetProperty("kind").GetString() == BillingFindingSignalMapper.FingerprintEvidenceKind);
+        json.RootElement.GetProperty("invoiceName").GetString().Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact(DisplayName = "049 D (D-112): a withheld group's stored plan carries no value text")]
+    public async Task SignalPlan_WithheldGroup_HasNoValueText()
+    {
+        var harness = new ProcessorHarness { Rules = [Version("BILL-AI", RuleType.AiObservation)] };
+        harness.Coding.Observations = [new InvoiceLineObservation { Type = InvoiceLineObservationType.BlockBilling, Confidence = 0.99m, QuotedText = "x" }];
+        var outcome = await harness.RunAsync();
+        var withheld = outcome with
+        {
+            Evaluation = outcome.Evaluation! with { Findings = [.. outcome.Evaluation.Findings.Select(f => f with { DetailWithheld = true })] },
+        };
+
+        using var json = JsonDocument.Parse(InvoiceSubmissionPersister.BuildFindingsJson(withheld, InvoiceId));
+
+        var entry = json.RootElement.GetProperty("signalPlan")[0];
+        entry.GetProperty("template").GetString().Should().Be(BillingRuleCatalogue.WithheldDuplicateTemplate);
+        entry.GetProperty("facts").EnumerateObject().Should().BeEmpty();
+        entry.GetProperty("evidence").EnumerateArray()
+            .Where(e => e.GetProperty("kind").GetString() is BillingFindingSignalMapper.FieldEvidenceKind or BillingFindingSignalMapper.ReferenceEvidenceKind)
+            .Should().OnlyContain(e => e.GetProperty("text").ValueKind == JsonValueKind.Null);
+    }
+
     // ── harness ──
 
     private static Entity Target(OrganizationRequest request) => request switch
