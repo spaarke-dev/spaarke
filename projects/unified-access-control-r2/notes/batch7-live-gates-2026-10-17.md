@@ -215,3 +215,18 @@ traces | where timestamp > datetime(2026-10-16T06:03:13Z) and cloud_RoleName == 
 - R3 (iii) no-op push: PASS.
 - #2083: PASS.
 - A positive re-file through the four #2094 writers is NOT REACHABLE live without creating config (none was created).
+
+## 099b live gate (2026-10-19), dev BFF 1.0.0+44f802a1d (live ad0e9e1a7 + 186 49279def1 + 099b d7eabba3b)
+
+**Verdict: PASS.**
+
+| Step | Result | Evidence |
+|---|---|---|
+| Backfill `Backfill-RecordOwnership.ps1 -Entities sprk_externalrecordaccess` | **PASS** | Dry run: 101 rows to write (73 Spaarke Business Unit 1, 26 Spaarke, 2 Secure). -Apply on a 3-row sample, read back, then the remaining 96 written with 0 failures; reversal manifests are kept in the session scratchpad. The 2 Secure rows had already been re-owned by the deployed reconciler at 11:38:09Z (modifiedby `mi-bff-api-dev`). **VERIFY: PASS** (103 team-owned rows checked, 0 mismatched, 0 to write, 0 unresolvable, 0 read failures). |
+| Grant on an ordinary root | **PASS** | Project `fb73b08c…`: `/grant` → 200 (invite NoEmail). Row `0d347616…` is owned by team `cf15f587…` (that BU's default team); owning user null; createdby `mi-bff-api-dev`. |
+| Grant on a Secure root | **PASS** | Fixture `a9e04977…`: `/grant` → 200. Row `46347616…` is owned by Secure Record Owners `6eabc7f9…`; owning user null. |
+| Revoke | Ordinary 200; Secure **500**, filed as **#2103** | Both rows end statecode 1 / statuscode 2, still team-owned. The Secure revoke of a no-email contact returns 500 `container_not_cleared`, permanently. This is pre-existing task-017 behaviour; the fix is in progress. |
+| Negative / no regression | **PASS** | No token on grant, record-grants and revoke → 401. The record-grants lists are correct, and the contact's 2 other grants are unchanged. |
+| Telemetry 11:37Z–11:51Z | **PASS** | 200 ×22, 401 ×6, 500 ×1 (the #2103 revoke). Exceptions: only `ODataError "Invalid hostname for this tenancy"` (#1830). |
+
+186 server side: no new exception types and no 5xx since the deploy. Its live gate (an unlicensed guest's sign-in and registration) needs the owner.

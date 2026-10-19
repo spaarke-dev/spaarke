@@ -7,7 +7,7 @@
 > - **Delete inventory:** `notes/core-record-delete-inventory.md`.
 > - **Narrative:** the checkpoint commit messages.
 
-> **Last Updated**: 2026-10-19 (checkpoint #50).
+> **Last Updated**: 2026-10-19 (checkpoint #51).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -31,8 +31,8 @@
 
 ## Merged 2026-10-18/19
 - **#2102 (#2084) `947d98e31`**: matter-scoped rules and their versions join the secure family. Publish is refuse-before-write (409 `rule_held_secure`, 400 `scope_matter_secured` only when the requested matter is the sole cause, 503 `owner_unavailable`). One citation predicate, `(sprk_signal, sprk_policy)`. Ontology ran 2 passes plus 2 re-checks, and is CLEAN. **Next:** the owner approves SRO Read on policy/policyversion on dev (send ontology before and after notices), R3 deploys (BFF before or with the Console), then the live gate.
-- **#2063 (099b) `d7eabba3b`**: merged after the union-resolved conflict with 186. R3 deploys it together with 186. **Next: after R3's after-notice, run `Backfill-RecordOwnership.ps1` -Apply, then VERIFY, then the 099b live gate, then close #1010.**
-- **#2061 (186) `49279def1`**: the Workforce role on dev was edited. R3 includes it in the next deploy, after their task 058 agent finishes. **Next: the 186 live gate after R3's after-notice.**
+- **#2063 (099b) `d7eabba3b`**: DEPLOYED (44f802a1d). Backfill of 101 rows, VERIFY PASS. **Live gate PASS** (batch7 notes); #1010 closed and commented. The gate found **#2103** (secure revoke of a no-email contact 500s permanently; task-017 code). Fix in progress in C:/wt2103.
+- **#2061 (186) `49279def1`**: DEPLOYED (44f802a1d). Server side clean. **Live gate needs the owner:** an unlicensed guest's sign-in and registration (186 design §6, 7 steps).
 - **#2094 `1473b34c6`** (#2091, part): the playbook update node, DataverseUpdateHandler and the field-mapping push now call `SecureChildReconciler.AfterRefileAsync`.
   - **Parent changes:** bind-string parent changes are handled in `RecordReparent.ParentChangesWithClearsIn`, with fail-closed bind validation.
   - **Predicates and reads:** the shared predicate is `RecordReparent.MayRefile`, and its map is `FilingParentOf`. `RefileIsolationRead` (one retry) is used by all 4 writers. `ParentsUnchanged` skips no-op re-files.
@@ -67,7 +67,8 @@
     - tests: must-fire, must-not-fire and resolver failure.
     Ontology runs 2 adversarial passes on it. The code-uniqueness oracle is an accepted known limit.
 - **ebilling**:
-  - **#2095 (InvoiceReviewService refile):** re-check of a69e703fc..5abdaf7fb found **F1**: the resume path stamps Confirmed before the isolation read. Sent back to them; waiting for the fix range. K1 is an optional CancellationToken.None test.
+  - **#2095:** fix c7c53ec8b re-check **PASS** (F1 and K1 closed; the FakeRecordShareTable cancelled-token change is approved). It closes once ebilling merges and deploys.
+  - **D-120** (delete design: rate cards, budgets, finance blockers) is folded into the design note (43bd1ccc5).
   - **015:** re-check PASS.
   - **D-112:** a secure-root-set subset rule, with 4 conditions on `SecureRootsAboveAsync` (in their 072 POML).
   - **#2081 invoice part:** rounds 1–3 PASS (update-only impersonated overload plus wire tests). #2090 filed (Optimistic mode is a no-op).
