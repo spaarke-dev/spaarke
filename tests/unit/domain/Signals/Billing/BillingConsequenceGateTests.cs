@@ -136,6 +136,41 @@ public class BillingConsequenceGateTests
         result.Reason.Should().Be(OntologyWriterFailureReason.RuleTypeWrongDomain);
     }
 
+    // 073 review, owner question 3: a Duplicate rule that compares lines only may not Reject (a duplicate line is flagged, never rejected).
+
+    private const string LinesOnlyDuplicate = """{"type":"Duplicate","matchFields":["timekeeper","lineDate","hours"]}""";
+    private const string InvoiceDuplicate = """{"type":"Duplicate","matchFields":["firmInvoiceNumber"]}""";
+    private const string MixedDuplicate = """{"type":"Duplicate","matchFields":["firmInvoiceNumber","timekeeper","lineDate"]}""";
+
+    [Fact]
+    public void ValidateForSave_RefusesReject_OnALineLevelDuplicate_WithAClearMessage()
+    {
+        var result = Validator().ValidateForSave("Duplicate", LinesOnlyDuplicate, null, RuleDomain.Billing, Reject);
+
+        result.IsValid.Should().BeFalse();
+        result.Reason.Should().Be(OntologyWriterFailureReason.ConsequenceNotAllowed);
+        result.Errors.Should().ContainSingle().Which.Should().Contain("firmInvoiceNumber").And.Contain("Flag").And.Contain("never rejected");
+    }
+
+    [Theory]
+    [InlineData(InvoiceDuplicate, Reject)]
+    [InlineData(MixedDuplicate, Reject)]
+    [InlineData(LinesOnlyDuplicate, Flag)]
+    public void ValidateForSave_AllowsReject_WhenTheDuplicateComparesTheInvoiceNumber_AndFlagOnALineLevelOne(string body, int consequence)
+    {
+        Validator().ValidateForSave("Duplicate", body, null, RuleDomain.Billing, consequence).IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void TheBillingGate_DoesNotRefuseAStoredLineLevelDuplicateReject_TheDeciderHoldsItsFindings()
+    {
+        // Save only: refusing it at the gate would stop a rule that can still flag duplicate lines; the decider holds them (073).
+        var stored = new PolicyVersionSnapshot(VersionId, "BILL-073", ((int)RuleType.Duplicate).ToString(System.Globalization.CultureInfo.InvariantCulture), LinesOnlyDuplicate, null, Reject);
+
+        Validator().TryPrepareBillingRule(stored, out var definition).Should().BeTrue();
+        definition.Should().NotBeNull();
+    }
+
     // ── Evaluation time: the billing gate ────────────────────────────────────────────────────────────────────────
 
     [Theory]

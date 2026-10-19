@@ -414,7 +414,7 @@ public sealed class PolicyVersionValidator
             }
             else
             {
-                result = ValidateBilling(ruleType, pv.RuleBody, pv.MessageTemplate, pv.Consequence);
+                result = ValidateBilling(ruleType, pv.RuleBody, pv.MessageTemplate, pv.Consequence, atSave: false);
                 if (result.IsValid)
                 {
                     definition = BillingRuleDefinition.FromValidatedBody(pv.PolicyVersionId, pv.PolicyCode, ruleType, pv.RuleBody!);
@@ -458,7 +458,10 @@ public sealed class PolicyVersionValidator
     /// token must be in <see cref="BillingRuleCatalogue.TemplateFactFields"/> for the type, the static set of values the
     /// type's handler (task 071) supplies for a finding.
     /// </summary>
-    private PolicyVersionValidationResult ValidateBilling(RuleType ruleType, string? ruleBodyJson, string? messageTemplate, int? consequence)
+    /// <remarks><paramref name="atSave"/>: true on the save path (<see cref="ValidateForSave"/>), false at the billing gate. Only the save
+    /// path refuses a Reject on a Duplicate rule that compares lines only (073 review, owner question 3); see the check below.</remarks>
+    private PolicyVersionValidationResult ValidateBilling(
+        RuleType ruleType, string? ruleBodyJson, string? messageTemplate, int? consequence, bool atSave)
     {
         if (ruleBodyJson is not null && ruleBodyJson.Length > RuleBodySchemaValidator.MaxRuleBodyLength)
         {
@@ -498,7 +501,33 @@ public sealed class PolicyVersionValidator
                 BillingRuleCatalogue.ConsequenceRefusal(ruleType, stated));
         }
 
+        // 073 review, owner question 3: a Duplicate rule whose matchFields lack firmInvoiceNumber compares lines only, and a line-level
+        // Duplicate never rejects (design.md 6.1, "Reject (invoice), Flag (line)"), so a Reject on it would be silently held. Refused at
+        // save, with the same stable reason. Save only: the billing gate leaves such a stored row to evaluate, and the rejection rule
+        // holds its line-level findings (duplicate_at_line_level) as Flags, which is what the rule can do.
+        if (atSave && ruleType == RuleType.Duplicate && consequence == (int)Finance.BillingConsequence.Reject
+            && !DuplicateComparesInvoiceNumber(ruleBodyJson))
+        {
+            return PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.ConsequenceNotAllowed,
+                "A Duplicate rule whose matchFields do not include firmInvoiceNumber compares lines only, and a duplicate line is " +
+                "flagged, never rejected (design.md 6.1). Add firmInvoiceNumber to matchFields to reject a duplicate invoice, or use Flag.");
+        }
+
         return PolicyVersionValidationResult.Success();
+    }
+
+    /// <summary>True when a schema-valid Duplicate body lists <c>firmInvoiceNumber</c> in <c>matchFields</c> (an invoice-level comparison).</summary>
+    private static bool DuplicateComparesInvoiceNumber(string? ruleBodyJson)
+    {
+        if (string.IsNullOrWhiteSpace(ruleBodyJson))
+        {
+            return false;
+        }
+
+        using var document = System.Text.Json.JsonDocument.Parse(ruleBodyJson);
+        return document.RootElement.TryGetProperty("matchFields", out var fields)
+               && fields.ValueKind == System.Text.Json.JsonValueKind.Array
+               && fields.EnumerateArray().Any(f => f.ValueKind == System.Text.Json.JsonValueKind.String && f.GetString() == "firmInvoiceNumber");
     }
 
     /// <summary>
@@ -546,7 +575,7 @@ public sealed class PolicyVersionValidator
                         "not evaluate it (FR-24: a consumer that cannot evaluate a type refuses it)."), null);
                 }
 
-                return (ValidateBilling(ruleType, ruleBodyJson, messageTemplate, billingConsequence), null);
+                return (ValidateBilling(ruleType, ruleBodyJson, messageTemplate, billingConsequence, atSave: true), null);
             }
 
             if (ruleType == RuleType.Switch)

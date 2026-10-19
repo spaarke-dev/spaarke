@@ -73,6 +73,26 @@ public sealed class RuleSetServiceConsequenceTests
         h.Row("sprk_ruleset", set).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(RuleSetService.RuleSetDraft);
     }
 
+    [Fact]
+    public async Task Publish_ALineLevelDuplicateWithReject_IsRefused_AndWritesNothing_OwnerQuestion3()
+    {
+        // 073 review, owner question 3: matchFields without firmInvoiceNumber compare lines only, and a duplicate line never rejects.
+        var h = new Harness();
+        var set = h.RuleSet();
+        var (bad, version) = h.Rule(
+            set, "BILL-DUP-LINES", ProposalState.Accepted, type: nameof(RuleType.Duplicate),
+            body: """{"type":"Duplicate","matchFields":["timekeeper","lineDate","hours"]}""", consequence: Reject);
+        h.Row("sprk_policyversion", version)["sprk_messagetemplate"] = BillingRuleDraftTranslator.Wording(RuleType.Duplicate).Template;
+
+        var outcome = await h.Service().PublishAsync(set, Effective, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Invalid);
+        outcome.Errors.Should().ContainSingle().Which.Should().Match<RuleSetError>(
+            e => e.PolicyId == bad && e.Field == "consequence" && e.Reason == OntologyWriterFailureReason.ConsequenceNotAllowed
+                 && e.Message.Contains("firmInvoiceNumber"));
+        h.Writes.Should().BeEmpty();
+    }
+
     [Theory]
     [MemberData(nameof(RejectAllowedTypes))]
     public async Task Publish_AnAcceptedRejectRule_OfAnEligibleType_Publishes(RuleType type)
