@@ -104,7 +104,8 @@ public sealed class BillingDecisionRecorder
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    /// <summary>Writes the decision's one Decision Record, or finds the one already written for its decision id.</summary>
+    /// <summary>Writes the decision's one Decision Record, or finds the one already written for its decision id. The deciding user's contact is
+    /// read only when a record is going to be written, so a true retry is answered even while that read faults.</summary>
     /// <exception cref="DecisionRecordRefusedException">The writer refused (nothing written; after a create timeout the row may exist), or
     /// the deciding user's linked contact could not be read (<see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>; nothing
     /// written: the append-only record must not lose its decider to a fault).</exception>
@@ -113,10 +114,13 @@ public sealed class BillingDecisionRecorder
     {
         var request = ToRequest(decision);
         _writer.PreflightBillingDecision(request); // an invalid decision is refused before the identity read
-        var contact = decision.Decider.SystemUserId is { } user && user != Guid.Empty
-            ? await DeciderContactAsync(user, ct).ConfigureAwait(false)
+        // The contact is supplied LAZILY: the writer asks for it only once it knows a record will be written, after its "already recorded"
+        // check. A true retry is then answered even while the identity read faults; a new decision with a faulting read is still refused
+        // before anything is written.
+        Func<CancellationToken, Task<Guid?>>? contact = decision.Decider.SystemUserId is { } user && user != Guid.Empty
+            ? token => DeciderContactAsync(user, token)
             : null;
-        var result = await _writer.WriteBillingDecisionAsync(request with { DeciderContactId = contact }, ct).ConfigureAwait(false);
+        var result = await _writer.WriteBillingDecisionAsync(request, contact, ct).ConfigureAwait(false);
         return new BillingDecisionRecordResult(result.RecordId, result.AlreadyRecorded, result.RecordClass);
     }
 

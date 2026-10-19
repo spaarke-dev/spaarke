@@ -154,8 +154,58 @@ public sealed class BillingDecisionRecorderTests
 
         (await recorder.Invoking(r => r.RecordAsync(Decision("approve-invoice", Invoice))).Should().ThrowAsync<DecisionRecordRefusedException>())
             .Which.Reason.Should().Be(DecisionRecordRefusalReason.BillingRecordLookupFailed);
-        h.Entities.Invocations.Should().BeEmpty("refused before the writer's first read");
+        // The already-recorded check runs first (a true repeat must still answer), so the writer has READ by now; a NEW decision with an
+        // identity fault is still refused before anything is created or asked.
         h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty("refused before the owner question");
+        h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ATrueRepeat_IsAlreadyRecorded_EvenWhenTheIdentityLookupWouldNowFault(bool serviceThrows)
+    {
+        // Follow-up item 4: the first call recorded the decision; the retry arrives during an identity fault. The record exists, so the
+        // answer is AlreadyRecorded; the contact is not needed (and not read) for a record that is not written.
+        var identity = Identity();
+        var (h, recorder) = Build(identity);
+        var decision = Decision("approve-invoice", Invoice);
+        var first = await recorder.RecordAsync(decision);
+
+        identity.Reset();
+        if (serviceThrows)
+        {
+            identity.Setup(i => i.ResolveAsync(Reviewer, It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("dataverse slow"));
+        }
+        else
+        {
+            identity.Setup(i => i.ResolveAsync(Reviewer, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PersonIdentity(Reviewer) { Faults = IdentityReadFaults.ContactBinding });
+        }
+
+        var retry = await recorder.RecordAsync(decision);
+
+        retry.AlreadyRecorded.Should().BeTrue();
+        retry.RecordId.Should().Be(first.RecordId);
+        identity.Invocations.Should().BeEmpty("a true repeat needs no contact");
+        h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ADifferentDecisionUnderTheSameId_DuringAnIdentityFault_IsRefusedForItsContent_NotAnswered()
+    {
+        // Must-not-fire for item 4: moving the contact lookup after the already-recorded check must not turn a changed decision into an answer.
+        var identity = Identity();
+        var (h, recorder) = Build(identity);
+        var id = Guid.NewGuid();
+        await recorder.RecordAsync(Decision("reject-invoice", Invoice, reason: "duplicate", id: id));
+        identity.Reset();
+        identity.Setup(i => i.ResolveAsync(Reviewer, It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("dataverse slow"));
+
+        (await recorder.Invoking(r => r.RecordAsync(Decision("reject-invoice", Invoice, reason: "a different reason", id: id)))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        h.Created.Should().ContainSingle("the first call's record only");
     }
 
     [Fact]

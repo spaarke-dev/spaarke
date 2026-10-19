@@ -1280,7 +1280,19 @@ public sealed class DecisionRecordWriter
     /// (<see cref="DecisionRecordRefusalReason.OwnerResolutionFailed"/>), the subject cannot be filed, the owner was refused, or the create
     /// failed. Nothing was written (after a create timeout the row may exist).</exception>
     /// <exception cref="OperationCanceledException">The caller cancelled.</exception>
-    public async Task<DecisionRecordWriteResult> WriteBillingDecisionAsync(BillingDecisionRecordRequest request, CancellationToken ct = default)
+    public Task<DecisionRecordWriteResult> WriteBillingDecisionAsync(BillingDecisionRecordRequest request, CancellationToken ct = default) =>
+        WriteBillingDecisionAsync(request, deciderContact: null, ct);
+
+    /// <summary>
+    /// <see cref="WriteBillingDecisionAsync(BillingDecisionRecordRequest, CancellationToken)"/> with the deciding contact supplied LAZILY:
+    /// <paramref name="deciderContact"/> runs only when a record is going to be written, after the "already recorded" check and before any
+    /// other read or the create. A true repeat is therefore answered without it, so a fault in the identity read cannot turn a retry of a
+    /// recorded decision into a refusal; a new decision whose contact read faults throws from the supplier (the supplier owns that refusal,
+    /// logged here with the other refusals) before anything is written. Used for a confirmed decision only (a system decision names no contact,
+    /// <see cref="ValidateBilling"/>); when the request already names a contact the supplier is not called.
+    /// </summary>
+    internal async Task<DecisionRecordWriteResult> WriteBillingDecisionAsync(
+        BillingDecisionRecordRequest request, Func<CancellationToken, Task<Guid?>>? deciderContact, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -1326,8 +1338,13 @@ public sealed class DecisionRecordWriter
                 };
             }
 
+            if (deciderContact is not null && NoneIfEmpty(request.ConfirmedByUserId) is not null && NoneIfEmpty(request.DeciderContactId) is null)
+            {
+                request = request with { DeciderContactId = await deciderContact(ct).ConfigureAwait(false) };
+            }
+
             await RequireBillingPolicyVersionAsync(request.PolicyVersionId, ct).ConfigureAwait(false);
-            var signalSubjects = await BillingSignalSubjectsAsync(request.ResolvedSignalIds, ct).ConfigureAwait(false);
+            var signalSubjects =await BillingSignalSubjectsAsync(request.ResolvedSignalIds, ct).ConfigureAwait(false);
             var (core, derived) = await ResolveBillingCoreAsync(request.Subject, ct).ConfigureAwait(false);
             var written = await CreateAsync(
                     BillingReview(request, plan, key, core) with { SignalSubjects = signalSubjects, ReviewHash = hash },

@@ -458,6 +458,47 @@ public sealed partial class DecisionRecordWriterTests
         DecisionRecordWriter.BillingDecisionHash(Reduce(800m)).Should().Be("13A35E02CEC9F2B513A9246A3B807C3350012543825A4B13B1DF5075E3F88347");
     }
 
+    // ── Follow-up item 4: the lazily supplied deciding contact is read only when a record will be written ──────────
+
+    [Fact]
+    public async Task Billing_Item4_TheLazyDeciderContact_IsReadOnceForANewDecision_AndNeverForARepeatOrAnInvalidOrASystemDecision()
+    {
+        var h = BillingHarness();
+        var contact = Guid.NewGuid();
+        var calls = 0;
+        Task<Guid?> Supplier(CancellationToken _)
+        {
+            calls++;
+            return Task.FromResult<Guid?>(contact);
+        }
+
+        var first = await h.Writer.WriteBillingDecisionAsync(Billing(), Supplier, CancellationToken.None);
+        var repeat = await h.Writer.WriteBillingDecisionAsync(Billing(), Supplier, CancellationToken.None);
+        await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing(facts: new Dictionary<string, object?>()), Supplier, CancellationToken.None))
+            .Should().ThrowAsync<DecisionRecordRefusedException>();
+        await h.Writer.WriteBillingDecisionAsync(Billing("reject-invoice", system: true, reason: "late", decisionId: Guid.NewGuid()), Supplier, CancellationToken.None);
+
+        first.AlreadyRecorded.Should().BeFalse();
+        repeat.AlreadyRecorded.Should().BeTrue();
+        calls.Should().Be(1, "once, for the one new human decision");
+        h.Created.Should().HaveCount(2);
+        h.Created[0].GetAttributeValue<EntityReference>("sprk_assignedtointernal").Id.Should().Be(contact);
+        h.Created[1].Contains("sprk_assignedtointernal").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Billing_Item4_AFaultFromTheLazyDeciderContact_WritesNothing_AndIsLoggedAsARefusal()
+    {
+        var h = BillingHarness();
+        var refusal = new DecisionRecordRefusedException(DecisionRecordRefusalReason.BillingRecordLookupFailed, "contact unreadable");
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing(), _ => throw refusal, CancellationToken.None))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Should().BeSameAs(refusal);
+        NothingWritten(h);
+    }
+
     // ── Follow-up item 3: of several rows with the code, the one whose hash matches answers ──────────────────────────
 
     private static Entity StoredBillingRow(string hash, string code = "approve-invoice") => new("sprk_decisionrecord", Guid.NewGuid())
