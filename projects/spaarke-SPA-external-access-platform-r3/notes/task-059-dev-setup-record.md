@@ -269,6 +269,12 @@ R3 shows **`spaarke-bff-api-prod` with tenant-wide consent to the DEV BFF app** 
 
   Anonymous `/api/me` 401; `/healthz` 200.
 - App Insights, 21:13:14Z → 21:15:44Z (ingestion lags a few minutes): no `sdap.auth.deny.*`. One 401, on `GET /` (no route, anonymous). Re-run after the browser checks below.
+- **Ontology session check (reported 2026-10-19, after the switch): PASS on both token versions.**
+  - Fresh v2 token (`ver` 2.0, bare `aud`, `azp`, no `appid`): `POST /api/v1/ontology/admin/authoring/validate` returned 200 `valid:true` on the Standard matter.
+  - On the Restricted matter it returned 200 `valid:false` with `ontology.admin.scope_matter_secured`.
+  - Both results match its v1 baseline on `00aba6d99`.
+  - Cached v1 token: also passes.
+  - Tip: `az --resource api://…` keeps serving the cached v1 token for up to ~90 min; use `--scope <appId>/.default` for a fresh v2 token.
 - **Still open (§5 per-surface check, owner):** fresh-session sign-ins to Console, a PCF, the Office add-in, the Teams/A8 SPA and the Copilot plugin if in use. A guest token's `email` (UAC's question for task 186) is not proved by the member token above.
 - Rollback unchanged (§5): PATCH back from `before-stageB.json` and reset `authenticationBehaviors`; C before B once stage C runs; the BFF stays at a build containing 077 for 90 minutes after.
 
