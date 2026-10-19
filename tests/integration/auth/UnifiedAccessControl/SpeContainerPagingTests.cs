@@ -362,6 +362,21 @@ public class SpeContainerPagingTests
             r => !r.Error!.StartsWith(SpeContainerMembershipService.NoPermissionFoundError));
     }
 
+    /// <summary>#2104 round 4 (F1): a read that faults establishes nothing about the container — Unknown (a retry may
+    /// answer it), never "a contact permission remains", which would tell the caller a retry cannot help.</summary>
+    [Fact]
+    public async Task RemoveMemberships_Confirming_WhenTheReadFails_TheContainerAnswerIsUnknown()
+    {
+        var factory = new Mock<IGraphClientFactory>();
+        factory.Setup(f => f.ForApp()).Throws(new InvalidOperationException("Graph unreachable"));
+        var service = new SpeContainerMembershipService(
+            TestSpeOwnership.AllowAll(factory.Object), NullLogger<SpeContainerMembershipService>.Instance);
+
+        var removal = await service.RemoveMembershipsAsync(ContainerId, [], NoInternalUsers, confirmNoContactPermission: true);
+
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.Unknown);
+    }
+
     /// <summary>
     /// Empty input must not touch Graph at all — an org whose members all failed email resolution
     /// should not cost a container read.
@@ -632,8 +647,8 @@ public class SpeContainerPagingTests
 
         adapter.DeletedUrls.Should().BeEmpty();
         removal.Results[Key("a@client-firm.com")].Error.Should().StartWith(SpeContainerMembershipService.NoPermissionFoundError);
-        removal.NoContactPermissionRemains.Should().BeFalse(
-            "an internal user's role is left in place, so the container is not shown to hold no person's permission");
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.Clean,
+            "#2104 round 4: the role left in place is an internal user's own (checked), not a contact permission");
     }
 
     /// <summary>
@@ -689,7 +704,7 @@ public class SpeContainerPagingTests
         adapter.DeletedUrls.Should().BeEmpty();
         removal.Results.Values.Should().OnlyContain(r => !r.Success
             && r.Error!.StartsWith(SpeContainerMembershipService.InternalUserCheckFailedError));
-        removal.NoContactPermissionRemains.Should().BeFalse();
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.Unknown, "#2104 round 4: a lookup fault establishes nothing");
     }
 
     /// <summary>K3: the lookup is BATCHED — one systemusers query for every candidate holder, not one per permission.</summary>
@@ -770,7 +785,7 @@ public class SpeContainerPagingTests
         adapter.DeletedUrls.Should().BeEmpty();
         removal.Results.Values.Should().OnlyContain(r => !r.Success
             && !r.Error!.StartsWith(SpeContainerMembershipService.NoPermissionFoundError));
-        removal.NoContactPermissionRemains.Should().BeFalse();
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.Unknown, "#2104 round 4: a marker-read fault establishes nothing");
     }
 
     /// <summary>The contact's email is trimmed (and compared case-insensitively) before it is matched.</summary>
@@ -796,7 +811,7 @@ public class SpeContainerPagingTests
     /// they are, is absent.
     /// </summary>
     [Fact]
-    public async Task RemoveMemberships_Confirming_WithOnlyMarkerOwnedPermissions_ReportsNoContactPermissionRemains()
+    public async Task RemoveMemberships_Confirming_WithOnlyMarkerOwnedPermissions_IsClean()
     {
         var adapter = new ScriptedPermissionAdapter(
             [Page(null, UserPermission("perm-jit", "internal.user@spaarke.example", userId: InternalUserId))],
@@ -804,7 +819,7 @@ public class SpeContainerPagingTests
 
         var removal = await ServiceOver(adapter).RemoveMembershipsAsync(ContainerId, [], NoInternalUsers, confirmNoContactPermission: true);
 
-        removal.NoContactPermissionRemains.Should().BeTrue();
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.Clean);
         removal.Results.Should().BeEmpty();
         adapter.GetRequestCount.Should().Be(1);
         adapter.MarkerReadCount.Should().Be(1);
@@ -823,8 +838,122 @@ public class SpeContainerPagingTests
 
         var removal = await ServiceOver(adapter).RemoveMembershipsAsync(ContainerId, [], NoInternalUsers, confirmNoContactPermission: true);
 
-        removal.NoContactPermissionRemains.Should().BeFalse();
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.ContactPermissionRemains,
+            "its holder was checked and is not an internal user — a retry reads it again");
         adapter.DeletedUrls.Should().BeEmpty("confirming never deletes a permission no key matched");
+    }
+
+    /// <summary>
+    /// #2104 round 4 (K), must fire: the only permission left is an internal user's HAND-GRANTED role (no marker) — that
+    /// user's own access, never a contact permission. Confirming checks its holder in the one batched systemusers lookup,
+    /// and the container is Clean. (Round 3 answered "one remains", which made an oversized organization's revoke and
+    /// closure non-retryable for good on any container an internal user had been added to by hand.)
+    /// </summary>
+    [Fact]
+    public async Task RemoveMemberships_Confirming_WithOnlyAnInternalUsersHandGrantedRole_IsClean()
+    {
+        var adapter = new ScriptedPermissionAdapter(
+            [Page(null,
+                UserPermission("perm-jit", "jit.user@spaarke.example", userId: MemberObjectId),
+                ManagerPermission("perm-hand", "internal.user@spaarke.example", InternalUserId))],
+            markers: new Dictionary<string, string>
+            {
+                [$"{SpeContainerMembershipService.JitWriterMarkerPrefix}{Guid.NewGuid():N}"] = "perm-jit",
+            });
+        var directory = TestInternalUserDirectory.With(InternalUserId);
+
+        var removal = await ServiceOver(adapter).RemoveMembershipsAsync(ContainerId, [], directory.Client, confirmNoContactPermission: true);
+
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.Clean);
+        directory.Filters.Should().ContainSingle("one batched lookup").Which.Should().Contain(InternalUserId.ToString())
+            .And.NotContain(MemberObjectId.ToString(), "a marker-owned permission's holder is not asked about");
+        adapter.DeletedUrls.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// #2104 round 4 (K), must not fire: beside the internal user's hand-granted role, a guest's permission (an object id
+    /// that is no systemuser) is left — a permission a contact grant could account for, so ContactPermissionRemains.
+    /// </summary>
+    [Fact]
+    public async Task RemoveMemberships_Confirming_WithAGuestPermissionBesideAnInternalUsersRole_ContactPermissionRemains()
+    {
+        var adapter = new ScriptedPermissionAdapter(
+            [Page(null,
+                ManagerPermission("perm-hand", "internal.user@spaarke.example", InternalUserId),
+                UserPermission("perm-guest", "guest_x.com#EXT#@spaarke.onmicrosoft.com", userId: GuestObjectId))],
+            markers: new Dictionary<string, string>());
+        var directory = TestInternalUserDirectory.With(InternalUserId);
+
+        var removal = await ServiceOver(adapter).RemoveMembershipsAsync(ContainerId, [], directory.Client, confirmNoContactPermission: true);
+
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.ContactPermissionRemains);
+        directory.Filters.Should().ContainSingle().Which.Should().Contain(GuestObjectId.ToString());
+    }
+
+    /// <summary>#2104 round 4 (K): the lookup over the remaining holders faulting establishes nothing — Unknown, never
+    /// Clean and never "one remains".</summary>
+    [Fact]
+    public async Task RemoveMemberships_Confirming_WhenTheRemainingHoldersLookupFails_IsUnknown()
+    {
+        var adapter = new ScriptedPermissionAdapter(
+            [Page(null, ManagerPermission("perm-hand", "internal.user@spaarke.example", InternalUserId))],
+            markers: new Dictionary<string, string>());
+        var directory = TestInternalUserDirectory.Failing(new InvalidOperationException("Dataverse down"));
+
+        var removal = await ServiceOver(adapter).RemoveMembershipsAsync(ContainerId, [], directory.Client, confirmNoContactPermission: true);
+
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.Unknown);
+        directory.Filters.Should().ContainSingle("precondition: the lookup was attempted");
+    }
+
+    /// <summary>
+    /// #2104 round 4: a permission definitely left wins over a fault elsewhere — a key's ambiguous match is still there
+    /// after any retry, so the answer is ContactPermissionRemains even though another key's delete failed.
+    /// </summary>
+    [Fact]
+    public async Task RemoveMemberships_AnAmbiguousMatchBesideAFailedDelete_ContactPermissionRemains()
+    {
+        var adapter = new ScriptedPermissionAdapter(
+            [Page(null,
+                UserPermission("perm-a1", "a@client-firm.com"),
+                UserPermission("perm-a2", "someone_x.com#EXT#@spaarke.onmicrosoft.com", email: "a@client-firm.com"),
+                UserPermission("perm-b", "b@client-firm.com"))],
+            deleteFailure: new InvalidOperationException("Graph refused the delete"));
+
+        var removal = await ServiceOver(adapter).RemoveMembershipsAsync(
+            ContainerId, Keys("a@client-firm.com", "b@client-firm.com"), NoInternalUsers, confirmNoContactPermission: true);
+
+        removal.Results[Key("b@client-firm.com")].Success.Should().BeFalse("precondition: b's delete failed");
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.ContactPermissionRemains);
+    }
+
+    /// <summary>
+    /// #2104 round 4 (F3): the internal-user lookup is batched at <see cref="SpeContainerMembershipService.InternalUserLookupBatchSize"/>
+    /// (50) object ids per <c>systemusers</c> query — 51 candidate holders are exactly two queries, neither over 50 — and
+    /// it never narrows by <c>isdisabled</c> or <c>statecode</c>: a disabled internal user is still internal, and their
+    /// own permission is still never a contact cleanup's to remove.
+    /// </summary>
+    [Fact]
+    public async Task RemoveMemberships_LooksUp51CandidateHoldersInTwoBatchesOfAtMost50_WithNoStateFilter()
+    {
+        var emails = Enumerable.Range(0, 51).Select(i => $"member{i}@client-firm.com").ToArray();
+        var holders = emails.Select(_ => Guid.NewGuid()).ToArray();
+        var adapter = new ScriptedPermissionAdapter(
+            [Page(null, [.. emails.Select((email, i) => UserPermission($"perm-{i}", email, userId: holders[i]))])]);
+        var directory = TestInternalUserDirectory.Empty();
+
+        await ServiceOver(adapter).RemoveMembershipsAsync(ContainerId, Keys(emails), directory.Client);
+
+        directory.Filters.Should().HaveCount(2, "51 holders at 50 per query");
+        var idsPerFilter = directory.Filters
+            .Select(f => System.Text.RegularExpressions.Regex.Matches(f, "azureactivedirectoryobjectid eq ").Count)
+            .ToList();
+        idsPerFilter.Should().OnlyContain(n => n <= SpeContainerMembershipService.InternalUserLookupBatchSize);
+        idsPerFilter.Sum().Should().Be(51);
+        holders.Should().OnlyContain(h => directory.Filters.Any(f => f.Contains(h.ToString())), "every holder is asked about");
+        directory.Filters.Should().OnlyContain(f => !f.Contains("isdisabled") && !f.Contains("statecode"),
+            "disabled internal users are still internal");
+        SpeContainerMembershipService.InternalUserLookupBatchSize.Should().Be(50);
     }
 
     /// <summary>F1: an INCOMPLETE read proves nothing about the unread tail — never "none remains", even when every
@@ -848,7 +977,7 @@ public class SpeContainerPagingTests
 
         adapter.MarkerReadCount.Should().Be(1, "precondition: every permission seen is marker-owned or the contact's");
         adapter.DeletedUrls.Should().ContainSingle().Which.Should().Contain("perm-a");
-        removal.NoContactPermissionRemains.Should().BeFalse("the unread tail may hold a contact permission");
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.Unknown, "the unread tail may hold a contact permission");
     }
 
     /// <summary>F1: a contact permission whose DELETE failed is still on the container — never "none remains".</summary>
@@ -867,7 +996,8 @@ public class SpeContainerPagingTests
 
         adapter.DeletedUrls.Should().ContainSingle().Which.Should().Contain("perm-a");
         removal.Results[Key("a@client-firm.com")].Success.Should().BeFalse();
-        removal.NoContactPermissionRemains.Should().BeFalse("the contact's permission was not removed");
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.Unknown,
+            "the contact's permission was not removed — but a retry may remove it (#2104 round 4)");
     }
 
     /// <summary>F1: the contact's own permission was the only unmanaged one, and this call removed it — none remains.</summary>
@@ -883,7 +1013,7 @@ public class SpeContainerPagingTests
         var removal = await ServiceOver(adapter).RemoveMembershipsAsync(ContainerId, Keys("a@client-firm.com"), NoInternalUsers);
 
         removal.Results[Key("a@client-firm.com")].PermissionId.Should().Be("perm-a");
-        removal.NoContactPermissionRemains.Should().BeTrue();
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.Clean);
     }
 
     /// <summary>F1: not asked to confirm and nothing matched, so the markers are not read (the broker-only common case
@@ -898,7 +1028,7 @@ public class SpeContainerPagingTests
         var removal = await ServiceOver(adapter).RemoveMembershipsAsync(ContainerId, Keys("absent@client-firm.com"), NoInternalUsers);
 
         adapter.MarkerReadCount.Should().Be(0);
-        removal.NoContactPermissionRemains.Should().BeFalse();
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.Unknown, "the unmatched permission was not judged");
         removal.Results[Key("absent@client-firm.com")].Error.Should().StartWith(SpeContainerMembershipService.NoPermissionFoundError);
     }
 
@@ -914,7 +1044,7 @@ public class SpeContainerPagingTests
         var removal = await ServiceOver(adapter)
             .RemoveMembershipsAsync(ContainerId, Keys("absent@client-firm.com"), NoInternalUsers, confirmNoContactPermission: true);
 
-        removal.NoContactPermissionRemains.Should().BeFalse();
+        removal.ContactPermissionState.Should().Be(SpeContainerContactPermissionState.Unknown);
         removal.Results[Key("absent@client-firm.com")].Error.Should().StartWith(SpeContainerMembershipService.NoPermissionFoundError);
     }
 

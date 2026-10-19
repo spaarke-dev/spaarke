@@ -426,7 +426,7 @@ public class RevokeGrantOverlapAndOwnContainerTests
                         results[key] = new SpeContainerMembershipResult(true, "permission-166r1", null);
                     }
 
-                    return new SpeMembershipRemoval(results, NoContactPermissionRemains: false);
+                    return new SpeMembershipRemoval(results, SpeContainerContactPermissionState.ContactPermissionRemains);
                 });
 
             return mock;

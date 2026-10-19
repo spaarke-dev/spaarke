@@ -222,7 +222,7 @@ public class SpeRevokeMatcherTests
                         results[key] = result;
                     }
 
-                    return new SpeMembershipRemoval(results, NoContactPermissionRemains: false);
+                    return new SpeMembershipRemoval(results, SpeContainerContactPermissionState.ContactPermissionRemains);
                 });
 
             return mock;
@@ -937,8 +937,9 @@ public class SpeRevokeMatcherTests
         public List<string> CapturedEmails { get; } = new();
         public int CallCount => CapturedEmails.Count;
 
-        /// <summary>#2104 round 3: the container-level answer every <c>RemoveMembershipsAsync</c> call gives.</summary>
-        public bool NoContactPermissionRemains { get; init; }
+        /// <summary>#2104 round 3: the container-level answer every <c>RemoveMembershipsAsync</c> call gives (three-state
+        /// since round 4; "one remains" unless a test says otherwise).</summary>
+        public SpeContainerContactPermissionState ContainerState { get; init; } = SpeContainerContactPermissionState.ContactPermissionRemains;
 
         /// <summary>#2104 round 3: when set, <c>RemoveMembershipsAsync</c> throws it.</summary>
         public Exception? RemoveThrows { get; init; }
@@ -1003,7 +1004,7 @@ public class SpeRevokeMatcherTests
                         results[key] = _byEmail.TryGetValue(email, out var specific) ? specific : _default;
                     }
 
-                    return new SpeMembershipRemoval(results, NoContactPermissionRemains);
+                    return new SpeMembershipRemoval(results, ContainerState);
                 });
 
             return mock;
@@ -1261,7 +1262,7 @@ public class SpeRevokeMatcherTests
             junctionThrows: false, membersWithoutEmail: null,
             overflowRows: ExternalOrganizationMembership.MaxMembersPerSweep,
             MemberOne, MemberTwo, MemberThree);
-        var stub = new SpeMemberStub(Removed) { NoContactPermissionRemains = true };
+        var stub = new SpeMemberStub(Removed) { ContainerState = SpeContainerContactPermissionState.Clean };
 
         var body = Body(await org.Revoke(stub.Build()));
 
@@ -1277,9 +1278,9 @@ public class SpeRevokeMatcherTests
     }
 
     /// <summary>
-    /// #2104 round 3 (item 2), the negative: the container still holds a permission that is not Spaarke-managed (or the
-    /// read was incomplete — the service answers false for both), so the members are not confirmed absent and the revoke
-    /// stays the non-retryable organization_too_large.
+    /// #2104 round 3 (item 2), the negative: the container definitely still holds a permission a contact grant could
+    /// account for, so the members are not confirmed absent and — a retry reads it again — the revoke stays the
+    /// non-retryable organization_too_large.
     /// </summary>
     [Fact]
     public async Task Revoke_OfAnOrganizationGrant_TooLargeToSweep_WithAContactPermissionLeft_StaysTooLarge()
@@ -1288,7 +1289,7 @@ public class SpeRevokeMatcherTests
             junctionThrows: false, membersWithoutEmail: null,
             overflowRows: ExternalOrganizationMembership.MaxMembersPerSweep,
             MemberOne, MemberTwo, MemberThree);
-        var stub = new SpeMemberStub(Removed) { NoContactPermissionRemains = false };
+        var stub = new SpeMemberStub(Removed) { ContainerState = SpeContainerContactPermissionState.ContactPermissionRemains };
 
         var problem = ProblemBody(await org.Revoke(stub.Build()));
 
@@ -1298,11 +1299,17 @@ public class SpeRevokeMatcherTests
     }
 
     /// <summary>
-    /// #2104 round 3 (item 2), fail closed: the container question itself faults — that proves nothing, so the revoke
-    /// stays organization_too_large (never a 200, and never the retryable code either: the bound still applies).
+    /// #2104 round 4 (F1), fail closed AND truthful: the container question itself faults (it throws, or the service
+    /// answers Unknown — a read, marker or internal-user lookup fault, an incomplete read). That proves nothing — never a
+    /// 200 — but it is not "a contact permission remains" either: a retry may prove the container clean. So the revoke is
+    /// the RETRYABLE container_not_cleared ("Retry the revoke"), never organization_too_large's "Retrying will not change
+    /// this". (Round 3 pinned too_large here, which told the caller a retry could not help when it could.)
     /// </summary>
-    [Fact]
-    public async Task Revoke_OfAnOrganizationGrant_TooLargeToSweep_WhenTheContainerQuestionFaults_StaysTooLarge()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Revoke_OfAnOrganizationGrant_TooLargeToSweep_WhenTheContainerQuestionFaults_IsRetryableNotCleared(
+        bool throws)
     {
         var org = new OrgRevokeFixture(
             junctionThrows: false, membersWithoutEmail: null,
@@ -1310,13 +1317,18 @@ public class SpeRevokeMatcherTests
             MemberOne, MemberTwo, MemberThree);
         var stub = new SpeMemberStub(Removed)
         {
-            NoContactPermissionRemains = true,
-            RemoveThrows = new InvalidOperationException("Graph unreachable"),
+            ContainerState = throws ? SpeContainerContactPermissionState.Clean : SpeContainerContactPermissionState.Unknown,
+            RemoveThrows = throws ? new InvalidOperationException("Graph unreachable") : null,
         };
 
         var problem = ProblemBody(await org.Revoke(stub.Build()));
 
-        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(RevokeExternalAccessEndpoint.RevokeOrganizationTooLargeReason);
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError, "still fail-closed — never a 200");
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(RevokeExternalAccessEndpoint.RevokeSpeCleanupIncompleteReason);
+        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
+        problem.ProblemDetails.Detail.Should().Contain("Retry the revoke").And.NotContain("Retrying will not change this");
+        stub.RemoveCalls.Should().Equal(new[] { (0, true) }, "the container was asked, with no key, and could not answer");
+        stub.CallCount.Should().Be(0, "no member was swept");
     }
 
     /// <summary>

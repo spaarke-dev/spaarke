@@ -707,9 +707,10 @@ public static class RevokeExternalAccessEndpoint
     /// holder cannot be verified, remove nothing and are counted Failed, which the response names as
     /// <see cref="RevokePermissionAmbiguousReason"/> (#2104 round 3).</para>
     ///
-    /// <para><b>An organization over the sweep bound (#2104 round 3)</b> is not swept member by member; it answers
-    /// <see cref="RevokeOrganizationTooLargeReason"/> unless the container's complete read holds no contact
-    /// permission at all (<see cref="ContainerHoldsNoContactPermissionAsync"/>), which is a 200.</para>
+    /// <para><b>An organization over the sweep bound (#2104 round 3)</b> is not swept member by member; the container is
+    /// asked whether it holds any contact permission at all (<see cref="ContainerContactPermissionStateAsync"/>). None: a
+    /// 200. One definitely left: <see cref="RevokeOrganizationTooLargeReason"/> (a retry meets the same bound). Not
+    /// established (round 4): the retryable <see cref="RevokeSpeCleanupIncompleteReason"/> — a retry may prove it clean.</para>
     /// </remarks>
     private static async Task<(SpeContainerRevokeOutcome Outcome, SpeOrgMemberCleanupSummary? OrgCleanup, bool OrganizationTooLarge, int PermissionsAmbiguous)>
         RemoveOrganizationMembersSpePermissionsAsync(
@@ -744,10 +745,12 @@ public static class RevokeExternalAccessEndpoint
         {
             // #2104 round 3: the members cannot be swept one by one, but the container itself can still prove that none
             // of them holds a permission there — the rule close-project applies (round 2, F1): a COMPLETE read on which
-            // every user permission is Spaarke-managed (SpeMembershipRemoval.NoContactPermissionRemains). Then nobody,
-            // member or not, holds a permission a contact grant could account for, and the honest answer is a 200.
-            if (await ContainerHoldsNoContactPermissionAsync(
-                    speContainerMembership, dataverseClient, containerId, organizationId, logger, ct))
+            // every user permission is Spaarke-managed or an internal user's (SpeContainerContactPermissionState.Clean).
+            // Then nobody, member or not, holds a permission a contact grant could account for: a 200.
+            var containerState = await ContainerContactPermissionStateAsync(
+                speContainerMembership, dataverseClient, containerId, organizationId, logger, ct);
+
+            if (containerState == SpeContainerContactPermissionState.Clean)
             {
                 logger.LogInformation(
                     "[EXT-REVOKE] Organization {OrganizationId} has more than {Bound} active members, more than one " +
@@ -756,6 +759,19 @@ public static class RevokeExternalAccessEndpoint
                     "(#2104 round 3).",
                     organizationId, ExternalOrganizationMembership.MaxMembersPerSweep, containerId);
                 return (SpeContainerRevokeOutcome.NoPermissionFound, UnknownMembership, false, 0);
+            }
+
+            if (containerState == SpeContainerContactPermissionState.Unknown)
+            {
+                // #2104 round 4 (F1): the container could not answer (a read, marker or lookup fault, an incomplete read, a
+                // throw). A retry may prove it clean, so this is the retryable container_not_cleared — never the
+                // "retrying will not change this" of organization_too_large.
+                logger.LogError(
+                    "[EXT-REVOKE] Organization {OrganizationId} has more than {Bound} active members, and whether container "
+                    + "{ContainerId} still holds a contact permission could not be established; members may RETAIN file "
+                    + "access. Retry the revoke.",
+                    organizationId, ExternalOrganizationMembership.MaxMembersPerSweep, containerId);
+                return (SpeContainerRevokeOutcome.Failed, UnknownMembership, false, 0);
             }
 
             // Task 020's escalation trigger, enforced in code rather than assumed away: a sweep that
@@ -908,13 +924,13 @@ public static class RevokeExternalAccessEndpoint
     }
 
     /// <summary>
-    /// #2104 round 3: does <paramref name="containerId"/> hold NO permission a contact grant could account for? The
+    /// #2104 round 3: does <paramref name="containerId"/> hold any permission a contact grant could account for? The
     /// container-wide answer <see cref="SpeContainerMembershipService.RemoveMembershipsAsync"/> gives with no key and
-    /// <c>confirmNoContactPermission</c> (<see cref="SpeMembershipRemoval.NoContactPermissionRemains"/>): <see langword="true"/>
-    /// only on a COMPLETE read where every user permission is Spaarke-managed. An incomplete read, unreadable markers, any
-    /// other user permission, or a fault is <see langword="false"/> — never clean. Removes nothing (there is no key).
+    /// <c>confirmNoContactPermission</c> (<see cref="SpeMembershipRemoval.ContactPermissionState"/>). Three-state since
+    /// round 4 (F1): a throw is <see cref="SpeContainerContactPermissionState.Unknown"/> — never clean, and never "one
+    /// remains" either, which would tell the caller a retry cannot help. Removes nothing (there is no key).
     /// </summary>
-    private static async Task<bool> ContainerHoldsNoContactPermissionAsync(
+    private static async Task<SpeContainerContactPermissionState> ContainerContactPermissionStateAsync(
         SpeContainerMembershipService speContainerMembership,
         DataverseWebApiClient dataverseClient,
         string containerId,
@@ -926,7 +942,7 @@ public static class RevokeExternalAccessEndpoint
         {
             var removal = await speContainerMembership.RemoveMembershipsAsync(
                 containerId, Array.Empty<SpeMembershipKey>(), dataverseClient, confirmNoContactPermission: true, ct);
-            return removal.NoContactPermissionRemains;
+            return removal.ContactPermissionState;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -938,7 +954,7 @@ public static class RevokeExternalAccessEndpoint
                 "[EXT-REVOKE] Could not establish whether container {ContainerId} holds any contact permission; the "
                 + "oversized organization {OrganizationId}'s members are not confirmed absent (fail closed).",
                 containerId, organizationId);
-            return false;
+            return SpeContainerContactPermissionState.Unknown;
         }
     }
 

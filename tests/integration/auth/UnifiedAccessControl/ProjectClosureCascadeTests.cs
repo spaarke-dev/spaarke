@@ -332,12 +332,13 @@ public class ProjectClosureCascadeTests
 
     /// <summary>The membership seam: answers RemoveMembershipsAsync per key from <paramref name="answer"/> (by the
     /// key's email — the contacts here have no bound object id) and records every (container, emails) it was called
-    /// with. #2104 round 2 (F1): <paramref name="noContactPermissionRemains"/> is the container-level answer, and
+    /// with. #2104 round 2 (F1): <paramref name="containerState"/> is the container-level answer ("one remains" unless a
+    /// test says otherwise; three-state since round 4), and
     /// <paramref name="confirmations"/> (when given) records each call's <c>confirmNoContactPermission</c>.</summary>
     private static Mock<SpeContainerMembershipService> SpeAnswering(
         Func<string, SpeContainerMembershipResult> answer,
         List<(string ContainerId, IReadOnlyCollection<string> Emails)> calls,
-        bool noContactPermissionRemains = false,
+        SpeContainerContactPermissionState containerState = SpeContainerContactPermissionState.ContactPermissionRemains,
         List<bool>? confirmations = null)
     {
         var spe = new Mock<SpeContainerMembershipService>(
@@ -356,7 +357,7 @@ public class ProjectClosureCascadeTests
                     results[key] = answer(key.Email ?? key.ToString());
                 }
 
-                return new SpeMembershipRemoval(results, noContactPermissionRemains);
+                return new SpeMembershipRemoval(results, containerState);
             });
         return spe;
     }
@@ -829,7 +830,7 @@ public class ProjectClosureCascadeTests
         var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
         var confirmations = new List<bool>();
         var body = OkBody(await CloseProject(client,
-            spe: SpeAnswering(_ => Removed, calls, noContactPermissionRemains: true, confirmations: confirmations),
+            spe: SpeAnswering(_ => Removed, calls, containerState: SpeContainerContactPermissionState.Clean, confirmations: confirmations),
             resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
 
         body.AccessRecordsRevoked.Should().Be(1);
@@ -854,7 +855,7 @@ public class ProjectClosureCascadeTests
         ArrangeOversizedOrganization(client);
 
         var problem = Problem(await CloseProject(client,
-            spe: SpeAnswering(_ => Removed, new(), noContactPermissionRemains: false),
+            spe: SpeAnswering(_ => Removed, new(), containerState: SpeContainerContactPermissionState.ContactPermissionRemains),
             resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
 
         problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureOrganizationTooLargeReason);
@@ -876,7 +877,7 @@ public class ProjectClosureCascadeTests
         ArrangeGranteeIdentities(client);
 
         var body = OkBody(await CloseProject(client,
-            spe: SpeAnswering(_ => Removed, new(), noContactPermissionRemains: true),
+            spe: SpeAnswering(_ => Removed, new(), containerState: SpeContainerContactPermissionState.Clean),
             resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
 
         body.SpeContainerMembersRemoved.Should().Be(1);
@@ -925,12 +926,14 @@ public class ProjectClosureCascadeTests
     }
 
     /// <summary>
-    /// #2104 (pass-2 F4): the container removal THROWS after an organization was found too large to sweep. The
-    /// oversized classification survives the throw — the closure still names the non-retryable leaf and its
-    /// administrator instruction, never the retryable container_not_cleared ("Retry the closure" cannot succeed).
+    /// #2104 (pass-2 F4), corrected by round 4 (F1): the container removal THROWS after an organization was found too
+    /// large to sweep. The throw means the container's own answer — the only thing that could confirm the oversized
+    /// organization's members absent — was never established, and a retry may establish it. So the closure is the
+    /// RETRYABLE container_not_cleared, never organization_too_large's "Retrying the closure will not change this" (which
+    /// pass-2 F4 pinned here, and which was false). The counts survive: both grantees are still uncleared.
     /// </summary>
     [Fact]
-    public async Task CloseProject_SecureProject_WhenTheRemovalThrowsAfterATooLargeOrganization_StaysNonRetryable()
+    public async Task CloseProject_SecureProject_WhenTheRemovalThrowsAfterATooLargeOrganization_IsRetryableNotCleared()
     {
         var table = new FakeGrantTable();
         table.SeedOrganizationGrant(OrganizationId, ProjectId);
@@ -949,13 +952,63 @@ public class ProjectClosureCascadeTests
         var problem = Problem(await CloseProject(client, spe: spe,
             resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
 
-        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureOrganizationTooLargeReason);
-        problem.ProblemDetails.Detail.Should().NotContain("Retry the closure")
-            .And.Contain("administrator")
-            .And.Contain("1 other grantee(s) could also not be confirmed removed");
-        problem.ProblemDetails.Extensions["organizationsTooLarge"].Should().Be(1);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason);
+        problem.ProblemDetails.Detail.Should().Contain("Retry the closure").And.NotContain("will not change");
+        problem.ProblemDetails.Extensions["organizationsTooLarge"].Should().Be(0,
+            "a retry may yet prove the oversized organization's members absent, so it is not reported as unfixable by one");
         problem.ProblemDetails.Extensions["granteesNotCleared"].Should().Be(2,
             "the oversized organization and the contact whose removal threw");
+        problem.ProblemDetails.Extensions["containerCleared"].Should().Be(false);
+    }
+
+    /// <summary>
+    /// #2104 round 4 (F1), the closure side of the revoke's rule: an oversized organization (or, below, a revoked history
+    /// over the read bound) can be confirmed absent only by the container's own answer. When that answer is Unknown — a
+    /// read, marker or internal-user lookup fault, or an incomplete read — the closure is the RETRYABLE
+    /// container_not_cleared, never a non-retryable leaf saying a retry cannot help.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_OversizedOrganization_WhenTheContainerAnswerIsUnknown_IsRetryableNotCleared()
+    {
+        var table = new FakeGrantTable();
+        table.SeedOrganizationGrant(OrganizationId, ProjectId);
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+        ArrangeOversizedOrganization(client);
+        var confirmations = new List<bool>();
+
+        var problem = Problem(await CloseProject(client,
+            spe: SpeAnswering(_ => Removed, new(), containerState: SpeContainerContactPermissionState.Unknown, confirmations: confirmations),
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason);
+        problem.ProblemDetails.Detail.Should().Contain("Retry the closure").And.NotContain("will not change");
+        problem.ProblemDetails.Extensions["organizationsTooLarge"].Should().Be(0);
+        problem.ProblemDetails.Extensions["containerCleared"].Should().Be(false);
+        confirmations.Should().Equal(new[] { true }, "the container was asked, and could not answer");
+    }
+
+    /// <summary>#2104 round 4 (F1): the same rule for a revoked history over the read bound — an Unknown container answer is
+    /// the retryable container_not_cleared, not too_many_grants.</summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_RevokedGrantsOverTheBound_WhenTheContainerAnswerIsUnknown_IsRetryableNotCleared()
+    {
+        var table = new FakeGrantTable();
+        for (var i = 0; i <= ProjectClosureEndpoint.MaxRevokedGrantsPerSweep; i++)
+        {
+            table.SeedContactGrant(ContactId, ProjectId).StateCode = 1;
+        }
+
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var problem = Problem(await CloseProject(client,
+            spe: SpeAnswering(_ => Removed, new(), containerState: SpeContainerContactPermissionState.Unknown),
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason);
+        problem.ProblemDetails.Detail.Should().Contain("Retry the closure").And.NotContain("will not change");
         problem.ProblemDetails.Extensions["containerCleared"].Should().Be(false);
     }
 
@@ -1270,7 +1323,7 @@ public class ProjectClosureCascadeTests
         ArrangeGranteeIdentities(client);
 
         var body = OkBody(await CloseProject(client,
-            spe: SpeAnswering(_ => Removed, new(), noContactPermissionRemains: true),
+            spe: SpeAnswering(_ => Removed, new(), containerState: SpeContainerContactPermissionState.Clean),
             resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
 
         body.AccessRecordsRevoked.Should().Be(0);
@@ -1373,7 +1426,7 @@ public class ProjectClosureCascadeTests
         ArrangeOversizedOrganization(client);
 
         var problem = Problem(await CloseProject(client,
-            spe: SpeAnswering(_ => Removed, new(), noContactPermissionRemains: true),
+            spe: SpeAnswering(_ => Removed, new(), containerState: SpeContainerContactPermissionState.Clean),
             resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
 
         problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosurePartialRevocationReason);

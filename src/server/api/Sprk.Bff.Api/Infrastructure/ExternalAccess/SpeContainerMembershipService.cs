@@ -236,8 +236,9 @@ public class SpeContainerMembershipService
     /// <param name="directory">The Dataverse a matched permission's holder is checked against (K3, see
     /// <see cref="RevokeMembershipAsync"/>).</param>
     /// <param name="confirmNoContactPermission">#2104 round 2 (F1): also establish
-    /// <see cref="SpeMembershipRemoval.NoContactPermissionRemains"/> when no key matched — the container's grant markers are
-    /// then read even though nothing matched (one extra container GET), and the read is made even with no key at all.
+    /// <see cref="SpeMembershipRemoval.ContactPermissionState"/> when no key matched — the container's grant markers are
+    /// then read even though nothing matched (one extra container GET), the read is made even with no key at all, and
+    /// (round 4) every unmanaged user permission's holder joins the one batched internal-user lookup.
     /// Close-project asks for it when a revoked grantee could not be enumerated (an organization over the sweep bound)
     /// and so can only be confirmed absent by the container itself holding no contact permission.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -278,7 +279,8 @@ public class SpeContainerMembershipService
 
         if (distinct.Count == 0 && !confirmNoContactPermission)
         {
-            return new SpeMembershipRemoval(new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>(), false);
+            return new SpeMembershipRemoval(
+                new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>(), SpeContainerContactPermissionState.Unknown);
         }
 
         _logger.LogInformation(
@@ -327,6 +329,7 @@ public class SpeContainerMembershipService
         PermissionReadResult read;
         IReadOnlySet<string>? managed;
         bool anyMatch;
+        bool markersRead;
         try
         {
             graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
@@ -336,9 +339,9 @@ public class SpeContainerMembershipService
             // permission — the common broker-only answer (nobody matches) costs no extra Graph call — or when the caller
             // needs to know whether a contact permission remains at all (F1).
             anyMatch = keys.Any(k => CandidatePermissions(read.Permissions, k, NoManagedPermissions).Count > 0);
-            var markersNeeded = anyMatch
+            markersRead = anyMatch
                 || (confirmNoContactPermission && read.EnumerationComplete && read.Permissions.Any(IsUserPermission));
-            managed = markersNeeded
+            managed = markersRead
                 ? await ReadManagedPermissionIdsAsync(graphClient, containerId, ct)
                 : NoManagedPermissions;
         }
@@ -357,7 +360,7 @@ public class SpeContainerMembershipService
                     false, null, $"Container permissions could not be read: {ex.Message}");
             }
 
-            return new SpeMembershipRemoval(results, NoContactPermissionRemains: false);
+            return new SpeMembershipRemoval(results, SpeContainerContactPermissionState.Unknown);
         }
 
         if (managed is null)
@@ -372,7 +375,7 @@ public class SpeContainerMembershipService
                     : ClassifyRevokeResult(read.EnumerationComplete, null, key.ToString());
             }
 
-            return new SpeMembershipRemoval(results, NoContactPermissionRemains: false);
+            return new SpeMembershipRemoval(results, SpeContainerContactPermissionState.Unknown);
         }
 
         // K3: every permission some key matches (managed ones aside) is a candidate; one batched lookup tells which are
@@ -381,21 +384,31 @@ public class SpeContainerMembershipService
             .SelectMany(k => CandidatePermissions(read.Permissions, k, managed))
             .DistinctBy(p => p.Id, StringComparer.Ordinal)
             .ToList();
-        var candidateObjectIds = candidates.SelectMany(PermissionUserObjectIds).Distinct().ToList();
+        // #2104 round 4: when the caller asks whether a contact permission remains, every OTHER unmanaged user permission's
+        // holder is checked in the same batched lookup — an internal user's hand-granted role is not a contact permission,
+        // so it must not make the answer "one remains". (Only on a complete read: an incomplete one is Unknown anyway.)
+        var lookedUpObjectIds = candidates.SelectMany(PermissionUserObjectIds)
+            .Concat(confirmNoContactPermission && read.EnumerationComplete
+                ? read.Permissions
+                    .Where(p => IsUserPermission(p) && !(p.Id is { } id && managed.Contains(id)))
+                    .SelectMany(PermissionUserObjectIds)
+                : [])
+            .Distinct()
+            .ToList();
 
         IReadOnlySet<Guid> internalObjectIds = NoInternalUsers;
-        if (candidateObjectIds.Count > 0)
+        if (lookedUpObjectIds.Count > 0)
         {
             try
             {
-                internalObjectIds = await QueryInternalUserObjectIdsAsync(directory, candidateObjectIds, ct);
+                internalObjectIds = await QueryInternalUserObjectIdsAsync(directory, lookedUpObjectIds, ct);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex,
-                    "Could not check whether the {Count} permission holder(s) matched on container {ContainerId} are "
+                    "Could not check whether the {Count} permission holder(s) on container {ContainerId} are "
                     + "internal users; NO permission was removed and none of the {Keys} contact(s) can be confirmed "
-                    + "removed (K3).", candidateObjectIds.Count, containerId, keys.Count);
+                    + "removed (K3).", lookedUpObjectIds.Count, containerId, keys.Count);
 
                 foreach (var key in keys)
                 {
@@ -406,7 +419,7 @@ public class SpeContainerMembershipService
                         + "absent. They may RETAIN file access; retry the revoke.");
                 }
 
-                return new SpeMembershipRemoval(results, NoContactPermissionRemains: false);
+                return new SpeMembershipRemoval(results, SpeContainerContactPermissionState.Unknown);
             }
         }
 
@@ -505,13 +518,70 @@ public class SpeContainerMembershipService
             }
         }
 
-        // F1: after this call, is any permission left that could be a contact's? Every user permission on a COMPLETE read
-        // is either Spaarke-managed or was deleted here — anything else (an internal user's role, an ambiguous or
-        // unverifiable match, a failed delete, an unmatched permission whose markers were not read) counts as remaining.
-        var remains = read.Permissions.Any(p => IsUserPermission(p)
-            && !(p.Id is { } id && (managed.Contains(id) || (deletions.TryGetValue(id, out var deleted) && deleted.Success))));
+        return new SpeMembershipRemoval(
+            results,
+            ContactPermissionStateAfter(read, markersRead, managed, deletions, internalObjectIds, lookedUpObjectIds, results));
+    }
 
-        return new SpeMembershipRemoval(results, NoContactPermissionRemains: read.EnumerationComplete && !remains);
+    /// <summary>
+    /// F1 (#2104 round 2; three-state since round 4): after a removal, is any permission left that could be a contact's?
+    /// Per user permission on the read: Spaarke-managed, deleted here, or held by an internal user — not a contact's. A
+    /// failed delete, or a permission not judged (markers not read, holder not looked up) —
+    /// <see cref="SpeContainerContactPermissionState.Unknown"/>: a retry may change it. Any other — its holder checked and
+    /// not internal, or naming no object id to check — definitely
+    /// <see cref="SpeContainerContactPermissionState.ContactPermissionRemains"/>, as does a key's ambiguous or unverifiable
+    /// match. A definite remainder wins over an unknown, and an incomplete read is at best unknown.
+    /// </summary>
+    private static SpeContainerContactPermissionState ContactPermissionStateAfter(
+        PermissionReadResult read,
+        bool markersRead,
+        IReadOnlySet<string> managed,
+        IReadOnlyDictionary<string, SpeContainerMembershipResult> deletions,
+        IReadOnlySet<Guid> internalObjectIds,
+        IReadOnlyCollection<Guid> lookedUpObjectIds,
+        IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult> results)
+    {
+        var remains = results.Values.Any(IsAmbiguousPermissionMatch);
+        var unknown = !read.EnumerationComplete;
+
+        foreach (var permission in read.Permissions.Where(IsUserPermission))
+        {
+            if (permission.Id is { } id)
+            {
+                if (managed.Contains(id))
+                {
+                    continue;
+                }
+
+                if (deletions.TryGetValue(id, out var deletion))
+                {
+                    // Deleted: gone. Failed: still there, but a retry may delete it.
+                    unknown |= !deletion.Success;
+                    continue;
+                }
+            }
+
+            var holders = PermissionUserObjectIds(permission).ToList();
+            if (holders.Any(internalObjectIds.Contains))
+            {
+                continue;
+            }
+
+            if (markersRead && holders.All(lookedUpObjectIds.Contains))
+            {
+                remains = true;
+            }
+            else
+            {
+                unknown = true;
+            }
+        }
+
+        return remains
+            ? SpeContainerContactPermissionState.ContactPermissionRemains
+            : unknown
+                ? SpeContainerContactPermissionState.Unknown
+                : SpeContainerContactPermissionState.Clean;
     }
 
     // =========================================================================
@@ -1372,15 +1442,35 @@ public sealed record SpeContainerMembershipResult(
 /// the one paged read established about the container as a whole.
 /// </summary>
 /// <param name="Results">One <see cref="SpeContainerMembershipResult"/> per distinct key.</param>
-/// <param name="NoContactPermissionRemains">#2104 round 2 (F1): <c>true</c> only when the permission collection was read to
-/// its end and every user permission on it is Spaarke-managed (marker-owned) or was deleted by this call — so NO person
-/// holds a permission there that a contact grant could account for, and every revoked grantee, whoever they are, is
-/// confirmed absent. <c>false</c> whenever that is not proven: an incomplete or failed read, unreadable markers, a failed
-/// internal-user check, or any other user permission left in place (an internal user's role included, and — when the
-/// caller did not ask for the markers to be read — an unmatched one).</param>
+/// <param name="ContactPermissionState">#2104 round 2 (F1), three-state since round 4: whether, after this call, the
+/// container holds a permission a contact grant could account for — <see cref="SpeContainerContactPermissionState"/>.</param>
 public sealed record SpeMembershipRemoval(
     IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult> Results,
-    bool NoContactPermissionRemains);
+    SpeContainerContactPermissionState ContactPermissionState);
+
+/// <summary>
+/// #2104 round 4 (F1): what <see cref="SpeContainerMembershipService.RemoveMembershipsAsync"/> established about the
+/// container as a whole — whether any permission is left that a contact grant could account for. Three states, because
+/// "one is left" and "could not tell" call for different answers: a retry cannot change the first, and can the second.
+/// </summary>
+public enum SpeContainerContactPermissionState
+{
+    /// <summary>Not established: the read faulted or was incomplete, the markers or the internal-user lookup could not be
+    /// read, a contact's delete failed, or a remaining permission was not checked. A retry may answer it. The default, so
+    /// an unset value never reads as clean.</summary>
+    Unknown = 0,
+
+    /// <summary>The collection was read to its end and every user permission on it is Spaarke-managed (marker-owned), was
+    /// deleted by this call, or is held by an internal user (a <c>systemuser</c> of this environment) — so no permission
+    /// is left that a contact grant could account for, and every revoked grantee, whoever they are, is absent.</summary>
+    Clean = 1,
+
+    /// <summary>A permission that could be a contact's is definitely left, and re-reading would find it again: a holder
+    /// checked and not an internal user (or naming no object id, so it cannot be checked), or a key's ambiguous or
+    /// unverifiable match (<see cref="SpeContainerMembershipService.IsAmbiguousPermissionMatch"/>). Only an administrator
+    /// changes it. Wins over <see cref="Unknown"/>: a fault elsewhere cannot make such a permission go away.</summary>
+    ContactPermissionRemains = 2,
+}
 
 /// <summary>
 /// #2105: the identity a contact's container permission is matched by (<see cref="SpeContainerMembershipService.FindContactPermissions"/>)

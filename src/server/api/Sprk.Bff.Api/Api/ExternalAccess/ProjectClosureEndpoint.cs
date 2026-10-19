@@ -275,6 +275,13 @@ public static class ProjectClosureEndpoint
             }
         }
 
+        // #2104 round 4 (F1): the two "a retry cannot help" claims below (an oversized organization, too many revoked
+        // grants) hold only while the container's own answer is definite. When it could not be established — the
+        // container question faulted, or the step threw — a retry may yet prove it clean, so neither claim is made and
+        // the closure answers the retryable container_not_cleared.
+        var containerAnswerDefinite =
+            granteeRemoval is { ContainerState: not SpeContainerContactPermissionState.Unknown };
+
         // What the container step established, for every incomplete answer below (pass-2 F2): a partial revocation
         // must not swallow it, and an oversized organization's non-retryable instruction must reach the caller.
         var container = new ContainerStepReport(
@@ -284,9 +291,10 @@ public static class ProjectClosureEndpoint
             GranteesNotCleared: granteeRemoval is { } counted && (historyRead || counted.ContainerProvenClean)
                 ? counted.Unresolved
                 : null,
-            OrganizationsTooLarge: granteeRemoval?.OrganizationsTooLarge ?? 0,
+            OrganizationsTooLarge: containerAnswerDefinite ? granteeRemoval!.Value.OrganizationsTooLarge : 0,
             // F2: the project's own container was swept, but its revoked grants exceed one read; not fixed by a retry.
-            RevokedGrantsOverLimit: closureContainerId is not null && !containerCleared && history is { OverLimit: true },
+            RevokedGrantsOverLimit: closureContainerId is not null && !containerCleared && history is { OverLimit: true }
+                && containerAnswerDefinite,
             // #2104 round 3: grantees whose match was ambiguous or unverifiable — nothing removed; not fixed by a retry.
             PermissionsAmbiguous: granteeRemoval?.PermissionsAmbiguous ?? 0);
 
@@ -439,10 +447,12 @@ public static class ProjectClosureEndpoint
     /// container. <c>false</c>: not confirmed (container undetermined, a grantee unresolved, earlier grants unreadable,
     /// or the step threw). <c>null</c>: the project is not secure and owns no container, so the step does not apply.</param>
     /// <param name="GranteesNotCleared">Grantees not confirmed removed; <c>null</c> when that could not be counted.</param>
-    /// <param name="OrganizationsTooLarge">Revoked organizations over the sweep bound — not fixed by a retry.</param>
+    /// <param name="OrganizationsTooLarge">Revoked organizations over the sweep bound — not fixed by a retry. 0 when the
+    /// container's own answer was not established (#2104 round 4): a retry may then prove their members absent.</param>
     /// <param name="RevokedGrantsOverLimit">#2104 round 2 (F2): the project's revoked grants exceed one read
-    /// (<see cref="MaxRevokedGrantsPerSweep"/>) and the container could not be shown to hold no contact permission — not
-    /// fixed by a retry. Carried in the detail, not as an extension.</param>
+    /// (<see cref="MaxRevokedGrantsPerSweep"/>) and the container definitely holds a permission a contact grant could
+    /// account for — not fixed by a retry (round 4: never set when the container's answer was not established). Carried
+    /// in the detail, not as an extension.</param>
     /// <param name="PermissionsAmbiguous">#2104 round 3: grantees (counted in <paramref name="GranteesNotCleared"/> too)
     /// whose match was ambiguous or unverifiable, so nothing was removed for them — not fixed by a retry. Carried in the
     /// detail and the reason code, not as an extension.</param>
@@ -603,19 +613,24 @@ public static class ProjectClosureEndpoint
     /// clear; not unresolved.</param>
     /// <param name="OrganizationsTooLarge">Revoked organizations (counted in <paramref name="Unresolved"/> too) whose
     /// active members exceed the sweep bound: their members were not swept, and a retry meets the same bound.</param>
-    /// <param name="ContainerProvenClean">#2104 round 2 (F1): the container's complete read left no permission a contact
-    /// grant could account for (<see cref="SpeMembershipRemoval.NoContactPermissionRemains"/>), so every revoked grantee
-    /// (an oversized organization's members, an unreadable identity, the earlier grants that could not be read) is
-    /// confirmed absent; <paramref name="Unresolved"/> and <paramref name="OrganizationsTooLarge"/> are then 0.</param>
+    /// <param name="ContainerState">#2104 round 2 (F1), three-state since round 4: what the removal established about the
+    /// container as a whole (<see cref="SpeMembershipRemoval.ContactPermissionState"/>); <see cref="SpeContainerContactPermissionState.Unknown"/>
+    /// when the removal threw; <c>null</c> when no removal ran. <see cref="SpeContainerContactPermissionState.Clean"/>
+    /// confirms every revoked grantee absent (<see cref="ContainerProvenClean"/>).</param>
     /// <param name="PermissionsAmbiguous">#2104 round 3: grantees (counted in <paramref name="Unresolved"/> too) whose match
     /// was ambiguous or unverifiable (<see cref="SpeContainerMembershipService.IsAmbiguousPermissionMatch"/>): nothing was
     /// removed for them, and a retry reads the same permissions and refuses again.</param>
     internal readonly record struct GranteeRemoval(
-        int Removed, int Unresolved, int NoMembershipKey = 0, int OrganizationsTooLarge = 0, bool ContainerProvenClean = false,
-        int PermissionsAmbiguous = 0)
+        int Removed, int Unresolved, int NoMembershipKey = 0, int OrganizationsTooLarge = 0,
+        SpeContainerContactPermissionState? ContainerState = null, int PermissionsAmbiguous = 0)
     {
         /// <summary>Every revoked grantee is confirmed to hold no permission on the container.</summary>
         public bool Complete => Unresolved == 0;
+
+        /// <summary>The container's complete read left no permission a contact grant could account for, so every revoked
+        /// grantee (an oversized organization's members, an unreadable identity, the earlier grants that could not be read)
+        /// is confirmed absent; <see cref="Unresolved"/> and <see cref="OrganizationsTooLarge"/> are then 0.</summary>
+        public bool ContainerProvenClean => ContainerState == SpeContainerContactPermissionState.Clean;
     }
 
     /// <summary>
@@ -782,10 +797,13 @@ public static class ProjectClosureEndpoint
         {
             // Pass-2 F4: the counts gathered so far — the oversized organizations above all — survive the throw, so the
             // closure still names the non-retryable leaf. Every keyed grantee is unconfirmed.
+            // Round 4 (F1): the container's answer was not established either, so a retry may still prove it clean — the
+            // non-retryable claims an oversized organization would otherwise make are not made (ContainerState Unknown).
             logger.LogError(ex,
                 "[CLOSE-PROJECT] Removing {Count} revoked grantee(s) from container {ContainerId} failed; none is "
                 + "confirmed removed.", keys.Count, containerId);
-            return new GranteeRemoval(0, unresolved + keys.Count, noKey, tooLarge);
+            return new GranteeRemoval(
+                0, unresolved + keys.Count, noKey, tooLarge, ContainerState: SpeContainerContactPermissionState.Unknown);
         }
 
         var removed = 0;
@@ -813,7 +831,7 @@ public static class ProjectClosureEndpoint
             }
         }
 
-        if (removal.NoContactPermissionRemains)
+        if (removal.ContactPermissionState == SpeContainerContactPermissionState.Clean)
         {
             if (unresolved > 0 || !sweepComplete)
             {
@@ -825,10 +843,12 @@ public static class ProjectClosureEndpoint
                     containerId, unresolved, tooLarge);
             }
 
-            return new GranteeRemoval(removed, Unresolved: 0, noKey, OrganizationsTooLarge: 0, ContainerProvenClean: true);
+            return new GranteeRemoval(
+                removed, Unresolved: 0, noKey, OrganizationsTooLarge: 0, ContainerState: SpeContainerContactPermissionState.Clean);
         }
 
-        return new GranteeRemoval(removed, unresolved, noKey, tooLarge, PermissionsAmbiguous: ambiguous);
+        return new GranteeRemoval(
+            removed, unresolved, noKey, tooLarge, removal.ContactPermissionState, PermissionsAmbiguous: ambiguous);
     }
 
     /// <summary>
