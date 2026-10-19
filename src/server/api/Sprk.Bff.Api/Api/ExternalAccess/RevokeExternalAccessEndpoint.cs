@@ -559,15 +559,17 @@ public static class RevokeExternalAccessEndpoint
             return SpeContainerRevokeOutcome.Failed;
         }
 
-        if (string.IsNullOrWhiteSpace(contactEmail))
+        if (HasNoContainerMembershipKey(contactEmail))
         {
-            // No email means no way to identify their ACL entry. If one exists we cannot find it, so this
-            // is an unknown state, not an absence — report Failed rather than NoPermissionFound.
-            logger.LogWarning(
-                "[EXT-REVOKE] Contact {ContactId} has no emailaddress1, which is the key SPE membership " +
-                "is written with — any container permission on {ContainerId} cannot be matched.",
-                request.ContactId, containerId);
-            return SpeContainerRevokeOutcome.Failed;
+            // #2103: the shared decision (see HasNoContainerMembershipKey) — nothing on the container can be this
+            // contact's, so there is nothing to clear. It used to be Failed → a 500 telling the caller to retry, which
+            // could never succeed: a missing email is permanent.
+            logger.LogInformation(
+                "[EXT-REVOKE] Contact {ContactId} has no emailaddress1 — the only key a container permission is " +
+                "matched by — so no permission on {ContainerId} can be attributed to them; container step " +
+                "{Outcome} (#2103).",
+                request.ContactId, containerId, NoContainerMembershipKeyOutcome);
+            return NoContainerMembershipKeyOutcome;
         }
 
         var result = await speContainerMembership.RevokeMembershipAsync(containerId, contactEmail, ct);
@@ -680,6 +682,7 @@ public static class RevokeExternalAccessEndpoint
         var notFound = 0;
         var failed = 0;
         var retained = 0;
+        var noKey = 0;
 
         var resolved = new List<(Guid ContactId, string Email)>();
 
@@ -702,13 +705,15 @@ public static class RevokeExternalAccessEndpoint
             {
                 var memberEmail = await ResolveContactEmailAsync(dataverseClient, memberContactId, ct);
 
-                if (string.IsNullOrWhiteSpace(memberEmail))
+                if (HasNoContainerMembershipKey(memberEmail))
                 {
-                    failed++;
-                    logger.LogWarning(
+                    // #2103: the shared decision — no permission can be this member's, so nothing to clear, and
+                    // not a failure (it used to be, which made every revoke of this organization a permanent 500).
+                    noKey++;
+                    logger.LogInformation(
                         "[EXT-REVOKE] Member Contact {ContactId} of Organization {OrganizationId} has no " +
-                        "emailaddress1 — the key SPE membership is written with — so any permission on " +
-                        "{ContainerId} cannot be matched. They may RETAIN file access.",
+                        "emailaddress1 — the only key a container permission is matched by — so no permission " +
+                        "on {ContainerId} can be attributed to them; nothing to clear (#2103).",
                         memberContactId, organizationId, containerId);
                     continue;
                 }
@@ -779,14 +784,16 @@ public static class RevokeExternalAccessEndpoint
             PermissionsRemoved: removed,
             PermissionsNotFound: notFound,
             Failed: failed,
-            RetainedByOtherGrant: retained);
+            RetainedByOtherGrant: retained,
+            NoMembershipKey: noKey);
 
         var outcome = AggregateOrgOutcome(summary);
 
         logger.LogInformation(
             "[EXT-REVOKE] Organization {OrganizationId} SPE cleanup on {ContainerId}: {Members} active " +
-            "member(s), {Removed} permission(s) removed, {NotFound} with none, {Failed} FAILED → {Outcome}",
-            organizationId, containerId, summary.MembersEnumerated, removed, notFound, failed, outcome);
+            "member(s), {Removed} permission(s) removed, {NotFound} with none, {NoKey} with no email key, " +
+            "{Failed} FAILED → {Outcome}",
+            organizationId, containerId, summary.MembersEnumerated, removed, notFound, noKey, failed, outcome);
 
         return (outcome, summary);
     }
@@ -821,8 +828,10 @@ public static class RevokeExternalAccessEndpoint
             return SpeContainerRevokeOutcome.PermissionRemoved;
 
         // Task 166 r1: every enumerated member is still entitled through another live grant on this root — nobody's
-        // permission was even looked up, so "nobody held one" would be a claim this revoke never checked.
-        if (summary.MembersEnumerated > 0 && summary.RetainedByOtherGrant == summary.MembersEnumerated)
+        // permission was even looked up, so "nobody held one" would be a claim this revoke never checked. #2103: a member
+        // with no email key is the same — nothing was looked up for them either.
+        if (summary.MembersEnumerated > 0
+            && summary.RetainedByOtherGrant + summary.NoMembershipKey == summary.MembersEnumerated)
             return SpeContainerRevokeOutcome.NotAttempted;
 
         // The member list was established (possibly empty) and nobody held a permission. Under the
@@ -847,6 +856,47 @@ public static class RevokeExternalAccessEndpoint
 
         return row?.emailaddress1;
     }
+
+    /// <summary>
+    /// #2103 — THE decision for a grantee contact with no <c>emailaddress1</c>, shared by every SPE cleanup that
+    /// revokes contacts: the single-grant revoke (a contact grant, and each member of an organization grant) and
+    /// project closure. <see langword="true"/> means no container permission can be attributed to this contact, so
+    /// there is nothing to clear — NOT a failure, and never a "retry".
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why "nothing to clear" is the truthful answer, not a guess.</b></para>
+    /// <list type="number">
+    /// <item><b>Spaarke never writes a contact's container permission.</b>
+    /// <see cref="SpeContainerMembershipService.GrantMembershipAsync"/> has no caller and never had one (its
+    /// introducing commit is the only one that changes its call count); <c>/grant</c> answers
+    /// <c>SpeContainerMembershipGranted: false</c>; the invite endpoints do not touch SPE. So no grant-time key
+    /// exists to revoke by — there is no grant-time write.</item>
+    /// <item><b>The roles Spaarke DOES create are not a contact's.</b> The marked grants
+    /// (<see cref="SpeContainerMembershipService.StandingWriterMarkerPrefix"/> /
+    /// <see cref="SpeContainerMembershipService.JitWriterMarkerPrefix"/> keyed by a systemuserid,
+    /// <see cref="SpeContainerMembershipService.DemoWriterMarkerPrefix"/> by a demo user's Entra object id) belong to
+    /// <c>SpeContainerMembershipSync</c> and demo expiry, which remove them on their own rules. A contact grant
+    /// never created one, so a contact revoke must not remove one.</item>
+    /// <item><b>What remains is a permission made outside Spaarke</b>, which a revoke recognises by one key only: the
+    /// contact's email (<see cref="SpeContainerMembershipService.FindPermissionByEmail"/>). With an email, "no permission
+    /// under it" is already the healthy <see cref="SpeContainerRevokeOutcome.NoPermissionFound"/>; with none, no
+    /// permission on the container can be tied to this contact at all.</item>
+    /// </list>
+    /// <para>It used to report <see cref="SpeContainerRevokeOutcome.Failed"/> (a 500 that says "retry"). A missing
+    /// email is permanent, so the retry could never succeed (#2103, found by the UAC 099b live gate). Every other
+    /// Failed — the email read faulting, Graph refusing, an incomplete permission read — is transient and stays
+    /// Failed. A contact who HAS an email is unaffected.</para>
+    /// </remarks>
+    internal static bool HasNoContainerMembershipKey(
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] string? contactEmail)
+        => string.IsNullOrWhiteSpace(contactEmail);
+
+    /// <summary>
+    /// The per-contact outcome of <see cref="HasNoContainerMembershipKey"/>: <see cref="SpeContainerRevokeOutcome.NotAttempted"/>,
+    /// because the container was not read for this contact. It is not <see cref="SpeContainerRevokeOutcome.NoPermissionFound"/>, which
+    /// claims a read. It is a 200, the same answer as a revoke whose request names no contact to match.
+    /// </summary>
+    internal const SpeContainerRevokeOutcome NoContainerMembershipKeyOutcome = SpeContainerRevokeOutcome.NotAttempted;
 
     /// <summary>Minimal projection of <c>contacts</c> for SPE identity matching.</summary>
     internal sealed class ContactEmailRow

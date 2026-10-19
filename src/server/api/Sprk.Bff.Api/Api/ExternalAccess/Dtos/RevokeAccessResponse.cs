@@ -22,7 +22,8 @@ public enum SpeContainerRevokeOutcome
     /// <summary>
     /// No removal was attempted — the grant's root is not a secure record with its own container (task 166: the
     /// container is derived from the root, never supplied by the client), or a contact-grant revoke named no
-    /// contact to match.
+    /// contact to match, or (#2103) the contact has no <c>emailaddress1</c>, so no container permission can be
+    /// attributed to them and there is nothing to clear (<c>RevokeExternalAccessEndpoint.HasNoContainerMembershipKey</c>).
     /// </summary>
     /// <remarks>
     /// <para><b>Task 020 narrowed this.</b> It used to ALSO mean "this was an organization-grant revoke",
@@ -73,8 +74,8 @@ public enum SpeContainerRevokeOutcome
 /// under the broker-only model — nothing in this product grants a member a container ACL.
 /// </param>
 /// <param name="Failed">
-/// Members whose container permission could NOT be confirmed removed — their email was unreadable or
-/// absent (so their ACL entry is unfindable), or Graph refused the delete. <b>Non-zero means those people
+/// Members whose container permission could NOT be confirmed removed — their email could not be read, or
+/// Graph refused the delete. (#2103: a member with NO email is counted in <c>NoMembershipKey</c>, not here.) <b>Non-zero means those people
 /// may RETAIN file access</b>, so the revoke MUST NOT be reported as an SPE success.
 /// </param>
 /// <remarks>
@@ -87,12 +88,19 @@ public enum SpeContainerRevokeOutcome
 /// active, unexpired grant on the same root (their own contact grant, or another organization's) still entitles
 /// them. Additive (defaults to 0), so a client that predates it is unaffected.
 /// </param>
+/// <param name="NoMembershipKey">
+/// #2103: members with no <c>emailaddress1</c>. No container permission can be attributed to them (Spaarke never
+/// writes one for a contact, and email is the only key an outside-made one is matched by), so there is nothing to
+/// clear. Not a failure, and not <paramref name="PermissionsNotFound"/>, which claims the container was read for them.
+/// Additive (defaults to 0), so a client that predates it is unaffected.
+/// </param>
 public sealed record SpeOrgMemberCleanupSummary(
     int? MembersEnumerated,
     int PermissionsRemoved,
     int PermissionsNotFound,
     int Failed,
-    int RetainedByOtherGrant = 0);
+    int RetainedByOtherGrant = 0,
+    int NoMembershipKey = 0);
 
 /// <summary>
 /// Response returned after revoking external access from a Contact.

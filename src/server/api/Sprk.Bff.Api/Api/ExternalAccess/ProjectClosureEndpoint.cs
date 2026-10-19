@@ -200,8 +200,9 @@ public static class ProjectClosureEndpoint
                 {
                     logger.LogInformation(
                         "[CLOSE-PROJECT] Removed {Count} revoked grantee permission(s) from project {ProjectId}'s " +
-                        "own container {ContainerId}; internal users' permissions were not touched.",
-                        speRemovedCount, request.ProjectId, closureContainerId);
+                        "own container {ContainerId} ({NoKey} grantee(s) with no email key had nothing to clear); " +
+                        "internal users' permissions were not touched.",
+                        speRemovedCount, request.ProjectId, closureContainerId, removal.NoMembershipKey);
                 }
                 else
                 {
@@ -384,7 +385,9 @@ public static class ProjectClosureEndpoint
     /// <summary>Outcome of <see cref="RemoveRevokedGranteesAsync"/>.</summary>
     /// <param name="Removed">Permissions actually deleted.</param>
     /// <param name="Unresolved">Grantees whose permission could not be CONFIRMED absent or removed.</param>
-    internal readonly record struct GranteeRemoval(int Removed, int Unresolved)
+    /// <param name="NoMembershipKey">#2103: grantees with no email, to whom no container permission can be attributed
+    /// (<see cref="RevokeExternalAccessEndpoint.HasNoContainerMembershipKey"/>). Nothing to clear; not unresolved.</param>
+    internal readonly record struct GranteeRemoval(int Removed, int Unresolved, int NoMembershipKey = 0)
     {
         /// <summary>Every revoked grantee is confirmed to hold no permission on the container.</summary>
         public bool Complete => Unresolved == 0;
@@ -401,11 +404,15 @@ public static class ProjectClosureEndpoint
     /// user identity, which on SPE is every individual grant — internal users included (the demo provisioning
     /// path and the SPE admin console both add internal users). Closing a project must revoke external access, not
     /// lock its own attorneys out of the files. The method had no other caller and was deleted.</para>
-    /// <para><b>Fail closed, per grantee.</b> A contact with no email, an email that could not be read, an
+    /// <para><b>Fail closed, per grantee.</b> An email that could not be read, an
     /// organization whose membership could not be enumerated or exceeds the sweep bound, and a per-permission
     /// failure each count as UNRESOLVED — "we could not confirm they are gone" — so the closure reports
     /// <see cref="ClosureContainerNotClearedReason"/> rather than a 200. "No permission found" on a FULLY enumerated
     /// container is the healthy broker-only answer and is not a failure.</para>
+    /// <para><b>A grantee with NO email (#2103)</b> is neither: no container permission can be attributed to them, so
+    /// there is nothing to clear — the single-grant revoke's decision, shared through
+    /// <see cref="RevokeExternalAccessEndpoint.HasNoContainerMembershipKey"/>, not a second copy. It used to count as
+    /// unresolved, so closing a project with one such grantee answered container_not_cleared + "retry" forever.</para>
     /// </remarks>
     internal static async Task<GranteeRemoval> RemoveRevokedGranteesAsync(
         SpeContainerMembershipService speContainerMembership,
@@ -416,6 +423,7 @@ public static class ProjectClosureEndpoint
         CancellationToken ct)
     {
         var unresolved = 0;
+        var noKey = 0;
         var contactIds = new HashSet<Guid>();
 
         foreach (var record in revokedRecords)
@@ -490,12 +498,13 @@ public static class ProjectClosureEndpoint
                 continue;
             }
 
-            if (string.IsNullOrWhiteSpace(email))
+            if (RevokeExternalAccessEndpoint.HasNoContainerMembershipKey(email))
             {
-                logger.LogWarning(
-                    "[CLOSE-PROJECT] Contact {ContactId} has no emailaddress1 — the key container membership is "
-                    + "written with — so any permission they hold cannot be matched.", contactId);
-                unresolved++;
+                logger.LogInformation(
+                    "[CLOSE-PROJECT] Contact {ContactId} has no emailaddress1 — the only key a container permission is "
+                    + "matched by — so no permission on {ContainerId} can be attributed to them; nothing to clear (#2103).",
+                    contactId, containerId);
+                noKey++;
                 continue;
             }
 
@@ -504,7 +513,7 @@ public static class ProjectClosureEndpoint
 
         if (emails.Count == 0)
         {
-            return new GranteeRemoval(0, unresolved);
+            return new GranteeRemoval(0, unresolved, noKey);
         }
 
         var results = await speContainerMembership.RemoveMembershipsAsync(containerId, emails, ct).ConfigureAwait(false);
@@ -529,7 +538,7 @@ public static class ProjectClosureEndpoint
             }
         }
 
-        return new GranteeRemoval(removed, unresolved);
+        return new GranteeRemoval(removed, unresolved, noKey);
     }
 
     /// <summary>

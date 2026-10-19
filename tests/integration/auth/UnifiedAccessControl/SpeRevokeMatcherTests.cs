@@ -426,24 +426,53 @@ public class SpeRevokeMatcherTests
     }
 
     /// <summary>
-    /// Without the email there is no way to identify the contact's ACL entry, so any permission that DOES
-    /// exist is unfindable. That is an unknown state, not an absence.
+    /// ✅ FLIPPED BY #2103 (was <c>Revoke_WhenTheContactHasNoEmail_ReportsFailedAsA500Problem</c>). Spaarke never
+    /// writes a contact's container permission, and an outside-made one is matched by the contact's email alone — so
+    /// for a contact with no email (never had one, or it was removed after the grant) nothing on the container can be
+    /// theirs. The container step is <see cref="SpeContainerRevokeOutcome.NotAttempted"/> and the revoke answers 200.
+    /// It used to answer 500 <c>container_not_cleared</c> + "retry", which a permanent missing email made
+    /// impossible to satisfy (UAC 099b live gate, 2026-10-19).
     /// </summary>
-    [Fact]
-    public async Task Revoke_WhenTheContactHasNoEmail_ReportsFailedAsA500Problem()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Revoke_WhenTheContactHasNoEmail_HasNothingToClear_AndAnswers200NotARetryable500(string? email)
     {
-        // ✅ INVERTED BY M2 (task 024 → task 065) — see Revoke_WhenGraphFails_ReportsFailedAsA500Problem.
         var stub = new SpeServiceStub();
         var spe = stub.Build(NotFound);
 
-        var result = await Revoke(DataverseFor(ContactId, contactEmail: null), spe);
+        var result = await Revoke(DataverseFor(ContactId, contactEmail: email), spe);
 
-        var problem = ProblemBody(result);
-        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
-        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
+        var body = Body(result);
+        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.NotAttempted,
+            "the container was not read for this contact — NoPermissionFound would claim a read that never happened");
+        body.SpeContainerMembershipRevoked.Should().BeFalse("nothing was removed");
+        body.DeactivatedCount.Should().Be(1, "the Dataverse half of the revoke still ran");
         stub.CallCount.Should().Be(0,
             "with no key to match on there is nothing to ask Graph — and asking with an empty key could " +
             "match the wrong permission");
+    }
+
+    /// <summary>
+    /// #2103, the email-CHANGED case. No grant-time key exists to revoke by (Spaarke writes no container permission
+    /// for a contact, so it records none), so the revoke matches the contact's CURRENT email — the unchanged
+    /// email-present path. A permission an admin made under a former address is not attributable to this contact,
+    /// exactly as one under any other address never was.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_WhenTheContactsEmailChangedAfterTheGrant_MatchesTheCurrentEmail()
+    {
+        const string currentEmail = "renamed.counsel@clientfirm.com";
+        var stub = new SpeServiceStub();
+        var spe = stub.Build(new SpeContainerMembershipResult(
+            false, null, $"{SpeContainerMembershipService.NoPermissionFoundError} for user '{currentEmail}' in container."));
+
+        var result = await Revoke(DataverseFor(ContactId, currentEmail), spe);
+
+        stub.CapturedEmail.Should().Be(currentEmail);
+        stub.CallCount.Should().Be(1);
+        Body(result).SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.NoPermissionFound);
     }
 
     /// <summary>
@@ -943,13 +972,14 @@ public class SpeRevokeMatcherTests
     }
 
     /// <summary>
-    /// A member with no <c>emailaddress1</c> has no findable ACL entry. That is an unknown state, not an
-    /// absence — the same judgement task 017 made per-contact, applied per member.
+    /// ✅ FLIPPED BY #2103 (was <c>Revoke_OfAnOrganizationGrant_WhenAMemberHasNoEmail_ReportsFailedAsA500Problem</c>).
+    /// The per-contact decision, applied per member: a member with no <c>emailaddress1</c> has nothing on the
+    /// container to clear, so they are counted in <c>NoMembershipKey</c>, not <c>Failed</c>, and one such member no
+    /// longer turns every revoke of the organization into a permanent 500.
     /// </summary>
     [Fact]
-    public async Task Revoke_OfAnOrganizationGrant_WhenAMemberHasNoEmail_ReportsFailedAsA500Problem()
+    public async Task Revoke_OfAnOrganizationGrant_WhenAMemberHasNoEmail_ClearsTheOthersAndAnswers200()
     {
-        // ✅ INVERTED BY M2 (task 024 → task 065) — see Revoke_WhenGraphFails_ReportsFailedAsA500Problem.
         var org = new OrgRevokeFixture(
             junctionThrows: false, membersWithoutEmail: new[] { MemberTwo }, overflowRows: 0,
             MemberOne, MemberTwo, MemberThree);
@@ -962,11 +992,33 @@ public class SpeRevokeMatcherTests
             "with no key to match on there is nothing to ask Graph for that member — and asking with an " +
             "empty key could match the wrong permission");
 
-        var problem = ProblemBody(result);
-        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
-        var orgCleanup = problem.ProblemDetails.Extensions["speOrgMemberCleanup"]
-            .Should().BeOfType<SpeOrgMemberCleanupSummary>().Subject;
-        orgCleanup.Failed.Should().Be(1);
+        var body = Body(result);
+        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.PermissionRemoved);
+        body.SpeOrgMemberCleanup.Should().Be(new SpeOrgMemberCleanupSummary(
+            MembersEnumerated: 3, PermissionsRemoved: 2, PermissionsNotFound: 0, Failed: 0,
+            RetainedByOtherGrant: 0, NoMembershipKey: 1));
+    }
+
+    /// <summary>
+    /// #2103: an organization whose every member has no email — nothing on the container can be any member's, the
+    /// container is not asked, and the outcome is <see cref="SpeContainerRevokeOutcome.NotAttempted"/> (never read),
+    /// not <see cref="SpeContainerRevokeOutcome.NoPermissionFound"/> (read, and empty).
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_WhenNoMemberHasAnEmail_HasNothingToClear_AndAnswers200()
+    {
+        var org = new OrgRevokeFixture(
+            junctionThrows: false, membersWithoutEmail: new[] { MemberOne, MemberTwo }, overflowRows: 0,
+            MemberOne, MemberTwo);
+        var stub = new SpeMemberStub(Removed);
+
+        var result = await org.Revoke(stub.Build());
+
+        stub.CallCount.Should().Be(0);
+        var body = Body(result);
+        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.NotAttempted);
+        body.SpeOrgMemberCleanup!.NoMembershipKey.Should().Be(2);
+        body.SpeOrgMemberCleanup.Failed.Should().Be(0);
     }
 
     /// <summary>
@@ -1203,6 +1255,21 @@ public class SpeRevokeMatcherTests
             "the same load-bearing null the 200 path preserves must survive the 500 path too — an omitted " +
             "field reads as 'undefined' to a client, not 'we do not know who the members are'");
     }
+
+    /// <summary>#2103: members with no email key were never looked up, so "all of them" is NotAttempted.</summary>
+    [Fact]
+    public void AggregateOrgOutcome_WhenEveryMemberHasNoEmailKey_IsNotAttempted() =>
+        RevokeExternalAccessEndpoint.AggregateOrgOutcome(
+                new SpeOrgMemberCleanupSummary(3, 0, 0, 0, RetainedByOtherGrant: 1, NoMembershipKey: 2))
+            .Should().Be(SpeContainerRevokeOutcome.NotAttempted,
+                "nobody's permission was looked up — 'nobody held one' would be a claim this revoke never checked");
+
+    /// <summary>#2103: one member looked up and found absent, the rest with no key — a read happened, and found none.</summary>
+    [Fact]
+    public void AggregateOrgOutcome_WhenSomeMembersHaveNoEmailKey_AndTheRestHeldNone_IsAbsent() =>
+        RevokeExternalAccessEndpoint.AggregateOrgOutcome(
+                new SpeOrgMemberCleanupSummary(3, 0, 1, 0, NoMembershipKey: 2))
+            .Should().Be(SpeContainerRevokeOutcome.NoPermissionFound);
 
     [Fact]
     public void AggregateOrgOutcome_WhenNobodyHeldAPermission_IsAbsentNotFailure() =>

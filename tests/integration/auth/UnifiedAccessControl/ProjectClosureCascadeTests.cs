@@ -664,6 +664,85 @@ public class ProjectClosureCascadeTests
             + "every permission with a user identity, which would strip the project's INTERNAL users too");
     }
 
+    /// <summary>A grantee contact <see cref="ArrangeGranteeIdentities"/> gives no email (#2103).</summary>
+    private static readonly Guid NoEmailContactId = Guid.Parse("77777777-2103-4000-8000-000000000001");
+
+    /// <summary>
+    /// #2103: a revoked grantee with no <c>emailaddress1</c> has nothing on the container to clear — the single-grant
+    /// revoke's decision, shared. The closure completes with a 200. It used to answer 500
+    /// <c>container_not_cleared</c> + "Retry the closure", which a permanent missing email made impossible to satisfy.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_AGranteeWithNoEmail_HasNothingToClear_AndTheClosureCompletes()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(NoEmailContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var spe = SpeAnswering(_ => Removed, calls);
+
+        var result = await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer));
+
+        var body = OkBody(result);
+        body.AccessRecordsRevoked.Should().Be(1);
+        body.SpeContainerMembersRemoved.Should().Be(0);
+        calls.Should().BeEmpty("no grantee has a key to match, so the container is not asked");
+        table.ActiveRows.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// #2103: a no-email grantee beside one with an email — the one with an email is still removed (by that email,
+    /// and only that one), and the no-email grantee no longer fails the closure.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_ANoEmailGranteeBesideAnother_RemovesTheOtherAndCompletes()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        table.SeedContactGrant(NoEmailContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var spe = SpeAnswering(_ => Removed, calls);
+
+        var result = await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer));
+
+        OkBody(result).SpeContainerMembersRemoved.Should().Be(1);
+        calls.Should().ContainSingle();
+        calls[0].Emails.Should().BeEquivalentTo(new[] { ContactEmail });
+    }
+
+    /// <summary>
+    /// The negative case #2103 must not widen: an email that could not be READ is transient, not "no email" — the
+    /// grantee may hold a permission under it, so the closure still reports container_not_cleared.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_WhenAGranteesEmailCannotBeRead_StillReportsContainerNotCleared()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+        client.Setup(c => c.RetrieveAsync<RevokeExternalAccessEndpoint.ContactEmailRow>(
+                "contacts", It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var spe = SpeAnswering(_ => Removed, calls);
+
+        var result = await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer));
+
+        Problem(result).ProblemDetails.Extensions["reasonCode"].Should()
+            .Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason);
+        calls.Should().BeEmpty();
+    }
+
     /// <summary>
     /// F8 (S-39): the client's <c>containerId</c> is GONE from the contract. A request body that still carries one —
     /// another record's container — deserializes (unknown members are skipped) and is IGNORED: the only container the
