@@ -106,8 +106,24 @@ public class InvoiceSubmissionAfterStepsTests
         public List<JobContract> Jobs { get; } = [];
         public List<SubmissionDecidedNotification> Notified { get; } = [];
         public HashSet<string> Markers { get; } = new(StringComparer.Ordinal);
+        /// <summary>Every write of <c>sprk_processingstatus</c>, conditional or not (an unconditional one is also in <see cref="UnconditionalStatusWrites"/>).</summary>
         public List<Dictionary<string, object>> TerminalWrites { get; } = [];
+        public List<Dictionary<string, object>> UnconditionalStatusWrites { get; } = [];
+        public List<string> FindingsWrites { get; } = [];
         public List<QueryExpression> PolicyQueries { get; } = [];
+        public List<QueryExpression> VersionQueries { get; } = [];
+
+        /// <summary>The system policy's versions (D-125); null = one current version built from <see cref="Policy"/>.</summary>
+        public List<Entity>? PolicyVersions { get; set; }
+
+        /// <summary>The policy's <c>sprk_currentversion</c>.</summary>
+        public Guid PolicyRowsCurrentVersion { get; set; } = SystemVersionId;
+
+        /// <summary>Called inside the conditional terminal write, before the row version is compared (a concurrent writer).</summary>
+        public Action? OnTerminalWrite { get; set; }
+
+        public Mock<IInvoiceTotalsService> Totals { get; } = new(MockBehavior.Strict);
+        public InvoiceTotalsCalculation TotalsResult { get; set; } = new(0m, 0m, 0m, 0m, 0m, new Dictionary<Guid, decimal>(), null);
         public List<QueryExpression> SignalQueries { get; } = [];
         public List<BillingDecision> Preflighted { get; } = [];
         public PolicyState Policy { get; set; } = PolicyState.Present;
@@ -143,33 +159,68 @@ public class InvoiceSubmissionAfterStepsTests
                 ["sprk_document"] = new EntityReference("sprk_document", Document),
                 [InvoiceSubmissionPersister.SubmissionCorrelationId] = "corr-stored",
                 [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Processing),
+                ["versionnumber"] = 100L,
             };
 
             Entities.Setup(e => e.RetrieveAsync(FinanceBaseValues.SubmissionEntity, Submission, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => Row);
+                .ReturnsAsync(() => Copy(Row));
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName switch
                 {
                     "sprk_signal" => SignalRows(q),
                     "sprk_policy" => PolicyRows(q),
+                    "sprk_policyversion" => VersionRows(q),
                     _ => throw new InvalidOperationException($"unexpected query on {q.EntityName}"),
                 });
+
+            // E: a findings-JSON write is told from a status write; only a status write counts as a terminal write.
             Entities.Setup(e => e.UpdateAsync(FinanceBaseValues.SubmissionEntity, Submission, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
                 .Returns((string _, Guid _, Dictionary<string, object> fields, CancellationToken _) =>
+                {
+                    if (fields.ContainsKey(InvoiceSubmissionPersister.SubmissionStatus))
+                    {
+                        if (CrashAtTerminal)
+                        {
+                            throw new Crash();
+                        }
+
+                        UnconditionalStatusWrites.Add(fields);
+                        TerminalWrites.Add(fields);
+                    }
+
+                    if (fields.TryGetValue(InvoiceSubmissionPersister.SubmissionFindingsJson, out var findings))
+                    {
+                        FindingsWrites.Add((string)findings);
+                    }
+
+                    Apply(fields);
+                    return Task.CompletedTask;
+                });
+
+            // B: the terminal write is conditional on the row version read.
+            Entities.Setup(e => e.BulkUpdateIfRowVersionsMatchAsync(FinanceBaseValues.SubmissionEntity,
+                    It.IsAny<List<(Guid id, Dictionary<string, object> fields, long rowVersion)>>(), It.IsAny<CancellationToken>()))
+                .Returns((string _, List<(Guid id, Dictionary<string, object> fields, long rowVersion)> updates, CancellationToken _) =>
                 {
                     if (CrashAtTerminal)
                     {
                         throw new Crash();
                     }
 
-                    TerminalWrites.Add(fields);
-                    foreach (var (k, v) in fields)
+                    OnTerminalWrite?.Invoke();
+                    var (id, fields, rowVersion) = updates.Single();
+                    id.Should().Be(Submission);
+                    if (rowVersion != Row.GetAttributeValue<long>("versionnumber"))
                     {
-                        Row[k] = v;
+                        throw new System.Data.DBConcurrencyException("row version mismatch");
                     }
 
+                    TerminalWrites.Add(fields);
+                    Apply(fields);
                     return Task.CompletedTask;
                 });
+
+            Totals.Setup(t => t.RecalculateAsync(InvoiceId, It.IsAny<CancellationToken>())).ReturnsAsync(() => TotalsResult);
 
             Records = DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness());
             Records.Rows[("sprk_invoice", InvoiceId)] = new Entity("sprk_invoice", InvoiceId) { ["sprk_matter"] = new EntityReference("sprk_matter", Matter) };
@@ -182,6 +233,19 @@ public class InvoiceSubmissionAfterStepsTests
         }
 
         public int RecordCreates => Records.Created.Count(e => e.LogicalName == "sprk_decisionrecord");
+
+        /// <summary>A write by anyone: the fields land and the row version moves (Dataverse's versionnumber).</summary>
+        public void Apply(Dictionary<string, object> fields)
+        {
+            foreach (var (k, v) in fields)
+            {
+                Row[k] = v;
+            }
+
+            Row["versionnumber"] = Row.GetAttributeValue<long>("versionnumber") + 1;
+        }
+
+        public InvoiceSubmissionStatus Status => (InvoiceSubmissionStatus)Row.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus).Value;
 
         public InvoiceSubmissionAfterSteps Build()
         {
@@ -211,6 +275,7 @@ public class InvoiceSubmissionAfterStepsTests
             return new InvoiceSubmissionAfterSteps(
                 Entities.Object,
                 idempotency.Object,
+                Totals.Object,
                 sink.Object,
                 Log,
                 WriteAsync,
@@ -263,18 +328,43 @@ public class InvoiceSubmissionAfterStepsTests
                 ["sprk_policycode"] = BillingRuleCatalogue.SystemPolicyCode,
                 ["sprk_enabled"] = Policy != PolicyState.Disabled,
                 ["statecode"] = new OptionSetValue(0),
-                ["sprk_currentversion"] = new EntityReference("sprk_policyversion", SystemVersionId),
+                ["sprk_currentversion"] = new EntityReference("sprk_policyversion", PolicyRowsCurrentVersion),
                 [RuleDomains.PolicyDomainColumn] = new OptionSetValue(RuleDomains.PolicyDomainBilling),
                 ["sprk_lane"] = new OptionSetValue(SignalWriter.LaneDecide),
-                ["v.statecode"] = new AliasedValue("sprk_policyversion", "statecode", new OptionSetValue(0)),
-                ["v.sprk_ruletype"] = new AliasedValue("sprk_policyversion", "sprk_ruletype",
-                    new OptionSetValue(Policy == PolicyState.WrongType ? (int)RuleType.InvoiceAge : (int)RuleType.SubmissionIntegrity)),
-                ["v.sprk_consequence"] = new AliasedValue("sprk_policyversion", "sprk_consequence", new OptionSetValue((int)BillingConsequence.Flag)),
-                ["v.sprk_inforcefrom"] = new AliasedValue("sprk_policyversion", "sprk_inforcefrom",
-                    Policy == PolicyState.NoVersionInForce ? new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc) : new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
-                ["v.sprk_versionnumber"] = new AliasedValue("sprk_policyversion", "sprk_versionnumber", 1),
             };
             return new EntityCollection([policy]);
+        }
+
+        private EntityCollection VersionRows(QueryExpression q)
+        {
+            VersionQueries.Add(q);
+            var policyId = (Guid)q.Criteria.Conditions.Single(c => c.AttributeName == "sprk_policy").Values[0];
+            var versions = PolicyVersions ??
+            [
+                SystemVersion(SystemVersionId, 1,
+                    Policy == PolicyState.NoVersionInForce ? new DateOnly(2027, 1, 1) : new DateOnly(2026, 1, 1), null,
+                    Policy == PolicyState.WrongType ? RuleType.InvoiceAge : RuleType.SubmissionIntegrity),
+            ];
+            return new EntityCollection(versions.Where(v => v.GetAttributeValue<EntityReference>("sprk_policy").Id == policyId).ToList());
+        }
+
+        /// <summary>A system policy version row (the 076 publish shape: dates at UTC midnight; a superseded one carries its end date).</summary>
+        public static Entity SystemVersion(Guid id, int number, DateOnly from, DateOnly? to, RuleType type = RuleType.SubmissionIntegrity)
+        {
+            var row = new Entity("sprk_policyversion", id)
+            {
+                ["sprk_policy"] = new EntityReference("sprk_policy", SystemPolicyId),
+                ["sprk_ruletype"] = new OptionSetValue((int)type),
+                ["sprk_consequence"] = new OptionSetValue((int)BillingConsequence.Flag),
+                ["sprk_inforcefrom"] = from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
+                ["sprk_versionnumber"] = number,
+            };
+            if (to is { } end)
+            {
+                row["sprk_inforceto"] = end.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            }
+
+            return row;
         }
 
         private Task<SignalWriteResult> WriteAsync(SignalWriteRequest request, CancellationToken _)
@@ -381,7 +471,9 @@ public class InvoiceSubmissionAfterStepsTests
         world.TerminalWrites.Should().ContainSingle();
         world.TerminalWrites[0][InvoiceSubmissionPersister.SubmissionStatus].Should().Be(new OptionSetValue((int)InvoiceSubmissionStatus.Rejected));
         world.TerminalWrites[0][InvoiceSubmissionPersister.SubmissionReasonCode].Should().Be(outcome.ReasonCode);
-        world.Entities.Invocations.Last().Method.Name.Should().Be(nameof(IGenericEntityService.UpdateAsync), "the terminal status is the last write");
+        world.Entities.Invocations.Last().Method.Name.Should().Be(nameof(IGenericEntityService.BulkUpdateIfRowVersionsMatchAsync),
+            "the terminal status is the last write, conditional on the row version");
+        world.UnconditionalStatusWrites.Should().BeEmpty();
         world.PolicyQueries.Should().BeEmpty("no system finding: the system policy is not read");
     }
 
@@ -487,7 +579,10 @@ public class InvoiceSubmissionAfterStepsTests
         var decision = InvoiceSubmissionAfterSteps.BuildRejectionDecision(stored, Submission, InvoiceId)!;
 
         decision.DecisionId.Should().Be(InvoiceSubmissionAfterSteps.RejectionDecisionIdFor(Submission));
-        InvoiceSubmissionAfterSteps.RejectionDecisionIdFor(Submission).Should().Be(InvoiceSubmissionAfterSteps.RejectionDecisionIdFor(Submission));
+        // E: the id is the deterministic derivation from its key (the persister's IdOf), not merely equal to itself.
+        decision.DecisionId.Should().Be(InvoiceSubmissionPersister.IdOf($"ebilling-auto-reject-{Submission:D}"))
+            .And.NotBe(InvoiceSubmissionPersister.InvoiceIdFor(Submission))
+            .And.NotBe(InvoiceSubmissionAfterSteps.RejectionDecisionIdFor(Matter));
         decision.ActionCode.Should().Be("reject-invoice");
         decision.SubjectId.Should().Be(InvoiceId);
         decision.Decider.SystemUserId.Should().BeNull();
@@ -915,5 +1010,324 @@ public class InvoiceSubmissionAfterStepsTests
         var act = () => sut.RunAsync(new SubmissionPersistResult { Status = SubmissionPersistStatus.Refused, SubmissionId = Submission }, null);
 
         await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    // ── 13a A: the terminal comes from the STORED state (F4-1) ──
+
+    [Theory(DisplayName = "049 13a A: a persisted result that disagrees with the stored kind / reason is Refused (stored_state_mismatch) and writes nothing")]
+    [InlineData(InvoiceSubmissionStatus.Accepted, null)]
+    [InlineData(InvoiceSubmissionStatus.Rejected, "ebilling.other.code")]
+    public async Task PersistedDisagreeingWithTheStoredState_IsRefused(InvoiceSubmissionStatus claimed, string? claimedCode)
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome);
+
+        var result = await world.Build().RunAsync(Persisted(outcome) with { TerminalStatus = claimed, TerminalReasonCode = claimedCode }, null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.StoredStateMismatch);
+        world.Writes.Should().BeEmpty();
+        world.RecordCreates.Should().Be(0);
+        world.Notified.Should().BeEmpty();
+        world.TerminalWrites.Should().BeEmpty();
+        world.Status.Should().Be(InvoiceSubmissionStatus.Processing);
+    }
+
+    [Theory(DisplayName = "049 13a A resume: a crash at each step, then ResumeAsync (no outcome, no evaluation) completes with the STORED terminal: one record, one notify, one terminal write")]
+    [InlineData(CrashPoint.MidSignals)]
+    [InlineData(CrashPoint.Record)]
+    [InlineData(CrashPoint.BeforeNotify)]
+    [InlineData(CrashPoint.Terminal)]
+    public async Task ResumeAsync_AfterACrash_AutoRejected_CompletesFromTheStoredState(CrashPoint point)
+    {
+        var outcome = await AutoRejected(readNumber: "INV-999");
+        var world = new World(outcome);
+        Arm(world, point);
+        var sut = world.Build();
+
+        (await Run(sut, Persisted(outcome))).Should().NotBe(SubmissionAfterStepsStatus.Completed);
+        world.TerminalWrites.Should().BeEmpty();
+        Disarm(world);
+        var resumed = await sut.ResumeAsync(Submission, "corr-2");
+
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed, resumed.ReasonCode);
+        resumed.TerminalStatus.Should().Be(InvoiceSubmissionStatus.Rejected);
+        resumed.AlreadyTerminal.Should().BeFalse();
+        world.Status.Should().Be(InvoiceSubmissionStatus.Rejected);
+        world.TerminalWrites.Should().ContainSingle().Which[InvoiceSubmissionPersister.SubmissionReasonCode].Should().Be(outcome.ReasonCode);
+        world.Notified.Should().ContainSingle().Which.Outcome.Should().Be(SubmissionDecisionOutcome.Rejected);
+        world.RecordCreates.Should().Be(1);
+        world.Writes.Should().OnlyContain(w => w.Episode == 1);
+        world.Totals.Verify(t => t.RecalculateAsync(InvoiceId, It.IsAny<CancellationToken>()), Times.Once, "the resume re-runs the totals once; the first run took the persister's");
+        world.Jobs.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "049 13a A resume (Accepted): a crash at indexing, before notify or at the terminal write, then ResumeAsync completes Accepted with the same indexing job")]
+    [InlineData(CrashPoint.Indexing)]
+    [InlineData(CrashPoint.BeforeNotify)]
+    [InlineData(CrashPoint.Terminal)]
+    public async Task ResumeAsync_AfterACrash_Accepted_CompletesFromTheStoredState(CrashPoint point)
+    {
+        var outcome = await Accepted();
+        var world = new World(outcome);
+        Arm(world, point);
+        var sut = world.Build();
+
+        (await Run(sut, Persisted(outcome))).Should().NotBe(SubmissionAfterStepsStatus.Completed);
+        Disarm(world);
+        var resumed = await sut.ResumeAsync(Submission, null);
+
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        world.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+        world.TerminalWrites.Should().ContainSingle();
+        world.Notified.Should().ContainSingle().Which.Outcome.Should().Be(SubmissionDecisionOutcome.Accepted);
+        world.Jobs.Select(j => (j.JobId, j.IdempotencyKey)).Distinct().Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "049 13a A resume: a totals fault on resume writes the Signals and the record, returns Retry (totals_failed); the next resume completes")]
+    public async Task ResumeAsync_TotalsFault_RetriesThenCompletes()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome);
+        var calls = 0;
+        world.Totals.Setup(t => t.RecalculateAsync(InvoiceId, It.IsAny<CancellationToken>()))
+            .Returns(() => ++calls == 1 ? Task.FromException<InvoiceTotalsCalculation>(new System.Data.DBConcurrencyException("busy")) : Task.FromResult(world.TotalsResult));
+        var sut = world.Build();
+
+        var first = await sut.ResumeAsync(Submission, null);
+        var second = await sut.ResumeAsync(Submission, null);
+
+        first.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
+        first.ReasonCode.Should().Be(InvoiceSubmissionPersister.TotalsFailedCode);
+        first.DecisionRecordId.Should().NotBeNull("the Signals and the record run before the totals Retry stops the run");
+        second.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        world.RecordCreates.Should().Be(1);
+        world.TerminalWrites.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "049 13a A: a totals refusal is recorded in the findings JSON once (idempotent across a resume) and the invoice stands; the run completes")]
+    public async Task TotalsRefusal_IsRecordedInTheFindings_Once()
+    {
+        var outcome = await Accepted();
+        var world = new World(outcome) { CrashAtTerminal = true };
+        var refused = world.TotalsResult with { Refusal = new InvoiceTotalsRefusal(InvoiceTotalsRefusalCodes.ApprovedTotalNegative, "below zero by 12.00") };
+        world.TotalsResult = refused;
+        var sut = world.Build();
+
+        (await Run(sut, Persisted(outcome) with { Totals = refused })).Should().BeNull("crashed at the terminal write");
+        world.CrashAtTerminal = false;
+        var resumed = await sut.ResumeAsync(Submission, null);
+
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        var findings = world.FindingsWrites.Should().ContainSingle("the second run finds the same code stored and does not write again").Subject;
+        var recorded = JsonNode.Parse(findings)![InvoiceSubmissionAfterSteps.TotalsRefusalMember]!;
+        recorded["code"]!.GetValue<string>().Should().Be(InvoiceTotalsRefusalCodes.ApprovedTotalNegative);
+        findings.Should().NotContain("below zero", "the code only, never the message");
+        InvoiceSubmissionAfterSteps.StoredFindings.Parse(findings)!.HasSignalPlan.Should().BeTrue("the rest of the stored JSON is kept");
+        world.TerminalWrites.Should().ContainSingle();
+        world.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+    }
+
+    [Fact(DisplayName = "049 13a A resume: a submission that links no invoice is Refused; a missing one is SubmissionMissing")]
+    public async Task ResumeAsync_NoLinkOrMissing()
+    {
+        var outcome = await Accepted();
+        var unlinked = new World(outcome);
+        unlinked.Row.Attributes.Remove(InvoiceSubmissionPersister.SubmissionInvoice);
+        var missing = new World(outcome);
+        missing.Entities.Setup(e => e.RetrieveAsync(FinanceBaseValues.SubmissionEntity, Submission, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+
+        var refused = await unlinked.Build().ResumeAsync(Submission, null);
+
+        refused.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
+        refused.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.InvoiceLinkMismatchCode);
+        (await missing.Build().ResumeAsync(Submission, null)).Status.Should().Be(SubmissionAfterStepsStatus.SubmissionMissing);
+        unlinked.Totals.Verify(t => t.RecalculateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── 13a B: the terminal is written only while Processing, on the row version (F4-2) ──
+
+    [Fact(DisplayName = "049 13a B scenario: Blocked completes, a reviewer sets Accepted, a re-delivery (RunAsync or ResumeAsync) writes nothing over it and does not notify again")]
+    public async Task Blocked_ThenReviewerAccepts_RedeliveryDoesNotOverwrite()
+    {
+        var outcome = await Blocked();
+        var world = new World(outcome);
+        var sut = world.Build();
+
+        (await sut.RunAsync(Persisted(outcome), null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        world.Status.Should().Be(InvoiceSubmissionStatus.Rejected);
+        world.Apply(new Dictionary<string, object> // the reviewer's Override (105)
+        {
+            [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            [InvoiceSubmissionPersister.SubmissionReasonCode] = null!,
+        });
+        var writesBefore = world.Writes.Count;
+
+        var viaRun = await sut.RunAsync(Persisted(outcome, SubmissionPersistStatus.Resumed), null);
+        var viaResume = await sut.ResumeAsync(Submission, null);
+
+        foreach (var redelivery in new[] { viaRun, viaResume })
+        {
+            redelivery.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+            redelivery.AlreadyTerminal.Should().BeTrue();
+            redelivery.TerminalStatus.Should().Be(InvoiceSubmissionStatus.Accepted);
+        }
+
+        world.Status.Should().Be(InvoiceSubmissionStatus.Accepted, "the reviewer's decision stands");
+        world.TerminalWrites.Should().ContainSingle("only the first run's Rejected");
+        world.Notified.Should().ContainSingle();
+        world.Writes.Count.Should().Be(writesBefore, "no step runs on a terminal submission");
+        world.Jobs.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "049 13a B: the row changes (still Processing) between the read and the terminal write -> re-read once, the write is retried on the new version")]
+    public async Task VersionConflict_StillProcessing_RetriesTheWriteOnce()
+    {
+        var outcome = await Accepted();
+        var world = new World(outcome);
+        world.OnTerminalWrite = () =>
+        {
+            world.OnTerminalWrite = null;
+            world.Apply(new Dictionary<string, object> { [InvoiceSubmissionPersister.SubmissionCorrelationId] = "touched" });
+        };
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        result.AlreadyTerminal.Should().BeFalse();
+        world.TerminalWrites.Should().ContainSingle();
+        world.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+    }
+
+    [Fact(DisplayName = "049 13a B: a reviewer decides between the read and the terminal write -> re-read finds it terminal, Completed, nothing written over it")]
+    public async Task VersionConflict_NowTerminal_CompletesWithoutWriting()
+    {
+        var outcome = await Blocked();
+        var world = new World(outcome);
+        world.OnTerminalWrite = () =>
+        {
+            world.OnTerminalWrite = null;
+            world.Apply(new Dictionary<string, object> { [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted) });
+        };
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        result.AlreadyTerminal.Should().BeTrue();
+        result.InvoiceId.Should().Be(InvoiceId);
+        world.TerminalWrites.Should().BeEmpty();
+        world.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+    }
+
+    [Fact(DisplayName = "049 13a B: the terminal write loses to a concurrent change twice -> Retry (terminal_write_conflict), still Processing")]
+    public async Task VersionConflict_Twice_Retries()
+    {
+        var outcome = await Accepted();
+        var world = new World(outcome);
+        world.OnTerminalWrite = () => world.Apply(new Dictionary<string, object> { [InvoiceSubmissionPersister.SubmissionCorrelationId] = "busy" });
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
+        result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.TerminalWriteConflictCode);
+        world.TerminalWrites.Should().BeEmpty();
+        world.Status.Should().Be(InvoiceSubmissionStatus.Processing);
+    }
+
+    [Theory(DisplayName = "049 13a B: a submission already Accepted / Rejected / Failed runs no step; Received is Refused (not_processing)")]
+    [InlineData(InvoiceSubmissionStatus.Accepted, SubmissionAfterStepsStatus.Completed)]
+    [InlineData(InvoiceSubmissionStatus.Rejected, SubmissionAfterStepsStatus.Completed)]
+    [InlineData(InvoiceSubmissionStatus.Failed, SubmissionAfterStepsStatus.Completed)]
+    [InlineData(InvoiceSubmissionStatus.Received, SubmissionAfterStepsStatus.Refused)]
+    public async Task NotProcessing_RunsNoStep(InvoiceSubmissionStatus status, SubmissionAfterStepsStatus expected)
+    {
+        var outcome = await AutoRejected(readNumber: "INV-999");
+        var world = new World(outcome);
+        world.Row[InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)status);
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(expected);
+        if (expected == SubmissionAfterStepsStatus.Refused)
+        {
+            result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.NotProcessingCode);
+        }
+
+        world.Writes.Should().BeEmpty();
+        world.RecordCreates.Should().Be(0);
+        world.Notified.Should().BeEmpty();
+        world.TerminalWrites.Should().BeEmpty();
+        world.Status.Should().Be(status);
+    }
+
+    // ── 13a F: the system policy's version is the one in force on the received date (K1) ──
+
+    [Fact(DisplayName = "049 13a F: a re-seed after receivedOn - the superseded version in force on receivedOn is used, so the system Signal is still written")]
+    public async Task SystemPolicy_SupersededInWindow_IsUsed()
+    {
+        var outcome = await Accepted(readNumber: "INV-999");
+        outcome.ReceivedOn.Should().Be(new DateOnly(2026, 6, 5));
+        var current = Guid.Parse("04900000-0000-4000-8000-0000000d0126");
+        var world = new World(outcome)
+        {
+            PolicyVersions =
+            [
+                World.SystemVersion(SystemVersionId, 1, new DateOnly(2026, 1, 1), new DateOnly(2026, 7, 1)),
+                World.SystemVersion(current, 2, new DateOnly(2026, 7, 1), null),
+            ],
+        };
+        world.PolicyRowsCurrentVersion = current;
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        world.Writes.Should().ContainSingle().Which.PolicyVersionId.Should().Be(SystemVersionId, "the version in force on 2026-06-05");
+        world.VersionQueries.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "049 13a F (must not fire): no version in force on receivedOn (window ended before it, current starts after; a draft in the window) -> no system Signal")]
+    public async Task SystemPolicy_NoVersionInForceOnReceivedOn_NoSignal()
+    {
+        var outcome = await Accepted(readNumber: "INV-999");
+        var current = Guid.Parse("04900000-0000-4000-8000-0000000d0126");
+        var world = new World(outcome)
+        {
+            PolicyVersions =
+            [
+                World.SystemVersion(SystemVersionId, 1, new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 1)),
+                World.SystemVersion(Guid.Parse("04900000-0000-4000-8000-0000000d0127"), 3, new DateOnly(2026, 6, 1), null), // a draft: not current, no end
+                World.SystemVersion(current, 2, new DateOnly(2026, 7, 1), null),
+            ],
+        };
+        world.PolicyRowsCurrentVersion = current;
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        world.Writes.Should().BeEmpty();
+        world.Log.Entries.Should().ContainSingle(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning);
+    }
+
+    // ── 13a G: the Signal plan is required ──
+
+    [Fact(DisplayName = "049 13a G: stored findings without a signalPlan are Refused (signal_plan_missing), not read as an empty plan; nothing is written")]
+    public async Task MissingSignalPlan_IsRefused()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome, json =>
+        {
+            json.Remove("signalPlan");
+            return json;
+        });
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
+        result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.SignalPlanMissingCode);
+        world.Writes.Should().BeEmpty();
+        world.RecordCreates.Should().Be(0);
+        world.Notified.Should().BeEmpty();
+        world.TerminalWrites.Should().BeEmpty();
     }
 }

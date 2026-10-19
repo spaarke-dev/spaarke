@@ -97,6 +97,15 @@ public static class SubmissionReasonCodes
     /// </summary>
     public const string CodingUnavailableHold = "ebilling.submission.coding_unavailable";
 
+    // ── After-commit steps (part D; notes 049 section 13a) ──
+
+    /// <summary>
+    /// The persister's result names a terminal status or reason code other than the one the STORED findings JSON (kind and root reason)
+    /// maps to: the caller evaluated again and got a different answer than the one committed. Nothing is written; the stored state wins and
+    /// a resume (<see cref="IInvoiceSubmissionAfterSteps.ResumeAsync"/>) completes from it.
+    /// </summary>
+    public const string StoredStateMismatch = "ebilling.submission.stored_state_mismatch";
+
     /// <summary>
     /// The document-level read failures (FR-21): the submission is Rejected with the code and no invoice is created. Every other read
     /// failure is retried.

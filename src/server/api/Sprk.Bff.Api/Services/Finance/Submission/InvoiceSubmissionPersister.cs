@@ -686,10 +686,18 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// Accepted / null; AcceptedUncoded Accepted + the coding code (b); AutoRejected Rejected + the first deciding code; Blocked
     /// Rejected + <see cref="SubmissionReasonCodes.Blocked"/> (the held representation).
     /// </summary>
-    internal static (InvoiceSubmissionStatus Status, string? ReasonCode) TerminalFor(SubmissionEvaluationOutcome outcome) => outcome.Kind switch
+    internal static (InvoiceSubmissionStatus Status, string? ReasonCode) TerminalFor(SubmissionEvaluationOutcome outcome) =>
+        TerminalFor(outcome.Kind, outcome.ReasonCode);
+
+    /// <summary>
+    /// The one terminal mapping, from a kind and its root reason code: the outcome's (above) or the STORED findings JSON's <c>kind</c> and
+    /// <c>reasonCode</c> (part D derives the terminal from the stored state, so a resume can never write a status the stored invoice and
+    /// record contradict; notes section 13a).
+    /// </summary>
+    internal static (InvoiceSubmissionStatus Status, string? ReasonCode) TerminalFor(SubmissionEvaluationKind kind, string? reasonCode) => kind switch
     {
-        SubmissionEvaluationKind.AutoRejected or SubmissionEvaluationKind.Blocked => (InvoiceSubmissionStatus.Rejected, outcome.ReasonCode),
-        SubmissionEvaluationKind.AcceptedUncoded => (InvoiceSubmissionStatus.Accepted, outcome.ReasonCode),
+        SubmissionEvaluationKind.AutoRejected or SubmissionEvaluationKind.Blocked => (InvoiceSubmissionStatus.Rejected, reasonCode),
+        SubmissionEvaluationKind.AcceptedUncoded => (InvoiceSubmissionStatus.Accepted, reasonCode),
         _ => (InvoiceSubmissionStatus.Accepted, null),
     };
 

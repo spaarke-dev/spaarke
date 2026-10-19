@@ -20,7 +20,26 @@ public interface IInvoiceSubmissionAfterSteps
     /// <param name="ct">Cancellation propagates.</param>
     /// <returns>See <see cref="SubmissionAfterStepsStatus"/>. Only <see cref="SubmissionAfterStepsStatus.Completed"/> wrote the terminal status.</returns>
     /// <exception cref="ArgumentException"><paramref name="persisted"/> carries no committed invoice.</exception>
+    /// <remarks>The terminal status, its reason code and the notification come from the STORED kind and root reason
+    /// (<see cref="InvoiceSubmissionPersister.TerminalFor(SubmissionEvaluationKind, string?)"/>), never from <paramref name="persisted"/>; a
+    /// <paramref name="persisted"/> that disagrees with them is <see cref="SubmissionAfterStepsStatus.Refused"/> with
+    /// <see cref="SubmissionReasonCodes.StoredStateMismatch"/> and nothing is written. The terminal status is written only while the
+    /// submission is Processing, conditional on the row version read; a submission already Accepted, Rejected or Failed returns
+    /// <see cref="SubmissionAfterStepsStatus.Completed"/> and no step runs (notes section 13a).</remarks>
     Task<SubmissionAfterStepsResult> RunAsync(SubmissionPersistResult persisted, string? correlationId, CancellationToken ct = default);
+
+    /// <summary>
+    /// The resume entry (part E, a Processing submission that already links an invoice): the same steps as <see cref="RunAsync"/>, from
+    /// the STORED submission alone (status, <c>sprk_invoice</c>, <c>sprk_findingsjson</c>, row version). It first re-runs the invoice
+    /// totals (idempotent; a refusal is recorded in the findings JSON and does not undo the invoice; a fault makes the result a Retry after
+    /// the Signals and the Decision Record, as a totals Retry does in <see cref="RunAsync"/>). It never re-runs AI or the evaluation.
+    /// </summary>
+    /// <param name="submissionId">The submission to finish.</param>
+    /// <param name="correlationId">The job's correlation id (indexing job); null uses the submission's.</param>
+    /// <param name="ct">Cancellation propagates.</param>
+    /// <returns>As <see cref="RunAsync"/>. A submission with no invoice link is <see cref="SubmissionAfterStepsStatus.Refused"/>
+    /// (<c>invoice_link_mismatch</c>); a missing row is <see cref="SubmissionAfterStepsStatus.SubmissionMissing"/>.</returns>
+    Task<SubmissionAfterStepsResult> ResumeAsync(Guid submissionId, string? correlationId, CancellationToken ct = default);
 
     /// <summary>
     /// Record-before-mutate (074 K-3; notes section 7 "Preflight before the transaction"): for an
@@ -43,12 +62,14 @@ public enum SubmissionAfterStepsStatus
     /// A step did not complete (a Signal write the writer skipped, an open Signal that changed while it was being superseded, a transient
     /// Decision Record refusal, an indexing enqueue fault, or the persister's totals Retry; a notification fault is logged and does not
     /// retry, per <see cref="IEbillingNotificationSink"/>'s contract). The submission stays Processing with
-    /// its invoice link, so a re-delivery resumes here (part E's step 0). <see cref="SubmissionAfterStepsResult.ReasonCode"/> says which.
+    /// its invoice link, so a re-delivery resumes here (part E's step 0). <see cref="SubmissionAfterStepsResult.ReasonCode"/> says which;
+    /// also the terminal write losing to a concurrent change twice (<c>terminal_write_conflict</c>).
     /// </summary>
     Retry,
 
-    /// <summary>A retry cannot succeed (the stored findings are unreadable or do not match the link, or the recorder refused the decision
-    /// for its content). Nothing after the failing step ran; part E marks the submission Failed with the code.</summary>
+    /// <summary>A retry cannot succeed (the stored findings are unreadable, lack their Signal plan or do not match the link; the caller's
+    /// persisted result disagrees with the stored state; the submission is neither Processing nor terminal; or the recorder refused the
+    /// decision for its content). Nothing after the failing step ran; part E marks the submission Failed with the code.</summary>
     Refused,
 
     /// <summary>The submission row no longer exists (044 K4): nothing was written.</summary>
@@ -68,8 +89,13 @@ public sealed record SubmissionAfterStepsResult
     /// <summary>A stable code for <see cref="SubmissionAfterStepsStatus.Retry"/> and <see cref="SubmissionAfterStepsStatus.Refused"/>.</summary>
     public string? ReasonCode { get; init; }
 
-    /// <summary>The terminal status written (only when <see cref="SubmissionAfterStepsStatus.Completed"/>).</summary>
+    /// <summary>The status the submission ends in (only when <see cref="SubmissionAfterStepsStatus.Completed"/>): the terminal status written
+    /// now, or the one found when the submission was already terminal (<see cref="AlreadyTerminal"/>).</summary>
     public InvoiceSubmissionStatus? TerminalStatus { get; init; }
+
+    /// <summary>True when the submission was already Accepted, Rejected or Failed (a reviewer, an earlier run or the job decided): nothing was
+    /// written and nobody was notified by this run.</summary>
+    public bool AlreadyTerminal { get; init; }
 
     /// <summary>The automatic rejection's Decision Record (written now or found from an earlier run); null for every other kind.</summary>
     public Guid? DecisionRecordId { get; init; }

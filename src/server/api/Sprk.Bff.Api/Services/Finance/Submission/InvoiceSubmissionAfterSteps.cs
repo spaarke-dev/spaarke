@@ -42,7 +42,8 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <item><b>Decision Record</b>, AutoRejected only, after the Signals (D-122 moved it there).</item>
 /// <item><b>Indexing</b> (Accepted, AcceptedUncoded, Blocked).</item>
 /// <item><b>Notification</b>, once per submission (an idempotency marker).</item>
-/// <item><b>Terminal status</b>, last: the persister's <see cref="SubmissionPersistResult.TerminalStatus"/> and reason code.</item>
+/// <item><b>Terminal status</b>, last: derived from the STORED kind and root reason (<see cref="InvoiceSubmissionPersister.TerminalFor(SubmissionEvaluationKind, string?)"/>),
+/// written only while the submission is Processing and conditional on its row version (notes section 13a).</item>
 /// </list>
 /// A step that does not complete leaves the submission Processing with its invoice link (a Retry result); every step is idempotent, so a
 /// re-delivery resumes. Logs carry ids, counts and codes only (ADR-015).
@@ -55,6 +56,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     internal const string SignalWriteSkippedCode = "ebilling.submission.signal_write_skipped";
     internal const string SignalChangedCode = "ebilling.submission.signal_changed";
     internal const string IndexingEnqueueFailedCode = "ebilling.submission.indexing_enqueue_failed";
+    internal const string SignalPlanMissingCode = "ebilling.submission.signal_plan_missing";
+    internal const string NotProcessingCode = "ebilling.submission.not_processing";
+    internal const string TerminalWriteConflictCode = "ebilling.submission.terminal_write_conflict";
+    internal const string RowVersionMissingCode = "ebilling.submission.row_version_missing";
 
     /// <summary>The automatic rejection's action code (074's billing catalog).</summary>
     internal const string RejectActionCode = "reject-invoice";
@@ -70,19 +75,23 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
     private const int StateActive = 0;
     private const string SignalEntity = "sprk_signal";
-    private const string VersionAlias = "v";
+    private const string RowVersionColumn = "versionnumber";
 
     internal static readonly string[] SubmissionColumns =
     [
         InvoiceSubmissionPersister.SubmissionFindingsJson, InvoiceSubmissionPersister.SubmissionInvoice, "sprk_channel", "sprk_document",
-        InvoiceSubmissionPersister.SubmissionCorrelationId,
+        InvoiceSubmissionPersister.SubmissionCorrelationId, InvoiceSubmissionPersister.SubmissionStatus, RowVersionColumn,
     ];
+
+    /// <summary>The columns the terminal write re-reads after a row-version conflict (B: write only while Processing).</summary>
+    internal static readonly string[] StateColumns = [InvoiceSubmissionPersister.SubmissionStatus, RowVersionColumn];
 
     // The "indexing needs DocumentIntelligence:Enabled" note (map row 9) is logged once per process.
     private static int _indexingNoteLogged;
 
     private readonly IGenericEntityService _entities;
     private readonly IIdempotencyService _idempotency;
+    private readonly IInvoiceTotalsService _totals;
     private readonly IEbillingNotificationSink _sink;
     private readonly ILogger<InvoiceSubmissionAfterSteps> _logger;
     private readonly Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>> _writeSignal;
@@ -97,11 +106,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         BillingDecisionRecorder recorder,
         JobSubmissionService jobs,
         IIdempotencyService idempotency,
+        IInvoiceTotalsService totals,
         IEbillingNotificationSink sink,
         ILogger<InvoiceSubmissionAfterSteps> logger)
         : this(
             entities,
             idempotency,
+            totals,
             sink,
             logger,
             (signals ?? throw new ArgumentNullException(nameof(signals))).WriteAsync,
@@ -116,6 +127,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     internal InvoiceSubmissionAfterSteps(
         IGenericEntityService entities,
         IIdempotencyService idempotency,
+        IInvoiceTotalsService totals,
         IEbillingNotificationSink sink,
         ILogger<InvoiceSubmissionAfterSteps> logger,
         Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>> writeSignal,
@@ -126,6 +138,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
+        _totals = totals ?? throw new ArgumentNullException(nameof(totals));
         _sink = sink ?? throw new ArgumentNullException(nameof(sink));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _writeSignal = writeSignal ?? throw new ArgumentNullException(nameof(writeSignal));
@@ -166,28 +179,89 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         ArgumentNullException.ThrowIfNull(persisted);
         var totalsRetry = persisted.Status == SubmissionPersistStatus.Retry;
         if (persisted.Status is not (SubmissionPersistStatus.Committed or SubmissionPersistStatus.Resumed or SubmissionPersistStatus.Retry)
-            || persisted.InvoiceId is not { } invoiceId || invoiceId == Guid.Empty || persisted.TerminalStatus is not { } terminal)
+            || persisted.InvoiceId is not { } invoiceId || invoiceId == Guid.Empty || persisted.TerminalStatus is not { } claimed)
         {
             throw new ArgumentException($"A {persisted.Status} result carries no committed invoice; the after-commit steps need one.", nameof(persisted));
         }
 
         var submissionId = persisted.SubmissionId;
-
-        // ── The stored state: the resume marker (the link) and the findings it was committed with ──
-        Entity? submission;
-        try
-        {
-            submission = await _entities.RetrieveAsync(FinanceBaseValues.SubmissionEntity, submissionId, SubmissionColumns, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (IsRecordNotFound(ex))
-        {
-            submission = null;
-        }
-
+        var submission = await ReadSubmissionAsync(submissionId, SubmissionColumns, ct).ConfigureAwait(false);
         if (submission is null)
         {
-            _logger.LogInformation("Invoice submission {SubmissionId}: the row no longer exists; no after-commit step ran", submissionId);
-            return new SubmissionAfterStepsResult { Status = SubmissionAfterStepsStatus.SubmissionMissing, SubmissionId = submissionId };
+            return Missing(submissionId);
+        }
+
+        return await RunFromStoredAsync(
+            submission,
+            submissionId,
+            invoiceId,
+            (claimed, persisted.TerminalReasonCode),
+            totalsRetry ? persisted.ReasonCode ?? InvoiceSubmissionPersister.TotalsFailedCode : null,
+            persisted.Totals,
+            correlationId,
+            ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<SubmissionAfterStepsResult> ResumeAsync(Guid submissionId, string? correlationId, CancellationToken ct = default)
+    {
+        var submission = await ReadSubmissionAsync(submissionId, SubmissionColumns, ct).ConfigureAwait(false);
+        if (submission is null)
+        {
+            return Missing(submissionId);
+        }
+
+        if (AlreadyTerminal(submission, submissionId) is { } done)
+        {
+            return done;
+        }
+
+        if (submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id is not { } invoiceId || invoiceId == Guid.Empty)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: a resume was asked for, but it links no invoice; no after-commit step ran", submissionId);
+            return new SubmissionAfterStepsResult
+            {
+                Status = SubmissionAfterStepsStatus.Refused, SubmissionId = submissionId, ReasonCode = InvoiceLinkMismatchCode,
+            };
+        }
+
+        // 016 again (idempotent; the persister's Resumed path re-runs it too). A fault is a totals Retry after the Signals and the record.
+        InvoiceTotalsCalculation? totals = null;
+        string? totalsRetryCode = null;
+        try
+        {
+            totals = await _totals.RecalculateAsync(invoiceId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: totals for invoice {InvoiceId} failed on resume ({Fault}); retry resumes",
+                submissionId, invoiceId, ex.GetType().Name);
+            totalsRetryCode = InvoiceSubmissionPersister.TotalsFailedCode;
+        }
+
+        return await RunFromStoredAsync(submission, submissionId, invoiceId, null, totalsRetryCode, totals, correlationId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The steps, from the stored submission (<paramref name="submission"/>, read with <see cref="SubmissionColumns"/>). The terminal status,
+    /// its reason code and the notification come from the STORED kind and root reason
+    /// (<see cref="InvoiceSubmissionPersister.TerminalFor(SubmissionEvaluationKind, string?)"/>); <paramref name="claimed"/> (the persister's,
+    /// first-run entry only) must agree with them, or nothing is written.
+    /// </summary>
+    private async Task<SubmissionAfterStepsResult> RunFromStoredAsync(
+        Entity submission,
+        Guid submissionId,
+        Guid invoiceId,
+        (InvoiceSubmissionStatus Status, string? ReasonCode)? claimed,
+        string? totalsRetryCode,
+        InvoiceTotalsCalculation? totals,
+        string? correlationId,
+        CancellationToken ct)
+    {
+        // ── B: only a Processing submission is finished here; a terminal one (a reviewer, an earlier run, the job) is never overwritten ──
+        if (AlreadyTerminal(submission, submissionId) is { } done)
+        {
+            return done;
         }
 
         if (submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id != invoiceId)
@@ -196,12 +270,38 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, InvoiceLinkMismatchCode);
         }
 
-        var stored = StoredFindings.Parse(submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson));
+        var findingsJson = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
+        var stored = StoredFindings.Parse(findingsJson);
         if (stored is null || stored.InvoiceId != invoiceId)
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: its findings JSON is missing, unreadable or names another invoice; no after-commit step ran",
                 submissionId);
             return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, FindingsUnreadableCode);
+        }
+
+        // G: the persister always stores the plan (every persisted kind carries an evaluation); a missing one is not an empty plan.
+        if (!stored.HasSignalPlan)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: its findings JSON has no Signal plan; no after-commit step ran", submissionId);
+            return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, SignalPlanMissingCode);
+        }
+
+        // ── A: the terminal comes from the STORED state; a caller that evaluated again and got another answer writes nothing ──
+        var (terminal, terminalReasonCode) = InvoiceSubmissionPersister.TerminalFor(stored.Kind, stored.ReasonCode);
+        if (claimed is { } c && (c.Status != terminal || !string.Equals(c.ReasonCode, terminalReasonCode, StringComparison.Ordinal)))
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the persisted result says {Claimed} ({ClaimedCode}) but the stored state is {Kind} ({Stored}, {StoredCode}); no after-commit step ran",
+                submissionId, c.Status, c.ReasonCode, stored.Kind, terminal, terminalReasonCode);
+            return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, SubmissionReasonCodes.StoredStateMismatch);
+        }
+
+        var rowVersion = RowVersionOf(submission);
+
+        // ── The totals refusal (map row 6c): recorded in the findings JSON, once; the invoice stands ──
+        if (totals?.Refusal is { } refusal
+            && await RecordTotalsRefusalAsync(submissionId, findingsJson!, refusal, ct).ConfigureAwait(false))
+        {
+            rowVersion = null; // our own write moved the row version: the terminal write re-reads it first
         }
 
         // ── 1. Signals ──
@@ -262,10 +362,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             }
         }
 
-        if (totalsRetry)
+        if (totalsRetryCode is not null)
         {
             // The totals failed after the commit: the Signals and the record are written; the redelivery re-runs the totals, then the rest.
-            return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, persisted.ReasonCode ?? InvoiceSubmissionPersister.TotalsFailedCode)
+            return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, totalsRetryCode)
                 with { SignalsWritten = written, DecisionRecordId = recordId };
         }
 
@@ -301,17 +401,16 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         }
 
         // ── 4. Notification: once per submission (the marker). The sink's contract: a failure is logged and never retries the pipeline ──
-        await NotifyOnceAsync(submission, submissionId, invoiceId, terminal, persisted.TerminalReasonCode, ct).ConfigureAwait(false);
+        await NotifyOnceAsync(submission, submissionId, invoiceId, terminal, terminalReasonCode, ct).ConfigureAwait(false);
 
-        // ── 5. Terminal status, LAST (D-130 a): Accepted / Rejected means complete ──
-        await _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, new Dictionary<string, object>
+        // ── 5. Terminal status, LAST (D-130 a): Accepted / Rejected means complete; written only while Processing, on the row version ──
+        if (await WriteTerminalAsync(submissionId, rowVersion, terminal, terminalReasonCode, ct).ConfigureAwait(false) is { } stopped)
         {
-            [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)terminal),
-            [InvoiceSubmissionPersister.SubmissionReasonCode] = persisted.TerminalReasonCode!,
-        }, ct).ConfigureAwait(false);
+            return stopped with { InvoiceId = stopped.InvoiceId ?? invoiceId, SignalsWritten = written, DecisionRecordId = recordId };
+        }
 
         _logger.LogInformation("Invoice submission {SubmissionId}: after-commit steps complete for invoice {InvoiceId} ({Kind}): {Written} Signals, status {Status} ({ReasonCode})",
-            submissionId, invoiceId, stored.Kind, written, terminal, persisted.TerminalReasonCode);
+            submissionId, invoiceId, stored.Kind, written, terminal, terminalReasonCode);
         return new SubmissionAfterStepsResult
         {
             Status = SubmissionAfterStepsStatus.Completed,
@@ -322,6 +421,145 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             SignalsWritten = written,
         };
     }
+
+    // ── Terminal status (B: written only while Processing) ──
+
+    /// <summary>
+    /// Writes the terminal status only while the submission is Processing, conditional on the row version
+    /// (<see cref="IGenericEntityService.BulkUpdateIfRowVersionsMatchAsync"/>, one row). A version conflict re-reads once: still Processing →
+    /// the write is tried once more on the new version; now terminal → Completed with nothing written (a reviewer or another run decided).
+    /// A <paramref name="rowVersion"/> of null (our own findings write moved it) re-reads before the first attempt. Returns null when the
+    /// terminal was written, else the result the run ends with.
+    /// </summary>
+    private async Task<SubmissionAfterStepsResult?> WriteTerminalAsync(
+        Guid submissionId, long? rowVersion, InvoiceSubmissionStatus terminal, string? reasonCode, CancellationToken ct)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            if (rowVersion is null)
+            {
+                var state = await ReadSubmissionAsync(submissionId, StateColumns, ct).ConfigureAwait(false);
+                if (state is null)
+                {
+                    return Missing(submissionId);
+                }
+
+                if (AlreadyTerminal(state, submissionId) is { } done)
+                {
+                    return done;
+                }
+
+                rowVersion = RowVersionOf(state);
+            }
+
+            if (rowVersion is not { } version)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: read without a row version; the terminal status is not written", submissionId);
+                return new SubmissionAfterStepsResult { Status = SubmissionAfterStepsStatus.Retry, SubmissionId = submissionId, ReasonCode = RowVersionMissingCode };
+            }
+
+            try
+            {
+                await _entities.BulkUpdateIfRowVersionsMatchAsync(FinanceBaseValues.SubmissionEntity,
+                [
+                    (submissionId, new Dictionary<string, object>
+                    {
+                        [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)terminal),
+                        [InvoiceSubmissionPersister.SubmissionReasonCode] = reasonCode!,
+                    }, version),
+                ], ct).ConfigureAwait(false);
+                return null;
+            }
+            catch (System.Data.DBConcurrencyException)
+            {
+                _logger.LogInformation("Invoice submission {SubmissionId}: it changed since it was read; re-reading before the terminal status", submissionId);
+                rowVersion = null;
+            }
+        }
+
+        _logger.LogWarning("Invoice submission {SubmissionId}: the terminal status lost to a concurrent change twice; it stays Processing for a retry", submissionId);
+        return new SubmissionAfterStepsResult { Status = SubmissionAfterStepsStatus.Retry, SubmissionId = submissionId, ReasonCode = TerminalWriteConflictCode };
+    }
+
+    /// <summary>
+    /// Null when the submission is Processing (the steps run). Accepted, Rejected or Failed: Completed with
+    /// <see cref="SubmissionAfterStepsResult.AlreadyTerminal"/>, nothing written and nobody notified. Any other status (Received, none):
+    /// Refused (<see cref="NotProcessingCode"/>).
+    /// </summary>
+    private SubmissionAfterStepsResult? AlreadyTerminal(Entity submission, Guid submissionId)
+    {
+        var status = submission.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus)?.Value;
+        if (status == (int)InvoiceSubmissionStatus.Processing)
+        {
+            return null;
+        }
+
+        if (status is (int)InvoiceSubmissionStatus.Accepted or (int)InvoiceSubmissionStatus.Rejected or (int)InvoiceSubmissionStatus.Failed)
+        {
+            _logger.LogInformation("Invoice submission {SubmissionId}: already {Status}; no after-commit step runs and the status is not written",
+                submissionId, (InvoiceSubmissionStatus)status.Value);
+            return new SubmissionAfterStepsResult
+            {
+                Status = SubmissionAfterStepsStatus.Completed,
+                SubmissionId = submissionId,
+                InvoiceId = submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id,
+                TerminalStatus = (InvoiceSubmissionStatus)status.Value,
+                AlreadyTerminal = true,
+            };
+        }
+
+        _logger.LogWarning("Invoice submission {SubmissionId}: status {Status} is neither Processing nor terminal; no after-commit step ran", submissionId, status);
+        return new SubmissionAfterStepsResult { Status = SubmissionAfterStepsStatus.Refused, SubmissionId = submissionId, ReasonCode = NotProcessingCode };
+    }
+
+    // ── Totals refusal (map row 6c) ──
+
+    /// <summary>The findings JSON member that records the 016 refusal: <c>{ "code": ..., "lineId": ... }</c> (no message, no amounts).</summary>
+    internal const string TotalsRefusalMember = "totalsRefusal";
+
+    /// <summary>
+    /// Records the totals refusal's code in <c>sprk_findingsjson</c> (the invoice is not undone, map row 6c). Idempotent: no write when the
+    /// stored member already holds the same code. Returns true when it wrote.
+    /// </summary>
+    private async Task<bool> RecordTotalsRefusalAsync(Guid submissionId, string findingsJson, InvoiceTotalsRefusal refusal, CancellationToken ct)
+    {
+        var root = JsonNode.Parse(findingsJson)!.AsObject();
+        if (root[TotalsRefusalMember] is JsonObject existing && string.Equals(Text(existing, "code"), refusal.Code, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        root[TotalsRefusalMember] = new JsonObject { ["code"] = refusal.Code, ["lineId"] = refusal.LineId?.ToString("D") };
+        await _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, new Dictionary<string, object>
+        {
+            [InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString(),
+        }, ct).ConfigureAwait(false);
+        _logger.LogWarning("Invoice submission {SubmissionId}: the invoice totals were refused ({Code}); recorded in the findings, the invoice stands",
+            submissionId, refusal.Code);
+        return true;
+    }
+
+    private async Task<Entity?> ReadSubmissionAsync(Guid submissionId, string[] columns, CancellationToken ct)
+    {
+        try
+        {
+            return await _entities.RetrieveAsync(FinanceBaseValues.SubmissionEntity, submissionId, columns, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsRecordNotFound(ex))
+        {
+            return null;
+        }
+    }
+
+    private SubmissionAfterStepsResult Missing(Guid submissionId)
+    {
+        _logger.LogInformation("Invoice submission {SubmissionId}: the row no longer exists; no after-commit step ran", submissionId);
+        return new SubmissionAfterStepsResult { Status = SubmissionAfterStepsStatus.SubmissionMissing, SubmissionId = submissionId };
+    }
+
+    private static long? RowVersionOf(Entity row) =>
+        row.GetAttributeValue<long?>(RowVersionColumn)
+        ?? (long.TryParse(row.RowVersion, NumberStyles.None, CultureInfo.InvariantCulture, out var version) ? version : null);
 
     // ── Notification ──
 
@@ -534,9 +772,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     }
 
     /// <summary>
-    /// One read: the policy by <c>sprk_policycode</c> (billing domain) with its current version joined. Usable only when exactly one such
-    /// policy exists, it is enabled and Active, and its current version is Active, of the SubmissionIntegrity type and in force on
-    /// <paramref name="receivedOn"/> (<see cref="BillingRuleCandidate.IsInForceOn"/>, the 076 K3 rule the evaluator applies).
+    /// Two reads: the policy by <c>sprk_policycode</c> (billing domain), then its versions. Usable only when exactly one such policy exists,
+    /// it is enabled and Active, and the version the evaluator would apply on <paramref name="receivedOn"/> exists
+    /// (<see cref="InvoiceComplianceEvaluator.SelectVersion"/> over <see cref="BillingRuleCandidate.IsInForceOn"/>, the 076 K3 rule: the
+    /// current version from its start, a superseded one inside its window) and is of the SubmissionIntegrity type. A version superseded
+    /// after the received date (a re-seed) therefore still applies to that submission, as it does for the rule evaluation (K1, notes 13a).
     /// </summary>
     internal async Task<(BillingRuleCandidate? Rule, string State)> ReadSystemPolicyAsync(DateOnly? receivedOn, CancellationToken ct)
     {
@@ -548,10 +788,6 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         };
         RuleDomains.AddBillingFilter(query);
         query.Criteria.AddCondition("sprk_policycode", ConditionOperator.Equal, BillingRuleCatalogue.SystemPolicyCode);
-        var version = query.AddLink("sprk_policyversion", "sprk_currentversion", "sprk_policyversionid", JoinOperator.LeftOuter);
-        version.EntityAlias = VersionAlias;
-        version.Columns = new ColumnSet("statecode", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline", "sprk_consequence",
-            "sprk_inforcefrom", "sprk_inforceto", "sprk_versionnumber");
 
         var rows = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities
             .Where(r => RuleDomains.IsBillingRow(r)
@@ -573,39 +809,51 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             return (null, "disabled");
         }
 
-        if (policy.GetAttributeValue<EntityReference>("sprk_currentversion") is not { } current || current.Id == Guid.Empty
-            || Aliased<OptionSetValue>(policy, "statecode")?.Value != StateActive
-            || Aliased<OptionSetValue>(policy, "sprk_ruletype")?.Value != SubmissionIntegrityOption)
+        if (receivedOn is not { } date)
         {
-            return (null, "without_an_active_version");
+            return (null, "without_a_version_in_force");
         }
 
-        var rule = new BillingRuleCandidate
+        var versionQuery = new QueryExpression(BillingFactLoader.VersionEntity)
         {
-            PolicyId = policy.Id,
-            PolicyCode = BillingRuleCatalogue.SystemPolicyCode,
-            PolicyVersionId = current.Id,
-            // The system policy belongs to no rule set (D-125); these two are never read for it (no D-39 selection, no handler).
-            RuleSetId = Guid.Empty,
-            Scope = RuleSetScope.ClientDefault,
-            RuleType = SubmissionIntegrityOption.ToString(CultureInfo.InvariantCulture),
-            RuleBody = Aliased<string>(policy, "sprk_rulebody"),
-            MessageTemplate = Aliased<string>(policy, "sprk_messagetemplate"),
-            ShortHeadline = Aliased<string>(policy, "sprk_shortheadline"),
-            InForceFrom = UtcDate(Aliased<DateTime?>(policy, "sprk_inforcefrom")),
-            InForceTo = UtcDate(Aliased<DateTime?>(policy, "sprk_inforceto")),
-            IsCurrent = true,
-            VersionNumber = Aliased<int?>(policy, "sprk_versionnumber") ?? 0,
-            Lane = policy.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value,
-            Severity = policy.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
-            Consequence = Aliased<OptionSetValue>(policy, "sprk_consequence")?.Value,
+            ColumnSet = new ColumnSet("sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
+                "sprk_consequence", "sprk_inforcefrom", "sprk_inforceto"),
+            NoLock = true,
         };
+        versionQuery.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, policy.Id);
+        var currentId = policy.GetAttributeValue<EntityReference>("sprk_currentversion")?.Id;
+        var versions = (await _entities.RetrieveMultipleAsync(versionQuery, ct).ConfigureAwait(false)).Entities
+            .Where(v => v.GetAttributeValue<EntityReference>("sprk_policy")?.Id == policy.Id)
+            .Select(v => new BillingRuleCandidate
+            {
+                PolicyId = policy.Id,
+                PolicyCode = BillingRuleCatalogue.SystemPolicyCode,
+                PolicyVersionId = v.Id,
+                // The system policy belongs to no rule set (D-125); these two are never read for it (no D-39 selection, no handler).
+                RuleSetId = Guid.Empty,
+                Scope = RuleSetScope.ClientDefault,
+                RuleType = v.GetAttributeValue<OptionSetValue>("sprk_ruletype")?.Value.ToString(CultureInfo.InvariantCulture),
+                RuleBody = v.GetAttributeValue<string>("sprk_rulebody"),
+                MessageTemplate = v.GetAttributeValue<string>("sprk_messagetemplate"),
+                ShortHeadline = v.GetAttributeValue<string>("sprk_shortheadline"),
+                InForceFrom = UtcDate(v.GetAttributeValue<DateTime?>("sprk_inforcefrom")),
+                InForceTo = UtcDate(v.GetAttributeValue<DateTime?>("sprk_inforceto")),
+                IsCurrent = currentId == v.Id,
+                VersionNumber = v.GetAttributeValue<int?>("sprk_versionnumber") ?? 0,
+                Lane = policy.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value,
+                Severity = policy.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
+                Consequence = v.GetAttributeValue<OptionSetValue>("sprk_consequence")?.Value,
+            })
+            .ToList();
 
-        return receivedOn is { } date && rule.IsInForceOn(date) ? (rule, "in_force") : (null, "without_a_version_in_force");
+        var rule = InvoiceComplianceEvaluator.SelectVersion(versions, date);
+        if (rule is null)
+        {
+            return (null, "without_a_version_in_force");
+        }
+
+        return rule.RuleType == SubmissionIntegrityOption.ToString(CultureInfo.InvariantCulture) ? (rule, "in_force") : (null, "of_another_rule_type");
     }
-
-    private static T? Aliased<T>(Entity row, string column) =>
-        row.GetAttributeValue<AliasedValue>($"{VersionAlias}.{column}")?.Value is T value ? value : default;
 
     private static DateOnly? UtcDate(DateTime? value) => value is { } v
         ? DateOnly.FromDateTime(v.Kind == DateTimeKind.Local ? v.ToUniversalTime() : v)
@@ -739,6 +987,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     internal sealed class StoredFindings
     {
         public required SubmissionEvaluationKind Kind { get; init; }
+
+        /// <summary>The root <c>reasonCode</c> (the outcome's): with <see cref="Kind"/> it decides the terminal status and its reason code.</summary>
+        public string? ReasonCode { get; init; }
+
+        /// <summary>False when the stored JSON has no <c>signalPlan</c> array (G: that is not an empty plan; the run is Refused).</summary>
+        public bool HasSignalPlan { get; init; }
+
         public required Guid InvoiceId { get; init; }
         public required string TrackingNumber { get; init; }
         public DateOnly? ReceivedOn { get; init; }
@@ -830,6 +1085,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             {
                 if (JsonNode.Parse(json) is not JsonObject root
                     || !Enum.TryParse<SubmissionEvaluationKind>(Text(root, "kind"), out var kind)
+                    || kind is not (SubmissionEvaluationKind.Accepted or SubmissionEvaluationKind.AcceptedUncoded
+                        or SubmissionEvaluationKind.AutoRejected or SubmissionEvaluationKind.Blocked)
                     || !Guid.TryParse(Text(root, "invoiceId"), out var invoiceId)
                     || Text(root, "trackingNumber") is not { Length: > 0 } tracking)
                 {
@@ -847,9 +1104,12 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 }
 
                 var decision = root["decision"] as JsonObject;
+                var plan = root["signalPlan"] as JsonArray;
                 return new StoredFindings
                 {
                     Kind = kind,
+                    ReasonCode = Text(root, "reasonCode"),
+                    HasSignalPlan = plan is not null,
                     InvoiceId = invoiceId,
                     TrackingNumber = tracking,
                     ReceivedOn = DateOnly.TryParseExact(Text(root, "receivedOn"), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var on) ? on : null,
@@ -857,7 +1117,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                     ReliabilityThreshold = decision?["reliabilityThreshold"]?.GetValue<decimal>(),
                     DecidingIndexes = (decision?["deciding"] as JsonArray ?? []).Select(n => n!.GetValue<int>()).ToList(),
                     Findings = findings,
-                    Plan = (root["signalPlan"] as JsonArray ?? []).OfType<JsonObject>().Select(ParsePlanEntry).ToList(),
+                    Plan = (plan ?? []).OfType<JsonObject>().Select(ParsePlanEntry).ToList(),
                     PipelineFindings = root["pipelineFindings"] as JsonArray ?? [],
                     CodingFindings = root["codingFindings"] as JsonArray ?? [],
                     CodeSet = root["codeSet"] as JsonObject,
