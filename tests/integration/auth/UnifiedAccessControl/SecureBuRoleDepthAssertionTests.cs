@@ -668,7 +668,7 @@ public class SecureBuRoleDepthAssertionTests
         set.BusinessUnitName.Should().Be(SecureRecordOwnerTeam.DefaultBusinessUnitName);
         set.Tables.Where(t => t.Kind == "root").Select(t => t.PrivilegeName)
             .Should().BeEquivalentTo(SecureBuRoleDepthAssertion.GuardedPrivileges);
-        set.Tables.Should().OnlyContain(t => t.Kind == "root" || t.Kind == "child");
+        set.Tables.Should().OnlyContain(t => t.Kind == "root" || t.Kind == "child" || t.Kind == "grant");
     }
 
     /// <summary>

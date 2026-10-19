@@ -130,7 +130,9 @@ public sealed partial class DecisionRecordWriterTests
             };
         });
 
-        public Harness(RecordOwnerResolution? ownership = null, IRecordOwnershipResolver? realResolver = null)
+        /// <param name="participantShares">Task 042b (D-169): the participant-share helper the writer calls after a gate create; null = a double over
+        /// an empty world.</param>
+        public Harness(RecordOwnerResolution? ownership = null, IRecordOwnershipResolver? realResolver = null, GateDecisionRecordSharing? participantShares = null)
         {
             Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
                 .Callback<Entity, CancellationToken>((e, _) => Created.Add(e))
@@ -190,7 +192,8 @@ public sealed partial class DecisionRecordWriterTests
                         StringComparer.OrdinalIgnoreCase));
                 },
                 NullLogger<CoreAncestorResolver>.Instance);
-            Writer = new DecisionRecordWriter(client, realResolver ?? Ownership.Object, coreAncestors, Entities.Object, RecordTypes, new FakeTimeProvider(Now), Log);
+            Writer = new DecisionRecordWriter(client, realResolver ?? Ownership.Object, coreAncestors, Entities.Object, RecordTypes, new FakeTimeProvider(Now), Log,
+                participantShares ?? new GateSharingWorld().Sharing);
         }
 
         public Entity Row => Created.Single();
@@ -1418,7 +1421,7 @@ public sealed partial class DecisionRecordWriterTests
             new OntologyWriterDataverseClient(() => h.Org.Object, NullLogger<OntologyWriterDataverseClient>.Instance),
             h.Ownership.Object, StampColumnsResolver(h.Entities.Object), h.Entities.Object,
             new Tests.TestInfrastructure.RecordTypeCatalogStub((_, _) => throw new TimeoutException("catalog down")),
-            new FakeTimeProvider(Now), h.Log);
+            new FakeTimeProvider(Now), h.Log, new GateSharingWorld().Sharing);
 
         (await writer.Invoking(w => w.WriteAsync(Request())).Should().ThrowAsync<DecisionRecordRefusedException>())
             .Which.Reason.Should().Be(DecisionRecordRefusalReason.FilingFailed);

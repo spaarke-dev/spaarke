@@ -20,8 +20,14 @@ namespace Sprk.Bff.Api.Services.Dataverse.Privileges;
 /// Consumed by <c>DataverseAuthorizationFilter</c> (single privilege checks) and the
 /// FetchXML endpoint filter path (batch checks via <see cref="GetReadableEntitiesAsync"/>).
 /// </para>
+/// <para>
+/// unified-access-control-r2 task 099b review round 2: also answers whether an OWNER TEAM holds Read on a table
+/// (<see cref="TeamHasReadPrivilegeAsync"/>) — the grant routes and the secure-transition child pass ask before a row of
+/// <c>sprk_externalrecordaccess</c> is created for, or assigned to, a team. Public (was internal) because the Assigned-To
+/// materializer and the secure child reconciler, public types with public constructors, take it.
+/// </para>
 /// </remarks>
-internal interface IDataversePrivilegeChecker
+public interface IDataversePrivilegeChecker
 {
     /// <summary>
     /// Returns <c>true</c> if the caller has Read privilege on the specified entity.
@@ -54,6 +60,29 @@ internal interface IDataversePrivilegeChecker
     Task<IReadOnlySet<string>> GetReadableEntitiesAsync(Guid userOid, CancellationToken ct);
 
     /// <summary>
+    /// Task 099b review round 2: whether the TEAM <paramref name="teamId"/> holds Read (at any depth) on
+    /// <paramref name="entityLogicalName"/> through its own security roles — Dataverse's "Read Privilege Check For Owner": a
+    /// team without it cannot own a row of that table.
+    /// </summary>
+    /// <returns><c>true</c> when one of the team's roles grants Read on the table; <c>false</c> when none does.</returns>
+    /// <param name="teamId">The team asked about.</param>
+    /// <param name="entityLogicalName">The table.</param>
+    /// <param name="fresh">
+    /// <c>true</c> reads Dataverse even when a remembered YES exists — for a caller that must not act on a privilege an
+    /// administrator has since removed (the grant core's classification of a refused create, review round 3, K2).
+    /// <c>false</c> may be answered YES from a short-lived per-team cache; a NO is never answered from it.
+    /// </param>
+    /// <param name="ct">Cancellation.</param>
+    /// <exception cref="Exception">
+    /// UNLIKE the user methods, a Dataverse fault is NOT answered <c>false</c>: it propagates, so a caller can tell "the team
+    /// lacks the privilege" from "it could not be read" (503) — and a fault is never cached. Only a YES is cached, per team,
+    /// for a short time, so an administrator's fix is seen on the next question.
+    /// </exception>
+    /// <remarks>App-only: <c>RetrieveTeamPrivileges</c> through the same application <c>ServiceClient</c> the ownership
+    /// resolver reads through; no impersonation.</remarks>
+    Task<bool> TeamHasReadPrivilegeAsync(Guid teamId, string entityLogicalName, bool fresh, CancellationToken ct);
+
+    /// <summary>
     /// The CEILING for a workforce-contact caller (unified-access-control-r2 task 186, ADR-028 A9, owner round 101 option
     /// (a)): the table × operation privileges of the Dataverse role <see cref="UserPrivilegeChecker.WorkforceRoleName"/>,
     /// read app-only with <c>RetrieveRolePrivilegesRole</c>.
@@ -80,7 +109,7 @@ internal interface IDataversePrivilegeChecker
 /// workforce contact could create, read and delete service requests whatever the owner's role says (the owner's round-101
 /// decision has no enforcement point).
 /// </remarks>
-internal sealed class WorkforceRoleCeiling
+public sealed class WorkforceRoleCeiling
 {
     private static readonly IReadOnlyDictionary<string, Spaarke.Dataverse.AccessRights> NoPrivileges =
         new Dictionary<string, Spaarke.Dataverse.AccessRights>(StringComparer.OrdinalIgnoreCase);
