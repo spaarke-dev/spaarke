@@ -470,16 +470,18 @@ public class SubmissionRejectionRuleTests
     [MemberData(nameof(Rejecting))]
     public void AnUnlistedReasonCode_UnderARejectVersion_WithReliableReads_DoesNotReject(RuleType type)
     {
-        // A reason code added later (a new sub-reason, 072 part E's billing.currency.*) is hold-by-default until it is listed on purpose.
-        foreach (var reason in new[] { "billing.currency.missing", type.ToString().ToLowerInvariant() + ".a_new_reason" })
-        {
-            var finding = Finding(type, Reads(SubjectOf(type), 0.99m, 0.99m), reason);
+        // A reason code added later (a new sub-reason) is hold-by-default until it is listed on purpose.
+        var finding = Finding(type, Reads(SubjectOf(type), 0.99m, 0.99m), type.ToString().ToLowerInvariant() + ".a_new_reason");
 
-            // ApprovedRate already holds every reason but a rate above the approved one, under its own, more specific code.
-            ShouldHold(
-                Decide(finding, Reject, Settings()),
-                type == RuleType.ApprovedRate ? SubmissionHoldReasons.ReferenceMissingHolds : SubmissionHoldReasons.ReasonNotRejectCapable);
-        }
+        // ApprovedRate already holds every reason but a rate above the approved one, under its own, more specific code.
+        ShouldHold(
+            Decide(finding, Reject, Settings()),
+            type == RuleType.ApprovedRate ? SubmissionHoldReasons.ReferenceMissingHolds : SubmissionHoldReasons.ReasonNotRejectCapable);
+
+        // 072 part E's billing.currency.* reasons are off the allowlist too, but flag-only by reason code, which is checked first.
+        var currency = Finding(type, Reads(SubjectOf(type), 0.99m, 0.99m), BillingEvaluationReasons.CurrencyMissing);
+        BillingRuleCatalogue.IsRejectCapableReason(type, BillingEvaluationReasons.CurrencyMissing).Should().BeFalse();
+        ShouldHold(Decide(currency, Reject, Settings()), SubmissionHoldReasons.ReasonFlagOnly);
     }
 
     [Fact]
@@ -928,7 +930,8 @@ public class SubmissionRejectionRuleTests
     public async Task ARejectCapableReason_OfTheSameMoneyPolicy_KeepsItsReject_AndOnlyItDecides_D115()
     {
         var rule = Version("BILL-EXPENSE", RuleType.ExpenseRule) with { Consequence = Reject };
-        var request = Request(Expense(0) with { ExpenseCode = "E109", Amount = 600m }) with { Currency = "EUR" };
+        // D-117: the rejection judges the firm-billed code; with only the AI-assigned code the finding would hold (ai_assigned_input).
+        var request = Request(Expense(0) with { ExpenseCode = "E109", BilledExpenseCode = "E109", Amount = 600m }) with { Currency = "EUR" };
         var result = Evaluator().Evaluate(request, Loaded(rule));
         result.Findings.Select(f => f.ReasonCode).Should().Equal(BillingEvaluationReasons.CurrencyNotUsd, BillingReasonCodes.ExpenseCodeNotReimbursable);
 
