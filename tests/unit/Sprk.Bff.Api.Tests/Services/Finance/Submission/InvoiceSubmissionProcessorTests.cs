@@ -628,7 +628,17 @@ public class InvoiceSubmissionProcessorTests
             };
         }
 
-        public Task<SubmissionEvaluationOutcome> RunAsync()
+        public Task<SubmissionEvaluationOutcome> RunAsync() => Build().EvaluateAsync(Row, LoadDocument);
+
+        /// <summary>The document loader the harness hands the processor (counts the loads).</summary>
+        public Task<InvoiceReadRequest> LoadDocument(SubmissionSnapshot snapshot, CancellationToken _)
+        {
+            DocumentLoads++;
+            return Task.FromResult(new InvoiceReadRequest { Content = new byte[] { 1 }, DocumentId = snapshot.DocumentId });
+        }
+
+        /// <summary>The real processor over this harness's fakes (049 part E drives it through the job handler).</summary>
+        public InvoiceSubmissionProcessor Build()
         {
             var ai = Ai ?? ReadingAi();
             var settings = new Mock<IEbillingSettingsReader>();
@@ -654,11 +664,7 @@ public class InvoiceSubmissionProcessorTests
                 monitor,
                 NullLogger<InvoiceSubmissionProcessor>.Instance);
 
-            return sut.EvaluateAsync(Row, (snapshot, _) =>
-            {
-                DocumentLoads++;
-                return Task.FromResult(new InvoiceReadRequest { Content = new byte[] { 1 }, DocumentId = snapshot.DocumentId });
-            });
+            return sut;
         }
 
         private IInvoiceAi ReadingAi()
