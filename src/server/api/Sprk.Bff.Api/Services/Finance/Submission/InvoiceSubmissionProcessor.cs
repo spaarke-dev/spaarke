@@ -130,24 +130,28 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
             return Log(SubmissionEvaluationOutcome.Failed(snapshot.SubmissionId, ex.ErrorCode, snapshot, read));
         }
 
-        // Step 3: code (047). D-126: coding that cannot run after a successful read is not a failure. The invoice and its uncoded lines are
-        // created In Review, held by a pipeline finding; no rule runs on uncoded lines, so nothing rejects. The coding InvoiceAiException
-        // (a model fault) still propagates for the job to retry.
-        InvoiceCodingResult coding;
+        // Step 3: code (047). D-126 / D-130: coding that cannot run after a successful read is not a failure, and it does not skip the
+        // rules. The lines stay uncoded and the invoice is held by a pipeline finding, but 072 and 073 still judge the firm's billed data:
+        // a rule-based rejection rejects as usual (D-101); otherwise the invoice is held by the coding finding plus any rule findings.
+        // Uncoded lines carry no AI-assigned code, so a rule that would read one holds as ai_assigned_input (D-117), never rejects.
+        // The coding InvoiceAiException (a model fault) still propagates for the job to retry.
+        InvoiceCodingResult? coding = null;
+        string? codingHold = null;
         try
         {
             coding = await _coding.CodeLinesAsync(BuildCodingRequest(snapshot, read), ct).ConfigureAwait(false);
         }
         catch (FeatureDisabledException ex)
         {
-            return Log(Uncoded(snapshot, read, numberCheck, pipelineFindings, resolution, SubmissionReasonCodes.CodingUnavailableHold, ex.ErrorCode));
+            codingHold = SubmissionReasonCodes.CodingUnavailableHold;
+            pipelineFindings = [.. pipelineFindings, CodingHoldFinding(codingHold, ex.ErrorCode)];
         }
         catch (LineCodingException ex)
         {
-            var hold = ex.ReasonCode == SubmissionReasonCodes.NoCodeSet
+            codingHold = ex.ReasonCode == SubmissionReasonCodes.NoCodeSet
                 ? SubmissionReasonCodes.CodingNoCodeSetHold
                 : SubmissionReasonCodes.CodingUnavailableHold;
-            return Log(Uncoded(snapshot, read, numberCheck, pipelineFindings, resolution, hold, ex.ReasonCode));
+            pipelineFindings = [.. pipelineFindings, CodingHoldFinding(codingHold, ex.ReasonCode)];
         }
 
         // Step 4: evaluate (072), on the core record and received date of this same submission read.
@@ -158,6 +162,12 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
         var decision = await _decider.DecideAsync(evaluation, ct).ConfigureAwait(false);
 
         var (kind, reasonCode) = Classify(decision, snapshot.Channel);
+        if (kind == SubmissionEvaluationKind.Accepted && codingHold is not null)
+        {
+            // D-130 (b): accepted but uncoded; the reason code carries the coding code.
+            (kind, reasonCode) = (SubmissionEvaluationKind.AcceptedUncoded, codingHold);
+        }
+
         return Log(new SubmissionEvaluationOutcome
         {
             Kind = kind,
@@ -175,24 +185,9 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
         });
     }
 
-    /// <summary>D-126: read and resolved, not coded. The hold finding names its cause; a D-91 finding, if any, is kept.</summary>
-    private static SubmissionEvaluationOutcome Uncoded(
-        SubmissionSnapshot snapshot,
-        ExtractedInvoice read,
-        InvoiceNumberCheck numberCheck,
-        IReadOnlyList<SubmissionPipelineFinding> pipelineFindings,
-        InvoiceResolutionResult resolution,
-        string holdCode,
-        string cause) => new()
-    {
-        Kind = SubmissionEvaluationKind.AcceptedUncoded,
-        SubmissionId = snapshot.SubmissionId,
-        Submission = snapshot,
-        Read = read,
-        InvoiceNumber = numberCheck,
-        PipelineFindings = [.. pipelineFindings, new SubmissionPipelineFinding(holdCode, new Dictionary<string, string?> { ["cause"] = cause })],
-        Resolution = resolution,
-    };
+    /// <summary>D-126: the hold finding of lines that were read and resolved but not coded; it names its cause.</summary>
+    private static SubmissionPipelineFinding CodingHoldFinding(string holdCode, string cause) =>
+        new(holdCode, new Dictionary<string, string?> { ["cause"] = cause });
 
     /// <summary>Step 5a (notes 049 section 2): Accepted; Rejected on SPA is an automatic rejection; Rejected on Internal is blocked.</summary>
     internal static (SubmissionEvaluationKind Kind, string? ReasonCode) Classify(SubmissionDecision decision, InvoiceSubmissionChannel channel)
@@ -286,10 +281,10 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
     // ── 043 + 046 + 047 → 072 ──
 
     internal static BillingEvaluationRequest BuildEvaluationRequest(
-        SubmissionSnapshot snapshot, ExtractedInvoice read, InvoiceResolutionResult resolution, InvoiceCodingResult coding)
+        SubmissionSnapshot snapshot, ExtractedInvoice read, InvoiceResolutionResult resolution, InvoiceCodingResult? coding)
     {
         var resolvedByIndex = resolution.Lines.ToDictionary(l => l.LineIndex);
-        var codedByKey = coding.Lines.ToDictionary(l => l.LineKey, StringComparer.Ordinal);
+        var codedByKey = coding?.Lines.ToDictionary(l => l.LineKey, StringComparer.Ordinal);
         var header = read.Header;
 
         var lines = new List<BillingLineFacts>(read.Lines.Count);
@@ -301,7 +296,9 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
                 throw new InvalidOperationException($"The resolution returned no result for line {index}.");
             }
 
-            if (!codedByKey.TryGetValue(LineKey(index), out var coded))
+            // D-130: coding is absent for an uncoded submission (null codes, no observations, no coding confidence).
+            LineCodingResult? coded = null;
+            if (codedByKey is not null && !codedByKey.TryGetValue(LineKey(index), out coded))
             {
                 throw new InvalidOperationException($"Line coding returned no result for line {index}.");
             }
@@ -318,13 +315,13 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
                 BilledRate = line.Rate.Value,
                 Amount = line.Amount.Value,
                 Narrative = line.Narrative.Value,
-                TaskCode = coded.Task.Code,
-                ActivityCode = coded.Activity.Code,
-                ExpenseCode = coded.Expense.Code,
+                TaskCode = coded?.Task.Code,
+                ActivityCode = coded?.Activity.Code,
+                ExpenseCode = coded?.Expense.Code,
                 BilledTaskCode = line.TaskCodeAsBilled.Value,
                 BilledActivityCode = line.ActivityCodeAsBilled.Value,
                 BilledExpenseCode = line.ExpenseCodeAsBilled.Value,
-                Observations = coded.Observations,
+                Observations = coded?.Observations ?? [],
                 FieldConfidence = LineConfidence(resolved, coded),
             });
         }
@@ -354,9 +351,15 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
     /// A line's confidences as the handlers read them: 046's combined confidence per field; the coding confidence (the model's own) under
     /// TaskCode / ActivityCode / ExpenseCode; each observation kind's own confidence (the highest of that kind) under Observation.*.
     /// </summary>
-    private static IReadOnlyDictionary<string, decimal> LineConfidence(ResolvedInvoiceLine resolved, LineCodingResult coded)
+    private static IReadOnlyDictionary<string, decimal> LineConfidence(ResolvedInvoiceLine resolved, LineCodingResult? coded)
     {
         var confidence = resolved.Fields.ToDictionary(f => f.Key, f => f.Value.Combined, StringComparer.Ordinal);
+        if (coded is null)
+        {
+            // Uncoded: no coding or observation confidence exists, so a rule that reads one finds it unknown (and holds, I-5).
+            return confidence;
+        }
+
         confidence[BillingFieldNames.TaskCode] = coded.Confidence;
         confidence[BillingFieldNames.ActivityCode] = coded.Confidence;
         confidence[BillingFieldNames.ExpenseCode] = coded.Confidence;

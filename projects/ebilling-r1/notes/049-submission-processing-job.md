@@ -275,3 +275,54 @@ faults and retries); nothing clears the link today.
    the findings JSON. Set it instead?
 4. AutoRejected "findings on both": the findings JSON lives on the submission (which links the invoice); the invoice has no findings
    column, so its copy is part D's Signals. Confirm no invoice-side column is wanted.
+
+## 12. Part C2 - D-130 follow-ups to parts B and C (2026-10-19)
+
+Supersedes the matching statements in sections 10-11 (the "no rule is evaluated on uncoded lines" rule, owner questions 1-3, and "the terminal
+status is committed in the transaction"). Files: `InvoiceSubmissionProcessor.cs`, `SubmissionEvaluationOutcome.cs`, `InvoiceSubmissionPersister.cs`,
+`IInvoiceSubmissionPersister.cs`; tests `InvoiceSubmissionProcessorTests.cs`, `InvoiceSubmissionPersisterTests.cs`; ArchTests census `PersonBearingWriters`.
+
+**1. Rules run on an uncoded submission (D-130 1).** A coding `FeatureDisabledException` / `LineCodingException` after the read now only adds the hold
+pipeline finding (`coding_no_code_set` / `coding_unavailable`) and leaves `Coding` null; 072 and 073 still run on the firm's billed data. Uncoded lines
+reach the evaluator with null `TaskCode` / `ActivityCode` / `ExpenseCode`, no observations and no coding or observation confidence.
+- A rejecting rule: AutoRejected (SPA) or Blocked (Internal) as usual; the outcome keeps the coding hold finding, the invoice is created Rejected (SPA),
+  and the findings JSON carries the rule finding and the hold finding.
+- Otherwise: `AcceptedUncoded` (held In Review), with the rule findings beside the coding finding.
+- AI-assigned inputs: checked, no change needed. The evaluator handlers read codes through `BillingText.Text` (null-safe) and the rejection rule holds a
+  finding that lists an AI-assigned field as `ai_assigned_input` before it looks at confidence. Pinned: an over-cap expense with no billed code reads
+  `ExpenseCode` and is held; the same line with a billed code rejects (control); every billing rule type evaluates uncoded lines without a fault.
+- The persister now requires an evaluation and a decision for every kind; only `Accepted` requires `Coding`.
+
+**2. Submitter (D-130 3).** Source: the submission's own `sprk_createdbyperson` (a lookup to `systemuser`), which intake stamped through
+`RecordOwnershipContext.RequestedBy` (SPA: the external caller's `SystemUserId`; internal: the caller's object id) and which 013 added to the submission
+table. `sprk_submitter` (a contact, SPA only) does not fit the systemuser lookup and is not used. The persister reads the column in its existing
+submission re-read (added to `SubmissionColumns`) and stamps it with `RecordCreatorPerson.Stamp` on the invoice, every line and the approval. A submission
+with no `sprk_createdbyperson` is `Refused` with `ebilling.submission.submitter_missing` before any write (fail closed; part E marks it Failed).
+Consequence to confirm: an SPA caller whose external contact has no linked systemuser (nothing stamped at intake) now fails here instead of creating a
+creator-less invoice.
+
+**3. Processing until part D (D-130 a).** `BuildSubmissionUpdate` writes `sprk_invoice`, `sprk_findingsjson` and `sprk_outcomereasoncode` (the reason
+code of the outcome; null for Accepted), and not `sprk_processingstatus`. `SubmissionPersistResult` exposes what part D writes last:
+`TerminalStatus` (`InvoiceSubmissionStatus?`) and `TerminalReasonCode`, set on Committed, Resumed and a totals Retry (derived from the outcome by
+`InvoiceSubmissionPersister.TerminalFor`).
+
+| Kind | TerminalStatus | TerminalReasonCode |
+|---|---|---|
+| Accepted | Accepted | null |
+| AcceptedUncoded | Accepted | `ebilling.submission.coding_no_code_set` / `coding_unavailable` (D-130 b) |
+| AutoRejected | Rejected | first deciding finding's code |
+| Blocked | Rejected | `ebilling.submission.blocked` (held representation unchanged) |
+
+Part E: a Processing submission with `sprk_invoice` set means "resume the after-steps" (the status is no longer a commit signal); the
+section 11 note that step 0c must test the link before the "Accepted / Rejected is a no-op" rule is now the intended order, not a workaround.
+
+**4. Reason code (D-130 b).** Done through item 3 (`AcceptedUncoded` outcome `ReasonCode` = the coding hold code). Owner question 3 is answered.
+
+**5. Approval record number.** `BuildApproval` cuts `sprk_regardingrecordnumber` to 100 characters. Not cut (outside the brief): the same value on the
+invoice (column length not documented in the data-model doc) and on the submission (044's write); the line column is Text(1000).
+
+**Owner questions 1, 2 and 3 of section 11 are closed by D-130.** Question 4 (invoice-side findings column) is closed by D-130 (c).
+
+**Verification.** Build 0 errors. Filtered unit suite 5,156 passed / 0 failed / 11 skipped (the part C figure of 5,563 came from another base).
+ArchTests 1,209 passed. Fail-before: against the part B processor 9 tests fail (the three D-126 tests and six C2 ones); with the persister mutated
+(no line / approval stamp, status written in the transaction, no trim) 7 tests fail.

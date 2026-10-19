@@ -34,7 +34,9 @@ public class InvoiceSubmissionPersisterTests
     private static readonly Guid TeamId = Guid.Parse("04900000-0000-4000-8000-0000000000e7");
     private static readonly Guid RecordTypeId = Guid.Parse("04900000-0000-4000-8000-0000000000e8");
 
-    private static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(Submission);
+    private static readonly Guid Submitter = Guid.Parse("04900000-0000-4000-8000-0000000000c9");
+
+    private static readonly Guid InvoiceId =InvoiceSubmissionPersister.InvoiceIdFor(Submission);
 
     // ── the four persisted kinds ──
 
@@ -105,8 +107,10 @@ public class InvoiceSubmissionPersisterTests
         var submission = Target(requests[4]);
         submission.Id.Should().Be(Submission);
         submission.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId, "the link is the commit marker");
-        submission.GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value.Should().Be((int)InvoiceSubmissionStatus.Accepted);
+        submission.Attributes.Should().NotContainKey("sprk_processingstatus", "D-130 a: the submission stays Processing inside the transaction");
         submission["sprk_outcomereasoncode"].Should().BeNull();
+        result.TerminalStatus.Should().Be(InvoiceSubmissionStatus.Accepted);
+        result.TerminalReasonCode.Should().BeNull();
         using (var findings = JsonDocument.Parse(submission.GetAttributeValue<string>("sprk_findingsjson")))
         {
             findings.RootElement.GetProperty("invoiceId").GetString().Should().Be(InvoiceId.ToString("D"));
@@ -136,8 +140,10 @@ public class InvoiceSubmissionPersisterTests
         invoice.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.Rejected);
 
         var submission = Target(requests[^1]);
-        submission.GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value.Should().Be((int)InvoiceSubmissionStatus.Rejected);
+        submission.Attributes.Should().NotContainKey("sprk_processingstatus", "D-130 a: Processing until part D's last step");
         submission.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(outcome.ReasonCode).And.NotBeNullOrEmpty();
+        result.TerminalStatus.Should().Be(InvoiceSubmissionStatus.Rejected);
+        result.TerminalReasonCode.Should().Be(outcome.ReasonCode);
         submission.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId, "the findings and the invoice are linked to each other");
         using var findings = JsonDocument.Parse(submission.GetAttributeValue<string>("sprk_findingsjson"));
         var deciding = findings.RootElement.GetProperty("findings").EnumerateArray().Should().ContainSingle(f => f.GetProperty("rejects").GetBoolean()).Subject;
@@ -163,8 +169,11 @@ public class InvoiceSubmissionPersisterTests
         Target(requests[0]).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
         requests.Select(Describe).Should().Contain("Create sprk_invoiceapproval");
         var submission = Target(requests[^1]);
-        submission.GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value.Should().Be(100000003);
+        submission.Attributes.Should().NotContainKey("sprk_processingstatus", "D-130 a");
         submission.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(SubmissionReasonCodes.Blocked);
+        result.TerminalStatus.Should().Be(InvoiceSubmissionStatus.Rejected, "the held representation: Rejected + blocked at terminal time");
+        result.TerminalStatus.Should().Be((InvoiceSubmissionStatus)100000003);
+        result.TerminalReasonCode.Should().Be(SubmissionReasonCodes.Blocked);
     }
 
     [Fact(DisplayName = "049 C (D-126): read but not coded -> invoice In Review, lines uncoded, approval, submission Accepted, hold finding stored")]
@@ -191,10 +200,132 @@ public class InvoiceSubmissionPersisterTests
 
         requests.Select(Describe).Should().Contain("Create sprk_invoiceapproval");
         var submission = Target(requests[^1]);
-        submission.GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value.Should().Be((int)InvoiceSubmissionStatus.Accepted);
+        submission.Attributes.Should().NotContainKey("sprk_processingstatus", "D-130 a");
+        submission.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(SubmissionReasonCodes.CodingNoCodeSetHold, "D-130 b");
+        result.TerminalStatus.Should().Be(InvoiceSubmissionStatus.Accepted);
+        result.TerminalReasonCode.Should().Be(SubmissionReasonCodes.CodingNoCodeSetHold);
         using var findings = JsonDocument.Parse(submission.GetAttributeValue<string>("sprk_findingsjson"));
         findings.RootElement.GetProperty("pipelineFindings").EnumerateArray()
             .Select(f => f.GetProperty("reasonCode").GetString()).Should().Contain(SubmissionReasonCodes.CodingNoCodeSetHold);
+    }
+
+    [Fact(DisplayName = "049 C2 (D-130 1): uncoded + a firm-data reject is persisted Rejected (no approval), keeping the rule finding AND the coding hold finding")]
+    public async Task UncodedAutoRejected_InvoiceRejected_BothFindingsStored()
+    {
+        var harness = new ProcessorHarness { Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()] };
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20))];
+        harness.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
+        var outcome = await harness.RunAsync();
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AutoRejected);
+        var store = new Store();
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        result.ApprovalId.Should().BeNull();
+        var requests = store.Transactions.Should().ContainSingle().Subject;
+        Target(requests[0]).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.Rejected);
+        var line = Target(requests[1]);
+        line.Attributes.Should().NotContainKey("sprk_codingconfidence");
+        var submission = Target(requests[^1]);
+        submission.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(outcome.ReasonCode);
+        result.TerminalStatus.Should().Be(InvoiceSubmissionStatus.Rejected);
+        result.TerminalReasonCode.Should().Be(outcome.ReasonCode);
+        using var findings = JsonDocument.Parse(submission.GetAttributeValue<string>("sprk_findingsjson"));
+        findings.RootElement.GetProperty("findings").EnumerateArray().Should().ContainSingle(f => f.GetProperty("rejects").GetBoolean());
+        findings.RootElement.GetProperty("pipelineFindings").EnumerateArray()
+            .Select(f => f.GetProperty("reasonCode").GetString()).Should().Contain(SubmissionReasonCodes.CodingNoCodeSetHold);
+        findings.RootElement.GetProperty("codeSet").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    // ── D-130 (3): the submitter ──
+
+    [Fact(DisplayName = "049 C2 (D-130 3): the submission's creator person is stamped as sprk_createdbyperson on the invoice, every line and the approval")]
+    public async Task Submitter_IsStamped_OnInvoice_Lines_AndApproval()
+    {
+        var harness = new ProcessorHarness();
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(), InvoiceSubmissionProcessorTests.FeeLine(hours: 2m, amount: 1000m)];
+        var outcome = await harness.RunAsync();
+        var store = new Store();
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var creates = store.Transactions.Single().OfType<CreateRequest>().Select(c => c.Target).ToList();
+        creates.Select(c => c.LogicalName).Should().Equal("sprk_invoice", "sprk_billingevent", "sprk_billingevent", "sprk_invoiceapproval");
+        creates.Should().OnlyContain(c => c.GetAttributeValue<EntityReference>("sprk_createdbyperson")!.Id == Submitter
+                && c.GetAttributeValue<EntityReference>("sprk_createdbyperson")!.LogicalName == "systemuser",
+            "the submitter is the person on all three kinds of row");
+        Target(store.Transactions.Single()[^1]).Attributes.Should().NotContainKey("sprk_createdbyperson", "the submission carries its own stamp from intake");
+    }
+
+    [Fact(DisplayName = "049 C2 (D-130 3): a submission that records no submitter is refused before any write (fails closed)")]
+    public async Task NoSubmitter_Refuses_BeforeAnyWrite()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store();
+        store.Submission.Attributes.Remove("sprk_createdbyperson");
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(InvoiceSubmissionPersister.SubmitterMissingCode).And.Be("ebilling.submission.submitter_missing");
+        result.InvoiceId.Should().BeNull();
+        result.TerminalStatus.Should().BeNull();
+        store.Transactions.Should().BeEmpty();
+        store.OwnerContexts.Should().BeEmpty();
+        store.TotalsCalls.Should().BeEmpty();
+    }
+
+    // ── D-130 (a): Processing until part D ──
+
+    [Fact(DisplayName = "049 C2 (D-130 a): a resumed submission exposes the same terminal status and reason code, and writes nothing")]
+    public async Task Resumed_ExposesTheTerminalStatus()
+    {
+        var harness = new ProcessorHarness { Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()], Channel = InvoiceSubmissionChannel.Internal };
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20))];
+        var outcome = await harness.RunAsync();
+        var store = new Store();
+        store.Submission["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid());
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Resumed);
+        result.TerminalStatus.Should().Be(InvoiceSubmissionStatus.Rejected);
+        result.TerminalReasonCode.Should().Be(SubmissionReasonCodes.Blocked);
+        store.Transactions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 C2 (D-130 a): the committed transaction leaves the submission Processing")]
+    public async Task Transaction_LeavesTheSubmissionProcessing()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store();
+
+        await store.Build().PersistAsync(outcome, null);
+
+        store.Submission.GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value.Should().Be((int)InvoiceSubmissionStatus.Processing);
+        store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId);
+    }
+
+    // ── approval record number ──
+
+    [Fact(DisplayName = "049 C2: the approval's regarding record number is cut to its Text(100) column; a short one is untouched")]
+    public async Task ApprovalRecordNumber_IsTrimmedTo100()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var longNumber = new string('N', 150);
+        var store = new Store { MatterNumber = longNumber };
+
+        await store.Build().PersistAsync(outcome, null);
+
+        var approval = Target(store.Transactions.Single().Single(r => Describe(r) == "Create sprk_invoiceapproval"));
+        approval.GetAttributeValue<string>("sprk_regardingrecordnumber").Should().Be(new string('N', 100));
+
+        var shortStore = new Store();
+        await shortStore.Build().PersistAsync(outcome, null);
+        Target(shortStore.Transactions.Single().Single(r => Describe(r) == "Create sprk_invoiceapproval"))
+            .GetAttributeValue<string>("sprk_regardingrecordnumber").Should().Be("M-1");
     }
 
     // ── line rows ──
@@ -451,7 +582,10 @@ public class InvoiceSubmissionPersisterTests
             ["createdon"] = new DateTime(2026, 6, 5, 23, 30, 0, DateTimeKind.Utc),
             ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Spa),
             ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Processing),
+            ["sprk_createdbyperson"] = new EntityReference("systemuser", Submitter),
         };
+
+        public string MatterNumber { get; init; } = "M-1";
 
         public List<Entity> StoredLines { get; } = [];
         public List<IReadOnlyList<OrganizationRequest>> Transactions { get; } = [];
@@ -471,7 +605,7 @@ public class InvoiceSubmissionPersisterTests
                 {
                     "sprk_invoicesubmission" when SubmissionDeleted => throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"),
                     "sprk_invoicesubmission" => Copy(Submission),
-                    _ => new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = "M-1" },
+                    _ => new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = MatterNumber },
                 });
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => new EntityCollection(StoredLines));

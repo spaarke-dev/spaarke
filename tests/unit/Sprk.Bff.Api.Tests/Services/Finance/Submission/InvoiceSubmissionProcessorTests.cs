@@ -185,13 +185,13 @@ public class InvoiceSubmissionProcessorTests
         var outcome = await h.RunAsync();
 
         outcome.Kind.Should().Be(SubmissionEvaluationKind.AcceptedUncoded, "D-126: only a submission that fails before it is read has no invoice");
-        outcome.ReasonCode.Should().BeNull();
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.CodingNoCodeSetHold, "D-130 b: the reason code carries the coding code");
         outcome.Read.Should().NotBeNull();
         outcome.Resolution.Should().NotBeNull("the lines keep their resolved timekeeper and rate");
         outcome.Coding.Should().BeNull();
-        outcome.Evaluation.Should().BeNull("no rule is judged on uncoded lines, so nothing can reject");
-        outcome.Decision.Should().BeNull();
-        h.Evaluated.Should().BeNull();
+        outcome.Evaluation.Should().NotBeNull("D-130 1: the rules still run on the firm's billed data");
+        outcome.Decision!.Outcome.Should().Be(SubmissionOutcome.Accepted);
+        h.Evaluated.Should().NotBeNull();
         outcome.PipelineFindings.Select(f => f.ReasonCode).Should().Equal(
             SubmissionReasonCodes.InvoiceNumberMismatch, SubmissionReasonCodes.CodingNoCodeSetHold);
         outcome.PipelineFindings[1].Values["cause"].Should().Be(SubmissionReasonCodes.NoCodeSet);
@@ -206,9 +206,104 @@ public class InvoiceSubmissionProcessorTests
         var outcome = await h.RunAsync();
 
         outcome.Kind.Should().Be(SubmissionEvaluationKind.AcceptedUncoded);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.CodingUnavailableHold, "D-130 b");
         outcome.PipelineFindings.Should().ContainSingle().Which.Should().Match<SubmissionPipelineFinding>(f =>
             f.ReasonCode == SubmissionReasonCodes.CodingUnavailableHold && f.Values["cause"] == SubmissionReasonCodes.AiLinearConsumersDisabled);
-        h.Evaluated.Should().BeNull();
+        h.Evaluated.Should().NotBeNull("D-130 1");
+    }
+
+    // ── D-130 (1): the rules run on an uncoded submission ──
+
+    [Fact(DisplayName = "049 C2 (D-130 1): uncoded + a firm-data reject rule on SPA is AutoRejected, with the rule finding and the coding hold finding both kept")]
+    public async Task Uncoded_WithAFirmDataReject_IsAutoRejected_BothFindings()
+    {
+        var h = new Harness { Rules = [InvoiceAgeReject()] };
+        h.Lines = [FeeLine(date: new DateOnly(2026, 1, 20))];
+        h.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AutoRejected);
+        outcome.Coding.Should().BeNull("the lines are still uncoded");
+        outcome.ReasonCode.Should().Be(outcome.Decision!.DecidingFindings[0].Finding.ReasonCode);
+        outcome.Decision.Outcome.Should().Be(SubmissionOutcome.Rejected);
+        outcome.PipelineFindings.Select(f => f.ReasonCode).Should().Contain(SubmissionReasonCodes.CodingNoCodeSetHold,
+            "the coding hold finding is still recorded beside the rejection");
+        h.Evaluated!.Lines[0].TaskCode.Should().BeNull();
+        h.Evaluated.Lines[0].Observations.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 C2 (D-130 1): uncoded + a firm-data reject rule on Internal is Blocked, with the coding hold finding kept")]
+    public async Task Uncoded_WithAFirmDataReject_OnInternal_IsBlocked()
+    {
+        var h = new Harness { Rules = [InvoiceAgeReject()], Channel = InvoiceSubmissionChannel.Internal };
+        h.Lines = [FeeLine(date: new DateOnly(2026, 1, 20))];
+        h.Coding.Failure = new FeatureDisabledException(SubmissionReasonCodes.AiLinearConsumersDisabled, "off");
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Blocked);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.Blocked);
+        outcome.PipelineFindings.Select(f => f.ReasonCode).Should().Contain(SubmissionReasonCodes.CodingUnavailableHold);
+    }
+
+    [Fact(DisplayName = "049 C2 (D-130 1): uncoded + no rejecting rule is held In Review (AcceptedUncoded) with the rule findings beside the coding finding")]
+    public async Task Uncoded_WithoutAReject_IsHeld_WithRuleFindings()
+    {
+        var h = new Harness { Rules = [Version("BILL-CAP", RuleType.DailyHoursCap) with { Consequence = Flag }] };
+        h.Lines = [FeeLine(hours: 13m, amount: 6500m)];
+        h.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AcceptedUncoded);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.CodingNoCodeSetHold);
+        outcome.Evaluation!.Findings.Select(f => f.RuleType).Should().Equal(RuleType.DailyHoursCap);
+        outcome.Decision!.Findings.Should().HaveCount(1);
+        outcome.PipelineFindings.Select(f => f.ReasonCode).Should().Contain(SubmissionReasonCodes.CodingNoCodeSetHold);
+    }
+
+    [Fact(DisplayName = "049 C2 (D-130 1, D-117): an uncoded line never rejects through an AI-assigned field; the same rule on a billed code does (control)")]
+    public async Task Uncoded_NeverRejectsThroughAnAiAssignedField()
+    {
+        // An over-cap expense with NO billed code reads the AI-assigned ExpenseCode field; uncoded lines have none, so 073 holds it.
+        var uncoded = new Harness { Rules = [Version("BILL-EXP", RuleType.ExpenseRule) with { Consequence = Reject }] };
+        uncoded.Lines = [ExpenseLine(billedCode: null)];
+        uncoded.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
+
+        var held = await uncoded.RunAsync();
+
+        var finding = held.Decision!.Findings.Should().ContainSingle().Subject;
+        finding.Finding.ReasonCode.Should().Be(BillingReasonCodes.ExpenseAmountOverCap);
+        finding.Finding.ReadFields.Should().Contain(f => f.Field == BillingFieldNames.ExpenseCode);
+        finding.Rejects.Should().BeFalse();
+        finding.HeldBecause.Should().Be(SubmissionHoldReasons.AiAssignedInput);
+        held.Kind.Should().Be(SubmissionEvaluationKind.AcceptedUncoded);
+
+        // Control: a billed code is the firm's own data, so the same over-cap expense rejects, uncoded or not.
+        var billed = new Harness { Rules = [Version("BILL-EXP", RuleType.ExpenseRule) with { Consequence = Reject }] };
+        billed.Lines = [ExpenseLine(billedCode: "E100")];
+        billed.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
+
+        var rejected = await billed.RunAsync();
+
+        rejected.Kind.Should().Be(SubmissionEvaluationKind.AutoRejected);
+        rejected.Decision!.DecidingFindings.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "049 C2 (D-130 1): every rule type evaluates uncoded lines without a fault (null AI codes, no observations)")]
+    public async Task Uncoded_EveryRuleType_EvaluatesWithoutAFault()
+    {
+        var h = new Harness { Rules = [.. Enum.GetValues<RuleType>().Where(t => RuleDomains.IsBilling(t) && t != RuleType.SubmissionIntegrity).Select(t => Version("BILL-" + t, t) with { Consequence = Flag })] };
+        h.Lines = [FeeLine(), ExpenseLine(billedCode: null)];
+        h.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AcceptedUncoded);
+        outcome.Decision!.Outcome.Should().Be(SubmissionOutcome.Accepted);
+        h.Evaluated!.Lines.Should().OnlyContain(l => l.TaskCode == null && l.ActivityCode == null && l.ExpenseCode == null && l.Observations.Count == 0);
+        h.Evaluated.Lines.Should().OnlyContain(l => !l.FieldConfidence.ContainsKey(BillingFieldNames.TaskCode));
     }
 
     // ── fail closed on the submission read ──
@@ -471,6 +566,25 @@ public class InvoiceSubmissionProcessorTests
         TaskCodeAsBilled = F<string?>("L110"),
         ActivityCodeAsBilled = F<string?>("A103"),
         ExpenseCodeAsBilled = F<string?>(null, null),
+    };
+
+    /// <summary>An expense line over the default ExpenseRule cap (500); <paramref name="billedCode"/> is the firm's own expense code, or none.</summary>
+    internal static ExtractedInvoiceLine ExpenseLine(string? billedCode, decimal amount = 900m) => new()
+    {
+        LineType = InvoiceLineType.Expense,
+        RowIndex = 1,
+        Date = F<DateOnly?>(new DateOnly(2026, 5, 21)),
+        TimekeeperAsBilled = F<string?>(null, null),
+        TitleAsBilled = F<string?>(null, null),
+        Hours = F<decimal?>(null, null),
+        Rate = F<decimal?>(null, null),
+        Quantity = F<decimal?>(1m),
+        UnitCost = F<decimal?>(amount),
+        Amount = F<decimal?>(amount),
+        Narrative = F<string?>("Travel."),
+        TaskCodeAsBilled = F<string?>(null, null),
+        ActivityCodeAsBilled = F<string?>(null, null),
+        ExpenseCodeAsBilled = billedCode is null ? F<string?>(null, null) : F<string?>(billedCode),
     };
 
     internal sealed class Harness

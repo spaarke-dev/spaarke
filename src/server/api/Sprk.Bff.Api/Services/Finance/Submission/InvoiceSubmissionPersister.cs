@@ -37,8 +37,10 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// </summary>
 /// <remarks>
 /// <para><b>One transaction</b> (FR-20), in this order: the invoice create(s) from 014, one create per line, the approval portion (not for an
-/// automatic rejection), the document's <c>sprk_invoice</c> link, and the submission update (<c>sprk_invoice</c>, the terminal status and
-/// reason code, <c>sprk_findingsjson</c>). A linked <c>sprk_invoice</c> therefore proves the commit; it is the resume marker.</para>
+/// automatic rejection), the document's <c>sprk_invoice</c> link, and the submission update (<c>sprk_invoice</c>, the reason code,
+/// <c>sprk_findingsjson</c>). A linked <c>sprk_invoice</c> therefore proves the commit; it is the resume marker. <b>The status is not
+/// written here (D-130 a):</b> the submission stays Processing, and part D writes <see cref="SubmissionPersistResult.TerminalStatus"/> last.
+/// Every created row carries the submitter as <c>sprk_createdbyperson</c> (D-130 3), read from the submission's own stamp.</para>
 /// <para><b>Deterministic ids.</b> The invoice, line and approval ids derive from the submission id, so a retry after an unknown outcome can
 /// never create a second invoice (a second create of the same id fails), and part D keys Signals before reading anything back.</para>
 /// <para><b>Faults.</b> A transaction fault is <see cref="SubmissionPersistStatus.Retry"/> with nothing persisted and the submission
@@ -112,6 +114,12 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     internal const string TooManyLinesCode = "ebilling.submission.too_many_lines";
     internal const string FindingsTooLargeCode = "ebilling.submission.findings_too_large";
     internal const string OwnerUnresolvedCode = "ebilling.submission.owner_unresolved";
+    internal const string SubmitterMissingCode = "ebilling.submission.submitter_missing";
+
+    internal const string ApprovalRecordNumber = "sprk_regardingrecordnumber";
+
+    /// <summary><c>sprk_invoiceapproval.sprk_regardingrecordnumber</c> MaxLength (Text 100).</summary>
+    internal const int ApprovalRecordNumberMaxLength = 100;
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
 
@@ -139,7 +147,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     }
 
     /// <summary>The submission columns the persister re-reads: the snapshot's (core record, link, status) and the correlation id.</summary>
-    internal static string[] SubmissionColumns { get; } = [.. SubmissionSnapshot.Columns, SubmissionCorrelationId];
+    internal static string[] SubmissionColumns { get; } = [.. SubmissionSnapshot.Columns, SubmissionCorrelationId, RecordCreatorPerson.Column];
 
     /// <summary>The invoice id for a submission: deterministic, so a retry reuses it and can never create a second invoice.</summary>
     public static Guid InvoiceIdFor(Guid submissionId) => IdOf($"ebilling-invoice-{submissionId:D}");
@@ -169,7 +177,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
         if (current.GetAttributeValue<EntityReference>(SubmissionInvoice) is { Id: var linkedId } && linkedId != Guid.Empty)
         {
-            return await ResumeAsync(submissionId, linkedId, ct).ConfigureAwait(false);
+            return await ResumeAsync(outcome, linkedId, ct).ConfigureAwait(false);
         }
 
         // 072 part L: never persist findings judged under a different core record.
@@ -184,6 +192,15 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 SubmissionId = submissionId,
                 CurrentSubmission = current,
             };
+        }
+
+        // D-130 (3): the submitter, recorded at intake as the submission's own sprk_createdbyperson (a systemuser; the SPA caller's linked
+        // user or the internal caller). Read before anything is built; absent fails closed, since a created row would carry no creator.
+        var submitter = current.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)?.Id;
+        if (submitter is not { } submitterId || submitterId == Guid.Empty)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: it records no submitter ({Column} is empty); nothing persisted", submissionId, RecordCreatorPerson.Column);
+            return Result(SubmissionPersistStatus.Refused, submissionId, SubmitterMissingCode);
         }
 
         // ── Core-record fields (013) and owner (uac-r2), once: every row is filed under the same core record ──
@@ -215,6 +232,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         var correlation = Cap(correlationId ?? current.GetAttributeValue<string>(SubmissionCorrelationId));
         var lines = BuildLines(outcome, invoiceId, core, resolverFields, owner, correlation);
         FillInvoice(invoice, outcome, resolverFields, owner, correlation);
+        RecordCreatorPerson.Stamp(invoice, submitterId);
+        foreach (var line in lines)
+        {
+            RecordCreatorPerson.Stamp(line, submitterId);
+        }
 
         var initial = outcome.Kind == SubmissionEvaluationKind.AutoRejected ? InvoiceLifecycleStatus.Rejected : InvoiceLifecycleStatus.InReview;
         var create = _lifecycle.BuildCreateRequest(invoice, initial);
@@ -227,6 +249,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         if (outcome.Kind != SubmissionEvaluationKind.AutoRejected)
         {
             approval = BuildApproval(outcome, invoiceId, core, resolverFields, owner);
+            RecordCreatorPerson.Stamp(approval, submitterId);
         }
 
         var findingsJson = BuildFindingsJson(outcome, invoiceId);
@@ -302,6 +325,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         _logger.LogInformation("Invoice submission {SubmissionId}: committed invoice {InvoiceId} ({Kind}) with {LineCount} lines in {RequestCount} requests",
             submissionId, invoiceId, outcome.Kind, lines.Count, requests.Count);
 
+        var committedTerminal = TerminalFor(outcome);
         return await WithTotalsAsync(new SubmissionPersistResult
         {
             Status = SubmissionPersistStatus.Committed,
@@ -309,13 +333,17 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             InvoiceId = invoiceId,
             LineIds = lineIds,
             ApprovalId = approval?.Id,
+            TerminalStatus = committedTerminal.Status,
+            TerminalReasonCode = committedTerminal.ReasonCode,
         }, ct).ConfigureAwait(false);
     }
 
     // ── Resume (the submission already links an invoice) ──
 
-    private async Task<SubmissionPersistResult> ResumeAsync(Guid submissionId, Guid invoiceId, CancellationToken ct)
+    private async Task<SubmissionPersistResult> ResumeAsync(SubmissionEvaluationOutcome outcome, Guid invoiceId, CancellationToken ct)
     {
+        var submissionId = outcome.SubmissionId;
+        var terminal = TerminalFor(outcome);
         var query = new QueryExpression(LineEntity) { ColumnSet = new ColumnSet(LineSequence), NoLock = true };
         query.Criteria.AddCondition(InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, ConditionOperator.Equal, invoiceId);
         var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
@@ -336,6 +364,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             SubmissionId = submissionId,
             InvoiceId = invoiceId,
             LineIds = lineIds,
+            TerminalStatus = terminal.Status,
+            TerminalReasonCode = terminal.ReasonCode,
         }, ct).ConfigureAwait(false);
     }
 
@@ -564,24 +594,41 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             row[column] = value;
         }
 
+        // The approval's record number is Text(100); the resolver does not cut it, so a longer one would fault the whole transaction.
+        if (row.GetAttributeValue<string>(ApprovalRecordNumber) is { Length: > ApprovalRecordNumberMaxLength } number)
+        {
+            row[ApprovalRecordNumber] = number[..ApprovalRecordNumberMaxLength];
+        }
+
         owner.ApplyTo(row);
         RequireFiled(row);
         return row;
     }
 
-    internal static Entity BuildSubmissionUpdate(SubmissionEvaluationOutcome outcome, Guid invoiceId, string findingsJson)
-    {
-        var status = outcome.Kind is SubmissionEvaluationKind.AutoRejected or SubmissionEvaluationKind.Blocked
-            ? InvoiceSubmissionStatus.Rejected
-            : InvoiceSubmissionStatus.Accepted;
-        return new Entity(FinanceBaseValues.SubmissionEntity, outcome.SubmissionId)
+    /// <summary>
+    /// The submission update inside the transaction: the invoice link (the commit marker), the findings JSON and the reason code. It does NOT
+    /// write <c>sprk_processingstatus</c> (D-130 a): the submission stays Processing until part D's after-commit steps are done, and part D
+    /// writes <see cref="SubmissionPersistResult.TerminalStatus"/> as its last step, so Accepted / Rejected means complete.
+    /// </summary>
+    internal static Entity BuildSubmissionUpdate(SubmissionEvaluationOutcome outcome, Guid invoiceId, string findingsJson) =>
+        new(FinanceBaseValues.SubmissionEntity, outcome.SubmissionId)
         {
             [SubmissionInvoice] = new EntityReference(InvoiceReviewService.InvoiceEntity, invoiceId),
-            [SubmissionStatus] = new OptionSetValue((int)status),
-            [SubmissionReasonCode] = outcome.Kind is SubmissionEvaluationKind.AutoRejected or SubmissionEvaluationKind.Blocked ? outcome.ReasonCode : null,
+            [SubmissionReasonCode] = TerminalFor(outcome).ReasonCode,
             [SubmissionFindingsJson] = findingsJson,
         };
-    }
+
+    /// <summary>
+    /// The terminal <c>sprk_processingstatus</c> and <c>sprk_outcomereasoncode</c> of a persisted outcome (notes 049 section 2, D-130):
+    /// Accepted / null; AcceptedUncoded Accepted + the coding code (b); AutoRejected Rejected + the first deciding code; Blocked
+    /// Rejected + <see cref="SubmissionReasonCodes.Blocked"/> (the held representation).
+    /// </summary>
+    internal static (InvoiceSubmissionStatus Status, string? ReasonCode) TerminalFor(SubmissionEvaluationOutcome outcome) => outcome.Kind switch
+    {
+        SubmissionEvaluationKind.AutoRejected or SubmissionEvaluationKind.Blocked => (InvoiceSubmissionStatus.Rejected, outcome.ReasonCode),
+        SubmissionEvaluationKind.AcceptedUncoded => (InvoiceSubmissionStatus.Accepted, outcome.ReasonCode),
+        _ => (InvoiceSubmissionStatus.Accepted, null),
+    };
 
     // ── Stored shapes ──
 
@@ -814,9 +861,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             throw new ArgumentException($"A {outcome.Kind} outcome creates no invoice (D-101); only a read submission is persisted.", nameof(outcome));
         }
 
-        var uncoded = outcome.Kind == SubmissionEvaluationKind.AcceptedUncoded;
+        // D-130 (1): the rules run on uncoded submissions too, so every persistable kind carries its evaluation and decision. Only Accepted
+        // proves its lines were coded; an AutoRejected / Blocked / AcceptedUncoded outcome may carry no coding (and then a hold finding).
         if (outcome.Submission is null || outcome.Read is null || outcome.Resolution is null
-            || (!uncoded && (outcome.Coding is null || outcome.Evaluation is null || outcome.Decision is null)))
+            || outcome.Evaluation is null || outcome.Decision is null
+            || (outcome.Kind == SubmissionEvaluationKind.Accepted && outcome.Coding is null))
         {
             throw new ArgumentException($"A {outcome.Kind} outcome misses a member its kind requires.", nameof(outcome));
         }

@@ -70,6 +70,22 @@ public sealed record SubmissionPersistResult
     /// <summary>The approval portion created (Accepted, Blocked, AcceptedUncoded); null otherwise and on a resume.</summary>
     public Guid? ApprovalId { get; init; }
 
+    /// <summary>
+    /// D-130 (a): the status part D writes to <c>sprk_processingstatus</c> as the LAST step, after Signals, the Decision Record and the
+    /// notification. The transaction leaves the submission Processing, so "Accepted / Rejected" means complete. Set on
+    /// <see cref="SubmissionPersistStatus.Committed"/> and <see cref="SubmissionPersistStatus.Resumed"/> (and on a totals
+    /// <see cref="SubmissionPersistStatus.Retry"/>, which keeps the invoice id); null when nothing was committed. Blocked is Rejected with
+    /// <see cref="TerminalReasonCode"/> = <see cref="SubmissionReasonCodes.Blocked"/>.
+    /// </summary>
+    public InvoiceSubmissionStatus? TerminalStatus { get; init; }
+
+    /// <summary>
+    /// The <c>sprk_outcomereasoncode</c> that goes with <see cref="TerminalStatus"/>: null for Accepted; the coding code for an uncoded
+    /// Accepted (D-130 b); the first deciding finding's code for AutoRejected; <see cref="SubmissionReasonCodes.Blocked"/> for Blocked.
+    /// The transaction already wrote it; part D writes it again with the status so the pair is consistent.
+    /// </summary>
+    public string? TerminalReasonCode { get; init; }
+
     /// <summary>A stable code for <see cref="SubmissionPersistStatus.Retry"/> and <see cref="SubmissionPersistStatus.Refused"/>.</summary>
     public string? ReasonCode { get; init; }
 

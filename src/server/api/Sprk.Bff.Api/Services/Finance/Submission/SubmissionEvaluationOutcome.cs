@@ -35,10 +35,12 @@ public enum SubmissionEvaluationKind
 
     /// <summary>
     /// D-126: the invoice was read and resolved but its lines could not be coded (no code set for the core record, or line coding switched
-    /// off). The invoice and its uncoded lines are created In Review with the approval portion, held for review by one pipeline finding
-    /// (<see cref="SubmissionReasonCodes.CodingNoCodeSetHold"/> or <see cref="SubmissionReasonCodes.CodingUnavailableHold"/>); the
-    /// submission is Accepted. No rule is evaluated and nothing is decided (<see cref="SubmissionEvaluationOutcome.Evaluation"/> and
-    /// <see cref="SubmissionEvaluationOutcome.Decision"/> are null), so nothing can reject it.
+    /// off) and no billing rule rejected it. The invoice and its uncoded lines are created In Review with the approval portion, held for
+    /// review by one pipeline finding (<see cref="SubmissionReasonCodes.CodingNoCodeSetHold"/> or
+    /// <see cref="SubmissionReasonCodes.CodingUnavailableHold"/>) plus any rule findings; the submission is Accepted with that coding code
+    /// as its reason (D-130 b). D-130 (1): the rules still run on the firm's billed data (<see cref="SubmissionEvaluationOutcome.Coding"/> is
+    /// null, so no AI-assigned field exists and a rule reading one holds as <c>ai_assigned_input</c>). A rule that rejects makes the outcome
+    /// <see cref="AutoRejected"/> or <see cref="Blocked"/> as usual, still carrying the coding hold finding.
     /// </summary>
     AcceptedUncoded,
 }
@@ -212,8 +214,9 @@ public sealed record SubmissionEvaluationOutcome
     /// The terminal reason code: the failure code (<see cref="SubmissionEvaluationKind.Failed"/>), the read code
     /// (<see cref="SubmissionEvaluationKind.RejectedUnreadable"/>), the first deciding finding's reason code
     /// (<see cref="SubmissionEvaluationKind.AutoRejected"/>), <see cref="SubmissionReasonCodes.Blocked"/>
-    /// (<see cref="SubmissionEvaluationKind.Blocked"/>), or null (<see cref="SubmissionEvaluationKind.Accepted"/>,
-    /// <see cref="SubmissionEvaluationKind.AcceptedUncoded"/>: its cause is on the pipeline finding).
+    /// (<see cref="SubmissionEvaluationKind.Blocked"/>), the coding code (<see cref="SubmissionEvaluationKind.AcceptedUncoded"/>:
+    /// <see cref="SubmissionReasonCodes.CodingNoCodeSetHold"/> or <see cref="SubmissionReasonCodes.CodingUnavailableHold"/>, D-130 b),
+    /// or null (<see cref="SubmissionEvaluationKind.Accepted"/>).
     /// </summary>
     public string? ReasonCode { get; init; }
 
@@ -239,7 +242,8 @@ public sealed record SubmissionEvaluationOutcome
     public InvoiceResolutionResult? Resolution { get; init; }
 
     /// <summary>Step 3: codes, observations and the code set per line (047; each line's <c>CodeSetSource</c> / <c>CodeSetNeedsReview</c>).
-    /// <c>LineKey</c> is the line index in invariant text. Null for <see cref="SubmissionEvaluationKind.AcceptedUncoded"/>.</summary>
+    /// <c>LineKey</c> is the line index in invariant text. Null when the submission is uncoded (D-126): an
+    /// <see cref="SubmissionEvaluationKind.AcceptedUncoded"/> outcome, or an AutoRejected / Blocked one carrying a coding hold finding.</summary>
     public InvoiceCodingResult? Coding { get; init; }
 
     /// <summary>Step 4 input: exactly what was judged (for the findings JSON and part C's re-evaluation check).</summary>

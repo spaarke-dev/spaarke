@@ -2160,6 +2160,7 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("UploadFinalizationWorker.cs", "ProcessSingleAttachmentAsync", "the carried saving user"),
         new PersonBearingWriter("InvoiceReviewService.cs", "CreateInvoiceRecordAsync", "the reviewer confirming the invoice"),
         new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview", "hands the HTTP caller to the invoice create"),
+        new PersonBearingWriter("InvoiceSubmissionPersister.cs", "PersistAsync", "the submitter the submission recorded at intake, stamped on the invoice, lines and approval (ebilling-r1 D-130 3)"),
         new PersonBearingWriter("UpdateRecordActionCore.cs", "UpdateAsync", "the impersonated user, for F3 (owner round 13 item 8)"),
         new PersonBearingWriter("DecisionActionExecutors.cs", "PlanAsync", "the caller whose decision commit revises the budget (ontology task 147, #1777)"),
         new PersonBearingWriter("DecisionRecordWriter.cs", "OwnershipContextOf", "the deciding user (ConfirmedByUserId) of the Decision Record (ontology task 142, #1783); none for a communications-gate decision (task 042: Guid.Empty, no person) or a condition-cleared closure (task 153: the nightly job asks for nobody)"),
