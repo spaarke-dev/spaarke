@@ -276,7 +276,9 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
             return InvoiceCreateRequestResult.Refuse(initialStatus, InvoiceTransitionReasons.InitialStatusNotAllowed);
         }
 
-        if (invoice.Attributes.ContainsKey(StateCode) || invoice.Attributes.ContainsKey(StatusCode))
+        // Case-insensitive: Dataverse treats attribute names so, and a differently-cased "StatusCode" must not slip past the guard.
+        if (invoice.Attributes.Keys.Any(k =>
+                string.Equals(k, StateCode, StringComparison.OrdinalIgnoreCase) || string.Equals(k, StatusCode, StringComparison.OrdinalIgnoreCase)))
         {
             _logger.LogWarning("Refused building an invoice create: the row already carries a status column, which only the lifecycle service writes");
             return InvoiceCreateRequestResult.Refuse(initialStatus, InvoiceTransitionReasons.StatusSuppliedByCaller);

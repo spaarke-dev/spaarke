@@ -407,6 +407,8 @@ public sealed class InvoiceLifecycleServiceTests
     [Theory]
     [InlineData("statuscode")]
     [InlineData("statecode")]
+    [InlineData("StatusCode")]
+    [InlineData("STATECODE")]
     public void BuildCreateRequest_WhenTheRowAlreadyCarriesAStatusColumn_IsRefused_BecauseOnlyTheLifecycleServiceWritesIt(string column)
     {
         var invoice = NewInvoice();

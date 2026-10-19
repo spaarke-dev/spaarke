@@ -8,7 +8,8 @@ namespace Spaarke.Dataverse;
 /// <remarks>
 /// A subclass of <see cref="InvalidOperationException"/> so a caller that already handles the failure of
 /// <see cref="IGenericEntityService.BulkUpdateAsync"/> handles this one the same way. The message names the failing request's
-/// kind, table and id and never a field value (ADR-015: no extracted values in logs).
+/// kind, table and id and adds no field value of its own (ADR-015: no extracted values in logs); it appends Dataverse's own fault text, which
+/// names a column or a rule but is not built from our values.
 /// </remarks>
 public sealed class DataverseTransactionException : InvalidOperationException
 {

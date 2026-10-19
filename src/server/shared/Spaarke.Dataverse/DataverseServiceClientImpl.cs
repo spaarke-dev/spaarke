@@ -2886,7 +2886,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// <item>No Dataverse fault anywhere in the chain (a timeout can land after the commit): the outcome is unknown — all or none, never
     /// partial — and <see cref="DataverseTransactionException.OutcomeUnknown"/> is true.</item>
     /// </list>
-    /// The message never carries a field value (ADR-015).
+    /// The message adds no field value of its own (ADR-015); the appended fault text is Dataverse's.
     /// </summary>
     public static DataverseTransactionException MapTransactionFailure(IReadOnlyList<OrganizationRequest> requests, Exception failure)
     {
