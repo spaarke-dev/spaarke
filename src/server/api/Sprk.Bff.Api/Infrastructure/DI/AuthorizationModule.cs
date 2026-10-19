@@ -184,9 +184,32 @@ public static class AuthorizationModule
         // to requestedAccessTokenVersion = 2 (aud = the bare app id for every caller) does not turn into a 401 on every
         // workforce surface. A SEPARATE PostConfigure, NOT inside the Copilot delegate above: that one runs once per
         // process and only when AgentToken:CopilotAudience is set. Only the audience changes (AddWorkforceAudiences).
+        // An ID token issued to a client signing in AS the BFF app also carries aud = the bare app id; it is refused here
+        // (077 review F4) because it carries neither azpacr (v2) nor appidacr (v1), which every Entra access token has.
         services.PostConfigure<JwtBearerOptions>(
             JwtBearerDefaults.AuthenticationScheme,
-            options => AddWorkforceAudiences(options.TokenValidationParameters, configuration["AzureAd:ClientId"]));
+            options =>
+            {
+                var clientId = configuration["AzureAd:ClientId"];
+                AddWorkforceAudiences(options.TokenValidationParameters, clientId);
+
+                options.Events ??= new JwtBearerEvents();
+                var existingOnTokenValidated = options.Events.OnTokenValidated;
+                options.Events.OnTokenValidated = async context =>
+                {
+                    if (IsIdTokenForApp(context.SecurityToken, clientId))
+                    {
+                        context.HttpContext.RequestServices.GetService<ILoggerFactory>()?
+                            .CreateLogger("WorkforceSchemeAudienceGuard")
+                            .LogWarning(
+                                "[AUTH] sdap.auth.deny.id_token_on_workforce_scheme: a token with aud = the BFF app id and no azpacr/appidacr (an ID token) was presented to the default (workforce) scheme and was rejected.");
+                        context.Fail("Only access tokens are accepted by the workforce scheme.");
+                        return;
+                    }
+
+                    if (existingOnTokenValidated != null) await existingOnTokenValidated(context);
+                };
+            });
 
         // FR-23 (external-access-platform-r3 task 010 · auth review R1): the DEFAULT (workforce) scheme
         // rejects every CIAM token — iss containing ciamlogin.com, or tid equal to Ciam:TenantId — the same
@@ -810,6 +833,28 @@ public static class AuthorizationModule
         parameters.ValidAudiences = audiences;
         // Clear the singular so the plural list is the one source, as the Copilot merge does.
         parameters.ValidAudience = null;
+    }
+
+    /// <summary>
+    /// Task 077 review F4: true when <paramref name="token"/> has <c>aud</c> = the bare BFF app id but neither
+    /// <c>azpacr</c> (v2 access tokens) nor <c>appidacr</c> (v1 access tokens), i.e. an ID token issued to a client that
+    /// signs in as the BFF app. Tokens with any other audience are not judged here (their behaviour is unchanged).
+    /// </summary>
+    internal static bool IsIdTokenForApp(Microsoft.IdentityModel.Tokens.SecurityToken? token, string? clientId)
+    {
+        if (token is not Microsoft.IdentityModel.JsonWebTokens.JsonWebToken jwt
+            || !Guid.TryParseExact(clientId?.Trim(), "D", out var appId))
+        {
+            return false;
+        }
+
+        var bareAudience = appId.ToString("D");
+        if (!jwt.Audiences.Any(a => string.Equals(a, bareAudience, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        return !jwt.TryGetClaim("azpacr", out _) && !jwt.TryGetClaim("appidacr", out _);
     }
 
     /// <summary>

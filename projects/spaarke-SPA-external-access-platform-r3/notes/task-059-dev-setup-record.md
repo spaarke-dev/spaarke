@@ -112,19 +112,21 @@ One PATCH, built from `before-1e40baad.json` so the lists are extended, never re
 az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/$BFF_OBJ" --headers Content-Type=application/json --body "@bff-after.json"
 ```
 
+**Precondition (added 2026-10-19 after stage R and task 077):** the live dev BFF build contains task 077 (`f68d0f312` and its fix round). Read the live DLL version and run `git merge-base --is-ancestor <077 fix commit> <live commit>` immediately before the PATCH. Without 077, the v2 switch sends every dev surface a 401.
+
 `bff-after.json` sets only:
-- `signInAudience`: `AzureADMultipleOrgs`;
+- `signInAudience`: already `AzureADMultipleOrgs` (R2), so it is left out;
+- `api.requestedAccessTokenVersion`: `2` (S-1; ADR-028 A9). This is the only change existing callers can notice: their next token has `aud` = the bare app id, a v2 issuer and `azp` instead of `appid`. Task 077 makes the BFF accept both forms at the same time, so tokens cached before the switch keep working;
 - `api.knownClientApplications`: the existing list + `$NEW_APP_ID`;
 - `optionalClaims`: the **whole** object from `before-1e40baad.json`, because Graph replaces collections. Its `accessToken` array gets every existing entry plus any of these that are missing: `{"name":"acct","essential":false}`, `{"name":"email","essential":false}`, `{"name":"given_name","essential":false}`, `{"name":"family_name","essential":false}` (research item 2). ID-token and SAML claims are copied unchanged.
 
 Then, as a separate call: `az rest --method PATCH --url "https://graph.microsoft.com/v1.0/applications/$BFF_OBJ/authenticationBehaviors" --headers Content-Type=application/json --body '{"removeUnverifiedEmailClaim":true}'`. This is explicit because the default for a converted single-tenant app is not documented (research item 3).
 
-`requestedAccessTokenVersion` is not touched, since S-1 requires it to be 2 already.
-
 - **Read after:** the R2 query again. Expect `AzureADMultipleOrgs`, token version 2, `known` containing the new client, the four access-token claims, and `removeUnverifiedEmailClaim` true.
-- **Effect on existing callers:** none intended. Spaarke-tenant tokens keep the same issuer, audience and version. The new access-token claims are additive.
-  - Check right after: a Console or PCF sign-in on dev still reaches the BFF. The owner checks it in the browser, and the session reads the BFF log for 401s.
-- **Rollback:** PATCH back the `signInAudience`, `knownClientApplications`, `optionalClaims` and `authenticationBehaviors` saved in `before-1e40baad.json`. One caveat: a multitenant app that another directory has consented to (stage C) must first have that consent removed. Rollback order is therefore C, then B.
+- **Effect on existing callers:** new tokens are v2 (bare-id audience, v2 issuer, `azp`). The BFF accepts both forms (077); the claim reads were checked (§11 S-1). The new access-token claims are additive.
+  - Check right after, one fresh token per surface (077 review K1: no test runs Identity Web's real issuer check on a v2 token): Console, a PCF, the Office add-in, the Teams/A8 SPA and, if in use, the Copilot plugin each get 200 on dev. The owner signs in with a fresh session in the browser; the session reads the BFF log for 401s and `sdap.auth.deny.*`.
+- **Rollback:** PATCH back `requestedAccessTokenVersion` (null), `knownClientApplications`, `optionalClaims` and `authenticationBehaviors` from `before-1e40baad.json`. One caveat: a multitenant app that another directory has consented to (stage C) must first have that consent removed. Rollback order is therefore C, then B.
+  - **Do not roll the dev BFF back to a build without 077 while the app is on v2, or within 90 minutes of reverting it** (cached v2 tokens live up to ~90 minutes). Any other session's dev deploy in that window must also contain 077 (the deploy round's ancestor check).
 
 ## 6. Stage C — admin consent in Dewey Cheatham (the owner, as that directory's admin)
 
@@ -140,7 +142,8 @@ Then, as a separate call: `az rest --method PATCH --url "https://graph.microsoft
 # Index N = the next free index after the existing WorkforceIdentity__CustomerTenantIds__* (from R5); existing entries untouched.
 az webapp config appsettings set -g rg-spaarke-dev -n spaarke-bff-dev --settings "WorkforceIdentity__CustomerTenantIds__N=$CUST_TID" "ExternalAccess__CustomerBusinessUnitId=$BU1"
 ```
-- If R5 shows `bc3aa7f4` already listed, only the BU setting is set.
+- If R5 shows `bc3aa7f4` already listed, only the BU setting is set. (It is: R5.)
+- `AzureAd__ValidAudiences__0..2` are read by no code (R5; 077 review). They are left as they are; the owner may ask to delete them in the same call (rollback: set them back from `before-bff-settings.json`).
 - **Effect:** App Service restarts the BFF (brief interruption on dev). `CustomerTenantIds` is read per request, but a settings change restarts the app anyway.
 - **Before the change:** tell the UAC, ontology and ebilling sessions (they want restart notices).
 - **Read after:** the R5 filter again (the old entries are kept and the new ones present), and `/healthz` returns 200.
@@ -179,6 +182,8 @@ gh run watch <run id> --exit-status
 ## 10. Rollback order (whole task)
 
 F (SPA) → E (variables) → D (BFF settings) → C (consent) → B (BFF app) → A (delete the client).
+
+The dev BFF build (task 077) is not part of this order. It stays in place: it accepts v1 and v2 tokens, so it is safe either side of stage B. Roll it back only after B is reverted and 90 minutes have passed.
 
 ## 11. Record (filled in as each stage runs)
 

@@ -464,6 +464,32 @@ public sealed class AuthorizationModuleCiamTests
         reason.Should().Be(GuestTokenDeny.Invalid);
     }
 
+    [Fact]
+    public async Task DefaultScheme_IdTokenForTheApp_WithRoles_Returns401()
+    {
+        // 077 review F4: an ID token issued to a client signing in AS the BFF app has aud = the bare app id. With an app
+        // role it carries roles (so Identity Web's scp-or-roles check passes) but never azpacr/appidacr.
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+
+        var status = await GetAsync(host, WorkforceRoute, IdToken(WorkforceBffClientId));
+
+        status.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Theory]
+    [InlineData(WorkforceBffClientId, false, true)]
+    [InlineData("22222222-2222-2222-2222-222222222222", true, false)]  // v2 access token (azpacr)
+    [InlineData(WorkforceBffAudience, false, false)]                   // other audiences are not judged here
+    public void IsIdTokenForApp_JudgesOnlyTheBareAppIdAudience(string audience, bool accessToken, bool expected)
+    {
+        var token = accessToken
+            ? WorkforceToken(WorkforceIssuerV2, WorkforceTenantId, audience)
+            : IdToken(audience);
+
+        AuthorizationModule.IsIdTokenForApp(new JsonWebToken(token), WorkforceBffClientId).Should().Be(expected);
+        AuthorizationModule.IsIdTokenForApp(new JsonWebToken(token), null).Should().BeFalse();
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -605,16 +631,40 @@ public sealed class AuthorizationModuleCiamTests
     private static string WorkforceToken(string issuer, string? tenantId, string audience)
         => CreateToken(issuer, tenantId, audience);
 
+    // An Entra v2 ID token's shape: aud = the client id, no scp, no azpacr/appidacr; roles when the user has an app role.
+    private static string IdToken(string audience)
+        => new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
+        {
+            Issuer = WorkforceIssuerV2,
+            Audience = audience,
+            IssuedAt = DateTime.UtcNow.AddMinutes(-1),
+            NotBefore = DateTime.UtcNow.AddMinutes(-1),
+            Expires = DateTime.UtcNow.AddMinutes(30),
+            Claims = new Dictionary<string, object>
+            {
+                ["ver"] = "2.0",
+                ["tid"] = WorkforceTenantId,
+                ["oid"] = Guid.NewGuid().ToString(),
+                ["sub"] = Guid.NewGuid().ToString(),
+                ["nonce"] = "n",
+                ["roles"] = new[] { "Admin" },
+            },
+            SigningCredentials = new SigningCredentials(SigningKey, SecurityAlgorithms.RsaSha256),
+        });
+
     private static string CreateToken(string issuer, string? tenantId, string audience)
     {
+        var v2 = issuer.EndsWith("/v2.0", StringComparison.Ordinal);
         var claims = new List<Claim>
         {
             // Entra stamps ver = 2.0 on tokens from a /v2.0 issuer and 1.0 otherwise; Microsoft.Identity.Web's
             // workforce audience validator keys the accepted audience form off it.
-            new("ver", issuer.EndsWith("/v2.0", StringComparison.Ordinal) ? "2.0" : "1.0"),
+            new("ver", v2 ? "2.0" : "1.0"),
             new("oid", Guid.NewGuid().ToString()),
             new("sub", Guid.NewGuid().ToString()),
             new("scp", "user_impersonation"),
+            // Every Entra ACCESS token carries azpacr (v2) or appidacr (v1); ID tokens carry neither (task 077 F4).
+            new(v2 ? "azpacr" : "appidacr", "0"),
         };
         if (tenantId is not null)
         {
