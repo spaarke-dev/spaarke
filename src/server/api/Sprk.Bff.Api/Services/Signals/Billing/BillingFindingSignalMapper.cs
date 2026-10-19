@@ -85,7 +85,9 @@ public sealed record BillingSignalMapping(SignalWriteRequest Request, BillingMes
 /// <para><b>Facts.</b> Only the keys <see cref="BillingRuleCatalogue.TemplateFactFields"/> allows for the type, as 071 built them.</para>
 /// <para><b>Subject.</b> <c>sprk_invoice</c> for an invoice-level finding, <c>sprk_billingevent</c> for a line (both verified Signal
 /// subjects, task 026). <b>Lane</b> is the policy's, Decide when it has none; <b>severity</b> the policy's; the <b>headline</b> the
-/// version's, else the type's default.</para>
+/// version's, else the type's default. Exception (ontology-r1 re-check F2): when the primary reason has its own message
+/// (<see cref="BillingRuleCatalogue.ReasonTemplate"/>) the headline is its own too (<see cref="BillingRuleCatalogue.ReasonHeadline"/>),
+/// and when the primary reason is flag-only the lane is Decide and the severity Info, not the host rule's.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <c>SignalEvaluationService</c> builds Ontology requests from a
 /// predicate hit, not a billing finding. Extension: no; a billing finding's subject is a line index and its message needs the D-112
 /// withheld variant. Cost of doing nothing: 049 has no tested way to turn a finding into a write the writer accepts.</para>
@@ -112,6 +114,12 @@ public static class BillingFindingSignalMapper
     internal const string InvoiceEntity = "sprk_invoice";
     internal const string LineEntity = "sprk_billingevent";
     private const int MaxHeadlineLength = 200;
+
+    /// <summary>The lane of a Signal whose primary reason is flag-only: a reviewer's item, never a Do (action) item.</summary>
+    internal const int FlagOnlyLane = SignalWriter.LaneDecide;
+
+    /// <summary>The severity of a Signal whose primary reason is flag-only: the lowest, so a note never ranks like a breach.</summary>
+    internal const int FlagOnlySeverity = SignalWriter.SeverityInfo;
 
     /// <summary>The Signal writes of one evaluation: <see cref="MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects)"/>
     /// over its findings and rule versions.</summary>
@@ -194,9 +202,17 @@ public static class BillingFindingSignalMapper
             ? (BillingRuleCatalogue.WithheldDuplicateTemplate, new Dictionary<string, object?>(), BillingMessageSource.WithheldDuplicate)
             : MessageOf(primary.Finding, primary.Rule);
         var rule = primary.Rule;
-        var headline = !string.IsNullOrWhiteSpace(rule.ShortHeadline) && rule.ShortHeadline.Trim().Length <= MaxHeadlineLength
-            ? rule.ShortHeadline.Trim()
-            : BillingRuleDraftTranslator.Wording(primary.Finding.RuleType).Headline;
+
+        // ontology-r1 re-check F2: a reason with its own sentence (ReasonTemplate) has its own title too. sprk_name is what the user
+        // sees first, and the host rule's title ("Billed rate above the approved rate") would claim a test that never ran (D-123).
+        // A flag-only primary reason is a note, not a breach: it ranks at the Flag level (Decide lane, Info severity), whatever the
+        // host rule's lane and severity say. No Flag-level mapping existed before; these two are the lowest-ranking values.
+        var ownHeadline = withheld ? null : BillingRuleCatalogue.ReasonHeadline(primary.Finding.ReasonCode);
+        var flagOnly = !withheld && BillingRuleCatalogue.IsFlagOnlyReason(primary.Finding.ReasonCode);
+        var headline = ownHeadline
+            ?? (!string.IsNullOrWhiteSpace(rule.ShortHeadline) && rule.ShortHeadline.Trim().Length <= MaxHeadlineLength
+                ? rule.ShortHeadline.Trim()
+                : BillingRuleDraftTranslator.Wording(primary.Finding.RuleType).Headline);
 
         var reasonCodes = members.Select(m => m.Finding.ReasonCode).ToList();
         var fingerprint = FingerprintOf(reasonCodes, consequence);
@@ -219,8 +235,8 @@ public static class BillingFindingSignalMapper
             subjectId,
             displayName,
             headline,
-            rule.Lane ?? SignalWriter.LaneDecide,
-            rule.Severity,
+            flagOnly ? FlagOnlyLane : rule.Lane ?? SignalWriter.LaneDecide,
+            flagOnly ? FlagOnlySeverity : rule.Severity,
             template,
             facts,
             evidence);

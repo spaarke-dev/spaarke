@@ -146,6 +146,33 @@ public static class BillingRuleCatalogue
         _ => null,
     };
 
+    /// <summary>The title (<c>sprk_name</c>) of D-115's "money not judged" Signal.</summary>
+    public const string RatesNotCheckedHeadline = "Rates and expense caps not checked";
+
+    /// <summary>The title of RequiredData's <see cref="BillingReasonCodes.CurrencyNotUsd"/> Signal.</summary>
+    public const string CurrencyNotUsdHeadline = "Invoice currency is not USD";
+
+    /// <summary>The title of CoreRecordWindow's <see cref="BillingReasonCodes.CoreRecordClosedToBilling"/> Signal.</summary>
+    public const string ClosedToBillingHeadline = "Closed to billing";
+
+    /// <summary>The title of CoreRecordWindow's <see cref="BillingReasonCodes.CoreRecordClosed"/> Signal.</summary>
+    public const string NoCloseDateHeadline = "Close date missing";
+
+    /// <summary>
+    /// The reason's own title, used instead of the policy version's <c>ShortHeadline</c> and the type's default headline, or <c>null</c>
+    /// when the reason has none (ontology-r1 072 re-check F2). Exactly the reasons that have a <see cref="ReasonTemplate"/>: a sentence
+    /// that says something else than the host rule's breach needs a title that does too, because the title is what the user sees first.
+    /// </summary>
+    public static string? ReasonHeadline(string reasonCode) => reasonCode switch
+    {
+        BillingReasonCodes.CurrencyNotUsd => CurrencyNotUsdHeadline,
+        BillingReasonCodes.CoreRecordClosedToBilling => ClosedToBillingHeadline,
+        BillingReasonCodes.CoreRecordClosed => NoCloseDateHeadline,
+        BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd
+            => RatesNotCheckedHeadline,
+        _ => null,
+    };
+
     /// <summary>D-115: the start of the message of the evaluator's "money not judged" finding; the reason completes it.</summary>
     private const string RatesNotCheckedPrefix = "Rates and expense caps were not checked: the invoice currency is ";
 

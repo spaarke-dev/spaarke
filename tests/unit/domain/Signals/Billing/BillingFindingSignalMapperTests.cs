@@ -118,6 +118,39 @@ public class BillingFindingSignalMapperTests
         mapping.MessageSource.Should().Be(BillingMessageSource.ReasonTemplate);
         SignalWriter.RenderSentence(mapping.Request.MessageTemplate, mapping.Request.FactValues)
             .Should().Be("The invoice currency is not USD.");
+        // ontology-r1 F2: the title (sprk_name) must not say "Required data missing" for a currency that was read.
+        mapping.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.CurrencyNotUsdHeadline);
+    }
+
+    [Fact]
+    public void AFlagOnlyReason_TakesTheFlagLevelLaneAndSeverity_NotTheHostRules_OntologyF2()
+    {
+        var rule = Version("CD-REQUIRED", RuleType.RequiredData, """{"type":"RequiredData","fields":["taskCode"]}""", lane: SignalWriter.LaneDo)
+            with { Severity = SignalWriter.SeverityCritical, ShortHeadline = "Firm authored headline", Consequence = Reject };
+        var request = Request(Fee(0)) with { Currency = "EUR" };
+        var result = Evaluator().Evaluate(request, Loaded(rule));
+
+        var sent = MapAll(request, result).Should().ContainSingle().Subject.Request;
+
+        sent.ShortHeadline.Should().Be(BillingRuleCatalogue.CurrencyNotUsdHeadline, "not the rule's authored headline");
+        sent.Lane.Should().Be(SignalWriter.LaneDecide);
+        sent.Severity.Should().Be(SignalWriter.SeverityInfo, "a flag-only note never ranks like a Critical breach");
+    }
+
+    [Fact]
+    public void ARealBreach_KeepsTheRulesHeadlineLaneAndSeverity_OntologyF2()
+    {
+        // Control for the test above: only a flag-only reason is moved to the Flag level.
+        var rule = Version("CD-REQUIRED", RuleType.RequiredData, """{"type":"RequiredData","fields":["taskCode"]}""", lane: SignalWriter.LaneDo)
+            with { Severity = SignalWriter.SeverityCritical, ShortHeadline = "Firm authored headline", Consequence = Reject };
+        var request = Request(Fee(0) with { BilledTaskCode = null });
+        var result = Evaluator().Evaluate(request, Loaded(rule));
+
+        var sent = MapAll(request, result).Should().ContainSingle().Subject.Request;
+
+        sent.ShortHeadline.Should().Be("Firm authored headline");
+        sent.Lane.Should().Be(SignalWriter.LaneDo);
+        sent.Severity.Should().Be(SignalWriter.SeverityCritical);
     }
 
     [Theory]
@@ -152,6 +185,7 @@ public class BillingFindingSignalMapperTests
         sentence.Should().Be(BillingRuleCatalogue.ClosedToBillingTemplate);
         sentence.Should().NotContain("2026", "the line is inside the dates; a date in the sentence would say the opposite").And.NotContain("outside");
         mapping.Request.MessageTemplate.Should().NotContain("{{", "the reason's own message names no token");
+        mapping.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.ClosedToBillingHeadline, "the title must not be the date rule's either");
     }
 
     [Fact]
@@ -173,6 +207,7 @@ public class BillingFindingSignalMapperTests
         var sentence = SignalWriter.RenderSentence(mapping.Request.MessageTemplate, mapping.Request.FactValues);
         sentence.Should().Be(BillingRuleCatalogue.NoCloseDateTemplate);
         sentence.Should().Contain("no close date").And.NotContain("outside").And.NotContain("2026");
+        mapping.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.NoCloseDateHeadline);
     }
 
     [Fact]
@@ -196,6 +231,7 @@ public class BillingFindingSignalMapperTests
         result.Findings.Should().ContainSingle().Which.ReasonCode.Should().Be(BillingReasonCodes.BeforeCoreRecordOpened);
         mapping.MessageSource.Should().Be(BillingMessageSource.PolicyVersion);
         SignalWriter.RenderSentence(mapping.Request.MessageTemplate, mapping.Request.FactValues).Should().Contain("2026-03-02").And.Contain("2026-03-10");
+        mapping.Request.ShortHeadline.Should().Be(BillingRuleDraftTranslator.Wording(RuleType.CoreRecordWindow).Headline);
     }
 
     [Fact]
@@ -494,7 +530,8 @@ public class BillingFindingSignalMapperTests
     [InlineData("EUR", 0.95, "not USD")]
     public async Task RatesNotChecked_IsWrittenWithItsOwnMessage_AsAFlag_D115(string? currency, double? confidence, string said)
     {
-        var rule = Version("CD-RATE", RuleType.ApprovedRate, template: "{{line.timekeeperName}} billed {{line.rate}}.") with { Consequence = Reject };
+        var rule = Version("CD-RATE", RuleType.ApprovedRate, template: "{{line.timekeeperName}} billed {{line.rate}}.", lane: SignalWriter.LaneDo)
+            with { Consequence = Reject, Severity = SignalWriter.SeverityCritical, ShortHeadline = "Billed rate above the approved rate" };
         var request = Request(Fee(0) with { BilledRate = 700m, Amount = 700m }) with
         {
             Currency = currency,
@@ -512,6 +549,10 @@ public class BillingFindingSignalMapperTests
         org.Rows[written.SignalId].GetAttributeValue<string>("sprk_sentence")
             .Should().Be($"Rates and expense caps were not checked: the invoice currency is {said}.");
         mapping.Request.SubjectEntityLogicalName.Should().Be("sprk_invoice");
+        // ontology-r1 F2: the title says what happened, not that a rate was found over the approved rate; and ranks as a Flag.
+        mapping.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.RatesNotCheckedHeadline);
+        mapping.Request.Lane.Should().Be(SignalWriter.LaneDecide);
+        mapping.Request.Severity.Should().Be(SignalWriter.SeverityInfo);
         mapping.Request.EvidenceRefs!.Where(e => e.Kind == BillingFindingSignalMapper.ReferenceEvidenceKind && e.Ref == "skippedPolicyVersion")
             .Should().ContainSingle().Which.Text.Should().Be("CD-RATE:" + rule.PolicyVersionId.ToString("D").ToLowerInvariant());
     }
@@ -535,6 +576,7 @@ public class BillingFindingSignalMapperTests
         var alone = BillingFindingSignalMapper.MapAll(result, SubjectsFor(request)).Should().ContainSingle().Subject;
 
         withBoth.Consequence.Should().Be(BillingConsequence.Reject, "the reject-capable reason keeps its Reject");
+        withBoth.Request.ShortHeadline.Should().NotBe(BillingRuleCatalogue.RatesNotCheckedHeadline, "the primary reason is the Reject one, so the title is the rule's");
         withBoth.ReasonCodes.Should().Equal(BillingEvaluationReasons.CurrencyNotUsd, BillingReasonCodes.ExpenseCodeNotReimbursable);
         withBoth.Fingerprint.Should().Be("billing.currency.not_usd,expense_rule.code_not_reimbursable|Reject");
         alone.Consequence.Should().Be(BillingConsequence.Flag, "the currency reason alone never raises the consequence");
