@@ -52,7 +52,7 @@
 
 - **uac-r2 #2110** (#2091 follow-up, `6b7cb018e`, review worktree `C:\wts-2110`): gate-DR interaction PASS sent (K1 same-parent skip removes a 50317 retry path; K2 sweep-job join R2 no step; K3 thread lookup not an ownership parent). uac-r2 merges after their own pass.
 - **042c** ✅ #2113 merged to docs `2176b03f1` (thread-filed communication -> gate DR re-owned at write; uac-r2 OK). Not yet on master: rides the next docs->master sync. #2114 = DI-119.
-- **ebilling D-130**: CLOSED from our side (`77690aa4f` PASS 381/0). Keep `C:\wts-eb130` for part D review.
+- **ebilling D-130**: CLOSED from our side (`77690aa4f` PASS 381/0). Keep `C:\wts-eb130` for part D review. **049 part D** (`29e91a285..8e3930c8d`): adversarial review running in `C:\wts-eb130`. **ebilling D-122 close path** (our design, they build): new `SignalWriter.CloseActedByAutomatedDecisionAsync(signalId, decisionRecordId, setReadAtUtc, policyCode)` -> Closed/AlreadyClosedByThisRecord/LeftAsIs/ChangedSinceRead; Acted, no resolvedby, row-version, re-close system closes after setReadAt; commit 1 = owner review by us, commit 2 = 049 wiring, commit 3 = Held presentation for Blocked (our §0.3 recommendation; owner may override). Review their range when it lands.
 
 ## Promises to peers
 
