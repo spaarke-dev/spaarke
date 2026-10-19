@@ -67,8 +67,11 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // A NULL value may CLEAR a lookup — moving the child OUT of a parent — so every null is passed as a candidate
         // clear (verifier item 8). This handler cannot tell a lookup from a text column; the resolver reads the row and
         // treats a null for a column that holds no parent as no parent change (the write then decides no owner).
+        // #2110 (ontology K3): with the lineage lookups it sets that are no ownership parent (a message's thread), so the reparent
+        // can tell whether it moved one (ParentsUnchanged); they never make a write a reparent on their own.
         var parentChanges = RecordOwnershipResolver.IsReparentableChild(entityLogicalName)
-            ? RecordReparent.ParentChangesWithClearsIn(entityLogicalName, fields)
+            ? RecordReparent.WithLineageLookupsIn(
+                entityLogicalName, RecordReparent.ParentChangesWithClearsIn(entityLogicalName, fields), fields)
             : new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>();
 
         // #2091: a write that may re-file the row (the ONE predicate, RecordReparent.MayRefile) runs the ONE step after a
