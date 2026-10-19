@@ -51,7 +51,7 @@
 - **ebilling D-130 (2) approved-total spend** (`1549ff165..cd690dbe2`, review worktree `C:\wts-eb130`): PASS 2026-10-19 (unit 410/0, guard 11/0). Sent K1 (race comment wrong: double count moves spend either way under credit memos / `le`/`lt`; fix comment+note, optional billed re-read guard), K2 (fake null-vs-absent `SignalReevaluationJobTests.cs:3395`). Q8 answer: NOT AuthorableColumns; expose `SpendAmountColumns` from FinanceBaseValues + extend `SignalPredicateTests.cs:174` not-field-secured assert (ebilling may do it; else our post-074 lane). Reported outside-diff: approved total not recalculated after reviewer decisions (only caller `InvoiceSubmissionPersister.cs:347`). Re-check their fix range.
 
 - **uac-r2 #2110** (#2091 follow-up, `6b7cb018e`, review worktree `C:\wts-2110`): gate-DR interaction PASS sent (K1 same-parent skip removes a 50317 retry path; K2 sweep-job join R2 no step; K3 thread lookup not an ownership parent). uac-r2 merges after their own pass.
-- **Lane 042c** PR #2113 (head `09ba17258`): uac-r2 OK after the resolver-fault test; merging into docs on green CI (background merge script). After merge: it reaches master with the next docs->master sync. #2114 = DI-119 (pre-existing, under-share on owner-only change).
+- **042c** ✅ #2113 merged to docs `2176b03f1` (thread-filed communication -> gate DR re-owned at write; uac-r2 OK). Not yet on master: rides the next docs->master sync. #2114 = DI-119.
 - **ebilling D-130**: CLOSED from our side (`77690aa4f` PASS 381/0). Keep `C:\wts-eb130` for part D review.
 
 ## Promises to peers
