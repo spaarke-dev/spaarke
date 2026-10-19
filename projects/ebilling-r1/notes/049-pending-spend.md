@@ -1,0 +1,90 @@
+# Task 049 (spend part) - D-102 held spend and D-104 Pending Spend
+
+> Owner decisions: D-102 (held invoices do not count), D-103 (counted spend = Approved, Sent to AP, Paid; amends D-102), D-104 (Pending Spend).
+> The pipeline half of 049 (job, processor, notification sink, FinanceModule) is a separate branch and is not touched here.
+
+## What changed
+
+| File | Change |
+|---|---|
+| `Services/Finance/FinanceBaseValues.cs` | Adds `PendingInvoiceStatuses` (In Review), `HeldSubmissionConditions` (the one held predicate), `PendingSpendColumn`, `BuildGroupedPendingSumFetchXml`, `ReadPendingSpendAsync`. `BuildGroupedSumFetchXml` now delegates to one private builder; its output is byte-identical (existing tests pass unchanged). |
+| `Services/Finance/FinanceRollupService.cs` | A third parallel query (`BuildPendingInvoiceQuery`) and `sprk_pendingspend` in `BuildRollupFields` (new required `pendingSpend` argument). Counted spend (`BuildInvoiceQuery`) is unchanged. |
+| `scripts/ebilling/Deploy-EbillingPendingSpendSchema.ps1` | Idempotent additive script: `sprk_matter.sprk_pendingspend` and `sprk_project.sprk_pendingspend` (Money, precision 2, 0 .. 1e9). Parse-checked only. NOT run against any environment. |
+| `docs/data-model/sprk_invoice-matter-project.md` | A row per parent for the new column. |
+| tests | `SpendHeldAndPendingTests.cs` (new, 18 tests), `FinanceRollupPayloadTests.cs` (new argument, new assertion), `FinanceBaseValuesSingleDefinitionGuardTests.cs` (guard: no consumer spells the held predicate; 2 new controls). |
+
+## D-102 (as amended by D-103): counted spend has no held predicate
+
+A held invoice is In Review, and `CountedInvoiceStatuses` is Approved, Sent to AP, Paid, so a held invoice is excluded automatically on both paths. No predicate was added to counted spend (`D102_CountedSpendQueries_HaveNoHeldPredicate...` pins that: no link-entity in either counted query).
+
+Tests that name D-102 (all in `SpendHeldAndPendingTests`):
+- must-fire, rollup path: a held In Review invoice is excluded from `FinanceRollupService.BuildInvoiceQuery`'s result.
+- must-fire, live path: the same row is excluded from `FinanceBaseValues.ReadAsync` (the Threshold input).
+- must-not-fire, both paths: a blocked invoice is released (submission to Accepted, invoice to Approved) and is then counted.
+
+Mutation check: adding `InReview` back to `CountedInvoiceStatuses` fails 7 of the 18 tests, including both must-fire tests and the must-not-fire test (the held row is admitted and the released-invoice assertion on the pre-release step fails first).
+
+## D-104: Pending Spend
+
+Pending Spend = sum of `sprk_invoice.sprk_totalamount` over the parent's invoices with `statuscode` in `PendingInvoiceStatuses` (In Review) that are not held.
+
+### The held representation (settled with the pipeline agent and the coordinator; no schema change)
+
+Held = an In Review invoice that has a linked `sprk_invoicesubmission` (`sprk_invoicesubmission.sprk_invoice` = the invoice) with `sprk_processingstatus` = Rejected (100000003) AND `sprk_outcomereasoncode` = `ebilling.submission.blocked`. Override (105) releases it by setting the submission to Accepted; Return moves the invoice out of In Review.
+
+Why: 020 gave the submission no Blocked status (Received, Processing, Accepted, Rejected, Failed), and no 044/045 column carries it. "Rejected + blocked reason code" is the state the Override / Return flow already needs (105's own constraint: "an internal-channel submission whose processing status is Rejected because of a blocking finding can be overridden"). Reading it needs a submission link in the query, which the task allows; no invoice flag was added.
+
+The reason code is a literal (`FinanceBaseValues.BlockedReasonCode`) with `// TODO(049)` to swap for `SubmissionReasonCodes.Blocked` when the pipeline branch's `Submission/SubmissionReasonCodes.cs` is merged. The status uses `InvoiceSubmissionStatus.Rejected` directly.
+
+### Double-count hazard and the anti-join
+
+An invoice can have several linked submissions (resubmissions). A plain join in a sum would repeat the invoice amount once per linked row. Both paths use a LEFT OUTER link with BOTH held conditions inside the link, plus a where-clause null check on the linked key (`link-type="outer"` + `<condition entityname="held" attribute="sprk_invoicesubmissionid" operator="null"/>`; `JoinOperator.LeftOuter` + `ConditionOperator.Null` with `EntityName = "held"` in the QueryExpression). A linked row exists only when it is a blocking one, and that invoice is then excluded, so the invoice is counted exactly once or not at all. I chose outer + null over `link-type="not any"` because it is the long-standing documented anti-join and needs no newer FetchXML feature; `not any` would also work.
+
+Proof: the test evaluator joins like SQL (one row per matching linked row), and `D104_AnInvoiceWithSeveralSubmissions_IsNeverCountedTwice_NorHalfCounted` shows: two non-blocking submissions -> counted once (7, not 14); one blocking + one not -> excluded (not 11, not partially counted); two blocking -> excluded. A control (`ANaivePlainJoin_WouldCountAnInvoiceOncePerLinkedSubmission...`) removes the conditions and the null check and gets 14, so the evaluator can see the hazard. Mutation check: dropping the null check fails 5 tests.
+
+Limit of the evidence: there is no FetchXML or QueryExpression evaluator in the repo. The in-memory evaluator in `SpendHeldAndPendingTests` interprets exactly these shapes (documented in its remarks); it proves the query logic and the reader, not that Dataverse accepts the FetchXML. **Open: one read-only live check on dev** (run `BuildGroupedPendingSumFetchXml` through the operator client; the live seam test `FinanceBaseValuesSeamTests` is the place) should be run before 079 relies on it. I did not run one (no live calls were in scope).
+
+### Fail-closed
+
+`ReadPendingSpendAsync` reuses `ReadGroupedSums`: an unknown parent or sum shape throws `InvalidOperationException`, a Dataverse failure propagates, an unknown parent entity throws `ArgumentOutOfRangeException`. Tests: `D104_AnUnreadablePendingShape_Throws_NotZero`, `D104_ADataverseFailure_Propagates`, `D104_AnUnknownParentEntity_IsRefused`. A submission table that does not exist would make the query fail, not read as zero.
+
+### Tests (D-104)
+
+- must-fire: held In Review not in pending (both paths); Approved (and every non-In-Review status) not in pending (both paths).
+- must-not-fire: unheld In Review counted as pending and not as actual spend (both paths); a submission that is Rejected for another reason, Accepted or Processing does not hold its invoice.
+- shape: the pending FetchXML and QueryExpression are pinned against the shared constants; the guard in `FinanceBaseValuesSingleDefinitionGuardTests` flags any consumer that spells the submission columns or the reason code.
+
+## §11 answers
+
+**New `FinanceBaseValues` measure (`PendingInvoiceStatuses`, `HeldSubmissionConditions`, `ReadPendingSpendAsync`, `BuildGroupedPendingSumFetchXml`)**
+- Existing: the counted-spend reader (`ReadAsync` / `BuildGroupedSumFetchXml`) and its status set; nothing else computes pending spend.
+- Extension: the FetchXML builder is extended (one private builder now serves both), and `ReadGroupedSums` is reused unchanged; the held predicate cannot live in `ReadAsync` because counted spend must not carry it (D-103) and its return tuple is the evaluator's contract.
+- Cost of doing nothing: the owner's D-104 (Pending Spend on both paths, Threshold-usable) would be unbuilt, and the rollup column and the live number would each grow their own copy of the held predicate and drift.
+
+**New rollup columns (`sprk_matter.sprk_pendingspend`, `sprk_project.sprk_pendingspend`)**
+- Existing: `sprk_totalspendtodate` holds actual spend only and `sprk_monthlyspendcurrent` is a different measure; no column holds In Review amounts.
+- Extension: actual spend cannot be widened to include In Review (D-103 excludes it), and a computed-on-read value would not be visible on the matter form or usable as a stored column; so one additive Money column per parent, same shape as `sprk_totalspendtodate`, written by the existing rollup.
+- Cost of doing nothing: the matter and project forms cannot show Pending Spend and there is nothing stored for the Threshold follow-up; the owner approved the additive column (D-104).
+
+## Needs a decision or a sequencing step
+
+1. **Deploy order.** `BuildRollupFields` now PATCHes `sprk_pendingspend`. Until the schema script has run on an environment, every `FinanceRollupService` recalculation there fails at the write with an unknown-property 400. The script must run (053 syncs SpaarkeMaster, 079 runs it) BEFORE this code is deployed to that environment. Not guarded in code (a silent skip would hide a missing column).
+2. **`RecalculateFinanceResponse` is unchanged** (no `PendingSpend` field); the stored column is the only output. Add the field only if a client needs it.
+3. Work assignment was not given a Pending Spend column (the task allowed matter and project only; work assignments have no counted-spend column either).
+
+## For ontology-r1
+
+Their follow-up (not done here; their files were not edited):
+
+| Item | Value |
+|---|---|
+| Column logical name | `sprk_pendingspend` |
+| Entities | `sprk_matter`, `sprk_project` (the same name on both) |
+| Type | Currency (Money), precision 2, min 0, max 1,000,000,000; stored, plain (not calculated or rollup) |
+| Writer | `FinanceRollupService` only (stored copy; can be stale like `sprk_totalspendtodate`) |
+| Live measure | `FinanceBaseValues.ReadPendingSpendAsync(entities, parentEntity, parentIds, ct)` -> `parentId -> decimal` (parents with none are 0). Constant: `FinanceBaseValues.PendingSpendColumn` |
+| Held predicate | `FinanceBaseValues.HeldSubmissionConditions` (status Rejected + reason `ebilling.submission.blocked` on a linked `sprk_invoicesubmission`) |
+
+To make a Threshold able to use it they need to: add `sprk_pendingspend` to `PolicyVersionValidator.AuthorableColumns`; add its range to the `PredicateCompiler` ranges (0 .. 1e9, Currency, like `sprk_totalspendtodate`); add a `RuleBodyDescriber` label ("Pending spend"); and, if the Threshold is to read it from base rows instead of the stored copy (the D-122 rule), add it to `FinanceBaseValues.DerivedColumns` / `Needs` / `ValueOf` and make `SignalEvaluator` call `ReadPendingSpendAsync` (the current `ReadAsync` tuple was left untouched on purpose). Until then the column is stored but unusable in a rule, which is safe. `FinanceBaseValues.IsDerived` deliberately returns false for it today.
+
+Range to send them: the commit(s) on branch `worktree-agent-a4620f6f07c910055` from `c342f4b9a` (see the report).
