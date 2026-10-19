@@ -394,7 +394,12 @@ public class ADR010_DITests
         // IInvoiceSubmissionPersister -> InvoiceSubmissionPersister. Seam justification: part E's handler tests fake persistence (the commit,
         // retry, re-evaluate and resume branches) the same way they fake IInvoiceSubmissionProcessor, without a Dataverse transaction double.
         // Falsifiable: if the handler tests drive the real persister over a fake IGenericEntityService, register the concrete and lower to 167.
-        const int knownOneToOneCeiling = 168;
+        // ───────── Ceiling RAISED 168 → 169, 2026-10-19 (ebilling-r1 task 049 part D; +1 interface) ─────────
+        // IInvoiceSubmissionAfterSteps -> InvoiceSubmissionAfterSteps. Seam justification: part E's handler tests fake the after-commit
+        // steps (Completed / Retry / Refused / SubmissionMissing branches and the preflight refusal) as they fake the processor and the
+        // persister; the real component needs the concrete SignalWriter, recorder and job queue. Falsifiable: if part E's handler tests
+        // drive the real after-steps, register the concrete and lower to 168.
+        const int knownOneToOneCeiling = 169;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

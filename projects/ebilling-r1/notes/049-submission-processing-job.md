@@ -327,7 +327,7 @@ invoice (column length not documented in the data-model doc) and on the submissi
 ArchTests 1,209 passed. Fail-before: against the part B processor 9 tests fail (the three D-126 tests and six C2 ones); with the persister mutated
 (no line / approval stamp, status written in the transaction, no trim) 7 tests fail.
 
-## Part C3 - Submitted By (D-131)
+## 12a. Part C3 - Submitted By (D-131)
 
 Owner decision (2026-10-19, D-131): `sprk_invoice.sprk_submittedby` (Submitted By), a lookup to `contact`, created live on dev (spaarkedev1). The BFF sets
 it from the external submitter's contact. This supersedes the C2 note that `sprk_submitter` "is not used".
@@ -350,3 +350,135 @@ it from the external submitter's contact. This supersedes the C2 note that `sprk
   `sprk_submittedby`, no warning); the existing neither-case refusal is unchanged.
 - **Owner actions.** The column must reach the SpaarkeMaster solution source by an export from dev. `ExternalAccessModule`'s column allow-list was NOT
   changed: no SPA surface reads `sprk_submittedby` yet.
+
+## 13. Part D - after-commit steps (2026-10-19)
+
+**Files.**
+- New: `Services/Finance/Submission/IInvoiceSubmissionAfterSteps.cs` (the interface, `SubmissionAfterStepsStatus`, `SubmissionAfterStepsResult`)
+  and `InvoiceSubmissionAfterSteps.cs` (the section 11 answers are in its header). Not registered in DI.
+- Changed:
+  - `BillingFindingSignalMapper` takes 073's decisions. The deciding reason is primary. A Reject group that 073 held throughout gets a
+    `billing.decision` / `Held` evidence line carrying the hold reason. The fingerprint does not change. (a): mismatch precedence.
+  - `BillingSystemFindings.CodeRefused` and `BillingRuleCatalogue`: (b).
+  - `InvoiceSubmissionPersister`: the findings JSON stores `invoiceName`, `invoiceNumberReadConfidence` and `signalPlan`. `IdOf`, `LineNameFor`
+    and `SignalSubjectsFor` are now shared with part D.
+- Tests: `InvoiceSubmissionAfterStepsTests` (34), `BillingFindingSignalMapperDecisionTests` (5), and additions to `BillingSystemPolicyTests` and
+  `InvoiceSubmissionPersisterTests`.
+
+**Input.** `RunAsync(SubmissionPersistResult, correlationId)` takes Committed, Resumed, or a totals Retry that has an invoice id.
+- Everything is read from the STORED submission: `sprk_findingsjson`, the link, the channel and the document. Nothing re-runs AI or the
+  evaluation.
+- The rule Signals are written from the stored `signalPlan`: the mapper's scrubbed requests, rendered once at commit. The first run and every
+  resume therefore write the same requests.
+- A missing row returns `SubmissionMissing`. A link to another invoice, or unreadable findings, returns `Refused` (`invoice_link_mismatch`,
+  `findings_unreadable`) and nothing is written.
+
+**Step order and why.**
+1. **Signals**: the rule Signals from the plan, then the system Signals.
+   - They come first, so the record's fact snapshot and the firm's notification never describe Signals that do not exist yet. D-122 moved the
+     record after them.
+   - Every request is attempted. Any failure returns `Retry` before step 2.
+2. **Decision Record**, AutoRejected only.
+   - Action `reject-invoice`; subject the invoice; decision id `IdOf("ebilling-auto-reject-{submissionId}")`; decider
+     `BillingDecider.Automated("submission rejection rule")`.
+   - Reason: the distinct deciding codes, joined by ", ". PolicyVersionId: the first deciding finding's version.
+   - Values: submissionId, trackingNumber and decidingReasonCodes, as strings.
+   - Facts: decision, outcome, threshold, the deciding codes, and every plan entry (policy, subject, codes, consequence, fingerprint, group
+     decision, rendered sentence).
+   - Written: the invoice.
+   - Refusals: the permanent ones (review_invalid, fact_snapshot_missing, subject_*, record_class_underivable, core_unsupported, owner_refused,
+     owner_missing) return `Refused`; the rest return `Retry`.
+   - A totals Retry stops here with the persister's `totals_failed` code.
+3. **Indexing**, for Accepted, AcceptedUncoded and Blocked (an invoice In Review).
+   - The `JobContract` has `JobId = IdOf("ebilling-index-{invoiceId}")` and `IdempotencyKey = invoice-index-{invoiceId}`, which is the extraction
+     handler's key, so Service Bus duplicate detection on the MessageId applies. Payload: `{InvoiceId, DocumentId}`.
+   - A fault returns `Retry` (`indexing_enqueue_failed`).
+   - Once per process, an Information line says the handler needs `DocumentIntelligence:Enabled`.
+   - No document: indexing is skipped with a warning.
+4. **Notify**, once. The marker is `ebilling-submission-notified:{submissionId:N}` and is kept for 30 days.
+
+   | Kind | Notified as | Reason code |
+   |---|---|---|
+   | Accepted, AcceptedUncoded | Accepted | none |
+   | AutoRejected | Rejected | the deciding code |
+   | Blocked | Rejected, with the invoice id | `ebilling.submission.blocked` |
+
+   - Blocked, decided: the submission did not pass automatically; the invoice exists In Review.
+   - A sink fault is logged and the run continues, under the sink's existing contract ("a failure must not undo the decision ... does not
+     retry the pipeline"). The marker is not set then.
+   - Delivery is at-least-once only in two cases: the window between the sink returning and the marker being set, and a cache that fails
+     open (`IsEventProcessedAsync` returns false on a fault).
+5. **Terminal status, last**: `UpdateAsync(sprk_processingstatus = TerminalStatus, sprk_outcomereasoncode = TerminalReasonCode)`. Only a
+   `Completed` run writes it. Any earlier failure leaves the submission Processing with its link, which is part E's resume marker.
+
+**System Signals (D-123, D-125).**
+- Sources, all written under `BILL-SYSTEM-SUBMISSION`:
+  - the stored pipeline findings: the mismatch (typed and read numbers, plus the read confidence) and the no-code-set and coding-unavailable
+    holds;
+  - `codeSet.needsReview`;
+  - `codingFindings`: refused codes and firm-code mismatches.
+- The policy is read once per run, app-only, and only when a system finding exists: `sprk_policy` (billing domain, by code) joined to its
+  current version.
+- It is usable only when there is exactly one row, the policy is enabled and Active, and its current version is Active, of type
+  SubmissionIntegrity and in force on the stored `receivedOn`.
+- Otherwise there are no system Signals, one Warning names only the policy code and its state, and the run continues.
+
+**Idempotency per step.**
+- Signals: the option-a lifecycle (section 6) on the dedupe-key prefix. A resume finds the open episode with the same fingerprint and
+  refreshes it, so there is no duplicate episode.
+- Record: the decision id is deterministic, and the writer answers `AlreadyRecorded`.
+- Indexing: the job id and idempotency key are deterministic.
+- Notify: the marker.
+- Terminal: the same values on every run.
+
+**Lock key and peers.**
+- No new lock. The handler's `invoice-submission:{submissionId:N}` lock (part E step 0) serialises 049 per submission.
+- `SignalWriter` and `SignalReevaluationJob` take no processing lock. They rely on the dedupe key and row-version conditional updates.
+- The supersede close is row-version conditional. If the Signal changed since the read, the close returns `ChangedSinceRead`, and part D
+  returns `Retry` (`signal_changed`) without writing a new episode. Test: a concurrent refresh between the read and the close, after which the
+  redelivery completes.
+- 104 and 105 do not exist yet. When they close the same Signals, they must use the same conditional close.
+
+**What part E must call and register.**
+- Before `PersistAsync`, call `afterSteps.PreflightRejection(outcome)` to refuse before the transaction. A `DecisionRecordRefusedException`
+  there means Failed, with its reason.
+- After `PersistAsync` returns Committed, Resumed, or Retry with an invoice id, call `RunAsync(persisted, correlationId)`:
+
+  | Result | Part E does |
+  |---|---|
+  | Completed | Nothing more |
+  | Retry | Leaves the submission Processing and lets the job retry (throw or abandon, per ADR-004) |
+  | Refused | Marks the submission Failed with `ReasonCode` |
+  | SubmissionMissing | Completes the message |
+  | An exception (a Dataverse read or write fault, a Signal write fault) | Treats it as transient: Processing, retry |
+
+- Register, scoped: `IInvoiceSubmissionProcessor`, `IInvoiceSubmissionPersister`, `IInvoiceSubmissionAfterSteps -> InvoiceSubmissionAfterSteps`,
+  and the handler.
+- Already registered dependencies: `SignalWriter`, `BillingDecisionRecorder` (singleton), `JobSubmissionService`, `IIdempotencyService`,
+  `IEbillingNotificationSink` (no-op until 132), `IGenericEntityService`.
+
+**Census.** ADR-010's one-to-one interface ceiling went from 168 to 169 for `IInvoiceSubmissionAfterSteps`. The seam: part E's handler tests
+fake it. Falsifiable: if they do not, register the concrete class and lower the ceiling.
+
+**(a)** Among flag-only reasons, the D-91 invoice-number mismatch is the primary reason of a shared system Signal. Tests: a `MapAll` test with
+both reasons on one invoice, and a must-not-fire test with two coding notes.
+
+**(b)**
+- `CodeRefused` cites the code only when `BillingRuleCatalogue.IsCodeShaped` holds. That is the rule schemas' `$defs.code.pattern`, read once,
+  and it must match the whole value.
+- Otherwise the reason is `coding.refused_code_not_shown`, with no `line.refusedCode` fact.
+- `NotApplicableToLineType` becomes `coding.code_kind_not_for_line`, with its own template and headline.
+
+**Open questions (not guessed).**
+1. **D-122 resolve-all is not implemented.**
+   - No path closes a Signal as resolved by a billing decision:
+     - `SignalWriter.CloseAsync` accepts system resolutions only (ConditionCleared, Superseded, PolicyRetired);
+     - `DecisionCommitService.CloseSignalAsync` is private and stamps a person in `resolvedby`;
+     - the recorder leaves closing to its caller.
+   - Listing Signals in `ResolvedSignalIds` without closing them would half-resolve them, so the record lists none.
+   - Needed (ontology-owned): a SignalWriter entry that closes a Signal as Acted, linked to a Decision Record, with no person, for a system
+     decision.
+   - Note for that work: the record hash includes `ResolvedSignalIds`, so the resolved set must be stable across a resume.
+2. A totals refusal is not recorded in the findings. Part C said "part D records it"; the brief did not ask for it.
+3. `IEbillingNotificationSink`'s "do not retry" contract was kept. If the notification must be exactly-once even when the sink faults, the sink
+   contract has to change (owner decision).
