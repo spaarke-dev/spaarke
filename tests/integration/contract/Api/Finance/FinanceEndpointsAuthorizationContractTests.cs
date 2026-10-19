@@ -549,6 +549,31 @@ public class FinanceEndpointsAuthorizationContractTests
         }
     }
 
+    [Fact(DisplayName = "#2095: an unreadable document isolation is a retryable 503 with a stable reason code, naming no record")]
+    public async Task Confirm_IsolationUnreadable_Is503_WithTheStableReasonCode_AndNamesNoRecord()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvoiceReviewException(
+                InvoiceReviewFailure.IsolationUnreadable,
+                "Whether the document is held in a Secure record could not be read, so it was not filed under the invoice. "
+                + "Nothing was saved; retry the confirmation.",
+                inner: new TaskCanceledException("HttpClient.Timeout elapsed")));
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain(body.DocumentId.ToString()).And.NotContain(body.MatterId.ToString())
+            .And.NotContain("Timeout", "the inner fault is logged, never rendered");
+        var json = JsonNode.Parse(text)!.AsObject();
+        json["reasonCode"]!.GetValue<string>().Should().Be("sdap.finance.invoice_review.isolation_unreadable");
+        json["detail"]!.GetValue<string>().Should().Contain("retry the confirmation");
+        json.Should().NotContainKey("invoiceId");
+    }
+
     [Fact]
     public async Task Confirm_AuthorizedBodyOnlyRequest_Returns202_AndAuthorizesEveryBodyId()
     {

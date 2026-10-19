@@ -1037,11 +1037,31 @@ public class InvoiceReviewWritePathTests
 
         var act = () => Sut().ConfirmInvoiceAsync(request, "corr-2095-c");
 
-        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("Nothing was saved");
+        var thrown = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        thrown.Failure.Should().Be(InvoiceReviewFailure.IsolationUnreadable);
+        thrown.ReasonCode.Should().Be("sdap.finance.invoice_review.isolation_unreadable");
+        thrown.Message.Should().Contain("Nothing was saved").And.NotContain(request.DocumentId.ToString());
+        thrown.InnerException.Should().BeOfType<TaskCanceledException>("the fault is carried for the log, not rendered");
         faults.Should().Be(2, "the read, then its one retry");
+
+        // ZERO writes of any kind, on every fake: no invoice create, no document link or review stamp or status
+        // (the records seam), no generic Create/Update/Delete/Execute (the strict entity service has no setup in this test),
+        // no reparent or owner write, no stamp or share or access-record write in the Dataverse world, no job.
         _records.Writes.Should().BeEmpty("fail closed: nothing is written when whether the document is isolated cannot be told");
+        _records.LinkAttempts.Should().Be(0);
+        _entities.VerifyNoOtherCalls();
+        _recordTypes.VerifyNoOtherCalls();
         _ownership.Verify(o => o.ReparentAsync(
             It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()), Times.Never);
+        _ownership.Verify(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Times.Never);
+        _world.OwnerWrites.Should().BeEmpty();
+        _world.StampWrites.Should().BeEmpty();
+        _world.AccessRecordWrites.Should().BeEmpty();
+        _world.AccessPermissionWrites.Should().BeEmpty();
+        _world.Deletes.Should().BeEmpty();
+        _shares.Writes.Should().BeEmpty();
+        _shares.WriteLog.Should().BeEmpty();
+        _jobs.Verify(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Never);
         _submitted.Should().BeEmpty();
     }
 

@@ -384,6 +384,8 @@ public static class FinanceEndpoints
             InvoiceReviewFailure.ReviewDecisionChanged => (StatusCodes.Status409Conflict, "Review Decision Changed"),
             InvoiceReviewFailure.DocumentLinkedToInvoice => (StatusCodes.Status409Conflict, "Document Already Confirmed"),
             InvoiceReviewFailure.OwnerTeamUnresolved => (StatusCodes.Status403Forbidden, "Invoice Not Created"),
+            // #2095: a transient read fault before anything was written - the caller retries.
+            InvoiceReviewFailure.IsolationUnreadable => (StatusCodes.Status503ServiceUnavailable, "Invoice Review Temporarily Unavailable"),
             _ => (StatusCodes.Status500InternalServerError, "Invoice Review Incomplete"),
         };
 

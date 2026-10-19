@@ -203,6 +203,12 @@ public enum InvoiceReviewFailure
     /// removed — it may exist unlinked. The document was not changed.
     /// </summary>
     CreateFailedInvoiceMayRemain,
+
+    /// <summary>
+    /// #2095: whether the document is held in a Secure record could not be read (twice), so it was not filed under the
+    /// invoice. Nothing was written — no invoice, link, owner change or review status. Transient and retryable (503).
+    /// </summary>
+    IsolationUnreadable,
 }
 
 /// <summary>
@@ -222,6 +228,9 @@ public sealed class InvoiceReviewException : Exception
     /// <summary>The invoice that exists (or existed) when the failure happened; null when none was created.</summary>
     public Guid? InvoiceId { get; }
 
+    /// <summary>#2095: the isolation read before the re-file faulted; nothing was saved, a retry is safe (503).</summary>
+    public const string IsolationUnreadableReasonCode = "sdap.finance.invoice_review.isolation_unreadable";
+
     /// <summary>The document no longer exists — shared by confirm and by reject's 404 (ADR-019).</summary>
     public const string DocumentNotFoundReasonCode = "sdap.finance.invoice_review.document_not_found";
 
@@ -238,6 +247,7 @@ public sealed class InvoiceReviewException : Exception
         InvoiceReviewFailure.CreateFailedInvoiceMayRemain => "sdap.finance.invoice_review.create_failed_invoice_may_remain",
         InvoiceReviewFailure.ReviewDecisionChanged => "sdap.finance.invoice_review.review_decision_changed",
         InvoiceReviewFailure.DocumentLinkedToInvoice => "sdap.finance.invoice_review.document_linked_to_invoice",
+        InvoiceReviewFailure.IsolationUnreadable => IsolationUnreadableReasonCode,
         _ => "sdap.finance.invoice_review.extraction_not_queued",
     };
 }
@@ -665,6 +675,9 @@ public class InvoiceReviewService : IInvoiceReviewService
     private async Task RefileDocumentUnderInvoiceAsync(
         InvoiceReviewConfirmRequest request, Func<CancellationToken, Task> applyChange, CancellationToken ct)
     {
+        // Unlike the unattended re-file writers (the playbook node, the field-mapping push, the update action), which write
+        // anyway and release nothing — a refusal there would fail a whole run over a transient read — confirm is ONE
+        // interactive action that is safe to retry, so it refuses (503) rather than file a document it cannot classify.
         var wasIsolated = await ReadDocumentIsolationBeforeWriteAsync(request.DocumentId, ct);
 
         var reparent = await _ownership.ReparentAsync(
@@ -711,9 +724,14 @@ public class InvoiceReviewService : IInvoiceReviewService
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException(
+            _logger.LogWarning(ex,
+                "Document {DocumentId} was not filed under its invoice: whether it is held in a Secure record could not be read "
+                + "(twice). Nothing was written; the confirmation is retryable.", documentId);
+            throw new InvoiceReviewException(
+                InvoiceReviewFailure.IsolationUnreadable,
                 "Whether the document is held in a Secure record could not be read, so it was not filed under the invoice. "
-                + "Nothing was saved; retry the confirmation.", ex);
+                + "Nothing was saved; retry the confirmation.",
+                inner: ex);
         }
     }
 
