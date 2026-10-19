@@ -15,7 +15,7 @@
 |---|---|
 | **Mode** | Final push to release. Run the fix-round loop, then merge when BOTH required checks (Router + "Client lint (type-aware ratchet)") are green, then deploy via R3. A task closes on merge + deploy + a server-side gate. |
 | **Fix bar** | Choose the most technically correct, best-practice, code-efficient fix. Never take the quick route. Add no complexity without value. Every defect found is fixed or filed. |
-| **Order** | ~~186~~ (merged 49279def1) → 099b → 036 (each merges after the owner items below), then #2084 (after 099b), then the #2091 thread-join follow-up (after ontology 042b merges), then the 090 wrap-up and the UAT checklist. |
+| **Order** | ~~186~~ (49279def1) → ~~099b~~ (d7eabba3b) → 036 (each merges after the owner items below), then #2084 (after 099b), then the #2091 thread-join follow-up (after ontology 042b merges), then the 090 wrap-up and the UAT checklist. |
 
 ## OWNER items outstanding (round 103, 2026-10-18)
 1. **036 ADR conflict (auth): STILL OPEN.** The owner leans C and asked what the conflict is. It was explained plainly on 2026-10-18; the C / B / A answer is pending. 036 is held until then.
@@ -28,9 +28,10 @@
 | PR | Issue | Worktree / branch | State |
 |---|---|---|---|
 | **#2078** (draft) | #1074, #1567 (036) | C:/wt036 `feat/uac-036-fr20-flag-gated-swap` @ **e7a8392bb** (pushed; master merged at 953fd6446) | Owner decisions (a) and (f) are built.<br>- **(a)**: a WorkforceHome-linked systemuser is confirmed app-only, naming the principal.<br>- **(f)**: `$orderby=modifiedon desc`, CacheVersion 2.<br>**Adversarial pass 1: 0 F.** Its K-items, to fix in the next round (batched with the owner's ADR answer):<br>- add a Verify bullet (vi) to guide §12.8 for a WorkforceHome live check;<br>- soften the guide's "exactly what the model-driven app allows" (team-inherited roles are an open question);<br>- add a 15 s linked timeout on the app-only calls;<br>- update the probe comments at :11 and :192-196.<br>The ADR edits are drafted in `notes/036-adr-edits-owner-a-f.md`. They are **NOT applied**: hold them until the owner's C/B/A answer. B1 wording note: the app-only calls DO send MSCRMCallerID, so "impersonating" is accurate. Pass 2 runs after that round. |
-| #2063 (099b) | #1010 D-11 half | C:/wt099b | The SRO role change on dev is DONE. Next, in order:<br>1. An implementer agent resolves the master-merge conflict with 186 in `IDataversePrivilegeChecker` and `UserPrivilegeChecker`, by union.<br>2. Push, wait for both checks, run merge-tree, then squash-merge.<br>3. Send the sha to R3 for the next deploy.<br>4. Run the backfill with -Apply, then VERIFY, then the live gate, then close #1010. |
+| #2084 | #2084 | C:/wt2084 `feat/uac-2084-policy-secure-lineage` | An implementer agent is building it: sprk_policy/policyversion lineage, SRO Read, resolver binding at :1154, and tests. After it lands: 2 adversarial passes (ontology runs theirs), merge, the SRO role on dev (owner authorized UAC role changes in round 103), R3 deploy, live gate. |
 
 ## Merged 2026-10-18
+- **#2063 (099b) `d7eabba3b`**: merged after the union-resolved conflict with 186. R3 deploys it together with 186. **Next: after R3's after-notice, run `Backfill-RecordOwnership.ps1` -Apply, then VERIFY, then the 099b live gate, then close #1010.**
 - **#2061 (186) `49279def1`**: the Workforce role on dev was edited. R3 includes it in the next deploy, after their task 058 agent finishes. **Next: the 186 live gate after R3's after-notice.**
 - **#2094 `1473b34c6`** (#2091, part): the playbook update node, DataverseUpdateHandler and the field-mapping push now call `SecureChildReconciler.AfterRefileAsync`.
   - **Parent changes:** bind-string parent changes are handled in `RecordReparent.ParentChangesWithClearsIn`, with fail-closed bind validation.
@@ -48,6 +49,7 @@
 - **#2095**: InvoiceReviewService document refile skips the hook (ebilling).
 - **#2097**: OutputOrchestrator's EntityReference/Money values are unwritable (orchestrator owner).
 - **#2098**: the push costs about 17 calls per child, and a 500-child push can exceed 230 s (queue it).
+- **#2100**: per-family Secure-team guard follow-up for task 178 (ebilling D-112 A1(b), K-i).
 - **#2087**: commented that the UAC part was already fixed by #2083.
 
 ## Peers (state)
