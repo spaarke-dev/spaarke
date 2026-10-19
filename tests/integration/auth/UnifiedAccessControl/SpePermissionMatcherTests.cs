@@ -6,7 +6,7 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
 /// <summary>
-/// <see cref="SpeContainerMembershipService.FindContactPermission"/> — the A-13 revoke matcher itself, keyed by
+/// <see cref="SpeContainerMembershipService.FindContactPermissions"/> — the A-13 revoke matcher itself, keyed by
 /// identity since #2105 (the bound object id, then the email against the permission's email and UPN; never a
 /// Spaarke-managed marker grant).
 /// </summary>
@@ -55,9 +55,11 @@ public class SpePermissionMatcherTests
         return permission;
     }
 
+    /// <summary>The single match, or null when there is none. #2104 round 2 (K2): the matcher returns EVERY match under
+    /// the deciding key; these single-match tests assert there is at most one (the ambiguity tests call it directly).</summary>
     private static Permission? Find(IReadOnlyList<Permission>? permissions, SpeMembershipKey key,
         IReadOnlySet<string>? managed = null)
-        => SpeContainerMembershipService.FindContactPermission(permissions, key, managed ?? NoneManaged);
+        => SpeContainerMembershipService.FindContactPermissions(permissions, key, managed ?? NoneManaged).SingleOrDefault();
 
     [Fact]
     public void MatchesThePermissionWhoseUpnIsTheContactsEmail()
@@ -256,5 +258,61 @@ public class SpePermissionMatcherTests
         key.IsEmpty.Should().BeTrue();
 
         Find(new List<Permission> { PermissionFor(ContactEmail) }, key).Should().BeNull();
+    }
+
+    /// <summary>#2104 round 2 (K2): two eligible permissions under the email are BOTH returned — never just the first, so
+    /// the caller can refuse to guess.</summary>
+    [Fact]
+    public void ReturnsEveryEligiblePermissionTheEmailMatches_NeverJustTheFirst()
+    {
+        var permissions = new List<Permission>
+        {
+            PermissionFor("counsel_client-firm.com#EXT#@spaarke.onmicrosoft.com", "perm-guest", email: ContactEmail),
+            PermissionFor(ContactEmail, "perm-member"),
+        };
+
+        SpeContainerMembershipService.FindContactPermissions(permissions, ByEmail(ContactEmail), NoneManaged)
+            .Select(p => p.Id).Should().Equal("perm-guest", "perm-member");
+    }
+
+    /// <summary>#2104 round 2 (K2): the same under the object id.</summary>
+    [Fact]
+    public void ReturnsEveryPermissionTheObjectIdMatches_NeverJustTheFirst()
+    {
+        var permissions = new List<Permission>
+        {
+            PermissionFor("a@x.example", "perm-1", userId: ContactObjectId),
+            PermissionFor("b@x.example", "perm-2", userId: ContactObjectId),
+        };
+
+        SpeContainerMembershipService.FindContactPermissions(permissions, new SpeMembershipKey(ContactObjectId, null), NoneManaged)
+            .Should().HaveCount(2);
+    }
+
+    /// <summary>#2104 round 2: an object-id match decides — another principal's permission that merely shares the email is
+    /// not added to it (and so never makes the contact's own match ambiguous).</summary>
+    [Fact]
+    public void AnObjectIdMatchDecides_TheEmailIsNotConsulted()
+    {
+        var permissions = new List<Permission>
+        {
+            PermissionFor("former@client-firm.com", "perm-own", userId: ContactObjectId),
+            PermissionFor(ContactEmail, "perm-other", userId: Guid.NewGuid()),
+        };
+
+        SpeContainerMembershipService.FindContactPermissions(
+                permissions, new SpeMembershipKey(ContactObjectId, ContactEmail), NoneManaged)
+            .Select(p => p.Id).Should().Equal("perm-own");
+    }
+
+    /// <summary>#2104 round 2: the key's email is trimmed when the key is made, and a permission's address is trimmed when
+    /// compared.</summary>
+    [Fact]
+    public void TrimsBothTheKeysEmailAndThePermissionsAddress()
+    {
+        new SpeMembershipKey(null, "  External.User@client-firm.com ").Email.Should().Be("External.User@client-firm.com");
+
+        Find(new List<Permission> { PermissionFor(" " + ContactEmail + "  ", "perm-padded") }, ByEmail(ContactEmail))!
+            .Id.Should().Be("perm-padded");
     }
 }

@@ -140,6 +140,27 @@ public static class ProjectClosureEndpoint
                 accessRecordsRevoked: 0);
         }
 
+        if (activeRecords.Count > MaxActiveGrantsPerClosure)
+        {
+            // #2104 round 2 (F2): the active rows are read as ONE bounded page ($top = bound + 1). More than the bound is
+            // not revoked on a partial list (Steps 2-4 stay unreachable, as for an enumeration failure) and is NAMED, not
+            // "retry": a retry reads the same rows and meets the same bound.
+            logger.LogError(
+                "[CLOSE-PROJECT] ProjectId={ProjectId} has more than {Bound} active external grants, more than one closure "
+                + "may read. Closure ABORTED with zero grants revoked; an administrator must act.",
+                request.ProjectId, MaxActiveGrantsPerClosure);
+
+            return ClosureIncomplete(
+                httpContext,
+                ClosureTooManyGrantsReason,
+                $"Project {request.ProjectId} has more than {MaxActiveGrantsPerClosure} active external grants, more than "
+                + "one closure may read. No grants were revoked and external access is UNCHANGED. Retrying the closure "
+                + "will not change that. An administrator must deactivate the project's external access records "
+                + "(sprk_externalrecordaccess) in Dataverse and remove those grantees' permissions from the project's "
+                + "container in the SPE admin app (the container's Permissions).",
+                accessRecordsRevoked: 0);
+        }
+
         if (activeRecords.Count == 0)
         {
             // Not an early 200 any more (#2104, pass-1 F1 / pass-2 F3): a closure that revoked its grants but could not
@@ -192,16 +213,15 @@ public static class ProjectClosureEndpoint
 
         // The revoked history is needed where a container will be swept, and — when nothing is active — to tell a
         // project that never had a grant (nothing to clear, wherever its container is) from one with grantees to clear.
-        IReadOnlyList<ExternalAccessRecord>? revokedEarlier = null;
-        var historyRead = false;
+        RevokedGrantHistory? history = null;
         if (closureContainerId is not null || (!containerDecided && activeRecords.Count == 0))
         {
-            revokedEarlier = await TryQueryRevokedAccessRecordsAsync(dataverseClient, request.ProjectId, logger, ct);
-            historyRead = revokedEarlier is not null;
+            history = await TryQueryRevokedAccessRecordsAsync(dataverseClient, request.ProjectId, logger, ct);
         }
 
+        var historyRead = history is { Complete: true };
         var ownsNoContainer = containerDecided && closureContainerId is null;
-        if (activeRecords.Count == 0 && (ownsNoContainer || revokedEarlier is { Count: 0 }))
+        if (activeRecords.Count == 0 && (ownsNoContainer || history is { Complete: true, Rows.Count: 0 }))
         {
             // Nothing to revoke, and nobody to clear: the project is not secure (its container step is skipped), or it
             // never had a grant. The pre-#2104 answer, unchanged.
@@ -218,14 +238,15 @@ public static class ProjectClosureEndpoint
         {
             try
             {
-                var sweep = GranteesToSweep(activeRecords, revokedEarlier ?? [], logger);
+                var sweep = GranteesToSweep(activeRecords, history?.Rows ?? [], logger);
                 var removal = await RemoveRevokedGranteesAsync(
-                    speContainerMembership, dataverseClient, closureContainerId, sweep, logger, ct);
+                    speContainerMembership, dataverseClient, closureContainerId, sweep, historyRead, logger, ct);
 
                 speRemovedCount = removal.Removed;
                 granteeRemoval = removal;
-                // The earlier grantees could not be read: whoever they are, they are not confirmed off the container.
-                containerCleared = removal.Complete && historyRead;
+                // The earlier grantees could not be read (or were too many to read): whoever they are, they are not
+                // confirmed off the container, unless the container itself holds no contact permission any more (F1).
+                containerCleared = removal.ContainerProvenClean || (removal.Complete && historyRead);
 
                 if (containerCleared)
                 {
@@ -260,8 +281,12 @@ public static class ProjectClosureEndpoint
             // Null: the project owns no container of its own, so there was nothing of this closure's to clear.
             Cleared: ownsNoContainer ? null : containerCleared,
             // Unknown when the container was never established, the earlier grants could not be read, or the step threw.
-            GranteesNotCleared: granteeRemoval is { } counted && historyRead ? counted.Unresolved : null,
-            OrganizationsTooLarge: granteeRemoval?.OrganizationsTooLarge ?? 0);
+            GranteesNotCleared: granteeRemoval is { } counted && (historyRead || counted.ContainerProvenClean)
+                ? counted.Unresolved
+                : null,
+            OrganizationsTooLarge: granteeRemoval?.OrganizationsTooLarge ?? 0,
+            // F2: the project's own container was swept, but its revoked grants exceed one read; not fixed by a retry.
+            RevokedGrantsOverLimit: closureContainerId is not null && !containerCleared && history is { OverLimit: true });
 
         // Step 4: Invalidate the grant cache of every affected contact — the ONE routine (task 137). Runs
         // unconditionally — it only ever removes access, so it is worth doing even when an earlier step failed.
@@ -299,6 +324,19 @@ public static class ProjectClosureEndpoint
                 $"{request.ProjectId}; {failedCount} could not be deactivated and remain ACTIVE. " +
                 "Those participants still have access. Retry the closure." +
                 ContainerAddendum(container),
+                accessRecordsRevoked: revokedCount,
+                container);
+        }
+
+        if (container.RevokedGrantsOverLimit)
+        {
+            // #2104 round 2 (F2): a retry reads the same revoked rows and meets the same bound. Named, not "retry".
+            return ClosureIncomplete(
+                httpContext,
+                ClosureTooManyGrantsReason,
+                $"{GrantsClause(request.ProjectId, activeRecords.Count, revokedCount)} "
+                + TooManyRevokedGrantsSentence("this")
+                + (container.OrganizationsTooLarge > 0 ? " " + OrganizationTooLargeSentence(container, "this") : string.Empty),
                 accessRecordsRevoked: revokedCount,
                 container);
         }
@@ -385,7 +423,11 @@ public static class ProjectClosureEndpoint
     /// or the step threw). <c>null</c>: the project is not secure and owns no container, so the step does not apply.</param>
     /// <param name="GranteesNotCleared">Grantees not confirmed removed; <c>null</c> when that could not be counted.</param>
     /// <param name="OrganizationsTooLarge">Revoked organizations over the sweep bound — not fixed by a retry.</param>
-    internal readonly record struct ContainerStepReport(bool? Cleared, int? GranteesNotCleared, int OrganizationsTooLarge);
+    /// <param name="RevokedGrantsOverLimit">#2104 round 2 (F2): the project's revoked grants exceed one read
+    /// (<see cref="MaxRevokedGrantsPerSweep"/>) and the container could not be shown to hold no contact permission — not
+    /// fixed by a retry. Carried in the detail, not as an extension.</param>
+    internal readonly record struct ContainerStepReport(
+        bool? Cleared, int? GranteesNotCleared, int OrganizationsTooLarge, bool RevokedGrantsOverLimit = false);
 
     /// <summary>The opening clause of a container-step failure: what happened to the grants themselves.</summary>
     private static string GrantsClause(Guid projectId, int activeCount, int revokedCount)
@@ -400,6 +442,13 @@ public static class ProjectClosureEndpoint
            "their members' SPE container permissions were NOT removed and they may retain file access. Retrying the " +
            $"closure will not change {retryScope}. An administrator must remove those members' permissions from the " +
            "project's container in the SPE admin app (the container's Permissions).";
+
+    /// <summary>#2104 round 2 (F2): the too-many-revoked-grants sentence and its NON-retryable administrator instruction.</summary>
+    private static string TooManyRevokedGrantsSentence(string retryScope)
+        => $"The project has more than {MaxRevokedGrantsPerSweep} revoked external grants, more than one closure may "
+           + "read, and its SPE container could not be confirmed to hold no permission of theirs, so those grantees may "
+           + $"retain file access. Retrying the closure will not change {retryScope}. An administrator must remove those "
+           + "grantees' permissions from the project's container in the SPE admin app (the container's Permissions).";
 
     /// <summary>Any grantee left unconfirmed besides the oversized organizations.</summary>
     private static string OtherUnresolvedSentence(ContainerStepReport container)
@@ -416,6 +465,9 @@ public static class ProjectClosureEndpoint
     {
         { Cleared: null } => string.Empty,
         { Cleared: true } => " The revoked grantees' permissions on the project's SPE container are confirmed removed.",
+        { RevokedGrantsOverLimit: true } =>
+            " " + TooManyRevokedGrantsSentence("that part")
+            + (container.OrganizationsTooLarge > 0 ? " " + OrganizationTooLargeSentence(container, "that part") : string.Empty),
         { OrganizationsTooLarge: > 0 } =>
             " " + OrganizationTooLargeSentence(container, "that part") + OtherUnresolvedSentence(container),
         { GranteesNotCleared: { } notCleared } =>
@@ -514,8 +566,12 @@ public static class ProjectClosureEndpoint
     /// clear; not unresolved.</param>
     /// <param name="OrganizationsTooLarge">Revoked organizations (counted in <paramref name="Unresolved"/> too) whose
     /// active members exceed the sweep bound: their members were not swept, and a retry meets the same bound.</param>
+    /// <param name="ContainerProvenClean">#2104 round 2 (F1): the container's complete read left no permission a contact
+    /// grant could account for (<see cref="SpeMembershipRemoval.NoContactPermissionRemains"/>), so every revoked grantee
+    /// (an oversized organization's members, an unreadable identity, the earlier grants that could not be read) is
+    /// confirmed absent; <paramref name="Unresolved"/> and <paramref name="OrganizationsTooLarge"/> are then 0.</param>
     internal readonly record struct GranteeRemoval(
-        int Removed, int Unresolved, int NoMembershipKey = 0, int OrganizationsTooLarge = 0)
+        int Removed, int Unresolved, int NoMembershipKey = 0, int OrganizationsTooLarge = 0, bool ContainerProvenClean = false)
     {
         /// <summary>Every revoked grantee is confirmed to hold no permission on the container.</summary>
         public bool Complete => Unresolved == 0;
@@ -546,12 +602,20 @@ public static class ProjectClosureEndpoint
     /// <para><b>A removal that throws (pass-2 F4)</b> leaves every keyed grantee unresolved and keeps the counts already
     /// gathered — an oversized organization stays classified as such, so the closure still names the non-retryable
     /// leaf instead of a "retry" that cannot succeed.</para>
+    /// <para><b>A container that holds no contact permission clears everyone (#2104 round 2, F1).</b> When a grantee could
+    /// not be enumerated or keyed (an organization over the sweep bound above all), or <paramref name="sweepComplete"/>
+    /// is false (the earlier grants could not be read in full), the one paged read is asked whether any permission a
+    /// contact grant could account for remains. If none does, every grantee is confirmed absent and nothing is
+    /// unresolved. Otherwise the closure kept answering <c>organization_too_large</c> for EVERY later closure of a
+    /// project that ever revoked an organization of more than 200 members, even with nothing of theirs on the
+    /// container. An incomplete or failed read proves nothing, so it stays fail closed.</para>
     /// </remarks>
     internal static async Task<GranteeRemoval> RemoveRevokedGranteesAsync(
         SpeContainerMembershipService speContainerMembership,
         DataverseWebApiClient dataverseClient,
         string containerId,
         IReadOnlyList<ExternalAccessRecord> revokedRecords,
+        bool sweepComplete,
         ILogger logger,
         CancellationToken ct)
     {
@@ -654,15 +718,20 @@ public static class ProjectClosureEndpoint
             keys.Add(key);
         }
 
-        if (keys.Count == 0)
+        // F1: a grantee who could not be enumerated or keyed, or earlier grants that could not be read, can still be
+        // confirmed absent, by the container holding no contact permission at all.
+        var confirmNoContactPermission = unresolved > 0 || !sweepComplete;
+
+        if (keys.Count == 0 && !confirmNoContactPermission)
         {
             return new GranteeRemoval(0, unresolved, noKey, tooLarge);
         }
 
-        IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult> results;
+        SpeMembershipRemoval removal;
         try
         {
-            results = await speContainerMembership.RemoveMembershipsAsync(containerId, keys, ct).ConfigureAwait(false);
+            removal = await speContainerMembership.RemoveMembershipsAsync(
+                containerId, keys, dataverseClient, confirmNoContactPermission, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -681,7 +750,7 @@ public static class ProjectClosureEndpoint
         var removed = 0;
         foreach (var key in keys)
         {
-            if (!results.TryGetValue(key, out var result))
+            if (!removal.Results.TryGetValue(key, out var result))
             {
                 unresolved++;
                 continue;
@@ -696,6 +765,21 @@ public static class ProjectClosureEndpoint
             {
                 unresolved++;
             }
+        }
+
+        if (removal.NoContactPermissionRemains)
+        {
+            if (unresolved > 0 || !sweepComplete)
+            {
+                logger.LogInformation(
+                    "[CLOSE-PROJECT] Container {ContainerId} holds no permission a contact grant could account for (read in "
+                    + "full; every remaining user permission is Spaarke-managed), so the {Unresolved} grantee(s) that could "
+                    + "not be enumerated or keyed ({TooLarge} oversized organization(s)) and any earlier grants not read are "
+                    + "confirmed absent (#2104 round 2, F1).",
+                    containerId, unresolved, tooLarge);
+            }
+
+            return new GranteeRemoval(removed, Unresolved: 0, noKey, OrganizationsTooLarge: 0, ContainerProvenClean: true);
         }
 
         return new GranteeRemoval(removed, unresolved, noKey, tooLarge);
@@ -731,10 +815,30 @@ public static class ProjectClosureEndpoint
     internal const int MaxRevokedGrantsPerSweep = 4999;
 
     /// <summary>
-    /// #2104: reads the project's revoked grant rows, or <c>null</c> when they could not be read in full — the caller
-    /// then cannot confirm the container clear of them. Never throws (cancellation aside).
+    /// #2104 round 2 (F2): the most ACTIVE rows one closure reads — one Dataverse page, requested as <c>$top</c> =
+    /// bound + 1 (<see cref="DataverseWebApiClient.QueryAsync{T}"/> reads one page and never follows
+    /// <c>@odata.nextLink</c>). More is never revoked on a truncated list: the closure answers
+    /// <see cref="ClosureTooManyGrantsReason"/> with nothing revoked.
     /// </summary>
-    private static async Task<IReadOnlyList<ExternalAccessRecord>?> TryQueryRevokedAccessRecordsAsync(
+    internal const int MaxActiveGrantsPerClosure = 4999;
+
+    /// <summary>
+    /// #2104: the project's revoked grant rows as read. <paramref name="Complete"/> false: they could not be read in full
+    /// and <paramref name="Rows"/> is empty — the caller cannot confirm the container clear of them.
+    /// </summary>
+    /// <param name="Rows">The revoked rows (empty unless <paramref name="Complete"/>).</param>
+    /// <param name="Complete">Every revoked row was read.</param>
+    /// <param name="OverLimit">#2104 round 2 (F2): not read in full because there are more than
+    /// <see cref="MaxRevokedGrantsPerSweep"/> — a retry meets the same bound (a read fault is retryable and leaves this
+    /// false).</param>
+    internal readonly record struct RevokedGrantHistory(
+        IReadOnlyList<ExternalAccessRecord> Rows, bool Complete, bool OverLimit = false);
+
+    /// <summary>
+    /// #2104: reads the project's revoked grant rows (see <see cref="RevokedGrantHistory"/>). Never throws (cancellation
+    /// aside).
+    /// </summary>
+    private static async Task<RevokedGrantHistory> TryQueryRevokedAccessRecordsAsync(
         DataverseWebApiClient dataverseClient,
         Guid projectId,
         ILogger logger,
@@ -753,17 +857,20 @@ public static class ProjectClosureEndpoint
             {
                 logger.LogError(
                     "[CLOSE-PROJECT] Project {ProjectId} has more than {Bound} revoked grants; they are not swept from "
-                    + "its container on a partial list, and the container is reported as not cleared.",
+                    + "its container on a partial list, and the container is reported as not cleared unless it holds no "
+                    + "contact permission at all.",
                     projectId, MaxRevokedGrantsPerSweep);
-                return null;
+                return new RevokedGrantHistory([], Complete: false, OverLimit: true);
             }
 
-            return rows
-                .Select(r => new ExternalAccessRecord(
-                    r.sprk_externalrecordaccessid ?? Guid.Empty,
-                    r._sprk_contact_value,
-                    r._sprk_organization_value))
-                .ToList();
+            return new RevokedGrantHistory(
+                rows
+                    .Select(r => new ExternalAccessRecord(
+                        r.sprk_externalrecordaccessid ?? Guid.Empty,
+                        r._sprk_contact_value,
+                        r._sprk_organization_value))
+                    .ToList(),
+                Complete: true);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -774,7 +881,7 @@ public static class ProjectClosureEndpoint
             logger.LogError(ex,
                 "[CLOSE-PROJECT] Could not read the revoked grants of ProjectId={ProjectId}; their grantees cannot be "
                 + "confirmed off the project's container.", projectId);
-            return null;
+            return new RevokedGrantHistory([], Complete: false);
         }
     }
 
@@ -847,6 +954,14 @@ public static class ProjectClosureEndpoint
     internal const string ClosureOrganizationTooLargeReason = "sdap.closure.incomplete.organization_too_large";
 
     /// <summary>
+    /// #2104 round 2 (F2): the NON-retryable leaf for a project with more grant rows than one closure reads — more than
+    /// <see cref="MaxActiveGrantsPerClosure"/> active ones (nothing is revoked), or more than
+    /// <see cref="MaxRevokedGrantsPerSweep"/> revoked ones while its container still may hold a permission of theirs. A
+    /// retry reads the same rows; the detail tells an administrator what to do instead.
+    /// </summary>
+    internal const string ClosureTooManyGrantsReason = "sdap.closure.incomplete.too_many_grants";
+
+    /// <summary>
     /// Queries all active sprk_externalrecordaccess records for the given project — contact grants AND
     /// organization grants.
     /// </summary>
@@ -874,10 +989,12 @@ public static class ProjectClosureEndpoint
     {
         try
         {
+            // F2: one bounded page; Handle reports more than the bound as too_many_grants, never a truncated closure.
             var rows = await dataverseClient.QueryAsync<ExternalAccessRow>(
                 ExternalAccessEntitySet,
                 filter: BuildActiveProjectGrantsFilter(projectId),
                 select: ActiveGrantSelect,
+                top: MaxActiveGrantsPerClosure + 1,
                 cancellationToken: ct);
 
             return rows

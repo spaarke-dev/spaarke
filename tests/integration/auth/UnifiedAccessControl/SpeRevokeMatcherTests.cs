@@ -193,8 +193,9 @@ public class SpeRevokeMatcherTests
                 TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
 
             mock.Setup(s => s.RevokeMembershipAsync(
-                    It.IsAny<string>(), It.IsAny<SpeMembershipKey>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string containerId, SpeMembershipKey key, CancellationToken _) =>
+                    It.IsAny<string>(), It.IsAny<SpeMembershipKey>(), It.IsAny<DataverseWebApiClient>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, SpeMembershipKey key, DataverseWebApiClient _, CancellationToken _) =>
                 {
                     CallCount++;
                     CapturedContainerId = containerId;
@@ -206,8 +207,10 @@ public class SpeRevokeMatcherTests
             // here for the same reason as above — an un-stubbed virtual returns a null Task and the
             // endpoint NREs, which is a fixture gap masquerading as a product defect.
             mock.Setup(s => s.RemoveMembershipsAsync(
-                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string containerId, IReadOnlyCollection<SpeMembershipKey> keys, CancellationToken _) =>
+                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(), It.IsAny<DataverseWebApiClient>(),
+                    It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, IReadOnlyCollection<SpeMembershipKey> keys, DataverseWebApiClient _,
+                    bool _, CancellationToken _) =>
                 {
                     var results = new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>();
 
@@ -219,7 +222,7 @@ public class SpeRevokeMatcherTests
                         results[key] = result;
                     }
 
-                    return (IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult>)results;
+                    return new SpeMembershipRemoval(results, NoContactPermissionRemains: false);
                 });
 
             return mock;
@@ -948,8 +951,9 @@ public class SpeRevokeMatcherTests
                 TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
 
             mock.Setup(s => s.RevokeMembershipAsync(
-                    It.IsAny<string>(), It.IsAny<SpeMembershipKey>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string containerId, SpeMembershipKey key, CancellationToken _) =>
+                    It.IsAny<string>(), It.IsAny<SpeMembershipKey>(), It.IsAny<DataverseWebApiClient>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, SpeMembershipKey key, DataverseWebApiClient _, CancellationToken _) =>
                 {
                     if (containerId != ContainerId.ToString())
                         throw new InvalidOperationException($"Unmodelled container: '{containerId}'.");
@@ -969,8 +973,10 @@ public class SpeRevokeMatcherTests
             // CapturedEmails still receives one entry per member, in order, so every existing
             // assertion about WHICH KEY was used — the whole of finding A-13 — is unchanged.
             mock.Setup(s => s.RemoveMembershipsAsync(
-                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string containerId, IReadOnlyCollection<SpeMembershipKey> keys, CancellationToken _) =>
+                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(), It.IsAny<DataverseWebApiClient>(),
+                    It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, IReadOnlyCollection<SpeMembershipKey> keys, DataverseWebApiClient _,
+                    bool _, CancellationToken _) =>
                 {
                     if (containerId != ContainerId.ToString())
                         throw new InvalidOperationException($"Unmodelled container: '{containerId}'.");
@@ -984,7 +990,7 @@ public class SpeRevokeMatcherTests
                         results[key] = _byEmail.TryGetValue(email, out var specific) ? specific : _default;
                     }
 
-                    return (IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult>)results;
+                    return new SpeMembershipRemoval(results, NoContactPermissionRemains: false);
                 });
 
             return mock;
@@ -1433,7 +1439,7 @@ public class SpeRevokeMatcherTests
         var service = ServiceWithFailingGraph(new InvalidOperationException("Graph unreachable"));
 
         var result = await service.RevokeMembershipAsync(
-            ContainerId.ToString(), new SpeMembershipKey(null, "counsel@client-firm.com"));
+            ContainerId.ToString(), new SpeMembershipKey(null, "counsel@client-firm.com"), TestInternalUserDirectory.Empty().Client);
 
         result.Success.Should().BeFalse();
         result.Error.Should().NotStartWith(SpeContainerMembershipService.NoPermissionFoundError,

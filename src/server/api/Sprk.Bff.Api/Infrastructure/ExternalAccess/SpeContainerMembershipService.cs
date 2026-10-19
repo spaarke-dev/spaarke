@@ -1,5 +1,6 @@
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -153,26 +154,30 @@ public class SpeContainerMembershipService
 
     /// <summary>
     /// Revokes a Contact's membership from an SPE container.
-    /// Finds the contact's permission entry by its identity key (<see cref="FindContactPermission"/>) and deletes it.
+    /// Finds the contact's permission entry by its identity key (<see cref="FindContactPermissions"/>) and deletes it.
     /// </summary>
     /// <param name="containerId">The SPE container ID (GUID format).</param>
     /// <param name="contact">The contact's identity key: its bound Entra object id and/or its email.</param>
+    /// <param name="directory">The Dataverse the matched permission's holder is checked against: a permission held by a
+    /// <c>systemuser</c> of this environment is an internal user's, never the contact's (#2104 round 2, K3).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>
     /// Success with the deleted permission id; or failure whose <c>Error</c> distinguishes
-    /// "no permission found for this user" from a Graph error.
+    /// "no permission found for this user" from a Graph error, an ambiguous match, an unverifiable holder or a failed
+    /// internal-user check.
     /// </returns>
     /// <remarks>
-    /// <para>This is the canonical SPE revoke. #2105: it matches by the contact's bound object id first, then by its
-    /// email against both the permission's <c>email</c> and its <c>userPrincipalName</c>, and it NEVER matches a
-    /// Spaarke-managed (marker-owned) permission — see <see cref="FindContactPermission"/>.</para>
+    /// <para>This is the canonical SPE revoke. It runs the SAME removal as <see cref="RemoveMembershipsAsync"/> for one
+    /// key (<see cref="RemoveCoreAsync"/>), so both apply one set of rules: #2105's identity match (the contact's bound
+    /// object id first, then its email against both the permission's <c>email</c> and its <c>userPrincipalName</c>),
+    /// never a Spaarke-managed (marker-owned) permission, never an internal user's own permission, and never a guess
+    /// between two matches.</para>
     ///
     /// <para><b>Task 017 / finding A-13</b>: <c>RevokeExternalAccessEndpoint</c> had its own private copy of
     /// this logic that searched for the contact's <b>GUID</b> inside the UPN. An email never contains a
     /// GUID, so it never matched — and it then returned <c>true</c> ("may have already been removed"),
     /// reporting revoke success while leaving the ACL entry in place. The fork is deleted; the endpoint
-    /// calls this method. Nothing here needed fixing: the correct implementation already existed and had
-    /// zero callers.</para>
+    /// calls this method.</para>
     ///
     /// <para><c>virtual</c> is the substitution seam (ADR-038 §4), matching the
     /// <c>DataverseWebApiClient</c> precedent — it lets the endpoint's revoke path be tested without
@@ -181,6 +186,7 @@ public class SpeContainerMembershipService
     public virtual async Task<SpeContainerMembershipResult> RevokeMembershipAsync(
         string containerId,
         SpeMembershipKey contact,
+        DataverseWebApiClient directory,
         CancellationToken ct = default)
     {
         _logger.LogInformation(
@@ -195,70 +201,11 @@ public class SpeContainerMembershipService
                 false, null, "No identity key (object id or email) to match a container permission by.");
         }
 
-        try
-        {
-            // Ownership INSIDE the try (task 227d): a refusal (a container this stamp does not own) or a marker read that
-            // got no answer is a failed result, like any other — never an exception. A revoke caller keeps going (its grant
-            // cache invalidation must still run) and reports the contact as not confirmed removed.
-            var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
-            var read = await ReadPermissionsAsync(graphClient, containerId, ct);
+        var removal = await RemoveCoreAsync(containerId, [contact], directory, confirmNoContactPermission: false, ct);
 
-            // #2105: a Spaarke-managed permission is never this contact's. null = the marker store could not be read, so
-            // no permission can be told apart from a managed one: nothing is deleted and nothing is claimed absent.
-            var managed = await ReadManagedPermissionIdsIfMatchedAsync(graphClient, containerId, read.Permissions, [contact], ct);
-            if (managed is null)
-            {
-                return MarkersUnreadable(containerId, contact);
-            }
-
-            var targetPermission = FindContactPermission(read.Permissions, contact, managed);
-
-            if (targetPermission == null)
-            {
-                LogManagedMatchLeftInPlace(read.Permissions, contact, containerId);
-
-                // Whether this is a benign absence or a failure depends on whether we finished LOOKING.
-                if (read.EnumerationComplete)
-                {
-                    _logger.LogWarning(
-                        "No SPE permission found for revocation: containerId={ContainerId}, contact={Contact}",
-                        containerId, contact);
-                }
-                else
-                {
-                    _logger.LogError(
-                        "SPE permissions for container {ContainerId} could not be fully enumerated; the " +
-                        "absence of a permission for {Contact} is UNPROVEN. They may RETAIN file access.",
-                        containerId, contact);
-                }
-
-                return ClassifyRevokeResult(read.EnumerationComplete, null, contact.ToString());
-            }
-
-            await graphClient.Storage.FileStorage
-                .Containers[containerId].Permissions[targetPermission.Id]
-                .DeleteAsync(cancellationToken: ct);
-
-            _logger.LogInformation(
-                "Successfully revoked SPE membership: containerId={ContainerId}, contact={Contact}, permissionId={PermissionId}",
-                containerId, contact, targetPermission.Id);
-
-            return ClassifyRevokeResult(read.EnumerationComplete, targetPermission.Id, contact.ToString());
-        }
-        catch (ServiceException ex)
-        {
-            _logger.LogError(ex,
-                "Graph API error revoking SPE membership: containerId={ContainerId}, contact={Contact}, status={StatusCode}",
-                containerId, contact, ex.ResponseStatusCode);
-            return new SpeContainerMembershipResult(false, null, $"Graph API error ({ex.ResponseStatusCode}): {ex.Message}");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "Unexpected error revoking SPE membership: containerId={ContainerId}, contact={Contact}",
-                containerId, contact);
-            return new SpeContainerMembershipResult(false, null, $"Unexpected error: {ex.Message}");
-        }
+        return removal.Results.TryGetValue(contact, out var result)
+            ? result
+            : new SpeContainerMembershipResult(false, null, "No outcome was produced for the contact.");
     }
 
     // ListExternalMembersAsync, its worker ReadExternalMembersAsync, ToContainerMember and the SpeContainerMember record
@@ -284,11 +231,18 @@ public class SpeContainerMembershipService
     /// <param name="containerId">The SPE container ID.</param>
     /// <param name="contacts">The contacts' identity keys. Duplicates (email casing included) and empty keys are tolerated;
     /// an empty key gets no entry.</param>
+    /// <param name="directory">The Dataverse a matched permission's holder is checked against (K3, see
+    /// <see cref="RevokeMembershipAsync"/>).</param>
+    /// <param name="confirmNoContactPermission">#2104 round 2 (F1): also establish
+    /// <see cref="SpeMembershipRemoval.NoContactPermissionRemains"/> when no key matched — the container's grant markers are
+    /// then read even though nothing matched (one extra container GET), and the read is made even with no key at all.
+    /// Close-project asks for it when a revoked grantee could not be enumerated (an organization over the sweep bound)
+    /// and so can only be confirmed absent by the container itself holding no contact permission.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>
     /// One <see cref="SpeContainerMembershipResult"/> per DISTINCT key (<see cref="SpeMembershipKey"/> equality: the
     /// email compares case-insensitively) — the same shape <see cref="RevokeMembershipAsync"/> returns, so callers
-    /// classify it identically. Matching is <see cref="FindContactPermission"/>'s (#2105).
+    /// classify it identically — and whether any contact permission remains on the container.
     /// </returns>
     /// <remarks>
     /// <para><b>ISS-004 (#968), closed by task 024.</b> The organization-grant revoke called
@@ -308,38 +262,83 @@ public class SpeContainerMembershipService
     /// 016/017. An incomplete enumeration flows through <see cref="ClassifyRevokeResult"/>, so a member
     /// who is merely UNSEEN is never reported as genuinely absent.</para>
     /// </remarks>
-    public virtual async Task<IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult>>
-        RemoveMembershipsAsync(
-            string containerId,
-            IReadOnlyCollection<SpeMembershipKey> contacts,
-            CancellationToken ct = default)
+    public virtual async Task<SpeMembershipRemoval> RemoveMembershipsAsync(
+        string containerId,
+        IReadOnlyCollection<SpeMembershipKey> contacts,
+        DataverseWebApiClient directory,
+        bool confirmNoContactPermission = false,
+        CancellationToken ct = default)
     {
         var distinct = contacts
             .Where(k => k is not null && !k.IsEmpty)
             .Distinct()
             .ToList();
 
-        var results = new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>();
-
-        if (distinct.Count == 0)
+        if (distinct.Count == 0 && !confirmNoContactPermission)
         {
-            return results;
+            return new SpeMembershipRemoval(new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>(), false);
         }
 
         _logger.LogInformation(
             "Removing {Count} contact permission(s) from container {ContainerId} via one paged read",
             distinct.Count, containerId);
 
+        return await RemoveCoreAsync(containerId, distinct, directory, confirmNoContactPermission, ct);
+    }
+
+    /// <summary>
+    /// The one removal both <see cref="RevokeMembershipAsync"/> and <see cref="RemoveMembershipsAsync"/> run: one paged
+    /// read, then per key at most ONE deletion, under these rules (#2105, #2104 round 2):
+    /// </summary>
+    /// <remarks>
+    /// <list type="number">
+    /// <item><b>Never a Spaarke-managed permission</b> — one a <c>SprkStd</c> / <c>SprkJit</c> / <c>SprkDemo</c> marker
+    /// records. Markers unreadable (404) while a key matched: nothing is deleted, every key Failed.</item>
+    /// <item><b>Never an internal user's own permission (K3).</b> Every permission a key matches is a candidate; their
+    /// holders' object ids are looked up in ONE batched <c>systemusers</c> query
+    /// (<see cref="QueryInternalUserObjectIdsAsync"/>), and a candidate held by a systemuser is ineligible — that user's
+    /// access is internal, governed by their roles and markers, not by a contact grant. The lookup failing: nothing is
+    /// deleted, every key Failed. A candidate whose holder carries no object id cannot be checked, so it is never
+    /// deleted either: that key is Failed (<see cref="UnverifiableHolderError"/>).</item>
+    /// <item><b>Never a guess (K2).</b> More than one eligible permission matching one key: nothing is deleted for it,
+    /// Failed (<see cref="AmbiguousMatchError"/>) — removing "the first" could remove somebody else's access.</item>
+    /// <item>A key whose only matches were excluded by rules 1–2 holds no permission of its OWN: on a complete read that is
+    /// the healthy <see cref="NoPermissionFoundError"/>.</item>
+    /// </list>
+    /// <para>Two keys can name ONE permission (one contact's oid, another's email): it is deleted once, and both get that
+    /// deletion's outcome rather than the second reading a "not found" off a permission the first just removed.</para>
+    /// <para>Never throws: every fault becomes a per-key failed result (the closure / revoke callers report them and
+    /// carry on).</para>
+    /// </remarks>
+    private async Task<SpeMembershipRemoval> RemoveCoreAsync(
+        string containerId,
+        IReadOnlyList<SpeMembershipKey> keys,
+        DataverseWebApiClient directory,
+        bool confirmNoContactPermission,
+        CancellationToken ct)
+    {
+        var results = new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>();
+
         // Ownership inside the try (task 227d): a refusal or an unanswered marker read fails every contact, like a client
-        // that cannot be obtained — every member gets an outcome (the closure / revoke callers report them and carry on).
+        // that cannot be obtained — every member gets an outcome.
         GraphServiceClient graphClient;
         PermissionReadResult read;
         IReadOnlySet<string>? managed;
+        bool anyMatch;
         try
         {
             graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
             read = await ReadPermissionsAsync(graphClient, containerId, ct);
-            managed = await ReadManagedPermissionIdsIfMatchedAsync(graphClient, containerId, read.Permissions, distinct, ct);
+
+            // The marker exclusion can only remove a candidate, so the markers are read only when some key matches some
+            // permission — the common broker-only answer (nobody matches) costs no extra Graph call — or when the caller
+            // needs to know whether a contact permission remains at all (F1).
+            anyMatch = keys.Any(k => CandidatePermissions(read.Permissions, k, NoManagedPermissions).Count > 0);
+            var markersNeeded = anyMatch
+                || (confirmNoContactPermission && read.EnumerationComplete && read.Permissions.Any(IsUserPermission));
+            managed = markersNeeded
+                ? await ReadManagedPermissionIdsAsync(graphClient, containerId, ct)
+                : NoManagedPermissions;
         }
         catch (Exception ex)
         {
@@ -348,41 +347,127 @@ public class SpeContainerMembershipService
             _logger.LogError(ex,
                 "Could not read permissions for container {ContainerId}; NONE of the {Count} contact(s) " +
                 "can be confirmed removed. They may RETAIN file access.",
-                containerId, distinct.Count);
+                containerId, keys.Count);
 
-            foreach (var key in distinct)
+            foreach (var key in keys)
             {
                 results[key] = new SpeContainerMembershipResult(
                     false, null, $"Container permissions could not be read: {ex.Message}");
             }
 
-            return results;
+            return new SpeMembershipRemoval(results, NoContactPermissionRemains: false);
         }
 
         if (managed is null)
         {
-            // #2105: without the marker store no permission can be told apart from a Spaarke-managed one — nothing is
-            // deleted, and nobody is claimed absent.
-            foreach (var key in distinct)
+            // #2105: without the marker store no matched permission can be told apart from a Spaarke-managed one —
+            // nothing is deleted, and nobody is claimed absent. (Read only for F1, with nothing matched: every key's own
+            // answer stands, but whether a contact permission remains is unknown.)
+            foreach (var key in keys)
             {
-                results[key] = MarkersUnreadable(containerId, key);
+                results[key] = anyMatch
+                    ? MarkersUnreadable(containerId, key)
+                    : ClassifyRevokeResult(read.EnumerationComplete, null, key.ToString());
             }
 
-            return results;
+            return new SpeMembershipRemoval(results, NoContactPermissionRemains: false);
         }
 
-        // Two keys can name ONE permission (one contact's oid, another's email): it is deleted once, and both get that
-        // deletion's outcome rather than the second reading a "not found" off a permission the first just removed.
+        // K3: every permission some key matches (managed ones aside) is a candidate; one batched lookup tells which are
+        // held by an internal user.
+        var candidates = keys
+            .SelectMany(k => CandidatePermissions(read.Permissions, k, managed))
+            .DistinctBy(p => p.Id, StringComparer.Ordinal)
+            .ToList();
+        var candidateObjectIds = candidates.SelectMany(PermissionUserObjectIds).Distinct().ToList();
+
+        IReadOnlySet<Guid> internalObjectIds = NoInternalUsers;
+        if (candidateObjectIds.Count > 0)
+        {
+            try
+            {
+                internalObjectIds = await QueryInternalUserObjectIdsAsync(directory, candidateObjectIds, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Could not check whether the {Count} permission holder(s) matched on container {ContainerId} are "
+                    + "internal users; NO permission was removed and none of the {Keys} contact(s) can be confirmed "
+                    + "removed (K3).", candidateObjectIds.Count, containerId, keys.Count);
+
+                foreach (var key in keys)
+                {
+                    results[key] = new SpeContainerMembershipResult(
+                        false, null,
+                        $"{InternalUserCheckFailedError}: the matched permission holders could not be checked against "
+                        + $"this environment's users, so no permission for user '{key}' was removed or can be confirmed "
+                        + "absent. They may RETAIN file access; retry the revoke.");
+                }
+
+                return new SpeMembershipRemoval(results, NoContactPermissionRemains: false);
+            }
+        }
+
+        var ineligible = new HashSet<string>(managed, StringComparer.Ordinal);
+        foreach (var candidate in candidates)
+        {
+            if (PermissionUserObjectIds(candidate).Any(internalObjectIds.Contains))
+            {
+                ineligible.Add(candidate.Id!);
+            }
+        }
+
         var deletions = new Dictionary<string, SpeContainerMembershipResult>(StringComparer.Ordinal);
 
-        foreach (var key in distinct)
+        foreach (var key in keys)
         {
-            var target = FindContactPermission(read.Permissions, key, managed);
+            var matches = FindContactPermissions(read.Permissions, key, ineligible);
 
-            if (target == null)
+            if (matches.Count == 0)
             {
-                LogManagedMatchLeftInPlace(read.Permissions, key, containerId);
+                LogExcludedMatchesLeftInPlace(read.Permissions, key, managed, ineligible, containerId);
+
+                // Whether this is a benign absence or a failure depends on whether we finished LOOKING.
+                if (!read.EnumerationComplete)
+                {
+                    _logger.LogError(
+                        "SPE permissions for container {ContainerId} could not be fully enumerated; the " +
+                        "absence of a permission for {Contact} is UNPROVEN. They may RETAIN file access.",
+                        containerId, key);
+                }
+
                 results[key] = ClassifyRevokeResult(read.EnumerationComplete, null, key.ToString());
+                continue;
+            }
+
+            if (matches.Count > 1)
+            {
+                _logger.LogError(
+                    "{Count} permissions on container {ContainerId} ({PermissionIds}) match {Contact}; NONE was removed, "
+                    + "because removing one could remove somebody else's access. They may RETAIN file access until an "
+                    + "administrator removes the right one in the SPE admin app (K2).",
+                    matches.Count, containerId, string.Join(", ", matches.Select(m => m.Id)), key);
+
+                results[key] = new SpeContainerMembershipResult(
+                    false, null,
+                    $"{AmbiguousMatchError}: {matches.Count} permissions on the container match user '{key}', so none "
+                    + "was removed. They may RETAIN file access; an administrator must remove the right one.");
+                continue;
+            }
+
+            var target = matches[0];
+
+            if (!PermissionUserObjectIds(target).Any())
+            {
+                _logger.LogError(
+                    "Permission {PermissionId} on container {ContainerId} matches {Contact} but names no holder object id, "
+                    + "so it cannot be checked against this environment's internal users; it was NOT removed (K3).",
+                    target.Id, containerId, key);
+
+                results[key] = new SpeContainerMembershipResult(
+                    false, null,
+                    $"{UnverifiableHolderError}: the permission matching user '{key}' names no object id, so it cannot be "
+                    + "told apart from an internal user's and was not removed. They may RETAIN file access.");
                 continue;
             }
 
@@ -397,6 +482,10 @@ public class SpeContainerMembershipService
                 await graphClient.Storage.FileStorage
                     .Containers[containerId].Permissions[target.Id]
                     .DeleteAsync(cancellationToken: ct);
+
+                _logger.LogInformation(
+                    "Removed SPE permission {PermissionId} of {Contact} from container {ContainerId}",
+                    target.Id, key, containerId);
 
                 results[key] = deletions[target.Id!] = ClassifyRevokeResult(read.EnumerationComplete, target.Id, key.ToString());
             }
@@ -414,7 +503,13 @@ public class SpeContainerMembershipService
             }
         }
 
-        return results;
+        // F1: after this call, is any permission left that could be a contact's? Every user permission on a COMPLETE read
+        // is either Spaarke-managed or was deleted here — anything else (an internal user's role, an ambiguous or
+        // unverifiable match, a failed delete, an unmatched permission whose markers were not read) counts as remaining.
+        var remains = read.Permissions.Any(p => IsUserPermission(p)
+            && !(p.Id is { } id && (managed.Contains(id) || (deletions.TryGetValue(id, out var deleted) && deleted.Success))));
+
+        return new SpeMembershipRemoval(results, NoContactPermissionRemains: read.EnumerationComplete && !remains);
     }
 
     // =========================================================================
@@ -955,24 +1050,18 @@ public class SpeContainerMembershipService
     /// #2105: the ids of the Spaarke-managed permissions on <paramref name="containerId"/> — every permission a grant
     /// marker (<see cref="StandingWriterMarkerPrefix"/>, <see cref="JitWriterMarkerPrefix"/>,
     /// <see cref="DemoWriterMarkerPrefix"/>) records as its value (<see cref="GrantMarkedWriterAsync"/> writes
-    /// <c>&lt;prefix&gt;&lt;holder&gt; = &lt;permission id&gt;</c>; the sync and demo expiry own their removal). Read ONLY
-    /// when some key matches some permission, because the exclusion can only remove a candidate: the common
-    /// broker-only answer (nobody matches) costs no extra Graph call.
+    /// <c>&lt;prefix&gt;&lt;holder&gt; = &lt;permission id&gt;</c>; the sync and demo expiry own their removal).
+    /// <see cref="RemoveCoreAsync"/> reads them only when some key matches some permission (the exclusion can only remove
+    /// a candidate, so the common broker-only answer costs no extra Graph call) or when its caller asked whether a contact
+    /// permission remains.
     /// </summary>
-    /// <returns>The managed ids (empty when nothing matched or no marker exists), or <see langword="null"/> when the
-    /// container answered 404 to the marker read — the store could not be read. Other faults propagate.</returns>
-    private static async Task<IReadOnlySet<string>?> ReadManagedPermissionIdsIfMatchedAsync(
+    /// <returns>The managed ids (empty when no marker exists), or <see langword="null"/> when the container answered 404
+    /// to the marker read — the store could not be read. Other faults propagate (to the caller's fail-closed catch).</returns>
+    private static async Task<IReadOnlySet<string>?> ReadManagedPermissionIdsAsync(
         GraphServiceClient graphClient,
         string containerId,
-        IReadOnlyList<Permission> permissions,
-        IReadOnlyCollection<SpeMembershipKey> contacts,
         CancellationToken ct)
     {
-        if (!contacts.Any(k => FindContactPermission(permissions, k, NoManagedPermissions) is not null))
-        {
-            return NoManagedPermissions;
-        }
-
         var markers = await ReadMarkersCoreAsync(graphClient, containerId, ct).ConfigureAwait(false);
 
         return markers?.Values
@@ -981,6 +1070,78 @@ public class SpeContainerMembershipService
     }
 
     private static readonly IReadOnlySet<string> NoManagedPermissions = new HashSet<string>(StringComparer.Ordinal);
+
+    private static readonly IReadOnlySet<Guid> NoInternalUsers = new HashSet<Guid>();
+
+    /// <summary>
+    /// #2104 round 2 (K2): the error text when more than one eligible permission matches one contact's key. Nothing is
+    /// deleted — removing "the first" could remove somebody else's access. A failure, never the benign absence.
+    /// </summary>
+    internal const string AmbiguousMatchError = "Ambiguous permission match";
+
+    /// <summary>
+    /// #2104 round 2 (K3): the error text when the one matching permission names no holder object id, so it cannot be
+    /// checked against this environment's internal users. Not deleted; a failure, never the benign absence.
+    /// </summary>
+    internal const string UnverifiableHolderError = "Unverifiable permission holder";
+
+    /// <summary>
+    /// #2104 round 2 (K3): the error text when the internal-user lookup failed. Nothing is deleted; a failure, never the
+    /// benign absence.
+    /// </summary>
+    internal const string InternalUserCheckFailedError = "Internal-user check failed";
+
+    /// <summary>The Dataverse entity set of internal users.</summary>
+    internal const string SystemUserEntitySet = "systemusers";
+
+    /// <summary>How many holder object ids one <see cref="QueryInternalUserObjectIdsAsync"/> request carries (keeps the
+    /// <c>$filter</c> URL short). The candidates of one removal are the permissions its keys match, so this is one request
+    /// in practice.</summary>
+    internal const int InternalUserLookupBatchSize = 50;
+
+    /// <summary>
+    /// #2104 round 2 (K3): which of <paramref name="objectIds"/> is the Entra object id
+    /// (<c>systemuser.azureactivedirectoryobjectid</c>) of a <c>systemuser</c> in this environment — the holders whose
+    /// permissions are an internal user's own and never a contact cleanup's to remove. One query per
+    /// <see cref="InternalUserLookupBatchSize"/> ids, never one per permission. Faults propagate.
+    /// </summary>
+    private static async Task<IReadOnlySet<Guid>> QueryInternalUserObjectIdsAsync(
+        DataverseWebApiClient directory,
+        IReadOnlyList<Guid> objectIds,
+        CancellationToken ct)
+    {
+        var found = new HashSet<Guid>();
+
+        foreach (var batch in objectIds.Chunk(InternalUserLookupBatchSize))
+        {
+            // includes disabled: a disabled internal user is still an internal user, and their own permission is still
+            // not a contact grant's to remove (K3) — the check excludes, it never admits.
+            var filter = string.Join(" or ", batch.Select(id => $"azureactivedirectoryobjectid eq {id:D}"));
+
+            var users = await directory.QueryAsync<SystemUserObjectIdRow>(
+                SystemUserEntitySet,
+                filter: filter,
+                select: "systemuserid,azureactivedirectoryobjectid",
+                cancellationToken: ct).ConfigureAwait(false);
+
+            foreach (var user in users)
+            {
+                if (user.azureactivedirectoryobjectid is { } objectId && batch.Contains(objectId))
+                {
+                    found.Add(objectId);
+                }
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>The <c>systemuser</c> columns <see cref="QueryInternalUserObjectIdsAsync"/> reads.</summary>
+    internal sealed class SystemUserObjectIdRow
+    {
+        public Guid? systemuserid { get; set; }
+        public Guid? azureactivedirectoryobjectid { get; set; }
+    }
 
     /// <summary>The fail-closed result when the marker store could not be read (#2105): not removed, not absent.</summary>
     private SpeContainerMembershipResult MarkersUnreadable(string containerId, SpeMembershipKey contact)
@@ -996,16 +1157,25 @@ public class SpeContainerMembershipService
             + "or confirmed absent. They may RETAIN file access; retry the revoke.");
     }
 
-    /// <summary>Logs, without acting on it, a permission that matched <paramref name="contact"/> but is Spaarke-managed (#2105).</summary>
-    private void LogManagedMatchLeftInPlace(IReadOnlyList<Permission> permissions, SpeMembershipKey contact, string containerId)
+    /// <summary>Logs, without acting on them, the permissions that matched <paramref name="contact"/> but are Spaarke-managed
+    /// (#2105) or an internal user's own (K3).</summary>
+    private void LogExcludedMatchesLeftInPlace(
+        IReadOnlyList<Permission> permissions,
+        SpeMembershipKey contact,
+        IReadOnlySet<string> managed,
+        IReadOnlySet<string> ineligible,
+        string containerId)
     {
-        if (FindContactPermission(permissions, contact, NoManagedPermissions) is { } managedMatch)
+        foreach (var excluded in CandidatePermissions(permissions, contact, NoManagedPermissions)
+                     .Where(p => ineligible.Contains(p.Id!)))
         {
             _logger.LogWarning(
-                "Permission {PermissionId} on container {ContainerId} matches {Contact} but is a Spaarke-managed grant "
-                + "(a standing, just-in-time or demo writer role, recorded by a marker); a contact revoke never removes "
-                + "it — its own lifecycle does (#2105).",
-                managedMatch.Id, containerId, contact);
+                "Permission {PermissionId} on container {ContainerId} matches {Contact} but is {Kind}; a contact revoke "
+                + "never removes it — its own lifecycle does (#2105, K3).",
+                excluded.Id, containerId, contact,
+                managed.Contains(excluded.Id!)
+                    ? "a Spaarke-managed grant (a standing, just-in-time or demo writer role, recorded by a marker)"
+                    : "an internal user's own permission (its holder is a systemuser of this environment)");
         }
     }
 
@@ -1015,60 +1185,104 @@ public class SpeContainerMembershipService
 
     /// <summary>
     /// THE container-permission matcher for a contact revoke (the single-grant revoke, each member of an organization
-    /// revoke, and project closure): the permission <paramref name="contact"/> holds on the container, or
-    /// <see langword="null"/>.
+    /// revoke, and project closure): the eligible permissions <paramref name="contact"/>'s DECIDING key matches — at most
+    /// one in a healthy container. <see cref="RemoveCoreAsync"/> deletes only when exactly one is returned.
     /// </summary>
     /// <param name="permissions">The container's permissions as read.</param>
     /// <param name="contact">The contact's identity key.</param>
-    /// <param name="managedPermissionIds">The Spaarke-managed permission ids (the marker values,
-    /// <see cref="ReadManagedPermissionIdsIfMatchedAsync"/>). Never matched.</param>
+    /// <param name="ineligiblePermissionIds">Never matched: the Spaarke-managed permission ids (the marker values,
+    /// <see cref="ReadManagedPermissionIdsAsync"/>) and the permissions held by an internal user (K3).</param>
     /// <remarks>
-    /// <para><b>#2105, three rules.</b></para>
+    /// <para><b>#2105 and #2104 round 2, four rules.</b></para>
     /// <list type="number">
-    /// <item><b>Never a Spaarke-managed permission.</b> The standing, just-in-time and demo writer roles belong to a
-    /// systemuser (or a demo user) and to the sync / demo expiry that own their lifecycle. When an internal user is also
-    /// a contact whose email equals their UPN, the email match used to DELETE that role and leave its marker dangling.
-    /// A contact grant never created one, so a contact revoke never removes one.</item>
+    /// <item><b>Never an ineligible permission.</b> The standing, just-in-time and demo writer roles belong to a
+    /// systemuser (or a demo user) and to the sync / demo expiry that own their lifecycle; an internal user's own
+    /// hand-granted role is governed by their internal roles. When an internal user is also a contact whose email equals
+    /// their UPN, the email match used to DELETE that role. A contact grant never created one, so a contact revoke never
+    /// removes one.</item>
     /// <item><b>Strongest key first: the bound Entra object id</b> (<c>contact.sprk_externalobjectid</c>, written by
     /// <c>ContactBindingDecision</c>'s <c>CreateByOid</c> / binds), against the permission's
     /// <c>grantedToV2.user.id</c> or <c>grantedTo.user.id</c> — the shape <see cref="ReadAccessAsync"/> already reads
-    /// as the holder's object id. A CIAM or home-tenant oid is not a principal in this tenant and simply matches
-    /// nothing (object ids are globally unique), so the email rule below still applies to those contacts.</item>
-    /// <item><b>Then the email</b>, case-insensitively, against BOTH the permission's <c>email</c> AND its
+    /// as the holder's object id. When the object id matches some eligible permission, it decides; the email is not
+    /// consulted. A CIAM or home-tenant oid is not a principal in this tenant and simply matches nothing (object ids are
+    /// globally unique), so the email rule below still applies to those contacts.</item>
+    /// <item><b>Then the email</b>, trimmed and case-insensitively, against BOTH the permission's <c>email</c> AND its
     /// <c>userPrincipalName</c>. A B2B guest's UPN is <c>alice_contoso.com#EXT#@tenant…</c> while its <c>email</c> is
     /// <c>alice@contoso.com</c>; comparing the UPN alone (the old first-wins read of UPN, then email) missed every
     /// such guest and reported "no permission found" while they kept file access.</item>
+    /// <item><b>Every match is returned, never the first (K2).</b> Two eligible permissions under the deciding key is an
+    /// ambiguity the caller must not resolve by guessing.</item>
     /// </list>
     /// <para><b>Graph shape — an assumption, stated.</b> SPE container permissions carry the user under
     /// <c>grantedToV2.user</c> (the legacy <c>grantedTo.user</c> is read too) with <c>id</c> typed and <c>email</c> /
     /// <c>userPrincipalName</c> in <c>AdditionalData</c> as strings (Kiota returns JSON scalars as CLR scalars). Only
     /// <c>userPrincipalName</c> is proven by this codebase's writes; <c>id</c> as the holder's object id is the
-    /// assumption <see cref="ContainerUserRole.IsFor"/> already makes, and <c>email</c> follows the documented
-    /// <c>sharePointIdentity</c> shape. A permission missing a field simply does not match on it.</para>
+    /// assumption <see cref="ContainerUserRole.IsFor"/> already makes and the documented list-permissions example shows,
+    /// and <c>email</c> follows the documented <c>sharePointIdentity</c> shape. A permission missing a field simply does
+    /// not match on it.</para>
     /// <para><b><c>internal</c> for testability (task 025, finding H6).</b> The matcher IS finding A-13 (it once compared
     /// the contact's GUID, matched nothing, and <c>/revoke</c> reported success). A pure function over Graph models, so
     /// it is tested directly — no transport, no <c>Mock&lt;HttpMessageHandler&gt;</c> (ADR-038 B1), no reflection (B8).</para>
     /// </remarks>
-    internal static Permission? FindContactPermission(
+    internal static IReadOnlyList<Permission> FindContactPermissions(
         IReadOnlyList<Permission>? permissions,
         SpeMembershipKey contact,
-        IReadOnlySet<string> managedPermissionIds)
+        IReadOnlySet<string> ineligiblePermissionIds)
     {
-        if (permissions == null || contact.IsEmpty) return null;
+        if (permissions == null || contact.IsEmpty) return [];
 
-        bool Eligible(Permission p) => !string.IsNullOrEmpty(p.Id) && !managedPermissionIds.Contains(p.Id);
+        bool Eligible(Permission p) => !string.IsNullOrEmpty(p.Id) && !ineligiblePermissionIds.Contains(p.Id);
 
-        if (contact.ObjectId is { } objectId
-            && permissions.FirstOrDefault(p => Eligible(p) && PermissionUserObjectIds(p).Contains(objectId)) is { } byObjectId)
+        if (contact.ObjectId is { } objectId)
         {
-            return byObjectId;
+            var byObjectId = permissions
+                .Where(p => Eligible(p) && MatchesObjectId(p, objectId))
+                .DistinctBy(p => p.Id, StringComparer.Ordinal)
+                .ToList();
+
+            if (byObjectId.Count > 0)
+            {
+                return byObjectId;
+            }
         }
 
         return contact.Email is { } email
-            ? permissions.FirstOrDefault(p => Eligible(p)
-                && PermissionUserAddresses(p).Any(a => string.Equals(a, email, StringComparison.OrdinalIgnoreCase)))
-            : null;
+            ? permissions
+                .Where(p => Eligible(p) && MatchesEmail(p, email))
+                .DistinctBy(p => p.Id, StringComparer.Ordinal)
+                .ToList()
+            : [];
     }
+
+    /// <summary>
+    /// Every eligible (not <paramref name="ineligiblePermissionIds"/>) permission <paramref name="contact"/> matches under
+    /// EITHER key — the candidates whose holders <see cref="RemoveCoreAsync"/> checks against the internal users (K3)
+    /// before <see cref="FindContactPermissions"/> decides.
+    /// </summary>
+    private static IReadOnlyList<Permission> CandidatePermissions(
+        IReadOnlyList<Permission> permissions,
+        SpeMembershipKey contact,
+        IReadOnlySet<string> ineligiblePermissionIds)
+    {
+        if (contact.IsEmpty) return [];
+
+        return permissions
+            .Where(p => !string.IsNullOrEmpty(p.Id) && !ineligiblePermissionIds.Contains(p.Id)
+                && ((contact.ObjectId is { } objectId && MatchesObjectId(p, objectId))
+                    || (contact.Email is { } email && MatchesEmail(p, email))))
+            .DistinctBy(p => p.Id, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static bool MatchesObjectId(Permission permission, Guid objectId)
+        => PermissionUserObjectIds(permission).Contains(objectId);
+
+    private static bool MatchesEmail(Permission permission, string email)
+        => PermissionUserAddresses(permission).Any(a => string.Equals(a.Trim(), email, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Does the permission name a user (<c>grantedToV2.user</c> or the legacy <c>grantedTo.user</c>) — the only
+    /// kind a contact's permission can be?</summary>
+    private static bool IsUserPermission(Permission permission) => PermissionUsers(permission).Any();
 
     /// <summary>The user identities a permission names: <c>grantedToV2.user</c>, then the legacy <c>grantedTo.user</c>.</summary>
     private static IEnumerable<Identity> PermissionUsers(Permission permission)
@@ -1139,12 +1353,27 @@ public sealed record SpeContainerMembershipResult(
     string? Error);
 
 /// <summary>
-/// #2105: the identity a contact's container permission is matched by (<see cref="SpeContainerMembershipService.FindContactPermission"/>)
+/// The outcome of <see cref="SpeContainerMembershipService.RemoveMembershipsAsync"/>: one result per distinct key, and what
+/// the one paged read established about the container as a whole.
+/// </summary>
+/// <param name="Results">One <see cref="SpeContainerMembershipResult"/> per distinct key.</param>
+/// <param name="NoContactPermissionRemains">#2104 round 2 (F1): <c>true</c> only when the permission collection was read to
+/// its end and every user permission on it is Spaarke-managed (marker-owned) or was deleted by this call — so NO person
+/// holds a permission there that a contact grant could account for, and every revoked grantee, whoever they are, is
+/// confirmed absent. <c>false</c> whenever that is not proven: an incomplete or failed read, unreadable markers, a failed
+/// internal-user check, or any other user permission left in place (an internal user's role included, and — when the
+/// caller did not ask for the markers to be read — an unmatched one).</param>
+public sealed record SpeMembershipRemoval(
+    IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult> Results,
+    bool NoContactPermissionRemains);
+
+/// <summary>
+/// #2105: the identity a contact's container permission is matched by (<see cref="SpeContainerMembershipService.FindContactPermissions"/>)
 /// — the contact's bound Entra object id, its email, or both. Empty when it has neither, which is
 /// <c>RevokeExternalAccessEndpoint.HasNoContainerMembershipKey</c>'s "nothing to clear".
 /// </summary>
 /// <remarks>
-/// A blank email and an all-zero object id are normalised to <see langword="null"/>. Equality compares the email
+/// A blank email and an all-zero object id are normalised to <see langword="null"/>; an email is trimmed. Equality compares the email
 /// case-insensitively (addresses are), so keys work as dictionary keys for <see cref="SpeContainerMembershipService.RemoveMembershipsAsync"/>'s results.
 /// </remarks>
 public sealed record SpeMembershipKey
@@ -1152,7 +1381,7 @@ public sealed record SpeMembershipKey
     public SpeMembershipKey(Guid? objectId, string? email)
     {
         ObjectId = objectId is { } oid && oid != Guid.Empty ? oid : null;
-        Email = string.IsNullOrWhiteSpace(email) ? null : email;
+        Email = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
     }
 
     /// <summary>The contact's bound Entra object id (<c>contact.sprk_externalobjectid</c>), when it has a readable one.</summary>

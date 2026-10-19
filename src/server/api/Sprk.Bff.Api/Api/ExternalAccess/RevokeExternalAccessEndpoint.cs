@@ -594,7 +594,7 @@ public static class RevokeExternalAccessEndpoint
             return NoContainerMembershipKeyOutcome;
         }
 
-        var result = await speContainerMembership.RevokeMembershipAsync(containerId, contactKey, ct);
+        var result = await speContainerMembership.RevokeMembershipAsync(containerId, contactKey, dataverseClient, ct);
 
         if (result.Success)
         {
@@ -763,8 +763,9 @@ public static class RevokeExternalAccessEndpoint
         IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult> speResults =
             resolved.Count == 0
                 ? new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>()
-                : await speContainerMembership.RemoveMembershipsAsync(
-                    containerId, resolved.Select(r => r.Key).ToList(), ct);
+                : (await speContainerMembership.RemoveMembershipsAsync(
+                    containerId, resolved.Select(r => r.Key).ToList(), dataverseClient,
+                    confirmNoContactPermission: false, ct)).Results;
 
         foreach (var (memberContactId, memberKey) in resolved)
         {

@@ -403,8 +403,9 @@ public class RevokeGrantOverlapAndOwnContainerTests
                 TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
 
             mock.Setup(s => s.RevokeMembershipAsync(
-                    It.IsAny<string>(), It.IsAny<SpeMembershipKey>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string containerId, SpeMembershipKey key, CancellationToken _) =>
+                    It.IsAny<string>(), It.IsAny<SpeMembershipKey>(), It.IsAny<DataverseWebApiClient>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, SpeMembershipKey key, DataverseWebApiClient _, CancellationToken _) =>
                 {
                     Containers.Add(containerId);
                     Emails.Add(key.Email ?? string.Empty);
@@ -412,8 +413,10 @@ public class RevokeGrantOverlapAndOwnContainerTests
                 });
 
             mock.Setup(s => s.RemoveMembershipsAsync(
-                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string containerId, IReadOnlyCollection<SpeMembershipKey> keys, CancellationToken _) =>
+                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(), It.IsAny<DataverseWebApiClient>(),
+                    It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, IReadOnlyCollection<SpeMembershipKey> keys, DataverseWebApiClient _,
+                    bool _, CancellationToken _) =>
                 {
                     var results = new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>();
                     foreach (var key in keys)
@@ -423,7 +426,7 @@ public class RevokeGrantOverlapAndOwnContainerTests
                         results[key] = new SpeContainerMembershipResult(true, "permission-166r1", null);
                     }
 
-                    return (IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult>)results;
+                    return new SpeMembershipRemoval(results, NoContactPermissionRemains: false);
                 });
 
             return mock;
