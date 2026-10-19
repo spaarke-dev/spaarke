@@ -449,6 +449,110 @@ public class SubmissionRejectionRuleTests
         Decide(finding, Reject, Settings()).Outcome.Should().Be(SubmissionOutcome.Rejected);
     }
 
+    // ── 073 review F-ALLOW: only an allowlisted reason code may reject ───────────────────────────────────────────
+
+    /// <summary>Every (type, reason) pair the catalogue lists as reject-capable.</summary>
+    public static TheoryData<RuleType, string> ListedReasons()
+    {
+        var data = new TheoryData<RuleType, string>();
+        foreach (var type in Enum.GetValues<RuleType>().Where(RuleDomains.IsBilling))
+        {
+            foreach (var reason in BillingRuleCatalogue.RejectCapableReasons(type).Order(StringComparer.Ordinal))
+            {
+                data.Add(type, reason);
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(Rejecting))]
+    public void AnUnlistedReasonCode_UnderARejectVersion_WithReliableReads_DoesNotReject(RuleType type)
+    {
+        // A reason code added later (a new sub-reason, 072 part E's billing.currency.*) is hold-by-default until it is listed on purpose.
+        foreach (var reason in new[] { "billing.currency.missing", type.ToString().ToLowerInvariant() + ".a_new_reason" })
+        {
+            var finding = Finding(type, Reads(SubjectOf(type), 0.99m, 0.99m), reason);
+
+            // ApprovedRate already holds every reason but a rate above the approved one, under its own, more specific code.
+            ShouldHold(
+                Decide(finding, Reject, Settings()),
+                type == RuleType.ApprovedRate ? SubmissionHoldReasons.ReferenceMissingHolds : SubmissionHoldReasons.ReasonNotRejectCapable);
+        }
+    }
+
+    [Fact]
+    public void AForeignCurrencyFinding_IsFlagOnly_ItsReasonIsNotListed_D115()
+    {
+        var invoice = BillingSubject.ForInvoice();
+        var finding = Finding(RuleType.RequiredData, Reads(invoice, 0.99m), BillingReasonCodes.CurrencyNotUsd, invoice);
+
+        BillingRuleCatalogue.IsRejectCapableReason(RuleType.RequiredData, BillingReasonCodes.CurrencyNotUsd).Should().BeFalse();
+        ShouldHold(Decide(finding, Reject, Settings()), SubmissionHoldReasons.ReasonNotRejectCapable);
+    }
+
+    [Theory]
+    [MemberData(nameof(ListedReasons))]
+    public void AListedReasonCode_StillRejects_TheControl(RuleType type, string reason)
+    {
+        var finding = Finding(type, Reads(SubjectOf(type), 0.99m, 0.99m), reason);
+
+        Decide(finding, Reject, Settings()).Outcome.Should().Be(SubmissionOutcome.Rejected, $"{type} {reason} is on the allowlist");
+    }
+
+    [Fact]
+    public void TheAllowlist_IsEmptyForEveryTypeThatMayNotReject_AndNonEmptyForEveryTypeThatMay()
+    {
+        foreach (var type in Enum.GetValues<RuleType>().Where(RuleDomains.IsBilling))
+        {
+            if (BillingRuleCatalogue.IsConsequenceAllowed(type, Reject))
+            {
+                BillingRuleCatalogue.RejectCapableReasons(type).Should().NotBeEmpty(type.ToString());
+            }
+            else
+            {
+                BillingRuleCatalogue.RejectCapableReasons(type).Should().BeEmpty(type.ToString());
+            }
+        }
+
+        ((Action)(() => BillingRuleCatalogue.RejectCapableReasons(RuleType.Threshold))).Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Theory]
+    [MemberData(nameof(ListedReasons))]
+    public void EveryAllowlistedReasonCode_IsARealCode_EmittedByItsTypesHandler(RuleType type, string reason)
+    {
+        // The guard that keeps the allowlist from rotting: the code is a BillingReasonCodes constant, and the type's own handler source
+        // references that constant (a renamed or removed code fails here, not silently in production).
+        var constant = typeof(BillingReasonCodes)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(f => f.IsLiteral && (string?)f.GetRawConstantValue() == reason)
+            .Select(f => f.Name)
+            .ToArray();
+        constant.Should().ContainSingle($"'{reason}' must be exactly one BillingReasonCodes constant");
+
+        var handler = File.ReadAllText(HandlerSource(type));
+        handler.Should().Contain($"BillingReasonCodes.{constant[0]}", $"{type}Handler must emit {reason}");
+    }
+
+    private static string HandlerSource(RuleType type)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var handlers = Path.Combine(dir.FullName, "src", "server", "api", "Sprk.Bff.Api", "Services", "Signals", "Billing", "Handlers");
+            if (Directory.Exists(handlers))
+            {
+                return Path.Combine(handlers, $"{type}Handler.cs");
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new InvalidOperationException($"Could not locate the repository root from '{AppContext.BaseDirectory}'.");
+    }
+
     // ── The settings ─────────────────────────────────────────────────────────────────────────────────────────────
 
     [Theory]
@@ -863,18 +967,17 @@ public class SubmissionRejectionRuleTests
     }
 
     [Fact]
-    public async Task ARealRequiredDataFinding_ForAReliablyReadBlankField_AndForAForeignCurrency_Rejects()
+    public async Task ARealRequiredDataFinding_ForAReliablyReadBlankField_Rejects()
     {
+        // 073 review F-ALLOW / D-115: a foreign currency is flag-only (AForeignCurrencyFinding_IsFlagOnly_ItsReasonIsNotListed_D115);
+        // the blank required field is the reason RequiredData rejects on.
         var rule = Version("BILL-REQ", RuleType.RequiredData, """{"type":"RequiredData","fields":["billingPeriodStart"]}""") with { Consequence = Reject };
         var blank = Request(Fee(0)) with { BillingPeriodStart = null }; // the header confidence map still carries 0.95 for the field
-        var foreign = Request(Fee(0)) with { Currency = "EUR" };
 
         var blankDecision = await Sut(new FakeSettings(Settings())).DecideAsync(Evaluator().Evaluate(blank, Loaded(rule)), CancellationToken.None);
-        var foreignDecision = await Sut(new FakeSettings(Settings())).DecideAsync(Evaluator().Evaluate(foreign, Loaded(rule)), CancellationToken.None);
 
         blankDecision.Outcome.Should().Be(SubmissionOutcome.Rejected);
-        foreignDecision.Outcome.Should().Be(SubmissionOutcome.Rejected);
-        foreignDecision.DecidingFindings.Single().Finding.ReasonCode.Should().Be(BillingReasonCodes.CurrencyNotUsd);
+        blankDecision.DecidingFindings.Single().Finding.ReasonCode.Should().Be(BillingReasonCodes.RequiredFieldMissing);
     }
 
     // ── The evaluation-time gate: a stored version whose consequence its type may not carry ──────────────────────

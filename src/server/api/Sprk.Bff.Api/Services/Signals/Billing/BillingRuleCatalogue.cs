@@ -187,6 +187,38 @@ public static class BillingRuleCatalogue
         return $"A {ruleType} rule may not have the consequence {chosen}: {why}. Allowed: {allowed}.";
     }
 
+    // ── Reject-capable reason codes (ebilling-r1 task 073 review, F-ALLOW) ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The finding reason codes (<see cref="BillingReasonCodes"/>) on which a rule of this type may reject a submission: an allowlist, so
+    /// a reason code added later (a new sub-reason, a currency finding) only ever holds or flags until it is listed here on purpose. The
+    /// rejection rule checks it as part of eligibility. Empty for a type that never rejects (TimeIncrement, DailyHoursCap,
+    /// NonBillableActivity, AiObservation) or holds only (ApprovedTimekeeper, D-89). Not listed on purpose:
+    /// the ApprovedRate reference-missing reasons (071 judgment call 2), the line-level Duplicate reasons (design.md 6.1) and
+    /// <see cref="BillingReasonCodes.CurrencyNotUsd"/> (flag-only, D-115).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
+    public static IReadOnlySet<string> RejectCapableReasons(RuleType ruleType) => ruleType switch
+    {
+        RuleType.ApprovedRate => RejectCapable(BillingReasonCodes.RateAboveApproved),
+        RuleType.ExpenseRule => RejectCapable(BillingReasonCodes.ExpenseCodeNotReimbursable, BillingReasonCodes.ExpenseAmountOverCap),
+        RuleType.InvoiceAge => RejectCapable(BillingReasonCodes.InvoiceTooOld),
+        RuleType.CoreRecordWindow => RejectCapable(
+            BillingReasonCodes.BeforeCoreRecordOpened, BillingReasonCodes.AfterCoreRecordClosed, BillingReasonCodes.CoreRecordClosed),
+        RuleType.Duplicate => RejectCapable(BillingReasonCodes.DuplicateInvoiceNumber),
+        RuleType.RequiredData => RejectCapable(BillingReasonCodes.RequiredFieldMissing),
+        RuleType.ApprovedTimekeeper or RuleType.TimeIncrement or RuleType.DailyHoursCap or RuleType.NonBillableActivity
+            or RuleType.AiObservation => RejectCapable(),
+        _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
+    };
+
+    /// <summary>True when <see cref="RejectCapableReasons"/> lists <paramref name="reasonCode"/> (ordinal) for the type.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
+    public static bool IsRejectCapableReason(RuleType ruleType, string? reasonCode) =>
+        reasonCode is not null && RejectCapableReasons(ruleType).Contains(reasonCode);
+
+    private static IReadOnlySet<string> RejectCapable(params string[] reasonCodes) => reasonCodes.ToFrozenSet(StringComparer.Ordinal);
+
     /// <summary>
     /// One deterministic sentence and formal form for a body that <see cref="PolicyVersionValidator.ValidateForSave"/> has
     /// accepted for <paramref name="ruleType"/>. Same body, same text; no lookup is read.

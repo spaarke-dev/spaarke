@@ -40,6 +40,13 @@ public static class SubmissionHoldReasons
     public const string DuplicateAtLineLevel = "duplicate_at_line_level";
 
     /// <summary>
+    /// The finding's reason code is not on the type's reject-capable allowlist (<see cref="BillingRuleCatalogue.RejectCapableReasons"/>):
+    /// a reason added later, or one that is flag-only by decision (a foreign currency, D-115), holds until it is listed on purpose
+    /// (073 review F-ALLOW).
+    /// </summary>
+    public const string ReasonNotRejectCapable = "reason_not_reject_capable";
+
+    /// <summary>
     /// The settings could not be read (the reader threw), so there is no threshold to apply. Transient: task 049 may retry the decision
     /// (073 review K1).
     /// </summary>
@@ -127,7 +134,8 @@ public sealed record SubmissionDecision
 /// <para><b>Holds beyond FR-26.</b> D-89: ApprovedTimekeeper never rejects, by type, not by 046's cap staying under the threshold.
 /// 071 judgment call 2: an ApprovedRate finding with no approved rate to compare against never rejects; only
 /// <see cref="BillingReasonCodes.RateAboveApproved"/> can. Duplicate rejects at invoice level only. AiObservation never rejects, even if
-/// a stored row says Reject (defence in depth beyond the publish check and the evaluation gate).</para>
+/// a stored row says Reject (defence in depth beyond the publish check and the evaluation gate). And only a reason code on the type's
+/// allowlist (<see cref="BillingRuleCatalogue.RejectCapableReasons"/>) can reject: a new reason code holds until it is listed.</para>
 /// <para><b>No I/O but the settings read.</b> It writes nothing and renders nothing: task 049 persists the findings and the outcome.
 /// A withheld Duplicate (D-112) carries no value text into <see cref="FindingDecision.ValuesRead"/>.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: none decides a submission outcome (grep "Reject" under
@@ -278,6 +286,12 @@ public sealed class SubmissionRejectionRule
         if (finding.RuleType == RuleType.Duplicate && finding.Subject.Kind != BillingSubjectKind.Invoice)
         {
             return Held(SubmissionHoldReasons.DuplicateAtLineLevel);
+        }
+
+        // Only a reason code the catalogue lists for the type may reject; any other holds by default (073 review F-ALLOW).
+        if (!BillingRuleCatalogue.IsRejectCapableReason(finding.RuleType, finding.ReasonCode))
+        {
+            return Held(SubmissionHoldReasons.ReasonNotRejectCapable);
         }
 
         // 3. The threshold can be used.
