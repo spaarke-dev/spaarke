@@ -194,7 +194,11 @@ public static class BillingFindingSignalMapper
             .ThenBy(m => ContentKey(m.Finding), StringComparer.Ordinal)
             .ToList();
         var consequence = members.Select(m => m.Consequence).MaxBy(Strength);
-        var primary = members.First(m => m.Consequence == consequence);
+        // ontology-r1 W re-check F2: in a Flag tie a flag-only note sorts first by code (currency_not_usd < missing_field), and as the
+        // primary it would title and rank a real Flag breach as a note. A real breach at the winning consequence takes precedence.
+        var primary = members.Where(m => m.Consequence == consequence)
+            .OrderBy(m => BillingRuleCatalogue.IsFlagOnlyReason(m.Finding.ReasonCode) ? 1 : 0)
+            .First();
         var withheld = members.Any(m => m.Finding.DetailWithheld);
 
         var (entity, subjectId, displayName) = SubjectOf(primary.Finding.Subject, subjects);

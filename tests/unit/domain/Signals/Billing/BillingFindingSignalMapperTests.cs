@@ -138,6 +138,27 @@ public class BillingFindingSignalMapperTests
     }
 
     [Fact]
+    public void InAFlagTie_ARealBreachIsThePrimary_NotAFlagOnlyNote_OntologyWRecheckF2()
+    {
+        // currency_not_usd sorts before missing_field; both are Flag here, and the author's Do / Critical ranking belongs to the breach.
+        var rule = Version("CD-REQUIRED", RuleType.RequiredData, """{"type":"RequiredData","fields":["billingPeriodStart"]}""", lane: SignalWriter.LaneDo)
+            with { Severity = SignalWriter.SeverityCritical, ShortHeadline = "Firm authored headline", Consequence = (int)BillingConsequence.Flag };
+        var request = Request(Fee(0)) with { BillingPeriodStart = null, Currency = "EUR" };
+        var result = Evaluator().Evaluate(request, Loaded(rule));
+
+        var mapping = MapAll(request, result).Should().ContainSingle().Subject;
+
+        mapping.ReasonCodes.Should().Equal(BillingReasonCodes.CurrencyNotUsd, BillingReasonCodes.RequiredFieldMissing);
+        mapping.Consequence.Should().Be(BillingConsequence.Flag);
+        mapping.Request.ShortHeadline.Should().Be("Firm authored headline", "the missing field is the breach, not the currency note");
+        mapping.Request.Lane.Should().Be(SignalWriter.LaneDo);
+        mapping.Request.Severity.Should().Be(SignalWriter.SeverityCritical);
+        mapping.Request.MessageTemplate.Should().NotBe(BillingRuleCatalogue.CurrencyNotUsdTemplate);
+        mapping.Request.EvidenceRefs!.Should().Contain(e => e.Kind == BillingFindingSignalMapper.ReasonEvidenceKind
+                                                            && e.Text == BillingRuleCatalogue.CurrencyNotUsdTemplate, "the note is still carried");
+    }
+
+    [Fact]
     public void ARealBreach_KeepsTheRulesHeadlineLaneAndSeverity_OntologyF2()
     {
         // Control for the test above: only a flag-only reason is moved to the Flag level.

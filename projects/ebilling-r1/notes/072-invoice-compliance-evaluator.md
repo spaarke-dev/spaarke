@@ -575,7 +575,7 @@ re-check items (F2, the EventId, the optional mapper test). Read first: sections
 | F1-a | `4795a4209` | `core_record_window.closed_to_billing` and `core_record_window.core_record_closed` get their own token-free `ReasonTemplate` (`ClosedToBillingTemplate`, `NoCloseDateTemplate`). The mapper already took a reason's template before the version's and the type's, so only the catalogue changed. `before_open` / `after_close` keep the version's template (they are about the dates). |
 | F2 | `2ef271b57` | `BillingRuleCatalogue.ReasonHeadline`: a reason with its own sentence has its own `sprk_name`. The mapper uses it when the PRIMARY reason has one (and the group is not withheld). A flag-only primary reason takes lane Decide and severity Info. |
 | F1-b | `0da5c4b08` | A downgraded firm version is left out of the D-39 precedence set (`!downgraded.ContainsKey(...)`). It still runs as Flag; the client default stays in force. |
-| EventId | `229cdbd7a` | The consequence-downgrade Warning has its own `EventId` 50316 (`PolicyVersionConsequenceDowngraded`), no longer 50301. |
+| EventId | `229cdbd7a` | The consequence-downgrade Warning has its own `EventId` (`PolicyVersionConsequenceDowngraded`), no longer 50301. First 50316; moved to 50318 in the re-check round, because ontology 042b's `ParticipantShareFailed` (50316) and `FilingReownFailed` (50317) take those ids on `origin/docs/ontology-platform-design`. |
 | Optional mapper test | `05bdb0213` | A downgraded version maps to a Flag Signal with a Flag fingerprint. A pin: the behaviour already held, so no fail-before. |
 | A7 extension | `61a2bd9c9` | A line with Hours (not negative) and no Amount lists Amount as an unknown read (null value, unknown confidence, below the floor). |
 | Currency | `3668c83da` | Confidence is checked before "not USD"; `US$` and `USD$` are USD in the one shared normaliser. |
@@ -648,7 +648,7 @@ so the tests compile and fail on behaviour). Counts are failing cases.
 | F1-a (mapper: Closed x3 template cases, Final with no close date; the date-reason control passes on both) | 4 | 0 |
 | F2 (the two `ReasonTemplate` tests, the D-115 theory x3, the new flag-only lane/severity test; the real-breach and merged controls pass on both) | 10 | 0 |
 | F1-b (the ExpenseRule case and the TimeIncrement variant; the valid-firm and null-consequence controls pass on both) | 2 | 0 |
-| EventId (the K2 Warning's `EventId` is 50316, not 50301) | 1 | 0 |
+| EventId (the K2 Warning's `EventId` is 50318, not 50301) | 1 | 0 |
 | A7 extension (the hours-no-amount case; the both-present control passes on both) | 1 | 0 |
 | Currency (low-confidence EUR x2, `US$` x3, `USD$` in two paths, RequiredData `US$` and `USD$`) | 9 | 0 |
 | Optional mapper test (downgraded version, Flag Signal, fingerprint) | pin, 0 | 0 |
@@ -665,3 +665,15 @@ Existing tests changed: `ADowngradedFirmVersion_StillDisplacesTheClientDefault_D
 expects USD.
 
 **Publish delta.** Not measured. Method bodies, string constants and one `EventId`; no package, project file or DI registration.
+
+## 14. ontology-r1 re-check of the W review fixes (2026-10-19)
+
+ontology-r1 re-checked `4795a4209^..c02200029`. Headlines, the downgraded firm version, the downgrade test, F1-a, hours with no amount and the shared currency normaliser all held. Mutations were killed: `ReasonHeadline` returning null, the downgrade displacing the default again, removing "US$", and the stored consequence used instead of the effective one.
+
+| Finding | Fix |
+|---|---|
+| F4: `EventId` 50316 collides with ontology 042b's `ParticipantShareFailed` (`origin/docs/ontology-platform-design`, `DecisionRecordWriter.cs:377`) once both reach master | `PolicyVersionConsequenceDowngraded` is 50318. The ontology range is free to 50339; 50340+ is `SignalEvaluationTriggerHandler`. |
+| F2: in a Flag tie, the flag-only `currency_not_usd` sorted before `missing_field` and became the primary. The Signal was titled as the currency note at Decide / Info, and the author's Do / Critical breach showed only in evidence. Reject was correct. | The primary is the first member at the winning consequence that is not flag-only (a flag-only one only if no other). Test `InAFlagTie_ARealBreachIsThePrimary_NotAFlagOnlyNote_OntologyWRecheckF2`. |
+
+**K1 (known limit, no code).** A low-confidence foreign currency with only RequiredData in force produces no finding: RequiredData stays quiet below the confidence floor, and D-115's "rates not checked" fires only when a money rule (ApprovedRate or ExpenseRule) was in force and skipped. Nothing is judged as if USD, because no rate rule ran. With a money rule in force, the D-115 "unclear" finding fires.
+

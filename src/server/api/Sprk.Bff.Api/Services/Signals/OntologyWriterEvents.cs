@@ -89,7 +89,7 @@ public static class OntologyWriterEvents
     /// id, not <see cref="PolicyVersionInvalid"/>: that one is an Error for a refused version, and an alert on it must not also count
     /// a version that is still evaluated. Structured properties: <c>SubmissionId</c>, <c>PolicyCode</c>, <c>PolicyVersionId</c>,
     /// <c>RuleType</c>, <c>Consequence</c>, <c>Reason</c>; never the rule body or template.</summary>
-    public static readonly EventId PolicyVersionConsequenceDowngraded = new(50316, nameof(PolicyVersionConsequenceDowngraded));
+    public static readonly EventId PolicyVersionConsequenceDowngraded = new(50318, nameof(PolicyVersionConsequenceDowngraded));
 
     /// <summary>Task 141 fix round 2 (K1): <c>TaskActionCore</c> could not build a task's regarding pair because Dataverse refused
     /// the BFF identity (the same detection <see cref="SignalWriter"/> uses). Logged at Error; the core still returns
