@@ -174,10 +174,6 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     }
 
     /// <inheritdoc />
-    public Task<SubmissionAfterStepsResult> ResumeAsync(Guid submissionId, string? correlationId, CancellationToken ct = default)
-        => throw new NotImplementedException("049 D-122 change implements ResumeAsync");
-
-    /// <inheritdoc />
     public async Task<SubmissionAfterStepsResult> RunAsync(SubmissionPersistResult persisted, string? correlationId, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(persisted);

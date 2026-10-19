@@ -50,12 +50,6 @@ public interface IInvoiceSubmissionAfterSteps
     /// </summary>
     /// <exception cref="Signals.DecisionRecordRefusedException">The record would be refused.</exception>
     void PreflightRejection(SubmissionEvaluationOutcome outcome);
-
-    /// <summary>
-    /// Resumes the after-steps for a Processing submission that already links its invoice, from the stored state; re-runs totals; never
-    /// re-runs AI.
-    /// </summary>
-    Task<SubmissionAfterStepsResult> ResumeAsync(Guid submissionId, string? correlationId, CancellationToken ct = default);
 }
 
 /// <summary>What <see cref="IInvoiceSubmissionAfterSteps.RunAsync"/> did.</summary>
