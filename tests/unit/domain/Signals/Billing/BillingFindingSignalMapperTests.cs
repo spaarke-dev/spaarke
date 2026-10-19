@@ -584,6 +584,21 @@ public class BillingFindingSignalMapperTests
     }
 
     [Fact]
+    public void ADowngradedVersion_MapsToAFlagSignal_WithTheMatchingFingerprint_K2()
+    {
+        // An ApprovedTimekeeper version stored as Reject (written around publish) is evaluated as Flag; the Signal and its
+        // fingerprint must say Flag too, or 049 would raise a Reject Signal 073 never decides on.
+        var stored = Version("CD-TIMEKEEPER", RuleType.ApprovedTimekeeper) with { Consequence = (int)BillingConsequence.Reject };
+        var request = Request(Fee(0) with { Timekeeper = Unmatched(Sprk.Bff.Api.Services.Finance.Resolution.TimekeeperUnmatchedReason.NotOnRoster) });
+        var result = Evaluator().Evaluate(request, Loaded(stored));
+
+        var mapping = MapAll(request, result).Should().ContainSingle().Subject;
+
+        mapping.Consequence.Should().Be(BillingConsequence.Flag);
+        mapping.Fingerprint.Should().Be(BillingFindingSignalMapper.FingerprintOf(mapping.ReasonCodes, BillingConsequence.Flag)).And.EndWith("|Flag");
+    }
+
+    [Fact]
     public void AChangedReasonSet_OrAChangedConsequence_GivesAnotherFingerprint_A4()
     {
         var codes = new[] { BillingReasonCodes.ExpenseAmountOverCap, BillingReasonCodes.ExpenseCodeNotReimbursable };
