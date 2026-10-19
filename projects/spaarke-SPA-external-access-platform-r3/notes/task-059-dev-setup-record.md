@@ -246,6 +246,32 @@ R3 shows **`spaarke-bff-api-prod` with tenant-wide consent to the DEV BFF app** 
   - `authenticationBehaviors.removeUnverifiedEmailClaim` = true.
 - Ids are saved in the scratchpad (`stageA-ids.json`). Rollback: `az ad app delete --id 5859e812-e5e7-452c-be21-1e5aa7b4d478`.
 
+### Stage B — 2026-10-19 21:13:14Z, owner approval "059 stage B is approved"
+
+- **Precondition:** the live dev BFF is `00aba6d99` (deployed 21:09–21:11Z, ProductVersion verified). `git merge-base --is-ancestor 77d74f305 00aba6d99` gives exit 0, so the build contains 077 and its fix round.
+- **Before-snapshot taken just before the PATCH** (scratchpad `before-stageB.json`, `before-stageB-ab.json`). It matched R2: token version null, known [`170c98e1`], 4 scopes, 10 pre-authorized clients, access-token claims `email`, `preferred_username`, `upn`, `acct`; `authenticationBehaviors` null.
+- B1: PATCH `api` + `optionalClaims` (`bff-after.json`, lists extended from the snapshot; `acceptMappedClaims` was null and is left out). Exit 0.
+- B2: PATCH `authenticationBehaviors` `{"removeUnverifiedEmailClaim":true}`. Exit 0.
+- **Read after (matches §5):**
+  - `AzureADMultipleOrgs`;
+  - `requestedAccessTokenVersion` = **2**;
+  - known clients `5859e812`, `170c98e1`;
+  - scopes `access_as_user`, `access_as_external_user`, `SDAP.Access`, `user_impersonation`, all enabled;
+  - 10 pre-authorized clients (unchanged);
+  - access-token claims `email`, `preferred_username`, `upn`, `acct`, `given_name`, `family_name`;
+  - `removeUnverifiedEmailClaim` = true.
+- **Session smoke check (Azure CLI, a Spaarke-tenant member; claim shapes only, no values):**
+
+  | Token | Shape | `/api/me` |
+  |---|---|---|
+  | Cached, requested for `api://1e40baad…` (issued before the switch) | `ver` 1.0, `aud` = `api://…`, `sts.windows.net` issuer, `appidacr`, `email` present | 200 |
+  | Fresh, requested for the bare app id (issued after the switch; Entra backdates `iat` by ~5 min) | `ver` **2.0**, `aud` = **bare GUID**, `login.microsoftonline.com/{tid}/v2.0` issuer, `azpacr` (no `appidacr`), `email` **present** | **200** |
+
+  Anonymous `/api/me` 401; `/healthz` 200.
+- App Insights, 21:13:14Z → 21:15:44Z (ingestion lags a few minutes): no `sdap.auth.deny.*`. One 401, on `GET /` (no route, anonymous). Re-run after the browser checks below.
+- **Still open (§5 per-surface check, owner):** fresh-session sign-ins to Console, a PCF, the Office add-in, the Teams/A8 SPA and the Copilot plugin if in use. A guest token's `email` (UAC's question for task 186) is not proved by the member token above.
+- Rollback unchanged (§5): PATCH back from `before-stageB.json` and reset `authenticationBehaviors`; C before B once stage C runs; the BFF stays at a build containing 077 for 90 minutes after.
+
 ### Side finding (owner-approved App Insights read, 2026-10-19): `IDX10214` and `IDX40001` on dev are log noise, not failures
 
 - App Insights `spe-insights-dev-67e2xz`, last 6 h.
