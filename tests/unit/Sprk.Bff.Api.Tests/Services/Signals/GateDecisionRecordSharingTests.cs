@@ -764,6 +764,25 @@ public sealed class GateDecisionRecordSharingTests
         world.RecordSharees(RecordId).Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task AtWrite_ACommunicationFiledByAThreadJoin_WhenTheResolverFaults_FailsClosedWithOneFilingReownWarning()
+    {
+        var world = ThreadFiledCommunication();
+        var fault = new InvalidOperationException("Test: the ownership resolver faulted.");
+        world.Ownership.Setup(r => r.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>())).ThrowsAsync(fault);
+
+        await world.Sharing.ShareAtWriteAsync(RecordId, CommunicationId, Owner);
+
+        // Fail-closed: a team-owned communication returns before any participant grant, so a resolver fault leaves the record user-owned
+        // with no share (never shared to the communication's sharees instead), and the fault is logged once (uac-r2 #2113 review F3).
+        world.Calls.Should().NotContain(c => c.StartsWith("assign:", StringComparison.Ordinal));
+        world.Calls.Should().NotContain(c => c.StartsWith("grant:", StringComparison.Ordinal));
+        world.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owninguser")?.Id.Should().Be(Owner);
+        world.RecordSharees(RecordId).Should().BeEmpty();
+        world.Log.Entries.Where(e => e.Level >= LogLevel.Warning).Should().ContainSingle("the resolver's fault is logged once")
+            .Which.Should().Match<LogEntry>(e => e.EventId == DecisionRecordEvents.FilingReownFailed && ReferenceEquals(e.Exception, fault));
+    }
+
     // ── 042b round 3 K2: a share a failed revoke left on the team-owned record goes on the next filing ──────────
 
     [Fact]

@@ -110,10 +110,10 @@ public sealed class GateDecisionRecordSharing
     /// </summary>
     public async Task ShareAtWriteAsync(Guid recordId, Guid communicationId, Guid ownerUserId)
     {
-        bool filed;
+        bool filedOrTeamOwned;
         try
         {
-            filed = await ShareWithCommunicationShareesAsync(communicationId, [new GateRecord(recordId, ownerUserId, null, [])]).ConfigureAwait(false);
+            filedOrTeamOwned = await ShareWithCommunicationShareesAsync(communicationId, [new GateRecord(recordId, ownerUserId, null, [])]).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -121,7 +121,7 @@ public sealed class GateDecisionRecordSharing
             return;
         }
 
-        if (!filed)
+        if (!filedOrTeamOwned)
             return;
 
         try
