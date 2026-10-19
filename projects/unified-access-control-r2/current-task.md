@@ -7,7 +7,7 @@
 > - **Delete inventory:** `notes/core-record-delete-inventory.md`.
 > - **Narrative:** the checkpoint commit messages.
 
-> **Last Updated**: 2026-10-18 (checkpoint #48).
+> **Last Updated**: 2026-10-19 (checkpoint #49).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -21,14 +21,14 @@
 1. **036 ADR conflict (auth): STILL OPEN.** The owner leans C and asked what the conflict is. It was explained plainly on 2026-10-18; the C / B / A answer is pending. 036 is held until then.
 2. Role changes on dev: **DONE** (round 103 item 2). Other environments need the same edits at provisioning.
 3. Model 1, ACME: the dry run found 0 changes, so nothing was applied (round 103 item 3).
-4. Core-record delete: **APPROVED as D1–D8** (round 103 item 4). The owner may still correct UAC's reading. Next: a design note, then the build, plus D9 (the sprk_policy_matter Cascade in the solution XML).
+4. Core-record delete: **APPROVED as D1–D8** (round 103 item 4). The design is `notes/core-record-delete-design.md` (4a353772b). D9 is already on master. **Owner Q1–Q5 are pending:** the named role A/B, SPE recycle bin vs permanent, empty dedicated containers, a DR for the delete, and Signals cited by kept DRs. Q6 (rate cards, eBilling tables) is with ebilling.
 5. 036 flag: R3 is tasked and has acknowledged. It needs the merge sha, a deploy, and the owner's confirmation in R3's session.
 
 ## Open PRs (UAC)
 | PR | Issue | Worktree / branch | State |
 |---|---|---|---|
 | **#2078** (draft) | #1074, #1567 (036) | C:/wt036 `feat/uac-036-fr20-flag-gated-swap` @ **e7a8392bb** (pushed; master merged at 953fd6446) | Owner decisions (a) and (f) are built.<br>- **(a)**: a WorkforceHome-linked systemuser is confirmed app-only, naming the principal.<br>- **(f)**: `$orderby=modifiedon desc`, CacheVersion 2.<br>**Adversarial pass 1: 0 F.** Its K-items, to fix in the next round (batched with the owner's ADR answer):<br>- add a Verify bullet (vi) to guide §12.8 for a WorkforceHome live check;<br>- soften the guide's "exactly what the model-driven app allows" (team-inherited roles are an open question);<br>- add a 15 s linked timeout on the app-only calls;<br>- update the probe comments at :11 and :192-196.<br>The ADR edits are drafted in `notes/036-adr-edits-owner-a-f.md`. They are **NOT applied**: hold them until the owner's C/B/A answer. B1 wording note: the app-only calls DO send MSCRMCallerID, so "impersonating" is accurate. Pass 2 runs after that round. |
-| #2084 | #2084 | C:/wt2084 `feat/uac-2084-policy-secure-lineage` | An implementer agent is building it: sprk_policy/policyversion lineage, SRO Read, resolver binding at :1154, and tests. After it lands: 2 adversarial passes (ontology runs theirs), merge, the SRO role on dev (owner authorized UAC role changes in round 103), R3 deploy, live gate. |
+| **#2102** (draft) | #2084 | C:/wt2084 @ 17ff59361 | Built to A3: refuse-before-write with `ontology.admin.rule_held_secure` 409, 503 on fault, no ownerid bind; lineage policy/version; Signal-cites exclusion; RuleWizard mapping. The dev probe refusals are recorded in the role config. **Waiting on ontology's 2 adversarial passes.** Then: fix, merge, SRO -Apply/-Verify on dev, R3 deploy (BFF before or with Console), live gate. |
 
 ## Merged 2026-10-18
 - **#2063 (099b) `d7eabba3b`**: merged after the union-resolved conflict with 186. R3 deploys it together with 186. **Next: after R3's after-notice, run `Backfill-RecordOwnership.ps1` -Apply, then VERIFY, then the 099b live gate, then close #1010.**
@@ -49,6 +49,7 @@
 - **#2095**: InvoiceReviewService document refile skips the hook (ebilling).
 - **#2097**: OutputOrchestrator's EntityReference/Money values are unwritable (orchestrator owner).
 - **#2098**: the push costs about 17 calls per child, and a 500-child push can exceed 230 s (queue it).
+- **#2101**: DELETE /api/v1/documents/{id} orphans the SPE file (found by the delete design).
 - **#2100**: per-family Secure-team guard follow-up for task 178 (ebilling D-112 A1(b), K-i).
 - **#2087**: commented that the UAC part was already fixed by #2083.
 
@@ -65,6 +66,7 @@
     - tests: must-fire, must-not-fire and resolver failure.
     Ontology runs 2 adversarial passes on it. The code-uniqueness oracle is an accepted known limit.
 - **ebilling**:
+  - **#2095 (InvoiceReviewService refile):** re-check of a69e703fc..5abdaf7fb found **F1**: the resume path stamps Confirmed before the isolation read. Sent back to them; waiting for the fix range. K1 is an optional CancellationToken.None test.
   - **015:** re-check PASS.
   - **D-112:** a secure-root-set subset rule, with 4 conditions on `SecureRootsAboveAsync` (in their 072 POML).
   - **#2081 invoice part:** rounds 1–3 PASS (update-only impersonated overload plus wire tests). #2090 filed (Optimistic mode is a no-op).
