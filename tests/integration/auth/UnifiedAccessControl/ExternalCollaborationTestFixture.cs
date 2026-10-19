@@ -116,6 +116,12 @@ internal sealed class WorkforceCeilingDouble : IDataversePrivilegeChecker
 
     public IDataversePrivilegeChecker? Inner { get; set; }
 
+    /// <summary>
+    /// Task 099b: answers the owner-team question (<see cref="TeamHasReadPrivilegeAsync"/>) when set; otherwise it goes to
+    /// <see cref="Inner"/>. A host whose real checker has no ServiceClient sets a team double here.
+    /// </summary>
+    public IDataversePrivilegeChecker? OwnerTeams { get; set; }
+
     public void Reset()
     {
         Ceiling = WorkforceRoleCeiling.Available(OwnerPrerequisite);
@@ -127,6 +133,10 @@ internal sealed class WorkforceCeilingDouble : IDataversePrivilegeChecker
 
     public Task<IReadOnlySet<string>> GetReadableEntitiesAsync(Guid userOid, CancellationToken ct) =>
         (Inner ?? throw new InvalidOperationException("No inner checker.")).GetReadableEntitiesAsync(userOid, ct);
+
+    public Task<bool> TeamHasReadPrivilegeAsync(Guid teamId, string entityLogicalName, bool fresh, CancellationToken ct) =>
+        (OwnerTeams ?? Inner ?? throw new InvalidOperationException("No inner checker."))
+            .TeamHasReadPrivilegeAsync(teamId, entityLogicalName, fresh, ct);
 
     public Task<WorkforceRoleCeiling> GetWorkforceRoleCeilingAsync(CancellationToken ct)
     {

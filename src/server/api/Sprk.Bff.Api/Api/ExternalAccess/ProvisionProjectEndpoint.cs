@@ -1546,18 +1546,33 @@ public static class ProvisionProjectEndpoint
             "status={Status} reowned={Reowned} remaining={Remaining} ({PerTable}) detail={Detail}. TraceId={TraceId}",
             root.WireToken, recordId, pass.Status, summary.Reowned, summary.Remaining, perTable, pass.Detail, traceId);
 
-        return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-            $"The {root.DisplayLabel.ToLowerInvariant()} is secured, shared and has its document container, but its existing " +
-            "related records (documents, events, to-dos, communications, memos) are not all secured yet: " +
-            $"{summary.Reowned} re-owned, {summary.Remaining} remaining" + (perTable.Length > 0 ? $" ({perTable})" : "") +
-            (pass.Detail is null ? "" : $" — {pass.Detail}") +
-            ". No related record is more exposed than before this call. Calling provisioning again (the same caller may) " +
-            "completes them; the secure-child reconciliation completes them regardless.",
-            traceId,
+        // UAC task 099b review round 3 (K2): a grant row the owner team may not own is not completed by a repeat call (nor by
+        // the reconciliation) until an administrator adds the privilege, so the detail does not promise it, and the cause is
+        // named as an extension (the reason code stays children_incomplete: the record IS provisioned).
+        var blockedByOwnerPrivilege = pass.BlockedByGrantOwnerPrivilege;
+        var extensions = new List<(string Key, object? Value)>
+        {
             (ReasonKey, ReasonChildrenIncomplete),
             ("childrenReowned", summary.Reowned),
             ("childrenRemaining", summary.Remaining),
-            ("childTables", summary.Tables));
+            ("childTables", summary.Tables),
+        };
+        extensions.AddRange(SecureChildPassSummary.BlockedByExtensions(pass));
+
+        return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+            $"The {root.DisplayLabel.ToLowerInvariant()} is secured, shared and has its document container, but its existing " +
+            "related records (documents, events, to-dos, communications, memos, access grants) are not all secured yet: " +
+            $"{summary.Reowned} re-owned, {summary.Remaining} remaining" + (perTable.Length > 0 ? $" ({perTable})" : "") +
+            (pass.Detail is null ? "" : $" — {pass.Detail}") +
+            ". No related record is more exposed than before this call. " +
+            (blockedByOwnerPrivilege
+                ? "Its access grants cannot be secured until an administrator gives the secure owner team's security role " +
+                  "Read on External Record Access; calling provisioning again before that does not complete them, and " +
+                  "calling it again after that does."
+                : "Calling provisioning again (the same caller may) completes them; the secure-child reconciliation " +
+                  "completes them regardless."),
+            traceId,
+            extensions.ToArray());
     }
 
     /// <summary>
