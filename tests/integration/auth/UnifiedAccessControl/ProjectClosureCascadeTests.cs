@@ -743,6 +743,68 @@ public class ProjectClosureCascadeTests
         calls.Should().BeEmpty();
     }
 
+    /// <summary>Makes every revoked organization larger than one closure may sweep.</summary>
+    private static void ArrangeOversizedOrganization(Mock<DataverseWebApiClient> client) =>
+        client.Setup(c => c.QueryAsync<ExternalOrganizationMembership.ContactOrganizationRow>(
+                ExternalOrganizationMembership.EntitySet, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Enumerable.Range(0, ExternalOrganizationMembership.MaxMembersPerSweep + 1)
+                .Select(_ => new ExternalOrganizationMembership.ContactOrganizationRow { ContactId = Guid.NewGuid() })
+                .ToList());
+
+    /// <summary>
+    /// #2103 follow-up: a revoked organization too large to sweep is NON-retryable — a retry meets the same bound — so
+    /// the closure names it (<c>organization_too_large</c>) and tells an administrator what to do, never "Retry the
+    /// closure". Still fail-closed (500) and still reports the grants it revoked.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_WhenARevokedOrganizationIsTooLargeToSweep_IsANamedNonRetryableOutcome()
+    {
+        var table = new FakeGrantTable();
+        table.SeedOrganizationGrant(OrganizationId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+        ArrangeOversizedOrganization(client);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var spe = SpeAnswering(_ => Removed, calls);
+
+        var problem = Problem(await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureOrganizationTooLargeReason);
+        ProjectClosureEndpoint.ClosureOrganizationTooLargeReason.Should().Be("sdap.closure.incomplete.organization_too_large");
+        problem.ProblemDetails.Detail.Should().NotContain("Retry the closure")
+            .And.Contain("will not change this")
+            .And.Contain("administrator");
+        problem.ProblemDetails.Extensions["accessRecordsRevoked"].Should().Be(1);
+        calls.Should().BeEmpty("no member of the oversized organization was swept");
+    }
+
+    /// <summary>
+    /// #2103 follow-up, mixed: an oversized organization AND a grantee whose removal failed transiently. A retry still
+    /// cannot finish the closure, so the non-retryable code wins — and the detail counts the other grantee too.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_TooLargeOrganizationBesideATransientFailure_StaysNonRetryableAndCountsTheOther()
+    {
+        var table = new FakeGrantTable();
+        table.SeedOrganizationGrant(OrganizationId, ProjectId);
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+        ArrangeOversizedOrganization(client);
+
+        var spe = SpeAnswering(_ => GraphError, new());
+
+        var problem = Problem(await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureOrganizationTooLargeReason);
+        problem.ProblemDetails.Detail.Should().Contain("1 other grantee(s) could also not be confirmed removed");
+    }
+
     /// <summary>
     /// F8 (S-39): the client's <c>containerId</c> is GONE from the contract. A request body that still carries one —
     /// another record's container — deserializes (unknown members are skipped) and is IGNORED: the only container the

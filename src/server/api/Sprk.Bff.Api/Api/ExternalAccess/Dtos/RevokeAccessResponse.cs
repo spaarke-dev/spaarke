@@ -49,7 +49,8 @@ public enum SpeContainerRevokeOutcome
 
     /// <summary>
     /// The permission could not be read, matched, or deleted. The Contact may RETAIN file access; the
-    /// revoke should be retried. For an ORGANIZATION revoke this covers BOTH "at least one member's
+    /// revoke should be retried — except for an organization too large to sweep, which the 500 names with its own
+    /// non-retryable reason code (<c>sdap.revoke.incomplete.organization_too_large</c>, #2103 follow-up). For an ORGANIZATION revoke this covers BOTH "at least one member's
     /// permission could not be removed" and "the member list could not be established at all" — the two
     /// are told apart by <see cref="SpeOrgMemberCleanupSummary.MembersEnumerated"/>.
     /// </summary>

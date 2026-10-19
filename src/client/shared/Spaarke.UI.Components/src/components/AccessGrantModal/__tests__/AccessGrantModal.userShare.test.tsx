@@ -703,6 +703,42 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       expect(screen.queryByText(/Failed to revoke access/)).not.toBeInTheDocument();
     });
 
+    it('#2103: an organization too large to sweep shows the server sentence for an administrator, never "please try again"', async () => {
+      const detail =
+        'Deactivated 1 Dataverse access grant(s). The organization has more than 200 active members, more than one ' +
+        "revoke may sweep, so no member's SPE container permission was removed and members may RETAIN file access. " +
+        "Retrying will not change this. An administrator must remove those members' permissions from the record's " +
+        "container in the SPE admin app (the container's Permissions).";
+      const authenticatedFetch = baseAuthenticatedFetch(url =>
+        url.includes('/revoke')
+          ? jsonResponse(
+              {
+                title: 'External access revoke incomplete',
+                detail,
+                reasonCode: 'sdap.revoke.incomplete.organization_too_large',
+                deactivatedCount: 1,
+                speContainerOutcome: 'Failed',
+              },
+              false,
+              500
+            )
+          : null
+      );
+      const props = makeProps({
+        authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Prior Grantee');
+      fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+      await screen.findByText('Revoke access?');
+      await confirmRevoke();
+
+      expect(await screen.findByText(/Retrying will not change this/)).toBeInTheDocument();
+      expect(screen.queryByText(/Please try again/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Retry the revoke/)).not.toBeInTheDocument();
+    });
+
     it('deactivatedCount 0 reports "already had no active access record" rather than a plain success', async () => {
       const authenticatedFetch = baseAuthenticatedFetch(url =>
         url.includes('/revoke')

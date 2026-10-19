@@ -42,6 +42,15 @@ public static class RevokeExternalAccessEndpoint
     internal const string RevokeSpeCleanupIncompleteReason = "sdap.revoke.incomplete.container_not_cleared";
 
     /// <summary>
+    /// #2103 follow-up. The NON-retryable leaf of the same <c>sdap.*.incomplete.*</c> family: an ORGANIZATION grant was
+    /// revoked in Dataverse, but the organization has more active members than one revoke may sweep
+    /// (<see cref="ExternalOrganizationMembership.MaxMembersPerSweep"/>), so no member's container permission was
+    /// touched. A retry meets the same bound and changes nothing — the detail tells an administrator what to do instead.
+    /// Still fail-closed (a 500, never a 200): members may retain file access.
+    /// </summary>
+    internal const string RevokeOrganizationTooLargeReason = "sdap.revoke.incomplete.organization_too_large";
+
+    /// <summary>
     /// Registers the revoke endpoint on the external-access group.
     /// </summary>
     public static RouteGroupBuilder MapRevokeExternalAccessEndpoint(this RouteGroupBuilder group)
@@ -190,7 +199,7 @@ public static class RevokeExternalAccessEndpoint
         }
 
         // ── Step 2: Remove the revoked grantee's SPE container permission(s) ──
-        var (speOutcome, orgCleanup) = await RemoveSpeContainerPermissionsAsync(
+        var (speOutcome, orgCleanup, organizationTooLarge) = await RemoveSpeContainerPermissionsAsync(
             speContainerMembership, dataverseClient, containerResolver, request, grantKey,
             ExternalGrantLifecycle.TodayUtc(timeProvider ?? TimeProvider.System), logger, ct);
 
@@ -236,7 +245,8 @@ public static class RevokeExternalAccessEndpoint
                 "grantee may RETAIN file access. Reporting 500 (M2) rather than 200.",
                 request.AccessRecordId, deactivatedCount);
 
-            return RevokeIncomplete(httpContext, deactivatedCount, speOutcome, orgCleanup, residualAccessTerms);
+            return RevokeIncomplete(
+                httpContext, deactivatedCount, speOutcome, orgCleanup, residualAccessTerms, organizationTooLarge);
         }
 
         // DeactivatedCount makes the outcome explicit rather than inferable: 0 means the grant was
@@ -275,9 +285,18 @@ public static class RevokeExternalAccessEndpoint
         int deactivatedCount,
         SpeContainerRevokeOutcome speOutcome,
         SpeOrgMemberCleanupSummary? orgCleanup,
-        IReadOnlyList<string>? residualAccessTerms = null)
+        IReadOnlyList<string>? residualAccessTerms = null,
+        bool organizationTooLarge = false)
     {
-        var detail = deactivatedCount > 0
+        var detail = organizationTooLarge
+            ? (deactivatedCount > 0
+                  ? $"Deactivated {deactivatedCount} Dataverse access grant(s). "
+                  : "No Dataverse access grants were active to deactivate. ") +
+              $"The organization has more than {ExternalOrganizationMembership.MaxMembersPerSweep} active members, " +
+              "more than one revoke may sweep, so no member's SPE container permission was removed and members may " +
+              "RETAIN file access. Retrying will not change this. An administrator must remove those members' " +
+              "permissions from the record's container in the SPE admin app (the container's Permissions)."
+            : deactivatedCount > 0
             ? $"Deactivated {deactivatedCount} Dataverse access grant(s), but the SPE container " +
               "permission could not be confirmed removed. The grantee may RETAIN file access. Retry the " +
               "revoke."
@@ -291,7 +310,7 @@ public static class RevokeExternalAccessEndpoint
             type: "https://tools.ietf.org/html/rfc7231#section-6.6.1",
             extensions: new Dictionary<string, object?>
             {
-                ["reasonCode"] = RevokeSpeCleanupIncompleteReason,
+                ["reasonCode"] = organizationTooLarge ? RevokeOrganizationTooLargeReason : RevokeSpeCleanupIncompleteReason,
                 ["deactivatedCount"] = deactivatedCount,
                 ["speContainerOutcome"] = speOutcome,
                 ["speOrgMemberCleanup"] = orgCleanup,
@@ -344,7 +363,7 @@ public static class RevokeExternalAccessEndpoint
     /// cannot be established (a read fault, or more rows than one revoke may read) the removal proceeds for everyone
     /// the revoked grant named — fail closed (ADR-003): an entitlement that cannot be verified is not honoured.</para>
     /// </remarks>
-    private static async Task<(SpeContainerRevokeOutcome Outcome, SpeOrgMemberCleanupSummary? OrgCleanup)>
+    private static async Task<(SpeContainerRevokeOutcome Outcome, SpeOrgMemberCleanupSummary? OrgCleanup, bool OrganizationTooLarge)>
         RemoveSpeContainerPermissionsAsync(
             SpeContainerMembershipService speContainerMembership,
             DataverseWebApiClient dataverseClient,
@@ -364,7 +383,7 @@ public static class RevokeExternalAccessEndpoint
                 "[EXT-REVOKE] The container of grant root {RootType} {RootId} could not be determined; the SPE "
                 + "permission cleanup cannot run and the grantee may RETAIN file access.",
                 grantKey.RootType, grantKey.RootId);
-            return (SpeContainerRevokeOutcome.Failed, grantKey.IsOrganizationGrant ? UnknownMembership : null);
+            return (SpeContainerRevokeOutcome.Failed, grantKey.IsOrganizationGrant ? UnknownMembership : null, false);
         }
 
         if (derivedContainerId is null)
@@ -372,7 +391,7 @@ public static class RevokeExternalAccessEndpoint
             logger.LogInformation(
                 "[EXT-REVOKE] Grant root {RootType} {RootId} is not a secure record with its own container — no "
                 + "record-owned container permission to remove.", grantKey.RootType, grantKey.RootId);
-            return (SpeContainerRevokeOutcome.NotAttempted, null);
+            return (SpeContainerRevokeOutcome.NotAttempted, null, false);
         }
 
         var containerId = derivedContainerId;
@@ -402,7 +421,7 @@ public static class RevokeExternalAccessEndpoint
                     "[EXT-REVOKE] Access record {AccessRecordId} derives an organization grant with no " +
                     "organization id. Members cannot be identified; no SPE container permission on " +
                     "{ContainerId} was removed.", request.AccessRecordId, containerId);
-                return (SpeContainerRevokeOutcome.Failed, UnknownMembership);
+                return (SpeContainerRevokeOutcome.Failed, UnknownMembership, false);
             }
 
             return await RemoveOrganizationMembersSpePermissionsAsync(
@@ -418,7 +437,7 @@ public static class RevokeExternalAccessEndpoint
                 "[EXT-REVOKE] Contact-grant revoke with no ContactId on the request — no identity key to " +
                 "match; SPE container permission removal not attempted for container {ContainerId}.",
                 containerId);
-            return (SpeContainerRevokeOutcome.NotAttempted, null);
+            return (SpeContainerRevokeOutcome.NotAttempted, null, false);
         }
 
         if (stillEntitled is not null && stillEntitled.Contains(request.ContactId))
@@ -427,11 +446,11 @@ public static class RevokeExternalAccessEndpoint
                 "[EXT-REVOKE] Contact {ContactId} is still entitled to {RootType} {RootId} through another active grant "
                 + "on it; their container permission on {ContainerId} is KEPT (task 166).",
                 request.ContactId, grantKey.RootType, grantKey.RootId, containerId);
-            return (SpeContainerRevokeOutcome.NotAttempted, null);
+            return (SpeContainerRevokeOutcome.NotAttempted, null, false);
         }
 
         return (await RemoveContactSpePermissionAsync(
-            speContainerMembership, dataverseClient, request, containerId, logger, ct), null);
+            speContainerMembership, dataverseClient, request, containerId, logger, ct), null, false);
     }
 
     /// <summary>The most remaining grant rows on one root a single revoke reads for the overlap check.</summary>
@@ -629,7 +648,7 @@ public static class RevokeExternalAccessEndpoint
     /// task 024 (SPE Graph paging); this method inherits it and cannot detect it from the callee's
     /// result. Fixing it HERE would mean forking the matcher, which is exactly what task 017 deleted.</para>
     /// </remarks>
-    private static async Task<(SpeContainerRevokeOutcome Outcome, SpeOrgMemberCleanupSummary? OrgCleanup)>
+    private static async Task<(SpeContainerRevokeOutcome Outcome, SpeOrgMemberCleanupSummary? OrgCleanup, bool OrganizationTooLarge)>
         RemoveOrganizationMembersSpePermissionsAsync(
             SpeContainerMembershipService speContainerMembership,
             DataverseWebApiClient dataverseClient,
@@ -655,7 +674,7 @@ public static class RevokeExternalAccessEndpoint
                 "[EXT-REVOKE] Could not enumerate the active members of Organization {OrganizationId}; " +
                 "NO SPE container permission on {ContainerId} was removed and members may RETAIN file access.",
                 organizationId, containerId);
-            return (SpeContainerRevokeOutcome.Failed, UnknownMembership);
+            return (SpeContainerRevokeOutcome.Failed, UnknownMembership, false);
         }
 
         if (memberSet.ExceededBound)
@@ -668,7 +687,9 @@ public static class RevokeExternalAccessEndpoint
                 "than one revoke request may sweep. NO SPE container permission on {ContainerId} was " +
                 "removed; escalate for a bulk cleanup rather than retrying.",
                 organizationId, ExternalOrganizationMembership.MaxMembersPerSweep, containerId);
-            return (SpeContainerRevokeOutcome.Failed, UnknownMembership);
+            // #2103 follow-up: flagged so the response names THIS condition (organization_too_large) instead of the
+            // retryable container_not_cleared — a retry meets the same bound.
+            return (SpeContainerRevokeOutcome.Failed, UnknownMembership, true);
         }
 
         // ── Resolve identities ───────────────────────────────────────────────
@@ -795,7 +816,7 @@ public static class RevokeExternalAccessEndpoint
             "{Failed} FAILED → {Outcome}",
             organizationId, containerId, summary.MembersEnumerated, removed, notFound, noKey, failed, outcome);
 
-        return (outcome, summary);
+        return (outcome, summary, false);
     }
 
     /// <summary>

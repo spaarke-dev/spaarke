@@ -186,6 +186,7 @@ public static class ProjectClosureEndpoint
             containerResolver, "sprk_project", request.ProjectId, logger, ct);
 
         int speRemovedCount = 0;
+        GranteeRemoval? granteeRemoval = null;
         if (closureContainerId is not null)
         {
             try
@@ -195,6 +196,7 @@ public static class ProjectClosureEndpoint
 
                 speRemovedCount = removal.Removed;
                 containerCleared = removal.Complete;
+                granteeRemoval = removal;
 
                 if (removal.Complete)
                 {
@@ -252,6 +254,26 @@ public static class ProjectClosureEndpoint
                 $"Revoked {revokedCount} of {activeRecords.Count} external grants for project " +
                 $"{request.ProjectId}; {failedCount} could not be deactivated and remain ACTIVE. " +
                 "Those participants still have access. Retry the closure.",
+                accessRecordsRevoked: revokedCount);
+        }
+
+        if (!containerCleared && granteeRemoval is { OrganizationsTooLarge: > 0 } oversized)
+        {
+            // #2103 follow-up: a retry meets the same sweep bound, so "Retry the closure" would be false. Named
+            // separately (non-retryable) and still fail-closed. Any OTHER unresolved grantee is mentioned too.
+            var otherUnresolved = oversized.Unresolved - oversized.OrganizationsTooLarge;
+            return ClosureIncomplete(
+                httpContext,
+                ClosureOrganizationTooLargeReason,
+                $"All {revokedCount} external grants for project {request.ProjectId} were revoked, but " +
+                $"{oversized.OrganizationsTooLarge} revoked organization(s) have more than " +
+                $"{ExternalOrganizationMembership.MaxMembersPerSweep} active members, more than one closure may " +
+                "sweep, so their members' SPE container permissions were NOT removed and they may retain file " +
+                "access. Retrying the closure will not change this. An administrator must remove those members' " +
+                "permissions from the project's container in the SPE admin app (the container's Permissions)." +
+                (otherUnresolved > 0
+                    ? $" {otherUnresolved} other grantee(s) could also not be confirmed removed."
+                    : string.Empty),
                 accessRecordsRevoked: revokedCount);
         }
 
@@ -387,7 +409,10 @@ public static class ProjectClosureEndpoint
     /// <param name="Unresolved">Grantees whose permission could not be CONFIRMED absent or removed.</param>
     /// <param name="NoMembershipKey">#2103: grantees with no email, to whom no container permission can be attributed
     /// (<see cref="RevokeExternalAccessEndpoint.HasNoContainerMembershipKey"/>). Nothing to clear; not unresolved.</param>
-    internal readonly record struct GranteeRemoval(int Removed, int Unresolved, int NoMembershipKey = 0)
+    /// <param name="OrganizationsTooLarge">Revoked organizations (counted in <paramref name="Unresolved"/> too) whose
+    /// active members exceed the sweep bound: their members were not swept, and a retry meets the same bound.</param>
+    internal readonly record struct GranteeRemoval(
+        int Removed, int Unresolved, int NoMembershipKey = 0, int OrganizationsTooLarge = 0)
     {
         /// <summary>Every revoked grantee is confirmed to hold no permission on the container.</summary>
         public bool Complete => Unresolved == 0;
@@ -424,6 +449,7 @@ public static class ProjectClosureEndpoint
     {
         var unresolved = 0;
         var noKey = 0;
+        var tooLarge = 0;
         var contactIds = new HashSet<Guid>();
 
         foreach (var record in revokedRecords)
@@ -467,6 +493,7 @@ public static class ProjectClosureEndpoint
                     + "container permissions were NOT swept. Escalate for a bulk cleanup.",
                     organizationId, ExternalOrganizationMembership.MaxMembersPerSweep);
                 unresolved++;
+                tooLarge++;
                 continue;
             }
 
@@ -513,7 +540,7 @@ public static class ProjectClosureEndpoint
 
         if (emails.Count == 0)
         {
-            return new GranteeRemoval(0, unresolved, noKey);
+            return new GranteeRemoval(0, unresolved, noKey, tooLarge);
         }
 
         var results = await speContainerMembership.RemoveMembershipsAsync(containerId, emails, ct).ConfigureAwait(false);
@@ -538,7 +565,7 @@ public static class ProjectClosureEndpoint
             }
         }
 
-        return new GranteeRemoval(removed, unresolved, noKey);
+        return new GranteeRemoval(removed, unresolved, noKey, tooLarge);
     }
 
     /// <summary>
@@ -585,6 +612,13 @@ public static class ProjectClosureEndpoint
     internal const string ClosureEnumerationFailedReason = "sdap.closure.incomplete.enumeration_failed";
     internal const string ClosurePartialRevocationReason = "sdap.closure.incomplete.partial_revocation";
     internal const string ClosureContainerNotClearedReason = "sdap.closure.incomplete.container_not_cleared";
+
+    /// <summary>
+    /// #2103 follow-up: the NON-retryable leaf — a revoked organization has more active members than one closure may
+    /// sweep (<see cref="ExternalOrganizationMembership.MaxMembersPerSweep"/>), so its members' container permissions
+    /// were not removed. A retry meets the same bound; the detail tells an administrator what to do instead.
+    /// </summary>
+    internal const string ClosureOrganizationTooLargeReason = "sdap.closure.incomplete.organization_too_large";
 
     /// <summary>
     /// Queries all active sprk_externalrecordaccess records for the given project — contact grants AND

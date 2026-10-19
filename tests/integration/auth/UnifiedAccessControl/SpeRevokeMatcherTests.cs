@@ -1050,6 +1050,9 @@ public class SpeRevokeMatcherTests
         orgCleanup.MembersEnumerated.Should().BeNull(
             "a null member count is what distinguishes 'we never looked' from 'we looked and it was empty' " +
             "— and it must survive the 500 exactly as it survives the 200 (see the serialization test below)");
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(
+            RevokeExternalAccessEndpoint.RevokeSpeCleanupIncompleteReason,
+            "a member read that faulted is transient — the retryable code, unlike organization_too_large");
     }
 
     /// <summary>
@@ -1101,6 +1104,34 @@ public class SpeRevokeMatcherTests
         orgCleanup.MembersEnumerated.Should().BeNull(
             "the member list is a truncation, not the membership — reporting its length would assert " +
             "something we do not know");
+    }
+
+    /// <summary>
+    /// #2103 follow-up: the too-large organization is a NON-retryable condition — a retry meets the same sweep bound —
+    /// so it carries its own reason code and tells an administrator what to do, never "Retry the revoke". It stays
+    /// fail-closed: a 500 with the Dataverse count, because members may retain file access.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_TooLargeToSweep_IsANamedNonRetryableOutcome_NotARetry()
+    {
+        var org = new OrgRevokeFixture(
+            junctionThrows: false, membersWithoutEmail: null,
+            overflowRows: ExternalOrganizationMembership.MaxMembersPerSweep,
+            MemberOne, MemberTwo, MemberThree);
+        var stub = new SpeMemberStub(Removed);
+
+        var problem = ProblemBody(await org.Revoke(stub.Build()));
+
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError, "still fail-closed — never a 200");
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(
+            RevokeExternalAccessEndpoint.RevokeOrganizationTooLargeReason);
+        RevokeExternalAccessEndpoint.RevokeOrganizationTooLargeReason.Should()
+            .Be("sdap.revoke.incomplete.organization_too_large", "a stable code clients switch on");
+        problem.ProblemDetails.Detail.Should().NotContain("Retry the revoke")
+            .And.Contain("Retrying will not change this")
+            .And.Contain("administrator");
+        problem.ProblemDetails.Extensions["deactivatedCount"].Should().Be(1,
+            "the Dataverse half still ran and the caller must still be told so");
     }
 
     /// <summary>

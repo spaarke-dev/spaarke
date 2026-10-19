@@ -514,6 +514,12 @@ type SpeContainerRevokeOutcome = 'NotAttempted' | 'PermissionRemoved' | 'NoPermi
  * switching on the code. */
 const REVOKE_SPE_CLEANUP_INCOMPLETE_REASON_CODE = 'sdap.revoke.incomplete.container_not_cleared';
 
+/** #2103 follow-up: the NON-retryable leaf of the same family — an organization grant was revoked, but the
+ * organization has more active members than one revoke may sweep, so no member's container permission was removed
+ * and a retry cannot change that. The server's `detail` says what an administrator must do. MUST match
+ * `RevokeExternalAccessEndpoint.RevokeOrganizationTooLargeReason` exactly. */
+const REVOKE_ORGANIZATION_TOO_LARGE_REASON_CODE = 'sdap.revoke.incomplete.organization_too_large';
+
 /**
  * Thrown by {@link postJson}/{@link getJson} for a non-OK BFF response (task-024
  * finding M8, transferred to task 065). Carries the parsed RFC 7807
@@ -2208,6 +2214,17 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
             deactivatedCount: err.deactivatedCount,
           })
         );
+      } else if (
+        pendingRevoke.kind === 'grant' &&
+        err instanceof AccessGrantModalApiError &&
+        err.reasonCode === REVOKE_ORGANIZATION_TOO_LARGE_REASON_CODE
+      ) {
+        // #2103 follow-up: the organization is too large for one revoke to sweep. The grant WAS deactivated, and a
+        // retry meets the same bound — so show the server's sentence (what an administrator must do), never the
+        // generic "please try again" below.
+        setPendingRevoke(null);
+        await loadData();
+        setNoticeIfCurrent({ intent: 'warning', text: err.detail });
       } else if (
         pendingRevoke.kind === 'share' &&
         err instanceof AccessGrantModalApiError &&
