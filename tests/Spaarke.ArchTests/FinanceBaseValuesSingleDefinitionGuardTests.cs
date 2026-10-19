@@ -23,6 +23,9 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
     private static readonly Regex CountedStatusLiteral = new(@"\b65949000[0-4]\b", RegexOptions.Compiled);
     private static readonly Regex CountedStatusConstant = new(@"\bInvoiceStatusCodes\.", RegexOptions.Compiled);
     private static readonly Regex PercentFormula = new(@"\*\s*100m?\b", RegexOptions.Compiled);
+    // ebilling-r1 049 (D-102, D-104): the held predicate (a blocked submission's status and reason code) is defined once, in
+    // FinanceBaseValues.HeldSubmissionConditions. A consumer that spells the submission columns or the reason code has its own copy.
+    private static readonly Regex HeldPredicateSpelling = new(@"sprk_processingstatus|sprk_outcomereasoncode|ebilling\.submission\.blocked", RegexOptions.Compiled);
 
     internal static IReadOnlyList<string> Violations(string code)
     {
@@ -31,6 +34,7 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
         if (CountedStatusLiteral.IsMatch(code)) found.Add("spells an invoice statuscode (659490000-659490004) instead of FinanceBaseValues.CountedInvoiceStatuses");
         if (CountedStatusConstant.IsMatch(code)) found.Add("names an InvoiceStatusCodes value instead of using FinanceBaseValues.CountedInvoiceStatuses");
         if (PercentFormula.IsMatch(code)) found.Add("multiplies by 100 itself instead of FinanceBaseValues.UtilizationPercent");
+        if (HeldPredicateSpelling.IsMatch(code)) found.Add("spells the held-submission predicate instead of FinanceBaseValues.HeldSubmissionConditions");
         return found;
     }
 
@@ -61,6 +65,17 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
         var copy = "var s = new[] { InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid }; var c = FinanceBaseValues.X;";
         Assert.Equal(new[] { "names an InvoiceStatusCodes value instead of using FinanceBaseValues.CountedInvoiceStatuses" }, Violations(copy));
     }
+
+    [Fact(DisplayName = "ebilling-r1 049 control: the detector fires on a private copy of the held predicate")]
+    public void TheDetector_FiresOnAPrivateHeldPredicate()
+    {
+        var copy = "var c = FinanceBaseValues.X; q.AddCondition(\"sprk_outcomereasoncode\", ConditionOperator.Equal, \"ebilling.submission.blocked\");";
+        Assert.Equal(new[] { "spells the held-submission predicate instead of FinanceBaseValues.HeldSubmissionConditions" }, Violations(copy));
+    }
+
+    [Fact(DisplayName = "ebilling-r1 049 control: the detector stays quiet on the shared held predicate")]
+    public void TheDetector_StaysQuietOnTheSharedHeldPredicate() =>
+        Assert.Empty(Violations("foreach (var (column, value) in FinanceBaseValues.HeldSubmissionConditions) { link.AddCondition(column, ConditionOperator.Equal, value); }"));
 
     [Fact(DisplayName = "Task 025b control: the detector stays quiet on the shared call")]
     public void TheDetector_StaysQuietOnTheSharedCall() =>

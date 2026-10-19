@@ -28,6 +28,7 @@ public class FinanceRollupPayloadTests
     private static Dictionary<string, object?> Build() =>
         FinanceRollupService.BuildRollupFields(
             totalSpend: 1234.56m,
+            pendingSpend: 77.25m,
             invoiceCount: 3,
             currentMonthSpend: 200.00m,
             totalBudget: 5000m,
@@ -81,6 +82,7 @@ public class FinanceRollupPayloadTests
         var fields = Build();
 
         fields["sprk_totalspendtodate"].Should().Be(1234.56m);
+        fields["sprk_pendingspend"].Should().Be(77.25m, "D-104: Pending Spend is stored beside, not inside, actual spend");
         fields["sprk_invoicecount"].Should().Be(3);
         fields["sprk_remainingbudget"].Should().Be(3765.44m);
         fields["sprk_monthovermonthvelocity"].Should().Be(-12.5m);

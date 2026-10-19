@@ -54,6 +54,7 @@ public class FinanceRollupService
 
     // Target field names on sprk_matter / sprk_project (from Dataverse schema)
     private const string Field_TotalSpendToDate = "sprk_totalspendtodate";
+    private const string Field_PendingSpend = FinanceBaseValues.PendingSpendColumn;
     private const string Field_InvoiceCount = "sprk_invoicecount";
     private const string Field_MonthlySpendCurrent = "sprk_monthlyspendcurrent";
     private const string Field_TotalBudget = "sprk_totalbudget";
@@ -91,6 +92,7 @@ public class FinanceRollupService
     /// </remarks>
     internal static Dictionary<string, object?> BuildRollupFields(
         decimal totalSpend,
+        decimal pendingSpend,
         int invoiceCount,
         decimal currentMonthSpend,
         decimal totalBudget,
@@ -101,6 +103,7 @@ public class FinanceRollupService
         string timelineJson) => new()
         {
             [Field_TotalSpendToDate] = totalSpend,
+            [Field_PendingSpend] = pendingSpend,
             [Field_InvoiceCount] = invoiceCount,
             [Field_MonthlySpendCurrent] = currentMonthSpend,
             [Field_TotalBudget] = totalBudget,
@@ -136,11 +139,14 @@ public class FinanceRollupService
         // Step 1: Parallel queries — invoices and budgets
         var invoiceTask = QueryInvoicesAsync(serviceClient, parentId, invoiceLookupField, ct);
         var budgetTask = QueryBudgetTotalAsync(serviceClient, parentId, budgetLookupField, ct);
+        var pendingTask = QueryPendingInvoicesAsync(serviceClient, parentId, invoiceLookupField, ct);
 
-        await Task.WhenAll(invoiceTask, budgetTask);
+        await Task.WhenAll(invoiceTask, budgetTask, pendingTask);
 
         var invoices = invoiceTask.Result;
         var totalBudget = budgetTask.Result;
+        // Pending Spend (D-104): In Review and not held, kept apart from actual spend; it feeds nothing else below.
+        var pendingSpend = FinanceBaseValues.SumMoney(pendingTask.Result, Invoice_TotalAmount);
 
         // Step 2: Compute all fields
         var now = DateTime.UtcNow;
@@ -190,7 +196,7 @@ public class FinanceRollupService
 
         // Step 3: Write back to parent entity — through the NARROW interface (→ DataverseWebApiService).
         var fields = BuildRollupFields(
-            totalSpend, invoiceCount, currentMonthSpend, totalBudget,
+            totalSpend, pendingSpend, invoiceCount, currentMonthSpend, totalBudget,
             remainingBudget, utilization, velocity ?? 0m, averageInvoice, timelineJson);
 
         // UPDATE-ONLY (task 130): never create. A plain PATCH upserts, so a parent deleted after the caller's
@@ -230,6 +236,51 @@ public class FinanceRollupService
 
         var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), ct);
         return results.Entities.ToList();
+    }
+
+    /// <summary>Query the parent's PENDING invoices (D-104): In Review and not held.</summary>
+    private static async Task<List<Entity>> QueryPendingInvoicesAsync(
+        ServiceClient serviceClient,
+        Guid parentId,
+        string lookupField,
+        CancellationToken ct)
+    {
+        var query = BuildPendingInvoiceQuery(parentId, lookupField);
+
+        var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), ct);
+        return results.Entities.ToList();
+    }
+
+    /// <summary>The pending-spend invoice query (D-104): the parent's invoices whose status is one of
+    /// <see cref="FinanceBaseValues.PendingInvoiceStatuses"/> and that are not held. The held exclusion is
+    /// <see cref="FinanceBaseValues.HeldSubmissionConditions"/>, written as a LEFT OUTER link with the conditions inside the link
+    /// and a null check on the linked key, so an invoice with several linked submissions is returned at most once. Internal so a
+    /// test can pin it against the grouped query the Signal evaluator sends.</summary>
+    internal static QueryExpression BuildPendingInvoiceQuery(Guid parentId, string lookupField)
+    {
+        var query = new QueryExpression(InvoiceEntity)
+        {
+            ColumnSet = new ColumnSet(Invoice_TotalAmount, Invoice_InvoiceDate, Invoice_StatusCode),
+            Criteria = new FilterExpression(LogicalOperator.And)
+        };
+        query.Criteria.AddCondition(lookupField, ConditionOperator.Equal, parentId);
+        query.Criteria.AddCondition(
+            Invoice_StatusCode,
+            ConditionOperator.In,
+            FinanceBaseValues.PendingInvoiceStatuses.Cast<object>().ToArray());
+
+        var held = query.AddLink(
+            FinanceBaseValues.SubmissionEntity, "sprk_invoiceid", FinanceBaseValues.SubmissionInvoiceLookup, JoinOperator.LeftOuter);
+        held.EntityAlias = FinanceBaseValues.HeldAlias;
+        held.Columns = new ColumnSet(false);
+        foreach (var (column, value) in FinanceBaseValues.HeldSubmissionConditions)
+        {
+            held.LinkCriteria.AddCondition(column, ConditionOperator.Equal, value);
+        }
+
+        query.Criteria.AddCondition(
+            FinanceBaseValues.HeldAlias, FinanceBaseValues.SubmissionKeyColumn, ConditionOperator.Null);
+        return query;
     }
 
     /// <summary>The invoice query: the parent's invoices whose status is one of <see cref="FinanceBaseValues.CountedInvoiceStatuses"/>.

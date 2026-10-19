@@ -4,6 +4,7 @@ using System.Xml.Linq;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -57,6 +58,52 @@ public static class FinanceBaseValues
     {
         InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid,
     };
+
+    /// <summary>The parent column that stores Pending Spend (matter and project; ebilling-r1 owner decision D-104). Written only by
+    /// <see cref="FinanceRollupService"/>. It is NOT in <see cref="IsDerived"/> yet: a Threshold cannot name it until ontology-r1
+    /// adds it to its authorable columns, so the evaluator never asks <see cref="Needs"/> / <see cref="ValueOf"/> about it.</summary>
+    public const string PendingSpendColumn = "sprk_pendingspend";
+
+    /// <summary>The invoice <c>statuscode</c> values whose amount is PENDING spend (D-104): In Review. Pending spend is kept apart
+    /// from actual spend (<see cref="CountedInvoiceStatuses"/>, D-103), so the two sets never overlap. A pending invoice that is
+    /// HELD (see <see cref="HeldSubmissionConditions"/>) is left out of the sum.</summary>
+    public static readonly IReadOnlyList<int> PendingInvoiceStatuses = new[] { InvoiceStatusCodes.InReview };
+
+    /// <summary>The submission table a held invoice is read from (<c>sprk_invoicesubmission.sprk_invoice</c> names the invoice the
+    /// submission created, D-101).</summary>
+    public const string SubmissionEntity = "sprk_invoicesubmission";
+    internal const string SubmissionInvoiceLookup = "sprk_invoice";
+    internal const string SubmissionKeyColumn = "sprk_invoicesubmissionid";
+    internal const string SubmissionStatusColumn = "sprk_processingstatus";
+    internal const string SubmissionReasonColumn = "sprk_outcomereasoncode";
+
+    /// <summary>The outcome reason code of a submission blocked by a rule and awaiting Override / Return.</summary>
+    // TODO(049): replace with SubmissionReasonCodes.Blocked when the pipeline's Submission/SubmissionReasonCodes.cs is on this branch.
+    public const string BlockedReasonCode = "ebilling.submission.blocked";
+
+    /// <summary>
+    /// What makes an In Review invoice HELD (owner decisions D-101, D-102, D-104): some submission linked to it
+    /// (<c>sprk_invoicesubmission.sprk_invoice</c>) has <c>sprk_processingstatus</c> = Rejected AND <c>sprk_outcomereasoncode</c> =
+    /// <see cref="BlockedReasonCode"/> - a blocked internal submission awaiting Override or Return. Override releases the invoice by
+    /// setting the submission to Accepted; Return moves the invoice out of In Review. No column is added to the invoice: the hold is
+    /// the state the Override / Return flow already keeps on the submission. This is the ONE definition; both pending-spend paths
+    /// (the rollup query and the grouped FetchXML) build their exclusion from it.
+    /// </summary>
+    /// <remarks>
+    /// Counted spend adds NO held predicate: a held invoice is In Review, which D-103 does not count. Only pending spend needs it.
+    /// The exclusion is an anti-join written as a LEFT OUTER link with these conditions INSIDE the link plus a null check on the
+    /// linked key in the where clause. An invoice can have several linked submissions (resubmissions); a plain join would repeat the
+    /// invoice's amount once per linked row, but here a linked row exists only when it is a blocking one, and that invoice is then
+    /// excluded, so no amount is ever counted twice.
+    /// </remarks>
+    public static IReadOnlyList<(string Column, object Value)> HeldSubmissionConditions { get; } = new (string, object)[]
+    {
+        (SubmissionStatusColumn, (int)InvoiceSubmissionStatus.Rejected),
+        (SubmissionReasonColumn, BlockedReasonCode),
+    };
+
+    /// <summary>The alias of the held-submission link in both pending-spend queries.</summary>
+    internal const string HeldAlias = "held";
 
     /// <summary>Parent ids per grouped query. Matches <c>PredicateCompiler.MaxInListLength</c>: the size of an <c>in</c> list
     /// the Signal code already sends to Dataverse.</summary>
@@ -155,26 +202,75 @@ public static class FinanceBaseValues
         return result;
     }
 
+    /// <summary>
+    /// The live PENDING spend (D-104) of <paramref name="parentIds"/>: per chunk of <see cref="ParentChunkSize"/> parents, one
+    /// grouped query over the In Review invoices that are not held. A parent with no such invoice has 0. A Dataverse failure or a
+    /// result of a shape <see cref="ReadGroupedSums"/> does not know propagates: pending spend is never read as zero by default.
+    /// </summary>
+    public static async Task<IReadOnlyDictionary<Guid, decimal>> ReadPendingSpendAsync(
+        IGenericEntityService entities, string parentEntity, IReadOnlyCollection<Guid> parentIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        ArgumentNullException.ThrowIfNull(parentIds);
+        var result = new Dictionary<Guid, decimal>(parentIds.Count);
+        foreach (var chunk in parentIds.Distinct().Chunk(ParentChunkSize))
+        {
+            var pending = ReadGroupedSums(await entities.RetrieveMultipleAsync(
+                new FetchExpression(BuildGroupedPendingSumFetchXml(parentEntity, chunk)), ct).ConfigureAwait(false));
+            foreach (var id in chunk)
+            {
+                result[id] = pending.GetValueOrDefault(id);
+            }
+        }
+
+        return result;
+    }
+
     internal const string ParentAlias = "parent";
     internal const string SumAlias = "total";
 
     /// <summary>The grouped aggregate query: the sum of the invoice amounts (counted statuses only) or of the budget totals,
     /// grouped by the parent lookup, over the given parents.</summary>
-    internal static string BuildGroupedSumFetchXml(string parentEntity, bool forInvoices, IEnumerable<Guid> parentIds)
+    internal static string BuildGroupedSumFetchXml(string parentEntity, bool forInvoices, IEnumerable<Guid> parentIds) =>
+        BuildGroupedFetchXml(parentEntity, forInvoices ? InvoiceEntity : BudgetEntity, forInvoices ? InvoiceTotalAmount : BudgetTotalBudget,
+            parentIds, forInvoices ? CountedInvoiceStatuses : null, excludeHeld: false);
+
+    /// <summary>The grouped aggregate query for PENDING spend (D-104): the sum of the amounts of the parents' invoices whose status
+    /// is in <see cref="PendingInvoiceStatuses"/> and that are not held (<see cref="HeldSubmissionConditions"/>), grouped by the
+    /// parent lookup.</summary>
+    internal static string BuildGroupedPendingSumFetchXml(string parentEntity, IEnumerable<Guid> parentIds) =>
+        BuildGroupedFetchXml(parentEntity, InvoiceEntity, InvoiceTotalAmount, parentIds, PendingInvoiceStatuses, excludeHeld: true);
+
+    private static string BuildGroupedFetchXml(
+        string parentEntity, string entityName, string sumColumn, IEnumerable<Guid> parentIds, IReadOnlyList<int>? statuses, bool excludeHeld)
     {
         var lookup = ParentLookup(parentEntity);
-        var entity = new XElement("entity", new XAttribute("name", forInvoices ? InvoiceEntity : BudgetEntity),
+        var entity = new XElement("entity", new XAttribute("name", entityName),
             new XElement("attribute",
-                new XAttribute("name", forInvoices ? InvoiceTotalAmount : BudgetTotalBudget),
+                new XAttribute("name", sumColumn),
                 new XAttribute("alias", SumAlias), new XAttribute("aggregate", "sum")),
             new XElement("attribute", new XAttribute("name", lookup), new XAttribute("alias", ParentAlias), new XAttribute("groupby", "true")));
         var filter = new XElement("filter", new XAttribute("type", "and"),
             new XElement("condition", new XAttribute("attribute", lookup), new XAttribute("operator", "in"),
                 parentIds.Select(id => new XElement("value", id.ToString("D", CultureInfo.InvariantCulture)))));
-        if (forInvoices)
+        if (statuses is not null)
         {
             filter.Add(new XElement("condition", new XAttribute("attribute", InvoiceStatusCodeColumn), new XAttribute("operator", "in"),
-                CountedInvoiceStatuses.Select(s => new XElement("value", s.ToString(CultureInfo.InvariantCulture)))));
+                statuses.Select(s => new XElement("value", s.ToString(CultureInfo.InvariantCulture)))));
+        }
+
+        if (excludeHeld)
+        {
+            // LEFT OUTER link to the blocking submissions, then keep only the invoices that found none (see HeldSubmissionConditions).
+            entity.Add(new XElement("link-entity",
+                new XAttribute("name", SubmissionEntity), new XAttribute("from", SubmissionInvoiceLookup), new XAttribute("to", "sprk_invoiceid"),
+                new XAttribute("link-type", "outer"), new XAttribute("alias", HeldAlias),
+                new XElement("filter", new XAttribute("type", "and"),
+                    HeldSubmissionConditions.Select(c => new XElement("condition",
+                        new XAttribute("attribute", c.Column), new XAttribute("operator", "eq"),
+                        new XAttribute("value", Convert.ToString(c.Value, CultureInfo.InvariantCulture)!))))));
+            filter.Add(new XElement("condition",
+                new XAttribute("entityname", HeldAlias), new XAttribute("attribute", SubmissionKeyColumn), new XAttribute("operator", "null")));
         }
 
         entity.Add(filter);
