@@ -35,6 +35,18 @@ public static class BillingRuleCatalogue
         RuleType.AiObservation,
     };
 
+    /// <summary>
+    /// The SYSTEM billing type (D-125): a Billing member that is not in <see cref="Types"/>, so it has no catalogue position, is not offered
+    /// to the drafting Action and cannot be authored. It is the type of the seeded policy <c>BILL-SYSTEM-SUBMISSION</c> only.
+    /// </summary>
+    public static bool IsSystemType(RuleType ruleType) => ruleType == RuleType.SubmissionIntegrity;
+
+    /// <summary>The system policy's code (D-125): one policy, seeded by <c>scripts/ebilling/Seed-BillingSystemPolicy.ps1</c>.</summary>
+    public const string SystemPolicyCode = "BILL-SYSTEM-SUBMISSION";
+
+    /// <summary>The refusal text of a system type at an authoring or save path (D-125). Names no rule content.</summary>
+    public const string SystemRuleRefusal = "SubmissionIntegrity is a system rule; not authorable.";
+
     /// <summary>The 1-based FR-24 / FR-26 catalogue position of a billing type.</summary>
     /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
     public static int CataloguePosition(RuleType ruleType)
@@ -59,6 +71,7 @@ public static class BillingRuleCatalogue
         RuleType.Duplicate => Suffix("duplicate"),
         RuleType.RequiredData => Suffix("required-data"),
         RuleType.AiObservation => Suffix("ai-observation"),
+        RuleType.SubmissionIntegrity => Suffix("submission-integrity"),
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
@@ -95,6 +108,10 @@ public static class BillingRuleCatalogue
         RuleType.Duplicate => Fields("invoice.firmInvoiceNumber", "line.date", "line.timekeeperName", "duplicateOf.trackingNumber"),
         RuleType.RequiredData => Fields("missingField"),
         RuleType.AiObservation => Fields("line.date", "observation", "observationConfidence", "rule.minConfidence"),
+        // D-125: the values the four system reasons compare, as 049 reads them (BillingSystemFindings builds exactly these).
+        RuleType.SubmissionIntegrity => Fields(
+            "submission.invoiceNumber", "invoice.invoiceNumber", "line.codeKind", "line.refusedCode", "line.firmCode", "line.suggestedCode",
+            "codeSet.name"),
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
@@ -140,11 +157,45 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CurrencyNotUsd => CurrencyNotUsdTemplate,
         BillingReasonCodes.CoreRecordClosedToBilling => ClosedToBillingTemplate,
         BillingReasonCodes.CoreRecordClosed => NoCloseDateTemplate,
+        BillingReasonCodes.SubmissionInvoiceNumberMismatch => InvoiceNumberMismatchTemplate,
+        BillingReasonCodes.CodingRefusedCode => RefusedCodeTemplate,
+        BillingReasonCodes.CodingFirmCodeMismatch => FirmCodeMismatchTemplate,
+        BillingReasonCodes.CodingCodeSetNeedsReview => CodeSetNeedsReviewTemplate,
         BillingEvaluationReasons.CurrencyMissing => RatesNotCheckedPrefix + "missing.",
         BillingEvaluationReasons.CurrencyUnreliable => RatesNotCheckedPrefix + "unclear.",
         BillingEvaluationReasons.CurrencyNotUsd => RatesNotCheckedPrefix + "not USD.",
         _ => null,
     };
+
+    // ── System reasons (D-125). Each claims only what was compared, never that a document is "invalid". ───────────────────────────
+
+    /// <summary>The message of <see cref="BillingReasonCodes.SubmissionInvoiceNumberMismatch"/> (D-91): cites both values it compared.</summary>
+    public const string InvoiceNumberMismatchTemplate =
+        "The invoice number on the submission, {{submission.invoiceNumber}}, does not match the invoice number read from the document, {{invoice.invoiceNumber}}.";
+
+    /// <summary>The message of <see cref="BillingReasonCodes.CodingRefusedCode"/> (047, FR-22): a code the coding service proposed was checked against the line's code set.</summary>
+    public const string RefusedCodeTemplate =
+        "The suggested {{line.codeKind}} code {{line.refusedCode}} is not allowed for this line in its code set, so it was not applied.";
+
+    /// <summary>The message of <see cref="BillingReasonCodes.CodingFirmCodeMismatch"/> (047, D-05): the firm's code was compared with the suggested one.</summary>
+    public const string FirmCodeMismatchTemplate =
+        "The {{line.codeKind}} code on the line, {{line.firmCode}}, differs from the code suggested for it, {{line.suggestedCode}}.";
+
+    /// <summary>The message of <see cref="BillingReasonCodes.CodingCodeSetNeedsReview"/> (047, FR-22 step 4): the code set itself was a suggestion.</summary>
+    public const string CodeSetNeedsReviewTemplate =
+        "The code set used to suggest codes for this invoice, {{codeSet.name}}, was itself suggested and has not been confirmed.";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.SubmissionInvoiceNumberMismatch"/>'s Signal.</summary>
+    public const string InvoiceNumberMismatchHeadline = "Invoice number differs from the submission";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.CodingRefusedCode"/>'s Signal.</summary>
+    public const string RefusedCodeHeadline = "Suggested code not applied";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.CodingFirmCodeMismatch"/>'s Signal.</summary>
+    public const string FirmCodeMismatchHeadline = "Billed code differs from the suggested code";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.CodingCodeSetNeedsReview"/>'s Signal.</summary>
+    public const string CodeSetNeedsReviewHeadline = "Suggested code set needs review";
 
     /// <summary>The title (<c>sprk_name</c>) of D-115's "money not judged" Signal.</summary>
     public const string RatesNotCheckedHeadline = "Rates and expense caps not checked";
@@ -168,6 +219,10 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CurrencyNotUsd => CurrencyNotUsdHeadline,
         BillingReasonCodes.CoreRecordClosedToBilling => ClosedToBillingHeadline,
         BillingReasonCodes.CoreRecordClosed => NoCloseDateHeadline,
+        BillingReasonCodes.SubmissionInvoiceNumberMismatch => InvoiceNumberMismatchHeadline,
+        BillingReasonCodes.CodingRefusedCode => RefusedCodeHeadline,
+        BillingReasonCodes.CodingFirmCodeMismatch => FirmCodeMismatchHeadline,
+        BillingReasonCodes.CodingCodeSetNeedsReview => CodeSetNeedsReviewHeadline,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd
             => RatesNotCheckedHeadline,
         _ => null,
@@ -184,6 +239,9 @@ public static class BillingRuleCatalogue
     public static bool IsFlagOnlyReason(string reasonCode) => reasonCode switch
     {
         BillingReasonCodes.CurrencyNotUsd => true,
+        // D-125: the system reasons hold or note, never reject or adjust, whatever a stored version's consequence says.
+        BillingReasonCodes.SubmissionInvoiceNumberMismatch or BillingReasonCodes.CodingRefusedCode
+            or BillingReasonCodes.CodingFirmCodeMismatch or BillingReasonCodes.CodingCodeSetNeedsReview => true,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd => true,
         _ => false,
     };
@@ -199,7 +257,8 @@ public static class BillingRuleCatalogue
     {
         RuleType.ApprovedTimekeeper or RuleType.ApprovedRate or RuleType.ExpenseRule or RuleType.InvoiceAge
             or RuleType.CoreRecordWindow or RuleType.Duplicate or RuleType.RequiredData => true,
-        RuleType.TimeIncrement or RuleType.DailyHoursCap or RuleType.NonBillableActivity or RuleType.AiObservation => false,
+        RuleType.TimeIncrement or RuleType.DailyHoursCap or RuleType.NonBillableActivity or RuleType.AiObservation
+            or RuleType.SubmissionIntegrity => false,
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
@@ -230,6 +289,7 @@ public static class BillingRuleCatalogue
         RuleType.Duplicate => Consequences(BillingConsequence.Reject, BillingConsequence.Flag),
         RuleType.RequiredData => Consequences(BillingConsequence.Reject, BillingConsequence.Flag),
         RuleType.AiObservation => Consequences(BillingConsequence.Flag),
+        RuleType.SubmissionIntegrity => Consequences(BillingConsequence.Flag),
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
@@ -251,6 +311,7 @@ public static class BillingRuleCatalogue
         var why = ruleType switch
         {
             RuleType.AiObservation => "an AI observation never rejects a submission (I-5)",
+            RuleType.SubmissionIntegrity => "a submission-integrity finding holds the invoice for review and never rejects or adjusts it (D-125)",
             RuleType.ApprovedTimekeeper when chosen == BillingConsequence.Reject => "an unapproved timekeeper holds the invoice for review and never rejects it (D-89)",
             _ when chosen == BillingConsequence.Reject => "this rule type may not reject a submission (FR-26)",
             _ => "this rule type does not suggest adjustments (design.md 6.1)",
@@ -280,7 +341,7 @@ public static class BillingRuleCatalogue
         RuleType.Duplicate => RejectCapable(BillingReasonCodes.DuplicateInvoiceNumber),
         RuleType.RequiredData => RejectCapable(BillingReasonCodes.RequiredFieldMissing),
         RuleType.ApprovedTimekeeper or RuleType.TimeIncrement or RuleType.DailyHoursCap or RuleType.NonBillableActivity
-            or RuleType.AiObservation => RejectCapable(),
+            or RuleType.AiObservation or RuleType.SubmissionIntegrity => RejectCapable(),
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
@@ -328,6 +389,9 @@ public static class BillingRuleCatalogue
         RuleType.AiObservation => (
             $"No line has the AI observation '{root.GetProperty("observation").GetString()}' at a confidence of {Num(root, "minConfidence")} or more.",
             $"AiObservation(observation={root.GetProperty("observation").GetString()}, minConfidence={Num(root, "minConfidence")})"),
+        RuleType.SubmissionIntegrity => (
+            "System rule: the submission's invoice number and the line coding are compared, and a difference is flagged for review.",
+            "SubmissionIntegrity()"),
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 

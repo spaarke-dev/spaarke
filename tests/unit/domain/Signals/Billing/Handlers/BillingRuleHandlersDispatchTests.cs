@@ -67,7 +67,7 @@ public class BillingRuleHandlersDispatchTests
 
         foreach (var type in Enum.GetValues<RuleType>())
         {
-            if (RuleDomains.IsBilling(type))
+            if (RuleDomains.IsBilling(type) && !BillingRuleCatalogue.IsSystemType(type))
             {
                 RuleDomains.DomainOf(type).Should().Be(RuleDomain.Billing);
                 BillingRuleHandlers.HasHandler(type).Should().BeTrue($"billing rule type {type} must have a handler (a new member needs a case in BillingRuleHandlers.HandlerFor)");
@@ -80,7 +80,8 @@ public class BillingRuleHandlersDispatchTests
             }
             else
             {
-                BillingRuleHandlers.HasHandler(type).Should().BeFalse($"{type} is not a billing type and must not be dispatched");
+                // D-125: the system type is a Billing member with no handler on purpose (049 creates its findings directly).
+                BillingRuleHandlers.HasHandler(type).Should().BeFalse($"{type} is not a handled billing type and must not be dispatched");
                 var anyRule = Rule(SampleBodies[RuleType.ApprovedTimekeeper]);
                 var refuse = () => BillingRuleHandlers.EvaluateAs(type, anyRule, Origin, facts);
                 refuse.Should().Throw<BillingRuleRefusedException>().Which.ReasonCode.Should().Be(BillingRuleRefusedException.NoHandler);

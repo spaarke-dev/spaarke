@@ -61,6 +61,7 @@ public sealed class RuleBodySchemaValidator
     /// <summary>ebilling-r1 task 070: one schema per billing type, loaded on first use from the flat
     /// <c>Services/Signals/Schemas/billing-*.schema.json</c> resources (<see cref="BillingRuleCatalogue.SchemaResourceSuffix"/>).</summary>
     private static readonly FrozenDictionary<RuleType, Lazy<JsonSchema>> BillingSchemas = BillingRuleCatalogue.Types
+        .Append(RuleType.SubmissionIntegrity) // D-125: a system type is schema-backed (the strict empty body) though it is not in Types
         .ToFrozenDictionary(t => t, t => new Lazy<JsonSchema>(() => LoadSchema(BillingRuleCatalogue.SchemaResourceSuffix(t))));
 
     /// <summary>The closed set, named for a refusal message (every <see cref="RuleType"/> member, in declaration order).</summary>
@@ -368,7 +369,7 @@ public sealed class RuleBodySchemaValidator
         RuleType.Threshold => ThresholdSchema.Value,
         RuleType.ApprovedTimekeeper or RuleType.ApprovedRate or RuleType.TimeIncrement or RuleType.DailyHoursCap
             or RuleType.NonBillableActivity or RuleType.ExpenseRule or RuleType.InvoiceAge or RuleType.CoreRecordWindow
-            or RuleType.Duplicate or RuleType.RequiredData or RuleType.AiObservation => BillingSchemas[ruleType].Value,
+            or RuleType.Duplicate or RuleType.RequiredData or RuleType.AiObservation or RuleType.SubmissionIntegrity => BillingSchemas[ruleType].Value,
         RuleType.Switch => throw new NotSupportedException(
             $"Schema validation for rule type '{ruleType}' has not been authored: Switch is deferred (D-16); " +
             "the shipped types are Existence and Threshold."),

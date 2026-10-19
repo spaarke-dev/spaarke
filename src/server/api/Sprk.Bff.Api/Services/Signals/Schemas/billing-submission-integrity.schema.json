@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/billing/billing-submission-integrity.schema.json",
+  "title": "SubmissionIntegrity billing rule body",
+  "description": "sprk_policyversion.sprk_rulebody shape for sprk_ruletype = SubmissionIntegrity (ebilling-r1 task 049; D-123, D-125). A SYSTEM rule: never authorable and never evaluated from its body. The body is the strict empty object; the findings (the D-91 invoice-number mismatch and the 047 coding findings) are created directly by the submission job. additionalProperties=false: any member is refused, not ignored.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {}
+}

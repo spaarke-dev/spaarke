@@ -45,7 +45,7 @@ public class SubmissionRejectionRuleTests
 
     public static TheoryData<RuleType> NeverRejecting => new(NeverRejectingTypes);
 
-    public static TheoryData<RuleType> EveryBillingType => new(Enum.GetValues<RuleType>().Where(RuleDomains.IsBilling));
+    public static TheoryData<RuleType> EveryBillingType => new(BillingRuleCatalogue.Types);
 
     // ── Builders ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -455,7 +455,7 @@ public class SubmissionRejectionRuleTests
     public static TheoryData<RuleType, string> ListedReasons()
     {
         var data = new TheoryData<RuleType, string>();
-        foreach (var type in Enum.GetValues<RuleType>().Where(RuleDomains.IsBilling))
+        foreach (var type in BillingRuleCatalogue.Types)
         {
             foreach (var reason in BillingRuleCatalogue.RejectCapableReasons(type).Order(StringComparer.Ordinal))
             {
@@ -508,7 +508,7 @@ public class SubmissionRejectionRuleTests
     [Fact]
     public void TheAllowlist_IsEmptyForEveryTypeThatMayNotReject_AndNonEmptyForEveryTypeThatMay()
     {
-        foreach (var type in Enum.GetValues<RuleType>().Where(RuleDomains.IsBilling))
+        foreach (var type in BillingRuleCatalogue.Types)
         {
             if (BillingRuleCatalogue.IsConsequenceAllowed(type, Reject))
             {
@@ -1269,7 +1269,7 @@ public class SubmissionRejectionRuleTests
     [Fact]
     public void FR26_RejectEligibility_IsCataloguePositions_1_2_6_7_8_9_10()
     {
-        var eligible = Enum.GetValues<RuleType>().Where(RuleDomains.IsBilling).ToArray();
+        var eligible = BillingRuleCatalogue.Types.ToArray();
         eligible.Should().HaveCount(11);
 
         foreach (var type in eligible)
@@ -1320,7 +1320,7 @@ public class SubmissionRejectionRuleTests
     [Fact]
     public void EveryTypeThatMayReject_IsEligible_SoNothingCanBeStoredAsRejectThatTheRuleWouldIgnore()
     {
-        foreach (var type in Enum.GetValues<RuleType>().Where(RuleDomains.IsBilling))
+        foreach (var type in BillingRuleCatalogue.Types)
         {
             if (BillingRuleCatalogue.IsConsequenceAllowed(type, Reject))
             {
@@ -1350,7 +1350,7 @@ public class SubmissionRejectionRuleTests
         var cases = 0;
         var controlsThatReject = 0;
 
-        foreach (var type in Enum.GetValues<RuleType>().Where(RuleDomains.IsBilling))
+        foreach (var type in BillingRuleCatalogue.Types)
         {
             foreach (var subject in new[] { BillingSubject.ForInvoice(), BillingSubject.ForLine(0) })
             {

@@ -79,4 +79,16 @@ public enum RuleType
 
     /// <summary>11. An AI observation (block billing, vague description) is present at or above a confidence. Flag only (I-5).</summary>
     AiObservation = 100000013,
+
+    // ── System billing rule (ebilling-r1 task 049, D-123 / D-125) ────────────────────────────────────────────────
+
+    /// <summary>
+    /// 12. A SYSTEM rule type (D-125): the marker of the seeded policy <c>BILL-SYSTEM-SUBMISSION</c>, which backs the findings task 049
+    /// creates directly (the D-91 invoice-number mismatch and the 047 coding findings). A Billing member, but never authorable and never
+    /// evaluated from a rule body: it is not in <see cref="Billing.BillingRuleCatalogue.Types"/> (so the drafting Action is not offered
+    /// it), <c>ValidateBilling(atSave: true)</c> and <c>PolicyVersionValidator.ValidateForAuthoring</c> refuse it, and no handler
+    /// exists for it. Flag only. Added to <c>sprk_policyversion.sprk_ruletype</c> by
+    /// <c>scripts/ebilling/Deploy-EbillingSubmissionIntegrityOption.ps1</c> (option value 100000014, the next free one).
+    /// </summary>
+    SubmissionIntegrity = 100000014,
 }

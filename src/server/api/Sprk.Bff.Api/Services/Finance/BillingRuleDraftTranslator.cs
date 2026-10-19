@@ -144,6 +144,10 @@ internal static class BillingRuleDraftTranslator
         RuleType.AiObservation => (
             "Billing practice concern",
             "The line dated {{line.date}} shows {{observation}} (confidence {{observationConfidence}}; the rule applies from {{rule.minConfidence}})."),
+        // D-125: never offered or authored; every SubmissionIntegrity reason has its own message, so this is only the closed switch's answer.
+        RuleType.SubmissionIntegrity => (
+            "Submission check",
+            "The submission has a note for review."),
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 

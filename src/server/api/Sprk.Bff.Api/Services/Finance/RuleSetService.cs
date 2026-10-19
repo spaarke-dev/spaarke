@@ -252,6 +252,7 @@ public class RuleSetService
     internal const string CodeSourceMissing = "ruleset.source_missing";
     internal const string CodeAlreadyDrafted = "ruleset.already_drafted";
     internal const string CodeConcurrentEdit = "ruleset.concurrent_edit";
+    internal const string CodeSystemRule = "ruleset.system_rule";
     internal const string CodePublishInProgress = "ruleset.publish_in_progress";
 
     /// <summary>
@@ -2198,6 +2199,12 @@ public class RuleSetService
         }
 
         var rule = loaded.Rules.FirstOrDefault(r => r.Policy.Id == policyId);
+        if (rule is not null && rule.Versions.Any(v => v.RuleType == (int)RuleType.SubmissionIntegrity))
+        {
+            // D-125: the system policy is never edited, accepted, rejected or given a new version here (an administrator may only turn it off).
+            return (null, RuleSetOutcome<T>.Refused(StatusCodes.Status409Conflict, CodeSystemRule, "This is a system rule; it cannot be changed here."));
+        }
+
         return rule is null
             ? (null, RuleSetOutcome<T>.Refused(StatusCodes.Status404NotFound, CodeProposalNotFound, "The rule was not found in this rule set."))
             : (rule, null);

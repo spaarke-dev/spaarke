@@ -51,7 +51,7 @@ public static class RuleDomains
         RuleType.Threshold or RuleType.Switch or RuleType.Existence => RuleDomain.Ontology,
         RuleType.ApprovedTimekeeper or RuleType.ApprovedRate or RuleType.TimeIncrement or RuleType.DailyHoursCap
             or RuleType.NonBillableActivity or RuleType.ExpenseRule or RuleType.InvoiceAge or RuleType.CoreRecordWindow
-            or RuleType.Duplicate or RuleType.RequiredData or RuleType.AiObservation => RuleDomain.Billing,
+            or RuleType.Duplicate or RuleType.RequiredData or RuleType.AiObservation or RuleType.SubmissionIntegrity => RuleDomain.Billing,
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a member of the closed RuleType set."),
     };
 

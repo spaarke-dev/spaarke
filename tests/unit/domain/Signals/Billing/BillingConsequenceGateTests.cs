@@ -32,7 +32,7 @@ public class BillingConsequenceGateTests
         {"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"sprk_direction":1}}]}
         """;
 
-    public static TheoryData<RuleType> EveryBillingType => new(Enum.GetValues<RuleType>().Where(RuleDomains.IsBilling));
+    public static TheoryData<RuleType> EveryBillingType => new(BillingRuleCatalogue.Types);
 
     public static TheoryData<RuleType> RejectRefusedTypes => new()
     {

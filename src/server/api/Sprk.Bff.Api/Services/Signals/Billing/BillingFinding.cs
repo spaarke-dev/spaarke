@@ -172,4 +172,10 @@ public static class BillingReasonCodes
     public const string CurrencyNotUsd = "required_data.currency_not_usd";
     public const string AiBlockBilling = "ai_observation.block_billing";
     public const string AiVagueDescription = "ai_observation.vague_description";
+
+    // SubmissionIntegrity (D-125): findings task 049 creates directly, never from a rule body. Flag only.
+    public const string SubmissionInvoiceNumberMismatch = "submission.invoice_number_mismatch";
+    public const string CodingRefusedCode = "coding.refused_code";
+    public const string CodingFirmCodeMismatch = "coding.firm_code_mismatch";
+    public const string CodingCodeSetNeedsReview = "coding.code_set_needs_review";
 }

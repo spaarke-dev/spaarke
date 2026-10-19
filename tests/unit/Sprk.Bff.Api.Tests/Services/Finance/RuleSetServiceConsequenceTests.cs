@@ -41,7 +41,7 @@ public sealed class RuleSetServiceConsequenceTests
         RuleType.ApprovedRate, RuleType.ExpenseRule, RuleType.InvoiceAge, RuleType.CoreRecordWindow, RuleType.Duplicate, RuleType.RequiredData,
     };
 
-    public static TheoryData<RuleType> EveryBillingType => new(Enum.GetValues<RuleType>().Where(RuleDomains.IsBilling));
+    public static TheoryData<RuleType> EveryBillingType => new(BillingRuleCatalogue.Types);
 
     /// <summary>A rule of <paramref name="type"/> with its catalogue-valid body and default wording, stored with <paramref name="consequence"/>.</summary>
     private static (Guid Policy, Guid Version) Stored(Harness h, Guid set, RuleType type, int? consequence, ProposalState state, string? code = null)

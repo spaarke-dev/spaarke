@@ -94,12 +94,16 @@ public class BillingRuleCatalogueTests
     // ── The closed set: 14 members, values, domain, catalogue position ─────────────────────────────────────────────
 
     [Fact]
-    public void RuleType_HasFourteenMembers_ThreeOntologyThenElevenBillingInFr24Order()
+    public void RuleType_HasFifteenMembers_ThreeOntologyThenElevenBillingInFr24OrderThenTheSystemType()
     {
-        Enum.GetValues<RuleType>().Should().HaveCount(14);
+        Enum.GetValues<RuleType>().Should().HaveCount(15);
         Enum.GetValues<RuleType>().Where(RuleDomains.IsOntology)
             .Should().BeEquivalentTo(new[] { RuleType.Threshold, RuleType.Switch, RuleType.Existence });
-        Enum.GetValues<RuleType>().Where(RuleDomains.IsBilling).Should().Equal(BillingRuleCatalogue.Types);
+        // D-125: the system type is a Billing member that is not in the (authorable) catalogue, with the next free option value.
+        Enum.GetValues<RuleType>().Where(RuleDomains.IsBilling)
+            .Should().Equal(BillingRuleCatalogue.Types.Append(RuleType.SubmissionIntegrity));
+        ((int)RuleType.SubmissionIntegrity).Should().Be(100000014);
+        BillingRuleCatalogue.Types.Should().NotContain(RuleType.SubmissionIntegrity);
         BillingRuleCatalogue.Types.Select(t => t.ToString()).Should().Equal(
             "ApprovedTimekeeper", "ApprovedRate", "TimeIncrement", "DailyHoursCap", "NonBillableActivity", "ExpenseRule",
             "InvoiceAge", "CoreRecordWindow", "Duplicate", "RequiredData", "AiObservation");

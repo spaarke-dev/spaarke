@@ -1208,6 +1208,11 @@
                   <label description="AiObservation" languagecode="1033" />
                 </labels>
               </option>
+              <option value="100000014" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="SubmissionIntegrity" languagecode="1033" />
+                </labels>
+              </option>
             </options>
           </optionset>
           <displaynames>

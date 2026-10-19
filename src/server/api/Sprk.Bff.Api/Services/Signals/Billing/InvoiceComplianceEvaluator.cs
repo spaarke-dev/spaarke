@@ -161,8 +161,10 @@ public sealed class InvoiceComplianceEvaluator
         };
 
         // Stable order for every pass below: the loader's order is not relied on.
+        // D-125: a system rule (SubmissionIntegrity) is never judged from a rule body: 049 creates its findings directly. A stored row of
+        // that type that reached the loader is skipped, not refused, so it can neither crash nor hold an evaluation.
         var candidates = loaded.Rules
-            .Where(c => c.CanBeInForce)
+            .Where(c => c.CanBeInForce && !IsSystemRule(c))
             .OrderBy(c => c.PolicyCode, StringComparer.Ordinal)
             .ThenBy(c => c.PolicyId)
             .ThenBy(c => c.VersionNumber)
@@ -377,6 +379,9 @@ public sealed class InvoiceComplianceEvaluator
     /// The billing rule type of a version whose stated consequence that type may not carry (or that is none of the three defined
     /// values), else <c>null</c>: no consequence stated, a type the gate refuses anyway (unknown or not billing), or an allowed one.
     /// </summary>
+    private static bool IsSystemRule(BillingRuleCandidate candidate) =>
+        RuleBodySchemaValidator.TryParseRuleType(candidate.RuleType, out var type) && BillingRuleCatalogue.IsSystemType(type);
+
     private static RuleType? DisallowedConsequenceType(BillingRuleCandidate candidate) =>
         candidate.Consequence is { } stated
         && RuleBodySchemaValidator.TryParseRuleType(candidate.RuleType, out var type)

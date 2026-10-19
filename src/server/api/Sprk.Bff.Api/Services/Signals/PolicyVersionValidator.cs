@@ -249,6 +249,14 @@ public sealed class PolicyVersionValidator
     /// </summary>
     public PolicyVersionAuthoringResult ValidateForAuthoring(string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate)
     {
+        // ebilling-r1 D-125: a system rule type is never authorable; refused before the domain check, with its own reason.
+        if (RuleBodySchemaValidator.TryParseRuleType(ruleTypeRaw, out var systemType) && BillingRuleCatalogue.IsSystemType(systemType))
+        {
+            return new PolicyVersionAuthoringResult(
+                PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.RuleTypeUnsupported, BillingRuleCatalogue.SystemRuleRefusal),
+                Array.Empty<string>());
+        }
+
         // ebilling-r1 merge (070 F3): authoring is the Ontology admin's validation, so a billing rule type is refused here with
         // RuleTypeWrongDomain (FR-24) instead of passing as a billing body that the allow-list check never sees.
         var (result, compiled) = ValidateInternal(
@@ -463,6 +471,13 @@ public sealed class PolicyVersionValidator
     private PolicyVersionValidationResult ValidateBilling(
         RuleType ruleType, string? ruleBodyJson, string? messageTemplate, int? consequence, bool atSave)
     {
+        // D-125: a system type is never authored, saved, or evaluated from a body (the billing gate refuses it too: 049 creates its
+        // findings directly, never through a BillingRuleDefinition).
+        if (BillingRuleCatalogue.IsSystemType(ruleType))
+        {
+            return PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.RuleTypeUnsupported, BillingRuleCatalogue.SystemRuleRefusal);
+        }
+
         if (ruleBodyJson is not null && ruleBodyJson.Length > RuleBodySchemaValidator.MaxRuleBodyLength)
         {
             return PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.RuleBodyTooLarge,
