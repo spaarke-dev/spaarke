@@ -85,7 +85,9 @@ try {
         }
     }
 
-    $expected = @($Ontology.Keys) + @($Billing.Keys)
+    # Task 049 (D-125) added SubmissionIntegrity = 100000014 to the column (Deploy-EbillingSubmissionIntegrityOption.ps1): tolerated when
+    # present, never inserted here, so this script stays re-runnable after it.
+    $expected = @($Ontology.Keys) + @($Billing.Keys) + 100000014
     $foreign = @($have | Where-Object { $_.Value -notin $expected })
     if ($foreign.Count -gt 0) {
         throw [EscalationException]::new("$Table.$Column holds options outside the 14 expected: $(Format-Options $foreign). Owner decision needed.")
@@ -137,7 +139,8 @@ try {
             $o = $after | Where-Object { $_.Value -eq $k }
             if (-not $o -or $o.Label -ne $all[$k]) { $bad += "$k expected '$($all[$k])', got '$($o.Label)'" }
         }
-        if ($after.Count -ne $all.Count) { $bad += "expected $($all.Count) options, found $($after.Count)" }
+        $systemPresent = @($after | Where-Object { $_.Value -eq 100000014 -and $_.Label -eq 'SubmissionIntegrity' }).Count
+        if ($after.Count -ne ($all.Count + $systemPresent)) { $bad += "expected $($all.Count + $systemPresent) options, found $($after.Count)" }
         if ($bad.Count -gt 0) { throw "Verification failed: $($bad -join '; ')" }
         Write-Host "  verified: $($all.Count) options match RuleType.cs" -ForegroundColor Green
     }

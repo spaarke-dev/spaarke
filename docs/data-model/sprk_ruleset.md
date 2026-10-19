@@ -1,7 +1,7 @@
 # sprk_ruleset and the billing columns on the policy store
 
 > **Project**: ebilling-r1, task 019 (FR-09, FR-27, FR-28, D-26, D-66, D-79)
-> **Last Updated**: 2026-10-18
+> **Last Updated**: 2026-10-19
 > **Scripts**: `scripts/ebilling/Deploy-EbillingPolicyStoreSchema.ps1` and, for `sprk_rejectionreason` (task 077, D-113), `scripts/ebilling/Deploy-EbillingRuleRejectionReasonSchema.ps1` (both idempotent, additive; a second run changes nothing)
 > **Owner of the policy tables**: spaarke-ontology-platform-r1 (`Services/Signals/**`). This task only adds columns to them.
 
@@ -71,6 +71,12 @@ Existing columns are unchanged. Added; clause and consequence sit on the version
 | `sprk_consequence` | Choice (local) | Reject submission = 100000000, Flag = 100000001, Suggest adjustment = 100000002. Empty on ontology rows. A rejection also needs the confidence threshold and a reject-eligible invoice type (FR-26, I-5). The type limits the value (task 073, `BillingRuleCatalogue.AllowedConsequences`): Reject only on ApprovedRate, ExpenseRule, InvoiceAge, CoreRecordWindow, Duplicate and RequiredData (not ApprovedTimekeeper, D-89; not TimeIncrement, DailyHoursCap, NonBillableActivity or AiObservation); Suggest adjustment only on ApprovedRate and NonBillableActivity; Flag on every type. Accept, edit, publish and drafting refuse the rest (`consequence_not_allowed`), and the billing gate refuses a stored version that carries one. |
 | `sprk_proposalstatus` | Choice (local) | Proposed = 100000000, Accepted = 100000001, Rejected = 100000002. State of a rule drafted by the Action (FR-27, FR-28). Empty on ontology rows. |
 | `sprk_rejectionreason` | Multiline text (2,000) | Why an admin rejected the draft (task 077, D-113). Set only by a reject, in the same conditional write as `sprk_proposalstatus = Rejected`; cleared by an accept and by an edit that returns the draft to Proposed. Required (1 to 2,000 characters after trimming) on the reject route, enforced by the BFF, not by schema. **Admin-only**: returned by the Rule Review read, never by a firm projection (`GetFirmClauseAsync` selects its columns by name). Empty on every version that was never rejected. Created by `Deploy-EbillingRuleRejectionReasonSchema.ps1` (task 079 runs it on dev; task 053 syncs SpaarkeMaster). |
+
+### `sprk_ruletype` (local choice) - options and the system value
+
+`sprk_policyversion.sprk_ruletype` is a **local** choice (not global). Options: Threshold 100000000, Switch 100000001, Existence 100000002 (Ontology); the eleven authorable billing types ApprovedTimekeeper 100000003 to AiObservation 100000013 (task 070, `scripts/ebilling/Deploy-EbillingRuleTypeOptions.ps1`); and, added by task 049 (D-125), the **system** type **SubmissionIntegrity = 100000014** (`scripts/ebilling/Deploy-EbillingSubmissionIntegrityOption.ps1`, idempotent, refuses a global choice or a relabelled option). Solution source (`SpaarkeMaster` `sprk_PolicyVersion/Entity.xml`) carries all 15; `RuleTypeOptionSetSyncTests` pins the enum to it.
+
+SubmissionIntegrity is the marker of the seeded policy `BILL-SYSTEM-SUBMISSION` (`scripts/ebilling/Seed-BillingSystemPolicy.ps1`): lane Decide, subject type Invoice, severity Info, domain Billing, **no rule set and no matter**, enabled, one version in force from 2026-10-19 with no end date, consequence Flag, body `{}`. It backs the findings task 049 creates directly: `submission.invoice_number_mismatch` (D-91) and the 047 coding findings `coding.refused_code`, `coding.firm_code_mismatch`, `coding.code_set_needs_review`. It is **never authorable** (absent from the drafting Action's options; `PolicyVersionValidator.ValidateBilling` and `ValidateForAuthoring` refuse it as `rule_type_unsupported`, "system rule; not authorable"), never evaluated from a body (no handler; the evaluator skips a stored row), flag-only (`AllowedConsequences` = Flag). An administrator may turn it off (`sprk_enabled`); new versions and deletion are refused; the findings stay in the submission's findings JSON either way.
 
 The predecessor of a version is its sibling under the same `sprk_policy` with the next-lower `sprk_versionnumber`; there is no extra link column.
 
