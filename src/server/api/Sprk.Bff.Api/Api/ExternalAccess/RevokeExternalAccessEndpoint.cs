@@ -105,7 +105,8 @@ public static class RevokeExternalAccessEndpoint
         // ContactId is OPTIONAL (task 073 #7): revoke is authoritative by AccessRecordId (root- AND
         // grantee-agnostic). Since task 137 the cache invalidation (Step 3) is keyed on the revoked ROW's grantee,
         // so it no longer needs ContactId either: a contact grant clears that contact, an ORGANIZATION grant clears
-        // every active member. ContactId still keys the per-contact SPE cleanup (Step 2), unchanged.
+        // every active member. Since #2104 (pass-1 K3) the per-contact SPE cleanup (Step 2) is keyed on the row's
+        // grantee too, so ContactId is not read by any step; it is logged only.
         //
         // Note (task 070): ProjectId is NOT required — revoke deactivates by AccessRecordId and is
         // root-agnostic (works for a project/matter/work-assignment grant alike). The field is retained
@@ -200,7 +201,7 @@ public static class RevokeExternalAccessEndpoint
 
         // ── Step 2: Remove the revoked grantee's SPE container permission(s) ──
         var (speOutcome, orgCleanup, organizationTooLarge) = await RemoveSpeContainerPermissionsAsync(
-            speContainerMembership, dataverseClient, containerResolver, request, grantKey,
+            speContainerMembership, dataverseClient, containerResolver, request.AccessRecordId, grantKey,
             ExternalGrantLifecycle.TodayUtc(timeProvider ?? TimeProvider.System), logger, ct);
 
         // ── Step 3: Invalidate the grant cache — the ONE routine (task 137) ───
@@ -336,7 +337,8 @@ public static class RevokeExternalAccessEndpoint
     ///
     /// <para>The fix is deletion, not repair: the service already had a correct email matcher with zero
     /// callers (CLAUDE.md §11 — reuse, don't fork). What remains here is the endpoint's own job — turning
-    /// a contact id into the email key, and mapping the result to an honest outcome.</para>
+    /// a contact id into its identity key (#2105: bound object id and email, <see cref="ResolveContactMembershipKeyAsync"/>),
+    /// and mapping the result to an honest outcome.</para>
     ///
     /// <para><b>Broker-only context.</b> Nothing in this codebase ADDS a container permission
     /// (<c>GrantMembershipAsync</c> has no callers; <c>/grant</c> reports
@@ -355,7 +357,7 @@ public static class RevokeExternalAccessEndpoint
     /// container is <c>Failed</c> (→ the M2 500). Note the shipped Manage Access modal never sent a container, so
     /// until this change secure-root revokes never cleaned up SPE at all.</para>
     ///
-    /// <para><b>Overlap — task 166 r1.</b> Permissions are keyed by EMAIL, not by grant, so one person can hold the
+    /// <para><b>Overlap — task 166 r1.</b> Permissions are keyed by IDENTITY, not by grant, so one person can hold the
     /// same container permission on the strength of two grants on this root (a direct contact grant AND membership of
     /// an organization granted the same root). Revoking one of them must not strip a permission the other still
     /// justifies. So before removing, the root's REMAINING active, unexpired grants are read and every contact they
@@ -368,7 +370,7 @@ public static class RevokeExternalAccessEndpoint
             SpeContainerMembershipService speContainerMembership,
             DataverseWebApiClient dataverseClient,
             RecordContainerResolver containerResolver,
-            RevokeAccessRequest request,
+            Guid accessRecordId,
             ExternalGrantKey grantKey,
             DateOnly today,
             ILogger logger,
@@ -420,7 +422,7 @@ public static class RevokeExternalAccessEndpoint
                 logger.LogError(
                     "[EXT-REVOKE] Access record {AccessRecordId} derives an organization grant with no " +
                     "organization id. Members cannot be identified; no SPE container permission on " +
-                    "{ContainerId} was removed.", request.AccessRecordId, containerId);
+                    "{ContainerId} was removed.", accessRecordId, containerId);
                 return (SpeContainerRevokeOutcome.Failed, UnknownMembership, false);
             }
 
@@ -428,29 +430,29 @@ public static class RevokeExternalAccessEndpoint
                 speContainerMembership, dataverseClient, containerId, organizationId, stillEntitled, logger, ct);
         }
 
-        // A CONTACT-grant row revoked without a ContactId on the request: the row names the grantee, but
-        // resolving them here would change which identity the per-contact path acts on, which task 017's
-        // constraint pins. Left as NotAttempted — the honest answer, and unchanged behaviour.
-        if (request.ContactId == Guid.Empty)
+        // A CONTACT grant: the ROW's contact is the one revoked (pass-1 K3), never request.ContactId — a request naming
+        // nobody, or a different contact, must not change whose permission is cleared. Unreachable when null:
+        // IsOrganizationGrant is exactly "no contact". Handled fail closed (Failed), never as a silent NotAttempted.
+        if (grantKey.ContactId is not { } contactId)
         {
-            logger.LogInformation(
-                "[EXT-REVOKE] Contact-grant revoke with no ContactId on the request — no identity key to " +
-                "match; SPE container permission removal not attempted for container {ContainerId}.",
-                containerId);
-            return (SpeContainerRevokeOutcome.NotAttempted, null, false);
+            logger.LogError(
+                "[EXT-REVOKE] Access record {AccessRecordId} derives a contact grant with no contact. The grantee "
+                + "cannot be identified; no SPE container permission on {ContainerId} was removed.",
+                accessRecordId, containerId);
+            return (SpeContainerRevokeOutcome.Failed, null, false);
         }
 
-        if (stillEntitled is not null && stillEntitled.Contains(request.ContactId))
+        if (stillEntitled is not null && stillEntitled.Contains(contactId))
         {
             logger.LogInformation(
                 "[EXT-REVOKE] Contact {ContactId} is still entitled to {RootType} {RootId} through another active grant "
                 + "on it; their container permission on {ContainerId} is KEPT (task 166).",
-                request.ContactId, grantKey.RootType, grantKey.RootId, containerId);
+                contactId, grantKey.RootType, grantKey.RootId, containerId);
             return (SpeContainerRevokeOutcome.NotAttempted, null, false);
         }
 
         return (await RemoveContactSpePermissionAsync(
-            speContainerMembership, dataverseClient, request, containerId, logger, ct), null, false);
+            speContainerMembership, dataverseClient, contactId, containerId, logger, ct), null, false);
     }
 
     /// <summary>The most remaining grant rows on one root a single revoke reads for the overlap check.</summary>
@@ -554,50 +556,51 @@ public static class RevokeExternalAccessEndpoint
     }
 
     /// <summary>
-    /// The per-CONTACT half of the SPE cleanup: one identity, one permission. Unchanged by task 020.
+    /// The per-CONTACT half of the SPE cleanup: one identity, one permission. <paramref name="contactId"/> is the
+    /// revoked ROW's contact (pass-1 K3), never the request's.
     /// </summary>
     private static async Task<SpeContainerRevokeOutcome> RemoveContactSpePermissionAsync(
         SpeContainerMembershipService speContainerMembership,
         DataverseWebApiClient dataverseClient,
-        RevokeAccessRequest request,
+        Guid contactId,
         string containerId,
         ILogger logger,
         CancellationToken ct)
     {
-        string? contactEmail;
+        SpeMembershipKey contactKey;
         try
         {
-            contactEmail = await ResolveContactEmailAsync(dataverseClient, request.ContactId, ct);
+            contactKey = await ResolveContactMembershipKeyAsync(dataverseClient, contactId, ct);
         }
         catch (Exception ex)
         {
             logger.LogError(ex,
-                "[EXT-REVOKE] Could not read the email for Contact {ContactId}; the SPE container " +
-                "permission on {ContainerId} could NOT be matched and may remain.",
-                request.ContactId, containerId);
+                "[EXT-REVOKE] Could not read the identity key (object id / email) of Contact {ContactId}; the SPE " +
+                "container permission on {ContainerId} could NOT be matched and may remain.",
+                contactId, containerId);
             return SpeContainerRevokeOutcome.Failed;
         }
 
-        if (HasNoContainerMembershipKey(contactEmail))
+        if (HasNoContainerMembershipKey(contactKey))
         {
             // #2103: the shared decision (see HasNoContainerMembershipKey) — nothing on the container can be this
             // contact's, so there is nothing to clear. It used to be Failed → a 500 telling the caller to retry, which
-            // could never succeed: a missing email is permanent.
+            // could never succeed: a missing key is permanent.
             logger.LogInformation(
-                "[EXT-REVOKE] Contact {ContactId} has no emailaddress1 — the only key a container permission is " +
-                "matched by — so no permission on {ContainerId} can be attributed to them; container step " +
-                "{Outcome} (#2103).",
-                request.ContactId, containerId, NoContainerMembershipKeyOutcome);
+                "[EXT-REVOKE] Contact {ContactId} has neither a bound object id nor an emailaddress1 — the keys a " +
+                "container permission is matched by — so no permission on {ContainerId} can be attributed to them; " +
+                "container step {Outcome} (#2103).",
+                contactId, containerId, NoContainerMembershipKeyOutcome);
             return NoContainerMembershipKeyOutcome;
         }
 
-        var result = await speContainerMembership.RevokeMembershipAsync(containerId, contactEmail, ct);
+        var result = await speContainerMembership.RevokeMembershipAsync(containerId, contactKey, ct);
 
         if (result.Success)
         {
             logger.LogInformation(
                 "[EXT-REVOKE] Removed SPE container permission {PermissionId} for Contact {ContactId} on {ContainerId}",
-                result.PermissionId, request.ContactId, containerId);
+                result.PermissionId, contactId, containerId);
             return SpeContainerRevokeOutcome.PermissionRemoved;
         }
 
@@ -608,14 +611,14 @@ public static class RevokeExternalAccessEndpoint
             logger.LogInformation(
                 "[EXT-REVOKE] No SPE container permission exists for Contact {ContactId} on {ContainerId} " +
                 "— nothing to remove (expected under the broker-only model).",
-                request.ContactId, containerId);
+                contactId, containerId);
             return SpeContainerRevokeOutcome.NoPermissionFound;
         }
 
         logger.LogError(
             "[EXT-REVOKE] Failed to remove the SPE container permission for Contact {ContactId} on " +
             "{ContainerId}: {Error}. They may RETAIN file access.",
-            request.ContactId, containerId, result.Error);
+            contactId, containerId, result.Error);
         return SpeContainerRevokeOutcome.Failed;
     }
 
@@ -693,8 +696,8 @@ public static class RevokeExternalAccessEndpoint
         }
 
         // ── Resolve identities ───────────────────────────────────────────────
-        // Membership is written with userPrincipalName = the contact's email, so an email is the ONLY
-        // key that can match an ACL entry. Resolve them all first, then do ONE container read.
+        // A permission is matched by the member's bound object id, then their email (#2105,
+        // SpeContainerMembershipService.FindContactPermission). Resolve them all first, then do ONE container read.
         //
         // ISS-004 (#968), closed by task 024: this loop used to call RevokeMembershipAsync per member,
         // and each of those calls read the container's ENTIRE permission collection — N members = N
@@ -705,7 +708,7 @@ public static class RevokeExternalAccessEndpoint
         var retained = 0;
         var noKey = 0;
 
-        var resolved = new List<(Guid ContactId, string Email)>();
+        var resolved = new List<(Guid ContactId, SpeMembershipKey Key)>();
 
         foreach (var memberContactId in memberSet.ContactIds)
         {
@@ -724,28 +727,28 @@ public static class RevokeExternalAccessEndpoint
             // strictly MORE access in place. Every member gets an outcome, and the failures are counted.
             try
             {
-                var memberEmail = await ResolveContactEmailAsync(dataverseClient, memberContactId, ct);
+                var memberKey = await ResolveContactMembershipKeyAsync(dataverseClient, memberContactId, ct);
 
-                if (HasNoContainerMembershipKey(memberEmail))
+                if (HasNoContainerMembershipKey(memberKey))
                 {
                     // #2103: the shared decision — no permission can be this member's, so nothing to clear, and
                     // not a failure (it used to be, which made every revoke of this organization a permanent 500).
                     noKey++;
                     logger.LogInformation(
-                        "[EXT-REVOKE] Member Contact {ContactId} of Organization {OrganizationId} has no " +
-                        "emailaddress1 — the only key a container permission is matched by — so no permission " +
-                        "on {ContainerId} can be attributed to them; nothing to clear (#2103).",
+                        "[EXT-REVOKE] Member Contact {ContactId} of Organization {OrganizationId} has neither a bound " +
+                        "object id nor an emailaddress1 — the keys a container permission is matched by — so no " +
+                        "permission on {ContainerId} can be attributed to them; nothing to clear (#2103).",
                         memberContactId, organizationId, containerId);
                     continue;
                 }
 
-                resolved.Add((memberContactId, memberEmail));
+                resolved.Add((memberContactId, memberKey));
             }
             catch (Exception ex)
             {
                 failed++;
                 logger.LogError(ex,
-                    "[EXT-REVOKE] Could not resolve the email for member Contact {ContactId} of " +
+                    "[EXT-REVOKE] Could not resolve the identity key for member Contact {ContactId} of " +
                     "Organization {OrganizationId}; their permission on {ContainerId} cannot be matched " +
                     "and may remain. Continuing with the rest.",
                     memberContactId, organizationId, containerId);
@@ -753,19 +756,19 @@ public static class RevokeExternalAccessEndpoint
         }
 
         // ── Sweep: ONE paged read, then match every member against it ────────
-        // ⚠️ Behaviour note: results are keyed by EMAIL, so two contact rows sharing one address now
-        // both report the outcome of the single permission that address owns. Previously the second
-        // call found the permission already deleted and reported NoPermissionFound, which read as "this
-        // person never had access". Keying by identity is the more truthful of the two.
-        IReadOnlyDictionary<string, SpeContainerMembershipResult> speResults =
+        // ⚠️ Behaviour note: results are keyed by IDENTITY KEY, so two contact rows sharing one key both report
+        // the outcome of the single permission it names (and the service deletes a permission two keys name only
+        // once). Previously the second call found the permission already deleted and reported NoPermissionFound,
+        // which read as "this person never had access".
+        IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult> speResults =
             resolved.Count == 0
-                ? new Dictionary<string, SpeContainerMembershipResult>(StringComparer.OrdinalIgnoreCase)
+                ? new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>()
                 : await speContainerMembership.RemoveMembershipsAsync(
-                    containerId, resolved.Select(r => r.Email).ToList(), ct);
+                    containerId, resolved.Select(r => r.Key).ToList(), ct);
 
-        foreach (var (memberContactId, memberEmail) in resolved)
+        foreach (var (memberContactId, memberKey) in resolved)
         {
-            if (!speResults.TryGetValue(memberEmail, out var result))
+            if (!speResults.TryGetValue(memberKey, out var result))
             {
                 // A member we asked about but got no answer for is an unknown, not an absence.
                 failed++;
@@ -812,7 +815,7 @@ public static class RevokeExternalAccessEndpoint
 
         logger.LogInformation(
             "[EXT-REVOKE] Organization {OrganizationId} SPE cleanup on {ContainerId}: {Members} active " +
-            "member(s), {Removed} permission(s) removed, {NotFound} with none, {NoKey} with no email key, " +
+            "member(s), {Removed} permission(s) removed, {NotFound} with none, {NoKey} with no identity key, " +
             "{Failed} FAILED → {Outcome}",
             organizationId, containerId, summary.MembersEnumerated, removed, notFound, noKey, failed, outcome);
 
@@ -860,68 +863,96 @@ public static class RevokeExternalAccessEndpoint
         return SpeContainerRevokeOutcome.NoPermissionFound;
     }
 
+    /// <summary>The contact columns <see cref="ResolveContactMembershipKeyAsync"/> reads.</summary>
+    internal static readonly string ContactMembershipKeySelect = string.Join(",",
+        "emailaddress1", ContactBindingDecision.ExternalObjectIdColumn, ContactBindingDecision.IdentityPlaneColumn);
+
     /// <summary>
-    /// Reads a contact's <c>emailaddress1</c> — the key SPE membership is written with.
+    /// Reads a contact's identity key (#2105): its bound Entra object id (<c>sprk_externalobjectid</c>, read through
+    /// <see cref="ContactBindingDecision.ReadBinding"/>, the one binding parse) and its <c>emailaddress1</c>.
     /// </summary>
     /// <remarks>
-    /// Uses <see cref="DataverseWebApiClient.RetrieveAsync{T}"/> directly rather than introducing a
-    /// contact-email service: one column on one row, and the client is already injected (CLAUDE.md §11).
+    /// <para>Uses <see cref="DataverseWebApiClient.RetrieveAsync{T}"/> directly rather than introducing a
+    /// contact-key service: three columns on one row, and the client is already injected (CLAUDE.md §11).
     /// <c>internal</c> since task 166: project closure removes the revoked grantees' container permissions by the
-    /// SAME identity key, so it reuses this rather than a second copy.
+    /// SAME identity key, so it reuses this rather than a second copy.</para>
+    /// <para><b>An UNREADABLE binding is not "no object id"</b> (<see cref="BindingKind.Unreadable"/>: a plane marker
+    /// with no readable oid — the field-security masking signature — is never treated as unbound). With an email the
+    /// email still matches, as it always has. With no email the contact may hold a permission under an oid this read
+    /// cannot see, so "nothing to clear" would be a guess: it THROWS, which every caller already reports as a key that
+    /// could not be read (Failed / not cleared) — fail closed.</para>
     /// </remarks>
-    internal static async Task<string?> ResolveContactEmailAsync(
+    internal static async Task<SpeMembershipKey> ResolveContactMembershipKeyAsync(
         DataverseWebApiClient dataverseClient, Guid contactId, CancellationToken ct)
     {
         var row = await dataverseClient.RetrieveAsync<ContactEmailRow>(
-            "contacts", contactId, "emailaddress1", ct);
+            "contacts", contactId, ContactMembershipKeySelect, ct);
 
-        return row?.emailaddress1;
+        var binding = ContactBindingDecision.ReadBinding(row?.sprk_externalobjectid, row?.sprk_identityplane);
+        var key = new SpeMembershipKey(binding.Kind == BindingKind.Bound ? binding.Oid : null, row?.emailaddress1);
+
+        if (binding.Kind == BindingKind.Unreadable && key.IsEmpty)
+        {
+            throw new InvalidOperationException(
+                $"Contact {contactId} has no emailaddress1 and an unreadable identity binding (a plane marker without a "
+                + "readable object id), so its container permission cannot be matched or ruled out.");
+        }
+
+        return key;
     }
 
     /// <summary>
-    /// #2103 — THE decision for a grantee contact with no <c>emailaddress1</c>, shared by every SPE cleanup that
-    /// revokes contacts: the single-grant revoke (a contact grant, and each member of an organization grant) and
-    /// project closure. <see langword="true"/> means no container permission can be attributed to this contact, so
-    /// there is nothing to clear — NOT a failure, and never a "retry".
+    /// #2103 / #2105 — THE decision for a grantee contact with no identity key (no bound Entra object id AND no
+    /// <c>emailaddress1</c>), shared by every SPE cleanup that revokes contacts: the single-grant revoke (a contact
+    /// grant, and each member of an organization grant) and project closure. <see langword="true"/> means no container
+    /// permission can be attributed to this contact, so there is nothing to clear — NOT a failure, and never a "retry".
     /// </summary>
     /// <remarks>
     /// <para><b>Why "nothing to clear" is the truthful answer, not a guess.</b></para>
     /// <list type="number">
-    /// <item><b>Spaarke never writes a contact's container permission.</b>
-    /// <see cref="SpeContainerMembershipService.GrantMembershipAsync"/> has no caller and never had one (its
-    /// introducing commit is the only one that changes its call count); <c>/grant</c> answers
-    /// <c>SpeContainerMembershipGranted: false</c>; the invite endpoints do not touch SPE. So no grant-time key
-    /// exists to revoke by — there is no grant-time write.</item>
-    /// <item><b>The roles Spaarke DOES create are not a contact's.</b> The marked grants
+    /// <item><b>No grant-time write records a key.</b> <see cref="SpeContainerMembershipService.GrantMembershipAsync"/>
+    /// has no caller and never had one; <c>/grant</c> answers <c>SpeContainerMembershipGranted: false</c>; the invite
+    /// endpoints do not touch SPE. A contact's container permission, when one exists, was added by hand — in the SPE
+    /// admin app (a Spaarke surface: Add Permission names the user by UPN, resolved from their object id) or outside
+    /// Spaarke.</item>
+    /// <item><b>Such a permission names its holder by object id, email and UPN.</b> The revoke matches it by the
+    /// contact's bound object id first, then by its email against the permission's <c>email</c> and
+    /// <c>userPrincipalName</c> (<see cref="SpeContainerMembershipService.FindContactPermission"/>). With either key,
+    /// "no permission under it" is the healthy <see cref="SpeContainerRevokeOutcome.NoPermissionFound"/>; with neither,
+    /// no permission on the container can be tied to this contact at all.</item>
+    /// <item><b>The roles Spaarke itself creates are never a contact's.</b> The marked grants
     /// (<see cref="SpeContainerMembershipService.StandingWriterMarkerPrefix"/> /
     /// <see cref="SpeContainerMembershipService.JitWriterMarkerPrefix"/> keyed by a systemuserid,
     /// <see cref="SpeContainerMembershipService.DemoWriterMarkerPrefix"/> by a demo user's Entra object id) belong to
-    /// <c>SpeContainerMembershipSync</c> and demo expiry, which remove them on their own rules. A contact grant
-    /// never created one, so a contact revoke must not remove one.</item>
-    /// <item><b>What remains is a permission made outside Spaarke</b>, which a revoke recognises by one key only: the
-    /// contact's email (<see cref="SpeContainerMembershipService.FindPermissionByEmail"/>). With an email, "no permission
-    /// under it" is already the healthy <see cref="SpeContainerRevokeOutcome.NoPermissionFound"/>; with none, no
-    /// permission on the container can be tied to this contact at all.</item>
+    /// <c>SpeContainerMembershipSync</c> and demo expiry. The matcher excludes every permission a marker records
+    /// (#2105), so a contact revoke never removes one — whatever its keys match.</item>
     /// </list>
     /// <para>It used to report <see cref="SpeContainerRevokeOutcome.Failed"/> (a 500 that says "retry"). A missing
-    /// email is permanent, so the retry could never succeed (#2103, found by the UAC 099b live gate). Every other
-    /// Failed — the email read faulting, Graph refusing, an incomplete permission read — is transient and stays
-    /// Failed. A contact who HAS an email is unaffected.</para>
+    /// key is permanent, so the retry could never succeed (#2103, found by the UAC 099b live gate). Every other
+    /// Failed — the key read faulting (an unreadable binding with no email included), Graph refusing, an incomplete
+    /// permission or marker read — is transient and stays Failed.</para>
     /// </remarks>
-    internal static bool HasNoContainerMembershipKey(
-        [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] string? contactEmail)
-        => string.IsNullOrWhiteSpace(contactEmail);
+    internal static bool HasNoContainerMembershipKey(SpeMembershipKey contactKey) => contactKey.IsEmpty;
 
     /// <summary>
     /// The per-contact outcome of <see cref="HasNoContainerMembershipKey"/>: <see cref="SpeContainerRevokeOutcome.NotAttempted"/>,
     /// because the container was not read for this contact. It is not <see cref="SpeContainerRevokeOutcome.NoPermissionFound"/>, which
-    /// claims a read. It is a 200, the same answer as a revoke whose request names no contact to match.
+    /// claims a read. It is a 200.
     /// </summary>
     internal const SpeContainerRevokeOutcome NoContainerMembershipKeyOutcome = SpeContainerRevokeOutcome.NotAttempted;
 
-    /// <summary>Minimal projection of <c>contacts</c> for SPE identity matching.</summary>
+    /// <summary>
+    /// Minimal projection of <c>contacts</c> for SPE identity matching (<see cref="ContactMembershipKeySelect"/>). The
+    /// name predates #2105, which added the binding columns.
+    /// </summary>
     internal sealed class ContactEmailRow
     {
         public string? emailaddress1 { get; set; }
+
+        /// <summary><c>sprk_externalobjectid</c> — the bound Entra object id (field-secured; null when masked).</summary>
+        public string? sprk_externalobjectid { get; set; }
+
+        /// <summary><c>sprk_identityplane</c> — which plane wrote the binding.</summary>
+        public int? sprk_identityplane { get; set; }
     }
 }

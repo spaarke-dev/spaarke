@@ -315,8 +315,9 @@ public class ProjectClosureCascadeTests
             });
     }
 
-    /// <summary>The membership seam: answers RemoveMembershipsAsync per email from <paramref name="answer"/> and
-    /// records every (container, emails) it was called with.</summary>
+    /// <summary>The membership seam: answers RemoveMembershipsAsync per key from <paramref name="answer"/> (by the
+    /// key's email — the contacts here have no bound object id) and records every (container, emails) it was called
+    /// with.</summary>
     private static Mock<SpeContainerMembershipService> SpeAnswering(
         Func<string, SpeContainerMembershipResult> answer,
         List<(string ContainerId, IReadOnlyCollection<string> Emails)> calls)
@@ -324,17 +325,17 @@ public class ProjectClosureCascadeTests
         var spe = new Mock<SpeContainerMembershipService>(
             TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
         spe.Setup(s => s.RemoveMembershipsAsync(
-                It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string containerId, IReadOnlyCollection<string> emails, CancellationToken _) =>
+                It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string containerId, IReadOnlyCollection<SpeMembershipKey> keys, CancellationToken _) =>
             {
-                calls.Add((containerId, emails.ToList()));
-                var results = new Dictionary<string, SpeContainerMembershipResult>(StringComparer.OrdinalIgnoreCase);
-                foreach (var email in emails)
+                calls.Add((containerId, keys.Select(k => k.Email ?? k.ToString()).ToList()));
+                var results = new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>();
+                foreach (var key in keys)
                 {
-                    results[email] = answer(email);
+                    results[key] = answer(key.Email ?? key.ToString());
                 }
 
-                return (IReadOnlyDictionary<string, SpeContainerMembershipResult>)results;
+                return (IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult>)results;
             });
         return spe;
     }
@@ -573,7 +574,7 @@ public class ProjectClosureCascadeTests
     // Task 016 built the `container_not_cleared` guard; task 017 made it reachable. Task 166 changed WHICH
     // container and WHO is removed: the container is DERIVED from the project (a secure project's own
     // container, never a client-supplied id, never the shared business-unit container), and only the
-    // grantees this closure revoked are removed — through the same email-keyed RemoveMembershipsAsync the
+    // grantees this closure revoked are removed — through the same identity-keyed RemoveMembershipsAsync the
     // single-grant revoke uses — instead of every permission carrying a user identity (internal users too).
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -594,7 +595,7 @@ public class ProjectClosureCascadeTests
         var spe = new Mock<SpeContainerMembershipService>(
             TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
         spe.Setup(s => s.RemoveMembershipsAsync(
-                It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Graph unreachable"));
 
         var result = await CloseProject(client, spe: spe,

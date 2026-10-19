@@ -28,7 +28,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// SHARED business-unit container and is never touched. (2) The removal was
 /// <c>RemoveAllExternalMembersAsync</c>, which deleted EVERY permission with a user identity — internal users'
 /// included. It now removes exactly the permissions of the grantees whose grants this closure revoked (contacts,
-/// and every active member of a revoked organization grant), through the same email-keyed
+/// and every active member of a revoked organization grant), through the same identity-keyed
 /// <see cref="SpeContainerMembershipService.RemoveMembershipsAsync"/> the single-grant revoke uses.</para>
 ///
 /// <para><b>The cascade never reports a success it did not achieve</b> (task 016, finding A-12, spec
@@ -202,7 +202,7 @@ public static class ProjectClosureEndpoint
                 {
                     logger.LogInformation(
                         "[CLOSE-PROJECT] Removed {Count} revoked grantee permission(s) from project {ProjectId}'s " +
-                        "own container {ContainerId} ({NoKey} grantee(s) with no email key had nothing to clear); " +
+                        "own container {ContainerId} ({NoKey} grantee(s) with no identity key had nothing to clear); " +
                         "internal users' permissions were not touched.",
                         speRemovedCount, request.ProjectId, closureContainerId, removal.NoMembershipKey);
                 }
@@ -407,8 +407,9 @@ public static class ProjectClosureEndpoint
     /// <summary>Outcome of <see cref="RemoveRevokedGranteesAsync"/>.</summary>
     /// <param name="Removed">Permissions actually deleted.</param>
     /// <param name="Unresolved">Grantees whose permission could not be CONFIRMED absent or removed.</param>
-    /// <param name="NoMembershipKey">#2103: grantees with no email, to whom no container permission can be attributed
-    /// (<see cref="RevokeExternalAccessEndpoint.HasNoContainerMembershipKey"/>). Nothing to clear; not unresolved.</param>
+    /// <param name="NoMembershipKey">#2103: grantees with no bound object id and no email, to whom no container
+    /// permission can be attributed (<see cref="RevokeExternalAccessEndpoint.HasNoContainerMembershipKey"/>). Nothing to
+    /// clear; not unresolved.</param>
     /// <param name="OrganizationsTooLarge">Revoked organizations (counted in <paramref name="Unresolved"/> too) whose
     /// active members exceed the sweep bound: their members were not swept, and a retry meets the same bound.</param>
     internal readonly record struct GranteeRemoval(
@@ -421,7 +422,8 @@ public static class ProjectClosureEndpoint
     /// <summary>
     /// Task 166 (amendment e): removes from <paramref name="containerId"/> the permissions of EXACTLY the grantees
     /// this closure revoked — each contact grant's contact, and every active member of each organization grant —
-    /// matched by the email key membership is written with, through ONE paged read
+    /// matched by identity (the contact's bound object id, then its email against the permission's email and UPN; a
+    /// Spaarke-managed marker grant is never matched), through ONE paged read
     /// (<see cref="SpeContainerMembershipService.RemoveMembershipsAsync"/>, the single-grant revoke's mechanism).
     /// </summary>
     /// <remarks>
@@ -429,15 +431,16 @@ public static class ProjectClosureEndpoint
     /// user identity, which on SPE is every individual grant — internal users included (the demo provisioning
     /// path and the SPE admin console both add internal users). Closing a project must revoke external access, not
     /// lock its own attorneys out of the files. The method had no other caller and was deleted.</para>
-    /// <para><b>Fail closed, per grantee.</b> An email that could not be read, an
+    /// <para><b>Fail closed, per grantee.</b> An identity that could not be read, an
     /// organization whose membership could not be enumerated or exceeds the sweep bound, and a per-permission
     /// failure each count as UNRESOLVED — "we could not confirm they are gone" — so the closure reports
     /// <see cref="ClosureContainerNotClearedReason"/> rather than a 200. "No permission found" on a FULLY enumerated
     /// container is the healthy broker-only answer and is not a failure.</para>
-    /// <para><b>A grantee with NO email (#2103)</b> is neither: no container permission can be attributed to them, so
-    /// there is nothing to clear — the single-grant revoke's decision, shared through
-    /// <see cref="RevokeExternalAccessEndpoint.HasNoContainerMembershipKey"/>, not a second copy. It used to count as
-    /// unresolved, so closing a project with one such grantee answered container_not_cleared + "retry" forever.</para>
+    /// <para><b>A grantee with NO identity key (#2103)</b> — no bound object id and no email — is neither: no container
+    /// permission can be attributed to them, so there is nothing to clear — the single-grant revoke's decision, shared
+    /// through <see cref="RevokeExternalAccessEndpoint.HasNoContainerMembershipKey"/>, not a second copy. It used to
+    /// count as unresolved, so closing a project with one such grantee answered container_not_cleared + "retry"
+    /// forever.</para>
     /// </remarks>
     internal static async Task<GranteeRemoval> RemoveRevokedGranteesAsync(
         SpeContainerMembershipService speContainerMembership,
@@ -503,13 +506,13 @@ public static class ProjectClosureEndpoint
             }
         }
 
-        var emails = new List<string>(contactIds.Count);
+        var keys = new HashSet<SpeMembershipKey>();
         foreach (var contactId in contactIds)
         {
-            string? email;
+            SpeMembershipKey key;
             try
             {
-                email = await RevokeExternalAccessEndpoint.ResolveContactEmailAsync(dataverseClient, contactId, ct)
+                key = await RevokeExternalAccessEndpoint.ResolveContactMembershipKeyAsync(dataverseClient, contactId, ct)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -519,36 +522,37 @@ public static class ProjectClosureEndpoint
             catch (Exception ex)
             {
                 logger.LogError(ex,
-                    "[CLOSE-PROJECT] Could not read the email of contact {ContactId}; their container permission cannot "
-                    + "be matched and may remain.", contactId);
+                    "[CLOSE-PROJECT] Could not read the identity of contact {ContactId}; their container permission "
+                    + "cannot be matched and may remain.", contactId);
                 unresolved++;
                 continue;
             }
 
-            if (RevokeExternalAccessEndpoint.HasNoContainerMembershipKey(email))
+            if (RevokeExternalAccessEndpoint.HasNoContainerMembershipKey(key))
             {
                 logger.LogInformation(
-                    "[CLOSE-PROJECT] Contact {ContactId} has no emailaddress1 — the only key a container permission is "
-                    + "matched by — so no permission on {ContainerId} can be attributed to them; nothing to clear (#2103).",
+                    "[CLOSE-PROJECT] Contact {ContactId} has no bound object id and no emailaddress1 — the keys a "
+                    + "container permission is matched by — so no permission on {ContainerId} can be attributed to them; "
+                    + "nothing to clear (#2103).",
                     contactId, containerId);
                 noKey++;
                 continue;
             }
 
-            emails.Add(email);
+            keys.Add(key);
         }
 
-        if (emails.Count == 0)
+        if (keys.Count == 0)
         {
             return new GranteeRemoval(0, unresolved, noKey, tooLarge);
         }
 
-        var results = await speContainerMembership.RemoveMembershipsAsync(containerId, emails, ct).ConfigureAwait(false);
+        var results = await speContainerMembership.RemoveMembershipsAsync(containerId, keys, ct).ConfigureAwait(false);
 
         var removed = 0;
-        foreach (var email in emails.Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var key in keys)
         {
-            if (!results.TryGetValue(email, out var result))
+            if (!results.TryGetValue(key, out var result))
             {
                 unresolved++;
                 continue;

@@ -21,9 +21,11 @@ public enum SpeContainerRevokeOutcome
 {
     /// <summary>
     /// No removal was attempted — the grant's root is not a secure record with its own container (task 166: the
-    /// container is derived from the root, never supplied by the client), or a contact-grant revoke named no
-    /// contact to match, or (#2103) the contact has no <c>emailaddress1</c>, so no container permission can be
-    /// attributed to them and there is nothing to clear (<c>RevokeExternalAccessEndpoint.HasNoContainerMembershipKey</c>).
+    /// container is derived from the root, never supplied by the client), or (#2103) the grant row's contact has
+    /// neither a bound Entra object id (<c>sprk_externalobjectid</c>) nor an <c>emailaddress1</c>, so no container
+    /// permission can be attributed to them and there is nothing to clear
+    /// (<c>RevokeExternalAccessEndpoint.HasNoContainerMembershipKey</c>). #2104: the contact is always the grant ROW's,
+    /// so a request that names no contact no longer skips the step.
     /// </summary>
     /// <remarks>
     /// <para><b>Task 020 narrowed this.</b> It used to ALSO mean "this was an organization-grant revoke",
@@ -75,8 +77,9 @@ public enum SpeContainerRevokeOutcome
 /// under the broker-only model — nothing in this product grants a member a container ACL.
 /// </param>
 /// <param name="Failed">
-/// Members whose container permission could NOT be confirmed removed — their email could not be read, or
-/// Graph refused the delete. (#2103: a member with NO email is counted in <c>NoMembershipKey</c>, not here.) <b>Non-zero means those people
+/// Members whose container permission could NOT be confirmed removed — their identity could not be read, or
+/// Graph refused the delete. (#2103: a member with NO identity key is counted in <c>NoMembershipKey</c>, not here.)
+/// <b>Non-zero means those people
 /// may RETAIN file access</b>, so the revoke MUST NOT be reported as an SPE success.
 /// </param>
 /// <remarks>
@@ -90,9 +93,10 @@ public enum SpeContainerRevokeOutcome
 /// them. Additive (defaults to 0), so a client that predates it is unaffected.
 /// </param>
 /// <param name="NoMembershipKey">
-/// #2103: members with no <c>emailaddress1</c>. No container permission can be attributed to them (Spaarke never
-/// writes one for a contact, and email is the only key an outside-made one is matched by), so there is nothing to
-/// clear. Not a failure, and not <paramref name="PermissionsNotFound"/>, which claims the container was read for them.
+/// #2103: members with neither a bound Entra object id nor an <c>emailaddress1</c>. No container permission can be
+/// attributed to them (a permission is matched by the object id, then by the email against the permission's email
+/// and UPN — #2104), so there is nothing to clear. Not a failure, and not <paramref name="PermissionsNotFound"/>,
+/// which claims the container was read for them.
 /// Additive (defaults to 0), so a client that predates it is unaffected.
 /// </param>
 public sealed record SpeOrgMemberCleanupSummary(

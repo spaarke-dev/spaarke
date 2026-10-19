@@ -248,8 +248,9 @@ public class SpeAppOnlyContainerIsolationTests
         var graph = new RoutedGraph().Container(ForeignContainer, marker: OtherCustomer);
         var membership = new SpeContainerMembershipService(Guard(graph), NullLogger<SpeContainerMembershipService>.Instance);
 
-        var revoked = await membership.RevokeMembershipAsync(ForeignContainer, "x@contoso.test");
-        var removed = await membership.RemoveMembershipsAsync(ForeignContainer, new[] { "x@contoso.test", "y@contoso.test" });
+        var revoked = await membership.RevokeMembershipAsync(ForeignContainer, new SpeMembershipKey(null, "x@contoso.test"));
+        var removed = await membership.RemoveMembershipsAsync(
+            ForeignContainer, new[] { new SpeMembershipKey(null, "x@contoso.test"), new SpeMembershipKey(null, "y@contoso.test") });
 
         revoked.Success.Should().BeFalse();
         removed.Should().HaveCount(2).And.OnlyContain(r => !r.Value.Success);

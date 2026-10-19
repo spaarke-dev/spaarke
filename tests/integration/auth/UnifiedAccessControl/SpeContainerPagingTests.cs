@@ -50,25 +50,35 @@ public class SpeContainerPagingTests
     // Fixtures — identities are STATED, never derived (task 020's lesson).
     // ─────────────────────────────────────────────────────────────────────────────
 
-    private static Permission UserPermission(string permissionId, string upn) => new()
+    private static Permission UserPermission(string permissionId, string upn, string? email = null, Guid? userId = null)
     {
-        Id = permissionId,
-        Roles = ["reader"],
-        GrantedToV2 = new SharePointIdentitySet
+        var data = new Dictionary<string, object> { ["userPrincipalName"] = upn };
+        if (email is not null) data["email"] = email;
+
+        return new Permission
         {
-            User = new SharePointIdentity
+            Id = permissionId,
+            Roles = ["reader"],
+            GrantedToV2 = new SharePointIdentitySet
             {
-                AdditionalData = new Dictionary<string, object> { ["userPrincipalName"] = upn }
+                User = new SharePointIdentity { Id = userId?.ToString(), AdditionalData = data }
             }
-        }
-    };
+        };
+    }
+
+    /// <summary>A contact key with only an email (#2105: the object id half is null).</summary>
+    private static SpeMembershipKey Key(string email) => new(null, email);
+
+    private static IReadOnlyCollection<SpeMembershipKey> Keys(params string[] emails) => emails.Select(Key).ToList();
 
     private static PermissionCollectionResponse Page(string? nextLink, params Permission[] permissions) =>
         new() { Value = [.. permissions], OdataNextLink = nextLink };
 
     private static SpeContainerMembershipService ServiceOver(params PermissionCollectionResponse[] pages)
+        => ServiceOver(new ScriptedPermissionAdapter(pages));
+
+    private static SpeContainerMembershipService ServiceOver(ScriptedPermissionAdapter adapter)
     {
-        var adapter = new ScriptedPermissionAdapter(pages);
         var graphClient = new GraphServiceClient(adapter);
 
         var factory = new Mock<IGraphClientFactory>();
@@ -98,9 +108,9 @@ public class SpeContainerPagingTests
             Page(NextLink, UserPermission("perm-1", "first@client-firm.com")),
             Page(null, UserPermission("perm-2", "second@client-firm.com")));
 
-        var results = await service.RemoveMembershipsAsync(ContainerId, ["second@client-firm.com"]);
+        var results = await service.RemoveMembershipsAsync(ContainerId, Keys("second@client-firm.com"));
 
-        results["second@client-firm.com"].PermissionId.Should().Be("perm-2",
+        results[Key("second@client-firm.com")].PermissionId.Should().Be("perm-2",
             "a member past the first page is still a member holding file access; a read that cannot see "
             + "them reports a container clean while they retain it");
     }
@@ -116,7 +126,7 @@ public class SpeContainerPagingTests
             Page(NextLink, UserPermission("perm-other", "someone.else@client-firm.com")),
             Page(null, UserPermission("perm-target", TargetEmail)));
 
-        var result = await service.RevokeMembershipAsync(ContainerId, TargetEmail);
+        var result = await service.RevokeMembershipAsync(ContainerId, Key(TargetEmail));
 
         result.Success.Should().BeTrue();
         result.PermissionId.Should().Be("perm-target");
@@ -133,9 +143,9 @@ public class SpeContainerPagingTests
             Page(NextLink, UserPermission("perm-2", "b@client-firm.com")),
             Page(null, UserPermission("perm-3", "c@client-firm.com")));
 
-        var results = await service.RemoveMembershipsAsync(ContainerId, ["c@client-firm.com"]);
+        var results = await service.RemoveMembershipsAsync(ContainerId, Keys("c@client-firm.com"));
 
-        results["c@client-firm.com"].PermissionId.Should().Be("perm-3",
+        results[Key("c@client-firm.com")].PermissionId.Should().Be("perm-3",
             "following one link is not the same as enumerating a collection");
     }
 
@@ -151,7 +161,7 @@ public class SpeContainerPagingTests
         var service = new SpeContainerMembershipService(
             TestSpeOwnership.AllowAll(factory.Object), NullLogger<SpeContainerMembershipService>.Instance);
 
-        await service.RemoveMembershipsAsync(ContainerId, ["absent@client-firm.com"]);
+        await service.RemoveMembershipsAsync(ContainerId, Keys("absent@client-firm.com"));
 
         adapter.GetRequestCount.Should().Be(1,
             "a collection with no nextLink is one request; re-reading it would double every cost");
@@ -173,7 +183,7 @@ public class SpeContainerPagingTests
         var service = new SpeContainerMembershipService(
             TestSpeOwnership.AllowAll(factory.Object), NullLogger<SpeContainerMembershipService>.Instance);
 
-        await service.RemoveMembershipsAsync(ContainerId, ["absent@client-firm.com"]);
+        await service.RemoveMembershipsAsync(ContainerId, Keys("absent@client-firm.com"));
 
         adapter.GetRequestCount.Should().Be(2);
         adapter.RequestedUrls[1].Should().Contain("$skiptoken=PAGE2",
@@ -199,7 +209,7 @@ public class SpeContainerPagingTests
             .Select(i => Page(NextLink, UserPermission($"perm-{i}", $"member{i}@client-firm.com")))
             .ToArray();
 
-        var result = await ServiceOver(pages).RevokeMembershipAsync(ContainerId, TargetEmail);
+        var result = await ServiceOver(pages).RevokeMembershipAsync(ContainerId, Key(TargetEmail));
 
         result.Success.Should().BeFalse();
         result.Error.Should().NotStartWith(SpeContainerMembershipService.NoPermissionFoundError,
@@ -235,12 +245,12 @@ public class SpeContainerPagingTests
             .ToArray();
 
         var results = await ServiceOver(pages)
-            .RemoveMembershipsAsync(ContainerId, ["member0@client-firm.com", "ghost@client-firm.com"]);
+            .RemoveMembershipsAsync(ContainerId, Keys("member0@client-firm.com", "ghost@client-firm.com"));
 
-        results["member0@client-firm.com"].Success.Should().BeTrue(
+        results[Key("member0@client-firm.com")].Success.Should().BeTrue(
             "a grantee the read DID see is removed — an unread tail cannot retract a deletion that happened");
-        results["ghost@client-firm.com"].Success.Should().BeFalse();
-        results["ghost@client-firm.com"].Error.Should().NotStartWith(SpeContainerMembershipService.NoPermissionFoundError,
+        results[Key("ghost@client-firm.com")].Success.Should().BeFalse();
+        results[Key("ghost@client-firm.com")].Error.Should().NotStartWith(SpeContainerMembershipService.NoPermissionFoundError,
             "a grantee the read never reached is UNSEEN, not absent — close-project reports container_not_cleared");
     }
 
@@ -269,7 +279,7 @@ public class SpeContainerPagingTests
             TestSpeOwnership.AllowAll(factory.Object), NullLogger<SpeContainerMembershipService>.Instance);
 
         var results = await service.RemoveMembershipsAsync(
-            ContainerId, ["a@client-firm.com", "b@client-firm.com", "c@client-firm.com"]);
+            ContainerId, Keys("a@client-firm.com", "b@client-firm.com", "c@client-firm.com"));
 
         results.Should().HaveCount(3);
         results.Values.Should().OnlyContain(r => r.Success);
@@ -294,12 +304,12 @@ public class SpeContainerPagingTests
             UserPermission("perm-c", "c@client-firm.com")));
 
         var results = await service.RemoveMembershipsAsync(
-            ContainerId, ["a@client-firm.com", "absent@client-firm.com", "c@client-firm.com"]);
+            ContainerId, Keys("a@client-firm.com", "absent@client-firm.com", "c@client-firm.com"));
 
-        results["a@client-firm.com"].PermissionId.Should().Be("perm-a");
-        results["c@client-firm.com"].PermissionId.Should().Be("perm-c");
-        results["absent@client-firm.com"].Success.Should().BeFalse();
-        results["absent@client-firm.com"].Error.Should()
+        results[Key("a@client-firm.com")].PermissionId.Should().Be("perm-a");
+        results[Key("c@client-firm.com")].PermissionId.Should().Be("perm-c");
+        results[Key("absent@client-firm.com")].Success.Should().BeFalse();
+        results[Key("absent@client-firm.com")].Error.Should()
             .StartWith(SpeContainerMembershipService.NoPermissionFoundError,
                 "a COMPLETE read that did not find them is the genuine broker-only absence");
     }
@@ -317,10 +327,10 @@ public class SpeContainerPagingTests
             .ToArray();
 
         var results = await ServiceOver(pages)
-            .RemoveMembershipsAsync(ContainerId, ["ghost@client-firm.com"]);
+            .RemoveMembershipsAsync(ContainerId, Keys("ghost@client-firm.com"));
 
-        results["ghost@client-firm.com"].Success.Should().BeFalse();
-        results["ghost@client-firm.com"].Error.Should()
+        results[Key("ghost@client-firm.com")].Success.Should().BeFalse();
+        results[Key("ghost@client-firm.com")].Error.Should()
             .NotStartWith(SpeContainerMembershipService.NoPermissionFoundError);
     }
 
@@ -337,7 +347,7 @@ public class SpeContainerPagingTests
             TestSpeOwnership.AllowAll(factory.Object), NullLogger<SpeContainerMembershipService>.Instance);
 
         var results = await service.RemoveMembershipsAsync(
-            ContainerId, ["a@client-firm.com", "b@client-firm.com"]);
+            ContainerId, Keys("a@client-firm.com", "b@client-firm.com"));
 
         results.Should().HaveCount(2);
         results.Values.Should().OnlyContain(r => !r.Success);
@@ -361,6 +371,155 @@ public class SpeContainerPagingTests
         var results = await service.RemoveMembershipsAsync(ContainerId, []);
 
         results.Should().BeEmpty();
+        adapter.RequestCount.Should().Be(0);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // #2105 — through the REAL service: marker exclusion, object-id and B2B matching.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid InternalUserId = Guid.Parse("0e0e0e0e-2105-4000-8000-000000000001");
+    private static readonly Guid ContactObjectId = Guid.Parse("0e0e0e0e-2105-4000-8000-000000000002");
+
+    /// <summary>
+    /// #2105: a standing / just-in-time / demo writer role is recorded by a container marker
+    /// (<c>&lt;prefix&gt;&lt;holder&gt; = &lt;permission id&gt;</c>). A contact whose address equals that internal user's
+    /// UPN used to DELETE it on a revoke, leaving the marker dangling. It is now left in place — under every prefix.
+    /// </summary>
+    [Theory]
+    [InlineData(SpeContainerMembershipService.StandingWriterMarkerPrefix)]
+    [InlineData(SpeContainerMembershipService.JitWriterMarkerPrefix)]
+    [InlineData(SpeContainerMembershipService.DemoWriterMarkerPrefix)]
+    public async Task RevokeMembership_NeverDeletesAMarkerOwnedPermission_EvenWhenItsUpnMatches(string prefix)
+    {
+        var adapter = new ScriptedPermissionAdapter(
+            [Page(null, UserPermission("perm-managed", TargetEmail))],
+            markers: new Dictionary<string, string> { [$"{prefix}{InternalUserId:N}"] = "perm-managed" });
+
+        var result = await ServiceOver(adapter).RevokeMembershipAsync(ContainerId, Key(TargetEmail));
+
+        adapter.DeletedUrls.Should().BeEmpty("a Spaarke-managed role belongs to its own lifecycle, never a contact revoke");
+        result.Success.Should().BeFalse();
+        result.Error.Should().StartWith(SpeContainerMembershipService.NoPermissionFoundError,
+            "the read was complete and no permission of THIS contact's exists");
+    }
+
+    /// <summary>#2105, the organization / closure path: a managed permission matched by its <c>email</c> is not removed
+    /// either, while an unmanaged contact permission in the same sweep is.</summary>
+    [Fact]
+    public async Task RemoveMemberships_NeverDeletesAMarkerOwnedPermission_AndStillRemovesTheContactsOwn()
+    {
+        var adapter = new ScriptedPermissionAdapter(
+            [Page(null,
+                UserPermission("perm-managed", "internal.user@spaarke.example", email: "a@client-firm.com"),
+                UserPermission("perm-b", "b@client-firm.com"))],
+            markers: new Dictionary<string, string>
+            {
+                [$"{SpeContainerMembershipService.StandingWriterMarkerPrefix}{InternalUserId:N}"] = "perm-managed",
+            });
+
+        var results = await ServiceOver(adapter)
+            .RemoveMembershipsAsync(ContainerId, Keys("a@client-firm.com", "b@client-firm.com"));
+
+        adapter.DeletedUrls.Should().ContainSingle().Which.Should().Contain("perm-b");
+        results[Key("a@client-firm.com")].Error.Should().StartWith(SpeContainerMembershipService.NoPermissionFoundError);
+        results[Key("b@client-firm.com")].PermissionId.Should().Be("perm-b");
+        adapter.MarkerReadCount.Should().Be(1, "the markers are read once per sweep, not per contact");
+    }
+
+    /// <summary>
+    /// #2105: the markers could not be read (the container answered 404), so no matched permission can be told apart
+    /// from a managed one. Nothing is deleted, and the contact is NOT reported absent — a retryable failure.
+    /// </summary>
+    [Fact]
+    public async Task RevokeMembership_WhenTheMarkersCannotBeRead_DeletesNothingAndIsNotAbsent()
+    {
+        var adapter = new ScriptedPermissionAdapter(
+            [Page(null, UserPermission("perm-target", TargetEmail))],
+            markerFailure: new Microsoft.Graph.Models.ODataErrors.ODataError { ResponseStatusCode = 404 });
+
+        var result = await ServiceOver(adapter).RevokeMembershipAsync(ContainerId, Key(TargetEmail));
+
+        adapter.DeletedUrls.Should().BeEmpty();
+        result.Success.Should().BeFalse();
+        result.Error.Should().NotStartWith(SpeContainerMembershipService.NoPermissionFoundError)
+            .And.Contain("grant markers could not be read");
+    }
+
+    /// <summary>#2105, the organization / closure path: unreadable markers fail every contact — nothing deleted, nobody absent.</summary>
+    [Fact]
+    public async Task RemoveMemberships_WhenTheMarkersCannotBeRead_DeletesNothingAndNobodyIsAbsent()
+    {
+        var adapter = new ScriptedPermissionAdapter(
+            [Page(null, UserPermission("perm-a", "a@client-firm.com"))],
+            markerFailure: new Microsoft.Graph.Models.ODataErrors.ODataError { ResponseStatusCode = 404 });
+
+        var results = await ServiceOver(adapter)
+            .RemoveMembershipsAsync(ContainerId, Keys("a@client-firm.com", "absent@client-firm.com"));
+
+        adapter.DeletedUrls.Should().BeEmpty();
+        results.Values.Should().OnlyContain(r => !r.Success
+            && !r.Error!.StartsWith(SpeContainerMembershipService.NoPermissionFoundError));
+    }
+
+    /// <summary>
+    /// #2105: the broker-only common case — nobody matches — costs no marker read: the exclusion can only remove a
+    /// candidate, so it is not asked for when there is none.
+    /// </summary>
+    [Fact]
+    public async Task RevokeMembership_WhenNothingMatches_DoesNotReadTheMarkers()
+    {
+        var adapter = new ScriptedPermissionAdapter([Page(null, UserPermission("perm-other", "someone.else@client-firm.com"))]);
+
+        await ServiceOver(adapter).RevokeMembershipAsync(ContainerId, Key(TargetEmail));
+
+        adapter.MarkerReadCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// #2105 (the email-changed case, through the real service): the permission was made under the contact's FORMER
+    /// address; the bound object id still finds it, and it is removed.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_WhenTheEmailChanged_RemovesThePermissionByTheObjectId()
+    {
+        var adapter = new ScriptedPermissionAdapter(
+            [Page(null, UserPermission("perm-target", "former.address@client-firm.com", userId: ContactObjectId))]);
+
+        var result = await ServiceOver(adapter)
+            .RevokeMembershipAsync(ContainerId, new SpeMembershipKey(ContactObjectId, "renamed@client-firm.com"));
+
+        result.Success.Should().BeTrue();
+        result.PermissionId.Should().Be("perm-target");
+        adapter.DeletedUrls.Should().ContainSingle().Which.Should().Contain("perm-target");
+    }
+
+    /// <summary>
+    /// #2105 (K2, through the real service): a B2B guest's UPN is the <c>#EXT#</c> form, their <c>email</c> the real
+    /// address. Matching the UPN alone reported "no permission found" while the guest kept file access.
+    /// </summary>
+    [Fact]
+    public async Task RevokeMembership_RemovesAB2BGuestWhoseEmailMatchesBesideAnExtUpn()
+    {
+        var adapter = new ScriptedPermissionAdapter(
+            [Page(null, UserPermission("perm-guest", "counsel_client-firm.com#EXT#@spaarke.onmicrosoft.com", email: TargetEmail))]);
+
+        var result = await ServiceOver(adapter).RevokeMembershipAsync(ContainerId, Key(TargetEmail));
+
+        result.Success.Should().BeTrue();
+        result.PermissionId.Should().Be("perm-guest");
+    }
+
+    /// <summary>#2105: an empty key reaching the service is never looked for, so it is a failure — never "absent".</summary>
+    [Fact]
+    public async Task RevokeMembership_WithNoKey_IsAFailureAndIssuesNoRequest()
+    {
+        var adapter = new ScriptedPermissionAdapter([]);
+
+        var result = await ServiceOver(adapter).RevokeMembershipAsync(ContainerId, new SpeMembershipKey(null, null));
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().NotStartWith(SpeContainerMembershipService.NoPermissionFoundError);
         adapter.RequestCount.Should().Be(0);
     }
 
@@ -419,11 +578,32 @@ public class SpeContainerPagingTests
     private sealed class ScriptedPermissionAdapter : IRequestAdapter
     {
         private readonly PermissionCollectionResponse[] _pages;
+        private readonly IReadOnlyDictionary<string, string>? _markers;
+        private readonly Exception? _markerFailure;
         private int _index;
 
-        public ScriptedPermissionAdapter(PermissionCollectionResponse[] pages) => _pages = pages;
+        /// <param name="pages">The permission pages, served in order.</param>
+        /// <param name="markers">#2105: the container's grant markers (custom property name to permission id), served
+        /// to the marker read. None by default.</param>
+        /// <param name="markerFailure">#2105: thrown by the marker read instead.</param>
+        public ScriptedPermissionAdapter(
+            PermissionCollectionResponse[] pages,
+            IReadOnlyDictionary<string, string>? markers = null,
+            Exception? markerFailure = null)
+        {
+            _pages = pages;
+            _markers = markers;
+            _markerFailure = markerFailure;
+        }
 
         public List<string> RequestedUrls { get; } = [];
+
+        /// <summary>Permission DELETEs only.</summary>
+        public List<string> DeletedUrls { get; } = [];
+
+        /// <summary>#2105: container (marker) reads, kept out of <see cref="GetRequestCount"/>, which counts the
+        /// permission-collection reads the ISS-004 invariant is about.</summary>
+        public int MarkerReadCount { get; private set; }
 
         public int RequestCount => RequestedUrls.Count;
 
@@ -447,6 +627,22 @@ public class SpeContainerPagingTests
             CancellationToken cancellationToken = default)
             where ModelType : IParsable
         {
+            if (typeof(ModelType) == typeof(FileStorageContainer))
+            {
+                // #2105: the grant-marker read (GET the container's customProperties), modelled explicitly.
+                MarkerReadCount++;
+                if (_markerFailure is not null)
+                    throw _markerFailure;
+
+                return Task.FromResult((ModelType?)(object)ContainerWithMarkers(_markers));
+            }
+
+            if (typeof(ModelType) != typeof(PermissionCollectionResponse))
+            {
+                throw new InvalidOperationException(
+                    $"Unmodelled read of {typeof(ModelType).Name}; this adapter scripts permission pages and markers only.");
+            }
+
             RequestedUrls.Add(requestInfo.URI.ToString());
             GetRequestCount++;
 
@@ -467,7 +663,26 @@ public class SpeContainerPagingTests
         {
             // The permission DELETE lands here. Recorded, and treated as succeeding.
             RequestedUrls.Add(requestInfo.URI.ToString());
+            DeletedUrls.Add(requestInfo.URI.ToString());
             return Task.CompletedTask;
+        }
+
+        /// <summary>The container as Kiota deserializes it: each custom property an <see cref="UntypedObject"/> whose
+        /// <c>value</c> is an <see cref="UntypedString"/> (the shape <c>SpeAdminGraphService.ReadCustomProperties</c>
+        /// reads).</summary>
+        private static FileStorageContainer ContainerWithMarkers(IReadOnlyDictionary<string, string>? markers)
+        {
+            var properties = new Dictionary<string, object>();
+            foreach (var (name, value) in markers ?? new Dictionary<string, string>())
+            {
+                properties[name] = new UntypedObject(new Dictionary<string, UntypedNode> { ["value"] = new UntypedString(value) });
+            }
+
+            return new FileStorageContainer
+            {
+                Id = ContainerId,
+                CustomProperties = new FileStorageContainerCustomPropertyDictionary { AdditionalData = properties },
+            };
         }
 
         public Task<IEnumerable<ModelType>?> SendCollectionAsync<ModelType>(

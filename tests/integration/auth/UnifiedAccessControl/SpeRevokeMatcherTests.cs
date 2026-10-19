@@ -106,7 +106,8 @@ public class SpeRevokeMatcherTests
     /// A Dataverse client that answers the grant read/sweep and the contact-email lookup.
     /// </summary>
     private static Mock<DataverseWebApiClient> DataverseFor(
-        Guid? contactOnGrantRow, string? contactEmail, bool emailLookupThrows = false)
+        Guid? contactOnGrantRow, string? contactEmail, bool emailLookupThrows = false,
+        Guid? boundOid = null, int? identityPlane = null)
     {
         var mock = new Mock<DataverseWebApiClient>(
             ClientConfig(), NullLogger<DataverseWebApiClient>.Instance,
@@ -149,7 +150,14 @@ public class SpeRevokeMatcherTests
         if (emailLookupThrows)
             emailSetup.ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
         else
-            emailSetup.ReturnsAsync(new RevokeExternalAccessEndpoint.ContactEmailRow { emailaddress1 = contactEmail });
+            emailSetup.ReturnsAsync(new RevokeExternalAccessEndpoint.ContactEmailRow
+            {
+                emailaddress1 = contactEmail,
+                // #2105: the bound Entra object id is the strongest key. A plane marker with no oid is the masking
+                // signature (Unreadable), which tests pass explicitly through identityPlane.
+                sprk_externalobjectid = boundOid?.ToString(),
+                sprk_identityplane = identityPlane ?? (boundOid is null ? null : (int)IdentityPlaneMarker.Workforce),
+            });
 
         // THROW on the membership junction rather than answering it (task 020). Moq's loose default for
         // Task<List<T>> is an EMPTY list, which would let a contact-path double silently satisfy an
@@ -167,13 +175,15 @@ public class SpeRevokeMatcherTests
     }
 
     /// <summary>
-    /// The membership service, substituted at its <c>virtual</c> seam. <c>CapturedEmail</c> is the point:
+    /// The membership service, substituted at its <c>virtual</c> seam. <c>CapturedKey</c> is the point:
     /// A-13 was entirely about WHICH key the revoke matched on, so the tests assert the key that was
-    /// actually passed, not merely that some call happened.
+    /// actually passed, not merely that some call happened. #2105: the key is the contact's bound object id plus
+    /// its email; <c>CapturedEmail</c> is its email half.
     /// </summary>
     private sealed class SpeServiceStub
     {
-        public string? CapturedEmail { get; private set; }
+        public SpeMembershipKey? CapturedKey { get; private set; }
+        public string? CapturedEmail => CapturedKey?.Email;
         public string? CapturedContainerId { get; private set; }
         public int CallCount { get; private set; }
 
@@ -183,12 +193,12 @@ public class SpeRevokeMatcherTests
                 TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
 
             mock.Setup(s => s.RevokeMembershipAsync(
-                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string containerId, string email, CancellationToken _) =>
+                    It.IsAny<string>(), It.IsAny<SpeMembershipKey>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, SpeMembershipKey key, CancellationToken _) =>
                 {
                     CallCount++;
                     CapturedContainerId = containerId;
-                    CapturedEmail = email;
+                    CapturedKey = key;
                     return result;
                 });
 
@@ -196,21 +206,20 @@ public class SpeRevokeMatcherTests
             // here for the same reason as above — an un-stubbed virtual returns a null Task and the
             // endpoint NREs, which is a fixture gap masquerading as a product defect.
             mock.Setup(s => s.RemoveMembershipsAsync(
-                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string containerId, IReadOnlyCollection<string> emails, CancellationToken _) =>
+                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, IReadOnlyCollection<SpeMembershipKey> keys, CancellationToken _) =>
                 {
-                    var results = new Dictionary<string, SpeContainerMembershipResult>(
-                        StringComparer.OrdinalIgnoreCase);
+                    var results = new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>();
 
-                    foreach (var email in emails)
+                    foreach (var key in keys)
                     {
                         CallCount++;
                         CapturedContainerId = containerId;
-                        CapturedEmail = email;
-                        results[email] = result;
+                        CapturedKey = key;
+                        results[key] = result;
                     }
 
-                    return (IReadOnlyDictionary<string, SpeContainerMembershipResult>)results;
+                    return (IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult>)results;
                 });
 
             return mock;
@@ -427,9 +436,9 @@ public class SpeRevokeMatcherTests
 
     /// <summary>
     /// ✅ FLIPPED BY #2103 (was <c>Revoke_WhenTheContactHasNoEmail_ReportsFailedAsA500Problem</c>). Spaarke never
-    /// writes a contact's container permission, and an outside-made one is matched by the contact's email alone — so
-    /// for a contact with no email (never had one, or it was removed after the grant) nothing on the container can be
-    /// theirs. The container step is <see cref="SpeContainerRevokeOutcome.NotAttempted"/> and the revoke answers 200.
+    /// writes a contact's container permission, and a hand-made one is matched by the contact's bound object id or its
+    /// email (#2105) — so for a contact with neither (no binding here, and no email: never had one, or it was removed
+    /// after the grant) nothing on the container can be theirs. The container step is <see cref="SpeContainerRevokeOutcome.NotAttempted"/> and the revoke answers 200.
     /// It used to answer 500 <c>container_not_cleared</c> + "retry", which a permanent missing email made
     /// impossible to satisfy (UAC 099b live gate, 2026-10-19).
     /// </summary>
@@ -455,24 +464,109 @@ public class SpeRevokeMatcherTests
     }
 
     /// <summary>
-    /// #2103, the email-CHANGED case. No grant-time key exists to revoke by (Spaarke writes no container permission
-    /// for a contact, so it records none), so the revoke matches the contact's CURRENT email — the unchanged
-    /// email-present path. A permission an admin made under a former address is not attributable to this contact,
-    /// exactly as one under any other address never was.
+    /// #2105 (was <c>Revoke_WhenTheContactsEmailChangedAfterTheGrant_MatchesTheCurrentEmail</c>, which only showed the
+    /// current email was passed). A contact whose email changed after an admin added their permission is still matched:
+    /// the revoke hands the service the contact's BOUND Entra object id, the strongest key, with the current email.
+    /// The matcher half — the permission made under the former address is found by that object id — is
+    /// <c>SpePermissionMatcherTests.FindContactPermission_WhenTheEmailChangedAfterTheGrant_MatchesByTheObjectId</c>
+    /// and, through the real service, <c>SpeContainerPagingTests.Revoke_WhenTheEmailChanged_RemovesThePermissionByTheObjectId</c>.
     /// </summary>
     [Fact]
-    public async Task Revoke_WhenTheContactsEmailChangedAfterTheGrant_MatchesTheCurrentEmail()
+    public async Task Revoke_WhenTheContactsEmailChangedAfterTheGrant_MatchesByTheBoundObjectId()
     {
         const string currentEmail = "renamed.counsel@clientfirm.com";
+        var boundOid = Guid.Parse("0b0b0b0b-1111-2222-3333-444444444444");
         var stub = new SpeServiceStub();
-        var spe = stub.Build(new SpeContainerMembershipResult(
-            false, null, $"{SpeContainerMembershipService.NoPermissionFoundError} for user '{currentEmail}' in container."));
+        var spe = stub.Build(Removed);
 
-        var result = await Revoke(DataverseFor(ContactId, currentEmail), spe);
+        var result = await Revoke(DataverseFor(ContactId, currentEmail, boundOid: boundOid), spe);
 
-        stub.CapturedEmail.Should().Be(currentEmail);
         stub.CallCount.Should().Be(1);
-        Body(result).SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.NoPermissionFound);
+        stub.CapturedKey!.ObjectId.Should().Be(boundOid,
+            "the bound object id survives an email change; it is the key the permission is matched by first");
+        stub.CapturedKey.Email.Should().Be(currentEmail);
+        Body(result).SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.PermissionRemoved);
+    }
+
+    /// <summary>
+    /// #2105: a contact with a bound object id and NO email still has a key, so the container IS read for them — it is
+    /// not the #2103 "nothing to clear" answer, which needs both keys absent.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_WhenTheContactHasABoundObjectIdButNoEmail_StillRevokesByTheObjectId()
+    {
+        var boundOid = Guid.Parse("0c0c0c0c-1111-2222-3333-444444444444");
+        var stub = new SpeServiceStub();
+        var spe = stub.Build(Removed);
+
+        var result = await Revoke(DataverseFor(ContactId, contactEmail: null, boundOid: boundOid), spe);
+
+        stub.CallCount.Should().Be(1, "an object id alone is a key: 'no key' is no object id AND no email");
+        stub.CapturedKey.Should().Be(new SpeMembershipKey(boundOid, null));
+        Body(result).SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.PermissionRemoved);
+    }
+
+    /// <summary>
+    /// #2105: a binding that cannot be read (a plane marker with no readable object id — the field-security masking
+    /// signature) is not "no object id". With no email either, the contact may hold a permission under an object id
+    /// this read cannot see, so "nothing to clear" would be a guess: Failed, a 500, and no SPE call.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_WhenTheBindingIsUnreadableAndThereIsNoEmail_FailsClosedRatherThanNothingToClear()
+    {
+        var stub = new SpeServiceStub();
+        var spe = stub.Build(Removed);
+
+        var result = await Revoke(
+            DataverseFor(ContactId, contactEmail: null, identityPlane: (int)IdentityPlaneMarker.External), spe);
+
+        var problem = ProblemBody(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
+        stub.CallCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// #2104 (pass-1 K3): the contact whose permission is cleared is the grant ROW's contact, never the one the request
+    /// names. A request naming a DIFFERENT contact must not redirect the cleanup to that contact's permission, and must
+    /// not leave the row's contact uncleared.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_WhenTheRequestNamesADifferentContact_ClearsTheGrantRowsContact()
+    {
+        var otherContact = Guid.Parse("99999999-1111-1111-1111-111111111111");
+        var stub = new SpeServiceStub();
+        var spe = stub.Build(Removed);
+        var dataverse = DataverseFor(ContactId, ContactEmail);
+
+        var result = await Revoke(dataverse, spe, contactId: otherContact);
+
+        dataverse.Verify(c => c.RetrieveAsync<RevokeExternalAccessEndpoint.ContactEmailRow>(
+            ContactEntitySet, ContactId, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once,
+            "the row's contact is the one whose identity key is read");
+        dataverse.Verify(c => c.RetrieveAsync<RevokeExternalAccessEndpoint.ContactEmailRow>(
+            ContactEntitySet, otherContact, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the request's contact is logged only");
+        stub.CallCount.Should().Be(1);
+        stub.CapturedEmail.Should().Be(ContactEmail);
+        Body(result).SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.PermissionRemoved);
+    }
+
+    /// <summary>
+    /// #2104 (pass-1 K3): a contact-grant revoke whose request names NO contact still clears the row's contact. It used
+    /// to answer <c>NotAttempted</c> — a 200 that left the grantee's permission on the container.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAContactGrant_WhenTheRequestNamesNoContact_StillClearsTheGrantRowsContact()
+    {
+        var stub = new SpeServiceStub();
+        var spe = stub.Build(Removed);
+
+        var result = await Revoke(DataverseFor(ContactId, ContactEmail), spe, contactId: Guid.Empty);
+
+        stub.CallCount.Should().Be(1);
+        stub.CapturedEmail.Should().Be(ContactEmail);
+        Body(result).SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.PermissionRemoved);
     }
 
     /// <summary>
@@ -854,12 +948,13 @@ public class SpeRevokeMatcherTests
                 TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
 
             mock.Setup(s => s.RevokeMembershipAsync(
-                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string containerId, string email, CancellationToken _) =>
+                    It.IsAny<string>(), It.IsAny<SpeMembershipKey>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, SpeMembershipKey key, CancellationToken _) =>
                 {
                     if (containerId != ContainerId.ToString())
                         throw new InvalidOperationException($"Unmodelled container: '{containerId}'.");
 
+                    var email = key.Email ?? string.Empty;
                     CapturedEmails.Add(email);
                     return _byEmail.TryGetValue(email, out var specific) ? specific : _default;
                 });
@@ -874,22 +969,22 @@ public class SpeRevokeMatcherTests
             // CapturedEmails still receives one entry per member, in order, so every existing
             // assertion about WHICH KEY was used — the whole of finding A-13 — is unchanged.
             mock.Setup(s => s.RemoveMembershipsAsync(
-                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string containerId, IReadOnlyCollection<string> emails, CancellationToken _) =>
+                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, IReadOnlyCollection<SpeMembershipKey> keys, CancellationToken _) =>
                 {
                     if (containerId != ContainerId.ToString())
                         throw new InvalidOperationException($"Unmodelled container: '{containerId}'.");
 
-                    var results = new Dictionary<string, SpeContainerMembershipResult>(
-                        StringComparer.OrdinalIgnoreCase);
+                    var results = new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>();
 
-                    foreach (var email in emails)
+                    foreach (var key in keys)
                     {
+                        var email = key.Email ?? string.Empty;
                         CapturedEmails.Add(email);
-                        results[email] = _byEmail.TryGetValue(email, out var specific) ? specific : _default;
+                        results[key] = _byEmail.TryGetValue(email, out var specific) ? specific : _default;
                     }
 
-                    return (IReadOnlyDictionary<string, SpeContainerMembershipResult>)results;
+                    return (IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult>)results;
                 });
 
             return mock;
@@ -1337,7 +1432,8 @@ public class SpeRevokeMatcherTests
     {
         var service = ServiceWithFailingGraph(new InvalidOperationException("Graph unreachable"));
 
-        var result = await service.RevokeMembershipAsync(ContainerId.ToString(), "counsel@client-firm.com");
+        var result = await service.RevokeMembershipAsync(
+            ContainerId.ToString(), new SpeMembershipKey(null, "counsel@client-firm.com"));
 
         result.Success.Should().BeFalse();
         result.Error.Should().NotStartWith(SpeContainerMembershipService.NoPermissionFoundError,
