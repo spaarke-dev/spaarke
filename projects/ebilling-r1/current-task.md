@@ -11,13 +11,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. 48/79 complete (073 and 074 newly ✅). 072 and 071 wait on two reviews of part W: our Opus adversarial pass on E+W (running), and ontology-r1's re-check of E (46c45e4bc..2b7c6a228) plus W (ffe12af4b..97b51f619). #2095 is done (uac-r2 PASS on a69e703fc..5abdaf7fb and c7c53ec8b) |
-| **Step** | Branch HEAD ba0f697f0+ (local; origin/work/ebilling-r1 is 33723dbdc; ask the owner before pushing). origin/master 1473b34c6 merged (11d3b7103, then bf5ca1305). Verified on the combined tip: build 0/0; broad billing filter 6062/0; ArchTests 1207/0. The full unit suite's only failures are 3-minute seam/contract timeouts under load (they pass when rerun on a quiet machine) |
+| **Task** | Parallel mode. 48/79 complete. 071/072: the W review fixes are on the branch (4795a4209..c02200029, notes to c342f4b9a); ontology-r1's re-check of that range was requested 2026-10-19. 049 is running as two implementer agents from base c342f4b9a: impl049 (opus; pipeline: handler, processor, sink, DI; D-101 overrides the POML's "Rejected: no invoice") and impl049spend (sonnet; D-102 tests + D-104 Pending Spend in FinanceBaseValues/FinanceRollupService + a scripts/ebilling column script) |
+| **Step** | Branch HEAD c342f4b9a (local; origin/work/ebilling-r1 is 33723dbdc; ask the owner before any push). Verified on c342f4b9a: build 0/0; broad filter 5349/0 + Refile/SecureChild 777/0; ArchTests 1207/0 (a first run had 9 boot-fixture timeouts under load; the rerun was clean) |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | (1) On W review findings: brief a fix agent (base = branch tip, in its own worktree), cherry-pick, run the BROAD filter (memory: verify-after-parallel-picks), send to ontology-r1. When both reviews are clean, mark 071 and 072 ✅ (POML status + TASK-INDEX "✅ [done]"; run check-task-status-drift.ps1). (2) Then start 049 (opus, FULL; read all its constraints, which have grown a lot). (3) Queued small 077 follow-up: show the F1-b "consequence lowered to Flag" note (stored in sprk_proposedaction) in the Rule Review read model and page. (4) Comment on #2095 that the fix is on work/ebilling-r1 and closes on merge |
+| **Next Action** | (1) On ontology-r1 PASS for the W fixes: mark 071 and 072 ✅ (POML status + TASK-INDEX "✅ [done]"; check-task-status-drift.ps1). On findings: a fix agent from the tip. (2) When the 049 agents report: cherry-pick both ranges with cp.sh, run the BROAD filter on the combined tip, rewrite hashes in the 049 notes, run one Opus adversarial review of 049, then send ontology-r1 the D-104 range plus the column name for their AuthorableColumns follow-up. (3) Queued 077 follow-up: show the F1-b "consequence lowered to Flag" note in the Rule Review read model and page |
 
 ### Ranges out for review
-- ontology-r1: 072 E+W, as above.
+- ontology-r1: 072 W review fixes 4795a4209..c342f4b9a (requested 2026-10-19).
 - Their earlier re-checks were clean: 073 fix round (plus our K1/K2 fix 9bbe8c0f4) and the 074 follow-up (plus our hash fix 18b6390dc).
 
 ### Owner decisions this session
@@ -69,7 +69,7 @@ D-111 to D-120 are in the decisions log.
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 071/072 (awaiting W reviews); next 049 |
+| **Task ID** | 071/072 (awaiting ontology-r1 re-check); 049 running (two agents) |
 
 ## Next Action
 
