@@ -69,6 +69,18 @@ public static class OntologyWriterTelemetry
                      "Kept off ontology.policy.invalid so Ontology dashboards do not count billing rows.");
 
     /// <summary>
+    /// <c>customMetrics/billing.rule.consequence_downgraded</c> (ebilling-r1 072 part W, the 073 review's K2): one stored billing
+    /// version whose consequence its rule type may not carry, evaluated with Flag instead of being dropped, so the check survives.
+    /// Beside <see cref="BillingRuleInvalidCounter"/> on the same Meter. Dimensioned by <c>rule_type</c> (the closed
+    /// <see cref="Sprk.Bff.Api.Services.Signals.RuleType"/> name set).
+    /// </summary>
+    private static readonly Counter<long> BillingRuleConsequenceDowngradedCounter = Meter.CreateCounter<long>(
+        name: "billing.rule.consequence_downgraded",
+        unit: "{policyversion}",
+        description: "Count of stored billing sprk_policyversion rows evaluated with Flag because their sprk_consequence is one " +
+                     "their rule type may not carry (publish, accept and edit refuse such a row; one written around them still runs).");
+
+    /// <summary>
     /// <c>customMetrics/ontology.decisionplan.refused</c> (task 036): one decision plan refused at read time because it
     /// does not resolve against the closed action catalog. Same <see cref="MeterName"/> (CLAUDE.md section 11: extend,
     /// do not stand up a second Meter). Dimensioned by <c>reason</c> (<see cref="DecisionPlanRefusalReason"/>).
@@ -111,6 +123,11 @@ public static class OntologyWriterTelemetry
     /// <c>ontology.policy.invalid</c>.</summary>
     public static void RecordBillingRuleInvalid(string reason) =>
         BillingRuleInvalidCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
+
+    /// <summary>Records one stored billing version evaluated with Flag in place of a consequence its type may not carry (072 part W).
+    /// <paramref name="ruleType"/> is a <see cref="Sprk.Bff.Api.Services.Signals.RuleType"/> name.</summary>
+    public static void RecordBillingRuleConsequenceDowngraded(string ruleType) =>
+        BillingRuleConsequenceDowngradedCounter.Add(1, new KeyValuePair<string, object?>("rule_type", ruleType));
 
     /// <summary>
     /// Records one refused decision plan (task 036). <paramref name="reason"/> MUST be one of

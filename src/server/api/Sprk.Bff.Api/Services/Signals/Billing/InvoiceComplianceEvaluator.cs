@@ -75,6 +75,12 @@ public sealed record BillingEvaluationResult
 /// <para><b>Refusals (FR-24).</b> A version the gate refuses (logged and metered by the gate) or whose handler refuses it (logged
 /// here as <see cref="OntologyWriterEvents.PolicyVersionInvalid"/> and metered) produces no finding; the other versions still run.
 /// Only <see cref="BillingRuleRefusedException"/> is caught; any other exception is a defect and propagates.</para>
+/// <para><b>A stored consequence the type may not carry is downgraded, not dropped</b> (072 part W, the 073 review's K2). Publish,
+/// accept and edit refuse such a consequence; a row written around them is still evaluated, its consequence read as Flag (in
+/// <see cref="BillingEvaluationResult.RulesByVersion"/>, which 073 and the mapper read), logged as a Warning and counted on
+/// <c>billing.rule.consequence_downgraded</c>. Dropping it would leave its type unchecked when it is the client default, or a firm
+/// rule of a type the default does not cover. It is not a refusal and is not listed in <see cref="BillingEvaluationResult.Refusals"/>.
+/// A version whose body the gate refuses is still refused.</para>
 /// <para><b>Currency (D-20, D-115).</b> R1 judges money in USD only (<c>"$"</c> is read as USD). When the currency is missing, is
 /// not USD, or its confidence (<c>HeaderConfidence["Currency"]</c>) is unknown or below the reliability threshold, ApprovedRate is
 /// not run and ExpenseRule's amount-cap findings are dropped (its code check still runs); each such skip is logged with its reason
@@ -173,16 +179,30 @@ public sealed class InvoiceComplianceEvaluator
         // 2. The gate, once per distinct selected version, in a stable order (FR-24).
         var refusals = new List<BillingRuleRefusal>();
         var accepted = new Dictionary<Guid, BillingRuleDefinition>();
+        var downgraded = new Dictionary<Guid, BillingRuleCandidate>();
         foreach (var candidate in candidates.Where(c => selectedBySubject.Any(s => s.Versions.Contains(c))))
         {
-            // Task 073 (FR-26, I-5, D-89): the stored consequence goes through the gate too, so a row authored directly in Dataverse
-            // with a consequence its type may not carry (Reject on an AiObservation rule) is refused here, not only at publish.
+            // Task 073 (FR-26, I-5, D-89) refuses a consequence the type may not carry at publish, accept and edit. A stored row that
+            // carries one anyway (written around them) is NOT dropped here (072 part W, the 073 review's K2): dropping it would leave
+            // the type unchecked when it is the client default, or a firm rule of a type the default does not cover. Its body still
+            // goes through the gate (refused as before when invalid); its consequence is evaluated as Flag.
+            var disallowed = DisallowedConsequenceType(candidate);
             var snapshot = new PolicyVersionSnapshot(
                 candidate.PolicyVersionId, candidate.PolicyCode, candidate.RuleType, candidate.RuleBody, candidate.MessageTemplate,
-                candidate.Consequence);
+                disallowed is null ? candidate.Consequence : null);
             if (_gate.TryPrepareBillingRule(snapshot, out var definition))
             {
                 accepted[candidate.PolicyVersionId] = definition;
+                if (disallowed is { } type)
+                {
+                    downgraded[candidate.PolicyVersionId] = candidate with { Consequence = (int)BillingConsequence.Flag };
+                    _logger.LogWarning(
+                        OntologyWriterEvents.PolicyVersionInvalid,
+                        "Billing evaluation of submission {SubmissionId}: policy {PolicyCode} version {PolicyVersionId} ({RuleType}) stores consequence {Consequence}, which its type may not carry; it is evaluated with Flag (reason={Reason}).",
+                        request.SubmissionId, candidate.PolicyCode, candidate.PolicyVersionId, type, candidate.Consequence,
+                        OntologyWriterFailureReason.ConsequenceNotAllowed);
+                    OntologyWriterTelemetry.RecordBillingRuleConsequenceDowngraded(type.ToString());
+                }
             }
             else
             {
@@ -190,6 +210,10 @@ public sealed class InvoiceComplianceEvaluator
                 refusals.Add(new BillingRuleRefusal(candidate.PolicyId, candidate.PolicyCode, candidate.PolicyVersionId, BillingEvaluationReasons.GateRefused));
             }
         }
+
+        // The version as 073 and the mapper must see it: a downgraded one carries Flag.
+        BillingRuleCandidate Effective(BillingRuleCandidate candidate) =>
+            downgraded.TryGetValue(candidate.PolicyVersionId, out var flagged) ? flagged : candidate;
 
         // 3. Each version's handler, at most once, on the whole fact set, and only when it is needed: a firm version's to decide
         //    precedence, any other's when it applies. A handler refusal is logged and metered here (FR-24). ApprovedRate on a
@@ -294,7 +318,7 @@ public sealed class InvoiceComplianceEvaluator
             foreach (var finding in kept)
             {
                 findings.Add((finding, findings.Count));
-                rulesByVersion[candidate.PolicyVersionId] = candidate;
+                rulesByVersion[candidate.PolicyVersionId] = Effective(candidate);
             }
         }
 
@@ -304,7 +328,7 @@ public sealed class InvoiceComplianceEvaluator
         {
             var notChecked = RatesNotChecked(request, loaded.ReliabilityThreshold, currencySkip, skips, candidates);
             findings.Add((notChecked.Finding, findings.Count));
-            rulesByVersion[notChecked.Rule.PolicyVersionId] = notChecked.Rule;
+            rulesByVersion[notChecked.Rule.PolicyVersionId] = Effective(notChecked.Rule);
         }
 
         var ordered = findings
@@ -327,6 +351,18 @@ public sealed class InvoiceComplianceEvaluator
             Facts = facts,
         };
     }
+
+    /// <summary>
+    /// The billing rule type of a version whose stated consequence that type may not carry (or that is none of the three defined
+    /// values), else <c>null</c>: no consequence stated, a type the gate refuses anyway (unknown or not billing), or an allowed one.
+    /// </summary>
+    private static RuleType? DisallowedConsequenceType(BillingRuleCandidate candidate) =>
+        candidate.Consequence is { } stated
+        && RuleBodySchemaValidator.TryParseRuleType(candidate.RuleType, out var type)
+        && RuleDomains.IsBilling(type)
+        && !BillingRuleCatalogue.IsConsequenceAllowed(type, stated)
+            ? type
+            : null;
 
     /// <summary>
     /// The version of one policy that applies on <paramref name="date"/>: in force on it (current preferred, then the highest

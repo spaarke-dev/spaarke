@@ -309,6 +309,80 @@ public class InvoiceComplianceEvaluatorTests
         lock (reasons) reasons.Should().Equal(OntologyWriterFailureReason.SchemaInvalid);
     }
 
+    // ── 073 review K2: a stored consequence the type may not carry is downgraded, the check survives ──────────────
+
+    [Fact]
+    public void AStoredApprovedTimekeeperRejectClientDefault_IsEvaluatedAsFlag_TheCheckSurvives_K2()
+    {
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var downgrades = new List<string>();
+        var invalid = new List<string>();
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, l) =>
+            {
+                if (instrument.Meter.Name == OntologyWriterTelemetry.MeterName
+                    && instrument.Name is "billing.rule.consequence_downgraded" or "billing.rule.invalid")
+                {
+                    l.EnableMeasurementEvents(instrument);
+                }
+            },
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, _, tags, _) =>
+        {
+            if (MetricScope.Value != scope) return;
+            foreach (var tag in tags)
+            {
+                if (tag.Value is not string value) continue;
+                if (instrument.Name == "billing.rule.consequence_downgraded" && tag.Key == "rule_type") lock (downgrades) downgrades.Add(value);
+                if (instrument.Name == "billing.rule.invalid") lock (invalid) invalid.Add(value);
+            }
+        });
+        listener.Start();
+
+        var stored = Version("CD-TIMEKEEPER", RuleType.ApprovedTimekeeper) with { Consequence = (int)BillingConsequence.Reject };
+        var unlisted = Fee(0) with { Timekeeper = Unmatched(Sprk.Bff.Api.Services.Finance.Resolution.TimekeeperUnmatchedReason.NotOnRoster) };
+        var logger = new CapturingLogger<InvoiceComplianceEvaluator>();
+
+        var result = Evaluator(logger).Evaluate(Request(unlisted), Loaded(stored));
+
+        result.Findings.Should().ContainSingle("the client default's check survives").Which.RuleType.Should().Be(RuleType.ApprovedTimekeeper);
+        result.RulesByVersion[stored.PolicyVersionId].Should().Be(stored with { Consequence = (int)BillingConsequence.Flag });
+        result.Refusals.Should().BeEmpty();
+        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("evaluated with Flag"));
+        logger.Entries.Should().NotContain(e => e.Level == LogLevel.Error);
+        lock (downgrades) downgrades.Should().Equal(nameof(RuleType.ApprovedTimekeeper));
+        lock (invalid) invalid.Should().BeEmpty("the gate did not refuse it");
+    }
+
+    [Fact]
+    public void ADowngradedFirmVersion_StillDisplacesTheClientDefault_D39_K2()
+    {
+        // The downgraded firm rule is evaluated, so it counts as the firm's rule of that type.
+        var clientDefault = Increment("CD-INCREMENT", "0.5");                                   // fires on 0.3 hours
+        var firm = Increment("FIRM-INCREMENT", "0.1", RuleSetScope.Firm) with { Consequence = (int)BillingConsequence.Reject }; // holds
+
+        var result = Evaluate(Request(Line(0, EarlyLine)), Loaded(clientDefault, firm));
+
+        result.Findings.Should().BeEmpty();
+        result.Refusals.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AVersionWithAnInvalidBody_AndADisallowedConsequence_IsStillRefused_AndDropped_K2()
+    {
+        var broken = Version("CD-TIMEKEEPER", RuleType.ApprovedTimekeeper, """{"type":"ApprovedTimekeeper","extra":1}""")
+            with { Consequence = (int)BillingConsequence.Reject };
+        var unlisted = Fee(0) with { Timekeeper = Unmatched(Sprk.Bff.Api.Services.Finance.Resolution.TimekeeperUnmatchedReason.NotOnRoster) };
+
+        var result = Evaluate(Request(unlisted), Loaded(broken));
+
+        result.Findings.Should().BeEmpty();
+        result.Refusals.Should().ContainSingle().Which.Should().Be(new BillingRuleRefusal(
+            broken.PolicyId, "CD-TIMEKEEPER", broken.PolicyVersionId, BillingEvaluationReasons.GateRefused));
+    }
+
     [Fact]
     public void AnyOtherHandlerException_IsADefect_AndPropagates()
     {

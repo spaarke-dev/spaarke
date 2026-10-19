@@ -1183,16 +1183,20 @@ public class SubmissionRejectionRuleTests
     [InlineData(RuleType.DailyHoursCap)]
     [InlineData(RuleType.NonBillableActivity)]
     [InlineData(RuleType.ApprovedTimekeeper)]
-    public void TheBillingGate_RefusesAStoredVersion_WhoseConsequenceIsReject(RuleType type)
+    public async Task AStoredVersion_WhoseConsequenceIsReject_IsEvaluatedAsFlag_TheCheckSurvives_K2(RuleType type)
     {
+        // 072 part W (073 review K2): the stored row is evaluated, not dropped; its consequence is read as Flag, so it cannot reject.
         var (request, loaded) = EverythingWrong(20);
         var stored = Version("BILL-" + type, type) with { Consequence = Reject };
 
         var result = Evaluator().Evaluate(request, loaded with { Rules = [stored] });
 
-        result.Findings.Should().BeEmpty("a refused version produces no finding, so it cannot reject");
-        result.Refusals.Should().ContainSingle().Which.Should().Be(
-            new BillingRuleRefusal(stored.PolicyId, stored.PolicyCode, stored.PolicyVersionId, BillingEvaluationReasons.GateRefused));
+        result.Findings.Should().NotBeEmpty().And.OnlyContain(f => f.RuleType == type, "the check survives");
+        result.Refusals.Should().BeEmpty("a downgrade is not a refusal");
+        result.RulesByVersion[stored.PolicyVersionId].Consequence.Should().Be((int)BillingConsequence.Flag);
+        var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
+        decision.Outcome.Should().NotBe(SubmissionOutcome.Rejected);
+        decision.Findings.Should().OnlyContain(f => f.HeldBecause == SubmissionHoldReasons.ConsequenceNotReject);
     }
 
     [Theory]
