@@ -120,22 +120,34 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
             : [];
 
         InvoiceResolutionResult resolution;
-        InvoiceCodingResult coding;
         try
         {
             // Step 2: resolve (046).
             resolution = await _resolution.ResolveAsync(BuildResolutionInput(snapshot, read), ct).ConfigureAwait(false);
-
-            // Step 3: code (047).
-            coding = await _coding.CodeLinesAsync(BuildCodingRequest(snapshot, read), ct).ConfigureAwait(false);
         }
         catch (FeatureDisabledException ex)
         {
             return Log(SubmissionEvaluationOutcome.Failed(snapshot.SubmissionId, ex.ErrorCode, snapshot, read));
         }
+
+        // Step 3: code (047). D-126: coding that cannot run after a successful read is not a failure. The invoice and its uncoded lines are
+        // created In Review, held by a pipeline finding; no rule runs on uncoded lines, so nothing rejects. The coding InvoiceAiException
+        // (a model fault) still propagates for the job to retry.
+        InvoiceCodingResult coding;
+        try
+        {
+            coding = await _coding.CodeLinesAsync(BuildCodingRequest(snapshot, read), ct).ConfigureAwait(false);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            return Log(Uncoded(snapshot, read, numberCheck, pipelineFindings, resolution, SubmissionReasonCodes.CodingUnavailableHold, ex.ErrorCode));
+        }
         catch (LineCodingException ex)
         {
-            return Log(SubmissionEvaluationOutcome.Failed(snapshot.SubmissionId, ex.ReasonCode, snapshot, read));
+            var hold = ex.ReasonCode == SubmissionReasonCodes.NoCodeSet
+                ? SubmissionReasonCodes.CodingNoCodeSetHold
+                : SubmissionReasonCodes.CodingUnavailableHold;
+            return Log(Uncoded(snapshot, read, numberCheck, pipelineFindings, resolution, hold, ex.ReasonCode));
         }
 
         // Step 4: evaluate (072), on the core record and received date of this same submission read.
@@ -162,6 +174,25 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
             Decision = decision,
         });
     }
+
+    /// <summary>D-126: read and resolved, not coded. The hold finding names its cause; a D-91 finding, if any, is kept.</summary>
+    private static SubmissionEvaluationOutcome Uncoded(
+        SubmissionSnapshot snapshot,
+        ExtractedInvoice read,
+        InvoiceNumberCheck numberCheck,
+        IReadOnlyList<SubmissionPipelineFinding> pipelineFindings,
+        InvoiceResolutionResult resolution,
+        string holdCode,
+        string cause) => new()
+    {
+        Kind = SubmissionEvaluationKind.AcceptedUncoded,
+        SubmissionId = snapshot.SubmissionId,
+        Submission = snapshot,
+        Read = read,
+        InvoiceNumber = numberCheck,
+        PipelineFindings = [.. pipelineFindings, new SubmissionPipelineFinding(holdCode, new Dictionary<string, string?> { ["cause"] = cause })],
+        Resolution = resolution,
+    };
 
     /// <summary>Step 5a (notes 049 section 2): Accepted; Rejected on SPA is an automatic rejection; Rejected on Internal is blocked.</summary>
     internal static (SubmissionEvaluationKind Kind, string? ReasonCode) Classify(SubmissionDecision decision, InvoiceSubmissionChannel channel)

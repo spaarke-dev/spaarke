@@ -114,6 +114,14 @@ public static class BillingSystemFindings
             new Dictionary<string, string>(StringComparer.Ordinal) { ["codeSet.name"] = codeSetName });
     }
 
+    /// <summary>D-126: the invoice was read but no billing-code set is configured for its core record, so its lines are uncoded. Invoice level.</summary>
+    public static BillingFinding NoCodeSet(BillingSystemPolicyVersion policy) =>
+        Build(policy, BillingSubject.ForInvoice(), BillingReasonCodes.CodingNoCodeSet, [], new Dictionary<string, string>(StringComparer.Ordinal));
+
+    /// <summary>D-126: the invoice was read but line coding could not run (switched off), so its lines are uncoded. Invoice level.</summary>
+    public static BillingFinding CodingUnavailable(BillingSystemPolicyVersion policy) =>
+        Build(policy, BillingSubject.ForInvoice(), BillingReasonCodes.CodingUnavailable, [], new Dictionary<string, string>(StringComparer.Ordinal));
+
     private static BillingFinding Build(
         BillingSystemPolicyVersion policy, BillingSubject subject, string reasonCode, IReadOnlyList<BillingValueRead> values,
         IReadOnlyDictionary<string, string> facts)

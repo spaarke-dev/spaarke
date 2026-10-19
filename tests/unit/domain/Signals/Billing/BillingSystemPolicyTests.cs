@@ -32,6 +32,8 @@ public class BillingSystemPolicyTests
         BillingReasonCodes.CodingRefusedCode,
         BillingReasonCodes.CodingFirmCodeMismatch,
         BillingReasonCodes.CodingCodeSetNeedsReview,
+        BillingReasonCodes.CodingNoCodeSet,
+        BillingReasonCodes.CodingUnavailable,
     ];
 
     private static PolicyVersionValidator Validator() =>
@@ -170,6 +172,8 @@ public class BillingSystemPolicyTests
         BillingReasonCodes.CodingRefusedCode.Should().Be("coding.refused_code");
         BillingReasonCodes.CodingFirmCodeMismatch.Should().Be("coding.firm_code_mismatch");
         BillingReasonCodes.CodingCodeSetNeedsReview.Should().Be("coding.code_set_needs_review");
+        BillingReasonCodes.CodingNoCodeSet.Should().Be("coding.no_code_set", "D-126");
+        BillingReasonCodes.CodingUnavailable.Should().Be("coding.unavailable", "D-126");
     }
 
     [Fact]
@@ -187,7 +191,7 @@ public class BillingSystemPolicyTests
             BillingRuleCatalogue.IsFlagOnlyReason(reason).Should().BeTrue(reason);
             BillingRuleCatalogue.IsRejectCapableReason(RuleType.SubmissionIntegrity, reason).Should().BeFalse(reason);
             SignalWriter.HasMalformedPlaceholder(template!).Should().BeFalse(reason);
-            SignalWriter.ExtractTemplateTokens(template!).Should().OnlyContain(t => declared.Contains(t), reason);
+            SignalWriter.ExtractTemplateTokens(template!).Where(t => !declared.Contains(t)).Should().BeEmpty(reason + ": a reason may name no token (D-126), never an undeclared one");
             (template + " " + headline).ToLowerInvariant().Should().NotContain("invalid", "a reason claims only what was compared");
             texts.Add(template!);
             texts.Add(headline!);
@@ -221,6 +225,8 @@ public class BillingSystemPolicyTests
         BillingReasonCodes.CodingRefusedCode => BillingSystemFindings.CodeRefused(System, 2, new RefusedCode(BillingCodeKind.Task, "L999", CodeRefusalReason.OutsideCodeSet)),
         BillingReasonCodes.CodingFirmCodeMismatch => BillingSystemFindings.FirmCodeMismatch(System, 1, BillingCodeKind.Activity, "A101", "A102"),
         BillingReasonCodes.CodingCodeSetNeedsReview => BillingSystemFindings.CodeSetNeedsReview(System, "UTBMS Litigation"),
+        BillingReasonCodes.CodingNoCodeSet => BillingSystemFindings.NoCodeSet(System),
+        BillingReasonCodes.CodingUnavailable => BillingSystemFindings.CodingUnavailable(System),
         _ => throw new ArgumentOutOfRangeException(nameof(reason)),
     };
 
@@ -299,7 +305,7 @@ public class BillingSystemPolicyTests
         var declared = BillingRuleCatalogue.TemplateFactFields(RuleType.SubmissionIntegrity);
         foreach (var reason in SystemReasons)
         {
-            FindingFor(reason).FactValues.Keys.Should().OnlyContain(k => declared.Contains(k), reason);
+            FindingFor(reason).FactValues.Keys.Where(k => !declared.Contains(k)).Should().BeEmpty(reason);
             FindingFor(reason).RuleType.Should().Be(RuleType.SubmissionIntegrity);
         }
     }

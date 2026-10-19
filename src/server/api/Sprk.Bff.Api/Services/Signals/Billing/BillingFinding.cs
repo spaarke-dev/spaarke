@@ -178,4 +178,8 @@ public static class BillingReasonCodes
     public const string CodingRefusedCode = "coding.refused_code";
     public const string CodingFirmCodeMismatch = "coding.firm_code_mismatch";
     public const string CodingCodeSetNeedsReview = "coding.code_set_needs_review";
+
+    // D-126 (task 049 part C): the invoice was read but its lines could not be coded, so it is created In Review with the lines uncoded.
+    public const string CodingNoCodeSet = "coding.no_code_set";
+    public const string CodingUnavailable = "coding.unavailable";
 }

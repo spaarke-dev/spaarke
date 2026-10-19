@@ -176,16 +176,39 @@ public class InvoiceSubmissionProcessorTests
         h.DocumentLoads.Should().Be(0);
     }
 
-    [Fact(DisplayName = "049 B (047): no code set resolved is Failed ebilling.coding.no_code_set")]
-    public async Task NoCodeSet_IsFailed()
+    [Fact(DisplayName = "049 C (D-126): no code set after a successful read is AcceptedUncoded, held by a coding_no_code_set finding, never Failed")]
+    public async Task NoCodeSet_AfterTheRead_IsAcceptedUncoded_Held()
     {
-        var h = new Harness();
+        var h = new Harness { ReadInvoiceNumber = "INV-999" };
         h.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
 
         var outcome = await h.RunAsync();
 
-        outcome.Kind.Should().Be(SubmissionEvaluationKind.Failed);
-        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.NoCodeSet);
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AcceptedUncoded, "D-126: only a submission that fails before it is read has no invoice");
+        outcome.ReasonCode.Should().BeNull();
+        outcome.Read.Should().NotBeNull();
+        outcome.Resolution.Should().NotBeNull("the lines keep their resolved timekeeper and rate");
+        outcome.Coding.Should().BeNull();
+        outcome.Evaluation.Should().BeNull("no rule is judged on uncoded lines, so nothing can reject");
+        outcome.Decision.Should().BeNull();
+        h.Evaluated.Should().BeNull();
+        outcome.PipelineFindings.Select(f => f.ReasonCode).Should().Equal(
+            SubmissionReasonCodes.InvoiceNumberMismatch, SubmissionReasonCodes.CodingNoCodeSetHold);
+        outcome.PipelineFindings[1].Values["cause"].Should().Be(SubmissionReasonCodes.NoCodeSet);
+    }
+
+    [Fact(DisplayName = "049 C (D-126): line coding switched off after the read is AcceptedUncoded, held by a coding_unavailable finding")]
+    public async Task CodingSwitchedOff_AfterTheRead_IsAcceptedUncoded_Held()
+    {
+        var h = new Harness();
+        h.Coding.Failure = new FeatureDisabledException(SubmissionReasonCodes.AiLinearConsumersDisabled, "off");
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AcceptedUncoded);
+        outcome.PipelineFindings.Should().ContainSingle().Which.Should().Match<SubmissionPipelineFinding>(f =>
+            f.ReasonCode == SubmissionReasonCodes.CodingUnavailableHold && f.Values["cause"] == SubmissionReasonCodes.AiLinearConsumersDisabled);
+        h.Evaluated.Should().BeNull();
     }
 
     // ── fail closed on the submission read ──
@@ -422,6 +445,8 @@ public class InvoiceSubmissionProcessorTests
         SubmissionReasonCodes.ReadNotConfigured.Should().Be("ai.invoice.read.not_configured");
         SubmissionReasonCodes.ReadUnreadable.Should().Be("invoice.read.unreadable");
         SubmissionReasonCodes.NoCodeSet.Should().Be("ebilling.coding.no_code_set");
+        SubmissionReasonCodes.CodingNoCodeSetHold.Should().Be("ebilling.submission.coding_no_code_set");
+        SubmissionReasonCodes.CodingUnavailableHold.Should().Be("ebilling.submission.coding_unavailable");
     }
 
     // ── builders ──

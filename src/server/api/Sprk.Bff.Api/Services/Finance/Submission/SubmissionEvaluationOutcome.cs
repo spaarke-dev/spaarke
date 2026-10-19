@@ -25,13 +25,22 @@ public enum SubmissionEvaluationKind
     /// <see cref="SubmissionReasonCodes.Blocked"/>.</summary>
     Blocked,
 
-    /// <summary>A non-retryable failure (flag off, AI off, missing tracking number or received date, no code set). No invoice;
-    /// submission Failed with <see cref="SubmissionEvaluationOutcome.ReasonCode"/>. When <see cref="SubmissionEvaluationOutcome.Read"/>
-    /// is null the failure came before the read.</summary>
+    /// <summary>A non-retryable failure (flag off, AI read off, missing tracking number or received date). No invoice; submission Failed
+    /// with <see cref="SubmissionEvaluationOutcome.ReasonCode"/>. D-126: line coding that cannot run after the read is not a failure
+    /// (<see cref="AcceptedUncoded"/>).</summary>
     Failed,
 
     /// <summary>A document-level read failure (FR-21: unreadable, page limit, no invoice). No invoice; submission Rejected with that code.</summary>
     RejectedUnreadable,
+
+    /// <summary>
+    /// D-126: the invoice was read and resolved but its lines could not be coded (no code set for the core record, or line coding switched
+    /// off). The invoice and its uncoded lines are created In Review with the approval portion, held for review by one pipeline finding
+    /// (<see cref="SubmissionReasonCodes.CodingNoCodeSetHold"/> or <see cref="SubmissionReasonCodes.CodingUnavailableHold"/>); the
+    /// submission is Accepted. No rule is evaluated and nothing is decided (<see cref="SubmissionEvaluationOutcome.Evaluation"/> and
+    /// <see cref="SubmissionEvaluationOutcome.Decision"/> are null), so nothing can reject it.
+    /// </summary>
+    AcceptedUncoded,
 }
 
 /// <summary>
@@ -203,7 +212,8 @@ public sealed record SubmissionEvaluationOutcome
     /// The terminal reason code: the failure code (<see cref="SubmissionEvaluationKind.Failed"/>), the read code
     /// (<see cref="SubmissionEvaluationKind.RejectedUnreadable"/>), the first deciding finding's reason code
     /// (<see cref="SubmissionEvaluationKind.AutoRejected"/>), <see cref="SubmissionReasonCodes.Blocked"/>
-    /// (<see cref="SubmissionEvaluationKind.Blocked"/>), or null (<see cref="SubmissionEvaluationKind.Accepted"/>).
+    /// (<see cref="SubmissionEvaluationKind.Blocked"/>), or null (<see cref="SubmissionEvaluationKind.Accepted"/>,
+    /// <see cref="SubmissionEvaluationKind.AcceptedUncoded"/>: its cause is on the pipeline finding).
     /// </summary>
     public string? ReasonCode { get; init; }
 
@@ -222,14 +232,14 @@ public sealed record SubmissionEvaluationOutcome
     /// <summary>Step 1c: the D-91 comparison.</summary>
     public InvoiceNumberCheck? InvoiceNumber { get; init; }
 
-    /// <summary>Pipeline findings (D-91 mismatch). Each holds; none rejects.</summary>
+    /// <summary>Pipeline findings (D-91 mismatch; D-126 lines not coded). Each holds; none rejects.</summary>
     public IReadOnlyList<SubmissionPipelineFinding> PipelineFindings { get; init; } = [];
 
     /// <summary>Step 2: arithmetic, timekeeper and rate resolution and combined confidence per field (046).</summary>
     public InvoiceResolutionResult? Resolution { get; init; }
 
     /// <summary>Step 3: codes, observations and the code set per line (047; each line's <c>CodeSetSource</c> / <c>CodeSetNeedsReview</c>).
-    /// <c>LineKey</c> is the line index in invariant text.</summary>
+    /// <c>LineKey</c> is the line index in invariant text. Null for <see cref="SubmissionEvaluationKind.AcceptedUncoded"/>.</summary>
     public InvoiceCodingResult? Coding { get; init; }
 
     /// <summary>Step 4 input: exactly what was judged (for the findings JSON and part C's re-evaluation check).</summary>

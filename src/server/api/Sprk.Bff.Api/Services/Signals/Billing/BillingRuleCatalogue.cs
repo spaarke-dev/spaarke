@@ -161,6 +161,8 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CodingRefusedCode => RefusedCodeTemplate,
         BillingReasonCodes.CodingFirmCodeMismatch => FirmCodeMismatchTemplate,
         BillingReasonCodes.CodingCodeSetNeedsReview => CodeSetNeedsReviewTemplate,
+        BillingReasonCodes.CodingNoCodeSet => NoCodeSetTemplate,
+        BillingReasonCodes.CodingUnavailable => CodingUnavailableTemplate,
         BillingEvaluationReasons.CurrencyMissing => RatesNotCheckedPrefix + "missing.",
         BillingEvaluationReasons.CurrencyUnreliable => RatesNotCheckedPrefix + "unclear.",
         BillingEvaluationReasons.CurrencyNotUsd => RatesNotCheckedPrefix + "not USD.",
@@ -185,6 +187,16 @@ public static class BillingRuleCatalogue
     public const string CodeSetNeedsReviewTemplate =
         "The code set used to suggest codes for this invoice, {{codeSet.name}}, was itself suggested and has not been confirmed.";
 
+    /// <summary>The message of <see cref="BillingReasonCodes.CodingNoCodeSet"/> (D-126): no billing-code set is configured for the core
+    /// record, so the lines were stored without suggested codes.</summary>
+    public const string NoCodeSetTemplate =
+        "No billing-code set is configured for this record, so no codes were suggested for the invoice lines. The lines can be coded once a code set exists.";
+
+    /// <summary>The message of <see cref="BillingReasonCodes.CodingUnavailable"/> (D-126): line coding could not run (switched off), so the
+    /// lines were stored without suggested codes.</summary>
+    public const string CodingUnavailableTemplate =
+        "Code suggestion was not available when this invoice was processed, so no codes were suggested for the invoice lines.";
+
     /// <summary>The title of <see cref="BillingReasonCodes.SubmissionInvoiceNumberMismatch"/>'s Signal.</summary>
     public const string InvoiceNumberMismatchHeadline = "Invoice number differs from the submission";
 
@@ -196,6 +208,12 @@ public static class BillingRuleCatalogue
 
     /// <summary>The title of <see cref="BillingReasonCodes.CodingCodeSetNeedsReview"/>'s Signal.</summary>
     public const string CodeSetNeedsReviewHeadline = "Suggested code set needs review";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.CodingNoCodeSet"/>'s Signal.</summary>
+    public const string NoCodeSetHeadline = "No billing-code set for this record";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.CodingUnavailable"/>'s Signal.</summary>
+    public const string CodingUnavailableHeadline = "Lines not coded";
 
     /// <summary>The title (<c>sprk_name</c>) of D-115's "money not judged" Signal.</summary>
     public const string RatesNotCheckedHeadline = "Rates and expense caps not checked";
@@ -223,6 +241,8 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CodingRefusedCode => RefusedCodeHeadline,
         BillingReasonCodes.CodingFirmCodeMismatch => FirmCodeMismatchHeadline,
         BillingReasonCodes.CodingCodeSetNeedsReview => CodeSetNeedsReviewHeadline,
+        BillingReasonCodes.CodingNoCodeSet => NoCodeSetHeadline,
+        BillingReasonCodes.CodingUnavailable => CodingUnavailableHeadline,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd
             => RatesNotCheckedHeadline,
         _ => null,
@@ -241,7 +261,8 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CurrencyNotUsd => true,
         // D-125: the system reasons hold or note, never reject or adjust, whatever a stored version's consequence says.
         BillingReasonCodes.SubmissionInvoiceNumberMismatch or BillingReasonCodes.CodingRefusedCode
-            or BillingReasonCodes.CodingFirmCodeMismatch or BillingReasonCodes.CodingCodeSetNeedsReview => true,
+            or BillingReasonCodes.CodingFirmCodeMismatch or BillingReasonCodes.CodingCodeSetNeedsReview
+            or BillingReasonCodes.CodingNoCodeSet or BillingReasonCodes.CodingUnavailable => true,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd => true,
         _ => false,
     };

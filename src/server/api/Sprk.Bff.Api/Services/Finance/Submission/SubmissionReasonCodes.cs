@@ -60,7 +60,8 @@ public static class SubmissionReasonCodes
     /// <summary>The submission names no document (<c>sprk_document</c>).</summary>
     public const string DocumentMissing = "ebilling.submission.document_missing";
 
-    /// <summary>047: no code set resolved for the submission's core record.</summary>
+    /// <summary>047: no code set resolved for the submission's core record. Since D-126 not a failure: the cause recorded on
+    /// <see cref="CodingNoCodeSetHold"/>.</summary>
     public const string NoCodeSet = LineCodingException.NoCodeSet;
 
     // ── Rejected, not read: no invoice (FR-21, D-101) ──
@@ -81,6 +82,20 @@ public static class SubmissionReasonCodes
 
     /// <summary>D-91: the firm invoice number read from the PDF differs from the typed one (normalised for case, whitespace and punctuation).</summary>
     public const string InvoiceNumberMismatch = "ebilling.submission.invoice_number_mismatch";
+
+    /// <summary>
+    /// D-126: the invoice was read but no code set is configured for its core record (<see cref="NoCodeSet"/>), so its lines are stored
+    /// uncoded and it is held for review. Value <c>cause</c> is 047's code. Part D writes it as the SubmissionIntegrity reason
+    /// <c>coding.no_code_set</c>.
+    /// </summary>
+    public const string CodingNoCodeSetHold = "ebilling.submission.coding_no_code_set";
+
+    /// <summary>
+    /// D-126: the invoice was read but line coding could not run (a kill switch, e.g. <see cref="AiLinearConsumersDisabled"/>), so its
+    /// lines are stored uncoded and it is held for review. Value <c>cause</c> is the switch's code. Part D writes it as the
+    /// SubmissionIntegrity reason <c>coding.unavailable</c>.
+    /// </summary>
+    public const string CodingUnavailableHold = "ebilling.submission.coding_unavailable";
 
     /// <summary>
     /// The document-level read failures (FR-21): the submission is Rejected with the code and no invoice is created. Every other read
