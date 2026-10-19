@@ -394,3 +394,16 @@ Clean apart from these, fixed in the main session:
 - K2: the SPA content scan now also covers `src/client/shared/Spaarke.UI.Components/src`, which the SPA bundles through the vite alias `@spaarke/ui-components`. Today's only hit there is a doc comment in `RecordHeader/fields/OptionSetField.tsx:64`, which the SPA does not import.
 - K4: the 412 re-read reports "already applied" only when the row names `statuscode` and not the old column. A row that names neither is refused, and a row that can't be re-read (404) is refused with an accurate message.
 uac-r2's re-check of the same range: PASS, no new findings.
+
+## #2095 - InvoiceReviewService re-file now runs AfterRefileAsync (found by uac-r2's guard, #2094)
+
+Filed here because 015 is the last task with a notes file that changed `InvoiceReviewService`; task 050 owns the file next (it redirects the confirm path) and must carry this forward.
+
+- **Defect.** `RefileDocumentUnderInvoiceAsync` re-parented the document under the confirmed matter (`ReparentAsync`, inherited matter) and never ran `SecureChildReconciler.AfterRefileAsync`. A document filed under an invoice of a Secure matter stayed readable by its business unit until the 2-minute net; one moved out of a Secure record released nothing until the sweep.
+- **Fix.** The method reads whether the document is Secure-team-owned before the reparent (`RefileIsolationRead.BeforeWriteAsync`, one retry), then, after the reparent succeeds and moved a parent, calls `AfterRefileAsync("sprk_document", id, wasIsolated, CancellationToken.None)`. The constructor takes `SecureChildReconciler` (scoped, already registered). The resumed-confirm path (no-op change) runs through the same method, so a first attempt that died before the step is completed by the retry.
+- **Deviation from the reference writers.** The reference writers write anyway when the read faults twice and hand the step a faulted answer (nothing released). Here a double fault throws `InvalidOperationException` ("Nothing was saved; retry the confirmation") before any write, per the #2095 brief. Confirm is retry-safe, so this costs a retry, and a Secure document is never re-filed with its release silently skipped. If the owner prefers the reference behaviour, it is a one-line change in `ReadDocumentIsolationBeforeWriteAsync`.
+- **Guard.** `InvoiceReviewService` is off the baseline in `RefileWriterAfterRefileGuardTests` and is now one of its non-vacuity "compliant" writers.
+- **For task 050.** If the confirm path is redirected into the submission operation, the new filing path must read isolation before its reparent and call `AfterRefileAsync` after it; the guard will fail otherwise.
+- **Tests.** 4 in `InvoiceReviewWritePathTests` (isolated to ordinary: mirror removed; ordinary to Secure: mirror created; double read fault: no write at all; refused reparent: step not run) and 1 DI-resolution test in `RefileWriterReconcilerRegistrationTests`.
+- **Publish size.** Method bodies only: no package or registration changed.
+
