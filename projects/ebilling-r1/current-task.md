@@ -11,13 +11,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. 50/79 complete. 049 in progress. On the branch: the map; parts A, B, C and C2 (6cf404162); spend D-102/D-104 and D-130 approved-total spend (1549ff165) with its review round (ae5197e25); the D-125 system policy; credit totals D-127/D-128/D-129. Running from base ae5197e25: impl049sub (sonnet; D-131 Submitted By: invoice sprk_submittedby = the submission's sprk_submitter contact; a missing systemuser no longer refuses, only "neither recorded" refuses) and impl049d (opus; part D after-commit steps: Signals, the D-122 rejection DR after the Signals, system-policy Signals, indexing, notify, terminal status last, resume; D-125 (a)/(b)) |
-| **Step** | HEAD 77690aa4f (D-131 and the D-130 re-check fixes picked; local; origin is 33723dbdc; ask the owner before any push). Last full verify at 77690aa4f: build 0/0; broad filter (+DerivedBaseColumns, AuthorableColumns) 7836/0; ArchTests 1214/0. ADR-010 ceiling is 168 |
+| **Task** | Parallel mode. 50/79 complete. 049 in progress. On the branch: map; parts A, B, C, C2, C3 (D-131 Submitted By, 58c904416); part D after-steps (bbea1e1f7, 168f43b1c, 8e3930c8d: D-125 (a)/(b), mapper takes 073 decisions, stored Signal plan, InvoiceSubmissionAfterSteps); spend D-102/D-104/D-130 (ontology PASS 77690aa4f). Running from base 8e3930c8d: impl049d122 (opus): commit 1 SignalWriter.CloseActedByAutomatedDecisionAsync (ontology-owned, their spec, they review as owners); commit 2 D-122 wiring (Signals → read open set once, store with setReadAtUtc → record over stored set → close each → terminal last); commit 3 Held presentation for Blocked (ontology recommendation, owner may override) + totals refusal in findings JSON |
+| **Step** | HEAD 8e3930c8d (local; origin is 33723dbdc; ask the owner before any push). Last full verify at 8e3930c8d: build 0/0; broad filter 7889/0; ArchTests 1214/0. ADR-010 ceiling is 169 (part D +1; lower it back if part E registers the concrete class) |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | (1) When impl049sub reports: pick, run the broad filter, then add D-131 to the owner-actions list (export sprk_invoice.sprk_submittedby, created live on dev 2026-10-19, into SpaarkeMaster). (2) When impl049d reports: pick (the notes file 049-submission-processing-job.md may conflict with impl049sub; keep both sections), run the broad filter, send the range to ontology-r1 (they review part D and D-125 (a)/(b)). (3) Part E: handler; step-0 re-read (Accepted/Rejected → no-op; linked invoice on Processing → resume after-steps); lock invoice-submission:{id:N}; the download with its container check, copied from InvoiceExtractionJobHandler; part D's preflight before the persister; DI for processor, persister, after-steps and handler; ArchTests; publish delta vs fresh master; CVE; one Opus adversarial review; mark 049 done. (4) Queued: the 077 F1-b note |
+| **Next Action** | (1) When impl049d122 reports: pick, broad filter, send the range to ontology-r1 (commit 1 for owner review). (2) Part E brief: handler; step-0 re-read (Accepted/Rejected → no-op; linked invoice on Processing → resume after-steps); lock invoice-submission:{id:N}; download with container check copied from InvoiceExtractionJobHandler; call PreflightRejection(outcome) before PersistAsync (DecisionRecordRefusedException → Failed); after Committed/Resumed/Retry-with-invoice call AfterSteps.RunAsync (Completed → done; Retry → leave Processing, retry; Refused → Failed with code; SubmissionMissing → complete; exception → transient retry); persister Refused → Failed; register processor, persister, IInvoiceSubmissionAfterSteps and handler scoped; ArchTests; publish delta vs fresh master; CVE; one Opus adversarial review; mark 049 done. POML criterion 2 "no invoice on Rejected" is superseded by D-101; criterion 1 "Signals for every finding" is qualified by D-125 (system policy enabled). (3) Queued: the 077 F1-b note |
 
 ### Ranges out for review
-- ontology-r1 PASS: D-130 closed (review round ae5197e25 + re-check fixes 77690aa4f). Earlier PASS: 072 (3ce07e0e3), 049 D-104 (295aa332a), D-125 (183c2cf47). Part D goes to them next.
+- ontology-r1 PASS: D-130 closed (review round ae5197e25 + re-check fixes 77690aa4f). Earlier PASS: 072 (3ce07e0e3), 049 D-104 (295aa332a), D-125 (183c2cf47). Part D 29e91a285..8e3930c8d under their review (C:\wts-eb130); D-122 close path spec received from them.
 
 ### Owner decisions this session
 D-111 to D-120 are in the decisions log.
@@ -73,7 +73,7 @@ D-111 to D-120 are in the decisions log.
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 049 (parts D and C3 running; part E next) |
+| **Task ID** | 049 (D-122 follow-up running; part E next) |
 
 ## Next Action
 
