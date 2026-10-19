@@ -553,11 +553,11 @@ only 074's billing entry and its helpers changed (the Ontology paths and the sha
 
 | # | Item | Commit |
 |---|---|---|
-| 1 | A resolved Signal that carries a core but no pair id is refused `OwnerRefused` / `ParentUndetermined` | `a4755c45c` |
-| 2 | The content hash is canonical: decimal scale and nested-map key order no longer change it | `fcb8e642e` |
-| 3 | The already-recorded lookup answers with the row that matches both the code and the hash | `ca6c7b0ab` |
-| 4 | A true retry is answered before the deciding contact is read; a new decision with an identity fault is still refused before any write | `93025a8fb` |
-| 5 | Nit: `BillingLookupCodes` no longer sits between `BillingSubjectEntityOf` and its doc comment | `1003b2a5f` |
+| 1 | A resolved Signal that carries a core but no pair id is refused `OwnerRefused` / `ParentUndetermined` | `2a28e54f0` |
+| 2 | The content hash is canonical: decimal scale and nested-map key order no longer change it | `b0097910b` |
+| 3 | The already-recorded lookup answers with the row that matches both the code and the hash | `f7b4184a7` |
+| 4 | A true retry is answered before the deciding contact is read; a new decision with an identity fault is still refused before any write | `7fe3f2e94` |
+| 5 | Nit: `BillingLookupCodes` no longer sits between `BillingSubjectEntityOf` and its doc comment | `f6895a761` |
 | 6 | These notes | the commit that adds this section |
 
 **Item 1.** The commit route first requires every resolved Signal to be on the request's own core (R-7 and the core checks in

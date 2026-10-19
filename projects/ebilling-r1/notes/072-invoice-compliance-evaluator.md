@@ -270,19 +270,19 @@ looks up the deciding user's contact itself"), and this part does not touch the 
 
 ## 11. Review fix round, part E (evaluator, mapper, currency)
 
-Model: Opus 5.5 @ high (implementer). Base: `work/ebilling-r1` `bdd373421` plus part L's `94de0f3c4` (cherry-picked as
-`dea47a05e`: the required `BillingEvaluationRequest.ReceivedOn`). Branch `fix/ebilling-r1-072-E`. Part L owns the loader, the fact
+Model: Opus 5.5 @ high (implementer). Base: `work/ebilling-r1` `bdd373421` plus part L's `2d95f765d` (cherry-picked as
+`2d95f765d`: the required `BillingEvaluationRequest.ReceivedOn`). Branch `fix/ebilling-r1-072-E`. Part L owns the loader, the fact
 set and their tests; nothing of theirs is edited here.
 
 ### E.1 Item map
 
 | Item | Commit | Change |
 |---|---|---|
-| A3 (F1) in-force selection | `157f82292` | A subject with no line date and no invoice date is judged on `request.ReceivedOn` (data from 049), not by the current pointer. `SelectVersion` always takes a date. New ArchTest `BillingEvaluatorClockGuardTests`: the in-memory `Evaluate` and the mapper reach no clock (transitive IL scan; must-fire and must-not-fire controls). |
-| B2 handler refusal | `0af7e0774` | Handlers run lazily, at most once per version: a firm version's to decide precedence, any other's only when it applies. D-39 counts only versions the gate AND the handler accept (owner, 2026-10-18). Handler refusals follow the gate's in candidate order. Remark fixed. |
-| A5 / ontology-r1 F1 | `d4e1e800f` | `BillingRuleCatalogue.ReasonTemplate` (a reason's own message) and `IsFlagOnlyReason`. `required_data.currency_not_usd` renders "The invoice currency is not USD." and is flag-only. 073's decider holds a flag-only reason (`reason_flag_only`). |
-| A4 (F4) Signal dedupe, option a | `e98acf482` | `BillingFindingSignalMapper.MapAll` sends one request per (policy code, subject). The single-finding `Map` is now internal. |
-| A5 / D-115 | `359730e1e` | One flag-only invoice-level "rates and expense caps were not checked" finding. `"$"` is read as USD. `low_confidence` is renamed `billing.currency.unreliable`. |
+| A3 (F1) in-force selection | `46c45e4bc` | A subject with no line date and no invoice date is judged on `request.ReceivedOn` (data from 049), not by the current pointer. `SelectVersion` always takes a date. New ArchTest `BillingEvaluatorClockGuardTests`: the in-memory `Evaluate` and the mapper reach no clock (transitive IL scan; must-fire and must-not-fire controls). |
+| B2 handler refusal | `33e1c2513` | Handlers run lazily, at most once per version: a firm version's to decide precedence, any other's only when it applies. D-39 counts only versions the gate AND the handler accept (owner, 2026-10-18). Handler refusals follow the gate's in candidate order. Remark fixed. |
+| A5 / ontology-r1 F1 | `08ff6e1b1` | `BillingRuleCatalogue.ReasonTemplate` (a reason's own message) and `IsFlagOnlyReason`. `required_data.currency_not_usd` renders "The invoice currency is not USD." and is flag-only. 073's decider holds a flag-only reason (`reason_flag_only`). |
+| A4 (F4) Signal dedupe, option a | `fb964ca04` | `BillingFindingSignalMapper.MapAll` sends one request per (policy code, subject). The single-finding `Map` is now internal. |
+| A5 / D-115 | `3d406fd20` | One flag-only invoice-level "rates and expense caps were not checked" finding. `"$"` is read as USD. `low_confidence` is renamed `billing.currency.unreliable`. |
 
 ### E.2 Behaviour
 
