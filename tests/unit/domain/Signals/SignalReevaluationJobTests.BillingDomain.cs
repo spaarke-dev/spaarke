@@ -153,10 +153,20 @@ public partial class SignalReevaluationJobTests
 
         await h.RunAsync();
 
-        policyQueries.Should().NotBeEmpty();
-        policyQueries.Should().OnlyContain(q => HasOntologyAllowlist(q),
+        // The deleted-policy existence read (SignalClosureService.ExistingPolicyCodesAsync, ontology 102b) is the one exception, and
+        // it must stay unfiltered: a code missing from it counts as a deleted policy, so an Ontology-only list would close every
+        // billing Signal as PolicyRetired.
+        var existence = policyQueries.Where(q => q.ColumnSet.Columns.Contains("createdon")).ToList();
+        var evaluation = policyQueries.Except(existence).ToList();
+
+        existence.Should().NotBeEmpty("the run reads every policy code to find deleted policies");
+        existence.Should().OnlyContain(q => !HasOntologyAllowlist(q) && q.Criteria.Conditions.Count == 0 && q.Criteria.Filters.Count == 0,
+            "the existence read must see billing policies too, or their Signals would look orphaned");
+
+        evaluation.Should().NotBeEmpty();
+        evaluation.Should().OnlyContain(q => HasOntologyAllowlist(q),
             "the enabled read and both not-in-force reads filter on sprk_domain null OR Ontology");
-        policyQueries.Should().OnlyContain(q => q.ColumnSet.Columns.Contains(RuleDomains.PolicyDomainColumn));
+        evaluation.Should().OnlyContain(q => q.ColumnSet.Columns.Contains(RuleDomains.PolicyDomainColumn));
     }
 
     internal static bool HasOntologyAllowlist(QueryExpression query) =>
