@@ -2813,6 +2813,142 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     }
 
     /// <summary>
+    /// Sends the requests as one <c>ExecuteTransactionRequest</c> — see <see cref="IGenericEntityService.ExecuteTransactionAsync"/>
+    /// for the contract. <see cref="BuildTransaction"/> builds it and <see cref="MapTransactionFailure"/> words a failure.
+    /// </summary>
+    public async Task ExecuteTransactionAsync(IReadOnlyList<OrganizationRequest> requests, CancellationToken ct = default)
+    {
+        // Argument validation lives in the builder and throws before any I/O, unwrapped.
+        var transaction = BuildTransaction(requests);
+
+        try
+        {
+            await _serviceClient.ExecuteAsync(transaction, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var mapped = MapTransactionFailure(requests, ex);
+            _logger.LogError(
+                ex,
+                "[DATAVERSE] Transaction of {RequestCount} requests failed (failed index {FailedRequestIndex}, outcome unknown {OutcomeUnknown}): {TransactionFailure}",
+                requests.Count,
+                mapped.FailedRequestIndex,
+                mapped.OutcomeUnknown,
+                mapped.Message);
+            throw mapped;
+        }
+
+        _logger.LogInformation("[DATAVERSE] Executed {RequestCount} requests in one transaction", requests.Count);
+    }
+
+    /// <summary>
+    /// Pure (no-I/O) builder for <see cref="ExecuteTransactionAsync"/>: ONE <c>ExecuteTransactionRequest</c> holding the
+    /// requests in input order, with no responses requested. Same shape as <see cref="BuildBulkUpdateTransaction"/>, which builds
+    /// one table's updates. Throws <see cref="ArgumentException"/> for a null or empty list, a null entry, or an
+    /// <c>ExecuteMultipleRequest</c> / <c>ExecuteTransactionRequest</c> entry (Dataverse cannot nest them). Public static for the
+    /// same testability reason as <see cref="BuildBulkUpdateTransaction"/> (ADR-038 B8 / B1).
+    /// </summary>
+    public static Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest BuildTransaction(IReadOnlyList<OrganizationRequest> requests)
+    {
+        if (requests is null || requests.Count == 0)
+            throw new ArgumentException("Requests list cannot be null or empty", nameof(requests));
+
+        var transaction = new Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest
+        {
+            Requests = new OrganizationRequestCollection(),
+            ReturnResponses = false // no caller reads per-request responses
+        };
+
+        for (var index = 0; index < requests.Count; index++)
+        {
+            var request = requests[index]
+                ?? throw new ArgumentException($"The request at index {index} is null.", nameof(requests));
+
+            if (request is Microsoft.Xrm.Sdk.Messages.ExecuteMultipleRequest or Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest)
+                throw new ArgumentException(
+                    $"The request at index {index} is a {request.GetType().Name}; a transaction cannot contain ExecuteMultiple or ExecuteTransaction.",
+                    nameof(requests));
+
+            transaction.Requests.Add(request);
+        }
+
+        return transaction;
+    }
+
+    /// <summary>
+    /// Pure: the exception <see cref="ExecuteTransactionAsync"/> throws for a failed transaction.
+    /// <list type="bullet">
+    /// <item>An <see cref="ExecuteTransactionFault"/> naming an in-range request (found through the exception chain, since the SDK may
+    /// wrap it) can only come from a transaction that rolled back: the message names that request's index, kind, table and id and states
+    /// that NO request was applied.</item>
+    /// <item>Any other Dataverse fault carries the atomicity guarantee alone (the client-wide last error can surface a concurrent
+    /// request's fault, GitHub #971), with no index.</item>
+    /// <item>No Dataverse fault anywhere in the chain (a timeout can land after the commit): the outcome is unknown — all or none, never
+    /// partial — and <see cref="DataverseTransactionException.OutcomeUnknown"/> is true.</item>
+    /// </list>
+    /// The message never carries a field value (ADR-015).
+    /// </summary>
+    public static DataverseTransactionException MapTransactionFailure(IReadOnlyList<OrganizationRequest> requests, Exception failure)
+    {
+        ArgumentNullException.ThrowIfNull(requests);
+        ArgumentNullException.ThrowIfNull(failure);
+
+        OrganizationServiceFault? fault = null;
+        for (var current = failure; current is not null && fault is null; current = current.InnerException)
+        {
+            if (current is FaultException<OrganizationServiceFault> faultException)
+            {
+                fault = faultException.Detail;
+            }
+        }
+
+        if (fault is null)
+        {
+            return new DataverseTransactionException(
+                $"Transaction of {requests.Count} request(s) did not complete: {failure.Message}. " +
+                "Dataverse returned no fault, so the outcome is unknown — the requests were sent (if at all) as ONE transaction, " +
+                "so either all of them were applied or none were, never a partial set.",
+                failedRequestIndex: null,
+                outcomeUnknown: true,
+                failure);
+        }
+
+        if (fault is ExecuteTransactionFault transactionFault
+            && transactionFault.FaultedRequestIndex >= 0
+            && transactionFault.FaultedRequestIndex < requests.Count)
+        {
+            var index = transactionFault.FaultedRequestIndex;
+            return new DataverseTransactionException(
+                $"Transaction of {requests.Count} request(s) failed at request index {index} ({DescribeRequest(requests[index])}): {fault.Message}. " +
+                "The transaction was rolled back — NO requests were applied.",
+                failedRequestIndex: index,
+                outcomeUnknown: false,
+                failure);
+        }
+
+        return new DataverseTransactionException(
+            $"Transaction of {requests.Count} request(s) failed: {fault.Message}. " +
+            "Dataverse did not identify which request faulted. The requests were sent as ONE transaction, so " +
+            "either all of them were applied or none were, never a partial set.",
+            failedRequestIndex: null,
+            outcomeUnknown: false,
+            failure);
+    }
+
+    /// <summary>Pure: a request's kind, table and id for a failure message (never a field value).</summary>
+    private static string DescribeRequest(OrganizationRequest request)
+    {
+        var kind = request.GetType().Name;
+        return request switch
+        {
+            Microsoft.Xrm.Sdk.Messages.CreateRequest create => $"{kind} {create.Target?.LogicalName} {create.Target?.Id}",
+            Microsoft.Xrm.Sdk.Messages.UpdateRequest update => $"{kind} {update.Target?.LogicalName} {update.Target?.Id}",
+            Microsoft.Xrm.Sdk.Messages.DeleteRequest delete => $"{kind} {delete.Target?.LogicalName} {delete.Target?.Id}",
+            _ => kind,
+        };
+    }
+
+    /// <summary>
     /// Pure: the exception <see cref="BulkUpdateIfRowVersionsMatchAsync"/> throws for a failed transaction. A row version mismatch
     /// (<see cref="IsRowVersionMismatch"/>) is a <see cref="System.Data.DBConcurrencyException"/> — the transaction rolled back, nothing
     /// was applied. Any other failure, a Dataverse fault or an exception with no fault at all (a timeout, whose outcome is unknown), is the

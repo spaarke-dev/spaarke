@@ -88,6 +88,28 @@ public interface IGenericEntityService
         throw new NotSupportedException(
             "BulkUpdateIfRowVersionsMatchAsync is implemented by DataverseServiceClientImpl only; a substitute must model row versions.");
 
+    /// <summary>
+    /// Sends <paramref name="requests"/> (creates, updates, deletes, in any mix of tables) as ONE <c>ExecuteTransactionRequest</c>,
+    /// <b>all-or-nothing</b>: Dataverse rolls the whole transaction back when any request faults. Requests run in list order.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Failure.</b> Throws <see cref="DataverseTransactionException"/> (an <see cref="InvalidOperationException"/>) whose
+    /// <see cref="DataverseTransactionException.FailedRequestIndex"/> is the zero-based index of the request Dataverse says faulted,
+    /// and whose <see cref="DataverseTransactionException.OutcomeUnknown"/> is true when Dataverse returned no fault (a timeout can
+    /// land after the commit). Cancellation surfaces as <see cref="OperationCanceledException"/>. A null, empty or nested
+    /// (<c>ExecuteMultiple</c> / <c>ExecuteTransaction</c>) list throws <see cref="ArgumentException"/> before any I/O.</para>
+    /// <para><b>Limits.</b> No responses are returned. Dataverse documents no request count for a transaction; keep a call to the same
+    /// 1,000-request bound <see cref="BulkUpdateAsync"/> uses.</para>
+    /// <para>Added for ebilling-r1 task 049 (G1): the submission pipeline persists an invoice, its lines, its approval portion and the
+    /// document link across several tables in one unit, and <see cref="BulkUpdateAsync"/> covers single-table updates only.</para>
+    /// <para>The default body throws, as <see cref="BulkUpdateIfRowVersionsMatchAsync"/>'s does: only the ServiceClient
+    /// implementation (<c>DataverseServiceClientImpl</c>) sends it, so a substitute that does not model transactions fails loudly
+    /// instead of writing the rows one by one.</para>
+    /// </remarks>
+    Task ExecuteTransactionAsync(IReadOnlyList<OrganizationRequest> requests, CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "ExecuteTransactionAsync is implemented by DataverseServiceClientImpl only; a substitute must model the transaction.");
+
     Task<Entity> RetrieveByAlternateKeyAsync(string entityLogicalName, KeyAttributeCollection alternateKeyValues, string[]? columns = null, CancellationToken ct = default);
     Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default);
     Task<LookupNavigationMetadata> GetLookupNavigationAsync(string childEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default);
