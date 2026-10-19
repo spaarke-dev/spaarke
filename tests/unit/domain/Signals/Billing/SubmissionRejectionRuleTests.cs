@@ -488,8 +488,10 @@ public class SubmissionRejectionRuleTests
         var invoice = BillingSubject.ForInvoice();
         var finding = Finding(RuleType.RequiredData, Reads(invoice, 0.99m), BillingReasonCodes.CurrencyNotUsd, invoice);
 
+        // Two independent guards: it is off the allowlist, and (072 part E) it is flag-only by reason code, which is checked first.
         BillingRuleCatalogue.IsRejectCapableReason(RuleType.RequiredData, BillingReasonCodes.CurrencyNotUsd).Should().BeFalse();
-        ShouldHold(Decide(finding, Reject, Settings()), SubmissionHoldReasons.ReasonNotRejectCapable);
+        BillingRuleCatalogue.IsFlagOnlyReason(BillingReasonCodes.CurrencyNotUsd).Should().BeTrue();
+        ShouldHold(Decide(finding, Reject, Settings()), SubmissionHoldReasons.ReasonFlagOnly);
     }
 
     [Theory]
@@ -1075,17 +1077,24 @@ public class SubmissionRejectionRuleTests
     }
 
     [Fact]
-    public async Task ARealRequiredDataFinding_ForAReliablyReadBlankField_Rejects()
+    public async Task ARealRequiredDataFinding_ForAReliablyReadBlankField_Rejects_ButAForeignCurrency_OnlyFlags()
     {
-        // 073 review F-ALLOW / D-115: a foreign currency is flag-only (AForeignCurrencyFinding_IsFlagOnly_ItsReasonIsNotListed_D115);
-        // the blank required field is the reason RequiredData rejects on.
+        // ontology-r1 072 review F1: required_data.currency_not_usd is flag-only by reason code, whatever the version's consequence.
+        // 073 review F-ALLOW also leaves it off the allowlist (AForeignCurrencyFinding_IsFlagOnly_ItsReasonIsNotListed_D115); the
+        // flag-only check runs first, so that is the hold reason.
         var rule = Version("BILL-REQ", RuleType.RequiredData, """{"type":"RequiredData","fields":["billingPeriodStart"]}""") with { Consequence = Reject };
         var blank = Request(Fee(0)) with { BillingPeriodStart = null }; // the header confidence map still carries 0.95 for the field
+        var foreign = Request(Fee(0)) with { Currency = "EUR" };
 
         var blankDecision = await Sut(new FakeSettings(Settings())).DecideAsync(Evaluator().Evaluate(blank, Loaded(rule)), CancellationToken.None);
+        var foreignDecision = await Sut(new FakeSettings(Settings())).DecideAsync(Evaluator().Evaluate(foreign, Loaded(rule)), CancellationToken.None);
 
         blankDecision.Outcome.Should().Be(SubmissionOutcome.Rejected);
         blankDecision.DecidingFindings.Single().Finding.ReasonCode.Should().Be(BillingReasonCodes.RequiredFieldMissing);
+        foreignDecision.Outcome.Should().Be(SubmissionOutcome.Accepted, "a foreign currency read reliably is a Flag, never a rejection");
+        var held = foreignDecision.Findings.Should().ContainSingle().Subject;
+        held.Finding.ReasonCode.Should().Be(BillingReasonCodes.CurrencyNotUsd);
+        held.HeldBecause.Should().Be(SubmissionHoldReasons.ReasonFlagOnly);
     }
 
     // ── The evaluation-time gate: a stored version whose consequence its type may not carry ──────────────────────

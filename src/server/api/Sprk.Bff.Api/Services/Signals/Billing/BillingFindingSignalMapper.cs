@@ -14,6 +14,10 @@ public enum BillingMessageSource
     /// <summary><see cref="BillingRuleCatalogue.WithheldDuplicateTemplate"/> (D-112): the prior is across the secure wall or unresolved.</summary>
     WithheldDuplicate,
 
+    /// <summary>The reason's own message (<see cref="BillingRuleCatalogue.ReasonTemplate"/>), whatever the version's template says:
+    /// a reason about the invoice's currency, not a breach of the rule.</summary>
+    ReasonTemplate,
+
     /// <summary>The type's default wording (<c>BillingRuleDraftTranslator.Wording</c>): the version's template is blank or names a
     /// token this finding has no value for.</summary>
     DefaultWording,
@@ -40,7 +44,7 @@ public sealed record BillingSignalMapping(SignalWriteRequest Request, BillingMes
 /// <remarks>
 /// <para><b>Message.</b> The first of these whose tokens all have a value: a withheld Duplicate (D-112, 071 fix round 2) always takes
 /// <see cref="BillingRuleCatalogue.WithheldDuplicateTemplate"/> with no fact values at all, so no withheld value reaches the Signal;
-/// otherwise the policy version's template, then (an invoice-level Duplicate only) <see cref="InvoiceDuplicateTemplate"/>, then the
+/// a reason with its own message (<see cref="BillingRuleCatalogue.ReasonTemplate"/>) takes it; otherwise the policy version's template, then (an invoice-level Duplicate only) <see cref="InvoiceDuplicateTemplate"/>, then the
 /// type's default wording, then the default headline as a sentence. 071's findings leave out a token with no value for the subject
 /// (a line token on an invoice-level finding, a timekeeper name that was not read), which is why the chain exists.</para>
 /// <para><b>Facts.</b> Only the keys <see cref="BillingRuleCatalogue.TemplateFactFields"/> allows for the type, as 071 built them.</para>
@@ -123,6 +127,11 @@ public static class BillingFindingSignalMapper
             .Where(kv => allowed.Contains(kv.Key) && kv.Value is not null)
             .OrderBy(kv => kv.Key, StringComparer.Ordinal)
             .ToDictionary(kv => kv.Key, kv => (object?)kv.Value, StringComparer.Ordinal);
+
+        if (BillingRuleCatalogue.ReasonTemplate(finding.ReasonCode) is { } own)
+        {
+            return (own, facts, BillingMessageSource.ReasonTemplate);
+        }
 
         if (Renders(rule.MessageTemplate, facts))
         {

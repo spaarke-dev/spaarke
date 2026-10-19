@@ -117,6 +117,31 @@ public static class BillingRuleCatalogue
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Only Duplicate has a withheld-detail variant."),
     };
 
+    /// <summary>The message of RequiredData's <see cref="BillingReasonCodes.CurrencyNotUsd"/> finding (ontology-r1 072 review F1): the
+    /// type's default wording ("The required data {{missingField}} is missing.") would tell the firm a currency it read was missing.</summary>
+    public const string CurrencyNotUsdTemplate = "The invoice currency is not USD.";
+
+    /// <summary>
+    /// The reason's own message, used instead of the policy version's template and the type's default wording, or <c>null</c> when the
+    /// reason has none. Names no token, so it always renders.
+    /// </summary>
+    public static string? ReasonTemplate(string reasonCode) => reasonCode switch
+    {
+        BillingReasonCodes.CurrencyNotUsd => CurrencyNotUsdTemplate,
+        _ => null,
+    };
+
+    /// <summary>
+    /// A reason that never rejects or adjusts, whatever consequence its policy version carries (D-115; ontology-r1 072 review F1):
+    /// the currency is a fact about the invoice, not a breach the rule's author priced. Task 073 holds such a finding as a Flag, and
+    /// <see cref="BillingFindingSignalMapper"/> counts it as a Flag when it merges reasons.
+    /// </summary>
+    public static bool IsFlagOnlyReason(string reasonCode) => reasonCode switch
+    {
+        BillingReasonCodes.CurrencyNotUsd => true,
+        _ => false,
+    };
+
     /// <summary>
     /// FR-26 reject-eligibility (ebilling-r1 task 073): catalogue positions 1, 2 and 6 to 10, that is ApprovedTimekeeper, ApprovedRate,
     /// ExpenseRule, InvoiceAge, CoreRecordWindow, Duplicate and RequiredData. TimeIncrement, DailyHoursCap, NonBillableActivity and

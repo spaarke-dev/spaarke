@@ -14,7 +14,8 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// (<see cref="BillingLineFacts.BilledTaskCode"/> and its siblings), not the AI's: the rule asks what the invoice carries.</para>
 /// <para><b>Currency (FR-21, D-20).</b> R1 is USD only. Whenever this rule runs, an invoice whose currency is read and is not
 /// <c>USD</c> (case ignored) gets one invoice-level finding, reason <c>required_data.currency_not_usd</c>, <c>missingField</c> =
-/// <c>currency</c>. It is a finding, never an exception, and it does not depend on the rule listing a field: the rule's
+/// <c>currency</c>, message <see cref="BillingRuleCatalogue.CurrencyNotUsdTemplate"/>; that reason is flag-only
+/// (<see cref="BillingRuleCatalogue.IsFlagOnlyReason"/>). It is a finding, never an exception, and it does not depend on the rule listing a field: the rule's
 /// vocabulary has no currency member, and a foreign-currency invoice is unsupported however the rule is configured. A currency
 /// that was not read is not flagged (no evidence), and "$" is not USD.</para>
 /// <para><b>An absent value is not reliably absent.</b> A missing field's confidence is whatever the fact set holds for it, or

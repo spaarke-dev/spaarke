@@ -27,6 +27,10 @@ public static class SubmissionHoldReasons
     /// <summary>The version carries no consequence, or a value outside the three defined: treated as not Reject (fail closed).</summary>
     public const string ConsequenceUnknown = "consequence_unknown";
 
+    /// <summary>The finding's reason never rejects, whatever the version's consequence (<see cref="BillingRuleCatalogue.IsFlagOnlyReason"/>:
+    /// the invoice currency, D-115 and ontology-r1's 072 review F1).</summary>
+    public const string ReasonFlagOnly = "reason_flag_only";
+
     /// <summary>The type is not reject-eligible (FR-26: TimeIncrement, DailyHoursCap, NonBillableActivity, AiObservation). A stored Reject on it is ignored (I-5).</summary>
     public const string TypeNotRejectEligible = "type_not_reject_eligible";
 
@@ -142,9 +146,10 @@ public sealed record SubmissionDecision
 /// (set against whatever the evaluation read), so a changed threshold applies to the next decision without a restart.</para>
 /// <para><b>Holds beyond FR-26.</b> D-89: ApprovedTimekeeper never rejects, by type, not by 046's cap staying under the threshold.
 /// 071 judgment call 2: an ApprovedRate finding with no approved rate to compare against never rejects; only
-/// <see cref="BillingReasonCodes.RateAboveApproved"/> can. Duplicate rejects at invoice level only. AiObservation never rejects, even if
-/// a stored row says Reject (defence in depth beyond the publish check and the evaluation gate). And only a reason code on the type's
-/// allowlist (<see cref="BillingRuleCatalogue.RejectCapableReasons"/>) can reject: a new reason code holds until it is listed.</para>
+/// <see cref="BillingReasonCodes.RateAboveApproved"/> can. Duplicate rejects at invoice level only. A flag-only reason
+/// (<see cref="BillingRuleCatalogue.IsFlagOnlyReason"/>, the invoice currency) never rejects, whatever its version's consequence. AiObservation
+/// never rejects, even if a stored row says Reject (defence in depth beyond the publish check and the evaluation gate). And only a reason code on
+/// the type's allowlist (<see cref="BillingRuleCatalogue.RejectCapableReasons"/>) can reject: a new reason code holds until it is listed.</para>
 /// <para><b>No I/O but the settings read.</b> It writes nothing and renders nothing: task 049 persists the findings and the outcome.
 /// A withheld Duplicate (D-112) carries no value text into <see cref="FindingDecision.ValuesRead"/>.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: none decides a submission outcome (grep "Reject" under
@@ -274,6 +279,12 @@ public sealed class SubmissionRejectionRule
         if (consequence != BillingConsequence.Reject)
         {
             return Held(SubmissionHoldReasons.ConsequenceNotReject);
+        }
+
+        // 1b. The reason may carry the Reject: a flag-only reason (the invoice currency) never does.
+        if (BillingRuleCatalogue.IsFlagOnlyReason(finding.ReasonCode))
+        {
+            return Held(SubmissionHoldReasons.ReasonFlagOnly);
         }
 
         // 2. The type is reject-eligible, and nothing narrows it for this finding.

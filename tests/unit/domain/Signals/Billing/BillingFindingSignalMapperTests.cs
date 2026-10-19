@@ -100,6 +100,23 @@ public class BillingFindingSignalMapperTests
         SignalWriter.RenderSentence(mapping.Request.MessageTemplate, mapping.Request.FactValues).Should().Be("Timekeeper not approved.");
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("The {{missingField}} must be on every invoice.")]
+    public void ARequiredDataForeignCurrency_SaysTheCurrencyIsNotUsd_NotThatItIsMissing_OntologyF1(string? versionTemplate)
+    {
+        // ontology-r1 072 review F1: the type's default wording rendered "The required data currency is missing." although EUR was read.
+        var rule = Version("CD-REQUIRED", RuleType.RequiredData, """{"type":"RequiredData","fields":["taskCode"]}""", template: versionTemplate);
+        var request = Request(Fee(0)) with { Currency = "EUR" };
+        var result = Evaluator().Evaluate(request, Loaded(rule));
+
+        var mapping = MapAll(request, result).Should().ContainSingle().Subject;
+
+        mapping.MessageSource.Should().Be(BillingMessageSource.ReasonTemplate);
+        SignalWriter.RenderSentence(mapping.Request.MessageTemplate, mapping.Request.FactValues)
+            .Should().Be("The invoice currency is not USD.");
+    }
+
     [Fact]
     public void AFindingOnALineWithNoRow_IsRefused()
     {
