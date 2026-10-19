@@ -39,6 +39,10 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// Poisoned, while a submission that already links its invoice stays Processing (replaying the dead-lettered message resumes it) and the job is
 /// Poisoned. The handler writes Accepted or Rejected itself only for a document that could not be read (no invoice, so no after-steps);
 /// every other terminal status is the after-steps' to write, last.</para>
+/// <para><b>A submission that links its invoice is never marked Failed by this handler.</b> Failed is terminal and the write is unconditional, so
+/// marking a linked submission Failed would strand an invoice that has no Signals, record or notification, make every replay after a code fix a
+/// no-op, and could overwrite a reviewer's decision made since the read. An after-steps <c>Refused</c> (always a bug: the stored state, the signal
+/// plan or the link does not match) therefore leaves the submission Processing, logs the id and code, and returns Poisoned.</para>
 /// <para><b>Logging (ADR-015).</b> Submission id, invoice id, attempt and reason codes only; never a value read from the invoice.</para>
 /// <para>§11: <i>Existing</i> - <c>InvoiceExtractionJobHandler</c> (payload, document read, pointer-container check, download) and
 /// <c>BillingRuleDraftJobHandler</c> (lock, final-delivery rule); the pipeline components are 049 parts B-D. <i>Extension</i> - the extraction
@@ -151,7 +155,9 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
             {
                 if (ex is SubmissionStepFailure { Permanent: true })
                 {
-                    return await FailAsync(job, id, code, stopwatch, ct).ConfigureAwait(false);
+                    // Raised while reading the document, before any invoice exists - unless the row carries a link it should not (a data fault):
+                    // a linked submission is never marked Failed, so look.
+                    return await FailAsync(job, id, code, await IsLinkedAsync(id, ct).ConfigureAwait(false), stopwatch, ct).ConfigureAwait(false);
                 }
 
                 _logger.LogError("Invoice submission job {JobId} for submission {SubmissionId} failed ({ExceptionType}, {ReasonCode})",
@@ -218,7 +224,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                 return JobOutcome.Poisoned(job.JobId, JobType, SubmissionReasonCodes.EbillingDisabled, job.Attempt, stopwatch.Elapsed);
             }
 
-            return await FailAsync(job, submissionId, SubmissionReasonCodes.EbillingDisabled, stopwatch, ct).ConfigureAwait(false);
+            return await FailAsync(job, submissionId, SubmissionReasonCodes.EbillingDisabled, linked: false, stopwatch, ct).ConfigureAwait(false);
         }
 
         // Processing with its invoice linked: the transaction committed, only the after-steps are left. Resume from the STORED state;
@@ -234,7 +240,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         var (_, snapshotFailure) = SubmissionSnapshot.Read(row);
         if (snapshotFailure is not null)
         {
-            return await FailAsync(job, submissionId, snapshotFailure, stopwatch, ct).ConfigureAwait(false);
+            return await FailAsync(job, submissionId, snapshotFailure, linked, stopwatch, ct).ConfigureAwait(false);
         }
 
         // 1. Processing, persisted before any AI call (ADR-017).
@@ -254,7 +260,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
             switch (outcome.Kind)
             {
                 case SubmissionEvaluationKind.Failed:
-                    return await FailAsync(job, submissionId, outcome.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct).ConfigureAwait(false);
+                    return await FailAsync(job, submissionId, outcome.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, linked, stopwatch, ct).ConfigureAwait(false);
 
                 case SubmissionEvaluationKind.RejectedUnreadable:
                     return await RejectUnreadableAsync(job, submissionId, outcome, stopwatch, ct).ConfigureAwait(false);
@@ -267,7 +273,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
             }
             catch (DecisionRecordRefusedException ex)
             {
-                return await FailAsync(job, submissionId, ex.Reason, stopwatch, ct).ConfigureAwait(false);
+                return await FailAsync(job, submissionId, ex.Reason, linked, stopwatch, ct).ConfigureAwait(false);
             }
 
             var persisted = await _persister.PersistAsync(outcome, correlation, ct).ConfigureAwait(false);
@@ -292,7 +298,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                     return await TransientAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct).ConfigureAwait(false);
 
                 case SubmissionPersistStatus.Refused:
-                    return await FailAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct).ConfigureAwait(false);
+                    return await FailAsync(job, submissionId, persisted.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, linked, stopwatch, ct).ConfigureAwait(false);
 
                 case SubmissionPersistStatus.SubmissionMissing:
                     _logger.LogInformation("Invoice submission job {JobId}: submission {SubmissionId} vanished before it was persisted; nothing to do", job.JobId, submissionId);
@@ -332,7 +338,10 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                 return Done(job, stopwatch);
 
             case SubmissionAfterStepsStatus.Refused:
-                return await FailAsync(job, submissionId, result.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct).ConfigureAwait(false);
+                // Both callers reach here only with the invoice linked (Committed / Retry-with-invoice / Resumed / a Processing+link resume),
+                // and the refusal means a bug: never Failed (terminal, unconditional write), so the invoice is not stranded and a replay
+                // after the fix resumes it. No status write at all.
+                return LeaveLinkedSubmission(job, submissionId, result.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch);
 
             case SubmissionAfterStepsStatus.Retry:
                 // The submission stays Processing with its invoice link; the redelivery resumes.
@@ -370,12 +379,40 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         return Done(job, stopwatch);
     }
 
-    /// <summary>A permanent failure: the submission is Failed with the code (ADR-017) and the job is Poisoned, so nothing retries.</summary>
-    private async Task<JobOutcome> FailAsync(JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch, CancellationToken ct)
+    /// <summary>
+    /// A permanent failure of a submission with no invoice: the submission is Failed with the code (ADR-017) and the job is Poisoned, so nothing
+    /// retries. <paramref name="linked"/> says whether the submission already links its invoice; every caller states it. A linked submission is
+    /// never marked Failed (see <see cref="LeaveLinkedSubmission"/>).
+    /// </summary>
+    private async Task<JobOutcome> FailAsync(JobContract job, Guid submissionId, string reasonCode, bool linked, Stopwatch stopwatch, CancellationToken ct)
     {
+        if (linked)
+        {
+            return LeaveLinkedSubmission(job, submissionId, reasonCode, stopwatch);
+        }
+
         _logger.LogWarning("Invoice submission job {JobId}: submission {SubmissionId} Failed ({ReasonCode})", job.JobId, submissionId, reasonCode);
         await MarkFailedAsync(submissionId, reasonCode, ct).ConfigureAwait(false);
         return JobOutcome.Poisoned(job.JobId, JobType, reasonCode, job.Attempt, stopwatch.Elapsed);
+    }
+
+    /// <summary>
+    /// A permanent failure of a submission that links its invoice: NO status write. It stays Processing (a replay of the dead-lettered message
+    /// resumes it once the cause is fixed), the id and code are logged at Error (ADR-015), and the job is Poisoned - the same rule as the final
+    /// transient delivery with a link and the flag-off-with-link path.
+    /// </summary>
+    private JobOutcome LeaveLinkedSubmission(JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch)
+    {
+        _logger.LogError(
+            "Invoice submission job {JobId}: submission {SubmissionId} links its invoice and failed permanently ({ReasonCode}); it stays Processing, not Failed - fix the cause, then replay the message",
+            job.JobId, submissionId, reasonCode);
+        return JobOutcome.Poisoned(job.JobId, JobType, reasonCode, job.Attempt, stopwatch.Elapsed);
+    }
+
+    private async Task<bool> IsLinkedAsync(Guid submissionId, CancellationToken ct)
+    {
+        var row = await ReadSubmissionAsync(submissionId, StatusColumns, ct).ConfigureAwait(false);
+        return row?.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice) is { Id: var l } && l != Guid.Empty;
     }
 
     /// <summary>
@@ -422,6 +459,10 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         return JobOutcome.Poisoned(job.JobId, JobType, reasonCode, job.Attempt, stopwatch.Elapsed);
     }
 
+    /// <summary>
+    /// Invariant: only called before an invoice is linked (every caller checks, or runs before the persister); a linked submission is never marked
+    /// Failed, so this write is unconditional - it carries no status or version condition because nothing else may have decided the submission.
+    /// </summary>
     private Task MarkFailedAsync(Guid submissionId, string reasonCode, CancellationToken ct) =>
         _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, new Dictionary<string, object>
         {

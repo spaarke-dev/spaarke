@@ -542,31 +542,104 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         rig.Writes.Should().BeEmpty("the handler writes no status on a resume; the after-steps write the terminal");
     }
 
-    [Theory(DisplayName = "049 E 0c: the resume result maps like RunAsync's: Completed/Missing Success, Retry Failure, Refused Failed with the code")]
-    [InlineData(SubmissionAfterStepsStatus.Completed, JobStatus.Completed, null)]
-    [InlineData(SubmissionAfterStepsStatus.SubmissionMissing, JobStatus.Completed, null)]
-    [InlineData(SubmissionAfterStepsStatus.Retry, JobStatus.Failed, null)]
-    [InlineData(SubmissionAfterStepsStatus.Refused, JobStatus.Poisoned, "ebilling.submission.findings_unreadable")]
-    public async Task ResumeResults_MapToOutcomes(SubmissionAfterStepsStatus status, JobStatus expected, string? failedCode)
+    [Theory(DisplayName = "049 E 0c: the resume result maps like RunAsync's: Completed/Missing Success, Retry Failure; none writes a status (Refused is its own theory)")]
+    [InlineData(SubmissionAfterStepsStatus.Completed, JobStatus.Completed)]
+    [InlineData(SubmissionAfterStepsStatus.SubmissionMissing, JobStatus.Completed)]
+    [InlineData(SubmissionAfterStepsStatus.Retry, JobStatus.Failed)]
+    public async Task ResumeResults_MapToOutcomes(SubmissionAfterStepsStatus status, JobStatus expected)
     {
         var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
         rig.After.Resume = () => Task.FromResult(AfterResult(status, status == SubmissionAfterStepsStatus.Completed ? null : "code.x"));
-        if (failedCode is not null)
-        {
-            rig.After.Resume = () => Task.FromResult(AfterResult(status, failedCode));
-        }
 
         var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
 
         outcome.Status.Should().Be(expected);
-        if (failedCode is not null)
+        rig.Writes.Should().BeEmpty("the handler writes no status on a resume; Retry stays Processing with its link");
+    }
+
+    // -- F4-1 (ontology review of part E): a submission that links its invoice is never marked Failed --
+
+    [Theory(DisplayName = "049 E F4-1: a Processing submission that links its invoice and whose ResumeAsync is Refused stays Processing, is Poisoned, and has NO status write")]
+    [InlineData("ebilling.submission.stored_state_mismatch")]
+    [InlineData("ebilling.submission.signal_plan_missing")]
+    [InlineData("ebilling.submission.invoice_link_mismatch")]
+    [InlineData("ebilling.submission.not_processing")]
+    public async Task ResumeRefused_WithALink_LeavesProcessing_AndWritesNothing(string code)
+    {
+        var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, code));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        outcome.ErrorMessage.Should().Be(code);
+        rig.Writes.Should().BeEmpty("a linked submission is never marked Failed: no status write at all (Failed is terminal and the write is unconditional)");
+        rig.After.ResumeCalls.Should().HaveCount(1);
+        var errors = rig.Log.Entries.Where(e => e.Level == LogLevel.Error).Select(e => e.Message).ToList();
+        errors.Should().ContainSingle(m => m.Contains(SubmissionId.ToString()) && m.Contains(code), "the id and the code, at Error, so the operator sees the bug");
+        errors.Should().OnlyContain(m => !m.Contains("INV-100"));
+    }
+
+    [Theory(DisplayName = "049 E F4-1: the same through RunAsync after Committed: Refused leaves the linked submission Processing, Poisoned, no Failed write")]
+    [InlineData("ebilling.submission.stored_state_mismatch")]
+    [InlineData("ebilling.submission.signal_plan_missing")]
+    [InlineData("ebilling.submission.invoice_link_mismatch")]
+    [InlineData("ebilling.submission.not_processing")]
+    public async Task RunRefused_AfterCommitted_LeavesProcessing_AndWritesNoFailed(string code)
+    {
+        var rig = new Rig().HappyPath();
+        rig.After.Run = _ => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, code));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        outcome.ErrorMessage.Should().Be(code);
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null)], "only the Processing write before the AI call; never Failed");
+        rig.Log.Entries.Where(e => e.Level == LogLevel.Error).Select(e => e.Message).Should()
+            .ContainSingle(m => m.Contains(SubmissionId.ToString()) && m.Contains(code));
+    }
+
+    [Fact(DisplayName = "049 E F4-1: a Resumed persist whose resume is Refused also leaves the linked submission Processing (no Failed write)")]
+    public async Task PersistResumed_ThenRefused_LeavesProcessing()
+    {
+        var rig = new Rig().HappyPath();
+        rig.Persister.Script.Clear();
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.Resumed, InvoiceId)));
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, "ebilling.submission.not_processing"));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null)]);
+    }
+
+    [Fact(DisplayName = "049 E F4-1: a Received row that already carries a link and then fails an evaluation is NOT marked Failed (only the Processing write)")]
+    public async Task ReceivedWithLink_ThenFailedOutcome_IsNotMarkedFailed()
+    {
+        var rig = new Rig { Row = SubmissionRow(Received, InvoiceId) }.HappyPath();
+        rig.Processor.Script = (_, _) => Task.FromResult(Outcome(SubmissionEvaluationKind.Failed, "invoice.read.failed"));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null)]);
+        rig.Persister.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 E F4-1: a permanent step failure (document unavailable) on a row that carries a link is NOT marked Failed")]
+    public async Task PermanentStepFailure_WithALink_IsNotMarkedFailed()
+    {
+        var rig = new Rig { Row = SubmissionRow(Received, InvoiceId), DocumentMissing = true }.HappyPath();
+        rig.Processor.Script = async (row, load) =>
         {
-            rig.StatusWrites.Should().Equal([(Failed, failedCode)]);
-        }
-        else
-        {
-            rig.Writes.Should().BeEmpty("Retry stays Processing with its link");
-        }
+            await load(SubmissionSnapshot.Read(row).Snapshot!, CancellationToken.None);
+            return Outcome(SubmissionEvaluationKind.Accepted);
+        };
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null)]);
     }
 
     [Fact(DisplayName = "049 E 0c: a resume that throws is transient: Failure, and the submission is left Processing")]
@@ -1078,22 +1151,19 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
     // ── 5: the after-steps' results ──
 
-    [Theory(DisplayName = "049 E 5: the after-steps' result maps Completed/Missing Success, Retry Failure (Processing), Refused Failed with the code")]
-    [InlineData(SubmissionAfterStepsStatus.Completed, JobStatus.Completed, null)]
-    [InlineData(SubmissionAfterStepsStatus.SubmissionMissing, JobStatus.Completed, null)]
-    [InlineData(SubmissionAfterStepsStatus.Retry, JobStatus.Failed, null)]
-    [InlineData(SubmissionAfterStepsStatus.Refused, JobStatus.Poisoned, "ebilling.submission.invoice_link_mismatch")]
-    public async Task AfterStepsResults_MapToOutcomes(SubmissionAfterStepsStatus status, JobStatus expected, string? failedCode)
+    [Theory(DisplayName = "049 E 5: the after-steps' result maps Completed/Missing Success, Retry Failure (Processing); none writes Failed (Refused: see F4-1)")]
+    [InlineData(SubmissionAfterStepsStatus.Completed, JobStatus.Completed)]
+    [InlineData(SubmissionAfterStepsStatus.SubmissionMissing, JobStatus.Completed)]
+    [InlineData(SubmissionAfterStepsStatus.Retry, JobStatus.Failed)]
+    public async Task AfterStepsResults_MapToOutcomes(SubmissionAfterStepsStatus status, JobStatus expected)
     {
         var rig = new Rig().HappyPath();
-        rig.After.Run = _ => Task.FromResult(AfterResult(status, failedCode ?? (status == SubmissionAfterStepsStatus.Retry ? "ebilling.submission.signal_write_skipped" : null)));
+        rig.After.Run = _ => Task.FromResult(AfterResult(status, status == SubmissionAfterStepsStatus.Retry ? "ebilling.submission.signal_write_skipped" : null));
 
         var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
 
         outcome.Status.Should().Be(expected);
-        rig.StatusWrites.Should().Equal(failedCode is null
-            ? [(Processing, (string?)null)]
-            : [(Processing, (string?)null), (Failed, failedCode)]);
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null)]);
     }
 
     [Fact(DisplayName = "049 E 5: an after-steps exception is transient: Failure, no Failed status before the final delivery")]
