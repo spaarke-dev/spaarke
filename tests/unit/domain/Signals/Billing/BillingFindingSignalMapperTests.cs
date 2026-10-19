@@ -25,8 +25,8 @@ public class BillingFindingSignalMapperTests
         "INV-100",
         request.Lines.ToDictionary(l => l.Index, l => Id("line-row:" + l.Index)));
 
-    private static IEnumerable<BillingSignalMapping> MapAll(BillingEvaluationRequest request, BillingEvaluationResult result) =>
-        result.Findings.Select(f => BillingFindingSignalMapper.Map(f, result.RulesByVersion[f.PolicyVersionId], SubjectsFor(request)));
+    private static IReadOnlyList<BillingSignalMapping> MapAll(BillingEvaluationRequest request, BillingEvaluationResult result) =>
+        BillingFindingSignalMapper.MapAll(result, SubjectsFor(request));
 
     public static TheoryData<string> TemplateChoices => new() { "blank", "default wording" };
 
@@ -45,9 +45,12 @@ public class BillingFindingSignalMapperTests
         var result = Evaluator().Evaluate(request, loaded);
         result.Findings.Select(f => f.RuleType).Distinct().Should().HaveCount(11);
 
-        foreach (var (finding, mapping) in result.Findings.Zip(MapAll(request, result)))
+        var mappings = MapAll(request, result);
+        mappings.SelectMany(m => m.Findings).Should().BeEquivalentTo(result.Findings, "every finding is carried by exactly one request");
+        foreach (var mapping in mappings)
         {
             var sent = mapping.Request;
+            var finding = mapping.Findings.First(f => f.PolicyVersionId == sent.PolicyVersionId);
             var render = () => SignalWriter.RenderSentence(sent.MessageTemplate, sent.FactValues);
             render.Should().NotThrow($"{finding.RuleType} {finding.ReasonCode} must render");
             sent.FactValues.Keys.Should().BeSubsetOf(BillingRuleCatalogue.TemplateFactFields(finding.RuleType));
@@ -221,5 +224,199 @@ public class BillingFindingSignalMapperTests
                 text.Should().NotContain("100.1", $"column {column} must not carry any part of it");
             }
         }
+    }
+
+    // ── One Signal per (policy, subject): ontology-r1's Signal dedupe option a (072 review A4) ─────────────────────
+
+    private const int Reject = (int)BillingConsequence.Reject;
+
+    /// <summary>The writer's dedupe key of a request (episode included), as <see cref="SignalWriter"/> builds it.</summary>
+    private static string KeyOf(SignalWriteRequest request) =>
+        SignalWriter.BuildDedupeKey(request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId.ToString("D").ToLowerInvariant(), request.Episode);
+
+    /// <summary>The guard: the dedupe keys sent more than once in one evaluation.</summary>
+    private static List<string> RepeatedKeys(IEnumerable<SignalWriteRequest> requests) =>
+        requests.GroupBy(KeyOf).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+
+    private static string Json(object value) => System.Text.Json.JsonSerializer.Serialize(value);
+
+    [Fact]
+    public async Task TwoReasonsOnOneLine_GiveOneRequestCarryingBoth_WithTheStrongestConsequence_A4()
+    {
+        var rule = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = Reject };
+        var request = Request(Expense(0) with { ExpenseCode = "E109", Amount = 600m });
+        var result = Evaluator().Evaluate(request, Loaded(rule));
+        result.Findings.Should().HaveCount(2, "control: the code and the cap both fail on the one line");
+        RepeatedKeys(result.Findings.Select(f => BillingFindingSignalMapper.Map(f, rule, SubjectsFor(request)).Request))
+            .Should().ContainSingle("control: mapped one by one, the two findings share the writer's key and one would be dropped");
+
+        var mapping = MapAll(request, result).Should().ContainSingle().Subject;
+
+        mapping.ReasonCodes.Should().Equal(BillingReasonCodes.ExpenseAmountOverCap, BillingReasonCodes.ExpenseCodeNotReimbursable);
+        mapping.Consequence.Should().Be(BillingConsequence.Reject);
+        mapping.Fingerprint.Should().Be("expense_rule.amount_over_cap,expense_rule.code_not_reimbursable|Reject");
+        mapping.Findings.Should().BeEquivalentTo(result.Findings);
+        var evidence = mapping.Request.EvidenceRefs!;
+        evidence.Should().ContainSingle(e => e.Kind == BillingFindingSignalMapper.FingerprintEvidenceKind).Which.Ref.Should().Be(mapping.Fingerprint);
+        var reasons = evidence.Where(e => e.Kind == BillingFindingSignalMapper.ReasonEvidenceKind).ToList();
+        reasons.Select(e => e.Ref).Should().Equal(mapping.ReasonCodes);
+        // Each reason keeps its own text line. (Both render the type's one default wording here, so the texts are equal: known limit.)
+        reasons.Should().HaveCount(2).And.OnlyContain(e => !string.IsNullOrWhiteSpace(e.Text) && e.Source == "sprk_policyversion:" + rule.PolicyVersionId.ToString("D").ToLowerInvariant());
+        evidence.Where(e => e.Kind == BillingFindingSignalMapper.FieldEvidenceKind).Select(e => e.Ref)
+            .Should().Contain(["line[0].ExpenseCode", "line[0].Amount"], "the union of the fields both reasons read");
+
+        var subjects = SubjectsFor(request);
+        var (writer, org) = Writer(subjects);
+        var written = await writer.WriteAsync(mapping.Request);
+        org.Rows.Should().ContainSingle();
+        org.Rows[written.SignalId].GetAttributeValue<string>("sprk_evidencerefs")
+            .Should().Contain(BillingReasonCodes.ExpenseAmountOverCap).And.Contain(BillingReasonCodes.ExpenseCodeNotReimbursable);
+    }
+
+    [Fact]
+    public void AFlagOnlyReason_NeverRaisesTheMergedConsequence_AndNeverLowersARejectCapableOne_A4()
+    {
+        var rule = Version("CD-REQUIRED", RuleType.RequiredData, """{"type":"RequiredData","fields":["billingPeriodStart"]}""") with { Consequence = Reject };
+        var both = Request(Fee(0)) with { BillingPeriodStart = null, Currency = "EUR" };
+        var currencyOnly = Request(Fee(0)) with { Currency = "EUR" };
+
+        var merged = MapAll(both, Evaluator().Evaluate(both, Loaded(rule))).Should().ContainSingle().Subject;
+        var alone = MapAll(currencyOnly, Evaluator().Evaluate(currencyOnly, Loaded(rule))).Should().ContainSingle().Subject;
+
+        merged.ReasonCodes.Should().Equal(BillingReasonCodes.CurrencyNotUsd, BillingReasonCodes.RequiredFieldMissing);
+        merged.Consequence.Should().Be(BillingConsequence.Reject, "the missing field keeps its Reject");
+        merged.Request.MessageTemplate.Should().NotBe(BillingRuleCatalogue.CurrencyNotUsdTemplate, "the message is the strongest reason's");
+        merged.Request.EvidenceRefs!.Should().Contain(e => e.Kind == BillingFindingSignalMapper.ReasonEvidenceKind
+                                                           && e.Text == BillingRuleCatalogue.CurrencyNotUsdTemplate);
+        alone.Consequence.Should().Be(BillingConsequence.Flag, "a flag-only reason under a Reject version is a Flag");
+        alone.Fingerprint.Should().Be("required_data.currency_not_usd|Flag");
+    }
+
+    [Fact]
+    public async Task AWithheldReason_MergedWithAVisibleOne_LeaksNothingOfTheHiddenPrior_A4_D112()
+    {
+        // The real Duplicate handler sends at most one finding per subject; a merge with a withheld reason is built by hand, as a
+        // future type (or a second Duplicate reason) could produce it. The visible reason names the same prior, and the line's own
+        // date and amount equal the hidden prior's.
+        const string hiddenTrackingNumber = "INV-100.1";
+        var hiddenPriorId = Id("hidden-prior-submission");
+        var rule = Version("CD-DUPLICATE", RuleType.Duplicate, template: BillingRuleDraftTranslator.Wording(RuleType.Duplicate).Template) with { Consequence = Reject };
+        BillingFinding Finding(string reason, bool withheld, IReadOnlyList<BillingValueRead> values, IReadOnlyDictionary<string, string> facts) => new()
+        {
+            RuleType = RuleType.Duplicate,
+            PolicyId = rule.PolicyId,
+            PolicyCode = rule.PolicyCode,
+            PolicyVersionId = rule.PolicyVersionId,
+            Subject = BillingSubject.ForLine(0),
+            ReasonCode = reason,
+            ValuesRead = values,
+            FactValues = facts,
+            DetailWithheld = withheld,
+        };
+        var dateField = new Sprk.Bff.Api.Services.Finance.Resolution.FieldRef(0, BillingFieldNames.Date);
+        var amountField = new Sprk.Bff.Api.Services.Finance.Resolution.FieldRef(0, BillingFieldNames.Amount);
+        var hidden = Finding(BillingReasonCodes.DuplicateOfPriorSubmissionLine, true,
+            [new BillingValueRead { Name = "line.date", ExtractedField = dateField, Confidence = 0.95m },
+             new BillingValueRead { Name = "line.amount", ExtractedField = amountField, Confidence = 0.95m }],
+            new Dictionary<string, string>());
+        var visible = Finding(BillingReasonCodes.DuplicateOfEarlierLine, false,
+            [new BillingValueRead { Name = "line.date", Value = "2026-03-02", ExtractedField = dateField, Confidence = 0.95m },
+             new BillingValueRead { Name = "line.amount", Value = "1234.56", ExtractedField = amountField, Confidence = 0.95m },
+             new BillingValueRead { Name = "duplicateOf.trackingNumber", Value = hiddenTrackingNumber },
+             new BillingValueRead { Name = "duplicateOf.submissionId", Value = hiddenPriorId.ToString() }],
+            new Dictionary<string, string>
+            {
+                ["invoice.firmInvoiceNumber"] = "INV-100", ["line.date"] = "2026-03-02", ["line.timekeeperName"] = "Jane Partner",
+                ["duplicateOf.trackingNumber"] = hiddenTrackingNumber,
+            });
+        var alone = BillingFindingSignalMapper.Map(visible, rule, SubjectsFor(Request(Fee(0))));
+        SignalWriter.RenderSentence(alone.Request.MessageTemplate, alone.Request.FactValues)
+            .Should().Contain(hiddenTrackingNumber, "control: on its own, the visible reason's text names the prior");
+        var request = Request(Fee(0));
+        var subjects = SubjectsFor(request);
+
+        var mapping = BillingFindingSignalMapper.MapAll([visible, hidden], new Dictionary<Guid, BillingRuleCandidate> { [rule.PolicyVersionId] = rule }, subjects)
+            .Should().ContainSingle().Subject;
+
+        mapping.ReasonCodes.Should().Equal(BillingReasonCodes.DuplicateOfPriorSubmissionLine, BillingReasonCodes.DuplicateOfEarlierLine);
+        mapping.MessageSource.Should().Be(BillingMessageSource.WithheldDuplicate);
+        mapping.Request.MessageTemplate.Should().Be(BillingRuleCatalogue.WithheldDuplicateTemplate);
+        mapping.Request.FactValues.Should().BeEmpty();
+        mapping.Request.EvidenceRefs!.Where(e => e.Kind == BillingFindingSignalMapper.FieldEvidenceKind)
+            .Should().NotBeEmpty("the fields read stay, with their confidence").And.OnlyContain(e => e.Text == null && e.Confidence != null);
+        var sent = Json(mapping.Request);
+        foreach (var leak in new[] { hiddenTrackingNumber, "100.1", "2026-03-02", "1234.56", hiddenPriorId.ToString(), "Jane Partner" })
+        {
+            sent.Should().NotContain(leak);
+        }
+
+        var (writer, org) = Writer(subjects);
+        var written = await writer.WriteAsync(mapping.Request);
+        foreach (var (column, value) in org.Rows[written.SignalId].Attributes)
+        {
+            var text = value switch
+            {
+                EntityReference reference => $"{reference.LogicalName} {reference.Id} {reference.Name}",
+                null => string.Empty,
+                _ => value.ToString() ?? string.Empty,
+            };
+            foreach (var leak in new[] { "100.1", "2026-03-02", "1234.56", hiddenPriorId.ToString(), "Jane Partner" })
+            {
+                text.Should().NotContain(leak, $"column {column} must not name the hidden prior");
+            }
+        }
+    }
+
+    [Fact]
+    public void TheMapper_NeverSendsTwoRequestsWithOneDedupeKey_OverThe150LineFixture_MustFireGuard_A4()
+    {
+        var (request, loaded) = EverythingWrong(150);
+        loaded = loaded with { Rules = loaded.Rules.Select(r => r with { Consequence = (int)BillingConsequence.Flag }).ToList() };
+        var result = Evaluator().Evaluate(request, loaded);
+        var subjects = SubjectsFor(request);
+        var oneByOne = result.Findings.Select(f => BillingFindingSignalMapper.Map(f, result.RulesByVersion[f.PolicyVersionId], subjects).Request).ToList();
+
+        var mapped = BillingFindingSignalMapper.MapAll(result, subjects);
+
+        RepeatedKeys(oneByOne).Should().NotBeEmpty("must fire: mapped one finding per request, the fixture repeats keys");
+        RepeatedKeys(mapped.Select(m => m.Request)).Should().BeEmpty("one request per (policy, subject)");
+        mapped.Should().HaveCount(oneByOne.Select(KeyOf).Distinct().Count());
+        mapped.SelectMany(m => m.Findings).Should().HaveCount(result.Findings.Count, "no finding is lost in the merge");
+        foreach (var mapping in mapped)
+        {
+            var render = () => SignalWriter.RenderSentence(mapping.Request.MessageTemplate, mapping.Request.FactValues);
+            render.Should().NotThrow();
+        }
+    }
+
+    [Fact]
+    public void TheFingerprintAndTheRequest_DoNotDependOnTheOrderOfTheFindings_A4()
+    {
+        var (request, loaded) = EverythingWrong(20);
+        var result = Evaluator().Evaluate(request, loaded);
+        var subjects = SubjectsFor(request);
+        var reordered = result.Findings.Reverse().ToList();
+        var interleaved = result.Findings.Where((_, i) => i % 2 == 1).Concat(result.Findings.Where((_, i) => i % 2 == 0)).ToList();
+
+        static Dictionary<string, string> ByKey(IEnumerable<BillingSignalMapping> mappings) =>
+            mappings.ToDictionary(m => KeyOf(m.Request), m => m.Fingerprint + "\n" + Json(m.Request));
+
+        var original = ByKey(BillingFindingSignalMapper.MapAll(result.Findings, result.RulesByVersion, subjects));
+
+        original.Values.Should().Contain(v => v.Contains(',', StringComparison.Ordinal), "control: the fixture merges reasons somewhere");
+        ByKey(BillingFindingSignalMapper.MapAll(reordered, result.RulesByVersion, subjects)).Should().Equal(original);
+        ByKey(BillingFindingSignalMapper.MapAll(interleaved, result.RulesByVersion, subjects)).Should().Equal(original);
+    }
+
+    [Fact]
+    public void AChangedReasonSet_OrAChangedConsequence_GivesAnotherFingerprint_A4()
+    {
+        var codes = new[] { BillingReasonCodes.ExpenseAmountOverCap, BillingReasonCodes.ExpenseCodeNotReimbursable };
+
+        var both = BillingFindingSignalMapper.FingerprintOf(codes, BillingConsequence.Reject);
+
+        BillingFindingSignalMapper.FingerprintOf(codes[..1], BillingConsequence.Reject).Should().NotBe(both);
+        BillingFindingSignalMapper.FingerprintOf(codes, BillingConsequence.Flag).Should().NotBe(both);
+        BillingFindingSignalMapper.FingerprintOf(codes, BillingConsequence.Reject).Should().Be(both);
     }
 }
