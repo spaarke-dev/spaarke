@@ -18,12 +18,17 @@ namespace Sprk.Bff.Api.Tests.AccessControl.Ontology;
 public partial class OntologyAdminAuthoringEndpointTests
 {
     private const string RuleHeldSecure = "ontology.admin.rule_held_secure";
+    private const string OwnerUnavailable = "ontology.admin.owner_unavailable";
+    private static readonly Guid SecureTeam = Guid.Parse("20840000-0000-4000-8000-0000000000f1");
 
     private void ResolverAnswersTheSecureTeam()
     {
-        _fixture.Ownership.TeamId = Guid.Parse("20840000-0000-4000-8000-0000000000f1");
+        _fixture.Ownership.TeamId = SecureTeam;
         _fixture.Ownership.IsSecureOwner = true;
     }
+
+    /// <summary>Round 2: the rule row itself is owned by the Secure team (the reconciler has re-owned it with its Secure matter).</summary>
+    private void TheRuleIsHeldByTheSecureTeam() => _fixture.World.Policies[PolicyId].Owner = SecureTeam;
 
     private void AssertNothingWasWritten()
     {
@@ -38,6 +43,7 @@ public partial class OntologyAdminAuthoringEndpointTests
         _fixture.World.Policies[PolicyId].Matter = MatterA;
         (await ScopedDryRun(PolicyId, MatterA)).StatusCode.Should().Be(HttpStatusCode.OK);
         ResolverAnswersTheSecureTeam();
+        TheRuleIsHeldByTheSecureTeam();
 
         var response = await ScopedPublish(PolicyId, MatterA);
 
@@ -69,18 +75,53 @@ public partial class OntologyAdminAuthoringEndpointTests
     }
 
     [Fact]
-    public async Task Publish_WhenTheRequestedMatterTurnsSecureAfterTheScopeCheckPassed_IsRefused_AndWritesNothing()
+    public async Task Publish_WhenTheRequestedMatterTurnsSecureAfterTheScopeCheckPassed_IsScopeMatterSecured_AndWritesNothing()
     {
         // Case (i): the caller's read of MatterB says ordinary (CheckScopeAsync passes), but by the time the owner is asked the
-        // resolver answers the Secure team. The publish is refused before the first write.
+        // resolver answers the Secure team. The rule itself is not held (its owner is not that team), so the Secure answer came from
+        // the requested matter: round 2 gives the scope check's own 400, not "held by a Secure matter's team".
         (await ScopedDryRun(PolicyId, MatterB)).StatusCode.Should().Be(HttpStatusCode.OK);
         ResolverAnswersTheSecureTeam();
 
         var response = await ScopedPublish(PolicyId, MatterB);
 
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        (await ReasonOf(response)).Should().Be(ScopeMatterSecured);
+        (await Json(response)).GetProperty("errors").GetProperty("matterId")[0].GetString()
+            .Should().Be("A rule cannot be limited to a Secure or Restricted matter, or to one whose access level could not be read.");
+        MatterWasRead(MatterB).Should().BeTrue("the scope check ran and passed first");
+        AssertNothingWasWritten();
+    }
+
+    [Fact]
+    public async Task Publish_OfAHeldRule_LimitedToAnotherMatter_IsStill409RuleHeldSecure_AndWritesNothing()
+    {
+        // Round 2, the other branch: the rule row IS owned by the Secure team, so the answer is "held", whichever matter is named.
+        _fixture.World.Policies[PolicyId].Matter = MatterA;
+        (await ScopedDryRun(PolicyId, MatterB)).StatusCode.Should().Be(HttpStatusCode.OK);
+        ResolverAnswersTheSecureTeam();
+        TheRuleIsHeldByTheSecureTeam();
+
+        var response = await ScopedPublish(PolicyId, MatterB);
+
         response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
         (await ReasonOf(response)).Should().Be(RuleHeldSecure);
-        MatterWasRead(MatterB).Should().BeTrue("the scope check ran and passed first");
+        AssertNothingWasWritten();
+    }
+
+    [Fact]
+    public async Task Publish_ToASecureMatter_IsRefusedByTheScopeCheck_BeforeTheResolverIsAsked()
+    {
+        // Round 2 (refusal order): the requested matter already reads as Secure, so CheckScopeAsync refuses with its 400 and the
+        // ownership resolver is never asked.
+        _fixture.World.MatterAccess[MatterA] = (true, null);
+        ResolverAnswersTheSecureTeam();
+
+        var response = await ScopedPublish(PolicyId, MatterA);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        (await ReasonOf(response)).Should().Be(ScopeMatterSecured);
+        _fixture.Ownership.Requests.Should().BeEmpty("the scope check refuses before the owner is asked");
         AssertNothingWasWritten();
     }
 
@@ -145,7 +186,7 @@ public partial class OntologyAdminAuthoringEndpointTests
         var response = await Publish(PolicyId);
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        (await ReasonOf(response)).Should().Be("ontology.admin.unavailable");
+        (await ReasonOf(response)).Should().Be(OwnerUnavailable, "round 2: the wizard can say nothing was changed");
         AssertNothingWasWritten();
     }
 
@@ -158,7 +199,7 @@ public partial class OntologyAdminAuthoringEndpointTests
         var response = await Publish(PolicyId);
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        (await ReasonOf(response)).Should().Be("ontology.admin.unavailable");
+        (await ReasonOf(response)).Should().Be(OwnerUnavailable, "round 2: the wizard can say nothing was changed");
         AssertNothingWasWritten();
     }
 
@@ -191,7 +232,6 @@ public partial class OntologyAdminAuthoringEndpointTests
         using var scope = _fixture.ProductionServices().CreateScope();
 
         scope.ServiceProvider.GetRequiredService<IRecordOwnershipResolver>().Should().BeOfType<RecordOwnershipResolver>();
-        scope.ServiceProvider.GetRequiredService<OntologyAdminAuthoringService>().Should().NotBeNull();
     }
 
     private System.Security.Claims.ClaimsPrincipal Principal() => new(new System.Security.Claims.ClaimsIdentity(

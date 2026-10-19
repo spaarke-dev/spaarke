@@ -655,7 +655,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         AnalysisTool tool, string tablename, DataverseWriteItemMapper.MappedItem item, ChatInvocationContext context,
         DateTimeOffset startedAt, CancellationToken ct)
     {
-        var parents = OwnedChildWrite.ParentsOf(item);
+        var parents = OwnedChildWrite.ParentsOf(tablename, item);
         var pair = OwnedChildWrite.PairOf(item);
         if (parents.Count == 0 && !pair.SetsId)
             return null;

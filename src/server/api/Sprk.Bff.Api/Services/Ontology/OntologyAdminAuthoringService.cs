@@ -110,6 +110,13 @@ public sealed partial class OntologyAdminAuthoringService
     internal const string ReasonRuleHeldSecure = "ontology.admin.rule_held_secure";
     internal const string RuleHeldSecureMessage = "This rule is held by a Secure matter's team; publish a new rule instead.";
 
+    /// <summary>
+    /// #2084 round 2: the stable code of the 503 a publish returns when the new version's owner could not be decided (a resolver
+    /// refusal, an answer with no team, or a fault). Asked before any write, so NOTHING was written: the wizard says so, unlike a
+    /// 503 after a write began (<see cref="ReasonUnavailable"/>), whose outcome is unknown.
+    /// </summary>
+    internal const string ReasonOwnerUnavailable = "ontology.admin.owner_unavailable";
+
     /// <summary>#2084: the rule table, as the ownership resolver names a parent (a version is filed under its rule).</summary>
     private const string PolicyTable = "sprk_policy";
 
@@ -1238,11 +1245,17 @@ public sealed partial class OntologyAdminAuthoringService
     /// and the matter the request names are passed too, so a rule whose matter turned Secure is caught while the reconciler has not yet
     /// re-owned it, and so is a requested matter that turned Secure after <see cref="CheckScopeAsync"/> read it (secure-if-any).
     /// <list type="bullet">
-    /// <item>The Secure Record Owners team: 409 <see cref="ReasonRuleHeldSecure"/>. The caller cannot create a row owned by that team
-    /// (no Assign on the table, and user roles are not widened), and a version owned by the caller would expose the rule's text.</item>
+    /// <item>The Secure Record Owners team, refused with nothing written: the caller cannot create a row owned by that team (no Assign
+    /// on the table, and user roles are not widened), and a version owned by the caller would expose the rule's text. Round 2: the
+    /// answer names what made it Secure. The rule itself is held (its <c>ownerid</c>, read with the policy, is that team): 409
+    /// <see cref="ReasonRuleHeldSecure"/>. Otherwise, when the request names a matter, that matter turned Secure after
+    /// <see cref="CheckScopeAsync"/> read it: the 400 <see cref="ReasonScopeMatterSecured"/> the scope check gives. With no matter
+    /// named, only the rule's own stored matter can be Secure (the reconciler has not yet re-owned the rule): 409
+    /// <see cref="ReasonRuleHeldSecure"/>.</item>
     /// <item>An ordinary team, or <see cref="RecordOwnerOutcome.Unchanged"/>: null. No <c>ownerid</c> is bound; the version stays the
     /// caller's, as before #2084.</item>
-    /// <item>A refusal (the owner could not be determined), an answer with no team, or a fault: 503, fail closed.</item>
+    /// <item>A refusal (the owner could not be determined), an answer with no team, or a fault: 503 <see cref="ReasonOwnerUnavailable"/>,
+    /// fail closed, nothing written.</item>
     /// </list>
     /// </summary>
     private async Task<OntologyAdminAuthoringResult<OntologyVersionPublished>?> CheckVersionOwnerAsync(
@@ -1268,11 +1281,20 @@ public sealed partial class OntologyAdminAuthoringService
         {
             _logger.LogWarning(ex, "Ontology authoring: the owner of a new version of policy {PolicyId} could not be resolved ({ExceptionType}); " +
                 "nothing was written.", policy.Id, ex.GetType().Name);
-            return Fail<OntologyVersionPublished>(Failure.Unavailable);
+            return Fail<OntologyVersionPublished>(Failure.OwnerUnavailable);
         }
 
         if (owner.IsOwned && owner.IsSecureOwner)
         {
+            if (policy.OwnerId != owner.OwningTeamId && matterScope is { } requested && requested != Guid.Empty)
+            {
+                // Round 2: the rule is not held; the matter the request names turned Secure after the scope check read it.
+                _logger.LogInformation("Ontology authoring: the matter a publish of policy {PolicyId} names is now Secure; the publish is " +
+                    "refused and nothing was written.", policy.Id);
+                return Invalid<OntologyVersionPublished>(
+                    new Dictionary<string, string[]>(StringComparer.Ordinal) { ["matterId"] = [ScopeMatterSecuredMessage] }, ReasonScopeMatterSecured);
+            }
+
             _logger.LogInformation("Ontology authoring: policy {PolicyId} is held by a Secure matter's team; the publish is refused and nothing was written.",
                 policy.Id);
             return Conflict<OntologyVersionPublished>(ReasonRuleHeldSecure);
@@ -1285,7 +1307,7 @@ public sealed partial class OntologyAdminAuthoringService
 
         _logger.LogWarning("Ontology authoring: the owner of a new version of policy {PolicyId} could not be determined ({RefusalCode}); " +
             "nothing was written.", policy.Id, owner.RefusalCode ?? "no team");
-        return Fail<OntologyVersionPublished>(Failure.Unavailable);
+        return Fail<OntologyVersionPublished>(Failure.OwnerUnavailable);
     }
 
     /// <summary>
@@ -1935,6 +1957,9 @@ public sealed partial class OntologyAdminAuthoringService
         Forbidden,
         NotFound,
         Unavailable,
+
+        /// <summary>#2084 round 2: the new version's owner could not be decided, before any write (<see cref="ReasonOwnerUnavailable"/>).</summary>
+        OwnerUnavailable,
     }
 
     private readonly record struct Read<T>(T? Value, Failure? Failure)
@@ -2012,14 +2037,16 @@ public sealed partial class OntologyAdminAuthoringService
     }
 
     /// <param name="MatterId">Task 102b: the policy's matter scope (<c>sprk_matter</c>), null for all matters.</param>
+    /// <param name="OwnerId">#2084 round 2: the policy's current owner (<c>ownerid</c>, a user or a team), as the same read returns it.</param>
     internal sealed record PolicyRow(
-        Guid Id, string Code, DecisionLane Lane, bool Enabled, bool Active, Guid? CurrentVersionId, long RowVersion, Guid? MatterId = null);
+        Guid Id, string Code, DecisionLane Lane, bool Enabled, bool Active, Guid? CurrentVersionId, long RowVersion, Guid? MatterId = null,
+        Guid? OwnerId = null);
 
     /// <summary>One policy AS THE CALLER, through the domain allow-list. Absent, unreadable or not an Ontology policy: the uniform 404.</summary>
     private async Task<Read<PolicyRow>> ReadPolicyAsync(Guid policyId, CancellationToken ct)
     {
         var response = await _user.GetAsync(
-            $"{PolicyEntitySet}?$select=sprk_policyid,sprk_policycode,sprk_lane,sprk_enabled,statecode,_sprk_currentversion_value,versionnumber,_sprk_matter_value,{OntologyDomain.Column}"
+            $"{PolicyEntitySet}?$select=sprk_policyid,sprk_policycode,sprk_lane,sprk_enabled,statecode,_sprk_currentversion_value,versionnumber,_sprk_matter_value,_ownerid_value,{OntologyDomain.Column}"
             + $"&$filter=sprk_policyid eq {policyId:D} and {OntologyDomain.Filter}", ct).ConfigureAwait(false);
         if (!response.IsSuccess)
         {
@@ -2049,7 +2076,8 @@ public sealed partial class OntologyAdminAuthoringService
             ReadInt(row, "statecode") is null or 0,
             TryGuid(row, "_sprk_currentversion_value", out var current) ? current : null,
             rowVersion,
-            TryGuid(row, "_sprk_matter_value", out var matter) ? matter : null));
+            TryGuid(row, "_sprk_matter_value", out var matter) ? matter : null,
+            TryGuid(row, "_ownerid_value", out var owner) ? owner : null));
     }
 
     /// <summary>A version of the policy as the caller reads it. <paramref name="Ended"/>: it carries an <c>sprk_inforceto</c>.
@@ -2184,6 +2212,7 @@ public sealed partial class OntologyAdminAuthoringService
             Failure.Refused => new(OntologyAdminAuthoringOutcome.Refused, ReasonCode: ReasonRefused),
             Failure.Forbidden => new(OntologyAdminAuthoringOutcome.Forbidden, ReasonCode: ReasonForbidden),
             Failure.NotFound => new(OntologyAdminAuthoringOutcome.NotFound, ReasonCode: ReasonNotFound),
+            Failure.OwnerUnavailable => new(OntologyAdminAuthoringOutcome.Unavailable, ReasonCode: ReasonOwnerUnavailable),
             _ => new(OntologyAdminAuthoringOutcome.Unavailable, ReasonCode: ReasonUnavailable),
         };
 

@@ -131,6 +131,43 @@ public class SecureChildLineageTests
         RecordOwnershipResolver.IsCitation("sprk_policyversion", "sprk_policy").Should().BeFalse();
     }
 
+    /// <summary>
+    /// #2084 round 2: ONE predicate for every parent derivation of a row being created — the attribute form keyed by its table,
+    /// <see cref="RecordOwnershipContext.ForChild"/>, and the create tool's <see cref="OwnedChildWrite.ParentsOf"/>. A Signal created
+    /// naming its rule is filed under its matter only (must fire); a version naming its rule is filed under it (must not fire).
+    /// </summary>
+    [Fact]
+    public void ACreatedSignalsRule_IsACitationOnEveryCreatePath_WhileAVersionsRuleIsItsParent()
+    {
+        var (rule, matter) = (Guid.NewGuid(), Guid.NewGuid());
+        var signal = new Microsoft.Xrm.Sdk.Entity("sprk_signal")
+        {
+            ["sprk_policy"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_policy", rule),
+            ["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter),
+        };
+
+        RecordOwnershipContext.ParentsOf(signal.Attributes, "sprk_signal").Should().Equal(new RecordOwnershipParent("sprk_matter", matter));
+        var context = RecordOwnershipContext.ForChild(signal);
+        context.Parents.Should().Equal(new RecordOwnershipParent("sprk_matter", matter));
+        context.TargetEntityLogicalName.Should().Be("sprk_matter");
+
+        var item = new DataverseWriteItemMapper.MappedItem("{}", [])
+        {
+            Lookups =
+            [
+                new DataverseWriteItemMapper.MappedLookup("sprk_policy", "sprk_policy", "sprk_policies", rule),
+                new DataverseWriteItemMapper.MappedLookup("sprk_matter", "sprk_matter", "sprk_matters", matter),
+            ],
+        };
+        OwnedChildWrite.ParentsOf("sprk_signal", item).Should().Equal(new RecordOwnershipParent("sprk_matter", matter));
+        OwnedChildWrite.ParentsOf("sprk_policyversion", item).Should().Equal(
+            new RecordOwnershipParent("sprk_policy", rule), new RecordOwnershipParent("sprk_matter", matter));
+        RecordOwnershipContext.ForChild(new Microsoft.Xrm.Sdk.Entity("sprk_policyversion")
+        {
+            ["sprk_policy"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_policy", rule),
+        }).Parents.Should().Equal(new RecordOwnershipParent("sprk_policy", rule));
+    }
+
     // ── What a child receives (Dataverse AccessRights values as literals) ────────────────────────────────────────────
 
     // Owner round 91 (2026-10-10, task 179): Share is carried where the root share holds it; never Assign or Create.

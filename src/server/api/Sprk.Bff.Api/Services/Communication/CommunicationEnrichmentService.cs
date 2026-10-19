@@ -810,7 +810,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         if (row is null || row.GetAttributeValue<long?>("versionnumber") is not { } version)
             return (true, 0);
 
-        return (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf(row.Attributes).Count > 0, version);
+        return (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf(row).Count > 0, version);
     }
 
     /// <summary>Resolves a team NAME to its <c>teamid</c> via the SAME name-lookup read path

@@ -55,6 +55,11 @@ export const REASON_SCOPE_MATTER_SECURED = 'ontology.admin.scope_matter_secured'
  * so nothing is written. A 409 that names no matter: the rule cannot be changed here, only replaced by a new rule.
  */
 export const REASON_RULE_HELD_SECURE = 'ontology.admin.rule_held_secure';
+/**
+ * uac-r2 #2084 round 2: a publish's 503 when the new version's owner could not be decided. The server asks before any write, so nothing
+ * was changed: unlike any other 503 on a write, the outcome is known.
+ */
+export const REASON_OWNER_UNAVAILABLE = 'ontology.admin.owner_unavailable';
 
 // ---- wire shapes: the catalog -----------------------------------------------------------------------------------------------
 
@@ -396,6 +401,14 @@ interface Problem {
 /** What a write that ended without a proven outcome says. The only honest answer is "maybe": do not claim it was or was not saved. */
 const OUTCOME_UNKNOWN = 'The change may not have been saved. Reload to check.';
 
+/** What a 503 the server answered BEFORE any write says (#2084 round 2: {@link REASON_OWNER_UNAVAILABLE}). */
+const NOTHING_CHANGED_TRY_LATER = 'Nothing was changed. Try again later.';
+
+/** True for a write whose outcome the server did not prove: a 5xx or no answer, except a 503 it answered before any write. */
+function isOutcomeUnknown(status: number | null, reasonCode: string | null, writes: boolean): boolean {
+  return writes && (status === null || status >= 500) && reasonCode !== REASON_OWNER_UNAVAILABLE;
+}
+
 const CONFLICT_MESSAGES: Readonly<Record<string, string | undefined>> = {
   [REASON_DRY_RUN_REQUIRED]: 'Run Test on this exact rule before saving it; any edit needs a new test run.',
   [REASON_POLICY_CODE_TAKEN]: 'Another rule already uses this code.',
@@ -447,7 +460,10 @@ function messageFor(
       'The rule is in a state that does not allow this change.'
     );
   }
-  if (writes && (status === null || status >= 500)) {
+  if (reasonCode === REASON_OWNER_UNAVAILABLE) {
+    return NOTHING_CHANGED_TRY_LATER;
+  }
+  if (isOutcomeUnknown(status, reasonCode, writes)) {
     // A saved-Off policy whose first version could not be made current (K6) carries its own, more exact, sentence.
     return typeof problem?.policyId === 'string' ? (detailOf(problem) ?? OUTCOME_UNKNOWN) : OUTCOME_UNKNOWN;
   }
@@ -464,7 +480,7 @@ function failure(status: number | null, problem: Problem | null, writes: boolean
     message: messageFor(status, reasonCode, problem, fieldErrors, writes),
     fieldErrors,
     policyId: typeof problem?.policyId === 'string' ? problem.policyId : null,
-    outcomeUnknown: writes && (status === null || status >= 500),
+    outcomeUnknown: isOutcomeUnknown(status, reasonCode, writes),
   };
 }
 

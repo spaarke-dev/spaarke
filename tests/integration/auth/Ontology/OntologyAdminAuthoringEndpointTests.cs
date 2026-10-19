@@ -1614,6 +1614,9 @@ public sealed class AuthoringWorld : IDataverseUserClient
 
         /// <summary>Task 102b: the policy's matter scope (<c>sprk_matter</c>); null for all matters.</summary>
         public Guid? Matter { get; set; }
+
+        /// <summary>#2084 round 2: the policy's owner (<c>_ownerid_value</c>); null when the read returns none.</summary>
+        public Guid? Owner { get; set; }
     }
 
     public sealed class VersionState
@@ -1840,6 +1843,7 @@ public sealed class AuthoringWorld : IDataverseUserClient
                         ["statecode"] = p.Value.State,
                         ["_sprk_currentversion_value"] = p.Value.Current?.ToString("D"),
                         ["_sprk_matter_value"] = p.Value.Matter?.ToString("D"),
+                        ["_ownerid_value"] = p.Value.Owner?.ToString("D"),
                         ["versionnumber"] = p.Value.RowVersion,
                         ["sprk_domain"] = p.Value.Domain,
                     })

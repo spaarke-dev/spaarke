@@ -205,7 +205,7 @@ public enum UnfiledOwnership
 /// <b>Every parent, not the first (task 146).</b> <see cref="TargetEntityLogicalName"/>/<see cref="TargetRecordId"/>
 /// is the PRIMARY parent — it decides the business unit of an ordinary child. <see cref="Parents"/> carries every
 /// OTHER parent lookup value the child has; together they are the set secure-if-any is applied to. Build them
-/// from the row being written with <see cref="ParentsOf(IEnumerable{KeyValuePair{string, object}})"/> so a lookup
+/// from the row being written with <see cref="ParentsOf(IEnumerable{KeyValuePair{string, object}}, string?)"/> so a lookup
 /// cannot be forgotten.
 /// </para>
 /// </remarks>
@@ -302,14 +302,20 @@ public sealed record RecordOwnershipContext
     /// Every ownership-parent reference among <paramref name="fields"/> — the attributes of a row being written, or
     /// an update payload. Reads <see cref="EntityReference"/> values only, keyed by whatever column holds them, so
     /// a child table's every parent lookup is picked up without a per-table column list (the set of lookups comes
-    /// from the row itself, never from a guess).
+    /// from the row itself, never from a guess). #2084: a column of <paramref name="table"/> that CITES rather than files
+    /// (<see cref="RecordOwnershipResolver.IsCitation"/>) is left out, so a row is never filed under the record it cites.
+    /// <paramref name="table"/> is the row's own table (required, so no caller can skip the exclusion by omission);
+    /// <c>null</c> only where the fields belong to no one table.
     /// </summary>
-    public static IReadOnlyList<RecordOwnershipParent> ParentsOf(IEnumerable<KeyValuePair<string, object>> fields)
+    public static IReadOnlyList<RecordOwnershipParent> ParentsOf(IEnumerable<KeyValuePair<string, object>> fields, string? table)
     {
         ArgumentNullException.ThrowIfNull(fields);
         var parents = new List<RecordOwnershipParent>();
-        foreach (var (_, value) in fields)
+        foreach (var (column, value) in fields)
         {
+            if (RecordOwnershipResolver.IsCitation(table, column))
+                continue;
+
             if (value is EntityReference reference
                 && reference.Id != Guid.Empty
                 && RecordOwnershipResolver.IsOwnershipParent(reference.LogicalName))
@@ -322,15 +328,15 @@ public sealed record RecordOwnershipContext
     }
 
     /// <summary>
-    /// #2084: <see cref="ParentsOf(IEnumerable{KeyValuePair{string, object}})"/> for an EXISTING row read from Dataverse, minus
-    /// its citation lookups (<see cref="RecordOwnershipResolver.IsCitation"/>): a lookup to an ownership-parent table that names
-    /// what the row cites, not what it is filed under. Every reader that decides an existing row's owner from the row itself
-    /// (the reconciler's <c>ContextFor</c>, the resolver's look-through) uses this.
+    /// #2084: <see cref="ParentsOf(IEnumerable{KeyValuePair{string, object}}, string?)"/> for a row, keyed by its own table, so
+    /// its citation lookups (<see cref="RecordOwnershipResolver.IsCitation"/>) are left out: a lookup to an ownership-parent table
+    /// that names what the row cites, not what it is filed under. Used for a row being created (<see cref="ForChild"/>) and for an
+    /// existing row the reconciler re-owns (<c>ContextFor</c>).
     /// </summary>
     public static IReadOnlyList<RecordOwnershipParent> ParentsOf(Entity row)
     {
         ArgumentNullException.ThrowIfNull(row);
-        return ParentsOf(row.Attributes.Where(a => !RecordOwnershipResolver.IsCitation(row.LogicalName, a.Key)));
+        return ParentsOf(row.Attributes, row.LogicalName);
     }
 
     /// <summary>
@@ -366,7 +372,7 @@ public sealed record RecordOwnershipContext
     public static RecordOwnershipContext ForChild(Entity child, RecordOwnershipParent? primaryParent = null)
     {
         ArgumentNullException.ThrowIfNull(child);
-        var parents = ParentsOf(child.Attributes);
+        var parents = ParentsOf(child); // #2084: keyed by the child's table, so a citation files nothing
         var primary = primaryParent is { IsSpecified: true } p && RecordOwnershipResolver.IsOwnershipParent(p.EntityLogicalName)
             ? p
             : parents.FirstOrDefault();
@@ -944,7 +950,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// raised it (<c>sprk_signal.sprk_policy</c>); it is filed under its subject and core record, never under the rule
     /// (SecureChildLineage leaves the lookup out). Read as a parent, an all-matters rule owned in its author's business unit
     /// would decide an ordinary Signal's team on an Unsecure, and a rule held by a Secure matter would pull a Signal about
-    /// another matter into isolation. <see cref="RecordOwnershipContext.ParentsOf(Entity)"/> drops them.
+    /// another matter into isolation. The one predicate every parent derivation applies: <see cref="RecordOwnershipContext.ParentsOf(IEnumerable{KeyValuePair{string, object}}, string?)"/>
+    /// (and through it <see cref="RecordOwnershipContext.ParentsOf(Entity)"/> and <see cref="RecordOwnershipContext.ForChild"/>) and
+    /// <c>OwnedChildWrite.ParentsOf</c>.
     /// </summary>
     private static readonly HashSet<(string Table, string Column)> CitationLookups = new(
         [("sprk_signal", "sprk_policy")], CitationComparer.Instance);
@@ -1891,7 +1899,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         };
         query.Criteria.AddCondition($"{row.EntityLogicalName}id", ConditionOperator.Equal, row.RecordId);
         var entity = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        return entity is null ? null : RecordOwnershipContext.ParentsOf(entity);
+        // #2084 round 2: no citation exclusion here. Every row read here is an ownership parent — a reparentable child on a
+        // lineage walk, or a ContentOf / DecisionRecordWriter target (ForParents keeps ownership parents only) — and no citing
+        // table (RecordOwnershipResolver.IsCitation: sprk_signal) is one, so the exclusion could never fire.
+        return entity is null ? null : RecordOwnershipContext.ParentsOf(entity.Attributes, table: null);
     }
 
     /// <summary>
