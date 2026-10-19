@@ -267,3 +267,142 @@ looks up the deciding user's contact itself"), and this part does not touch the 
 
 **For 049 (constraints, not code).** 049 supplies `ReceivedOn` from the submission's received date (data, never a clock read).
 
+
+## 11. Review fix round, part E (evaluator, mapper, currency)
+
+Model: Opus 5.5 @ high (implementer). Base: `work/ebilling-r1` `bdd373421` plus part L's `94de0f3c4` (cherry-picked as
+`dea47a05e`: the required `BillingEvaluationRequest.ReceivedOn`). Branch `fix/ebilling-r1-072-E`. Part L owns the loader, the fact
+set and their tests; nothing of theirs is edited here.
+
+### E.1 Item map
+
+| Item | Commit | Change |
+|---|---|---|
+| A3 (F1) in-force selection | `157f82292` | A subject with no line date and no invoice date is judged on `request.ReceivedOn` (data from 049), not by the current pointer. `SelectVersion` always takes a date. New ArchTest `BillingEvaluatorClockGuardTests`: the in-memory `Evaluate` and the mapper reach no clock (transitive IL scan; must-fire and must-not-fire controls). |
+| B2 handler refusal | `0af7e0774` | Handlers run lazily, at most once per version: a firm version's to decide precedence, any other's only when it applies. D-39 counts only versions the gate AND the handler accept (owner, 2026-10-18). Handler refusals follow the gate's in candidate order. Remark fixed. |
+| A5 / ontology-r1 F1 | `d4e1e800f` | `BillingRuleCatalogue.ReasonTemplate` (a reason's own message) and `IsFlagOnlyReason`. `required_data.currency_not_usd` renders "The invoice currency is not USD." and is flag-only. 073's decider holds a flag-only reason (`reason_flag_only`). |
+| A4 (F4) Signal dedupe, option a | `e98acf482` | `BillingFindingSignalMapper.MapAll` sends one request per (policy code, subject). The single-finding `Map` is now internal. |
+| A5 / D-115 | `359730e1e` | One flag-only invoice-level "rates and expense caps were not checked" finding. `"$"` is read as USD. `low_confidence` is renamed `billing.currency.unreliable`. |
+
+### E.2 Behaviour
+
+**A3.** The judging date is line date, then invoice date, then `ReceivedOn`. An undated invoice received before a future-effective
+current version is judged by the version in force on the received date, or by none.
+
+**B2.** A firm version refused by the gate or by its handler leaves the client default of that type in force. A client default
+displaced by a valid firm version is never run, so it cannot refuse or log.
+
+**A4 (mapper).**
+- **Grouping.** The group key is the writer's own `DedupeKeySubjectPrefix(policyCode, subjectEntity, subjectId)`. Groups come out in
+  first-appearance order.
+- **Reason order.** Within a group, reasons are sorted by code (ordinal), then by a content key, so the output does not depend on input
+  order.
+- **Consequence.** The strongest effective consequence wins: Reject > SuggestAdjustment > Flag. A flag-only reason counts as Flag, and
+  so does a missing or unknown consequence.
+- **Message.** The message is the primary reason's (the strongest, then the first). `FactValues` is the primary's allowed facts (the
+  template source).
+- **Evidence.** One `billing.reasonset` line carries `Ref` = fingerprint = `sorted codes joined by "," + "|" + consequence`. There is
+  one `billing.reason` line per reason (`Ref` the code, `Text` its own sentence, `Source` `sprk_policyversion:{id}`). The union of the
+  values read follows: `billing.field` (`Ref` `invoice.{Field}` / `line[n].{Field}`, Tier Observation, `Confidence`, `Text` the value)
+  and `billing.reference`.
+- **Mapping record.** `BillingSignalMapping` exposes `Findings`, `ReasonCodes`, `Consequence` and `Fingerprint`, which 049 uses to
+  supersede and for the Decision Record snapshot.
+- **Withheld group (D-112).** The group gets the withheld template and no facts. Reason texts are token-free (the withheld template,
+  the reason's own message, or the type headline). No value text is stored, because a duplicate line's own date, amount and hours
+  equal the hidden prior's.
+
+**A5 (D-115).** When `currencySkip` is set and at least one money check was skipped, the evaluator raises ONE finding:
+- **Subject and reason.** It is on the invoice, with reason `billing.currency.missing` / `.unreliable` / `.not_usd`.
+- **Message.** "Rates and expense caps were not checked: the invoice currency is missing / unclear / not USD."
+- **Version.** It hangs on the first skipped money policy (ordinal policy code, then version id; main-session decision), with that
+  policy's rule type and clause.
+- **Values read.** It reads `invoice.currency` (FieldRef(null, Currency), with its confidence and below-threshold flag). It cites every
+  skipped version as a `skippedPolicyVersion` reference (`CODE:versionid`). It has no fact values.
+- **Result.** The version is added to `RulesByVersion`. The finding does not depend on a RequiredData rule being in force. With no money
+  rule in force, or only a cap-less ExpenseRule, nothing is skipped and no finding is raised.
+
+### E.3 Tests and evidence
+
+New or changed test methods: 23 added, 1 replaced (a Fact became a Theory). One existing 073 test changed its expectation: a foreign
+currency under a RequiredData Reject rule now Flags (`reason_flag_only`), where it used to Reject. Those are the brief's semantics.
+
+Fail-before or mutation proof (each mutation applied to the committed source, the suite run, the file restored; helper
+`e_mutate.py` in the session scratchpad):
+
+| Proof | Result |
+|---|---|
+| A3: the pre-fix evaluator (old `IsCurrent` path) | Both A3 tests fail (`AnUndatedInvoice_ReceivedBeforeAFutureEffective...`, `...BeforeTheOnlyVersionTakesEffect...`) |
+| A3: `DateTime.UtcNow` read in `Evaluate` | Clock guard fails |
+| B2: the pre-fix evaluator | `AFirmVersionItsHandlerRefuses_LeavesTheClientDefaultInForce_B2` fails |
+| F1: `ReasonTemplate` loses `currency_not_usd` | Mapper F1 theory fails (2 cases) |
+| F1: `IsFlagOnlyReason` loses `currency_not_usd` | The 073 foreign-currency test fails |
+| M-A4-1: no grouping (one request per finding) | 5 A4 tests fail, including the 150-line must-fire guard |
+| M-A4-2: reasons kept in arrival order | 4 fail, including order independence |
+| M-A4-3: withheld group keeps value text | The leak test fails |
+| M-A4-4: flag-only reason takes the version's consequence | The flag-only test fails |
+| M-A4-5: weakest consequence wins | The flag-only / Reject test fails |
+| M-A4-6: withheld group renders the visible reason's text | The leak test fails. On the first run it survived: the hand-built visible reason lacked `invoice.firmInvoiceNumber`, so its template never rendered. The test now asserts, as a control, that the visible reason alone names the prior. |
+| M-A5-1: no D-115 finding | 15 fail |
+| M-A5-2: `"$"` not read as USD | 3 fail |
+| M-A5-3: currency reasons not flag-only | 12 fail, including both 073 D-115 tests |
+| M-A5-4: hangs on the last skipped policy | Placement test fails |
+| M-A5-5: cites only the first skipped version | Placement test fails |
+| M-A5-6: `not_usd` message falls back to the rule's template | Mapper D-115 theory fails |
+
+**150-line fixture.** 1,276 findings give 1,261 requests, matching the review. 15 pairs are merged, all
+`expense_rule.amount_over_cap,expense_rule.code_not_reimbursable`. Mapped one per finding, the same fixture repeats 15 keys: this is
+the guard's must-fire control.
+
+**Suites.**
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
+- `Sprk.Bff.Api.Tests` filtered `Billing|Compliance|Rejection|RuleSet|Finance|Signals`: 4,543 passed, 5 skipped (live Dataverse), 0
+  failed.
+- `Spaarke.ArchTests`: 1,178 / 1,178 (3 new).
+
+**Publish delta.** Not measured. No package, project file or DI registration changed, and the change is method bodies plus one
+record's init properties and constants.
+
+### E.4 A5 placement rationale
+
+The finding is built in the evaluator, not in a handler, for three reasons. The skip is the evaluator's own decision (D-20). It must
+fire whether or not a RequiredData rule is in force (D-115). And handlers judge one rule each, while this finding is about rules that
+were NOT judged.
+
+It hangs on a skipped money policy rather than on a synthetic policy, because SignalWriter needs a real policy and version (it writes
+lookups to `sprk_policy` and `sprk_policyversion`). It is flag-only by reason code, so the version's configured consequence never
+applies to it: the mapper counts it as Flag, and 073 holds it with `reason_flag_only` before eligibility and confidence are checked.
+
+Under A4 it merges with that policy's other reasons on the invoice subject, and being a Flag it can never raise the merged
+consequence. The real handlers give ApprovedRate and ExpenseRule no other invoice-level reason, so in practice it stands alone; the
+merge case is tested with a hand-built reason.
+
+### E.5 073 check (rejection decider vs the mapper change)
+
+073 decides per finding, from `BillingEvaluationResult.Findings` and each finding's own version (`RulesByVersion`). It never reads
+mappings, so aggregation cannot change a decision:
+- **Flag-only reasons stay Flags.** A flag-only reason is held (`reason_flag_only`, new in this round), so it never rejects.
+- **Reject-capable reasons keep their Reject.** A reject-capable reason is decided on its own and keeps its Reject. Test: ExpenseRule
+  Reject on EUR, where the code finding decides and the currency finding is held.
+- **The merged consequence is display and fingerprint only.** It is the maximum, so it never drops a Reject and a flag-only reason
+  never contributes one.
+
+### E.6 Deviations and open points
+
+1. **"Hold" is not a stored consequence.** The brief and 049 say "Reject > Hold > Flag". `BillingConsequence` has Reject, Flag and
+   SuggestAdjustment, so the order used is Reject > SuggestAdjustment > Flag. Holding is 073's per-finding outcome and is not modelled
+   in the mapper.
+2. **Tension with 049's option-a rule (5).** That rule says D-115's finding "must never be merged into a Reject". The brief (main
+   session) decided the finding merges with the policy's other reasons on the invoice and cannot RAISE the consequence. A merged
+   Signal can therefore carry Reject because of another reason, while the currency reason itself never rejects (073 holds it). If (5)
+   means "never share a Signal with a Reject reason", the finding needs its own policy or subject. Owner or main-session call.
+3. **`"$"` is inconsistent with RequiredData.** 071's RequiredDataHandler deliberately treats `"$"` as not USD and raises
+   `currency_not_usd`, while the evaluator now reads `"$"` as USD (049 obligation). A `"$"` invoice gets its rates checked AND a "not
+   USD" flag. Not changed: it is 071's documented rule. Recommendation: one shared normaliser for both.
+4. **Identical reason texts (known limit).** The type's default wording does not tell ExpenseRule's code reason from its cap reason,
+   so a merged Signal can carry two reason lines with the same text. The codes differ.
+5. **Fingerprint granularity (known limit).** The fingerprint is the codes plus the consequence, as specified. Two RequiredData
+   `missing_field` reasons whose fields change but whose count does not keep the same fingerprint, so 049 only refreshes them.
+6. **Case-insensitive alternate key (known limit).** Dataverse alternate keys compare case-insensitively. Two policy codes that
+   differ only in case would still collide in the writer. The mapper groups ordinally, as the writer builds the key.
+7. **Null `Clause` on billing evidence lines.** These lines leave `Clause` null. `SignalEvidenceRef`'s doc says the UI shows such a
+   line as "context, not tested"; a billing UI (077) should read the `billing.*` kinds instead.
