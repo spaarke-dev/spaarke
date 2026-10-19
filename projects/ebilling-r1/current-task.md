@@ -12,7 +12,7 @@
 | Field | Value |
 |-------|-------|
 | **Task** | Parallel mode. 50/79 complete. 049 in progress. On the branch: the map; parts A, B, C and C2 (6cf404162); spend D-102/D-104 and D-130 approved-total spend (1549ff165) with its review round (ae5197e25); the D-125 system policy; credit totals D-127/D-128/D-129. Running from base ae5197e25: impl049sub (sonnet; D-131 Submitted By: invoice sprk_submittedby = the submission's sprk_submitter contact; a missing systemuser no longer refuses, only "neither recorded" refuses) and impl049d (opus; part D after-commit steps: Signals, the D-122 rejection DR after the Signals, system-policy Signals, indexing, notify, terminal status last, resume; D-125 (a)/(b)) |
-| **Step** | HEAD ae5197e25 (local; origin is 33723dbdc; ask the owner before any push). Last full verify at ae5197e25: build 0/0; broad filter (+DerivedBaseColumns) 7827/0; ArchTests 1214/0. ADR-010 ceiling is 168 |
+| **Step** | HEAD 58c904416 (D-131 picked; local; origin is 33723dbdc; ask the owner before any push). Last full verify at 58c904416: build 0/0; broad filter (+DerivedBaseColumns) 7830/0; ArchTests 1214/0. ADR-010 ceiling is 168 |
 | **Status** | in-progress (parallel mode) |
 | **Next Action** | (1) When impl049sub reports: pick, run the broad filter, then add D-131 to the owner-actions list (export sprk_invoice.sprk_submittedby, created live on dev 2026-10-19, into SpaarkeMaster). (2) When impl049d reports: pick (the notes file 049-submission-processing-job.md may conflict with impl049sub; keep both sections), run the broad filter, send the range to ontology-r1 (they review part D and D-125 (a)/(b)). (3) Part E: handler; step-0 re-read (Accepted/Rejected → no-op; linked invoice on Processing → resume after-steps); lock invoice-submission:{id:N}; the download with its container check, copied from InvoiceExtractionJobHandler; part D's preflight before the persister; DI for processor, persister, after-steps and handler; ArchTests; publish delta vs fresh master; CVE; one Opus adversarial review; mark 049 done. (4) Queued: the 077 F1-b note |
 
@@ -35,6 +35,7 @@ D-111 to D-120 are in the decisions log.
 - The 074 live seam test.
 - The IfRowVersionMatches probe (076).
 - Run the schema scripts on dev, with the owner's OK and notices before and after to ontology-r1 and uac-r2, BEFORE a BFF that reads them: rejection reason; D-104 sprk_pendingspend; D-121 Deploy-EbillingBillingEventAmountRange.ps1; D-124 Deploy-EbillingInvoiceTrackingNumberSchema.ps1; D-125 rule-type option and Seed-BillingSystemPolicy.ps1 (fix #2107, the owning team, first); D-127/D-129 Deploy-EbillingInvoiceTotalsRange.ps1 (seven columns, including sprk_billingexport total). The pending-spend query shapes are already verified read-only on dev.
+- D-131: export sprk_invoice.sprk_submittedby (created live on dev 2026-10-19) into the SpaarkeMaster solution source.
 - Add the 7 new tables to the apps.
 - Grant Write on sprk_ruleset before 079.
 
