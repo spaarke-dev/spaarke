@@ -1547,14 +1547,16 @@ public sealed class DecisionRecordWriter
 
     /// <summary>The columns a resolved Signal's subject is read from: the pair id and every subject lookup (the commit route reads the same
     /// ones, task 141), so <see cref="DecisionCommitService.ToRow"/> derives the subject exactly as the commit route does.</summary>
-    private static readonly string[] BillingSignalSubjectColumns = ["sprk_regardingrecordid", .. SignalWriter.RegardingLookupByEntity.Values];
+    private static readonly string[] BillingSignalSubjectColumns =
+        ["sprk_regardingrecordid", "sprk_corerecordtype", "sprk_corerecordid", .. SignalWriter.RegardingLookupByEntity.Values];
 
     /// <summary>
     /// ontology-r1 F4-1 (D-123, secure-if-any): the subject of every Signal a billing decision resolves, read app-only through the shared
     /// sysadmin reader (one query by id; the writer may use that reader only for <c>RetrieveMultipleAsync</c>, D-34), as parents of the
     /// record's owner question. The rule is the commit route's own, REUSED, not copied: <see cref="DecisionCommitService.ToRow"/> derives the
     /// subject from the subject lookup that carries the pair id, and <see cref="DecisionCommitService.SignalSubjectsOf"/> keeps it (a Signal
-    /// with no pair id adds none; a pair id no single lookup carries is refused). Without this, a finding about a line under a secure record
+    /// with no pair id and no core adds none; one with a core but no pair id is refused here, because its core would never be asked; a pair
+    /// id no single lookup carries is refused). Without this, a finding about a line under a secure record
     /// could be closed by an invoice decision whose record an ordinary team owns.
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.OwnerRefused"/>
@@ -1609,7 +1611,19 @@ public sealed class DecisionRecordWriter
                     RecordOwnerRefusal.ParentUndetermined);
             }
 
-            rows.Add(DecisionCommitService.ToRow(signalId, row));
+            var signal = DecisionCommitService.ToRow(signalId, row);
+            if ((signal.HasCore || signal.CoreMalformed) && signal.SubjectId is null)
+            {
+                // The commit route first requires every resolved Signal to sit on the request's own core, so a Signal's core is always one of the
+                // record's parents. The billing request's core is derived from its subject, so a Signal on some other core would add no parent
+                // here (SignalSubjectsOf skips a Signal with no pair id) and its core would never be asked. Unknown parent: refused, never dropped.
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.OwnerRefused,
+                    "A Signal the decision resolves sits on a core record but names no subject, so the Decision Record owner is unknown; nothing was written.",
+                    RecordOwnerRefusal.ParentUndetermined);
+            }
+
+            rows.Add(signal);
         }
 
         return DecisionCommitService.SignalSubjectsOf(rows);

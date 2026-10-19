@@ -777,6 +777,70 @@ public sealed partial class DecisionRecordWriterTests
         NothingWritten(h);
     }
 
+    /// <summary>A Signal that carries a core pair (task 036) and, optionally, the pair id and its subject lookup.</summary>
+    private static Entity SignalOnCore(Guid signalId, bool withPairId)
+    {
+        var signal = withPairId ? SignalAbout(signalId, "sprk_billingevent", LineId) : new Entity("sprk_signal", signalId);
+        signal["sprk_corerecordtype"] = new EntityReference("sprk_recordtype_ref", Guid.NewGuid());
+        signal["sprk_corerecordid"] = MatterId.ToString("D");
+        return signal;
+    }
+
+    [Fact]
+    public async Task Billing_F41_ASignalThatCarriesACoreButNoPairId_IsRefused_BeforeAnyCreate()
+    {
+        // Must-fire (follow-up item 1): the commit route requires every resolved Signal to sit on the request's own core. The billing path
+        // asks the owner only about the pair id's subject, so a core-only Signal's core would never be asked: it is an UNKNOWN parent.
+        var h = BillingHarness();
+        h.Rows[("sprk_signal", BillingSignal)] = SignalOnCore(BillingSignal, withPairId: false);
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing("approve-invoice") with { ResolvedSignalIds = [BillingSignal] }))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        ex.OwnerRefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        NothingWritten(h);
+    }
+
+    [Fact]
+    public async Task Billing_F41_ASignalThatCarriesACoreAndAPairId_IsNotRefused_AndAsksTheOwnerAboutItsSubject()
+    {
+        // Must-not-fire: with a pair id the subject is a parent (the commit route's rule); the refusal is only for the no-subject case.
+        var h = BillingHarness();
+        h.Rows[("sprk_signal", BillingSignal)] = SignalOnCore(BillingSignal, withPairId: true);
+
+        await h.Writer.WriteBillingDecisionAsync(Billing("approve-invoice") with { ResolvedSignalIds = [BillingSignal] });
+
+        h.Created.Should().ContainSingle();
+        h.OwnerAsks.Should().ContainSingle().Which.Parents.Should().Contain(new RecordOwnershipParent("sprk_billingevent", LineId));
+    }
+
+    [Fact]
+    public async Task Billing_F41_ASignalWithNeitherACoreNorAPairId_AddsNoParent_AndIsNotRefused()
+    {
+        // Must-not-fire: a Signal that names nothing at all keeps the commit route's skip.
+        var h = BillingHarness();
+        h.Rows[("sprk_signal", BillingSignal)] = new Entity("sprk_signal", BillingSignal);
+
+        await h.Writer.WriteBillingDecisionAsync(Billing("approve-invoice") with { ResolvedSignalIds = [BillingSignal] });
+
+        h.Created.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Billing_F41_TheSignalRead_AsksForTheCorePairColumns()
+    {
+        // The test harness returns every column it holds whatever the query asks for, so the column list is pinned here: without the core
+        // pair in the read, the real reader would return a Signal's core as empty and the check above could never fire.
+        var h = BillingHarness();
+        h.Rows[("sprk_signal", BillingSignal)] = SignalAbout(BillingSignal, "sprk_billingevent", LineId);
+
+        await h.Writer.WriteBillingDecisionAsync(Billing("approve-invoice") with { ResolvedSignalIds = [BillingSignal] });
+
+        h.Lookups.Single(q => q.EntityName == "sprk_signal").ColumnSet.Columns
+            .Should().Contain(["sprk_corerecordtype", "sprk_corerecordid", "sprk_regardingrecordid"]);
+    }
+
     [Fact]
     public async Task Billing_F41_AFaultOnTheSignalRead_WritesNothing()
     {
