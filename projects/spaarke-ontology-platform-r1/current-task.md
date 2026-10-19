@@ -10,8 +10,8 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No lane in flight. 042b ✅ (#2096 → docs `f66aa811a`; not yet on master). uac-r2 PR #2102 (#2084, D-168 A3): passes 1+2 + re-checks CLEAN at `c757caf8b` (ArchTests 1150/0); uac-r2 merges on green CI |
-| **Next Action** | 1) #2102: on uac-r2's merge SHA, finalise D-168 (race/un-scope -> 409; `owner_unavailable` 503 "Nothing was changed"), close DI-115 (#2084); SRO Read apply notices from uac-r2; then merge + R3 deploy (BFF before/with Console; fresh owner approval). 2) Next docs→master sync carries 042b (full ArchTests first; then R3 BFF deploy with fresh owner approval). 3) Re-check ebilling fix ranges when sent: 071 r3 / 072 combined, 073 (K1 guard + K2 comment), 074 follow-up (K1-K4 + ParentUndetermined). 5) After 074 reaches master, one small code lane: immutability ArchTest entry + 5 stale writer comments + a comment on `SignalClosureService.ExistingPolicyCodesAsync` (:278) that it must stay UNFILTERED (billing depends on it; ebilling pins it in c3d8616e2) |
+| **Task** | No lane in flight. 042b ✅ (#2096 → docs `f66aa811a`; not yet on master). uac-r2 #2102 (#2084, D-168 final) merged to master `947d98e31`; DI-115 closed. Not yet on dev: needs R3 deploy (BFF before/with Console, owner approval in R3's session) + uac-r2 SRO Read apply (owner approval; before/after notices) |
+| **Next Action** | 1) #2102: await uac-r2's SRO Read notices and R3's deploy notice; after the deploy, smoke the Rule wizard publish on dev. 2) Next docs→master sync carries 042b (full ArchTests first; then R3 BFF deploy with fresh owner approval). 3) Re-check ebilling fix ranges when sent: 071 r3 / 072 combined, 073 (K1 guard + K2 comment), 074 follow-up (K1-K4 + ParentUndetermined). 5) After 074 reaches master, one small code lane: immutability ArchTest entry + 5 stale writer comments + a comment on `SignalClosureService.ExistingPolicyCodesAsync` (:278) that it must stay UNFILTERED (billing depends on it; ebilling pins it in c3d8616e2) |
 
 ## Open owner / peer items
 
