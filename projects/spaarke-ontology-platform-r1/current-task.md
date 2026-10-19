@@ -11,7 +11,7 @@
 | Field | Value |
 |---|---|
 | **Task** | No lane in flight. 042b ✅ (#2096 → docs `f66aa811a`; not yet on master) |
-| **Next Action** | 1) Tomorrow: check the first nightly sweep on the 102b BFF (deleted-rule Signals closed as PolicyRetired + redacted; none expected beyond any S2-type rows). 2) Next docs→master sync carries 042b (full ArchTests first; then R3 BFF deploy with fresh owner approval). 3) Re-check ebilling fix ranges when sent: 071 r3 / 072 combined, 073 (K1 guard + K2 comment), 074 follow-up (K1-K4 + ParentUndetermined). 4) uac-r2's #2084 PR (after #2063): two passes. 5) After 074 reaches master: immutability ArchTest entry + 5 stale writer comments |
+| **Next Action** | 1) Tomorrow: check the first nightly sweep on the 102b BFF (deleted-rule Signals closed as PolicyRetired + redacted; none expected beyond any S2-type rows). 2) Next docs→master sync carries 042b (full ArchTests first; then R3 BFF deploy with fresh owner approval). 3) Re-check ebilling fix ranges when sent: 071 r3 / 072 combined, 073 (K1 guard + K2 comment), 074 follow-up (K1-K4 + ParentUndetermined). 4) uac-r2's #2084 PR (after #2063): two passes. 5) After 074 reaches master, one small code lane: immutability ArchTest entry + 5 stale writer comments + a comment on `SignalClosureService.ExistingPolicyCodesAsync` (:278) that it must stay UNFILTERED (billing depends on it; ebilling pins it in c3d8616e2) |
 
 ## Open owner / peer items
 
