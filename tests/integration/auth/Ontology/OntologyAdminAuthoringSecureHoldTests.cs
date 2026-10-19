@@ -94,6 +94,24 @@ public partial class OntologyAdminAuthoringEndpointTests
     }
 
     [Fact]
+    public async Task Publish_OfARuleNotYetReownedFromASecureStoredMatter_ToAnOrdinaryMatter_Is409RuleHeldSecure_NotTheScopeError()
+    {
+        // Round 3 (ontology F3): the rule still stores MatterA, which is Secure but the rule is not yet re-owned (inside the reconcile
+        // window). Limiting it to ordinary MatterB passes the scope check; the resolver answers Secure because of A. The 400 would
+        // blame B, which the caller cannot fix, so the answer is "held", and nothing is written.
+        _fixture.World.Policies[PolicyId].Matter = MatterA;
+        (await ScopedDryRun(PolicyId, MatterB)).StatusCode.Should().Be(HttpStatusCode.OK);
+        ResolverAnswersTheSecureTeam();
+
+        var response = await ScopedPublish(PolicyId, MatterB);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        (await ReasonOf(response)).Should().Be(RuleHeldSecure);
+        MatterWasRead(MatterB).Should().BeTrue("the scope check ran and passed first");
+        AssertNothingWasWritten();
+    }
+
+    [Fact]
     public async Task Publish_OfAHeldRule_LimitedToAnotherMatter_IsStill409RuleHeldSecure_AndWritesNothing()
     {
         // Round 2, the other branch: the rule row IS owned by the Secure team, so the answer is "held", whichever matter is named.

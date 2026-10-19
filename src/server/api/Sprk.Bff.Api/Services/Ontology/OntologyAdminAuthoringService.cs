@@ -1286,9 +1286,13 @@ public sealed partial class OntologyAdminAuthoringService
 
         if (owner.IsOwned && owner.IsSecureOwner)
         {
-            if (policy.OwnerId != owner.OwningTeamId && matterScope is { } requested && requested != Guid.Empty)
+            if (policy.OwnerId != owner.OwningTeamId && matterScope is { } requested && requested != Guid.Empty
+                && (policy.MatterId is not { } stored || stored == Guid.Empty || stored == requested))
             {
-                // Round 2: the rule is not held; the matter the request names turned Secure after the scope check read it.
+                // Round 2: the rule is not held, and the requested matter is the only matter that can have made the answer Secure
+                // (the rule stores no other), so it turned Secure after the scope check read it. When the rule still stores a
+                // DIFFERENT matter, that matter may be the cause (Secure, not yet re-owned); blaming the requested one would name a
+                // matter the caller cannot change, so that case falls through to "held" (round 3, ontology F3).
                 _logger.LogInformation("Ontology authoring: the matter a publish of policy {PolicyId} names is now Secure; the publish is " +
                     "refused and nothing was written.", policy.Id);
                 return Invalid<OntologyVersionPublished>(
