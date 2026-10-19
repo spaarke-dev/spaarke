@@ -7,7 +7,7 @@
 > - **Delete inventory:** `notes/core-record-delete-inventory.md`.
 > - **Narrative:** the checkpoint commit messages.
 
-> **Last Updated**: 2026-10-19 (checkpoint #49).
+> **Last Updated**: 2026-10-19 (checkpoint #50).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -15,7 +15,7 @@
 |---|---|
 | **Mode** | Final push to release. Run the fix-round loop, then merge when BOTH required checks (Router + "Client lint (type-aware ratchet)") are green, then deploy via R3. A task closes on merge + deploy + a server-side gate. |
 | **Fix bar** | Choose the most technically correct, best-practice, code-efficient fix. Never take the quick route. Add no complexity without value. Every defect found is fixed or filed. |
-| **Order** | ~~186~~ (49279def1) → ~~099b~~ (d7eabba3b) → 036 (each merges after the owner items below), then #2084 (after 099b), then the #2091 thread-join follow-up (after ontology 042b merges), then the 090 wrap-up and the UAT checklist. |
+| **Order** | ~~186~~ → ~~099b~~ → ~~#2084~~ (947d98e31) → 036 (each merges after the owner items below), then #2084 (after 099b), then the #2091 thread-join follow-up (after ontology 042b merges), then the 090 wrap-up and the UAT checklist. |
 
 ## OWNER items outstanding (round 103, 2026-10-18)
 1. **036 ADR conflict (auth): STILL OPEN.** The owner leans C and asked what the conflict is. It was explained plainly on 2026-10-18; the C / B / A answer is pending. 036 is held until then.
@@ -28,9 +28,9 @@
 | PR | Issue | Worktree / branch | State |
 |---|---|---|---|
 | **#2078** (draft) | #1074, #1567 (036) | C:/wt036 `feat/uac-036-fr20-flag-gated-swap` @ **e7a8392bb** (pushed; master merged at 953fd6446) | Owner decisions (a) and (f) are built.<br>- **(a)**: a WorkforceHome-linked systemuser is confirmed app-only, naming the principal.<br>- **(f)**: `$orderby=modifiedon desc`, CacheVersion 2.<br>**Adversarial pass 1: 0 F.** Its K-items, to fix in the next round (batched with the owner's ADR answer):<br>- add a Verify bullet (vi) to guide §12.8 for a WorkforceHome live check;<br>- soften the guide's "exactly what the model-driven app allows" (team-inherited roles are an open question);<br>- add a 15 s linked timeout on the app-only calls;<br>- update the probe comments at :11 and :192-196.<br>The ADR edits are drafted in `notes/036-adr-edits-owner-a-f.md`. They are **NOT applied**: hold them until the owner's C/B/A answer. B1 wording note: the app-only calls DO send MSCRMCallerID, so "impersonating" is accurate. Pass 2 runs after that round. |
-| **#2102** (draft) | #2084 | C:/wt2084 @ 17ff59361 | Built to A3: refuse-before-write with `ontology.admin.rule_held_secure` 409, 503 on fault, no ownerid bind; lineage policy/version; Signal-cites exclusion; RuleWizard mapping. The dev probe refusals are recorded in the role config. **Waiting on ontology's 2 adversarial passes.** Then: fix, merge, SRO -Apply/-Verify on dev, R3 deploy (BFF before or with Console), live gate. |
 
-## Merged 2026-10-18
+## Merged 2026-10-18/19
+- **#2102 (#2084) `947d98e31`**: matter-scoped rules and their versions join the secure family. Publish is refuse-before-write (409 `rule_held_secure`, 400 `scope_matter_secured` only when the requested matter is the sole cause, 503 `owner_unavailable`). One citation predicate, `(sprk_signal, sprk_policy)`. Ontology ran 2 passes plus 2 re-checks, and is CLEAN. **Next:** the owner approves SRO Read on policy/policyversion on dev (send ontology before and after notices), R3 deploys (BFF before or with the Console), then the live gate.
 - **#2063 (099b) `d7eabba3b`**: merged after the union-resolved conflict with 186. R3 deploys it together with 186. **Next: after R3's after-notice, run `Backfill-RecordOwnership.ps1` -Apply, then VERIFY, then the 099b live gate, then close #1010.**
 - **#2061 (186) `49279def1`**: the Workforce role on dev was edited. R3 includes it in the next deploy, after their task 058 agent finishes. **Next: the 186 live gate after R3's after-notice.**
 - **#2094 `1473b34c6`** (#2091, part): the playbook update node, DataverseUpdateHandler and the field-mapping push now call `SecureChildReconciler.AfterRefileAsync`.
@@ -54,7 +54,8 @@
 - **#2087**: commented that the UAC part was already fixed by #2083.
 
 ## Peers (state)
-- **R3**: the 036 flag flip is tasked and acknowledged. The next deploy includes 186, plus 099b if it has merged by then.
+- **R3**: deploy candidate `f111de2b7` (live ad0e9e1a7 + 186 + 099b) has the UAC OK and waits on the owner. #2084 is to follow. The dev backfill dry run planned 101 grant rows (73 / 26 / 2 Secure).
+- **R3 (036)**: the 036 flag flip is tasked and acknowledged. The next deploy includes 186, plus 099b if it has merged by then.
 - **R3 (earlier)**: deploying the dev BFF from master (20e7b71a1; ontology 102b + #2043). UAC said OK. UAC asked R3 to include #2094 next and to send an after-notice.
 - **Ontology**:
   - **042b (#1876, PR #2096 → docs branch, head 0846c2b8d):** UAC-owned files were verified unchanged since the accepted round-2 diffs. It has the required GateDecisionRecordSharing dependency, the AfterRefileAsync hook for communications, and the Secure end-to-end test. Owner: DRs are internal-only (round 102 item 10). Known limits: #2092 and #2093.
