@@ -207,6 +207,9 @@ public sealed class BillingFactLoader
 
     private const int RuleSetPublished = 659490000;
     private const int StateActive = 0;
+    private const string OpenedDateColumn = "sprk_openeddate";
+    private const string ClosedDateColumn = "sprk_closeddate";
+    private const string BillingStatusColumn = "sprk_billingstatus";
     private const int CostTypeFee = 100000000;
 
     private static readonly string[] OwnerColumns = ["owningteam", "owninguser"];
@@ -401,19 +404,22 @@ public sealed class BillingFactLoader
 
     private async Task<BillingCoreRecordFacts?> LoadCoreRecordAsync(CoreRecordReference core, CancellationToken ct)
     {
-        var (entity, opened, closed) = core.Kind switch
+        // D-116: the three tables carry the same columns (sprk_workassignment gained its dates with the billing status; verified live
+        // 2026-10-18).
+        var entity = core.Kind switch
         {
-            CoreRecordKind.Matter => ("sprk_matter", "sprk_openeddate", "sprk_closeddate"),
-            CoreRecordKind.Project => ("sprk_project", "sprk_openeddate", "sprk_closeddate"),
-            // A work assignment has no open or close date column (InvoiceContextService): only its state is judged.
-            CoreRecordKind.WorkAssignment => ("sprk_workassignment", (string?)null, (string?)null),
+            CoreRecordKind.Matter => "sprk_matter",
+            CoreRecordKind.Project => "sprk_project",
+            CoreRecordKind.WorkAssignment => "sprk_workassignment",
             _ => throw new ArgumentOutOfRangeException(nameof(core), core.Kind, "Unknown core record kind."),
         };
 
-        var columns = new List<string> { "statecode" };
-        if (opened is not null) columns.Add(opened);
-        if (closed is not null) columns.Add(closed);
-        var query = new QueryExpression(entity) { ColumnSet = new ColumnSet(columns.ToArray()), TopCount = 1, NoLock = true };
+        var query = new QueryExpression(entity)
+        {
+            ColumnSet = new ColumnSet("statecode", OpenedDateColumn, ClosedDateColumn, BillingStatusColumn),
+            TopCount = 1,
+            NoLock = true,
+        };
         query.Criteria.AddCondition(entity + "id", ConditionOperator.Equal, core.Id);
         var row = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
         if (row is null)
@@ -424,12 +430,21 @@ public sealed class BillingFactLoader
             return null;
         }
 
+        var billingStatus = row.GetAttributeValue<OptionSetValue>(BillingStatusColumn)?.Value;
+        if (billingStatus is { } status && !CoreRecordBillingStatus.All.Contains(status))
+        {
+            _logger.LogWarning(
+                "Billing evaluation: core record {CoreEntity} {CoreId} has sprk_billingstatus {BillingStatus}, which is not Open, Final or Closed; CoreRecordWindow judges it as having no billing status (D-111).",
+                entity, core.Id, status);
+        }
+
         return new BillingCoreRecordFacts
         {
-            OpenDate = opened is null ? null : DateOf(row.GetAttributeValue<DateTime?>(opened)),
-            CloseDate = closed is null ? null : DateOf(row.GetAttributeValue<DateTime?>(closed)),
-            // Closed = the record is inactive (statecode 1), whether or not it has a close date (D-111).
+            OpenDate = DateOf(row.GetAttributeValue<DateTime?>(OpenedDateColumn)),
+            CloseDate = DateOf(row.GetAttributeValue<DateTime?>(ClosedDateColumn)),
+            // Closed = the record is inactive (statecode 1), whether or not it has a close date (D-111; read only with no billing status).
             IsClosed = row.GetAttributeValue<OptionSetValue>("statecode")?.Value is { } state && state != StateActive,
+            BillingStatus = billingStatus,
         };
     }
 

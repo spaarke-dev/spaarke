@@ -530,8 +530,34 @@ public class BillingRuleCatalogueTests
         var text = result.Description!.Clauses.Single().Text;
         text.Should().Contain("after its close date").And.Contain("before the core record's open date");
         text.Should().Contain("billed later is not", "earlier work billed later is fine");
-        text.Should().Contain("closed core record with no close date flags every line");
+        text.Should().Contain("closed core record with no close date flags every charge line (credits excluded)");
         text.Should().NotContain("is not closed", "closure alone does not flag a line dated inside the window");
+    }
+
+    [Fact]
+    public async Task Describer_CoreRecordWindow_SaysWhatEachBillingStatusDoes_AndExcludesCredits_D116_A8()
+    {
+        var result = await Describer().DescribeAsync("""{"type":"CoreRecordWindow","graceDays":30}""", default);
+
+        var text = result.Description!.Clauses.Single().Text;
+        text.Should().Contain("billing status").And.Contain("30 grace days");
+        text.Should().Contain("Open: a line dated before the core record's open date is flagged; the close date and closed state are ignored.");
+        text.Should().Contain("Final: also a line dated after its close date is flagged")
+            .And.Contain("with no close date, every charge line (credits excluded) is flagged.");
+        text.Should().Contain("Closed: every charge line (credits excluded) is flagged as closed to billing.");
+        text.Should().Contain("credit lines are never flagged");
+        text.Should().NotContain("every line", "every reason that flags all lines flags charge lines only (D-105)");
+    }
+
+    [Fact]
+    public void TheCoreRecordWindowSchemaDescription_MatchesTheHandler_D116_A8()
+    {
+        using var schema = System.Text.Json.JsonDocument.Parse(BillingRuleCatalogue.SchemaText(RuleType.CoreRecordWindow));
+        var description = schema.RootElement.GetProperty("description").GetString();
+
+        description.Should().Contain("billing status").And.Contain("every charge line (credits excluded)")
+            .And.Contain("closed to billing").And.Contain("credit lines are never flagged");
+        description.Should().NotContain("every line.");
     }
 
     [Fact]

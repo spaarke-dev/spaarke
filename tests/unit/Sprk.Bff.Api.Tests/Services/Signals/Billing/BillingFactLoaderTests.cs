@@ -254,6 +254,61 @@ public class BillingFactLoaderTests
         missing.CoreRecord.Should().BeNull();
     }
 
+    [Theory]
+    [InlineData(CoreRecordKind.Matter, "sprk_matter")]
+    [InlineData(CoreRecordKind.Project, "sprk_project")]
+    [InlineData(CoreRecordKind.WorkAssignment, "sprk_workassignment")]
+    public async Task TheCoreRecord_ReadsItsBillingStatusAndBothDates_OnEveryCoreTable_AWorkAssignmentIncluded_D116(CoreRecordKind kind, string table)
+    {
+        var id = Guid.NewGuid();
+        _world.Add(table, id,
+            ("sprk_openeddate", new DateTime(2026, 1, 10)), ("sprk_closeddate", new DateTime(2026, 3, 20)),
+            ("statecode", new OptionSetValue(0)), ("sprk_billingstatus", new OptionSetValue(CoreRecordBillingStatus.Final)));
+        var request = Request(null) with { CoreRecord = new CoreRecordReference(kind, id) };
+
+        var loaded = await Loader().LoadAsync(request, CancellationToken.None);
+
+        loaded.CoreRecord.Should().Be(new BillingCoreRecordFacts
+        {
+            OpenDate = new DateOnly(2026, 1, 10),
+            CloseDate = new DateOnly(2026, 3, 20),
+            IsClosed = false,
+            BillingStatus = CoreRecordBillingStatus.Final,
+        });
+        AssertWroteNothing();
+    }
+
+    [Fact]
+    public async Task AWorkAssignmentClosedToBilling_FlagsEveryChargeLine_EndToEnd_D116()
+    {
+        var assignment = Guid.NewGuid();
+        _world.Add("sprk_workassignment", assignment,
+            ("sprk_openeddate", new DateTime(2026, 1, 10)), ("sprk_closeddate", new DateTime(2026, 12, 31)),
+            ("statecode", new OptionSetValue(0)), ("sprk_billingstatus", new OptionSetValue(CoreRecordBillingStatus.Closed)));
+        Policy(RuleSet(RuleSetScope.ClientDefault), "CD-WINDOW", RuleType.CoreRecordWindow, """{"type":"CoreRecordWindow","graceDays":0}""");
+        var request = Request(null, lines: 2) with { CoreRecord = new CoreRecordReference(CoreRecordKind.WorkAssignment, assignment) };
+
+        var result = await Evaluator().EvaluateAsync(request, CancellationToken.None);
+
+        result.Findings.Select(f => (f.Subject.LineIndex, f.ReasonCode)).Should().Equal(
+            (0, BillingReasonCodes.CoreRecordClosedToBilling), (1, BillingReasonCodes.CoreRecordClosedToBilling));
+        AssertWroteNothing();
+    }
+
+    [Fact]
+    public async Task AnUnknownBillingStatus_IsLoadedAsRead_AndLoggedAsAWarning_D116()
+    {
+        var matter = Guid.NewGuid();
+        _world.Add("sprk_matter", matter, ("statecode", new OptionSetValue(0)), ("sprk_billingstatus", new OptionSetValue(100000099)));
+        var logger = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.BillingEvaluationKit.CapturingLogger<BillingFactLoader>();
+        _loaderLogger = logger;
+
+        var loaded = await Loader().LoadAsync(Request(matter), CancellationToken.None);
+
+        loaded.CoreRecord!.BillingStatus.Should().Be(100000099, "the handler treats a value outside the set as none (D-111)");
+        logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("sprk_billingstatus 100000099"));
+    }
+
     // ── Priors (D-112, FR-36) ────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]

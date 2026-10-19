@@ -194,6 +194,115 @@ public class CoreRecordWindowHandlerTests
         finding.Value("coreRecord.closed").Value.Should().Be("true");
     }
 
+    // ── D-116: the billing status decides ────────────────────────────────────────────────────────────────────────
+
+    private static BillingCoreRecordFacts WithStatus(int? status, DateOnly? open = null, DateOnly? close = null, bool closed = false) =>
+        Core(open, close, closed) with { BillingStatus = status };
+
+    [Fact]
+    public void Open_OnlyTheOpenDateIsChecked_TheCloseDateAndTheClosedStateAreIgnored_D116()
+    {
+        // An inactive record with a close date in the past, but billing Open: billing is allowed.
+        var open = WithStatus(CoreRecordBillingStatus.Open, Open, Close, closed: true);
+
+        var findings = Run(Window(), FactsFor(open, Open.AddDays(-1), Open.AddDays(5), Close.AddDays(40), null));
+
+        var finding = findings.Should().ContainSingle("only the line before the open date is flagged").Subject;
+        finding.Subject.Should().Be(BillingSubject.ForLine(0));
+        finding.ReasonCode.Should().Be(BillingReasonCodes.BeforeCoreRecordOpened);
+        finding.Value("coreRecord.billingStatus").Value.Should().Be("Open");
+    }
+
+    [Fact]
+    public void Open_WithNoCloseDate_OnAnInactiveRecord_FlagsNothing_D116()
+    {
+        // Under D-111 this record (inactive, no close date) would flag every line.
+        Run(Window(), FactsFor(WithStatus(CoreRecordBillingStatus.Open, Open, closed: true), Open.AddDays(5), null)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Final_FlagsALineDatedAfterTheCloseDate_NotWorkDatedOnOrBeforeIt_D116()
+    {
+        var final = WithStatus(CoreRecordBillingStatus.Final, Open, Close);
+
+        var findings = Run(Window(), FactsFor(final, Close.AddDays(-5), Close, Close.AddDays(1), null, Open.AddDays(-1)));
+
+        findings.Select(f => (f.Subject.LineIndex, f.ReasonCode)).Should().Equal(
+            (2, BillingReasonCodes.AfterCoreRecordClosed), (4, BillingReasonCodes.BeforeCoreRecordOpened));
+    }
+
+    [Fact]
+    public void Final_UsesTheGraceDaysAfterTheCloseDate_D116()
+    {
+        var final = WithStatus(CoreRecordBillingStatus.Final, Open, Close);
+
+        Run(Window(7), FactsFor(final, Close.AddDays(7))).Should().BeEmpty();
+        Run(Window(7), FactsFor(final, Close.AddDays(8))).Should().ContainSingle();
+    }
+
+    [Fact]
+    public void Final_WithNoCloseDate_FlagsEveryChargeLine_EvenOneWithNoDate_D116()
+    {
+        var findings = Run(Window(), FactsFor(WithStatus(CoreRecordBillingStatus.Final, Open), Open.AddDays(5), null));
+
+        findings.Select(f => f.Subject.LineIndex).Should().Equal(0, 1);
+        findings.Should().OnlyContain(f => f.ReasonCode == BillingReasonCodes.CoreRecordClosed);
+    }
+
+    [Fact]
+    public void Closed_FlagsEveryChargeLine_WhateverItsDate_ClosedToBilling_D116()
+    {
+        // An active record, dates wide open, a line inside the window and one with no date: closed to billing flags both.
+        var closed = WithStatus(CoreRecordBillingStatus.Closed, Open, Close);
+
+        var findings = Run(Window(), FactsFor(closed, Open.AddDays(5), null, Open.AddDays(-30)));
+
+        findings.Select(f => f.Subject.LineIndex).Should().Equal(0, 1, 2);
+        findings.Should().OnlyContain(f => f.ReasonCode == BillingReasonCodes.CoreRecordClosedToBilling);
+        findings[0].Value("coreRecord.billingStatus").Value.Should().Be("Closed");
+        BillingRuleCatalogue.IsRejectCapableReason(RuleType.CoreRecordWindow, BillingReasonCodes.CoreRecordClosedToBilling)
+            .Should().BeTrue("the rule's author decides the consequence, as for the other CoreRecordWindow reasons (073 F-ALLOW)");
+    }
+
+    [Theory]
+    [InlineData(CoreRecordBillingStatus.Open)]
+    [InlineData(CoreRecordBillingStatus.Final)]
+    [InlineData(CoreRecordBillingStatus.Closed)]
+    public void UnderEveryBillingStatus_ACreditLineIsNeverFlagged_D105_D116(int status)
+    {
+        // No close date: Final and Closed would flag every charge line. The credits are dated before the open date too.
+        var core = WithStatus(status, Open);
+        var facts = Facts(
+            Fee(0) with { Date = Open.AddDays(-30), Hours = -1m, Amount = -575m },
+            Fee(1) with { Date = null, Amount = -575m },
+            Expense(2) with { Date = Open.AddDays(-30), Amount = -40m }) with { CoreRecord = core };
+
+        Run(Window(), facts).Should().BeEmpty("a credit is never judged as a charge, whatever the billing status");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(100000099)] // a value outside the set
+    public void AnEmptyOrUnknownBillingStatus_IsJudgedByD111(int? status)
+    {
+        var inactiveNoClose = WithStatus(status, Open, closed: true);
+        var activeWithClose = WithStatus(status, Open, Close);
+
+        Run(Window(), FactsFor(inactiveNoClose, Open.AddDays(5), null)).Should().HaveCount(2)
+            .And.OnlyContain(f => f.ReasonCode == BillingReasonCodes.CoreRecordClosed);
+        Run(Window(), FactsFor(activeWithClose, Close.AddDays(1), Close)).Should().ContainSingle()
+            .Which.ReasonCode.Should().Be(BillingReasonCodes.AfterCoreRecordClosed);
+    }
+
+    [Fact]
+    public void TheBillingStatusValues_AreTheLiveOptionValues_DefinedOnce_D116()
+    {
+        CoreRecordBillingStatus.Open.Should().Be(100000000);
+        CoreRecordBillingStatus.Final.Should().Be(100000001);
+        CoreRecordBillingStatus.Closed.Should().Be(100000002);
+        CoreRecordBillingStatus.All.Should().BeEquivalentTo([100000000, 100000001, 100000002]);
+    }
+
     [Fact]
     public void AMissingCoreRecordDate_IsLeftOutOfTheTemplateValues_NotWrittenAsNull()
     {

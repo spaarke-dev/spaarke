@@ -164,6 +164,7 @@ public static class BillingReasonCodes
     public const string BeforeCoreRecordOpened = "core_record_window.before_open";
     public const string AfterCoreRecordClosed = "core_record_window.after_close";
     public const string CoreRecordClosed = "core_record_window.core_record_closed";
+    public const string CoreRecordClosedToBilling = "core_record_window.closed_to_billing";
     public const string DuplicateInvoiceNumber = "duplicate.invoice_number";
     public const string DuplicateOfPriorSubmissionLine = "duplicate.line_prior_submission";
     public const string DuplicateOfEarlierLine = "duplicate.line_same_invoice";

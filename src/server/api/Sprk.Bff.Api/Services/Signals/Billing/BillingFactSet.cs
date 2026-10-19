@@ -210,12 +210,51 @@ public sealed record BillingLineFacts
 /// <summary>The core record's reference data for CoreRecordWindow (spec FR-24).</summary>
 public sealed record BillingCoreRecordFacts
 {
+    /// <summary><c>sprk_openeddate</c> (sprk_matter, sprk_project and sprk_workassignment).</summary>
     public DateOnly? OpenDate { get; init; }
 
+    /// <summary><c>sprk_closeddate</c> (sprk_matter, sprk_project and sprk_workassignment).</summary>
     public DateOnly? CloseDate { get; init; }
 
-    /// <summary>The core record is closed (its status), whether or not it has a close date.</summary>
+    /// <summary>The core record is closed (inactive, <c>statecode</c>), whether or not it has a close date. Read only when
+    /// <see cref="BillingStatus"/> is empty (D-111); a billing status decides on its own (D-116).</summary>
     public bool IsClosed { get; init; }
+
+    /// <summary>
+    /// <c>sprk_billingstatus</c> (D-116): one of <see cref="CoreRecordBillingStatus"/>, or <c>null</c> when the row has none (it existed
+    /// before the column), in which case D-111 applies. A value outside the set is treated as none.
+    /// </summary>
+    public int? BillingStatus { get; init; }
+}
+
+/// <summary>
+/// The values of the global choice <c>sprk_billingstatus</c> on sprk_matter, sprk_project and sprk_workassignment (D-116; verified
+/// live on spaarkedev1 2026-10-18; form default Open, not required). The one place the option values are named: the labels and values
+/// may change, so code refers to them only through these constants.
+/// </summary>
+public static class CoreRecordBillingStatus
+{
+    /// <summary>Open: billing is allowed. Only the opened date is checked; the close date and the closed state are ignored.</summary>
+    public const int Open = 100000000;
+
+    /// <summary>Final: only work dated on or before the close date is billable; with no close date nothing is (fail safe).</summary>
+    public const int Final = 100000001;
+
+    /// <summary>Closed: closed to billing; every new charge line is flagged.</summary>
+    public const int Closed = 100000002;
+
+    /// <summary>The three values.</summary>
+    public static IReadOnlySet<int> All { get; } = new[] { Open, Final, Closed }.ToFrozenSet();
+
+    /// <summary>The value's label as text for a finding's reference value, or <c>null</c> when there is none.</summary>
+    internal static string? Label(int? value) => value switch
+    {
+        null => null,
+        Open => "Open",
+        Final => "Final",
+        Closed => "Closed",
+        _ => value.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+    };
 }
 
 /// <summary>What an earlier attempt came to, as far as Duplicate cares (spec FR-36, D-37).</summary>

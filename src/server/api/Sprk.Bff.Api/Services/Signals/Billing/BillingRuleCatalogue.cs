@@ -236,7 +236,8 @@ public static class BillingRuleCatalogue
         RuleType.ExpenseRule => RejectCapable(BillingReasonCodes.ExpenseCodeNotReimbursable, BillingReasonCodes.ExpenseAmountOverCap),
         RuleType.InvoiceAge => RejectCapable(BillingReasonCodes.InvoiceTooOld),
         RuleType.CoreRecordWindow => RejectCapable(
-            BillingReasonCodes.BeforeCoreRecordOpened, BillingReasonCodes.AfterCoreRecordClosed, BillingReasonCodes.CoreRecordClosed),
+            BillingReasonCodes.BeforeCoreRecordOpened, BillingReasonCodes.AfterCoreRecordClosed, BillingReasonCodes.CoreRecordClosed,
+            BillingReasonCodes.CoreRecordClosedToBilling),
         RuleType.Duplicate => RejectCapable(BillingReasonCodes.DuplicateInvoiceNumber),
         RuleType.RequiredData => RejectCapable(BillingReasonCodes.RequiredFieldMissing),
         RuleType.ApprovedTimekeeper or RuleType.TimeIncrement or RuleType.DailyHoursCap or RuleType.NonBillableActivity
@@ -277,7 +278,7 @@ public static class BillingRuleCatalogue
             $"No line is dated more than {Num(root, "maxAgeDays")} days before the invoice date.",
             $"InvoiceAge(maxAgeDays={Num(root, "maxAgeDays")})"),
         RuleType.CoreRecordWindow => (
-            $"A line dated before the core record's open date or after its close date (with {Num(root, "graceDays")} grace days) is flagged; work dated on or before the close date and billed later is not; a closed core record with no close date flags every line.",
+            $"Judged by the core record's billing status, with {Num(root, "graceDays")} grace days on each date; credit lines are never flagged. Open: a line dated before the core record's open date is flagged; the close date and closed state are ignored. Final: also a line dated after its close date is flagged, and work dated on or before the close date and billed later is not; with no close date, every charge line (credits excluded) is flagged. Closed: every charge line (credits excluded) is flagged as closed to billing. No billing status: a line dated before the open date or after the close date is flagged, and a closed core record with no close date flags every charge line (credits excluded).",
             $"CoreRecordWindow(graceDays={Num(root, "graceDays")})"),
         RuleType.Duplicate => (
             $"No invoice or line duplicates an earlier one from the firm on {List(root, "matchFields")}.",
