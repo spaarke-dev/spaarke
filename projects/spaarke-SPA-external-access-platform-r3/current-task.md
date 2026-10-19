@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-18 22:32Z (after the owner-approved dev BFF deploy of `ad0e9e1a7`)
+> **Last Updated**: 2026-10-19 11:40Z (after the owner-approved dev BFF deploy of `44f802a1d`)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **058 done 2026-10-19** (SPA multitenant sign-in, profile form, link). 2 adversarial passes; fix round 1 closed the no-account `clearCache()` session wipe (real-MSAL regression test). Final: vitest 1072/1072, typecheck, lint, build, check:dist clean. Next task **075** (Teams → multitenant NAA; carry-over recorded in its POML notes) |
-| **Step** | Dev BFF deploy candidate **`f111de2b7`**: master `d7eabba3b` merged (`125f72564`), plus the ArchTest unicode-escape fix. Live `ad0e9e1a7` is an ancestor. BFF build 0 errors; targeted 5381 passed / 9 skipped; ArchTests 1149/1150 → the 1 fixed (ExternalSpa 231/231). Deploy check sent 2026-10-19 ~04:30Z to UAC, ontology, ebilling, word-add-in and provisioning; field-mapping (new session) held it, so it does not block. **Waiting for replies and the owner's direct approval** |
-| **Status** | **Dev BFF = `ad0e9e1a7`** (R3 + master `1473b34c6`: ontology 102b #2088 + UAC #2094), deployed with the owner's direct approval, finished 2026-10-18 22:30:58Z. Pre-deploy live was `ebc74b331` (an ancestor). Verified: ProductVersion `1.0.0+ad0e9e1a7…`, 4 critical files SHA-256 match, `/healthz` 200, 2 CORS origins, MIs `mi-bff-api-dev` + `mi-ontology-writer-dev`. Tests at this head: targeted 1064/1064, ArchTests 1130/1130. After-notices sent to ontology (authoring routes + nightly sweep), UAC (#2094 live gate + #2083 smoke) and word-add-in. Rollback: redeploy `ebc74b331`. Dev external SPA = `ebc74b331` (run `39094144398`), not redeployed. **Owner Partner UAT passed 2026-10-18; UI changes go to a new round** |
-| **Next Action** | Merge `origin/master` into the branch, keeping the owner's researcher MEMORY.md (save the patch, check it out, merge, then `apply -3`). 058's SPA is not deployed; the SPA deploy waits for 059 (multitenant client redirect URIs, plus GitHub env `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID` and `VITE_BACKENDS` with `homeTenantIds`; the workflow now fails closed without them) |
+| **Step** | 058 closed. Next: task 075 (Teams → multitenant NAA) via task-execute. Watch for UAC's backfill + 186/099b live-gate results |
+| **Status** | **Dev BFF = `44f802a1d`** (= candidate `f111de2b7` + a state-file commit: live `ad0e9e1a7` + master `d7eabba3b` UAC 186 #2061 + 099b #2063). Deployed with the owner's direct approval 2026-10-19 11:35:09–11:37:07Z. Verified: ProductVersion `1.0.0+44f802a1d…`; 4 critical files SHA-256 match; `/healthz` 200; 2 CORS origins; MIs `mi-bff-api-dev` + `mi-ontology-writer-dev`. Session OKs: UAC, ontology, ebilling (no `sprk_invoicestatus` delete yet), word-add-in, provisioning; field-mapping unreachable. After-notices sent. **Rollback: redeploy `ad0e9e1a7`.** Dev external SPA = `ebc74b331`, not redeployed (058's SPA waits for 059) |
+| **Next Action** | Start task 075 via task-execute. 058's SPA is not deployed: it waits for 059 (multitenant client redirect URIs; GitHub env `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID` and `VITE_BACKENDS` with `homeTenantIds`; the workflow fails closed without them) |
 
 ### Uncommitted files
 - `.claude/agent-memory/researcher/MEMORY.md` (modified) and `.claude/agent-memory/researcher/dataverse-duplicate-detection-api-default-2026-10-15.md` (untracked) belong to the OWNER. Never commit or discard them. The 2026-10-18 master merge re-applied the owner's index line next to master's new line. Backups are in the session scratchpad (`owner-researcher-memory.patch`, `owner-researcher-MEMORY.md.bak`).
@@ -25,7 +25,7 @@
 - **Test runs:** use filtered runs and absolute csproj paths. Full-suite host tests time out under load (2–4 min each), so re-run failures in isolation. Rebuild the test project before trusting results (CS0016/MSB3030 races).
 
 ## Next actions (in order)
-1. Read ontology's and UAC's post-deploy check results for `ad0e9e1a7`; if either fails, decide on rollback with the owner.
+1. Read UAC's backfill + 186/099b live-gate results for `44f802a1d`; on a failure, decide on rollback (`ad0e9e1a7`) with the owner.
 2. Partner UAT passed (2026-10-18). UI changes are a new round (not R3 scope unless the owner says otherwise).
 4. 075 → 076 → 074 (074 and 059 are live and owner-gated); 070/071/072; the final R3 PR.
 5. Close DEF-004 (#1829) as superseded when ebilling 051 merges (successor answers posted on the issue).
@@ -42,7 +42,9 @@
 - **ebilling 015: `sprk_invoicestatus` retirement.** Grid 3ff4102c is on `statuscode` (2026-10-18 03:42Z). The external allow-list admits both columns (transitional). Ebilling's `-Delete` waits until 015 reaches master and R3 deploys a BFF containing it. **From the delete on, every dev BFF candidate must pass a CONTENT check** (not ancestry, because PR #1911 may be squash-merged): `Services/Finance/FinanceBaseValues.cs`, `FinanceRollupService.cs` and `InvoiceReviewService.cs` contain no `sprk_invoicestatus`, and FinanceBaseValues contains `InvoiceStatusCodeColumn`. `20e7b71a1` and the live `ad0e9e1a7` do NOT pass this (FinanceBaseValues 3 refs, InvoiceReviewService 1), so neither is a delete attestation. Afterwards, remove `sprk_invoicestatus` from the ReadableColumns and both test arrays. **Merge note:** keep ebilling's retirement-marker line in the ExternalAccessModule invoice block. **Rollback order:** SPA before BFF; never deploy the SPA after a failed or rolled-back BFF.
 - **ebilling-r1 merge (later):** its BFF reads `sprk_policyversion.sprk_rejectionreason` (D-113) and the D-104 Pending Spend column. Their schema scripts must run on dev before deploying any BFF built from that master; ebilling notifies.
 - **UAC order:** #2061 (186) → #2078 (036). 186 waits on the owner's Workforce role edit; 036 is held on an owner ADR decision. After 186: every new `/api/v1/external` route declares a ceiling requirement, handler check or exemption (`WorkforceCeilingEndpointFilter.cs`). **Tell UAC before any BFF change to the external write routes, ExternalAccessModule.cs or AccessibleRecordSetService.cs.**
-- **Next dev BFF deploy must include UAC 186** (#2061, master `49279def1`, merged 2026-10-18; owner edited the dev Workforce role). Merge master only after the 058 implementer agent finishes (it edits the working tree). 099b (#2063) is also merged (master `d7eabba3b`; union-resolved with 186 in `IDataversePrivilegeChecker`/`UserPrivilegeChecker`) — take both in the same merge. After the deploy: after-notice to UAC, which then runs the record-ownership backfill on dev (-Apply, VERIFY) and the 099b + 186 live gates.
+- **Next-after-`f111de2b7` dev BFF deploy:** include UAC #2102 (#2084, master `947d98e31`, matter-scoped rules in the secure family).
+  - Order: BFF before or with the Console. The RuleWizard maps `ontology.admin.rule_held_secure` and `ontology.admin.owner_unavailable`; an older Console shows the detail text, so there is no regression either way.
+  - Dev prerequisite: SRO Read on `sprk_policy`/`sprk_policyversion`, pending the owner's approval in UAC.
 - **036 live gate:** (UAC relayed 2026-10-18 that the owner tasks R3 with this flip; still needs the owner's DIRECT confirmation here, plus UAC's merge sha.) set `ExternalAccess__ImpersonatedRootSets__Enabled=true` on spaarke-bff-dev, done by R3, ONLY after #2078 is merged and deployed to dev, and after the owner confirms DIRECTLY in this session. UAC's relay doesn't count. Show the exact `az webapp config appsettings set` command first. Rollback: delete the setting, or set it to `false`.
 - **Ontology:** wants before/after restart notices; BFF before Console bundle for 102b.
 - Older items (verify before relying): Copilot agent still on `access_as_user` (`1e40baad`); operator mailbox/Exchange RBAC (H14a); BFF app user `prvDelete` on `sprk_servicerequest`; ISS-001…ISS-005; DEF-001 #1736, DEF-002 #1737, DEF-003 #1828.
