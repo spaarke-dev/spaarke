@@ -53,7 +53,7 @@ The planner classifies every row it reaches as Delete, Keep, Block or Unlink. Ta
 |---|---|---|
 | **Delete** | `sprk_document` (+ `sprk_fileversion`, `sprk_emailartifact`, `sprk_attachmentartifact`), `sprk_analysis` (+ `sprk_analysisoutput`, which cascades), `sprk_communication`, `sprk_communicationthread`, `sprk_communicationattachment`, `sprk_communicationparticipant`, `sprk_emailreviewlog`, `sprk_event`, `sprk_eventlog`, `sprk_todo`, `sprk_memo`, `sprk_signal`, `sprk_kpiassessment`, `sprk_reportcard`, `sprk_spendsnapshot`, `sprk_spendsignal`, `sprk_budget` (+ `sprk_budgetbucket`, which cascades), `sprk_agreement`, `sprk_communicationrule`, `sprk_externalidentifier` | inventory §4.1, D8; Signals per round 103 |
 | **Keep** (RemoveLink unlinks) | `sprk_decisionrecord`, `sprk_externalrecordaccess`, `sprk_assignedaccess` | D2, D4 |
-| **Block** (the whole delete is refused) | `sprk_invoice`, `sprk_billingevent`, `sprk_invoicesubmission`, `sprk_invoiceapproval`, `sprk_invoicecorrection`, `sprk_budgetrevision`, `sprk_ratecard` | D3. Rate card is blocked by default, pending ebilling-r1 (§9 Q6). |
+| **Block** (the whole delete is refused) | `sprk_invoice`, `sprk_billingevent`, `sprk_invoicesubmission`, `sprk_invoiceapproval`, `sprk_invoicecorrection`, `sprk_externalidentifier` | D3 as settled by ebilling D-120 (§10). Rate cards are now deleted with the record, and budgets (with their buckets and revisions) are kept and unlinked. Neither blocks. |
 | **Platform cascade** (counted, not deleted by the BFF) | `sprk_policy` (matter; `Cascade`, D9) | — |
 | **Hard deny** (never Delete, whatever the walk says) | the four core tables, `contact`, `account`, `systemuser`, `team`, `businessunit`, `sprk_organization`, `email`, every `*_ref` table, `sprk_analysisaction/knowledge/skill/tool`, `sprk_policyversion`, `sprk_ruleset`, `sprk_billingcodeset` | Owner rule; inventory §1.2, §4.3 |
 
@@ -378,6 +378,20 @@ Model per the UAC standing rule: Opus pinned; effort as given.
 - **Q4. Should the delete itself be recorded as a Decision Record?** The DR would name the caller, R and the counts. Today the Dataverse audit names the BFF app user for the deletes, and the caller appears only in telemetry and in a 7-day status record. Audit retention is unset (#2027). DRs are ontology-owned, so a yes goes through ontology-r1.
 - **Q5. Signals that a kept Decision Record cites (4 on dev):** delete them (as approved, "Signals deleted"), or keep them as the DR's evidence?
 
-**For ebilling-r1 (a peer, relayed through it):**
+**For ebilling-r1:** Q6 is ANSWERED by the owner as ebilling D-120 (2026-10-19). See §10.
 
-- **Q6.** Rate cards (`sprk_ratecard` + rates) under a core record: block (the default here), delete, or keep? Also confirm that the eBilling submission, approval and correction tables block the delete (D3).
+---
+
+## 10. ebilling D-120 (owner, 2026-10-19, relayed by ebilling-r1)
+
+This settles Q6 and replaces the earlier "rate cards and budget revisions block" default.
+
+| Table(s) | Lookup(s) to the core record | Behaviour |
+|---|---|---|
+| `sprk_ratecard`, with `sprk_ratecardrate` lines (parental, cascade) | `sprk_matter` / `sprk_project` / `sprk_workassignment` (`sprk_matter_ratecard_matter`, `sprk_project_ratecard_project`, `sprk_workassignment_ratecard_workassignment`) | **Deleted with the record.** This covers the card scoped to it and its lines. A card carries at most one core scope (task 078's writer). A card with no core scope is firm-wide and untouched. |
+| `sprk_budget`, with `sprk_budgetbucket` (and its revisions); `sprk_spendsnapshot`; `sprk_spendsignal` | `sprk_matter` / `sprk_project` | **Kept and unlinked.** They do NOT block. |
+| `sprk_invoicesubmission`, `sprk_invoiceapproval`, `sprk_invoicecorrection`, `sprk_externalidentifier` | `sprk_regardingmatter` / `sprk_regardingproject` / `sprk_regardingworkassignment` (no service-request lookup) | **Block**, alongside `sprk_invoice` and `sprk_billingevent`: finance and audit history. |
+| Billing Signals and Decision Records | only via `sprk_regardinginvoice` / `sprk_regardinginvoiceline` | Covered: the invoice blocks first. |
+| `sprk_ruleset`, `sprk_policy`/`sprk_policyversion` (firm-scoped here), `sprk_billingcodeset`/`sprk_billingcode`, `sprk_timekeeper`, `sprk_billingexport`, `sprk_ebillingsetting` | none | Untouched. |
+
+**Before relying on any platform cascade:** read the live relationship metadata (`CascadeConfiguration.Delete`) for the `sprk_invoiceapproval` and rate-card core lookups. ebilling's docs do not state them. The delete operation never depends on a cascade it has not verified. The task 1 preview reads these relationships, so it does that check.
