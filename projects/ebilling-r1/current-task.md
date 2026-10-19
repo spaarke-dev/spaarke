@@ -11,27 +11,27 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. 48/79 complete. 071/072: the W review fixes are on the branch (4795a4209..c02200029, notes to c342f4b9a); ontology-r1's re-check of that range was requested 2026-10-19. 049 is running as two implementer agents from base c342f4b9a: impl049 (opus; pipeline: handler, processor, sink, DI; D-101 overrides the POML's "Rejected: no invoice") and impl049spend (sonnet; D-102 tests + D-104 Pending Spend in FinanceBaseValues/FinanceRollupService + a scripts/ebilling column script) |
-| **Step** | Branch HEAD c342f4b9a (local; origin/work/ebilling-r1 is 33723dbdc; ask the owner before any push). Verified on c342f4b9a: build 0/0; broad filter 5349/0 + Refile/SecureChild 777/0; ArchTests 1207/0 (a first run had 9 boot-fixture timeouts under load; the rerun was clean) |
+| **Task** | Parallel mode. 48/79 complete. 071/072: ontology-r1 re-checked the W fixes, raising F4 (EventId) and F2 (Flag-tie primary); both are fixed in 3ce07e0e3 and that commit is out for re-check, after which 071/072 should PASS. 049: the pipeline agent stopped after writing the step-to-component map (notes/049-submission-processing-job.md, plan parts A to E). The owner answered D-121 to D-124. The spend part has landed (be84b2a8f..bafa0cb9e). Running now: impl049a (sonnet xhigh: ExecuteTransactionAsync, the 014 create-in-status, the notification sink, the D-121 amount script, the D-124 sprk_trackingnumber column) and impl049b (opus: SubmissionReasonCodes, the FinanceBaseValues TODO swap, processor steps 1-5 and the outcome type), both from base bafa0cb9e |
+| **Step** | HEAD bafa0cb9e (local; origin is 33723dbdc; ask the owner before any push). Verified: build 0/0; broad filter incl. Spend and Rollup 6196/0; ArchTests 1209/0 |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | (1) On ontology-r1 PASS for the W fixes: mark 071 and 072 ✅ (POML status + TASK-INDEX "✅ [done]"; check-task-status-drift.ps1). On findings: a fix agent from the tip. (2) When the 049 agents report: cherry-pick both ranges with cp.sh, run the BROAD filter on the combined tip, rewrite hashes in the 049 notes, run one Opus adversarial review of 049, then send ontology-r1 the D-104 range plus the column name for their AuthorableColumns follow-up. (3) Queued 077 follow-up: show the F1-b "consequence lowered to Flag" note in the Rule Review read model and page |
+| **Next Action** | (1) On ontology-r1 PASS: mark 071/072 ✅ (POML + TASK-INDEX; run check-task-status-drift.ps1). (2) On parts A and B: cherry-pick, run the broad filter, then brief part C (persistence: row builders, ownership and core fields, the transaction, 016 totals, re-evaluate on a CoreRecord change, fault injection) from B's outcome type. Then part D (after commit: Signal supersede, deciding primary, held presentation, the D-122 rejection DR resolving every open Signal under the IIdempotencyService lock with a concurrent test, D-123 system-policy Signals once ontology-r1 agrees the shape, terminal status, indexing, notify, resume). Then part E (handler, DI, ArchTests, publish delta vs fresh master, CVE check, one Opus adversarial review). (3) ontology-r1 is also reviewing the D-104 range and the D-123 system-policy design (asked). (4) Queued 077 follow-up: show the F1-b "lowered to Flag" note in Rule Review |
 
 ### Ranges out for review
-- ontology-r1: 072 W review fixes 4795a4209..c342f4b9a (requested 2026-10-19).
-- Their earlier re-checks were clean: 073 fix round (plus our K1/K2 fix 9bbe8c0f4) and the 074 follow-up (plus our hash fix 18b6390dc).
+- ontology-r1: 3ce07e0e3 (072 F4/F2); be84b2a8f..bafa0cb9e (049 D-104, their hot path); D-123 system-policy design ask.
 
 ### Owner decisions this session
 D-111 to D-120 are in the decisions log.
 - D-117: an expense rule rejects only on the firm-billed code.
 - D-118: client workforce users may use the partner portal.
 - D-119: a bare "$" is USD.
+- D-121: credit amounts may be negative (lower sprk_amount min). D-122: an automatic rejection resolves every open Signal on the invoice. D-123: D-91 / coding findings become Signals under a system billing policy (needs ontology-r1). D-124: new sprk_invoice tracking-number column.
 - D-120: core-record delete. Finance history blocks the delete. A rate card scoped 1:1 to the record is deleted with it; a shared card is kept. Budgets are kept, unlinked, and never block. uac-r2 adopted it.
 
 ### Queued owner actions (live writes need the owner's OK)
 - Re-sync the drafting Action row (scripts/ebilling/Ensure-ActionRow.ps1; 073 prompt change).
 - The 074 live seam test.
 - The IfRowVersionMatches probe (076).
-- Run the schema scripts (rejection reason; D-104 Pending Spend) on dev before a BFF that reads them.
+- Run the schema scripts on dev before a BFF that reads them: rejection reason; D-104 sprk_pendingspend (Deploy-EbillingPendingSpendSchema.ps1; rollups 400 without it); D-121 amount min; D-124 tracking column. Then a read-only live check of the pending-spend FetchXML shape.
 - Add the 7 new tables to the apps.
 - Grant Write on sprk_ruleset before 079.
 
