@@ -3,6 +3,8 @@ using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.DI;
@@ -342,6 +344,109 @@ public sealed class InvoiceLifecycleServiceTests
             InvoiceStatusCodes.TryFromStatusCode(statusCode, out var roundTrip).Should().BeTrue();
             roundTrip.Should().Be(status);
         }
+    }
+
+    // ---- ebilling-r1 task 049 part A, G2 / D-101: the create-time status. The lifecycle service stays the single owner of statuscode;
+    // it builds the create request (so 049 can put it inside one ExecuteTransactionAsync) and refuses every status but In Review / Rejected.
+
+    private static Entity NewInvoice() => new("sprk_invoice", InvoiceId)
+    {
+        ["sprk_invoicenumber"] = "INV-1",
+        ["sprk_totalamount"] = new Money(1500m),
+    };
+
+    [Theory]
+    [InlineData(InvoiceLifecycleStatus.InReview, 0, 1)]
+    [InlineData(InvoiceLifecycleStatus.Rejected, 1, 659490003)]
+    public void BuildCreateRequest_ForInReviewAndRejected_AddsTheStatePairToACopyOfTheRow(
+        InvoiceLifecycleStatus initial, int expectedState, int expectedStatus)
+    {
+        var invoice = NewInvoice();
+
+        var result = CreateService().BuildCreateRequest(invoice, initial);
+
+        result.Succeeded.Should().BeTrue();
+        result.Reason.Should().BeNull();
+        result.Requested.Should().Be(initial);
+        var target = result.Request!.Target;
+        target.LogicalName.Should().Be("sprk_invoice");
+        target.Id.Should().Be(InvoiceId, "the caller's client-chosen id is kept, so the transaction's other rows can point at it");
+        target.GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(expectedState);
+        target.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(expectedStatus);
+        target.GetAttributeValue<string>("sprk_invoicenumber").Should().Be("INV-1", "the caller's columns are carried over unchanged");
+        target.GetAttributeValue<Money>("sprk_totalamount").Value.Should().Be(1500m);
+        invoice.Attributes.Should().NotContainKey("statuscode", "the caller's row is never changed behind its back");
+        invoice.Attributes.Should().NotContainKey("statecode");
+    }
+
+    [Theory]
+    [InlineData(InvoiceLifecycleStatus.Approved)]
+    [InlineData(InvoiceLifecycleStatus.SentToAp)]
+    [InlineData(InvoiceLifecycleStatus.Paid)]
+    [InlineData(InvoiceLifecycleStatus.ReturnedToFirm)]
+    [InlineData(InvoiceLifecycleStatus.Cancelled)]
+    public void BuildCreateRequest_ForAnyOtherStatus_IsRefused_WithNoRequest(InvoiceLifecycleStatus initial)
+    {
+        var result = CreateService().BuildCreateRequest(NewInvoice(), initial);
+
+        result.Succeeded.Should().BeFalse();
+        result.Request.Should().BeNull("a refused create can never be sent by mistake");
+        result.Reason.Should().Be(InvoiceTransitionReasons.InitialStatusNotAllowed);
+        result.Requested.Should().Be(initial);
+    }
+
+    [Fact]
+    public void BuildCreateRequest_ForAnUndefinedStatus_IsRefused()
+    {
+        var result = CreateService().BuildCreateRequest(NewInvoice(), (InvoiceLifecycleStatus)99);
+
+        result.Succeeded.Should().BeFalse();
+        result.Reason.Should().Be(InvoiceTransitionReasons.InitialStatusNotAllowed);
+    }
+
+    [Theory]
+    [InlineData("statuscode")]
+    [InlineData("statecode")]
+    public void BuildCreateRequest_WhenTheRowAlreadyCarriesAStatusColumn_IsRefused_BecauseOnlyTheLifecycleServiceWritesIt(string column)
+    {
+        var invoice = NewInvoice();
+        invoice[column] = new OptionSetValue(InvoiceStatusCodes.Approved);
+
+        var result = CreateService().BuildCreateRequest(invoice, InvoiceLifecycleStatus.InReview);
+
+        result.Succeeded.Should().BeFalse();
+        result.Request.Should().BeNull();
+        result.Reason.Should().Be(InvoiceTransitionReasons.StatusSuppliedByCaller);
+    }
+
+    [Fact]
+    public void BuildCreateRequest_ForARowOfAnotherTable_Throws_BecauseItIsAProgrammingError()
+    {
+        var act = () => CreateService().BuildCreateRequest(new Entity("sprk_billingevent", Guid.NewGuid()), InvoiceLifecycleStatus.InReview);
+
+        act.Should().Throw<ArgumentException>().WithParameterName("invoice");
+        FluentActions.Invoking(() => CreateService().BuildCreateRequest(null!, InvoiceLifecycleStatus.InReview)).Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void BuildCreateRequest_BuildsAnOrdinaryCreateRequest_ThatSitsInsideOneTransaction()
+    {
+        var created = CreateService().BuildCreateRequest(NewInvoice(), InvoiceLifecycleStatus.Rejected).Request!;
+        var line = new CreateRequest { Target = new Entity("sprk_billingevent", Guid.NewGuid()) };
+
+        var transaction = DataverseServiceClientImpl.BuildTransaction([created, line]);
+
+        transaction.Requests.Should().HaveCount(2);
+        transaction.Requests[0].Should().BeSameAs(created);
+    }
+
+    [Fact]
+    public void BuildCreateRequest_Performs_NoIo()
+    {
+        CreateService().BuildCreateRequest(NewInvoice(), InvoiceLifecycleStatus.InReview);
+        CreateService().BuildCreateRequest(NewInvoice(), InvoiceLifecycleStatus.Approved);
+
+        _records.VerifyNoOtherCalls();
     }
 
     // ADR-038 B3 note: this is not a plain "service resolves" wiring test. It pins the gating contract the task 014 acceptance criterion
