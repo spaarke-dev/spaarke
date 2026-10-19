@@ -937,6 +937,15 @@ public class SpeRevokeMatcherTests
         public List<string> CapturedEmails { get; } = new();
         public int CallCount => CapturedEmails.Count;
 
+        /// <summary>#2104 round 3: the container-level answer every <c>RemoveMembershipsAsync</c> call gives.</summary>
+        public bool NoContactPermissionRemains { get; init; }
+
+        /// <summary>#2104 round 3: when set, <c>RemoveMembershipsAsync</c> throws it.</summary>
+        public Exception? RemoveThrows { get; init; }
+
+        /// <summary>#2104 round 3: each <c>RemoveMembershipsAsync</c> call's key count and <c>confirmNoContactPermission</c>.</summary>
+        public List<(int Keys, bool Confirm)> RemoveCalls { get; } = new();
+
         public SpeMemberStub(
             SpeContainerMembershipResult @default,
             Dictionary<string, SpeContainerMembershipResult>? byEmail = null)
@@ -976,10 +985,14 @@ public class SpeRevokeMatcherTests
                     It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(), It.IsAny<DataverseWebApiClient>(),
                     It.IsAny<bool>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string containerId, IReadOnlyCollection<SpeMembershipKey> keys, DataverseWebApiClient _,
-                    bool _, CancellationToken _) =>
+                    bool confirm, CancellationToken _) =>
                 {
                     if (containerId != ContainerId.ToString())
                         throw new InvalidOperationException($"Unmodelled container: '{containerId}'.");
+
+                    RemoveCalls.Add((keys.Count, confirm));
+                    if (RemoveThrows is not null)
+                        throw RemoveThrows;
 
                     var results = new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>();
 
@@ -990,7 +1003,7 @@ public class SpeRevokeMatcherTests
                         results[key] = _byEmail.TryGetValue(email, out var specific) ? specific : _default;
                     }
 
-                    return new SpeMembershipRemoval(results, NoContactPermissionRemains: false);
+                    return new SpeMembershipRemoval(results, NoContactPermissionRemains);
                 });
 
             return mock;
@@ -1233,6 +1246,167 @@ public class SpeRevokeMatcherTests
             .And.Contain("administrator");
         problem.ProblemDetails.Extensions["deactivatedCount"].Should().Be(1,
             "the Dataverse half still ran and the caller must still be told so");
+    }
+
+    /// <summary>
+    /// #2104 round 3 (item 2, the F1 rule close-project applies): an organization too large to sweep is not swept member
+    /// by member — but the container is still asked, with no key, whether it holds ANY permission a contact grant could
+    /// account for. A complete read that holds none proves no member holds one: 200, NoPermissionFound, nothing removed.
+    /// It used to answer organization_too_large on every revoke of such an organization, whatever the container held.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_TooLargeToSweep_ContainerHoldsNoContactPermission_Answers200()
+    {
+        var org = new OrgRevokeFixture(
+            junctionThrows: false, membersWithoutEmail: null,
+            overflowRows: ExternalOrganizationMembership.MaxMembersPerSweep,
+            MemberOne, MemberTwo, MemberThree);
+        var stub = new SpeMemberStub(Removed) { NoContactPermissionRemains = true };
+
+        var body = Body(await org.Revoke(stub.Build()));
+
+        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.NoPermissionFound,
+            "the container was read in full and holds no permission any member could have");
+        body.SpeContainerMembershipRevoked.Should().BeFalse("nothing was removed");
+        body.DeactivatedCount.Should().Be(1);
+        body.SpeOrgMemberCleanup!.MembersEnumerated.Should().BeNull(
+            "the member list is still a truncation — the 200 rests on the container, not on a member count");
+        stub.RemoveCalls.Should().Equal(new[] { (0, true) },
+            "one container-wide question, with NO key — no member's permission is matched or removed");
+        stub.CallCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// #2104 round 3 (item 2), the negative: the container still holds a permission that is not Spaarke-managed (or the
+    /// read was incomplete — the service answers false for both), so the members are not confirmed absent and the revoke
+    /// stays the non-retryable organization_too_large.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_TooLargeToSweep_WithAContactPermissionLeft_StaysTooLarge()
+    {
+        var org = new OrgRevokeFixture(
+            junctionThrows: false, membersWithoutEmail: null,
+            overflowRows: ExternalOrganizationMembership.MaxMembersPerSweep,
+            MemberOne, MemberTwo, MemberThree);
+        var stub = new SpeMemberStub(Removed) { NoContactPermissionRemains = false };
+
+        var problem = ProblemBody(await org.Revoke(stub.Build()));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(RevokeExternalAccessEndpoint.RevokeOrganizationTooLargeReason);
+        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
+        stub.RemoveCalls.Should().Equal(new[] { (0, true) }, "the container was asked, and did not prove itself clean");
+    }
+
+    /// <summary>
+    /// #2104 round 3 (item 2), fail closed: the container question itself faults — that proves nothing, so the revoke
+    /// stays organization_too_large (never a 200, and never the retryable code either: the bound still applies).
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_TooLargeToSweep_WhenTheContainerQuestionFaults_StaysTooLarge()
+    {
+        var org = new OrgRevokeFixture(
+            junctionThrows: false, membersWithoutEmail: null,
+            overflowRows: ExternalOrganizationMembership.MaxMembersPerSweep,
+            MemberOne, MemberTwo, MemberThree);
+        var stub = new SpeMemberStub(Removed)
+        {
+            NoContactPermissionRemains = true,
+            RemoveThrows = new InvalidOperationException("Graph unreachable"),
+        };
+
+        var problem = ProblemBody(await org.Revoke(stub.Build()));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(RevokeExternalAccessEndpoint.RevokeOrganizationTooLargeReason);
+    }
+
+    /// <summary>
+    /// #2104 round 3 (item 1): the contact's match was ambiguous (two eligible permissions) or unverifiable (no holder
+    /// object id), so the service removed nothing — and a retry reads the same permissions and refuses again. The revoke
+    /// names it (permission_ambiguous), tells an administrator to resolve the container's permissions in the SPE admin
+    /// app, never says "retry", and names no person or address. Still fail-closed: a 500 with the Dataverse count.
+    /// </summary>
+    [Theory]
+    [InlineData(SpeContainerMembershipService.AmbiguousMatchError)]
+    [InlineData(SpeContainerMembershipService.UnverifiableHolderError)]
+    public async Task Revoke_WhenTheMatchIsAmbiguousOrUnverifiable_IsANamedNonRetryableOutcome(string errorPrefix)
+    {
+        var stub = new SpeServiceStub();
+        var spe = stub.Build(new SpeContainerMembershipResult(
+            false, null, $"{errorPrefix}: the permission(s) matching user '{ContactEmail}' were not removed."));
+
+        var problem = ProblemBody(await Revoke(DataverseFor(ContactId, ContactEmail), spe));
+
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError, "still fail-closed — never a 200");
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(RevokeExternalAccessEndpoint.RevokePermissionAmbiguousReason);
+        RevokeExternalAccessEndpoint.RevokePermissionAmbiguousReason.Should()
+            .Be("sdap.revoke.incomplete.permission_ambiguous", "a stable code clients switch on");
+        problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
+        problem.ProblemDetails.Extensions["deactivatedCount"].Should().Be(1);
+        problem.ProblemDetails.Detail.Should().NotContain("Retry the revoke")
+            .And.Contain("Retrying will not change this")
+            .And.Contain("administrator must resolve the container's permissions in the SPE admin app")
+            .And.NotContain(ContactEmail, "the detail reaches the caller's UI and names no PII")
+            .And.NotContain(ContactId.ToString());
+    }
+
+    /// <summary>
+    /// #2104 round 3 (item 1), the negative: a transient failure (the internal-user lookup faulted) is NOT an ambiguity —
+    /// a retry can succeed — so it stays the retryable container_not_cleared.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_WhenTheInternalUserCheckFailed_StaysTheRetryableContainerNotCleared()
+    {
+        var spe = new SpeServiceStub().Build(new SpeContainerMembershipResult(
+            false, null, $"{SpeContainerMembershipService.InternalUserCheckFailedError}: could not be checked."));
+
+        var problem = ProblemBody(await Revoke(DataverseFor(ContactId, ContactEmail), spe));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(RevokeExternalAccessEndpoint.RevokeSpeCleanupIncompleteReason);
+        problem.ProblemDetails.Detail.Should().Contain("Retry the revoke");
+    }
+
+    /// <summary>
+    /// #2104 round 3 (item 1) on the organization path, with mixed causes: one member's match is ambiguous and another's
+    /// delete failed transiently. A retry could clear only the transient one, so the non-retryable code wins (the rule
+    /// close-project applies to organization_too_large versus container_not_cleared) and the detail counts the other
+    /// member too. Neither member's address appears.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_AnAmbiguousMemberBesideATransientFailure_IsNonRetryableAndCountsTheOther()
+    {
+        var org = new OrgRevokeFixture(MemberOne, MemberTwo, MemberThree);
+        var stub = new SpeMemberStub(Removed, new Dictionary<string, SpeContainerMembershipResult>
+        {
+            [EmailFor(MemberOne)] = new(false, null, $"{SpeContainerMembershipService.AmbiguousMatchError}: 2 permissions."),
+            [EmailFor(MemberTwo)] = GraphError,
+        });
+
+        var problem = ProblemBody(await org.Revoke(stub.Build()));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(RevokeExternalAccessEndpoint.RevokePermissionAmbiguousReason);
+        problem.ProblemDetails.Extensions["speOrgMemberCleanup"].Should().Be(
+            new SpeOrgMemberCleanupSummary(MembersEnumerated: 3, PermissionsRemoved: 1, PermissionsNotFound: 0, Failed: 2),
+            "the ambiguous member is still counted Failed — it may retain file access");
+        problem.ProblemDetails.Detail.Should().Contain("1 member(s) of the organization match more than one permission")
+            .And.Contain("1 other member(s) could also not be confirmed removed")
+            .And.Contain("Retrying will not change this")
+            .And.NotContain(EmailFor(MemberOne))
+            .And.NotContain(EmailFor(MemberTwo));
+    }
+
+    /// <summary>#2104 round 3 (item 1): transient member failures alone stay the retryable code.</summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_OnlyTransientMemberFailures_StaysRetryable()
+    {
+        var org = new OrgRevokeFixture(MemberOne, MemberTwo);
+        var stub = new SpeMemberStub(Removed, new Dictionary<string, SpeContainerMembershipResult>
+        {
+            [EmailFor(MemberTwo)] = GraphError,
+        });
+
+        var problem = ProblemBody(await org.Revoke(stub.Build()));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(RevokeExternalAccessEndpoint.RevokeSpeCleanupIncompleteReason);
     }
 
     /// <summary>

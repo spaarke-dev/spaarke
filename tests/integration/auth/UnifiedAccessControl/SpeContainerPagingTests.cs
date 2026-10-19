@@ -575,6 +575,8 @@ public class SpeContainerPagingTests
         result.Success.Should().BeFalse();
         result.Error.Should().StartWith(SpeContainerMembershipService.AmbiguousMatchError)
             .And.NotStartWith(SpeContainerMembershipService.NoPermissionFoundError);
+        SpeContainerMembershipService.IsAmbiguousPermissionMatch(result).Should().BeTrue(
+            "#2104 round 3: the endpoints name this outcome permission_ambiguous (non-retryable) off this classifier");
     }
 
     /// <summary>K2 on the organization / closure path: the ambiguous key deletes nothing; the other keys are unaffected.</summary>
@@ -593,6 +595,8 @@ public class SpeContainerPagingTests
         adapter.DeletedUrls.Should().ContainSingle().Which.Should().Contain("perm-b");
         results[Key("a@client-firm.com")].Success.Should().BeFalse();
         results[Key("a@client-firm.com")].Error.Should().StartWith(SpeContainerMembershipService.AmbiguousMatchError);
+        SpeContainerMembershipService.IsAmbiguousPermissionMatch(results[Key("a@client-firm.com")]).Should().BeTrue();
+        SpeContainerMembershipService.IsAmbiguousPermissionMatch(results[Key("b@client-firm.com")]).Should().BeFalse();
         results[Key("b@client-firm.com")].PermissionId.Should().Be("perm-b");
     }
 
@@ -666,6 +670,8 @@ public class SpeContainerPagingTests
         result.Success.Should().BeFalse();
         result.Error.Should().StartWith(SpeContainerMembershipService.InternalUserCheckFailedError)
             .And.NotStartWith(SpeContainerMembershipService.NoPermissionFoundError);
+        SpeContainerMembershipService.IsAmbiguousPermissionMatch(result).Should().BeFalse(
+            "#2104 round 3: a lookup that faulted is transient — a retry can succeed, so it stays retryable");
     }
 
     /// <summary>K3 on the organization / closure path: a failed lookup deletes nothing for anyone, and proves nothing.</summary>
@@ -730,6 +736,8 @@ public class SpeContainerPagingTests
         result.Success.Should().BeFalse();
         result.Error.Should().StartWith(SpeContainerMembershipService.UnverifiableHolderError)
             .And.NotStartWith(SpeContainerMembershipService.NoPermissionFoundError);
+        SpeContainerMembershipService.IsAmbiguousPermissionMatch(result).Should().BeTrue(
+            "#2104 round 3: a retry reads the same holder-less permission — named permission_ambiguous, not a retry");
     }
 
     /// <summary>K5: a marker read that FAULTS (not a 404) is as unanswered as a 404 — nothing deleted, Failed.</summary>

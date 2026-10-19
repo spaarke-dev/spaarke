@@ -286,7 +286,9 @@ public static class ProjectClosureEndpoint
                 : null,
             OrganizationsTooLarge: granteeRemoval?.OrganizationsTooLarge ?? 0,
             // F2: the project's own container was swept, but its revoked grants exceed one read; not fixed by a retry.
-            RevokedGrantsOverLimit: closureContainerId is not null && !containerCleared && history is { OverLimit: true });
+            RevokedGrantsOverLimit: closureContainerId is not null && !containerCleared && history is { OverLimit: true },
+            // #2104 round 3: grantees whose match was ambiguous or unverifiable — nothing removed; not fixed by a retry.
+            PermissionsAmbiguous: granteeRemoval?.PermissionsAmbiguous ?? 0);
 
         // Step 4: Invalidate the grant cache of every affected contact — the ONE routine (task 137). Runs
         // unconditionally — it only ever removes access, so it is worth doing even when an earlier step failed.
@@ -336,7 +338,7 @@ public static class ProjectClosureEndpoint
                 ClosureTooManyGrantsReason,
                 $"{GrantsClause(request.ProjectId, activeRecords.Count, revokedCount)} "
                 + TooManyRevokedGrantsSentence("this")
-                + (container.OrganizationsTooLarge > 0 ? " " + OrganizationTooLargeSentence(container, "this") : string.Empty),
+                + NonRetryableGranteeSentences(container, "this"),
                 accessRecordsRevoked: revokedCount,
                 container);
         }
@@ -348,8 +350,23 @@ public static class ProjectClosureEndpoint
             return ClosureIncomplete(
                 httpContext,
                 ClosureOrganizationTooLargeReason,
-                $"{GrantsClause(request.ProjectId, activeRecords.Count, revokedCount)} " +
-                OrganizationTooLargeSentence(container, "this") + OtherUnresolvedSentence(container),
+                $"{GrantsClause(request.ProjectId, activeRecords.Count, revokedCount)}" +
+                NonRetryableGranteeSentences(container, "this") + OtherUnresolvedSentence(container),
+                accessRecordsRevoked: revokedCount,
+                container);
+        }
+
+        if (!containerCleared && container.PermissionsAmbiguous > 0)
+        {
+            // #2104 round 3: a grantee's match was ambiguous or unverifiable, so nothing was removed for them — and a retry
+            // reads the same permissions and refuses again. Named (non-retryable), still fail-closed. Precedence, the
+            // rule above (ClosurePermissionAmbiguousReason): a non-retryable cause wins over a transient one, and the
+            // other unresolved grantees are counted in the detail.
+            return ClosureIncomplete(
+                httpContext,
+                ClosurePermissionAmbiguousReason,
+                $"{GrantsClause(request.ProjectId, activeRecords.Count, revokedCount)}" +
+                NonRetryableGranteeSentences(container, "this") + OtherUnresolvedSentence(container),
                 accessRecordsRevoked: revokedCount,
                 container);
         }
@@ -426,8 +443,12 @@ public static class ProjectClosureEndpoint
     /// <param name="RevokedGrantsOverLimit">#2104 round 2 (F2): the project's revoked grants exceed one read
     /// (<see cref="MaxRevokedGrantsPerSweep"/>) and the container could not be shown to hold no contact permission — not
     /// fixed by a retry. Carried in the detail, not as an extension.</param>
+    /// <param name="PermissionsAmbiguous">#2104 round 3: grantees (counted in <paramref name="GranteesNotCleared"/> too)
+    /// whose match was ambiguous or unverifiable, so nothing was removed for them — not fixed by a retry. Carried in the
+    /// detail and the reason code, not as an extension.</param>
     internal readonly record struct ContainerStepReport(
-        bool? Cleared, int? GranteesNotCleared, int OrganizationsTooLarge, bool RevokedGrantsOverLimit = false);
+        bool? Cleared, int? GranteesNotCleared, int OrganizationsTooLarge, bool RevokedGrantsOverLimit = false,
+        int PermissionsAmbiguous = 0);
 
     /// <summary>The opening clause of a container-step failure: what happened to the grants themselves.</summary>
     private static string GrantsClause(Guid projectId, int activeCount, int revokedCount)
@@ -450,13 +471,30 @@ public static class ProjectClosureEndpoint
            + $"retain file access. Retrying the closure will not change {retryScope}. An administrator must remove those "
            + "grantees' permissions from the project's container in the SPE admin app (the container's Permissions).";
 
-    /// <summary>Any grantee left unconfirmed besides the oversized organizations.</summary>
+    /// <summary>#2104 round 3: the ambiguous-match sentence and its NON-retryable administrator instruction. A count only —
+    /// the detail names no person and no address.</summary>
+    private static string PermissionAmbiguousSentence(ContainerStepReport container, string retryScope)
+        => $"{container.PermissionsAmbiguous} revoked grantee(s) match more than one permission on the project's SPE "
+           + "container, or a permission whose holder cannot be verified, so none of those permissions was removed and "
+           + $"they may retain file access. Retrying the closure will not change {retryScope}. An administrator must "
+           + "resolve the container's permissions in the SPE admin app (the project's container, its Permissions).";
+
+    /// <summary>
+    /// The sentence of every grantee-level cause a retry cannot fix (#2103 oversized organizations, #2104 round 3 ambiguous
+    /// matches), each with a leading space — so whichever reason code wins, the detail still names every such cause.
+    /// </summary>
+    private static string NonRetryableGranteeSentences(ContainerStepReport container, string retryScope)
+        => (container.OrganizationsTooLarge > 0 ? " " + OrganizationTooLargeSentence(container, retryScope) : string.Empty)
+           + (container.PermissionsAmbiguous > 0 ? " " + PermissionAmbiguousSentence(container, retryScope) : string.Empty);
+
+    /// <summary>Any grantee left unconfirmed besides the oversized organizations and the ambiguous matches.</summary>
     private static string OtherUnresolvedSentence(ContainerStepReport container)
         => container.GranteesNotCleared switch
         {
             null => " Other revoked grantees could not all be confirmed removed either.",
-            { } notCleared when notCleared - container.OrganizationsTooLarge > 0 =>
-                $" {notCleared - container.OrganizationsTooLarge} other grantee(s) could also not be confirmed removed.",
+            { } notCleared when notCleared - container.OrganizationsTooLarge - container.PermissionsAmbiguous > 0 =>
+                $" {notCleared - container.OrganizationsTooLarge - container.PermissionsAmbiguous} other grantee(s) could "
+                + "also not be confirmed removed.",
             _ => string.Empty,
         };
 
@@ -466,10 +504,9 @@ public static class ProjectClosureEndpoint
         { Cleared: null } => string.Empty,
         { Cleared: true } => " The revoked grantees' permissions on the project's SPE container are confirmed removed.",
         { RevokedGrantsOverLimit: true } =>
-            " " + TooManyRevokedGrantsSentence("that part")
-            + (container.OrganizationsTooLarge > 0 ? " " + OrganizationTooLargeSentence(container, "that part") : string.Empty),
-        { OrganizationsTooLarge: > 0 } =>
-            " " + OrganizationTooLargeSentence(container, "that part") + OtherUnresolvedSentence(container),
+            " " + TooManyRevokedGrantsSentence("that part") + NonRetryableGranteeSentences(container, "that part"),
+        { OrganizationsTooLarge: > 0 } or { PermissionsAmbiguous: > 0 } =>
+            NonRetryableGranteeSentences(container, "that part") + OtherUnresolvedSentence(container),
         { GranteesNotCleared: { } notCleared } =>
             $" The project's SPE container could not be cleared of {notCleared} revoked grantee(s), who may also " +
             "retain file access.",
@@ -570,8 +607,12 @@ public static class ProjectClosureEndpoint
     /// grant could account for (<see cref="SpeMembershipRemoval.NoContactPermissionRemains"/>), so every revoked grantee
     /// (an oversized organization's members, an unreadable identity, the earlier grants that could not be read) is
     /// confirmed absent; <paramref name="Unresolved"/> and <paramref name="OrganizationsTooLarge"/> are then 0.</param>
+    /// <param name="PermissionsAmbiguous">#2104 round 3: grantees (counted in <paramref name="Unresolved"/> too) whose match
+    /// was ambiguous or unverifiable (<see cref="SpeContainerMembershipService.IsAmbiguousPermissionMatch"/>): nothing was
+    /// removed for them, and a retry reads the same permissions and refuses again.</param>
     internal readonly record struct GranteeRemoval(
-        int Removed, int Unresolved, int NoMembershipKey = 0, int OrganizationsTooLarge = 0, bool ContainerProvenClean = false)
+        int Removed, int Unresolved, int NoMembershipKey = 0, int OrganizationsTooLarge = 0, bool ContainerProvenClean = false,
+        int PermissionsAmbiguous = 0)
     {
         /// <summary>Every revoked grantee is confirmed to hold no permission on the container.</summary>
         public bool Complete => Unresolved == 0;
@@ -748,6 +789,7 @@ public static class ProjectClosureEndpoint
         }
 
         var removed = 0;
+        var ambiguous = 0;
         foreach (var key in keys)
         {
             if (!removal.Results.TryGetValue(key, out var result))
@@ -764,6 +806,10 @@ public static class ProjectClosureEndpoint
                          StringComparison.OrdinalIgnoreCase) != true)
             {
                 unresolved++;
+                if (SpeContainerMembershipService.IsAmbiguousPermissionMatch(result))
+                {
+                    ambiguous++;
+                }
             }
         }
 
@@ -782,7 +828,7 @@ public static class ProjectClosureEndpoint
             return new GranteeRemoval(removed, Unresolved: 0, noKey, OrganizationsTooLarge: 0, ContainerProvenClean: true);
         }
 
-        return new GranteeRemoval(removed, unresolved, noKey, tooLarge);
+        return new GranteeRemoval(removed, unresolved, noKey, tooLarge, PermissionsAmbiguous: ambiguous);
     }
 
     /// <summary>
@@ -960,6 +1006,24 @@ public static class ProjectClosureEndpoint
     /// retry reads the same rows; the detail tells an administrator what to do instead.
     /// </summary>
     internal const string ClosureTooManyGrantsReason = "sdap.closure.incomplete.too_many_grants";
+
+    /// <summary>
+    /// #2104 round 3: the NON-retryable leaf for a match the closure refused to act on — more than one eligible
+    /// permission on the project's container matches a revoked grantee, or the one match names no holder object id and
+    /// so cannot be told apart from an internal user's (<see cref="SpeContainerMembershipService.IsAmbiguousPermissionMatch"/>).
+    /// Nothing was removed for that grantee; a retry reads the same permissions and refuses again. The detail tells an
+    /// administrator to resolve the container's permissions in the SPE admin app.
+    /// </summary>
+    /// <remarks>
+    /// <b>Precedence when causes mix</b> — one rule for every non-retryable leaf: a cause a retry cannot fix wins over a
+    /// transient one, because a retry could clear only the transient part and the closure still could not complete; the
+    /// detail then also counts the other grantees not confirmed removed. Order: <see cref="ClosurePartialRevocationReason"/>
+    /// (grants still ACTIVE — a retry does help those; its detail carries every container cause), then
+    /// <see cref="ClosureTooManyGrantsReason"/>, <see cref="ClosureOrganizationTooLargeReason"/>, this, and last the
+    /// retryable <see cref="ClosureContainerNotClearedReason"/>. Whichever wins, the detail names every non-retryable cause
+    /// present.
+    /// </remarks>
+    internal const string ClosurePermissionAmbiguousReason = "sdap.closure.incomplete.permission_ambiguous";
 
     /// <summary>
     /// Queries all active sprk_externalrecordaccess records for the given project — contact grants AND

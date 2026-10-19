@@ -960,6 +960,149 @@ public class ProjectClosureCascadeTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // #2104 round 3 (item 1): an ambiguous or unverifiable match is NON-retryable — permission_ambiguous.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private static SpeContainerMembershipResult Ambiguous(string email) =>
+        new(false, null, $"{SpeContainerMembershipService.AmbiguousMatchError}: 2 permissions on the container match user '{email}'.");
+
+    private static SpeContainerMembershipResult Unverifiable(string email) =>
+        new(false, null, $"{SpeContainerMembershipService.UnverifiableHolderError}: the permission matching user '{email}' names no object id.");
+
+    /// <summary>
+    /// #2104 round 3: a revoked grantee's match was ambiguous (two eligible permissions) or unverifiable (no holder object
+    /// id), so nothing was removed for them — and a retry reads the same permissions and refuses again. The closure names
+    /// it (permission_ambiguous), tells an administrator to resolve the container's permissions in the SPE admin app,
+    /// never says "Retry the closure", and names no person or address. Still fail-closed: a 500, grants revoked.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CloseProject_SecureProject_AnAmbiguousOrUnverifiableMatch_IsANamedNonRetryableOutcome(bool unverifiable)
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var spe = SpeAnswering(email => unverifiable ? Unverifiable(email) : Ambiguous(email), new());
+
+        var problem = Problem(await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError, "still fail-closed — never a 200");
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosurePermissionAmbiguousReason);
+        ProjectClosureEndpoint.ClosurePermissionAmbiguousReason.Should()
+            .Be("sdap.closure.incomplete.permission_ambiguous", "a stable code clients switch on");
+        problem.ProblemDetails.Detail.Should().NotContain("Retry the closure")
+            .And.Contain("1 revoked grantee(s) match more than one permission")
+            .And.Contain("Retrying the closure will not change this")
+            .And.Contain("administrator must resolve the container's permissions in the SPE admin app")
+            .And.NotContain(ContactEmail, "the detail reaches the caller's UI and names no PII")
+            .And.NotContain(ContactId.ToString());
+        problem.ProblemDetails.Extensions["accessRecordsRevoked"].Should().Be(1);
+        problem.ProblemDetails.Extensions["containerCleared"].Should().Be(false);
+        problem.ProblemDetails.Extensions["granteesNotCleared"].Should().Be(1);
+        table.ActiveRows.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// #2104 round 3, mixed causes: one grantee ambiguous, another's delete failed transiently. A retry could clear only
+    /// the transient one, so the non-retryable code wins (the rule organization_too_large already follows) and the detail
+    /// counts the other grantee.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_AnAmbiguousMatchBesideATransientFailure_StaysNonRetryableAndCountsTheOther()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        table.SeedContactGrant(OtherContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var spe = SpeAnswering(email => email == ContactEmail ? Ambiguous(email) : GraphError, new());
+
+        var problem = Problem(await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosurePermissionAmbiguousReason);
+        problem.ProblemDetails.Detail.Should().Contain("1 revoked grantee(s) match more than one permission")
+            .And.Contain("1 other grantee(s) could also not be confirmed removed")
+            .And.NotContain(OtherContactEmail);
+        problem.ProblemDetails.Extensions["granteesNotCleared"].Should().Be(2);
+    }
+
+    /// <summary>
+    /// #2104 round 3, the negative: a transient failure alone (the internal-user lookup faulted) is not an ambiguity — a
+    /// retry can succeed — so it stays the retryable container_not_cleared.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_AnInternalUserCheckFailure_StaysTheRetryableContainerNotCleared()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var spe = SpeAnswering(_ => new SpeContainerMembershipResult(
+            false, null, $"{SpeContainerMembershipService.InternalUserCheckFailedError}: could not be checked."), new());
+
+        var problem = Problem(await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason);
+        problem.ProblemDetails.Detail.Should().Contain("Retry the closure");
+    }
+
+    /// <summary>
+    /// #2104 round 3, two non-retryable causes: an oversized organization AND an ambiguous match. The earlier leaf
+    /// (organization_too_large) keeps the code, and its detail names the ambiguous match too — whichever code wins, every
+    /// non-retryable cause reaches the administrator.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_TooLargeOrganizationAndAnAmbiguousMatch_NamesBoth()
+    {
+        var table = new FakeGrantTable();
+        table.SeedOrganizationGrant(OrganizationId, ProjectId);
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+        ArrangeOversizedOrganization(client);
+
+        var problem = Problem(await CloseProject(client, spe: SpeAnswering(Ambiguous, new()),
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureOrganizationTooLargeReason);
+        problem.ProblemDetails.Detail.Should().Contain("1 revoked organization(s) have more than")
+            .And.Contain("1 revoked grantee(s) match more than one permission")
+            .And.NotContain("other grantee(s) could also not be confirmed removed",
+                "both unresolved grantees are named by their own non-retryable cause");
+    }
+
+    /// <summary>
+    /// #2104 round 3: a partial revocation keeps its own (retryable) code — rows remain ACTIVE and a retry does help those
+    /// — but its detail carries the ambiguous match's non-retryable instruction for that part.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_PartialRevocationWithAnAmbiguousMatch_CarriesTheNonRetryableInstruction()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        var stubborn = table.SeedContactGrant(OtherContactId, ProjectId);
+        table.FailDeactivationFor.Add(stubborn.Id);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var problem = Problem(await CloseProject(client,
+            spe: SpeAnswering(email => email == ContactEmail ? Ambiguous(email) : Removed, new()),
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosurePartialRevocationReason);
+        problem.ProblemDetails.Detail.Should().Contain("1 revoked grantee(s) match more than one permission")
+            .And.Contain("Retrying the closure will not change that part");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // #2104 (pass-1 F1 / pass-2 F3): "Retry the closure" must be TRUE. A retry finds the grants already inactive, so
     // the container step must still run over the grantees revoked earlier.
     // ─────────────────────────────────────────────────────────────────────────────

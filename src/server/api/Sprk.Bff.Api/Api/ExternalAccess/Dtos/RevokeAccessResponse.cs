@@ -51,8 +51,11 @@ public enum SpeContainerRevokeOutcome
 
     /// <summary>
     /// The permission could not be read, matched, or deleted. The Contact may RETAIN file access; the
-    /// revoke should be retried — except for an organization too large to sweep, which the 500 names with its own
-    /// non-retryable reason code (<c>sdap.revoke.incomplete.organization_too_large</c>, #2103 follow-up). For an ORGANIZATION revoke this covers BOTH "at least one member's
+    /// revoke should be retried — except for two causes a retry cannot fix, which the 500 names with their own
+    /// non-retryable reason codes: an organization too large to sweep (<c>sdap.revoke.incomplete.organization_too_large</c>,
+    /// #2103 follow-up), and a match the revoke refused to act on — more than one permission matching the grantee, or a
+    /// match whose holder cannot be verified (<c>sdap.revoke.incomplete.permission_ambiguous</c>, #2104 round 3).
+    /// For an ORGANIZATION revoke this covers BOTH "at least one member's
     /// permission could not be removed" and "the member list could not be established at all" — the two
     /// are told apart by <see cref="SpeOrgMemberCleanupSummary.MembersEnumerated"/>.
     /// </summary>
@@ -68,8 +71,10 @@ public enum SpeContainerRevokeOutcome
 /// NOT be established at all (the junction query failed, or the organization has more members than one
 /// revoke request may sweep). <c>null</c> is the load-bearing value: it is the difference between
 /// "we swept everyone and there was nothing to remove" and "we do not know who to sweep", which the
-/// counts alone cannot express. It always pairs with
-/// <see cref="SpeContainerRevokeOutcome.Failed"/>.
+/// counts alone cannot express. It pairs with <see cref="SpeContainerRevokeOutcome.Failed"/>, with one exception
+/// (#2104 round 3): an organization over the sweep bound whose container's COMPLETE read holds no permission a contact
+/// grant could account for answers <see cref="SpeContainerRevokeOutcome.NoPermissionFound"/> — the members are still
+/// unknown, but none of them can hold a permission there.
 /// </param>
 /// <param name="PermissionsRemoved">Members whose container permission was found and deleted.</param>
 /// <param name="PermissionsNotFound">
@@ -77,8 +82,8 @@ public enum SpeContainerRevokeOutcome
 /// under the broker-only model — nothing in this product grants a member a container ACL.
 /// </param>
 /// <param name="Failed">
-/// Members whose container permission could NOT be confirmed removed — their identity could not be read, or
-/// Graph refused the delete. (#2103: a member with NO identity key is counted in <c>NoMembershipKey</c>, not here.)
+/// Members whose container permission could NOT be confirmed removed — their identity could not be read, Graph
+/// refused the delete, or (#2104 round 2) their match was ambiguous or its holder unverifiable, so nothing was removed. (#2103: a member with NO identity key is counted in <c>NoMembershipKey</c>, not here.)
 /// <b>Non-zero means those people
 /// may RETAIN file access</b>, so the revoke MUST NOT be reported as an SPE success.
 /// </param>

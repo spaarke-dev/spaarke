@@ -315,4 +315,29 @@ public class SpePermissionMatcherTests
         Find(new List<Permission> { PermissionFor(" " + ContactEmail + "  ", "perm-padded") }, ByEmail(ContactEmail))!
             .Id.Should().Be("perm-padded");
     }
+
+    /// <summary>
+    /// #2104 round 3: <see cref="SpeContainerMembershipService.IsAmbiguousPermissionMatch"/> is the line between the two
+    /// failures a retry cannot fix (an ambiguous match, an unverifiable holder) and every transient one. The endpoints name
+    /// the first <c>permission_ambiguous</c>; misclassifying a transient failure would take away a retry that can work.
+    /// </summary>
+    [Theory]
+    [InlineData(SpeContainerMembershipService.AmbiguousMatchError + ": 2 permissions on the container match user 'x'", true)]
+    [InlineData(SpeContainerMembershipService.UnverifiableHolderError + ": the permission matching user 'x' names no object id", true)]
+    [InlineData(SpeContainerMembershipService.InternalUserCheckFailedError + ": the matched permission holders could not be checked", false)]
+    [InlineData(SpeContainerMembershipService.NoPermissionFoundError + " for user 'x' in container.", false)]
+    [InlineData("Container permissions could not be fully enumerated, so no permission for user 'x' can be confirmed absent.", false)]
+    [InlineData("The container's grant markers could not be read, so no permission for user 'x' can be removed.", false)]
+    [InlineData("Graph error deleting permission: 503", false)]
+    [InlineData("Container permissions could not be read: timeout", false)]
+    public void IsAmbiguousPermissionMatch_OnlyTheTwoUnfixableFailures(string error, bool expected) =>
+        SpeContainerMembershipService.IsAmbiguousPermissionMatch(new SpeContainerMembershipResult(false, null, error))
+            .Should().Be(expected);
+
+    /// <summary>#2104 round 3: a success is never ambiguous, whatever text it carries.</summary>
+    [Fact]
+    public void IsAmbiguousPermissionMatch_IsFalseForASuccess() =>
+        SpeContainerMembershipService.IsAmbiguousPermissionMatch(
+                new SpeContainerMembershipResult(true, "perm-1", SpeContainerMembershipService.AmbiguousMatchError))
+            .Should().BeFalse();
 }

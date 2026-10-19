@@ -77,8 +77,9 @@ public class SpeContainerMembershipService
     /// file access through the broker, not through per-contact container ACLs:
     /// <c>GrantExternalAccessEndpoint</c> returns <c>SpeContainerMembershipGranted: false</c> and never
     /// calls this, and neither invite endpoint touches SPE. It is retained as the documented counterpart
-    /// of <see cref="RevokeMembershipAsync"/> and as the definition of the identity key the revoke matcher
-    /// must match (<c>userPrincipalName</c> = contact email). Do NOT wire it up without revisiting the
+    /// of <see cref="RevokeMembershipAsync"/>: a permission it writes (<c>userPrincipalName</c> = contact email) is one
+    /// the revoke matcher (<see cref="FindContactPermissions"/>: the bound object id, then the email against the
+    /// permission's <c>email</c> and <c>userPrincipalName</c>) finds. Do NOT wire it up without revisiting the
     /// broker-only decision — and note that <see cref="RevokeMembershipAsync"/> still exists and matters
     /// regardless, because container ACLs created by legacy versions or by admins outside this codebase
     /// must still be cleanable.
@@ -221,7 +222,8 @@ public class SpeContainerMembershipService
     // carrying a user identity — which on SPE is every individual grant, INTERNAL users included (demo provisioning
     // and the SPE admin console both add internal users). Closing a project revokes EXTERNAL access; it must not
     // lock the project's own people out of its files. Closure now removes exactly the revoked grantees through
-    // RemoveMembershipsAsync below (the single-grant revoke's email-keyed mechanism). Its result type
+    // RemoveMembershipsAsync below (the single-grant revoke's identity-keyed mechanism: bound object id, then email —
+    // FindContactPermissions). Its result type
     // (SpeBulkRemovalResult) went with it. Do not re-add an "everyone with a user identity" sweep.
 
     /// <summary>
@@ -256,7 +258,7 @@ public class SpeContainerMembershipService
     /// identity, not just the target grantees' — other organizations' people AND internal users. A revoke or a
     /// closure must evict exactly the people whose grants it revoked. Project closure uses this method too.</para>
     ///
-    /// <para><b>Failure is per-caller-visible, not aggregated.</b> A failure to READ makes every email
+    /// <para><b>Failure is per-caller-visible, not aggregated.</b> A failure to READ makes every key
     /// unanswerable, so each one gets a failed result rather than the method throwing — that preserves
     /// the caller's "every member gets an outcome, and the failures are counted" contract from tasks
     /// 016/017. An incomplete enumeration flows through <see cref="ClassifyRevokeResult"/>, so a member
@@ -1090,6 +1092,19 @@ public class SpeContainerMembershipService
     /// benign absence.
     /// </summary>
     internal const string InternalUserCheckFailedError = "Internal-user check failed";
+
+    /// <summary>
+    /// #2104 round 3: is <paramref name="result"/> a failure a RETRY cannot fix — an ambiguous match
+    /// (<see cref="AmbiguousMatchError"/>) or an unverifiable holder (<see cref="UnverifiableHolderError"/>)? A retry reads
+    /// the same permissions and reaches the same answer until an administrator resolves the container's permissions in
+    /// the SPE admin app, so the revoke and the closure name it (<c>…incomplete.permission_ambiguous</c>) instead of
+    /// "retry". Every other failure (a read, a lookup, a marker read or a delete that faulted) stays retryable.
+    /// </summary>
+    internal static bool IsAmbiguousPermissionMatch(SpeContainerMembershipResult result)
+        => !result.Success
+           && result.Error is { } error
+           && (error.StartsWith(AmbiguousMatchError, StringComparison.Ordinal)
+               || error.StartsWith(UnverifiableHolderError, StringComparison.Ordinal));
 
     /// <summary>The Dataverse entity set of internal users.</summary>
     internal const string SystemUserEntitySet = "systemusers";
