@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-18 ~22:40Z (main session; dev BFF live on ad0e9e1a7 with 102b). State only — history is in git log,
+> **Last Updated**: 2026-10-19 ~04:30Z (main session; dev BFF live on ad0e9e1a7 with 102b; first nightly sweep on it checked). State only — history is in git log,
 > task `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path;
 > D-123 secure family; D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-169). Deferred work: one self-contained GitHub issue per item, label
@@ -10,8 +10,8 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No lane in flight. 042b ✅ (#2096 → docs `f66aa811a`; not yet on master) |
-| **Next Action** | 1) Tomorrow: check the first nightly sweep on the 102b BFF (deleted-rule Signals closed as PolicyRetired + redacted; none expected beyond any S2-type rows). 2) Next docs→master sync carries 042b (full ArchTests first; then R3 BFF deploy with fresh owner approval). 3) Re-check ebilling fix ranges when sent: 071 r3 / 072 combined, 073 (K1 guard + K2 comment), 074 follow-up (K1-K4 + ParentUndetermined). 4) uac-r2's #2084 PR (after #2063): two passes. 5) After 074 reaches master, one small code lane: immutability ArchTest entry + 5 stale writer comments + a comment on `SignalClosureService.ExistingPolicyCodesAsync` (:278) that it must stay UNFILTERED (billing depends on it; ebilling pins it in c3d8616e2) |
+| **Task** | No lane in flight. 042b ✅ (#2096 → docs `f66aa811a`; not yet on master). uac-r2 PR #2102 (#2084, D-168 A3): adversarial passes 1 (isolation, `C:\wts-2102a`) and 2 (correctness, `C:\wts-2102b`) running |
+| **Next Action** | 1) When passes 1+2 on #2102 report: send combined findings to uac-r2, re-check their fix range, then merge + R3 deploy (BFF before/with Console; fresh owner approval). 2) Next docs→master sync carries 042b (full ArchTests first; then R3 BFF deploy with fresh owner approval). 3) Re-check ebilling fix ranges when sent: 071 r3 / 072 combined, 073 (K1 guard + K2 comment), 074 follow-up (K1-K4 + ParentUndetermined). 5) After 074 reaches master, one small code lane: immutability ArchTest entry + 5 stale writer comments + a comment on `SignalClosureService.ExistingPolicyCodesAsync` (:278) that it must stay UNFILTERED (billing depends on it; ebilling pins it in c3d8616e2) |
 
 ## Open owner / peer items
 
@@ -39,6 +39,7 @@
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
+- **First nightly sweep on 102b BFF (2026-10-19 02:30Z) OK:** `[SIGNAL-EVALUATOR] heartbeat outcome=succeeded policies=6 hits=142 written=0 unchanged=142 closed=0 policyRetiredClosed=0 policyFailures=0` (36.7 s). 0 PolicyRetired is expected: the 102b live-check rows (S2) were deleted at cleanup. Rows are not re-stamped when unchanged (D-61). App Insights app `6a76b012-…` (spe-insights-dev-67e2xz), query via `az rest` to api.applicationinsights.io.
 - BFF `1.0.0+ad0e9e1a7…` (R3, 2026-10-18 22:31Z; owner-approved directly to R3) = master 20fb86dc4 (#2088, 102b) + UAC #2094 + R3. Rollback `ebc74b331`. Does NOT contain ebilling 015 (`e0df77339`) nor 042b.
 - Console from master `20fb86dc4` (04:36Z). Console and BFF aligned for 102b. **Landing tab = Worklist** (D-164; revert `Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing'`).
 - **`sprk_policy_matter` CascadeDelete = Cascade** since 2026-10-18 ~03:35Z (D-167; Archive RemoveLink). Live facts: an admin delete removes only the rule; a Core User's matter delete also deletes the matter's rules (no privilege check on the child; audited). See notes/102b "Live on spaarkedev1".
