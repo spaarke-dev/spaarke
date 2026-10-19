@@ -184,3 +184,94 @@ Tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/InvoiceSubmiss
 **Deviation from the brief's name.** The kind is `Failed`, not `FailedBeforeRead`, because `ebilling.coding.no_code_set` and a coding kill switch fail after the read. `Read` is non-null in that case. Per section 2, no invoice is created for any Failed.
 
 **DI.** Not registered. FinanceModule is the shared append point agent A also edits; part E registers it scoped with the handler. Its dependencies are all registered unconditionally (`IInvoiceAi` has `NullInvoiceAi`).
+
+## 11. Part C - persistence, step 6 (2026-10-19)
+
+**Files.** `Services/Finance/Submission/IInvoiceSubmissionPersister.cs`, `InvoiceSubmissionPersister.cs` (§11 header in the file). Tests:
+`tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/InvoiceSubmissionPersisterTests.cs` (outcomes from the real part B processor
+harness; Dataverse, owner and totals are strict doubles, so any write outside the one transaction fails a test).
+
+**Entry point.** `PersistAsync(SubmissionEvaluationOutcome, string? correlationId, ct)` → `SubmissionPersistResult`:
+
+| Status | Meaning | Members |
+|---|---|---|
+| `Committed` | the transaction committed (or an unknown outcome was proved by the link), totals ran | `InvoiceId`, `LineIds` (line index → row id), `ApprovalId`, `Totals` |
+| `Resumed` | the submission already linked an invoice: nothing created, totals re-run | `InvoiceId` (the stored one), `LineIds` (queried: `sprk_linesequence` - 1) |
+| `ReEvaluate` | the submission's core record differs from `outcome.CoreRecord` (072 part L): nothing written | `CurrentSubmission` (pass to the processor) |
+| `Retry` | transient: nothing persisted when `InvoiceId` is null; committed but totals failed when set | `ReasonCode` |
+| `Refused` | will not succeed on retry (core fields incomplete, owner refused, > 1,000 requests, findings JSON over 1,048,576) | `ReasonCode` |
+| `SubmissionMissing` | the row is gone (044 K4) | |
+
+A submission read fault or cancellation propagates. A Failed / RejectedUnreadable outcome is an `ArgumentException` (D-101: no invoice).
+
+**The one transaction**, in order: 014's create request(s) (`BuildCreateRequest` now returns `Requests`, a list of one), one create per
+line, the approval portion (not for AutoRejected), the `sprk_document.sprk_invoice` update, the submission update (`sprk_invoice`,
+`sprk_processingstatus`, `sprk_outcomereasoncode`, `sprk_findingsjson`). Accepted / AcceptedUncoded → submission Accepted, reason null;
+AutoRejected → Rejected + the first deciding code, invoice Rejected; Blocked → Rejected + `ebilling.submission.blocked`, invoice In Review.
+
+**Ids are deterministic** (`InvoiceIdFor`, `LineIdFor`, `ApprovalIdFor`: SHA-256 of a key on the submission id, as `DecisionRecordWriter.IdOf`).
+A retry reuses them, so a second invoice cannot be created, and part D can key Signals without a read.
+
+**Rows.** Invoice: status via 014 only; core lookup + 5 resolver fields from 013's guard (`Check` + `DeriveResolverFieldsAsync`, once, reused on
+every row; each built row is re-checked and a refusal is a builder defect); owner `ResolveOwnerAsync(ForParents(core))` once + `ApplyTo` on
+every row; `sprk_name` (`InvoiceReviewService.BuildInvoiceName`), `sprk_invoicenumber` as typed, `sprk_trackingnumber` (D-124),
+`sprk_vendororg`, `sprk_document`, dates, `sprk_totalamount` (TotalDue as read, else the signed line sum), `sprk_currency`,
+`sprk_correlationid` (the job's, else the submission's). Lines (6b): billed values signed (D-121), fee hours / expense quantity in
+`sprk_quantity` and rate / unit cost in `sprk_rate` (the 072 fact loader reads these back for Duplicate), `sprk_eventdate` at UTC midnight
+(076's convention; falls back to the invoice date), resolved timekeeper, approved rate, coding confidence, `sprk_linestatus` Flagged when a
+072 finding names the line or 047 refused a code / found a firm-code mismatch, else Pending; `sprk_extractionconfidence`
+`{ fields: { name: { confidence, combined, page, repair, box?, returned? } }, coding: { status, codeSetId, codeSetName, codeSetSource,
+needsReview, confidence, task/activity/expense {code, firmCode, mismatch}, firmCodeMismatch, refused[], observations[] } }`, or
+`coding: { status: "NotCoded", hold }` for D-126. Approval: Pending, invoice, core trio + resolver fields, owner; no approver (103).
+
+**`sprk_findingsjson`** `{ schema, kind, reasonCode, invoiceId, trackingNumber, receivedOn, decision {outcome, reliabilityThreshold,
+deciding[]}, codeSet, findings[] {index, ruleType, policyId, policyCode, policyVersionId, clause, clauseLocation, subject, line, reasonCode,
+detailWithheld, consequence, rejects, heldBecause, valuesRead[]}, pipelineFindings[], codingFindings[] }`. **D-112:** in a (policy, subject)
+group holding a withheld finding, no entry carries `valuesRead`.
+
+**D-126 (part B changed, the cleaner option).** The processor, not the persister, classifies: a `LineCodingException` or a coding
+`FeatureDisabledException` after the read is `SubmissionEvaluationKind.AcceptedUncoded` (read + resolution, no coding / evaluation /
+decision) with a hold pipeline finding `ebilling.submission.coding_no_code_set` or `ebilling.submission.coding_unavailable` (value `cause`).
+Reason: the persister then never re-interprets a Failed outcome, and `Failed` again means "never read". New SubmissionIntegrity reasons
+`coding.no_code_set` / `coding.unavailable` (template, headline, flag-only, `BillingSystemFindings.NoCodeSet` / `CodingUnavailable`); part D maps
+the two hold codes to them. No rule is evaluated on uncoded lines (owner question 2 below).
+
+**Faults.** `DataverseTransactionException` not unknown → `Retry` (`transaction_failed`), nothing persisted, submission untouched (never
+Accepted). Unknown → re-read `sprk_invoice`: our invoice id → committed; else (or the re-read fails) → `Retry` (`transaction_outcome_unknown`).
+Totals: a refusal is returned in `Totals` (part D records it); a fault is `Retry` (`totals_failed`) with `InvoiceId` set, and the next run
+resumes from the link (tested: one transaction across both runs).
+
+**ArchTests.** ADR-010 ceiling 167 → **168** (+1, `IInvoiceSubmissionPersister`, seam for part E's handler tests). Census: the persister's
+creates are invisible to the scanner (rows built in helpers, handed to `new CreateRequest { Target = variable }`), so it is listed in
+`UnscannedWriters` (it calls the resolver; that test passes). **DI: not registered** (part E, with the processor and handler).
+
+**Verification.** Build 0 errors. Filtered unit suite 5,563 passed / 0 failed / 11 skipped. ArchTests 1,209 passed. Fail-before: the two
+D-126 processor tests fail on the part B processor; the lifecycle tests did not compile against the old shape; for the new persister, nine
+mutations (core re-check off, unknown-outcome always retry, resume off, line status always Pending, `Math.Abs` amounts, no approval, no
+D-112 scrub, AutoRejected created In Review) fail 11 of its 18 tests.
+
+**For part E / D (contract consequences, not decided here).**
+- The terminal status is committed in the transaction (brief), so section 1 rows 6 / 8 ("status stays Processing"; terminal status after
+  Signals) are superseded. **Part E's step 0c must test `sprk_invoice` BEFORE the "Accepted / Rejected → no-op" rule**, or a retry after a
+  Signal or totals failure would no-op and never write Signals. A redelivered, finished submission then resumes (part D is idempotent).
+  The 074 order "record after the commit, before the terminal status" can no longer hold literally; Preflight before the transaction still can.
+- On `Retry` the handler abandons for redelivery; on `Refused` it marks the submission Failed with the code; on `ReEvaluate` it re-runs the
+  processor on `CurrentSubmission` (bound the loop).
+
+**Known limits (K-class).** The core-record re-check reads before the transaction, so a re-file in the milliseconds between them is not
+caught (an `IfRowVersionMatches` on the submission update would close it; needs a live check that `RetrieveAsync` fills `RowVersion`).
+`sprk_invoiceapproval.sprk_regardingrecordnumber` is Text(100) while the guard does not cut the number (as on 044's submission write).
+No AI code lookups (`sprk_taskcode` / `sprk_activitycode` / `sprk_expensecode`): 047's `ResolvedCodeSet` carries codes, not
+`sprk_billingcode` ids; the codes are in the line's `coding` JSON. A coding model fault (`InvoiceAiException`) after the read still
+propagates, so after the job's last retry part E would mark Failed with no invoice (D-126 names only no-code-set and switched-off).
+A deterministic id collides if a committed invoice's submission link is ever cleared and the submission re-processed (the create then
+faults and retries); nothing clears the link today.
+
+**Owner questions (not guessed).**
+1. Creator person (task 146 c1-r1): the job stamps no `sprk_createdbyperson` on the invoice, lines or approval. Should it be the submitter
+   (internal: the systemuser; SPA: a contact, which the column may not take)? Until decided the persister is not listed as person-less.
+2. D-126: should 072 still run on uncoded lines (Duplicate, rates, windows), with any Reject held instead of applied? Today nothing is judged.
+3. `sprk_outcomereasoncode` on an AcceptedUncoded submission is left null (the column is documented for Failed / Rejected); the cause is in
+   the findings JSON. Set it instead?
+4. AutoRejected "findings on both": the findings JSON lives on the submission (which links the invoice); the invoice has no findings
+   column, so its copy is part D's Signals. Confirm no invoice-side column is wanted.
