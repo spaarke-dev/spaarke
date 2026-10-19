@@ -24,6 +24,37 @@ import { problemOf } from '../../utils/thrownFetchError';
  */
 export const CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE = 'sdap.closure.incomplete.organization_too_large';
 
+/**
+ * #2104 round 2: the closure's other NON-retryable leaf. The project has more grant rows than one closure reads (active
+ * ones: nothing was revoked; revoked ones: their container permissions could not be confirmed removed), and a retry
+ * reads the same rows. MUST match `ProjectClosureEndpoint.ClosureTooManyGrantsReason`.
+ */
+export const CLOSURE_TOO_MANY_GRANTS_REASON_CODE = 'sdap.closure.incomplete.too_many_grants';
+
+/**
+ * #2104 round 2: the grants WERE revoked, but some grantee's file access on the project's container could not be
+ * confirmed removed. Retryable. MUST match `ProjectClosureEndpoint.ClosureContainerNotClearedReason`.
+ */
+export const CLOSURE_CONTAINER_NOT_CLEARED_REASON_CODE = 'sdap.closure.incomplete.container_not_cleared';
+
+/**
+ * #2104 round 2: some grants were revoked and some could not be deactivated (they remain active). Retryable. MUST match
+ * `ProjectClosureEndpoint.ClosurePartialRevocationReason`.
+ */
+export const CLOSURE_PARTIAL_REVOCATION_REASON_CODE = 'sdap.closure.incomplete.partial_revocation';
+
+/**
+ * #2104 round 2: the active grants could not be enumerated, so none was revoked. Retryable. MUST match
+ * `ProjectClosureEndpoint.ClosureEnumerationFailedReason`.
+ */
+export const CLOSURE_ENUMERATION_FAILED_REASON_CODE = 'sdap.closure.incomplete.enumeration_failed';
+
+/** The reason codes a retry cannot fix: the dialog shows them as "incomplete", with no "Try Again". */
+export const NON_RETRYABLE_CLOSURE_REASON_CODES: readonly string[] = [
+  CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE,
+  CLOSURE_TOO_MANY_GRANTS_REASON_CODE,
+];
+
 // ---------------------------------------------------------------------------
 // Request / Response types (mirror BFF Dtos)
 // ---------------------------------------------------------------------------
