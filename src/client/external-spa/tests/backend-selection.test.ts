@@ -66,6 +66,8 @@ function makeFakeInstance(name: string, behaviour: Behaviour, config: any): any 
     name,
     config,
     initialize: vi.fn(async () => undefined),
+    handleRedirectPromise: vi.fn(async () => null),
+    addEventCallback: vi.fn(() => null),
     getActiveAccount: () => active,
     setActiveAccount: (a: any) => {
       active = a;
@@ -631,20 +633,31 @@ describe('Same build, two backends: requests and token scopes go to whichever ba
 // ---------------------------------------------------------------------------------------------------------------
 
 describe('Both planes acquire tokens for the active backend’s scope', () => {
-  const workforceAccount = { homeAccountId: 'w', username: 'w@spaarke.test', tenantId: SPAARKE_TENANT };
+  // A9 (task 058): the browser workforce plane is the multitenant HOME plane. The sign-in asks for OIDC scopes only; the
+  // signed-in tenant (tid) picks the backend, and the BFF token request carries that entry's scope.
+  const FABRIKAM_TID = 'fabf0000-0000-4000-8000-00000000000f';
+  const workforceAccount = { homeAccountId: 'w', username: 'w@fabrikam.test', tenantId: FABRIKAM_TID };
 
-  it('workforce browser plane: login scope and MSAL token request are the selected backend’s; the BFF call goes to its host', async () => {
-    stubTwoBackends();
+  it('workforce home plane: the login scope is OIDC-only; the MSAL token request is the signed-in tenant’s backend scope; the BFF call goes to its host', async () => {
+    vi.stubEnv('VITE_WORKFORCE_HOME_MSAL_CLIENT_ID', '33333333-2222-3333-4444-555555555555');
+    vi.stubEnv(
+      'VITE_BACKENDS',
+      JSON.stringify([
+        { ...CONTOSO, homeTenantIds: ['c0c0c0c0-0000-4000-8000-000000000001'] },
+        { ...FABRIKAM, homeTenantIds: [FABRIKAM_TID] },
+      ])
+    );
     stubWorkforceEnv();
     h.accounts = [workforceAccount];
-    const { selection, msalAuth, bff } = await load();
+    const { msalAuth, bff } = await load();
     const plane = await import('../src/auth/standalone-plane');
 
-    selection.activateBackend('workforce', { ...FABRIKAM });
-    const resolved = plane.resolveStandalonePlane('workforce');
+    const prepared = await plane.prepareWorkforceHomePlane({ search: '' });
+    expect(prepared.kind).toBe('plane');
+    const resolved = (prepared as { plane: any }).plane;
     expect(resolved.bffScope).toBe(scopeOf(FABRIKAM.bffAppId));
     plane.applyStandalonePlane(resolved);
-    expect(msalAuth.getActiveLoginScope()).toBe(scopeOf(FABRIKAM.bffAppId));
+    expect(msalAuth.getActiveLoginScope()).toBe('openid');
 
     await bff.bffApiCall('/api/v1/external/me');
     const workforcePca = h.pcas.find(p => p.instance === resolved.instance)!;

@@ -99,7 +99,7 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>ADR-028 A9 Teams amendment; design §7/§12. Live verification is task 071.</notes>
+  <notes>ADR-028 A9 Teams amendment; design §7/§12. Live verification is task 071. Carry-over from 058 (2026-10-19): remove the stale /join comment (TeamsHostAdapter.ts:149) and the now-unused notifyTeamsSuccess export (:153); fix the /join wording in spec.md and design.md. Reuse 058 pieces: acquireSpaarkeGuestToken (account-scoped cleanup only, never no-account clearCache), WorkforceHomeGate, RegistrationPage.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

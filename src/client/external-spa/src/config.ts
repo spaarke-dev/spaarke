@@ -177,7 +177,7 @@ export function getWorkforceClientConfig(): WorkforceClientConfig {
     throw new Error(
       '[ExternalSPA] Missing or unsubstituted workforce environment variables ' +
         '(VITE_TEAMS_MSAL_CLIENT_ID / VITE_TEAMS_MSAL_TENANT_ID). Required only when running on the workforce plane ' +
-        '(inside Teams, or the browser "My organization" realm) — see .env.example.'
+        '(inside Teams, or the browser "company account" sign-in) — see .env.example.'
     );
   }
 
@@ -209,7 +209,7 @@ export function getWorkforceEnvConfig(): WorkforceEnvConfig {
     throw new Error(
       '[ExternalSPA] Missing or unsubstituted workforce environment variables ' +
         '(VITE_TEAMS_MSAL_CLIENT_ID / VITE_TEAMS_MSAL_TENANT_ID / VITE_TEAMS_MSAL_BFF_SCOPE). Required only ' +
-        'when running on the workforce plane (inside Teams, or the browser "My organization" realm) — see .env.example.'
+        'when running on the workforce plane (inside Teams, or the browser "company account" sign-in) — see .env.example.'
     );
   }
 
@@ -228,6 +228,54 @@ export function getWorkforceEnvConfig(): WorkforceEnvConfig {
   }
 
   return { clientId: clientId as string, tenantId, bffScope };
+}
+
+// ---------------------------------------------------------------------------
+// Workforce HOME plane — the multitenant client (ADR-028 Amendment A9; task 058)
+// ---------------------------------------------------------------------------
+
+/** The multitenant workforce HOME sign-in client (A9): the browser "company account" sign-in, one client for all customers. */
+export interface WorkforceHomeClientConfig {
+  clientId: string;
+}
+
+/** True when `value` is a GUID (a tenant id or an application id). */
+export function isGuid(value: string | undefined | null): value is string {
+  return !!value && TENANT_ID_PATTERN.test(value);
+}
+
+/**
+ * Read + validate the multitenant HOME sign-in client id (A9, task 058): `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID`. It is
+ * a DIFFERENT application from the single-tenant A8 client (`VITE_TEAMS_MSAL_CLIENT_ID`): the A8 client stays
+ * tenant-pinned (the Teams tab and the guest-token link); this one signs a workforce contact in to THEIR OWN
+ * directory. Read lazily (a CIAM-only build needs neither); missing, an un-substituted placeholder, not a GUID, or
+ * equal to the A8 client id (case-insensitive) is a fail-loud error.
+ */
+export function getWorkforceHomeClientConfig(): WorkforceHomeClientConfig {
+  const clientId = import.meta.env.VITE_WORKFORCE_HOME_MSAL_CLIENT_ID as string | undefined;
+
+  if (isUnsetOrPlaceholder(clientId)) {
+    throw new Error(
+      '[ExternalSPA] Missing or unsubstituted workforce home environment variable VITE_WORKFORCE_HOME_MSAL_CLIENT_ID. ' +
+        'Required only when running the browser workforce ("company account") sign-in — see .env.example.'
+    );
+  }
+
+  if (!isGuid(clientId)) {
+    throw new Error(
+      `[ExternalSPA] VITE_WORKFORCE_HOME_MSAL_CLIENT_ID must be the multitenant client's application id (a GUID), not '${clientId}'.`
+    );
+  }
+
+  const teamsClientId = import.meta.env.VITE_TEAMS_MSAL_CLIENT_ID as string | undefined;
+  if (!isUnsetOrPlaceholder(teamsClientId) && teamsClientId!.toLowerCase() === clientId.toLowerCase()) {
+    throw new Error(
+      '[ExternalSPA] VITE_WORKFORCE_HOME_MSAL_CLIENT_ID must differ from VITE_TEAMS_MSAL_CLIENT_ID: the single-tenant ' +
+        'A8 client and the multitenant home client are separate applications (ADR-028 A8 / A9).'
+    );
+  }
+
+  return { clientId };
 }
 
 /**

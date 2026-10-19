@@ -43,7 +43,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 055 | Notification bell + deep-link record open (FR-08/FR-07 client) | P5 | ✅ [done] | 054, 037, 041 | S/h | FULL | Wave 7 |
 | 056 | Join page (FR-13), flagged until 060 | P5 | ✅ [done] | 003, 041 | O/h | FULL | Wave 8 |
 | 057 | Detail events + to-dos for Matter and Work Assignment (FR-03 client) | P5 | ✅ [done] | 039, 055 | S/h | FULL | Wave 8 |
-| 058 | SPA multitenant sign-in, tid → backend, silent/interactive link, profile form, landing wording | P4b | 🔲 [open] | 047, 048 | S/xh | FULL | A9 Wave 5 |
+| 058 | SPA multitenant sign-in, tid → backend, silent/interactive link, profile form, landing wording | P4b | ✅ [done] 2026-10-19 | 047, 048 | S/xh | FULL | A9 Wave 5 |
 | 059 | Dev Entra + settings setup for A9 (live, owner-gated) | P4b | 🔲 [open] | 044 | S/h | STANDARD | A9 Wave 2 (live, alongside 046) |
 | 060 | Registration service: owner host decision, then build or R4 hand-off (FR-14) | P6 | 🚫 [cancelled] superseded by ADR-028 A9 (047 + 058) | 003 + owner decision | O/h | FULL | — |
 | 061 | Shared DataGrid shows option-set labels from @formattedValues (check-2 #1) | P5b | ✅ [done] reaches dev with the next SPA deploy | none | S/h | FULL | CHK2 |

@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MsalProvider } from '@azure/msal-react';
+import type { IPublicClientApplication } from '@azure/msal-browser';
 import { Button, FluentProvider, Spinner, Text, tokens } from '@fluentui/react-components';
 import { resolveCodePageTheme } from '@spaarke/ui-components/utils/themeStorage';
 import { msalInstance } from './auth/msal-config';
@@ -10,16 +11,21 @@ import {
   createTeamsHostAdapter,
   notifyTeamsAppLoaded,
   notifyTeamsFailureOther,
-  notifyTeamsSuccess,
   type ITeamsHostAdapter,
 } from './host/TeamsHostAdapter';
 import { getStoredRealm, setStoredRealm, clearStoredRealm, type Realm } from './auth/realm';
 import { syncActiveAccountOnInteractiveSignIn } from './auth/msal-auth';
-import { resolveStandalonePlane, applyStandalonePlane, type StandalonePlane } from './auth/standalone-plane';
+import {
+  resolveStandalonePlane,
+  applyStandalonePlane,
+  prepareWorkforceHomePlane,
+  type StandalonePlane,
+} from './auth/standalone-plane';
 import {
   activateBackend,
   chooseBackend,
   clearActiveBackend,
+  landingCustomerName,
   resolveBackendSelection,
   type Backend,
   type BackendPlane,
@@ -27,10 +33,9 @@ import {
 import { RealmChooser } from './components/auth/RealmChooser';
 import { CustomerPicker } from './components/auth/CustomerPicker';
 import { TeamsAuthError } from './components/auth/TeamsAuthError';
+import { OrganizationNotSetUp } from './components/auth/OrganizationNotSetUp';
 import { App } from './App';
 import { isDevMockEnabled } from './dev-mock';
-import { isJoinPath } from './auth/registration-client';
-import { JoinPage } from './pages/JoinPage';
 import { captureInviteCode, clearInviteCode } from './auth/invite-code';
 
 // Power Pages Code Page SPA — React 18 with createRoot (bundled, not platform-provided).
@@ -116,10 +121,14 @@ const bootstrapCenterStyle: React.CSSProperties = {
  * Live browser bootstrap component: home-realm discovery → per-context authority → MSAL init → App.
  *
  * State machine (all pre-auth screens are Fluent v9 semantic tokens only — ADR-021):
- *   - no stored realm            → <RealmChooser> ("My organization" | "Partner")
- *   - realm chosen               → run-time backend selection for that plane (task 041, FR-17): one backend (or a
+ *   - no stored realm            → <RealmChooser> ("Partner" | "company account")
+ *   - realm chosen (Partner)     → run-time backend selection for the CIAM plane (task 041, FR-17): one backend (or a
  *                                  valid `?customer=` / stored key) is activated; several and none active →
  *                                  <CustomerPicker>; none → fail closed (the error screen below; no request is made)
+ *   - realm chosen (company)     → the workforce HOME plane (ADR-028 A9, task 058): sign in to the person's own directory
+ *                                  first, then the signed-in tenant id picks the backend. No account yet → the app mounts
+ *                                  so AuthGuard starts the sign-in; a tenant no directory entry lists →
+ *                                  <OrganizationNotSetUp> (no token request, no BFF call); several entries → <CustomerPicker>
  *   - realm chosen, initializing → spinner
  *   - realm chosen, init failed  → fail-loud error + "choose a different sign-in" (criterion 4)
  *   - plane ready                → <MsalProvider instance={plane}><App/></MsalProvider>
@@ -134,12 +143,32 @@ const StandaloneBootstrap: React.FC = () => {
   // Customer picker options (several backends known, none active), and the key the user picked from them.
   const [pickOptions, setPickOptions] = React.useState<Backend[] | null>(null);
   const [pickedKey, setPickedKey] = React.useState<string | null>(null);
+  // The signed-in company directory is listed by no customer (A9): the sign-in instance, kept for "Sign out".
+  const [notSetUp, setNotSetUp] = React.useState<IPublicClientApplication | null>(null);
+  // "Work for {customer}?" on the landing, for a `?customer={key}` link that names a configured customer.
+  const customerName = React.useMemo(() => landingCustomerName(), []);
 
   React.useEffect(() => {
     if (!realm) return;
     let cancelled = false;
     void (async () => {
       try {
+        if (realm === 'workforce') {
+          // The company-account sign-in (A9): the plane depends on the signed-in tenant, so it is prepared as one step.
+          const prepared = await prepareWorkforceHomePlane({ pickedKey: pickedKey ?? undefined });
+          if (cancelled) return;
+          if (prepared.kind === 'pick') {
+            setPickOptions(prepared.options);
+            return;
+          }
+          if (prepared.kind === 'notSetUp') {
+            setNotSetUp(prepared.instance);
+            return;
+          }
+          applyStandalonePlane(prepared.plane);
+          setPlane(prepared.plane);
+          return;
+        }
         if (!pickedKey) {
           // Backend first (task 041): the plane's scope and every request URL come from the active backend.
           const selection = await resolveBackendSelection(realm);
@@ -196,6 +225,7 @@ const StandaloneBootstrap: React.FC = () => {
     setPlane(null);
     setPickOptions(null);
     setPickedKey(null);
+    setNotSetUp(null);
     setRealm(null);
   }, []);
 
@@ -203,7 +233,7 @@ const StandaloneBootstrap: React.FC = () => {
   if (!realm) {
     return (
       <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
-        <RealmChooser onChoose={handleChoose} />
+        <RealmChooser onChoose={handleChoose} customerName={customerName} />
       </FluentProvider>
     );
   }
@@ -224,6 +254,15 @@ const StandaloneBootstrap: React.FC = () => {
             Choose a different sign-in
           </Button>
         </div>
+      </FluentProvider>
+    );
+  }
+
+  // The company directory is listed by no customer (A9): nothing was requested, nothing is active.
+  if (notSetUp) {
+    return (
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <OrganizationNotSetUp instance={notSetUp} onChooseDifferent={handleResetRealm} />
       </FluentProvider>
     );
   }
@@ -378,28 +417,6 @@ function renderTeamsAuthError(root: Root, adapter: ITeamsHostAdapter, err: unkno
   );
 }
 
-/**
- * `/join?customer={key}` (task 056, FR-13): a pre-sign-in page, so it is rendered here — before the realm chooser, the
- * backend activation and any MSAL instance — in both hosts. The page itself decides what to show: "not available"
- * while `VITE_JOIN_ENABLED` is off, a browser-only message inside Teams (no redirect in the Teams iframe, NFR-04).
- */
-function renderJoin(root: Root, inTeams: boolean): void {
-  // Inside Teams the host's spinner stops once there is a screen to show (as for the other pre-auth screens), and the
-  // message is the whole tab (no sign-in follows), so the start is also reported as successful, as the Teams bootstrap
-  // does once it has something to show.
-  if (inTeams) {
-    notifyTeamsAppLoaded();
-    notifyTeamsSuccess();
-  }
-  root.render(
-    <React.StrictMode>
-      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
-        <JoinPage teamsHost={inTeams} />
-      </FluentProvider>
-    </React.StrictMode>
-  );
-}
-
 async function main() {
   // Task 185: FIRST, before any MSAL work — store the invite link's code and strip it from the URL (auth/invite-code.ts).
   captureInviteCode();
@@ -408,10 +425,6 @@ async function main() {
   const root = createRoot(rootElement);
 
   const inTeams = await detectTeamsHost();
-  if (isJoinPath(window.location.pathname)) {
-    renderJoin(root, inTeams);
-    return;
-  }
   if (inTeams) {
     await bootstrapTeams(root);
   } else {

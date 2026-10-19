@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **058** — SPA multitenant sign-in, tid → backend, silent/interactive link, profile form (`tasks/058-spa-multitenant-signin-profile-form.poml`). Rigor FULL; Opus session (POML: sonnet @ xhigh). 044–048 and 061–068 are done and on master |
-| **Step** | Step 0 done (knowledge, BFF contracts and SPA code read; escalation trigger evaluated: does not fire, link flow unchanged). **Implementation plan is in `notes/task-058-notes.md` — follow it.** Next: Step 1 (tests in `tests/workforce-home-auth.test.ts`), then Steps 2–6. No code written yet |
+| **Task** | **058 done 2026-10-19** (SPA multitenant sign-in, profile form, link). 2 adversarial passes; fix round 1 closed the no-account `clearCache()` session wipe (real-MSAL regression test). Final: vitest 1072/1072, typecheck, lint, build, check:dist clean. Next task **075** (Teams → multitenant NAA; carry-over recorded in its POML notes) |
+| **Step** | Before 075: merge `origin/master` (UAC 186 `49279def1` + 099b `d7eabba3b`), run targeted tests + ArchTests, then the deploy check round and the owner's direct approval for the dev BFF deploy (gate below) |
 | **Status** | **Dev BFF = `ad0e9e1a7`** (R3 + master `1473b34c6`: ontology 102b #2088 + UAC #2094), deployed with the owner's direct approval, finished 2026-10-18 22:30:58Z. Pre-deploy live was `ebc74b331` (an ancestor). Verified: ProductVersion `1.0.0+ad0e9e1a7…`, 4 critical files SHA-256 match, `/healthz` 200, 2 CORS origins, MIs `mi-bff-api-dev` + `mi-ontology-writer-dev`. Tests at this head: targeted 1064/1064, ArchTests 1130/1130. After-notices sent to ontology (authoring routes + nightly sweep), UAC (#2094 live gate + #2083 smoke) and word-add-in. Rollback: redeploy `ebc74b331`. Dev external SPA = `ebc74b331` (run `39094144398`), not redeployed. **Owner Partner UAT passed 2026-10-18; UI changes go to a new round** |
-| **Next Action** | Continue 058 per `notes/task-058-notes.md` "Implementation plan" (SPA dir `src/client/external-spa`; npm typecheck/lint/test/build/check:dist). Watch for the UAC post-deploy result (ontology confirmed OK; it checks the nightly sweep on 2026-10-19) |
+| **Next Action** | Merge `origin/master` into the branch, keeping the owner's researcher MEMORY.md (save the patch, check it out, merge, then `apply -3`). 058's SPA is not deployed; the SPA deploy waits for 059 (multitenant client redirect URIs, plus GitHub env `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID` and `VITE_BACKENDS` with `homeTenantIds`; the workflow now fails closed without them) |
 
 ### Uncommitted files
 - `.claude/agent-memory/researcher/MEMORY.md` (modified) and `.claude/agent-memory/researcher/dataverse-duplicate-detection-api-default-2026-10-15.md` (untracked) belong to the OWNER. Never commit or discard them. The 2026-10-18 master merge re-applied the owner's index line next to master's new line. Backups are in the session scratchpad (`owner-researcher-memory.patch`, `owner-researcher-MEMORY.md.bak`).
@@ -27,7 +27,7 @@
 ## Next actions (in order)
 1. Read ontology's and UAC's post-deploy check results for `ad0e9e1a7`; if either fails, decide on rollback with the owner.
 2. Partner UAT passed (2026-10-18). UI changes are a new round (not R3 scope unless the owner says otherwise).
-4. Task 058 → 075 → 076 → 074 (074 and 059 are live and owner-gated); 070/071/072; the final R3 PR.
+4. 075 → 076 → 074 (074 and 059 are live and owner-gated); 070/071/072; the final R3 PR.
 5. Close DEF-004 (#1829) as superseded when ebilling 051 merges (successor answers posted on the issue).
 
 ## Open owner questions

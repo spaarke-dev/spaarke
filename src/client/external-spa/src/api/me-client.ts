@@ -8,7 +8,7 @@
  * contract; mock the payload where the endpoint is not yet deployed").
  *
  * `plane` is derived from the REAL host-detection signal already established at bootstrap
- * (`teamsHost` — a Teams tab is workforce SSO, a standalone browser is CIAM; see
+ * (`teamsHost` — a Teams tab is workforce SSO, a standalone browser is CIAM unless the workforce home plane is mounted; see
  * `src/host/TeamsHostAdapter.ts` + `main.tsx`) — only `entitlements` is mocked pending task 022.
  * A dev-only `?dv_persona=workforce|ciam|admin` override lets every persona's role-defaulted workspace be exercised
  * locally without a live entitlement backend. It runs only in dev-mock mode (`isDevMockEnabled()`, dev-mock.ts: the
@@ -33,6 +33,7 @@
  */
 
 import { bffApiCall } from '../auth/bff-client';
+import { isWorkforceHomePlaneActive } from '../auth/msal-auth';
 import { isDevMockEnabled } from '../dev-mock';
 import { ApiError } from '../types';
 
@@ -106,7 +107,10 @@ function resolveDevPersonaOverride(): Plane | null {
  * rollout fallback plane; the live BFF derives the plane authoritatively from the caller's token.
  */
 export async function fetchMeEntitlements(teamsHost: boolean): Promise<MeEntitlementsResponse> {
-  const basePlane: Plane = teamsHost ? 'workforce' : 'ciam';
+  // A Teams tab is workforce SSO; so is the browser workforce HOME plane (A9, task 058) - the signal for that is the
+  // mounted plane, not `teamsHost`, which is false in a browser. Without it a home-plane user on the 5xx degrade would
+  // get the CIAM default modules.
+  const basePlane: Plane = teamsHost || isWorkforceHomePlaneActive() ? 'workforce' : 'ciam';
 
   // Local dev only (dev-mock.ts): short-circuit to the plane/persona mock, no BFF call. Preserves the
   // `?dv_persona=` override for exercising every persona's workspace without a live entitlement backend.

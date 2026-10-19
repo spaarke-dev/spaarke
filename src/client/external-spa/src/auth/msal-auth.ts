@@ -30,7 +30,7 @@ import {
 import { app as teamsApp, nestedAppAuth } from '@microsoft/teams-js';
 import { msalInstance, workforceAuthorityConfig, buildMsalConfiguration, popupRedirectUri } from './msal-config';
 import { activeBffScope, BackendSelectionError, type ActiveBackend } from './backend-selection';
-import { isUserImpersonationScope } from '../config';
+import { MSAL_TENANT_ID, getWorkforceClientConfig, isTenantId, isUserImpersonationScope } from '../config';
 
 /**
  * Deep-link preservation through the MSAL login/token redirect (task 012).
@@ -156,6 +156,12 @@ export interface StandaloneAcquireOptions {
    * so a later user-initiated redirect is not blocked by it. Absent, behaviour is exactly as before.
    */
   noInteraction?: boolean;
+  /**
+   * Per-request authority (ADR-028 A9). The workforce HOME plane signs in on `organizations` but requests the BFF token
+   * on `https://login.microsoftonline.com/{tid}`: it is added to the silent requests and to both interactive
+   * redirects, only when set, so the CIAM requests and the Teams requests are unchanged.
+   */
+  authority?: string;
 }
 
 /** The accounts of one instance, optionally scoped to a tenant (case-insensitive GUID). */
@@ -358,6 +364,8 @@ export async function acquireStandaloneBffToken(
   options: StandaloneAcquireOptions = {}
 ): Promise<string> {
   const accounts = accountsFor(instance, options.tenantId);
+  // The home plane's per-request authority (A9), added to a request only when set.
+  const authority = options.authority ? { authority: options.authority } : {};
 
   if (accounts.length === 0) {
     // A background caller never starts a sign-in (and records nothing).
@@ -365,7 +373,7 @@ export async function acquireStandaloneBffToken(
     // No authenticated account — trigger login redirect (preserving the current route), unless one already failed
     assertRedirectAllowed(instance);
     captureReturnTo();
-    await instance.acquireTokenRedirect({ scopes: [bffScope] });
+    await instance.acquireTokenRedirect({ scopes: [bffScope], ...authority });
     // acquireTokenRedirect navigates away; this throw aborts the current call chain
     throw new Error('No authenticated account — redirecting to login');
   }
@@ -378,7 +386,8 @@ export async function acquireStandaloneBffToken(
       bffScope,
       account,
       options.silentRedirectUri,
-      options.forceRefresh === true
+      options.forceRefresh === true,
+      options.authority
     );
     // A token again: any earlier failed redirect for this instance is over.
     clearSignInFailure(instance);
@@ -396,6 +405,7 @@ export async function acquireStandaloneBffToken(
       await instance.acquireTokenRedirect({
         scopes: [bffScope],
         account,
+        ...authority,
       });
       throw new Error('Interaction required — redirecting to login');
     }
@@ -413,12 +423,15 @@ async function acquireSilent(
   bffScope: string,
   account: AccountInfo,
   silentRedirectUri?: string,
-  forceRefresh = false
+  forceRefresh = false,
+  authorityOverride?: string
 ): Promise<string> {
   // `forceRefresh` is added to the request only when asked for, so the 040 request shapes are otherwise unchanged.
   const refresh = forceRefresh ? { forceRefresh: true } : {};
+  // Likewise the home plane's per-request authority (A9).
+  const authority = authorityOverride ? { authority: authorityOverride } : {};
   if (!silentRedirectUri) {
-    const result = await instance.acquireTokenSilent({ scopes: [bffScope], account, ...refresh });
+    const result = await instance.acquireTokenSilent({ scopes: [bffScope], account, ...refresh, ...authority });
     return result.accessToken;
   }
 
@@ -428,6 +441,7 @@ async function acquireSilent(
       account,
       cacheLookupPolicy: CacheLookupPolicy.AccessTokenAndRefreshToken,
       ...refresh,
+      ...authority,
     });
     return result.accessToken;
   } catch (err) {
@@ -441,6 +455,7 @@ async function acquireSilent(
     account,
     cacheLookupPolicy: CacheLookupPolicy.Skip,
     redirectUri: silentRedirectUri,
+    ...authority,
   });
   return result.accessToken;
 }
@@ -620,11 +635,47 @@ export function setActiveAccountTenantId(tenantId: string | null): void {
   activeAccountTenantId = tenantId;
 }
 
+/**
+ * Active account PREDICATE seam (ADR-028 A9, task 058). Null for CIAM. The workforce HOME plane sets
+ * {@link isWorkforceHomeAccount} so that, BEFORE the signed-in tenant is known, a CIAM account cached in the same tab's
+ * sessionStorage is still not counted as a workforce sign-in. Applied after the tenant filter.
+ */
+let activeAccountFilter: ((account: { tenantId?: string }) => boolean) | null = null;
+
+export function setActiveAccountFilter(filter: ((account: { tenantId?: string }) => boolean) | null): void {
+  activeAccountFilter = filter;
+}
+
+/**
+ * True for an account a workforce contact signed in with in THEIR OWN directory: its tenant is a GUID and is not the CIAM
+ * external tenant. MSAL's `environment` is deliberately not used (it reports the cache alias `login.windows.net` for
+ * `login.microsoftonline.com`), and the Spaarke tenant is not excluded: a Spaarke-tenant sign-in simply finds no
+ * directory entry and shows "not set up" - excluding it would send the sign-in round again, forever.
+ */
+export function isWorkforceHomeAccount(account: { tenantId?: string }): boolean {
+  const tid = account.tenantId;
+  return isTenantId(tid) && tid.toLowerCase() !== MSAL_TENANT_ID.toLowerCase();
+}
+
+/** Whether the workforce HOME plane (A9) is the mounted browser plane; read by the registration gate. */
+let workforceHomePlaneActive = false;
+
+export function setWorkforceHomePlaneActive(active: boolean): void {
+  workforceHomePlaneActive = active;
+}
+
+export function isWorkforceHomePlaneActive(): boolean {
+  return workforceHomePlaneActive;
+}
+
 /** The accounts that belong to the currently-selected browser plane (all of them for CIAM). */
 export function accountsForActivePlane<T extends { tenantId?: string }>(accounts: readonly T[]): T[] {
-  if (!activeAccountTenantId) return [...accounts];
-  const tenant = activeAccountTenantId.toLowerCase();
-  return accounts.filter(a => a.tenantId?.toLowerCase() === tenant);
+  let result = [...accounts];
+  if (activeAccountTenantId) {
+    const tenant = activeAccountTenantId.toLowerCase();
+    result = result.filter(a => a.tenantId?.toLowerCase() === tenant);
+  }
+  return activeAccountFilter ? result.filter(activeAccountFilter) : result;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────
@@ -1017,4 +1068,137 @@ async function signInViaPopupInstance(
  */
 export async function signInTeamsWorkforceViaPopup(cfg: TeamsWorkforceAuthConfig): Promise<string> {
   return signInViaPopupInstance(cfg, false);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────
+ * Guest (Spaarke-tenant) token for the stored link (ADR-028 A9; task 058)
+ * ───────────────────────────────────────────────────────────────────────────────────────────
+ *
+ * A licensed workforce user is a GUEST of Spaarke's tenant and the BFF must link the home sign-in's tid/oid to that
+ * guest's `systemuser` row. The proof is a Spaarke-tenant token for the BFF, requested here with the single-tenant A8
+ * client (authority pinned to Spaarke's tenant) and sent ONCE, in the body of `POST /api/v1/external/workforce/link`.
+ *
+ *   - The token is a one-shot credential, not a session: the instance keeps its cache in MEMORY (never sessionStorage or
+ *     localStorage), the cache is cleared after every call, and the token is returned to the caller only. It is never
+ *     logged, stored, put in a URL, or used as a Bearer token.
+ *   - `silent` runs `ssoSilent` with the home account as `loginHint` (a hidden iframe: Chrome and Edge allow it; Safari
+ *     and Firefox block third-party cookies, so it fails and the caller falls back to the profile form). ANY failure is
+ *     "no token" (null): the caller shows the form, which fails closed.
+ *   - `popup` runs `acquireTokenPopup` and is called ONLY from a click. A closed popup is `GuestLinkTokenError('cancelled')`.
+ *   - Only the `api://{app id}/user_impersonation` scope is ever requested.
+ */
+
+/** A failed popup acquisition: the person closed the window (`cancelled`), or it failed for another reason (`failed`). */
+export class GuestLinkTokenError extends Error {
+  constructor(public readonly reason: 'cancelled' | 'failed') {
+    super(
+      reason === 'cancelled'
+        ? 'The sign-in window was closed before it finished.'
+        : 'The Spaarke sign-in could not be completed.'
+    );
+    this.name = 'GuestLinkTokenError';
+  }
+}
+
+let guestLinkInstancePromise: Promise<IPublicClientApplication> | null = null;
+let guestLinkInstanceCacheKey: string | null = null;
+
+/**
+ * The memoized A8 instance for the link: Spaarke-tenant authority, bridge-page redirect URI, in-memory cache. A failed
+ * creation is not memoized, so a later call can retry it.
+ */
+async function getGuestLinkInstance(bffScope: string): Promise<IPublicClientApplication> {
+  const { clientId, tenantId } = getWorkforceClientConfig();
+  const key = `${clientId}|${tenantId}`;
+  if (!guestLinkInstancePromise || guestLinkInstanceCacheKey !== key) {
+    guestLinkInstanceCacheKey = key;
+    const created = (async () => {
+      const configuration = buildMsalConfiguration(workforceAuthorityConfig({ clientId, tenantId, bffScope }), {
+        redirectUri: popupRedirectUri(),
+        cacheLocation: 'memoryStorage',
+      });
+      const pca = new PublicClientApplication(configuration);
+      await pca.initialize();
+      return pca as IPublicClientApplication;
+    })();
+    guestLinkInstancePromise = created;
+    created.catch(() => {
+      if (guestLinkInstancePromise === created) {
+        guestLinkInstancePromise = null;
+        guestLinkInstanceCacheKey = null;
+      }
+    });
+  }
+  return guestLinkInstancePromise;
+}
+
+/**
+ * Acquire the Spaarke-tenant guest token for the stored link. `silent` resolves to the token or null (any failure);
+ * `popup` resolves to the token or throws {@link GuestLinkTokenError}. The instance's cache is cleared afterwards in
+ * both modes.
+ *
+ * @param mode `silent` (hidden iframe, no user gesture) or `popup` (call ONLY from a click).
+ * @param loginHint The home account's username (UPN), so the sign-in resolves to the same person.
+ * @param bffScope `api://{customer BFF app id}/user_impersonation` of the active backend.
+ */
+export async function acquireSpaarkeGuestToken(
+  mode: 'silent' | 'popup',
+  loginHint: string,
+  bffScope: string
+): Promise<string | null> {
+  if (!isUserImpersonationScope(bffScope)) {
+    if (mode === 'popup') throw new GuestLinkTokenError('failed');
+    return null;
+  }
+
+  let instance: IPublicClientApplication;
+  try {
+    instance = await getGuestLinkInstance(bffScope);
+  } catch {
+    if (mode === 'popup') throw new GuestLinkTokenError('failed');
+    return null;
+  }
+
+  try {
+    const result =
+      mode === 'silent'
+        ? await instance.ssoSilent({ scopes: [bffScope], loginHint })
+        : await instance.acquireTokenPopup({ scopes: [bffScope], loginHint });
+    if (!result.accessToken) {
+      if (mode === 'popup') throw new GuestLinkTokenError('failed');
+      return null;
+    }
+    return result.accessToken;
+  } catch (err) {
+    if (mode === 'silent') return null;
+    if (err instanceof GuestLinkTokenError) throw err;
+    throw new GuestLinkTokenError(isUserCancelled(err) ? 'cancelled' : 'failed');
+  } finally {
+    await dropGuestLinkAccounts(instance);
+  }
+}
+
+/**
+ * Remove every account (and so every token) this guest instance holds, so the token lives for one call only.
+ *
+ * NEVER `instance.clearCache()` with no account here: in msal-browser 5.5.0 that form runs `BrowserCacheManager.clear()`,
+ * which deletes every sessionStorage key containing "msal" - the temporary cache is always sessionStorage, whatever the
+ * instance's `cacheLocation` - and so signs the home (multitenant) plane and the CIAM plane out. The account form
+ * (`clearCacheOnLogout` -> `removeAccount`) touches only this instance's own (memory) store.
+ * Regression: tests/guest-token-cache-isolation.test.ts (real msal-browser).
+ */
+async function dropGuestLinkAccounts(instance: IPublicClientApplication): Promise<void> {
+  let accounts: AccountInfo[] = [];
+  try {
+    accounts = instance.getAllAccounts();
+  } catch {
+    /* best effort: the cache is in memory only */
+  }
+  for (const account of accounts) {
+    try {
+      await instance.clearCache({ account });
+    } catch {
+      /* best effort: the cache is in memory only */
+    }
+  }
 }
