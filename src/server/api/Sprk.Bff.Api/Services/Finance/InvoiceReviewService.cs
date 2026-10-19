@@ -404,6 +404,7 @@ public class InvoiceReviewService : IInvoiceReviewService
         Guid invoiceId;
         long? statusVersion;
         var reconcileOwnerAfterStatus = false;
+        Func<Task<bool>>? resumedWasIsolated = null;
 
         if (first.Link == LinkState.SameMatterAndVendor)
         {
@@ -414,6 +415,11 @@ public class InvoiceReviewService : IInvoiceReviewService
             invoiceId = first.LinkedInvoiceId!.Value;
             statusVersion = first.Version; // nothing written since the read: the status write is conditional on it
             reconcileOwnerAfterStatus = true; // task 146 — see after step 3
+
+            // #2095: the resumed re-file below runs AFTER the review stamp, so whether the document is isolated is read now,
+            // BEFORE that first write: a read that cannot be answered (503) must leave the document exactly as it was, not
+            // stamped Confirmed with no extraction queued. The re-file below is handed this answer.
+            resumedWasIsolated = await ReadDocumentIsolationBeforeWriteAsync(request.DocumentId, ct);
         }
         else
         {
@@ -510,7 +516,8 @@ public class InvoiceReviewService : IInvoiceReviewService
         // version condition (an already-owned document is left as it is — the common case is a no-op).
         if (reconcileOwnerAfterStatus)
         {
-            await RefileDocumentUnderInvoiceAsync(request, applyChange: _ => Task.CompletedTask, ct);
+            await RefileDocumentUnderInvoiceAsync(
+                request, applyChange: _ => Task.CompletedTask, ct, wasIsolatedPreRead: resumedWasIsolated);
         }
 
         // Step 4: enqueue extraction. Its idempotency key is per invoice and becomes the Service Bus MessageId, but
@@ -673,12 +680,15 @@ public class InvoiceReviewService : IInvoiceReviewService
     /// writes nothing (fail closed — a retry re-reads it); the step itself never throws (the write stands).</para>
     /// </summary>
     private async Task RefileDocumentUnderInvoiceAsync(
-        InvoiceReviewConfirmRequest request, Func<CancellationToken, Task> applyChange, CancellationToken ct)
+        InvoiceReviewConfirmRequest request, Func<CancellationToken, Task> applyChange, CancellationToken ct,
+        Func<Task<bool>>? wasIsolatedPreRead = null)
     {
         // Unlike the unattended re-file writers (the playbook node, the field-mapping push, the update action), which write
         // anyway and release nothing — a refusal there would fail a whole run over a transient read — confirm is ONE
         // interactive action that is safe to retry, so it refuses (503) rather than file a document it cannot classify.
-        var wasIsolated = await ReadDocumentIsolationBeforeWriteAsync(request.DocumentId, ct);
+        // wasIsolatedPreRead: the resumed confirm reads it before its review stamp (nothing may be written first); the first
+        // attempt reads it here, before its invoice create.
+        var wasIsolated = wasIsolatedPreRead ?? await ReadDocumentIsolationBeforeWriteAsync(request.DocumentId, ct);
 
         var reparent = await _ownership.ReparentAsync(
             new RecordReparent

@@ -967,6 +967,31 @@ public class InvoiceReviewWritePathTests
     private const int CollaborateMask = 1 | 2 | 4 | 16;
 
     /// <summary>
+    /// ZERO writes of any kind, on every fake: no invoice create, no document link or review stamp or status (the records
+    /// seam), no generic Create/Update/Delete/Execute (the strict entity service has no setup in these tests), no reparent or
+    /// owner write, no stamp or share or access-record write in the Dataverse world, no job.
+    /// </summary>
+    private void AssertNothingWasWritten()
+    {
+        _records.Writes.Should().BeEmpty("fail closed: nothing is written when whether the document is isolated cannot be told");
+        _records.LinkAttempts.Should().Be(0);
+        _entities.VerifyNoOtherCalls();
+        _recordTypes.VerifyNoOtherCalls();
+        _ownership.Verify(o => o.ReparentAsync(
+            It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()), Times.Never);
+        _ownership.Verify(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Times.Never);
+        _world.OwnerWrites.Should().BeEmpty();
+        _world.StampWrites.Should().BeEmpty();
+        _world.AccessRecordWrites.Should().BeEmpty();
+        _world.AccessPermissionWrites.Should().BeEmpty();
+        _world.Deletes.Should().BeEmpty();
+        _shares.Writes.Should().BeEmpty();
+        _shares.WriteLog.Should().BeEmpty();
+        _jobs.Verify(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Never);
+        _submitted.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// The reparent as Dataverse leaves it: the change applied, the document's matter lookup on the confirmed matter and its
     /// owner moved to the secure team (<paramref name="intoSecure"/>) or the ordinary business unit's team.
     /// </summary>
@@ -1044,25 +1069,63 @@ public class InvoiceReviewWritePathTests
         thrown.InnerException.Should().BeOfType<TaskCanceledException>("the fault is carried for the log, not rendered");
         faults.Should().Be(2, "the read, then its one retry");
 
-        // ZERO writes of any kind, on every fake: no invoice create, no document link or review stamp or status
-        // (the records seam), no generic Create/Update/Delete/Execute (the strict entity service has no setup in this test),
-        // no reparent or owner write, no stamp or share or access-record write in the Dataverse world, no job.
-        _records.Writes.Should().BeEmpty("fail closed: nothing is written when whether the document is isolated cannot be told");
-        _records.LinkAttempts.Should().Be(0);
-        _entities.VerifyNoOtherCalls();
-        _recordTypes.VerifyNoOtherCalls();
-        _ownership.Verify(o => o.ReparentAsync(
-            It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()), Times.Never);
-        _ownership.Verify(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Times.Never);
-        _world.OwnerWrites.Should().BeEmpty();
-        _world.StampWrites.Should().BeEmpty();
-        _world.AccessRecordWrites.Should().BeEmpty();
-        _world.AccessPermissionWrites.Should().BeEmpty();
-        _world.Deletes.Should().BeEmpty();
-        _shares.Writes.Should().BeEmpty();
-        _shares.WriteLog.Should().BeEmpty();
-        _jobs.Verify(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Never);
-        _submitted.Should().BeEmpty();
+        AssertNothingWasWritten();
+    }
+
+    [Fact(DisplayName = "#2095 F1: a RESUMED confirm whose isolation read faults twice writes nothing - the review stamp included")]
+    public async Task Confirm_Resume_WhenTheIsolationReadFaultsTwice_WritesNothing_NotEvenTheReviewStamp()
+    {
+        var request = NewRequest();
+        var invoiceId = Guid.NewGuid();
+        // What a first attempt left behind: the document linked to the invoice, its review status not yet set.
+        _records.Invoice(invoiceId, matterId: request.MatterId, vendorId: request.VendorOrgId);
+        _records.ExistingDocument(request.DocumentId, linkedInvoiceId: invoiceId);
+        _world.SecureRoot("sprk_matter", SecureMatter)
+            .SecureChild("sprk_document", request.DocumentId, ("sprk_matter", "sprk_matter", SecureMatter));
+        var faults = 0;
+        _world.QueryFault = () =>
+        {
+            faults++;
+            return new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout of 100 seconds elapsing.");
+        };
+        _world.FailingQueriesOf("sprk_document");
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-2095-f1");
+
+        (await act.Should().ThrowAsync<InvoiceReviewException>()).Which.Failure.Should().Be(InvoiceReviewFailure.IsolationUnreadable);
+        faults.Should().Be(2, "the read, then its one retry");
+        AssertNothingWasWritten();
+        _records.LinkOf(request.DocumentId).Should().Be(invoiceId, "the first attempt's link is untouched");
+    }
+
+    [Fact(DisplayName = "#2095 K1: AfterRefileAsync runs with CancellationToken.None - a request cancelled after the reparent still moves the share mirror")]
+    public async Task Confirm_ARequestCancelledAfterTheReparent_StillRunsAfterRefile()
+    {
+        var request = NewRequest() with { MatterId = OrdinaryMatter };
+        _world.SecureRoot("sprk_matter", SecureMatter).OrdinaryRoot("sprk_matter", OrdinaryMatter)
+            .SecureChild("sprk_document", request.DocumentId, ("sprk_matter", "sprk_matter", SecureMatter));
+        _shares.Seed("sprk_document", request.DocumentId, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _records.ExistingDocument(request.DocumentId);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+        using var cancel = new CancellationTokenSource();
+        _ownership.Setup(o => o.ReparentAsync(
+                It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (RecordReparent _, Func<CancellationToken, Task> apply, CancellationToken token) =>
+            {
+                await apply(token);
+                _world.Set("sprk_document", request.DocumentId, "sprk_matter", new EntityReference("sprk_matter", OrdinaryMatter));
+                _world.MoveOwner("sprk_document", request.DocumentId, DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam));
+                cancel.Cancel(); // the caller goes away once the re-file has landed
+                return RecordOwnerResolution.Owned(TeamId);
+            });
+
+        // The later steps honour the cancelled token and stop the request; what matters is the step after the re-file.
+        try { await Sut().ConfirmInvoiceAsync(request, "corr-2095-k1", cancel.Token); }
+        catch (Exception ex) when (ex is OperationCanceledException or InvoiceReviewException) { }
+
+        cancel.IsCancellationRequested.Should().BeTrue();
+        _shares.MaskOf("sprk_document", request.DocumentId, DataversePrincipalRef.User(Sharee)).Should().BeNull(
+            "the step after the re-file ran to completion although the request was cancelled (CancellationToken.None)");
     }
 
     [Fact(DisplayName = "#2095: a refused reparent writes nothing and does not run AfterRefileAsync")]
