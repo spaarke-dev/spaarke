@@ -118,3 +118,7 @@ Spend, in the live Threshold input and in the stored `sprk_totalspendtodate`, is
 - Behaviour you will see: an Approved invoice billed 1000 with 200 disallowed counts 800; a credit memo (negative approved total) lowers spend; an approved total of 0 counts 0. A Threshold such as "spend reaches 90 percent of budget" now fires later than it would on billed amounts when reviewers disallow charges. In Review invoices are unaffected until approved (not counted either way).
 - Please check: the `null` / `not-null` condition on `sprk_approvedtotal` inside an aggregate FetchXML (the two new shapes) via the read-only seam case, and that dev data has no invoice whose approved total is the placeholder 0 while its billed total is real (a 0 is treated as a real value and counts 0, by design).
 - Guard: `FinanceBaseValuesSingleDefinitionGuardTests` now also flags any rollup / evaluator source that names an invoice amount column, so a second copy of the rule fails CI.
+
+## Live check (main session, 2026-10-19)
+
+The read-only seam case `FinanceBaseValuesSeamTests.PendingSpendQueries_AreAcceptedByDataverse_ReadOnly` now also sends `FinanceBaseValues.ReadAsync` (both counted parts plus the budget query). It passed against spaarkedev1, run as the operator with ids that match no row; it creates nothing. Dataverse accepts `null` / `not-null` on `sprk_approvedtotal` inside the grouped aggregates, for both counted spend and Pending Spend, on matter and project. The real-row semantic case still creates rows, so running it needs the owner's OK.

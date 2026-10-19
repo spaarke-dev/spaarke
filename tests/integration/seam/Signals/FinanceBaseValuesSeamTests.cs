@@ -98,7 +98,7 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
     }
 
     /// <summary>
-    /// READ-ONLY (049, ontology-r1 review K1): Dataverse accepts both Pending Spend (D-104) query shapes, the aggregate FetchXML
+    /// READ-ONLY (049, ontology-r1 review K1; D-130): Dataverse accepts the counted spend parts and both Pending Spend (D-104) query shapes, the aggregate FetchXML
     /// (<see cref="FinanceBaseValues.BuildGroupedPendingSpendFetchXml"/>, with <c>entityname</c> on a root condition inside an
     /// aggregate) and the rollup's QueryExpression (<see cref="FinanceRollupService.BuildPendingInvoiceQuery"/>), and the reader
     /// reads the result. It creates nothing: the ids belong to no row, so each query must run and return no rows (0, never a throw).
@@ -119,6 +119,10 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
         {
             var pending = await FinanceBaseValues.ReadPendingSpendAsync(entities.Object, parent, new[] { nobody }, CancellationToken.None);
             pending[nobody].Should().Be(0m, $"the grouped pending query on {parent} is accepted and an id with no invoices sums to 0");
+
+            // D-130: counted spend is two grouped parts (approved total where set, billed where not), null / not-null on a Money column.
+            var counted = await FinanceBaseValues.ReadAsync(entities.Object, parent, new[] { nobody }, needSpend: true, needBudget: true, CancellationToken.None);
+            counted[nobody].Should().Be((0m, 0m), $"the counted spend parts and the budget query on {parent} are accepted");
 
             var rows = await op.RetrieveMultipleAsync(FinanceRollupService.BuildPendingInvoiceQuery(nobody, parent));
             rows.Entities.Should().BeEmpty($"the rollup's pending query on {parent} is accepted");
