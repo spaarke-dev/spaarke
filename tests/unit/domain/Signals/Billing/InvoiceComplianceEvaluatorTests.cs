@@ -170,7 +170,7 @@ public class InvoiceComplianceEvaluatorTests
     }
 
     [Fact]
-    public void ALineWithNoDate_TakesTheInvoiceDate_AndWithNoDateAtAll_TheCurrentVersion()
+    public void ALineWithNoDate_TakesTheInvoiceDate_AndWithNoDateAtAll_TheReceivedDate()
     {
         var supersededOn = new DateOnly(2026, 3, 10);
         var v1 = Increment("CD-INCREMENT", "0.1", from: RulesFrom, to: supersededOn, current: false, number: 1);
@@ -180,7 +180,41 @@ public class InvoiceComplianceEvaluatorTests
         var undated = Evaluate(Request(Line(0, null)) with { InvoiceDate = null }, Loaded(v1, v2));
 
         onInvoiceDate.Findings.Should().BeEmpty("the undated line is judged on the invoice date, when v1 (0.1) was in force");
-        undated.Findings.Should().ContainSingle().Which.PolicyVersionId.Should().Be(v2.PolicyVersionId);
+        undated.Findings.Should().ContainSingle("judged on the received date, 2026-04-02, when v2 is in force")
+            .Which.PolicyVersionId.Should().Be(v2.PolicyVersionId);
+    }
+
+    private static readonly DateOnly FutureEffective = new(2026, 5, 1);
+
+    [Fact]
+    public void AnUndatedInvoice_ReceivedBeforeAFutureEffectiveCurrentVersion_IsJudgedByTheEarlierVersion_A3()
+    {
+        // 072 review A3: the current version was published with a later effective date. A subject with no line date and no invoice
+        // date is judged on the received date (data from 049), so the version in force then applies, not the current pointer.
+        var earlier = Increment("CD-INCREMENT", "0.5", from: RulesFrom, to: FutureEffective, current: false, number: 1);
+        var future = Increment("CD-INCREMENT", "0.1", from: FutureEffective, current: true, number: 2);
+        var undated = Request(Line(0, null)) with { InvoiceDate = null, ReceivedOn = new DateOnly(2026, 4, 2) };
+        var receivedLater = undated with { ReceivedOn = new DateOnly(2026, 5, 2) };
+
+        var result = Evaluate(undated, Loaded(earlier, future));
+        var control = Evaluate(receivedLater, Loaded(earlier, future));
+
+        result.Findings.Should().ContainSingle("v1 (0.5) was in force when the invoice was received")
+            .Which.PolicyVersionId.Should().Be(earlier.PolicyVersionId);
+        control.Findings.Should().BeEmpty("control: received after the effective date, the current version (0.1) judges it");
+    }
+
+    [Fact]
+    public void AnUndatedInvoice_ReceivedBeforeTheOnlyVersionTakesEffect_IsJudgedByNone_A3()
+    {
+        var future = Increment("CD-INCREMENT", "0.5", from: FutureEffective, current: true, number: 1);
+        var undated = Request(Line(0, null)) with { InvoiceDate = null, ReceivedOn = new DateOnly(2026, 4, 2) };
+
+        var result = Evaluate(undated, Loaded(future));
+
+        result.Findings.Should().BeEmpty("no version of the policy was in force on the received date");
+        result.Refusals.Should().BeEmpty();
+        result.RulesByVersion.Should().BeEmpty();
     }
 
     // ── FR-24: refusals ──────────────────────────────────────────────────────────────────────────────────────────

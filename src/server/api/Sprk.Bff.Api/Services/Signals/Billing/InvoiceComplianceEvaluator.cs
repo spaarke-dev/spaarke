@@ -59,10 +59,11 @@ public sealed record BillingEvaluationResult
 /// </summary>
 /// <remarks>
 /// <para><b>Which version, on which date.</b> A line is judged on its own date, else the invoice date; the invoice on the invoice
-/// date. A version applies when it is in force on that date (<see cref="BillingRuleCandidate.IsInForceOn"/>, task 076 K3); a draft,
-/// a rejected draft or an abandoned edit never applies. A subject with no date at all (no line date and no invoice date) is judged by
-/// each policy's current version: there is no date to choose an older one by, and RequiredData must still be able to report the
-/// missing date. When two versions of one policy are in force on one date (overlapping ranges left by a failed publish), the current
+/// date. A subject with no date at all (no line date and no invoice date) is judged on the date the submission was received
+/// (<see cref="BillingEvaluationRequest.ReceivedOn"/>, data from task 049, never a clock read; 072 review A3), so a current version
+/// published with a later effective date does not judge an invoice received before it. A version applies when it is in force on
+/// that date (<see cref="BillingRuleCandidate.IsInForceOn"/>, task 076 K3); a draft, a rejected draft or an abandoned edit never
+/// applies. When two versions of one policy are in force on one date (overlapping ranges left by a failed publish), the current
 /// version wins, else the highest version number.</para>
 /// <para><b>Firm over client default (D-39).</b> For one subject, when a firm rule set's version and a client default's version of
 /// the same rule type both apply, only the firm's is evaluated. A version the gate refuses does not count for this: the client
@@ -151,8 +152,10 @@ public sealed class InvoiceComplianceEvaluator
         var byPolicy = candidates.GroupBy(c => c.PolicyId).Select(g => g.ToList()).ToList();
 
         // 1. The version of each policy that applies to each subject.
-        var subjects = new List<(BillingSubject Subject, DateOnly? Date)> { (BillingSubject.ForInvoice(), request.InvoiceDate) };
-        subjects.AddRange(request.Lines.OrderBy(l => l.Index).Select(l => (BillingSubject.ForLine(l.Index), l.Date ?? request.InvoiceDate)));
+        // A3: with no line date and no invoice date, the received date (data, never the clock) is the judging date.
+        var invoiceDate = request.InvoiceDate ?? request.ReceivedOn;
+        var subjects = new List<(BillingSubject Subject, DateOnly Date)> { (BillingSubject.ForInvoice(), invoiceDate) };
+        subjects.AddRange(request.Lines.OrderBy(l => l.Index).Select(l => (BillingSubject.ForLine(l.Index), l.Date ?? invoiceDate)));
         var selectedBySubject = subjects
             .Select(s => (s.Subject, Versions: byPolicy.Select(versions => SelectVersion(versions, s.Date)).OfType<BillingRuleCandidate>().ToList()))
             .ToList();
@@ -279,11 +282,11 @@ public sealed class InvoiceComplianceEvaluator
 
     /// <summary>
     /// The version of one policy that applies on <paramref name="date"/>: in force on it (current preferred, then the highest
-    /// version number), or, with no date, the current version. <c>null</c> when none applies.
+    /// version number). <c>null</c> when none applies.
     /// </summary>
-    internal static BillingRuleCandidate? SelectVersion(IReadOnlyList<BillingRuleCandidate> versions, DateOnly? date) =>
+    internal static BillingRuleCandidate? SelectVersion(IReadOnlyList<BillingRuleCandidate> versions, DateOnly date) =>
         versions
-            .Where(v => date is { } d ? v.IsInForceOn(d) : v.IsCurrent)
+            .Where(v => v.IsInForceOn(date))
             .OrderByDescending(v => v.IsCurrent)
             .ThenByDescending(v => v.VersionNumber)
             .ThenBy(v => v.PolicyVersionId)
