@@ -10,11 +10,15 @@
  *   - All external members removed from the SPE document container
  *   - Redis participation cache invalidated for all affected contacts
  *
- * Four phases, each rendered as `SprkModal` header/footer/body content:
- *   1. Confirm  — warning list + "Close Project" (danger) / "Cancel" buttons
- *   2. Closing  — Spinner with progress label
- *   3. Success  — Success summary
- *   4. Error    — Error MessageBar + "Try Again" / "Cancel" buttons
+ * Five phases, each rendered as `SprkModal` header/footer/body content:
+ *   1. Confirm    — warning list + "Close Project" (danger) / "Cancel" buttons
+ *   2. Closing    — Spinner with progress label
+ *   3. Success    — Success summary
+ *   4. Error      — Error MessageBar + "Try Again" / "Cancel" buttons
+ *   5. Incomplete — #2104: a failure a retry cannot fix (a revoked organization too large for one closure to
+ *                   sweep, `organization_too_large`). Warning MessageBar with the server's detail (what an
+ *                   administrator must do) + "Close" — never "Try Again", which would promise a retry that meets
+ *                   the same bound.
  *
  * Dependencies are injected via props (no solution-specific imports):
  *   - authenticatedFetch: MSAL-backed fetch function
@@ -74,9 +78,14 @@ import {
   StorageRegular,
   CheckmarkCircleFilled,
   DismissCircleFilled,
+  WarningFilled,
 } from '@fluentui/react-icons';
 import { SprkModal, useDangerButtonClassName } from '../SprkModal';
-import { closeSecureProject, type ICloseProjectResponse } from './closureService';
+import {
+  CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE,
+  closeSecureProject,
+  type ICloseProjectResponse,
+} from './closureService';
 import type { AuthenticatedFetchFn } from '../../utils/fetchTypes';
 
 // ---------------------------------------------------------------------------
@@ -121,7 +130,7 @@ export interface ICloseProjectDialogProps {
 // Internal state
 // ---------------------------------------------------------------------------
 
-type DialogPhase = 'confirm' | 'closing' | 'success' | 'error';
+type DialogPhase = 'confirm' | 'closing' | 'success' | 'error' | 'incomplete';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -215,6 +224,14 @@ const useStyles = makeStyles({
   resultIconError: {
     color: tokens.colorPaletteRedForeground1,
     fontSize: '48px',
+  },
+  resultIconWarning: {
+    color: tokens.colorStatusWarningForeground1,
+    fontSize: '48px',
+  },
+  resultMessageBar: {
+    textAlign: 'left',
+    width: '100%',
   },
   resultTitle: {
     color: tokens.colorNeutralForeground1,
@@ -337,6 +354,11 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
       setClosureResult(result.data);
       setPhase('success');
       onClosed?.(result.data);
+    } else if (result.reasonCode === CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE) {
+      // #2104: not retryable — a retry meets the same sweep bound. The server's detail says what an administrator
+      // must do; the dialog offers no "Try Again".
+      setErrorMessage(result.detail ?? result.errorMessage);
+      setPhase('incomplete');
     } else {
       setErrorMessage(result.errorMessage ?? 'An unexpected error occurred during project closure.');
       setPhase('error');
@@ -388,6 +410,10 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
         ) : phase === 'success' ? (
           <Button appearance="primary" onClick={handleClose} aria-label="Close this dialog">
             Done
+          </Button>
+        ) : phase === 'incomplete' ? (
+          <Button appearance="primary" onClick={handleClose} aria-label="Close this dialog">
+            Close
           </Button>
         ) : (
           <Button appearance="primary" onClick={handleRetry} aria-label="Try closing the project again">
@@ -508,6 +534,23 @@ const CloseProjectDialog: React.FC<ICloseProjectDialogProps> = ({
             <Text size={300} className={styles.resultSubtitle}>
               The project was not closed. You can retry or contact your administrator if the issue persists.
             </Text>
+          </div>
+        )}
+
+        {/* ── Incomplete phase (#2104: not retryable) ── */}
+        {phase === 'incomplete' && (
+          <div className={styles.resultContainer}>
+            <WarningFilled className={styles.resultIconWarning} aria-hidden="true" />
+            <Text size={500} weight="semibold" className={styles.resultTitle}>
+              Closure incomplete
+            </Text>
+            {errorMessage && (
+              <MessageBar intent="warning" className={styles.resultMessageBar}>
+                <MessageBarBody>
+                  <Text size={200}>{errorMessage}</Text>
+                </MessageBarBody>
+              </MessageBar>
+            )}
           </div>
         )}
       </div>

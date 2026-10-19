@@ -730,6 +730,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       renderWithTheme(<AccessGrantModal {...props} />);
 
       await screen.findByText('Prior Grantee');
+      expect(props.fetchExistingGrants).toHaveBeenCalledTimes(1);
       fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
       await screen.findByText('Revoke access?');
       await confirmRevoke();
@@ -737,6 +738,11 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       expect(await screen.findByText(/Retrying will not change this/)).toBeInTheDocument();
       expect(screen.queryByText(/Please try again/)).not.toBeInTheDocument();
       expect(screen.queryByText(/Retry the revoke/)).not.toBeInTheDocument();
+      // #2104: a WARNING (the grant WAS deactivated; an administrator finishes the container) — the notice's warning
+      // title, never the error one — and the list reloads so the revoked grant leaves it.
+      expect(screen.getByText('Notice')).toBeInTheDocument();
+      expect(screen.queryByText('Error')).not.toBeInTheDocument();
+      await waitFor(() => expect(props.fetchExistingGrants).toHaveBeenCalledTimes(2));
     });
 
     it('deactivatedCount 0 reports "already had no active access record" rather than a plain success', async () => {

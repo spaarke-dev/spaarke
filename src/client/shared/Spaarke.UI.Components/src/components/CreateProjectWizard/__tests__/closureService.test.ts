@@ -5,7 +5,7 @@
  * ProblemDetails detail/title) or `AuthError` (401 after retries). The service reports either as
  * `{ success: false, errorMessage }` and never rejects.
  */
-import { closeSecureProject } from '../closureService';
+import { CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE, closeSecureProject } from '../closureService';
 import { apiErrorFor, authExhausted } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 const REQUEST = { projectId: 'p-1', closeMessage: 'done' } as unknown as Parameters<typeof closeSecureProject>[0];
@@ -20,15 +20,38 @@ describe('closeSecureProject — thrown failures', () => {
   it('reports the server detail when the fetch throws ApiError(409)', async () => {
     const fetchMock = jest
       .fn()
-      .mockRejectedValue(apiErrorFor(409, { title: 'Conflict', status: 409, detail: 'The project is already closed.' }));
+      .mockRejectedValue(
+        apiErrorFor(409, { title: 'Conflict', status: 409, detail: 'The project is already closed.' })
+      );
 
     const result = await closeSecureProject(REQUEST, fetchMock, 'https://bff.example');
 
-    expect(result).toEqual({ success: false, errorMessage: 'Project closure failed: The project is already closed.' });
+    expect(result).toEqual({
+      success: false,
+      errorMessage: 'Project closure failed: The project is already closed.',
+      detail: 'The project is already closed.',
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       'https://bff.example/api/v1/external-access/close-project',
       expect.objectContaining({ method: 'POST' })
     );
+  });
+
+  it('#2104: surfaces the ProblemDetails reasonCode and the unprefixed detail, so a caller can tell a retry from none', async () => {
+    const fetchMock = jest.fn().mockRejectedValue(
+      apiErrorFor(500, {
+        title: 'Project closure incomplete',
+        status: 500,
+        detail: 'An administrator must remove those members’ permissions.',
+        reasonCode: CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE,
+      })
+    );
+
+    const result = await closeSecureProject(REQUEST, fetchMock, 'https://bff.example');
+
+    expect(result.success).toBe(false);
+    expect(result.reasonCode).toBe('sdap.closure.incomplete.organization_too_large');
+    expect(result.detail).toBe('An administrator must remove those members’ permissions.');
   });
 
   it('falls back to "HTTP n" when the error body was not ProblemDetails', async () => {

@@ -15,6 +15,14 @@
  */
 
 import type { AuthenticatedFetchFn } from '../../utils/fetchTypes';
+import { problemOf } from '../../utils/thrownFetchError';
+
+/**
+ * #2103 follow-up: the closure's NON-retryable leaf. A revoked organization has more active members than one closure
+ * may sweep, so their container permissions were not removed and a retry meets the same bound; the server's `detail`
+ * says what an administrator must do instead. MUST match `ProjectClosureEndpoint.ClosureOrganizationTooLargeReason`.
+ */
+export const CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE = 'sdap.closure.incomplete.organization_too_large';
 
 // ---------------------------------------------------------------------------
 // Request / Response types (mirror BFF Dtos)
@@ -44,6 +52,14 @@ export interface ICloseProjectResult {
   success: boolean;
   data?: ICloseProjectResponse;
   errorMessage?: string;
+  /**
+   * The server's machine-readable `reasonCode` (a ProblemDetails extension, e.g.
+   * {@link CLOSURE_ORGANIZATION_TOO_LARGE_REASON_CODE}) when the failure carried one — so a caller can tell a
+   * retryable failure from one a retry cannot fix.
+   */
+  reasonCode?: string;
+  /** The server's ProblemDetails `detail`, unprefixed, when the failure carried one. */
+  detail?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,9 +107,12 @@ export async function closeSecureProject(
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Network error';
     console.error('[ClosureService] Project closure error:', err);
+    const problem = problemOf(err);
     return {
       success: false,
       errorMessage: `Project closure failed: ${message}`,
+      reasonCode: typeof problem?.reasonCode === 'string' ? problem.reasonCode : undefined,
+      detail: typeof problem?.detail === 'string' ? problem.detail : undefined,
     };
   }
 }
