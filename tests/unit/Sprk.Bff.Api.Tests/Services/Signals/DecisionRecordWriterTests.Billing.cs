@@ -348,6 +348,116 @@ public sealed partial class DecisionRecordWriterTests
             .Should().Be(DecisionRecordWriter.BillingDecisionHash(Reduce(800m)), "a retry may re-read its facts and clock");
     }
 
+    // ── Follow-up item 2: the content hash is canonical (decimal scale and nested key order do not change it) ───────
+
+    private static BillingDecisionRecordRequest WithValues(IReadOnlyDictionary<string, object?> values) =>
+        Billing("reduce-line", reason: "rate above card", values: values);
+
+    private static JsonElement Json(string text) => JsonDocument.Parse(text).RootElement.Clone();
+
+    [Fact]
+    public async Task Billing_Item2_ARepeatOf800AgainstAStored800Point00_IsAlreadyRecorded()
+    {
+        var h = BillingHarness();
+        var first = await h.Writer.WriteBillingDecisionAsync(Reduce(800.00m));
+
+        var repeat = await h.Writer.WriteBillingDecisionAsync(Reduce(800m));
+
+        repeat.AlreadyRecorded.Should().BeTrue("800 and 800.00 are the same amount; System.Text.Json writes them differently");
+        repeat.RecordId.Should().Be(first.RecordId);
+        h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Billing_Item2_ARepeatOf800AgainstAStored700Point00_IsStillReviewInvalid()
+    {
+        var h = BillingHarness();
+        await h.Writer.WriteBillingDecisionAsync(Reduce(700.00m));
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Reduce(800m))).Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public void Billing_Item2_TheHash_IgnoresTrailingZerosOnDecimals_AtTheTopAndNested_AndOnJsonNumbers()
+    {
+        var plain = DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?> { ["approvedAmount"] = 800m }));
+
+        DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?> { ["approvedAmount"] = 800.00m })).Should().Be(plain);
+        DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?> { ["approvedAmount"] = Json("800.00") })).Should().Be(plain);
+        DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?> { ["approvedAmount"] = Json("800") })).Should().Be(plain);
+        DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?> { ["approvedAmount"] = 800.5m })).Should()
+            .NotBe(plain).And.Be(DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?> { ["approvedAmount"] = 800.50m })));
+        DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?> { ["approvedAmount"] = 700m })).Should().NotBe(plain);
+        DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?> { ["approvedAmount"] = 0.00m })).Should()
+            .Be(DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?> { ["approvedAmount"] = 0m })));
+
+        var nested = DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?>
+        {
+            ["approvedAmount"] = 1m,
+            ["split"] = new Dictionary<string, object?> { ["fees"] = 800m, ["expenses"] = new List<object?> { 10m, 20.0m } },
+        }));
+        DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?>
+        {
+            ["approvedAmount"] = 1.0m,
+            ["split"] = new Dictionary<string, object?> { ["fees"] = 800.00m, ["expenses"] = new List<object?> { 10.00m, 20m } },
+        })).Should().Be(nested, "decimals inside nested maps and lists normalise too");
+        DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?>
+        {
+            ["approvedAmount"] = 1m,
+            ["split"] = new Dictionary<string, object?> { ["fees"] = 800m, ["expenses"] = new List<object?> { 20m, 10m } },
+        })).Should().NotBe(nested, "list order is meaningful");
+    }
+
+    [Theory]
+    [InlineData("79228162514264337593543950335", "79228162514264337593543950335.0")]
+    [InlineData("-79228162514264337593543950335", "-79228162514264337593543950335.0")]
+    [InlineData("1.10", "1.1")]
+    [InlineData("100.000", "100")]
+    [InlineData("0.0000001", "0.00000010")]
+    [InlineData("-0.50", "-0.5")]
+    public void Billing_Item2_TheHash_NormalisesDecimalsAtTheExtremes(string a, string b)
+    {
+        static string HashOf(string text) => DecisionRecordWriter.BillingDecisionHash(WithValues(
+            new Dictionary<string, object?> { ["approvedAmount"] = decimal.Parse(text, System.Globalization.CultureInfo.InvariantCulture) }));
+
+        HashOf(a).Should().Be(HashOf(b));
+        HashOf(a).Should().NotBe(HashOf("12345"));
+    }
+
+    [Fact]
+    public void Billing_Item2_TheHash_IgnoresTheKeyOrderOfNestedMaps_ButNotTheirContent()
+    {
+        static IReadOnlyDictionary<string, object?> Values(IDictionary<string, object?> inner) =>
+            new Dictionary<string, object?> { ["approvedAmount"] = 800m, ["split"] = inner };
+
+        var ab = DecisionRecordWriter.BillingDecisionHash(WithValues(Values(
+            new Dictionary<string, object?> { ["a"] = 1, ["b"] = new Dictionary<string, object?> { ["x"] = "1", ["y"] = "2" } })));
+        var ba = DecisionRecordWriter.BillingDecisionHash(WithValues(Values(
+            new Dictionary<string, object?> { ["b"] = new Dictionary<string, object?> { ["y"] = "2", ["x"] = "1" }, ["a"] = 1 })));
+        var other = DecisionRecordWriter.BillingDecisionHash(WithValues(Values(
+            new Dictionary<string, object?> { ["a"] = 1, ["b"] = new Dictionary<string, object?> { ["x"] = "1", ["y"] = "3" } })));
+        var fromJson = DecisionRecordWriter.BillingDecisionHash(WithValues(new Dictionary<string, object?>
+        {
+            ["approvedAmount"] = 800m,
+            ["split"] = Json("{\"b\":{\"y\":\"2\",\"x\":\"1\"},\"a\":1.0}"),
+        }));
+
+        ba.Should().Be(ab, "insertion order of nested maps is not content");
+        fromJson.Should().Be(ab, "a JsonElement object canonicalises the same way (1.0 is 1)");
+        other.Should().NotBe(ab);
+    }
+
+    [Fact]
+    public void Billing_Item2_ASimpleRequest_KeepsTheHashItHadBeforeTheCanonicalForm()
+    {
+        // The envelope is unchanged and only values the old form wrote differently (a decimal's trailing zeros, nested key order) now
+        // normalise, so a request with neither hashes as before. Captured from the pre-change code.
+        DecisionRecordWriter.BillingDecisionHash(Reduce(800m)).Should().Be("13A35E02CEC9F2B513A9246A3B807C3350012543825A4B13B1DF5075E3F88347");
+    }
+
     [Fact]
     public async Task Billing_K2_AWriterRecordWithTheSameKeyAndCodeButNoReadableHash_IsRefused_NeverAnsweredNorWrittenOver()
     {

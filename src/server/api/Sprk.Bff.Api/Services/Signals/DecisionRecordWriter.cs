@@ -1359,7 +1359,8 @@ public sealed class DecisionRecordWriter
     /// <summary>
     /// K2 (ontology-r1): a stable hash of what the billing decision IS, stored in <c>sprk_steps</c> beside the key (the review path's
     /// <see cref="DecisionRecordRequest.ReviewHash"/> slot, task 043), so a repeat of the decision id can be told from a different decision
-    /// under the same id. Covered: the code, the subject, who decided (confirmer and role), the values (ordered by key), the outcome, the
+    /// under the same id. The values are hashed in a canonical form (<see cref="CanonicalHashValue"/>): 800 and 800.00 are one amount, and
+    /// nested maps are in key order. Covered: the code, the subject, who decided (confirmer and role), the values (ordered by key), the outcome, the
     /// reason, the policy version and the resolved Signals (ordered). Not covered, because an honest retry may differ in them: the fact
     /// snapshot (re-read at retry time), the decision time (the clock when not given), the written rows (a caller may recreate them on a retry)
     /// and the deciding contact and privilege flag (derived from the confirmer and the findings, not decided).
@@ -1375,7 +1376,7 @@ public sealed class DecisionRecordWriter
             confirmedBy = NoneIfEmpty(r.ConfirmedByUserId),
             role = r.DeciderRole,
             values = (r.Values ?? new Dictionary<string, object?>()).OrderBy(v => v.Key, StringComparer.Ordinal)
-                .Select(v => new object?[] { v.Key, v.Value }).ToArray(),
+                .Select(v => new object?[] { v.Key, CanonicalHashValue(v.Value) }).ToArray(),
             outcome = r.Outcome,
             reason = r.Reason,
             policyVersion = NoneIfEmpty(r.PolicyVersionId),
@@ -1383,6 +1384,62 @@ public sealed class DecisionRecordWriter
         };
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(canonical))));
     }
+
+    /// <summary>
+    /// The canonical form of one value in <see cref="BillingDecisionHash"/>, so the same amount or the same map hashes the same however a
+    /// caller built it: System.Text.Json writes <c>800m</c> as <c>800</c> and <c>800.00m</c> as <c>800.00</c>, and writes a map in insertion
+    /// order. A decimal (or a JSON number that fits one) has its trailing zeros removed; every map (a dictionary or a JSON object) is written
+    /// in ordinal key order, recursively; a list keeps its order (it is content). Culture never reaches the output: the serializer writes numbers
+    /// with the invariant culture. Anything else is left to the serializer as it was.
+    /// </summary>
+    private static object? CanonicalHashValue(object? value)
+    {
+        switch (value)
+        {
+            case null:
+            case string:
+            case byte[]:
+                return value;
+            case decimal d:
+                return NormalizedDecimal(d);
+            case System.Text.Json.Nodes.JsonNode node:
+                return CanonicalHashValue(JsonSerializer.SerializeToElement(node));
+            case JsonElement element:
+                return element.ValueKind switch
+                {
+                    JsonValueKind.Object => SortedMap(element.EnumerateObject().Select(p => KeyValuePair.Create<string, object?>(p.Name, p.Value))),
+                    JsonValueKind.Array => element.EnumerateArray().Select(e => CanonicalHashValue(e)).ToList(),
+                    JsonValueKind.Number => element.TryGetDecimal(out var number) ? NormalizedDecimal(number) : element.GetDouble(),
+                    JsonValueKind.String => element.GetString(),
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    _ => null,
+                };
+            case IReadOnlyDictionary<string, object?> map:
+                return SortedMap(map);
+            case System.Collections.IDictionary dictionary:
+                return SortedMap(dictionary.Cast<System.Collections.DictionaryEntry>()
+                    .Select(e => KeyValuePair.Create(Convert.ToString(e.Key, CultureInfo.InvariantCulture) ?? string.Empty, e.Value)));
+            case System.Collections.IEnumerable list:
+                return list.Cast<object?>().Select(CanonicalHashValue).ToList();
+            default:
+                return value;
+        }
+
+        static SortedDictionary<string, object?> SortedMap(IEnumerable<KeyValuePair<string, object?>> entries)
+        {
+            var sorted = new SortedDictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var entry in entries)
+            {
+                sorted[entry.Key] = CanonicalHashValue(entry.Value);
+            }
+
+            return sorted;
+        }
+    }
+
+    /// <summary>The same number with its trailing zeros removed (<c>800.00</c> is <c>800</c>, <c>0.50</c> is <c>0.5</c>, <c>0.00</c> is <c>0</c>).</summary>
+    private static decimal NormalizedDecimal(decimal value) => value / 1.0000000000000000000000000000m;
 
     /// <summary>The review shape the shared builders read (<see cref="Content"/>, <see cref="FiledAndOwnedAsync"/>): <see cref="Guid.Empty"/>
     /// means "none" for the policy version and the confirmer, as on the gate and closure paths.</summary>
