@@ -350,7 +350,9 @@ public class InvoiceComplianceEvaluatorTests
         result.Findings.Should().ContainSingle("the client default's check survives").Which.RuleType.Should().Be(RuleType.ApprovedTimekeeper);
         result.RulesByVersion[stored.PolicyVersionId].Should().Be(stored with { Consequence = (int)BillingConsequence.Flag });
         result.Refusals.Should().BeEmpty();
-        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("evaluated with Flag"));
+        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("evaluated with Flag"))
+            .Which.EventId.Id.Should().Be(OntologyWriterEvents.PolicyVersionConsequenceDowngraded.Id)
+            .And.NotBe(OntologyWriterEvents.PolicyVersionInvalid.Id, "an alert on the refusal id must not count a version that is still evaluated");
         logger.Entries.Should().NotContain(e => e.Level == LogLevel.Error);
         lock (downgrades) downgrades.Should().Equal(nameof(RuleType.ApprovedTimekeeper));
         lock (invalid) invalid.Should().BeEmpty("the gate did not refuse it");

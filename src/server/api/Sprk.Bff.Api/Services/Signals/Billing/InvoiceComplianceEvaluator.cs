@@ -200,7 +200,7 @@ public sealed class InvoiceComplianceEvaluator
                 {
                     downgraded[candidate.PolicyVersionId] = candidate with { Consequence = (int)BillingConsequence.Flag };
                     _logger.LogWarning(
-                        OntologyWriterEvents.PolicyVersionInvalid,
+                        OntologyWriterEvents.PolicyVersionConsequenceDowngraded,
                         "Billing evaluation of submission {SubmissionId}: policy {PolicyCode} version {PolicyVersionId} ({RuleType}) stores consequence {Consequence}, which its type may not carry; it is evaluated with Flag (reason={Reason}).",
                         request.SubmissionId, candidate.PolicyCode, candidate.PolicyVersionId, type, candidate.Consequence,
                         OntologyWriterFailureReason.ConsequenceNotAllowed);
