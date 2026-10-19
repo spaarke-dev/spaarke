@@ -45,6 +45,29 @@ public class FinanceRollupPendingSpendWriteTests
     }
 
     [Fact]
+    public async Task BothWrites_Succeed_WithZeroPending_WritesZero()
+    {
+        // ontology-r1 re-check F3: 0 is a real value (the last pending invoice was approved), not "unchanged". Skipping the write at 0
+        // would leave the matter showing the old pending amount forever.
+        var wrote = await Write(_ => Task.FromResult(0m));
+
+        wrote.Should().BeTrue();
+        _written.Should().HaveCount(2);
+        _written[1]["sprk_pendingspend"].Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task APendingTimeout_WithTheCallersTokenLive_IsContainedLikeAnyPendingFailure()
+    {
+        // An HttpClient timeout surfaces as TaskCanceledException although the caller did not cancel.
+        var wrote = await Write(_ => throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout"));
+
+        wrote.Should().BeFalse();
+        _written.Should().ContainSingle().Which.Should().BeSameAs(Counted);
+        VerifyErrorLogged();
+    }
+
+    [Fact]
     public async Task APendingQueryFailure_StillWritesTheCountedFields_AndWritesNoPendingValue()
     {
         // The pending query joins sprk_invoicesubmission; on an environment without it the query throws.
@@ -91,7 +114,8 @@ public class FinanceRollupPendingSpendWriteTests
     [Fact]
     public async Task Cancellation_IsNotSwallowedAsAPendingFailure()
     {
-        var act = () => Write(_ => throw new OperationCanceledException());
+        using var cts = new CancellationTokenSource();
+        var act = () => Write(_ => { cts.Cancel(); throw new OperationCanceledException(cts.Token); }, cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }

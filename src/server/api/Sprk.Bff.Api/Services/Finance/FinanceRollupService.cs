@@ -147,7 +147,8 @@ public class FinanceRollupService
             await writer.UpdateExistingRecordFieldsAsync(parentEntityName, parentId, BuildPendingSpendFields(pendingSpend), ct);
             return true;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        // Not the caller's cancellation; an HttpClient timeout (TaskCanceledException with ct not cancelled) is a pending failure too.
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger.LogError(
                 ex,
