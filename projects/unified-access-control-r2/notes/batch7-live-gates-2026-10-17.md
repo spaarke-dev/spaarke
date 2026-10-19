@@ -230,3 +230,46 @@ traces | where timestamp > datetime(2026-10-16T06:03:13Z) and cloud_RoleName == 
 | Telemetry 11:37Z–11:51Z | **PASS** | 200 ×22, 401 ×6, 500 ×1 (the #2103 revoke). Exceptions: only `ODataError "Invalid hostname for this tenancy"` (#1830). |
 
 186 server side: no new exception types and no 5xx since the deploy. Its live gate (an unlicensed guest's sign-in and registration) needs the owner.
+
+## #2102 (#2084) live gate (2026-10-19)
+
+**Scope.** Server-side gate for PR #2102 (issue #2084, master `947d98e31`). Run 20:36–20:53Z against spaarke-bff-dev and spaarkedev1, as admin only (the default `az` login, systemuser `1d02f31c…`).
+- Tokens: ARM (for the Kudu VFS read), Dataverse, and a delegated BFF token `api://1e40baad…/.default` from `az` (Azure CLI client `04b07795…`, scp `SDAP.Access user_impersonation`). No token or secret was printed or written.
+- No Entra, Key Vault, app-setting, role, team, solution or tenant-config write. No SPE container was touched. `65a3fab2…` and the fixture `a9e04977…` were not touched. No existing record was modified.
+- Scripts and logs: session scratchpad `gate2102/` (`g2102_log.txt`, `g2102_lib.py`, `g2102_s1.py`, `g2102_s2a.py`, `g2102_s2b.py`, `g2102_s3a.py`, `g2102_s3b.py`, `g2102_s4.py`, `g2102_s5.py`, `g2102_chk.py`, `g2102_ai.py`, `g2102_ai_runs*.json`).
+
+**Verdict: PARTIAL.** Deploy, must-not-fire, the ordinary publish and cleanup PASS. Neither the Secure lineage nor the 409/400 refusals could run, because **dev has no Secure matter**.
+
+| Step | Result | Evidence |
+|---|---|---|
+| 1. Deployed literals | **PASS** | Kudu VFS `Sprk.Bff.Api.dll`: 19,767,808 B, sha256 `eff568d0…`, InformationalVersion **`1.0.0+283466d40b4b6028e74a5f2ef111d87d9e631721`**. `git merge-base --is-ancestor 947d98e31 283466d40` holds.<br>User strings (UTF-16) present: `ontology.admin.rule_held_secure`, `ontology.admin.scope_matter_secured`, `ontology.admin.owner_unavailable`, "This rule is held by a Secure matter's team; publish a new rule instead.", and the entity sets `sprk_policies` and `sprk_policyversions`.<br>Metadata names present: `CheckVersionOwnerAsync`, `IsCitation`, `CitationLookups`, `OwnerUnavailable`.<br>Live use of the lineage entries: from 20:42Z every recent-changes listing reads `sprk_policy` and `sprk_policyversion` (`[DATAVERSE] RetrieveMultiple on sprk_policy returned 1 records`, `… sprk_policyversion returned 1/2 records`). |
+| 2. Lineage into Secure via the reconciler | **NOT RUN: no Secure matter on dev** | `sprk_matters?$filter=sprk_issecure eq true` → 200 with **0 rows**. No `sprk_matter` is owned by team `6eabc7f9…`; the team owns only 3 projects (`31e232ae…`, `65a3fab2…`, `a9e04977…`). The reconciler heartbeat agrees: `roots=0/3`. As instructed, no record's secure flag was flipped, so no Secure probe was created. **Nothing is HELD for the ontology smoke.** The ontology `rule_held_secure` smoke needs a Secure matter too: the owner must make one (Make Secure) or name one. |
+| 3. Must-not-fire (ordinary matter) | **PASS** | **Probe.** Policy `b8346c69-fdcb-f111-a05b-7c1e520a989f` (`UAC-2102-GATE-20261019-204109Z`, Ontology domain, Off, subject Matter), created 20:41:12Z with `sprk_matter` = ordinary matter `d14d79f4-8fbf-f111-aaaf-0022482913fc` (`sprk_issecure` false, owner admin; read only). Version v1 `236f0569-fdcb-f111-a05d-0022482913fc`, with the current-version pointer set (204).<br>**Sweeps.** The 20:42:05Z and 20:44:05Z runs list `recentRowsChanged=2 recentRoots=0`; after the publish, the 20:48:04Z and 20:50:05Z runs list `recentRowsChanged=3 recentRoots=0`. Every run had `refused=0 failed=0 recentFailure=(null)` at Information.<br>**Owners.** Read at 20:47:09Z and again at 20:51:09Z: the policy, v1 and v2 are all still owned by admin `1d02f31c…`, BU Spaarke. **None was re-owned to `6eabc7f9…`.** |
+| 4a. Publish refusal (409 `rule_held_secure` / 400 `scope_matter_secured`) | **NOT TESTED live: no Secure matter** | The delegated BFF token works (see 4b), so only the Secure matter is missing. Covered offline by `OntologyAdminAuthoringSecureHoldTests`. |
+| 4b. Ordinary publish through the BFF | **PASS** | `POST /api/v1/ontology/admin/authoring/dry-run` {policyId b8346c69…, Existence, matterId d14d79f4…} → **200** (`recorded true`, 0 rows).<br>`POST /api/v1/ontology/admin/authoring/policies/b8346c69…/versions` {draft, matterId d14d79f4…} → **200**: v2 `01c07fa7-406e-470d-9699-6f490c4f6164`, previous `236f0569…`, `reevaluation notEvaluated` (the rule is Off), superseded 0, raised 0.<br>v2 is owned by the caller (admin), so the resolver's ordinary answer bound no `ownerid`. 503 `owner_unavailable` did not fire.<br>Trace: `Ontology authoring: policy b8346c69… published version 2 01c07fa7… (reevaluation=notEvaluated)`. |
+| App Insights 20:40–20:51Z | **PASS** | `0x80040299` / "Read Privilege Check For Owner failed": **0 rows** (traces and exceptions). Reconciler lines with failed ≠ 0: **0**. Requests: no 5xx; the two ontology requests were both 200. Exceptions: only `ODataError "Invalid hostname for this tenancy"` ×3 (#1830). |
+| 5. Cleanup | **PASS** | Signals citing the probe: 0. The pointer was cleared (`$ref` DELETE 204). Then deleted, versions first, each 204 with a 404 read-back: v2 `01c07fa7…`, v1 `236f0569…`, policy `b8346c69…`. Sweep: 0 `UAC-2102-GATE*` policies or versions remain. Matter `d14d79f4…` is unchanged (`modifiedon` 2026-10-04T01:07:25Z, owner admin, not secure). |
+
+### Created and deleted (all as admin)
+
+| Row | Id | Delete | Read-back |
+|---|---|---|---|
+| `sprk_policyversion` v2 (BFF publish) | `01c07fa7-406e-470d-9699-6f490c4f6164` | 204 | 404 |
+| `sprk_policyversion` v1 | `236f0569-fdcb-f111-a05d-0022482913fc` | 204 | 404 |
+| `sprk_policy` `UAC-2102-GATE-20261019-204109Z` | `b8346c69-fdcb-f111-a05b-7c1e520a989f` | 204 | 404 |
+
+**HELD for ontology smoke; main session deletes:** none. No Secure probe was created, because dev has no Secure matter.
+
+### Observations (no defect filed)
+
+- **The lineage reaches both tables live.** The reconciler's recent-changes listing picked up the new probe rows on the first sweep after they were created, so the deployed lineage includes `sprk_policy` and `sprk_policyversion`. It resolved them to no Secure root, which is correct for an ordinary matter. The positive move into Secure needs a Secure matter.
+- **The sweep itself runs `mode=ReportOnly`**, while the recent-changes pass writes. A Secure-matter probe would be re-owned by the recent-changes pass, as the 099b gate saw for `sprk_externalrecordaccess`.
+- **The BFF logs a Warning** "Token on POST … appid=04b07795…" for the Azure CLI client's delegated token. The request was accepted. This is diagnostic only and outside #2102.
+
+**Verdicts:**
+- Step 1 deploy and literals: PASS.
+- Step 2 Secure lineage: NOT RUN (no Secure matter on dev).
+- Step 3 must-not-fire: PASS.
+- Step 4 refusal: NOT TESTED (no Secure matter); ordinary publish: PASS.
+- App Insights: PASS.
+- Step 5 cleanup: PASS.
