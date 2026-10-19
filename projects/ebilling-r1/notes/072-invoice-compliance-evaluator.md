@@ -449,8 +449,9 @@ consequence. 073's allowlist guard (the handler source names each listed code) p
 **A7.** See the 071 notes, "Round 3". Through 073: ApprovedRate on "(2.5) @ 650 = (1,625.00)" (rate parsed, hours and amount not)
 now holds as `read_field_confidence_unknown` with Hours and Amount as the unreliable fields, where it used to reject.
 
-**D-119.** `"$"` gives no currency finding from either path and rates are checked; `"EUR"` (and `"US$"`) gives both D-115's
-`billing.currency.not_usd` flag and RequiredData's `required_data.currency_not_usd`; a missing or blank currency gives only D-115's
+**D-119.** `"$"` gives no currency finding from either path and rates are checked; `"EUR"` gives both D-115's
+`billing.currency.not_usd` flag and RequiredData's `required_data.currency_not_usd` (`"US$"` and `"USD$"` were in this list until the
+W review fix round, section 13: they are USD now); a missing or blank currency gives only D-115's
 `billing.currency.missing` (RequiredData still does not treat absence as evidence). The confidence key stays exactly `Currency`.
 
 **A5.** The host is the first skipped ApprovedRate version (ordinal code, then version id), else the first skipped ExpenseRule
@@ -466,8 +467,8 @@ out of the gate's snapshot, so the gate still validates the body, template and l
 An accepted version is evaluated; `RulesByVersion` carries it `with { Consequence = Flag }`, which 073 and the mapper read, so it can
 never reject. It is logged as a Warning (`OntologyWriterEvents.PolicyVersionInvalid`, reason `consequence_not_allowed`, "evaluated
 with Flag") and counted on the new `billing.rule.consequence_downgraded` (tag `rule_type`, `OntologyWriterTelemetry`, beside
-`billing.rule.invalid`). It is not a refusal and not in `Refusals`. A downgraded firm version still displaces the client default
-(D-39). `PolicyVersionValidator.cs` is untouched, so the Ontology paths are byte-identical; publish, accept and edit still refuse at
+`billing.rule.invalid`). It is not a refusal and not in `Refusals`. A downgraded firm version still runs, but since the W review fix round (section 13, F1-b) it
+no longer displaces the client default (D-39, D-116). `PolicyVersionValidator.cs` is untouched, so the Ontology paths are byte-identical; publish, accept and edit still refuse at
 authoring.
 
 **ReceivedOn.** A default `ReceivedOn` (0001-01-01) has no version in force, so every undated subject was silently judged by
@@ -512,6 +513,8 @@ must-fire theory uses `"US$"` where it used `"$"`, and `"$"` / `" $ "` moved to 
 
 **Publish delta.** `dotnet publish -c Release -r linux-x64`, short paths, `Compress-Archive` (Optimal). Fresh `origin/master` `d7eabba3b`: 39,237,970 bytes; base `db4eee636`: 39,742,544; tip `e310220d4`: 39,743,814. 192 files in all three. Tip vs master +505,844 bytes (+0.48 MB, all of it ebilling-r1 work already on the branch); part W alone (tip vs base) +1,270 bytes. Total 39.7 MB, under the +5 MB per-task and 55 MB review thresholds.
 
+**Where that measurement was taken (corrected in the W review fix round).** The +1,270-byte part-W delta was measured **on the W branch**, between base `db4eee636` and tip `0ff90328e` (`fix/072-part-w`), which holds the part-W commits by their W-branch names: `57eb49096` (A6 + A8), `f58768889` and `2f3244fca` (test-only), `c39da7f8a` (A7), `18738ed67` (D-119), `f4aca8bdb` (A5 placement), `bc69be34b` (K2), `debbffa1d` (ReceivedOn) and the notes commit `0ff90328e`. It is a branch-local measurement. It is NOT a measurement of the pair on `work/ebilling-r1`, whose commits were rewritten by the cherry-pick (`ffe12af4b` ... `e310220d4`, `97b51f619`) and whose same-named pair also contains #2095 (`a69e703fc`, `5abdaf7fb`, `c7c53ec8b`). The `e310220d4` and `db4eee636` byte counts above are the W-branch figures too; the work-branch tip was not re-measured. The conclusion (no package, project file or DI registration changed; method bodies and constants only) holds on either pair. This round adds method bodies, constants and one `EventId`, no package or DI change, and was not re-measured.
+
 ### W.4 Deviations and judgment calls
 
 1. **Final with no close date reuses `core_record_closed`** (D-111's "no window end" reason) rather than a second new code; only
@@ -545,9 +548,8 @@ must-fire theory uses `"US$"` where it used `"$"`, and `"$"` / `" $ "` moved to 
   filing an issue against 178 (uac-r2, K-i).
 
 **K2.**
-- A downgraded firm version (say an InvoiceAge version stored with Suggest adjustment) displaces a client-default InvoiceAge Reject,
-  so the client's Reject becomes a Flag for that firm; the same shape as 073's known limit for a null-consequence firm row, and only
-  a row written around publish can do it.
+- (Removed in the W review fix round, section 13, F1-b: a downgraded firm version no longer displaces the client default.) 073's known
+  limit for a null-consequence firm row stays; see section 13.3.
 
 **Mapper and currency (main session).**
 - The reason-set fingerprint ignores which field is missing: two RequiredData `missing_field` reasons whose fields change but whose
@@ -558,3 +560,106 @@ must-fire theory uses `"US$"` where it used `"$"`, and `"$"` / `" $ "` moved to 
   must build the Decision Record snapshot from the merged, scrubbed form; the main session adds that constraint to 049.
 - RequiredData's own `currency_not_usd` (flag-only) can share a group with a RequiredData `missing_field` Reject on the invoice; the
   merged Signal then shows Reject because of the missing field (E.6 item 2's case, not the D-115 reason).
+
+
+## 13. Review fix round (W review)
+
+Implementer, Sonnet 5.5 @ high (commit trailer as the brief required). Base `work/ebilling-r1` `bc501875b`. Branch
+`worktree-agent-a4e999e511fa2ca29`; the main session cherry-picks. Inputs: the adversarial review of parts E and W, then ontology-r1's
+re-check items (F2, the EventId, the optional mapper test). Read first: sections 11 and 12, D-39, D-115, D-116, D-119.
+
+### 13.1 Item map
+
+| Item | Commit | Change |
+|---|---|---|
+| F1-a | `d6fd76790` | `core_record_window.closed_to_billing` and `core_record_window.core_record_closed` get their own token-free `ReasonTemplate` (`ClosedToBillingTemplate`, `NoCloseDateTemplate`). The mapper already took a reason's template before the version's and the type's, so only the catalogue changed. `before_open` / `after_close` keep the version's template (they are about the dates). |
+| F2 | `ced33d2fa` | `BillingRuleCatalogue.ReasonHeadline`: a reason with its own sentence has its own `sprk_name`. The mapper uses it when the PRIMARY reason has one (and the group is not withheld). A flag-only primary reason takes lane Decide and severity Info. |
+| F1-b | `35831d102` | A downgraded firm version is left out of the D-39 precedence set (`!downgraded.ContainsKey(...)`). It still runs as Flag; the client default stays in force. |
+| EventId | `cf170c812` | The consequence-downgrade Warning has its own `EventId` 50316 (`PolicyVersionConsequenceDowngraded`), no longer 50301. |
+| Optional mapper test | `17e6fbeb7` | A downgraded version maps to a Flag Signal with a Flag fingerprint. A pin: the behaviour already held, so no fail-before. |
+| A7 extension | `3ca2fbc7a` | A line with Hours (not negative) and no Amount lists Amount as an unknown read (null value, unknown confidence, below the floor). |
+| Currency | `1bc84c209` | Confidence is checked before "not USD"; `US$` and `USD$` are USD in the one shared normaliser. |
+| Doc fix, this section | this notes commit | W.3 publish delta corrected; W.2 and W.5 updated; this section. |
+
+### 13.2 Behaviour
+
+**F1-a.** The sentence for a Closed core record is now "The matter, project or work assignment this line is billed to is closed to
+billing." and names no date. For a core record with no close date (Final, or billing status empty and inactive) it is "This line
+cannot be checked against a close date: the record is closed or final but has no close date."
+
+*Deviation from the brief's example wording.* `core_record_window.core_record_closed` is one reason code with two sources: Final with
+no close date (D-116) and the empty-status inactive record with no close date (D-111). The brief's example said "the record is final",
+which would be false for the second. The sentence says "closed or final" so it is true for both; no new reason code was added.
+
+**F2.** The title and ranking of a Signal now follow its primary reason:
+
+| Reason | `sprk_name` | Lane / severity |
+|---|---|---|
+| `billing.currency.missing` / `.unreliable` / `.not_usd` | "Rates and expense caps not checked" | Decide / Info |
+| `required_data.currency_not_usd` | "Invoice currency is not USD" | Decide / Info |
+| `core_record_window.closed_to_billing` | "Closed to billing" | the rule's (a reject-capable reason) |
+| `core_record_window.core_record_closed` | "Close date missing" | the rule's |
+| any other reason | the version's `ShortHeadline`, else the type's | the rule's |
+
+*Flag level, stated choice.* The mapper had no Flag-level lane or severity to reuse. A flag-only primary reason (the group then holds
+only flag-only reasons, or its strongest member is one) takes **lane Decide and severity Info**: Info is the lowest severity, and
+Decide is the reviewer's lane, never the action (Do) lane. They are constants on the mapper (`FlagOnlyLane`, `FlagOnlySeverity`).
+A group whose primary is a reject-capable reason (the D-115 reason merged with a Reject, E.6 item 2) keeps the rule's headline, lane
+and severity: the primary reason there is the breach.
+
+**F1-b.** For a firm ExpenseRule stored as Suggest adjustment (downgraded to Flag) and a client-default ExpenseRule at Reject, both
+now produce findings: the client default's code and cap findings (version consequence Reject) and the firm's own code finding (version
+consequence Flag). Before, only the firm's ran. Cost of the change: none for a valid firm version, which still displaces the client
+default (control test).
+
+**A7 extension.** An ApprovedRate finding on "2.5 @ 650" with no parsed amount used to Reject (Hours read reliably, Amount not
+listed). It now holds as `read_field_confidence_unknown`, Amount the unreliable field. An expense line (no hours, amount present) is
+unchanged (the existing negative case, and a new "hours and amount both present still rejects" control).
+
+**Currency.** `CurrencySkipReason` order is: missing, then unclear (unknown or below-floor confidence, whatever the code is), then
+not USD. A low-confidence "EUR" is `billing.currency.unreliable`. `BillingCurrency.Normalise` reads `$`, `US$` and `USD$` (any case,
+trimmed) as USD; `CA$` stays foreign. RequiredData goes through the same normaliser, so the two paths still agree (the D-119 theory
+covers it). *Open point, not changed:* RequiredData's own flag-only `required_data.currency_not_usd` does not look at the currency's
+confidence (071's rule: it reports a currency that was read), so a low-confidence EUR with a RequiredData rule gets D-115's "unclear"
+and RequiredData's "not USD" together. Both are flags. Say if RequiredData should stay silent below the floor.
+
+### 13.3 Known limits (recorded, not changed)
+
+**A null-consequence firm row still overrides a client default's Reject (073's limit).** Not changed on purpose. A null consequence
+means "the type's default" and is a valid authored row: publish allows it, the gate accepts it, and the firm author chose a rule of
+that type for the firm. It is not "a firm rule version that cannot be evaluated" (D-116), so nothing is downgraded and nothing is wrong
+with the row; the firm version simply decides the type for that firm (D-39). A test pins the behaviour
+(`ANullConsequenceFirmVersion_StillDisplacesTheClientDefaultsReject_KnownLimit_073`). The "a downgraded firm version still displaces a
+client-default Reject" limit that W.5 listed is removed: F1-b fixes it.
+
+**For 049: the merged Signal's consequence and primary message.** A merged Signal's `Consequence` is the version's configured one (the
+strongest of the merged reasons, flag-only counting as Flag), and its primary message is the first reject-consequence reason in code
+order. Neither is 073's deciding reason. 049 should choose the primary reason from 073's Rejects (`bc501875b` already records the
+constraint in `tasks/049-submission-processing-job.poml`).
+
+### 13.4 Tests and evidence
+
+Fail-before: the new or changed tests against the pre-change production file (the new constants were added first, wired to nothing,
+so the tests compile and fail on behaviour). Counts are failing cases.
+
+| Item | Fail before | After |
+|---|---|---|
+| F1-a (mapper: Closed x3 template cases, Final with no close date; the date-reason control passes on both) | 4 | 0 |
+| F2 (the two `ReasonTemplate` tests, the D-115 theory x3, the new flag-only lane/severity test; the real-breach and merged controls pass on both) | 10 | 0 |
+| F1-b (the ExpenseRule case and the TimeIncrement variant; the valid-firm and null-consequence controls pass on both) | 2 | 0 |
+| EventId (the K2 Warning's `EventId` is 50316, not 50301) | 1 | 0 |
+| A7 extension (the hours-no-amount case; the both-present control passes on both) | 1 | 0 |
+| Currency (low-confidence EUR x2, `US$` x3, `USD$` in two paths, RequiredData `US$` and `USD$`) | 9 | 0 |
+| Optional mapper test (downgraded version, Flag Signal, fingerprint) | pin, 0 | 0 |
+
+Suites (at the final code commit):
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
+- `Sprk.Bff.Api.Tests` filtered `Billing|Compliance|Rejection|RuleSet|Finance|Signal|PolicyVersion|DecisionRecord`: 4,906 passed, 6
+  skipped (live Dataverse), 0 failed.
+- `Spaarke.ArchTests`: 1,207 / 1,207.
+
+Existing tests changed: `ADowngradedFirmVersion_StillDisplacesTheClientDefault_D39_K2` was replaced by the F1-b tests; RequiredData's
+`US$` row moved from its must-fire to its must-not-fire theory (and `CA$` took its place); the D-119 two-path theory's `US$` row now
+expects USD.
+
+**Publish delta.** Not measured. Method bodies, string constants and one `EventId`; no package, project file or DI registration.
