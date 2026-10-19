@@ -80,7 +80,8 @@ public sealed record BillingEvaluationResult
 /// <see cref="BillingEvaluationResult.RulesByVersion"/>, which 073 and the mapper read), logged as a Warning and counted on
 /// <c>billing.rule.consequence_downgraded</c>. Dropping it would leave its type unchecked when it is the client default, or a firm
 /// rule of a type the default does not cover. It is not a refusal and is not listed in <see cref="BillingEvaluationResult.Refusals"/>.
-/// A version whose body the gate refuses is still refused.</para>
+/// A version whose body the gate refuses is still refused. A downgraded FIRM version runs (as a Flag) but does not displace the
+/// client default of its type (D-39, D-116; 072 W review F1-b): the client default stays in force beside it.</para>
 /// <para><b>Currency (D-20, D-115).</b> R1 judges money in USD only (<c>"$"</c> is read as USD). When the currency is missing, is
 /// not USD, or its confidence (<c>HeaderConfidence["Currency"]</c>) is unknown or below the reliability threshold, ApprovedRate is
 /// not run and ExpenseRule's amount-cap findings are dropped (its code check still runs); each such skip is logged with its reason
@@ -259,12 +260,16 @@ public sealed class InvoiceComplianceEvaluator
         }
 
         // 4. D-39 precedence per subject, among the versions both the gate and the handler accept (072 review B2, owner 2026-10-18:
-        //    a firm version that cannot be evaluated leaves the client default in force).
+        //    a firm version that cannot be evaluated leaves the client default in force). A downgraded firm version (its stored
+        //    consequence is one its type may not carry, evaluated as Flag) is not a valid firm rule for this purpose either (072 W
+        //    review F1-b, D-116): it still runs, as a Flag, but the client default of its type stays in force beside it, so a
+        //    client Reject is never turned into a Flag by a row written around publish.
         var subjectsByVersion = new Dictionary<Guid, HashSet<BillingSubject>>();
         foreach (var (subject, versions) in selectedBySubject)
         {
             var firmTypes = versions
                 .Where(v => v.Scope == RuleSetScope.Firm
+                            && !downgraded.ContainsKey(v.PolicyVersionId)
                             && accepted.TryGetValue(v.PolicyVersionId, out var firmDefinition)
                             && HandlerAccepts(v, firmDefinition))
                 .Select(v => accepted[v.PolicyVersionId].RuleType)

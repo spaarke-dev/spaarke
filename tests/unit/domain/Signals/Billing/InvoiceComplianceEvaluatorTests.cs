@@ -356,16 +356,70 @@ public class InvoiceComplianceEvaluatorTests
         lock (invalid) invalid.Should().BeEmpty("the gate did not refuse it");
     }
 
+    private const string ExpenseCodesOnly = """{"type":"ExpenseRule","nonReimbursableCodes":["E109"]}""";
+
+    private static BillingLineFacts BadExpense(int index) =>
+        Expense(index) with { ExpenseCode = "E109", BilledExpenseCode = "E109", Amount = 600m };
+
     [Fact]
-    public void ADowngradedFirmVersion_StillDisplacesTheClientDefault_D39_K2()
+    public void ADowngradedFirmVersion_DoesNotDisplaceTheClientDefault_D39_D116_K2()
     {
-        // The downgraded firm rule is evaluated, so it counts as the firm's rule of that type.
-        var clientDefault = Increment("CD-INCREMENT", "0.5");                                   // fires on 0.3 hours
-        var firm = Increment("FIRM-INCREMENT", "0.1", RuleSetScope.Firm) with { Consequence = (int)BillingConsequence.Reject }; // holds
+        // 072 W review F1-b. A firm ExpenseRule stored as SuggestAdjustment (a type that CAN reject, but not suggest) is evaluated as
+        // Flag. D-116: "a firm rule version that cannot be evaluated leaves the client default in force", so the client default's
+        // Reject still runs; the downgraded firm version still produces its own Flag finding.
+        var clientDefault = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = (int)BillingConsequence.Reject };
+        var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesOnly, RuleSetScope.Firm)
+            with { Consequence = (int)BillingConsequence.SuggestAdjustment };
+
+        var result = Evaluate(Request(BadExpense(0)), Loaded(clientDefault, firm));
+
+        result.Refusals.Should().BeEmpty();
+        var client = result.Findings.Where(f => f.PolicyVersionId == clientDefault.PolicyVersionId).ToList();
+        client.Select(f => f.ReasonCode).Should().BeEquivalentTo([BillingReasonCodes.ExpenseCodeNotReimbursable, BillingReasonCodes.ExpenseAmountOverCap],
+            "the client default's Reject still runs");
+        result.RulesByVersion[clientDefault.PolicyVersionId].Consequence.Should().Be((int)BillingConsequence.Reject);
+        var firmFinding = result.Findings.Where(f => f.PolicyVersionId == firm.PolicyVersionId).Should().ContainSingle("the firm version still runs").Subject;
+        firmFinding.ReasonCode.Should().Be(BillingReasonCodes.ExpenseCodeNotReimbursable);
+        result.RulesByVersion[firm.PolicyVersionId].Consequence.Should().Be((int)BillingConsequence.Flag, "the downgraded version can never reject");
+    }
+
+    [Fact]
+    public void AValidFirmVersion_StillDisplacesTheClientDefault_Control_D39()
+    {
+        // Control for the test above: a firm version with an allowed consequence displaces the client default, as ever.
+        var clientDefault = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = (int)BillingConsequence.Reject };
+        var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesOnly, RuleSetScope.Firm)
+            with { Consequence = (int)BillingConsequence.Flag };
+
+        var result = Evaluate(Request(BadExpense(0)), Loaded(clientDefault, firm));
+
+        result.Findings.Should().ContainSingle().Which.PolicyVersionId.Should().Be(firm.PolicyVersionId);
+    }
+
+    [Fact]
+    public void ANullConsequenceFirmVersion_StillDisplacesTheClientDefaultsReject_KnownLimit_073()
+    {
+        // Pinned, not endorsed as ideal: null means "the type default" and is a valid authored row, so the firm version counts and
+        // the client default's Reject for the same type does not run. 073's known limit; see the 072 notes, section 13.
+        var clientDefault = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = (int)BillingConsequence.Reject };
+        var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesOnly, RuleSetScope.Firm) with { Consequence = null };
+
+        var result = Evaluate(Request(BadExpense(0)), Loaded(clientDefault, firm));
+
+        result.Findings.Should().ContainSingle().Which.PolicyVersionId.Should().Be(firm.PolicyVersionId);
+    }
+
+    [Fact]
+    public void ADowngradedFirmVersion_OfATypeThatOnlyFlags_LeavesTheClientDefaultInForce_K2()
+    {
+        // A firm TimeIncrement stored as Reject is evaluated as Flag (and holds here, 0.3 is a multiple of 0.1); the client default
+        // stays in force and fires on the line.
+        var clientDefault = Increment("CD-INCREMENT", "0.5");
+        var firm = Increment("FIRM-INCREMENT", "0.1", RuleSetScope.Firm) with { Consequence = (int)BillingConsequence.Reject };
 
         var result = Evaluate(Request(Line(0, EarlyLine)), Loaded(clientDefault, firm));
 
-        result.Findings.Should().BeEmpty();
+        result.Findings.Should().ContainSingle().Which.PolicyCode.Should().Be("CD-INCREMENT");
         result.Refusals.Should().BeEmpty();
     }
 
