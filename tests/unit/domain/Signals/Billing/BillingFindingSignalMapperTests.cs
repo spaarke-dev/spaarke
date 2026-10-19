@@ -244,7 +244,7 @@ public class BillingFindingSignalMapperTests
     public async Task TwoReasonsOnOneLine_GiveOneRequestCarryingBoth_WithTheStrongestConsequence_A4()
     {
         var rule = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = Reject };
-        var request = Request(Expense(0) with { ExpenseCode = "E109", Amount = 600m });
+        var request = Request(Expense(0) with { ExpenseCode = "E109", BilledExpenseCode = "E109", Amount = 600m }); // D-117: the billed code is judged
         var result = Evaluator().Evaluate(request, Loaded(rule));
         result.Findings.Should().HaveCount(2, "control: the code and the cap both fail on the one line");
         RepeatedKeys(result.Findings.Select(f => BillingFindingSignalMapper.Map(f, rule, SubjectsFor(request)).Request))
@@ -263,7 +263,7 @@ public class BillingFindingSignalMapperTests
         // Each reason keeps its own text line. (Both render the type's one default wording here, so the texts are equal: known limit.)
         reasons.Should().HaveCount(2).And.OnlyContain(e => !string.IsNullOrWhiteSpace(e.Text) && e.Source == "sprk_policyversion:" + rule.PolicyVersionId.ToString("D").ToLowerInvariant());
         evidence.Where(e => e.Kind == BillingFindingSignalMapper.FieldEvidenceKind).Select(e => e.Ref)
-            .Should().Contain(["line[0].ExpenseCode", "line[0].Amount"], "the union of the fields both reasons read");
+            .Should().Contain(["line[0].BilledExpenseCode", "line[0].Amount"], "the union of the fields both reasons read");
 
         var subjects = SubjectsFor(request);
         var (writer, org) = Writer(subjects);

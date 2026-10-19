@@ -120,7 +120,7 @@ internal static class BillingEvaluationKit
     internal static (BillingEvaluationRequest Request, BillingLoadedFacts Loaded) EverythingWrong(int lineCount = 150)
     {
         var lines = Enumerable.Range(0, lineCount).Select(i => i % 10 == 9
-                ? Expense(i) with { ExpenseCode = "E109", Amount = 600m }
+                ? Expense(i) with { ExpenseCode = "E109", BilledExpenseCode = "E109", Amount = 600m }
                 : Fee(i) with
                 {
                     Date = new DateOnly(2026, 3, 2 + (i % 3)),
