@@ -469,11 +469,14 @@ public sealed class AuthorizationModuleCiamTests
     {
         // 077 review F4: an ID token issued to a client signing in AS the BFF app has aud = the bare app id. With an app
         // role it carries roles (so Identity Web's scp-or-roles check passes) but never azpacr/appidacr.
-        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId);
+        var logs = new CapturingLoggerProvider();
+        using var host = await StartHostAsync(ciamAudience: StampCiamAppId, ciamTenantId: CiamTenantId, loggerProvider: logs);
 
         var status = await GetAsync(host, WorkforceRoute, IdToken(WorkforceBffClientId));
 
         status.Should().Be(HttpStatusCode.Unauthorized);
+        logs.Entries.Should().ContainSingle(e => e.Message.Contains("sdap.auth.deny.id_token_on_workforce_scheme"),
+            "the refusal must come from the 077 guard, not another 401 source");
     }
 
     [Theory]
@@ -486,8 +489,13 @@ public sealed class AuthorizationModuleCiamTests
             ? WorkforceToken(WorkforceIssuerV2, WorkforceTenantId, audience)
             : IdToken(audience);
 
-        AuthorizationModule.IsIdTokenForApp(new JsonWebToken(token), WorkforceBffClientId).Should().Be(expected);
-        AuthorizationModule.IsIdTokenForApp(new JsonWebToken(token), null).Should().BeFalse();
+        var jwt = new JsonWebToken(token);
+        AuthorizationModule.IsIdTokenForApp(jwt, null, WorkforceBffClientId).Should().Be(expected);
+        AuthorizationModule.IsIdTokenForApp(jwt, null, null).Should().BeFalse();
+
+        // Any other token type: judged from the principal's claims (077 re-check K2), with the same answer.
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(jwt.Claims, "test"));
+        AuthorizationModule.IsIdTokenForApp(null, principal, WorkforceBffClientId).Should().Be(expected);
     }
 
     [Theory]

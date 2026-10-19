@@ -197,7 +197,7 @@ public static class AuthorizationModule
                 var existingOnTokenValidated = options.Events.OnTokenValidated;
                 options.Events.OnTokenValidated = async context =>
                 {
-                    if (IsIdTokenForApp(context.SecurityToken, clientId))
+                    if (IsIdTokenForApp(context.SecurityToken, context.Principal, clientId))
                     {
                         context.HttpContext.RequestServices.GetService<ILoggerFactory>()?
                             .CreateLogger("WorkforceSchemeAudienceGuard")
@@ -840,21 +840,26 @@ public static class AuthorizationModule
     /// <c>azpacr</c> (v2 access tokens) nor <c>appidacr</c> (v1 access tokens), i.e. an ID token issued to a client that
     /// signs in as the BFF app. Tokens with any other audience are not judged here (their behaviour is unchanged).
     /// </summary>
-    internal static bool IsIdTokenForApp(Microsoft.IdentityModel.Tokens.SecurityToken? token, string? clientId)
+    internal static bool IsIdTokenForApp(
+        Microsoft.IdentityModel.Tokens.SecurityToken? token, System.Security.Claims.ClaimsPrincipal? principal, string? clientId)
     {
-        if (token is not Microsoft.IdentityModel.JsonWebTokens.JsonWebToken jwt
-            || !Guid.TryParseExact(clientId?.Trim(), "D", out var appId))
+        if (!Guid.TryParseExact(clientId?.Trim(), "D", out var appId))
         {
             return false;
         }
 
         var bareAudience = appId.ToString("D");
-        if (!jwt.Audiences.Any(a => string.Equals(a, bareAudience, StringComparison.OrdinalIgnoreCase)))
+        if (token is Microsoft.IdentityModel.JsonWebTokens.JsonWebToken jwt)
         {
-            return false;
+            return jwt.Audiences.Any(a => string.Equals(a, bareAudience, StringComparison.OrdinalIgnoreCase))
+                && !jwt.TryGetClaim("azpacr", out _) && !jwt.TryGetClaim("appidacr", out _);
         }
 
-        return !jwt.TryGetClaim("azpacr", out _) && !jwt.TryGetClaim("appidacr", out _);
+        // Any other token type (a legacy handler): judge from the principal's claims, as the FR-23 guard does, so the
+        // refusal cannot fail open on the handler type (077 re-check K2).
+        return principal is not null
+            && principal.FindAll("aud").Any(c => string.Equals(c.Value, bareAudience, StringComparison.OrdinalIgnoreCase))
+            && principal.FindFirst("azpacr") is null && principal.FindFirst("appidacr") is null;
     }
 
     /// <summary>

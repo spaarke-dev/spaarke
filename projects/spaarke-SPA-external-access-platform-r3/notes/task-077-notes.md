@@ -35,7 +35,9 @@ Claim-shape reads after the v2 switch were checked by the session and both revie
   - ID-token guard disabled → `DefaultScheme_IdTokenForTheApp_WithRoles_Returns401` fails;
   - link harness without the bare id → `V2GuestToken_BareAppIdAudience_Returns200Linked` fails.
 - Auth-filtered unit tests (AuthorizationModule, SpaarkeGuestTokenValidator, ExternalWorkforceLink, WorkforcePrincipalResolver, Authentication, KeylessProof, CallerIdentity): **309/309**.
-- ArchTests on `f68d0f312`: **1152/1152**.
+- ArchTests on `f68d0f312` and on `77d74f305`: **1152/1152**.
+- Full BFF unit suite on `77d74f305`: 25154 passed, 22 skipped, 45 failed. 42 of the failures took about 3 minutes each (host start-up timeouts in a 48-minute parallel run on a busy machine). Rerunning every class that had a failure, 32 classes plus the 4 display-named tests, gave **858/858**. The fast failures (WorkforceHome scheme, one link case) also pass on their own (253/253). None reproduce.
+- After the re-check hardening: the classes above plus the auth filter pass.
 - Publish size, fresh worktrees `C:\wt077m` (master `30324eeac`) and `C:\wt077b` (`f68d0f312`), `Compress-Archive`: 192 files each; **37.44 MB both, delta −258 bytes**. Worktrees removed with `Remove-WorktreeSafe.ps1`.
 - No package change, so no new CVE.
 
@@ -60,6 +62,16 @@ Claim-shape reads after the v2 switch were checked by the session and both revie
 | 8 | 2 | K4 | `auth-security-boundaries.md` described only the Copilot merge. | Fixed. |
 | 9 | 2 | K4 | Provisioning H3 does not set token version 2 on stamps today; when it does, stamps need a build with 077. | Recorded; sent to provisioning with the A9 coordination items. |
 | 10 | 2 | K4 | `BuildCiamValidAudiences` is named for CIAM but now has three non-CIAM callers. | Not renamed (pre-existing name, no behaviour impact). |
+
+### Scoped re-check of the fix diff (Sonnet, `77d74f305`): no F-class findings
+
+| # | Class | Finding | Outcome |
+|---|---|---|---|
+| R1 | K2 | `IsIdTokenForApp` failed open when the validated token is not a `JsonWebToken` (no legacy handler is configured today). | Hardened: falls back to the principal's `aud`/`azpacr`/`appidacr` claims, as the FR-23 guard does; table test covers both paths. |
+| R2 | K4 | The ID-token 401 test asserted only the status code. | It now also asserts the `sdap.auth.deny.id_token_on_workforce_scheme` log line. |
+| R3 | K3 | The guard rests on Microsoft's claims reference: access tokens carry `azpacr`/`appidacr`, ID tokens do not. Managed-identity tokens carry `appidacr` by recollection, not re-fetched. | Live proof: 059 stage B per-surface check reads the log for this deny code. |
+| R4 | K4 | "No code reads `AzureAd__ValidAudiences__*`". | Pass 2 confirmed there is no top-level `ValidAudiences` property on `JwtBearerOptions` or `MicrosoftIdentityOptions` to bind, and the probe showed the bare id refused although dev's harness-equivalent config carries no such list. Kept as stated. |
+| R5 | K4 | No mixed-case or multi-audience case. | Code uses `OrdinalIgnoreCase` and `Any`; no extra test (scope). |
 
 ## Known limits
 
