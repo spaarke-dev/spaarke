@@ -118,6 +118,12 @@ public class ProjectClosureCascadeTests
         /// <summary>Set to make the enumeration query fail outright.</summary>
         public Exception? QueryFailure { get; set; }
 
+        /// <summary>#2104: set to make only the REVOKED-rows read (<c>statecode eq 1</c>) fail.</summary>
+        public Exception? RevokedQueryFailure { get; set; }
+
+        /// <summary>#2104: every <c>$top</c> the production code passed, in order.</summary>
+        public List<int?> Tops { get; } = new();
+
         /// <summary>The <c>$select</c> the production code last emitted.</summary>
         public string? LastSelect { get; private set; }
 
@@ -170,15 +176,20 @@ public class ProjectClosureCascadeTests
             mock.Setup(c => c.QueryAsync<ProjectClosureEndpoint.ExternalAccessRow>(
                     GrantEntitySet, It.IsAny<string>(), It.IsAny<string>(),
                     It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string _, string? filter, string? select, int? _, int? _, CancellationToken _) =>
+                .ReturnsAsync((string _, string? filter, string? select, int? top, int? _, CancellationToken _) =>
                 {
                     LastSelect = select;
+                    Tops.Add(top);
 
                     if (QueryFailure is not null)
                         throw QueryFailure;
 
+                    if (RevokedQueryFailure is not null && filter?.Contains("statecode eq 1", StringComparison.Ordinal) == true)
+                        throw RevokedQueryFailure;
+
                     RejectUnknownColumns(select);
-                    return Match(filter).Select(Project).ToList();
+                    // $top is honoured, as Dataverse does: a bound the code relies on must be a tested property.
+                    return Match(filter).Select(Project).Take(top ?? int.MaxValue).ToList();
                 });
 
             mock.Setup(c => c.UpdateAsync(
@@ -216,7 +227,8 @@ public class ProjectClosureCascadeTests
             }
         }
 
-        /// <summary>Interprets the filter emitted by <c>BuildActiveProjectGrantsFilter</c>.</summary>
+        /// <summary>Interprets the filters emitted by <c>BuildActiveProjectGrantsFilter</c> and (#2104)
+        /// <c>BuildRevokedProjectGrantsFilter</c>.</summary>
         private IEnumerable<Row> Match(string? filter)
         {
             if (filter is null) return Enumerable.Empty<Row>();
@@ -226,8 +238,11 @@ public class ProjectClosureCascadeTests
 
             var projectId = Guid.Parse(projectMatch.Groups[1].Value);
             var activeOnly = filter.Contains("statecode eq 0", StringComparison.Ordinal);
+            var inactiveOnly = filter.Contains("statecode eq 1", StringComparison.Ordinal);
 
-            return _rows.Where(r => r.ProjectId == projectId && (!activeOnly || r.StateCode == 0));
+            return _rows.Where(r => r.ProjectId == projectId
+                                    && (!activeOnly || r.StateCode == 0)
+                                    && (!inactiveOnly || r.StateCode == 1));
         }
 
         private static ProjectClosureEndpoint.ExternalAccessRow Project(Row row) => new()
@@ -807,6 +822,346 @@ public class ProjectClosureCascadeTests
     }
 
     /// <summary>
+    /// #2104 (pass-2 F4): the container removal THROWS after an organization was found too large to sweep. The
+    /// oversized classification survives the throw — the closure still names the non-retryable leaf and its
+    /// administrator instruction, never the retryable container_not_cleared ("Retry the closure" cannot succeed).
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_WhenTheRemovalThrowsAfterATooLargeOrganization_StaysNonRetryable()
+    {
+        var table = new FakeGrantTable();
+        table.SeedOrganizationGrant(OrganizationId, ProjectId);
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+        ArrangeOversizedOrganization(client);
+
+        var spe = new Mock<SpeContainerMembershipService>(
+            TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
+        spe.Setup(s => s.RemoveMembershipsAsync(
+                It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Graph unreachable"));
+
+        var problem = Problem(await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureOrganizationTooLargeReason);
+        problem.ProblemDetails.Detail.Should().NotContain("Retry the closure")
+            .And.Contain("administrator")
+            .And.Contain("1 other grantee(s) could also not be confirmed removed");
+        problem.ProblemDetails.Extensions["organizationsTooLarge"].Should().Be(1);
+        problem.ProblemDetails.Extensions["granteesNotCleared"].Should().Be(2,
+            "the oversized organization and the contact whose removal threw");
+        problem.ProblemDetails.Extensions["containerCleared"].Should().Be(false);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // #2104 (pass-1 F1 / pass-2 F3): "Retry the closure" must be TRUE. A retry finds the grants already inactive, so
+    // the container step must still run over the grantees revoked earlier.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The retry that works: the first closure revokes the grant but cannot clear the container (500
+    /// container_not_cleared, "Retry the closure"); the retry finds no ACTIVE grant, still sweeps the grantee revoked
+    /// earlier, and — now that the container answers — completes with 200.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_RetryAfterContainerNotCleared_ClearsTheEarlierRevokedGranteeAndAnswers200()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+        var resolver = TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer);
+
+        var containerUp = false;
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var spe = SpeAnswering(_ => containerUp ? Removed : GraphError, calls);
+
+        var first = Problem(await CloseProject(client, spe: spe, resolver: resolver));
+        first.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason);
+        first.ProblemDetails.Detail.Should().Contain("Retry the closure");
+        table.ActiveRows.Should().BeEmpty("precondition: the grant was revoked by the first call");
+
+        containerUp = true;
+        var retry = OkBody(await CloseProject(client, spe: spe, resolver: resolver));
+
+        retry.AccessRecordsRevoked.Should().Be(0, "nothing was active any more");
+        retry.SpeContainerMembersRemoved.Should().Be(1, "the earlier revoked grantee was removed by the retry");
+        calls.Should().HaveCount(2, "the retry swept the container again — it did not answer 200 without looking");
+        calls[1].ContainerId.Should().Be(OwnContainer);
+        calls[1].Emails.Should().BeEquivalentTo(new[] { ContactEmail });
+    }
+
+    /// <summary>
+    /// The retry that still fails: with no ACTIVE grant left, a container that still cannot be cleared is still a
+    /// 500 container_not_cleared — never the false 200 a retry used to return.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_RetryWhenTheContainerStillCannotBeCleared_StaysIncomplete()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+        var resolver = TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer);
+        var spe = SpeAnswering(_ => GraphError, new());
+
+        Problem(await CloseProject(client, spe: spe, resolver: resolver));
+        var retry = Problem(await CloseProject(client, spe: spe, resolver: resolver));
+
+        retry.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        retry.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason);
+        retry.ProblemDetails.Extensions["accessRecordsRevoked"].Should().Be(0);
+        retry.ProblemDetails.Extensions["granteesNotCleared"].Should().Be(1);
+        retry.ProblemDetails.Detail.Should().Contain("had no active external grants left to revoke");
+    }
+
+    /// <summary>
+    /// #2104: a grantee revoked EARLIER by a single-grant revoke (whose own container step may have failed) is cleared
+    /// by the closure too, beside the grantees this call revokes — in the one sweep.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_AlsoClearsGranteesRevokedBeforeTheClosure()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        table.SeedContactGrant(OtherContactId, ProjectId).StateCode = 1;
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var spe = SpeAnswering(_ => Removed, calls);
+
+        var body = OkBody(await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        body.AccessRecordsRevoked.Should().Be(1);
+        body.AffectedContactIds.Should().Equal(ContactId);
+        calls.Should().ContainSingle();
+        calls[0].Emails.Should().BeEquivalentTo(new[] { ContactEmail, OtherContactEmail });
+        table.Tops.Should().Contain(ProjectClosureEndpoint.MaxRevokedGrantsPerSweep + 1,
+            "the revoked-rows read is bounded, so a truncated page can never read as a complete one");
+    }
+
+    /// <summary>
+    /// #2104: the earlier revoked grants could not be read — whoever they are, they are not confirmed off the
+    /// container, so the closure is not complete even though every ACTIVE grantee was cleared.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_WhenTheEarlierRevokedGrantsCannotBeRead_ReportsContainerNotCleared()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        table.RevokedQueryFailure = new InvalidOperationException("Dataverse unavailable");
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var spe = SpeAnswering(_ => Removed, calls);
+
+        var problem = Problem(await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason);
+        problem.ProblemDetails.Extensions["granteesNotCleared"].Should().BeNull("the earlier grantees could not be counted");
+        calls.Should().ContainSingle("the active grantee was still swept").Which.Emails.Should().Equal(ContactEmail);
+    }
+
+    /// <summary>
+    /// #2104: a project with more revoked grants than one closure reads is not swept on a partial list — the read
+    /// reports itself incomplete and the closure is not complete.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_WhenTheRevokedGrantsExceedTheReadBound_ReportsContainerNotCleared()
+    {
+        var table = new FakeGrantTable();
+        for (var i = 0; i <= ProjectClosureEndpoint.MaxRevokedGrantsPerSweep; i++)
+        {
+            table.SeedContactGrant(ContactId, ProjectId).StateCode = 1;
+        }
+
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var problem = Problem(await CloseProject(client, spe: SpeAnswering(_ => Removed, new()),
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason);
+    }
+
+    /// <summary>
+    /// #2104: a revoked project whose container cannot be determined, retried: the grantees revoked earlier may still
+    /// be on it, so the retry is not a 200. A project that never had a grant has nobody to clear, wherever its container
+    /// is: 200.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_NoActiveGrants_ContainerUndetermined_IsIncompleteOnlyWhenGranteesWereRevokedEarlier()
+    {
+        var undetermined = TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, ownContainerId: null);
+
+        var revokedTable = new FakeGrantTable();
+        revokedTable.SeedContactGrant(ContactId, ProjectId).StateCode = 1;
+        var withHistory = await CloseProject(revokedTable.BuildMock(), spe: SpeAnswering(_ => Removed, new()),
+            resolver: undetermined);
+
+        Problem(withHistory).ProblemDetails.Extensions["reasonCode"].Should()
+            .Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason);
+
+        var neverGranted = await CloseProject(new FakeGrantTable().BuildMock(), spe: SpeAnswering(_ => Removed, new()),
+            resolver: undetermined);
+
+        OkBody(neverGranted).AccessRecordsRevoked.Should().Be(0);
+    }
+
+    /// <summary>
+    /// #2104: the same organization revoked earlier AND revoked by this call is swept — and counted — once. Two copies
+    /// would query its members twice and report two oversized organizations where there is one.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_AnOrganizationRevokedEarlierAndNow_IsSweptOnce()
+    {
+        var table = new FakeGrantTable();
+        table.SeedOrganizationGrant(OrganizationId, ProjectId);
+        table.SeedOrganizationGrant(OrganizationId, ProjectId).StateCode = 1;
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+        ArrangeOversizedOrganization(client);
+
+        var problem = Problem(await CloseProject(client, spe: SpeAnswering(_ => Removed, new()),
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureOrganizationTooLargeReason);
+        problem.ProblemDetails.Extensions["organizationsTooLarge"].Should().Be(1);
+        problem.ProblemDetails.Extensions["granteesNotCleared"].Should().Be(1);
+    }
+
+    /// <summary>
+    /// #2104: a revoked row naming neither a contact nor an organization (its grantee's record was deleted, clearing the
+    /// lookup) identifies nobody, so no container permission can be attributed to it — the #2103 "no key" answer, not
+    /// an unresolved grantee that would fail every closure of the project for good.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_ARevokedGrantNamingNobody_IsNotAnUnresolvedGrantee()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        table.SeedContactGrant(ContactId, ProjectId).StateCode = 1;
+        var orphan = table.SeedContactGrant(ContactId, ProjectId);
+        orphan.ContactId = null;
+        orphan.StateCode = 1;
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var body = OkBody(await CloseProject(client, spe: SpeAnswering(_ => Removed, calls),
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        body.AccessRecordsRevoked.Should().Be(1);
+        calls.Should().ContainSingle().Which.Emails.Should().Equal(ContactEmail);
+    }
+
+    /// <summary>
+    /// #2104: a SECURE project that never had a grant closes cleanly — the revoked-rows read finds nobody, so the
+    /// container is not asked.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProjectWithNoGrantsEver_Returns200AndNeverAsksTheContainer()
+    {
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+
+        var result = await CloseProject(new FakeGrantTable().BuildMock(), spe: SpeAnswering(_ => Removed, calls),
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer));
+
+        OkBody(result).AccessRecordsRevoked.Should().Be(0);
+        calls.Should().BeEmpty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // #2104 (pass-2 F2): a partial revocation must not swallow what the container step found.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A row could not be deactivated (partial_revocation, retryable) AND a revoked organization is too large to sweep
+    /// (not retryable). The partial answer carries the container step's counts and the oversized organization's
+    /// administrator instruction — a retry fixes the row, not the organization.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_PartialRevocationWithATooLargeOrganization_CarriesTheNonRetryableInstruction()
+    {
+        var table = new FakeGrantTable();
+        var stubborn = table.SeedContactGrant(ContactId, ProjectId);
+        table.SeedOrganizationGrant(OrganizationId, ProjectId);
+        table.FailDeactivationFor.Add(stubborn.Id);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+        ArrangeOversizedOrganization(client);
+
+        var problem = Problem(await CloseProject(client, spe: SpeAnswering(_ => Removed, new()),
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosurePartialRevocationReason);
+        problem.ProblemDetails.Extensions["containerCleared"].Should().Be(false);
+        problem.ProblemDetails.Extensions["organizationsTooLarge"].Should().Be(1);
+        problem.ProblemDetails.Extensions["granteesNotCleared"].Should().Be(1, "the oversized organization; the contact was removed");
+        problem.ProblemDetails.Detail.Should().Contain("Retry the closure")
+            .And.Contain("will not change that part")
+            .And.Contain("administrator");
+    }
+
+    /// <summary>
+    /// A row could not be deactivated AND a revoked grantee could not be cleared from the container: the partial answer
+    /// says so, with the count, instead of implying the container is fine.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_PartialRevocationWithAGranteeNotCleared_CarriesTheContainerState()
+    {
+        var table = new FakeGrantTable();
+        var stubborn = table.SeedContactGrant(ContactId, ProjectId);
+        table.SeedContactGrant(OtherContactId, ProjectId);
+        table.FailDeactivationFor.Add(stubborn.Id);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var problem = Problem(await CloseProject(client,
+            spe: SpeAnswering(email => email == OtherContactEmail ? GraphError : Removed, new()),
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosurePartialRevocationReason);
+        problem.ProblemDetails.Extensions["containerCleared"].Should().Be(false);
+        problem.ProblemDetails.Extensions["granteesNotCleared"].Should().Be(1);
+        problem.ProblemDetails.Extensions["organizationsTooLarge"].Should().Be(0);
+        problem.ProblemDetails.Detail.Should().Contain("could not be cleared of 1 revoked grantee(s)");
+    }
+
+    /// <summary>
+    /// The partial answer on a secure project whose container WAS cleared says so (true), and on a non-secure project —
+    /// which owns no container — reports the step as not applicable (null), never a "cleared" it did not perform.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_PartialRevocation_ReportsTheContainerAsClearedOrNotApplicable()
+    {
+        var secureTable = new FakeGrantTable();
+        var stubborn = secureTable.SeedContactGrant(ContactId, ProjectId);
+        secureTable.FailDeactivationFor.Add(stubborn.Id);
+        var secureClient = secureTable.BuildMock();
+        ArrangeGranteeIdentities(secureClient);
+
+        var secure = Problem(await CloseProject(secureClient, spe: SpeAnswering(_ => Removed, new()),
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+        secure.ProblemDetails.Extensions["containerCleared"].Should().Be(true);
+        secure.ProblemDetails.Detail.Should().Contain("confirmed removed");
+
+        var plainTable = new FakeGrantTable();
+        var plainStubborn = plainTable.SeedContactGrant(ContactId, ProjectId);
+        plainTable.FailDeactivationFor.Add(plainStubborn.Id);
+
+        var plain = Problem(await CloseProject(plainTable.BuildMock()));
+        plain.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosurePartialRevocationReason);
+        plain.ProblemDetails.Extensions["containerCleared"].Should().BeNull();
+    }
+
+    /// <summary>
     /// F8 (S-39): the client's <c>containerId</c> is GONE from the contract. A request body that still carries one —
     /// another record's container — deserializes (unknown members are skipped) and is IGNORED: the only container the
     /// sweep ever sees is the one the server derived from the authorized project.
@@ -1162,6 +1517,14 @@ public class ProjectClosureCascadeTests
     {
         ProjectClosureEndpoint.BuildActiveProjectGrantsFilter(ProjectId)
             .Should().Be($"_sprk_project_value eq {ProjectId} and statecode eq 0");
+    }
+
+    /// <summary>#2104: the revoked-rows read is the same project lookup, inactive rows only.</summary>
+    [Fact]
+    public void BuildRevokedProjectGrantsFilter_ScopesToTheProjectAndInactiveRowsOnly()
+    {
+        ProjectClosureEndpoint.BuildRevokedProjectGrantsFilter(ProjectId)
+            .Should().Be($"_sprk_project_value eq {ProjectId} and statecode eq 1");
     }
 
     /// <summary>
