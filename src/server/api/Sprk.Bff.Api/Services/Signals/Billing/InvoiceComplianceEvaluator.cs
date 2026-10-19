@@ -81,9 +81,10 @@ public sealed record BillingEvaluationResult
 /// and listed in <see cref="BillingEvaluationResult.Skips"/>. When anything was skipped, ONE invoice-level finding says so (D-115:
 /// "Rates and expense caps were not checked: the invoice currency is missing / unclear / not USD"), whether or not a RequiredData
 /// rule is in force. Its reason (<see cref="BillingEvaluationReasons.CurrencyMissing"/>, <see cref="BillingEvaluationReasons.CurrencyUnreliable"/>,
-/// <see cref="BillingEvaluationReasons.CurrencyNotUsd"/>) is flag-only: it never rejects or adjusts. It hangs on the first skipped
-/// money policy (ordinal policy code, then version id) and cites every skipped version. With no money rule in force nothing is
-/// skipped and no such finding is raised.</para>
+/// <see cref="BillingEvaluationReasons.CurrencyNotUsd"/>) is flag-only: it never rejects or adjusts. It hangs on a skipped
+/// ApprovedRate version when there is one, else on a skipped ExpenseRule version (ordinal policy code, then version id within the
+/// type), so its Signal never merges with a Reject reason (049 rule 5), and it cites every skipped version. With no money rule in
+/// force nothing is skipped and no such finding is raised.</para>
 /// <para><b>Determinism.</b> No clock is read; all ordering is explicit and ordinal.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <c>SignalEvaluationService</c> (Ontology policies, predicate
 /// compiler, which refuses every billing type) and task 071's handlers (judge one rule, select nothing). Extension: no; billing rule
@@ -297,8 +298,8 @@ public sealed class InvoiceComplianceEvaluator
             }
         }
 
-        // 6. D-115: money that was not judged is visible to the reviewer, as ONE flag-only invoice-level finding on the first skipped
-        //    money policy (ordinal policy code, then version id), citing every skipped version. Nothing skipped, no finding.
+        // 6. D-115: money that was not judged is visible to the reviewer, as ONE flag-only invoice-level finding on a skipped
+        //    ApprovedRate version, else a skipped ExpenseRule one, citing every skipped version. Nothing skipped, no finding.
         if (currencySkip is not null && skips.Count > 0)
         {
             var notChecked = RatesNotChecked(request, loaded.ReliabilityThreshold, currencySkip, skips, candidates);
@@ -365,7 +366,8 @@ public sealed class InvoiceComplianceEvaluator
     /// <summary>
     /// D-115: the "rates and expense caps were not checked" finding. Its reason is the currency skip reason, which is flag-only
     /// (<see cref="BillingRuleCatalogue.IsFlagOnlyReason"/>): it never rejects or adjusts, whatever the version's consequence. It hangs
-    /// on the first skipped money policy (ordinal policy code, then version id) and cites every skipped version as a reference value.
+    /// on the first skipped ApprovedRate version (ordinal policy code, then version id), else on the first skipped ExpenseRule version,
+    /// so the Signal group it lands in carries no other reason; it cites every skipped version as a reference value.
     /// It reads the currency (the extracted header field, with its confidence).
     /// </summary>
     private static (BillingFinding Finding, BillingRuleCandidate Rule) RatesNotChecked(
@@ -377,7 +379,11 @@ public sealed class InvoiceComplianceEvaluator
             .OrderBy(s => s.PolicyCode, StringComparer.Ordinal)
             .ThenBy(s => s.PolicyVersionId)
             .ToList();
-        var first = skipped[0];
+
+        // 072 part W (049 rule 5: never merged into a Reject): hang it on a skipped ApprovedRate version. ApprovedRate is not run at
+        // all on such an invoice, so its invoice-level group holds this reason alone. Only when no ApprovedRate version was skipped
+        // (none in force) does it fall back to an ExpenseRule version, whose handler gives no invoice-level reason either.
+        var first = skipped.FirstOrDefault(s => s.RuleType == RuleType.ApprovedRate) ?? skipped[0];
         var rule = candidates.First(c => c.PolicyVersionId == first.PolicyVersionId);
 
         decimal? confidence = request.HeaderConfidence.TryGetValue(BillingFieldNames.Currency, out var c) ? c : null;

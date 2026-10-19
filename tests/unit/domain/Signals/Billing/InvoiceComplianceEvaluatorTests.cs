@@ -385,10 +385,10 @@ public class InvoiceComplianceEvaluatorTests
     // ── D-115: rates and expense caps not checked ────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void RatesNotChecked_IsOneInvoiceLevelFinding_OnTheFirstSkippedMoneyPolicy_CitingEverySkippedVersion_D115()
+    public void RatesNotChecked_IsOneInvoiceLevelFinding_OnTheSkippedApprovedRatePolicy_CitingEverySkippedVersion_D115()
     {
         var rate = Version("CD-RATE", RuleType.ApprovedRate);
-        var expense = Version("AA-EXPENSE", RuleType.ExpenseRule);     // ordinal first
+        var expense = Version("AA-EXPENSE", RuleType.ExpenseRule);     // ordinal first, but not ApprovedRate (072 part W)
         var increment = Increment("CD-INCREMENT", "0.1");             // not a money rule
         var request = Request(Fee(0) with { BilledRate = 700m, Amount = 700m }, Expense(1) with { ExpenseCode = "E101", Amount = 600m }) with
         {
@@ -399,10 +399,10 @@ public class InvoiceComplianceEvaluatorTests
 
         var notChecked = result.Findings.Should().ContainSingle("one finding, not one per skipped rule").Subject;
         notChecked.ReasonCode.Should().Be(BillingEvaluationReasons.CurrencyNotUsd);
-        notChecked.PolicyCode.Should().Be("AA-EXPENSE");
-        notChecked.PolicyVersionId.Should().Be(expense.PolicyVersionId);
-        notChecked.RuleType.Should().Be(RuleType.ExpenseRule);
-        notChecked.ClauseReference.Should().Be(expense.ClauseReference);
+        notChecked.PolicyCode.Should().Be("CD-RATE", "ApprovedRate is preferred: it is not run at all, so its group holds this reason alone");
+        notChecked.PolicyVersionId.Should().Be(rate.PolicyVersionId);
+        notChecked.RuleType.Should().Be(RuleType.ApprovedRate);
+        notChecked.ClauseReference.Should().Be(rate.ClauseReference);
         notChecked.FactValues.Should().BeEmpty();
         notChecked.ValuesRead.Where(v => v.Name == "skippedPolicyVersion").Select(v => v.Value).Should().Equal(
             "AA-EXPENSE:" + expense.PolicyVersionId.ToString("D").ToLowerInvariant(),
@@ -411,7 +411,96 @@ public class InvoiceComplianceEvaluatorTests
         currencyRead.Value.Should().Be("EUR");
         currencyRead.ExtractedField.Should().Be(new Sprk.Bff.Api.Services.Finance.Resolution.FieldRef(null, BillingFieldNames.Currency));
         currencyRead.Confidence.Should().Be(0.95m);
-        result.RulesByVersion[notChecked.PolicyVersionId].Should().Be(expense, "the mapper and 073 find the version");
+        result.RulesByVersion[notChecked.PolicyVersionId].Should().Be(rate, "the mapper and 073 find the version");
+    }
+
+    [Fact]
+    public void RatesNotChecked_FallsBackToTheSkippedExpenseRule_OnlyWhenNoApprovedRateVersionIsInForce_D115()
+    {
+        var notYetInForce = Version("AA-RATE", RuleType.ApprovedRate, from: new DateOnly(2027, 1, 1));
+        var expense = Version("ZZ-EXPENSE", RuleType.ExpenseRule);
+        var request = Request(Expense(0) with { Amount = 600m }) with { Currency = "EUR" };
+
+        var notChecked = Evaluate(request, Loaded(notYetInForce, expense)).Findings.Should().ContainSingle().Subject;
+
+        notChecked.PolicyCode.Should().Be("ZZ-EXPENSE");
+        notChecked.RuleType.Should().Be(RuleType.ExpenseRule);
+    }
+
+    // ── 049 rule 5: the D-115 reason is never merged into a Reject (072 part W, A5 placement) ────────────────────
+
+    /// <summary>The money rules a combination draws from, each with the strongest consequence its type may carry.</summary>
+    private static readonly BillingRuleCandidate[] MoneyRules =
+    [
+        Version("CD-RATE", RuleType.ApprovedRate) with { Consequence = (int)BillingConsequence.Reject },
+        Version("FIRM-RATE", RuleType.ApprovedRate, scope: RuleSetScope.Firm) with { Consequence = (int)BillingConsequence.Reject },
+        Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = (int)BillingConsequence.Reject },
+        Version("FIRM-EXPENSE", RuleType.ExpenseRule, scope: RuleSetScope.Firm) with { Consequence = (int)BillingConsequence.Reject },
+        Version("AA-EXPENSE-CODES", RuleType.ExpenseRule, """{"type":"ExpenseRule","nonReimbursableCodes":["E109"]}""")
+            with { Consequence = (int)BillingConsequence.Reject },
+    ];
+
+    public static TheoryData<int, string?, decimal?> MoneyRuleCombinations()
+    {
+        var data = new TheoryData<int, string?, decimal?>();
+        for (var mask = 1; mask < 1 << MoneyRules.Length; mask++)
+        {
+            data.Add(mask, "EUR", 0.95m);
+            data.Add(mask, null, null);
+            data.Add(mask, "USD", 0.50m);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(MoneyRuleCombinations))]
+    public void TheSignalCarryingTheCurrencyReason_IsNeverStrongerThanFlag_OverEveryCombinationOfMoneyRules_MustFire(
+        int mask, string? currency, decimal? confidence)
+    {
+        // Every other rule that can reject at invoice level is in force too, and fires there: RequiredData (no billing period start)
+        // and Duplicate (the firm number repeats a prior). Each line fails a reject-capable money reason in USD.
+        var rules = MoneyRules.Where((_, i) => (mask & (1 << i)) != 0).ToList();
+        var others = new[]
+        {
+            Version("CD-REQUIRED", RuleType.RequiredData, """{"type":"RequiredData","fields":["billingPeriodStart"]}""")
+                with { Consequence = (int)BillingConsequence.Reject },
+            Version("CD-DUPLICATE", RuleType.Duplicate, """{"type":"Duplicate","matchFields":["firmInvoiceNumber"]}""")
+                with { Consequence = (int)BillingConsequence.Reject },
+        };
+        var request = Request(
+            Fee(0) with { BilledRate = 700m, Amount = 700m },
+            Expense(1) with { ExpenseCode = "E109", BilledExpenseCode = "E109", Amount = 600m }) with
+        {
+            Currency = currency,
+            BillingPeriodStart = null,
+            HeaderConfidence = Confidence().With(BillingFieldNames.Currency, confidence),
+        };
+        var loaded = Loaded([.. rules, .. others]) with { PriorSubmissions = [Prior("INV-100.1", "INV-100", 1)] };
+        var subjects = new BillingSignalSubjects(Id("invoice-row"), "INV-100", request.Lines.ToDictionary(l => l.Index, l => Id("line-row:" + l.Index)));
+
+        var result = Evaluate(request, loaded);
+        var mappings = BillingFindingSignalMapper.MapAll(result, subjects);
+
+        var anyRate = rules.Any(r => r.RuleType == ((int)RuleType.ApprovedRate).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var anyCap = rules.Any(r => r.RuleType == ((int)RuleType.ExpenseRule).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                                   && r.RuleBody!.Contains("maxAmountPerItem", StringComparison.Ordinal));
+        var carrying = mappings.Where(m => m.Findings.Any(f => f.ReasonCode.StartsWith("billing.currency.", StringComparison.Ordinal))).ToList();
+        if (!anyRate && !anyCap)
+        {
+            carrying.Should().BeEmpty("no money was skipped, so there is no currency reason");
+            return;
+        }
+
+        var mapping = carrying.Should().ContainSingle("one D-115 finding per invoice").Subject;
+        mapping.Consequence.Should().Be(BillingConsequence.Flag, "049 rule 5: the currency reason is never merged into a Reject");
+        mapping.ReasonCodes.Should().OnlyContain(c => BillingRuleCatalogue.IsFlagOnlyReason(c), "its group holds no other reason");
+        mapping.Request.SubjectEntityLogicalName.Should().Be("sprk_invoice");
+        var host = result.RulesByVersion[mapping.Findings.Single().PolicyVersionId];
+        host.RuleType.Should().Be(((int)(anyRate ? RuleType.ApprovedRate : RuleType.ExpenseRule)).ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        // Control: the invoice-level Reject reasons of the other rules are in force and do reject, in Signals of their own.
+        mappings.Should().Contain(m => m.Consequence == BillingConsequence.Reject && m.Request.SubjectEntityLogicalName == "sprk_invoice");
     }
 
     [Fact]
