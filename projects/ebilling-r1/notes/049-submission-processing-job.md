@@ -707,6 +707,77 @@ Fail-before for the new tests is these kills: each new test fails against the mu
 1. Missing listed Signal after the store: shrink and retry once (a). Done.
 2. A listed Signal deleted after the record is skipped with a Warning rather than retried forever (b). Confirmed by ontology-r1.
 
+### 13d. F1-3: caps, preflight at persist, permanent refusals
+
+Ontology-r1's part D finding F1-3: a deterministic Signal-write refusal was retried until the handler gave up, and because the Signals step runs before the Decision Record, an AutoRejected invoice ended with no record (074 K-3). Live vector: Signal sentences quoted raw firm text. Commits 082c1a49d (caps), 2baff05be (preflight at persist), bd76c2033 (permanent refusals). `SignalWriter` is unchanged.
+
+**1. Caps at the source.** One definition per shape, in `BillingRuleCatalogue` beside `IsCodeShaped`: `IsInvoiceNumberShaped` (`^[A-Za-z0-9][A-Za-z0-9._/#-]{0,39}\z`), `IsNameShaped` (`^\p{L}[\p{L}\p{M} .,'’-]{0,99}\z`), and `IsCitable(token, value)`, the one map from a template fact to its shape. A value out of shape is left out, never truncated.
+
+| Fact | Source | Guard | Where |
+|---|---|---|---|
+| `line.firmCode` (system) | the code the firm billed | `IsCodeShaped`; otherwise reason `coding.firm_code_mismatch_not_shown` (own template, headline "Unrecognised billed code differs from the suggested code"), no firm-code fact or value read | `BillingSystemFindings.FirmCodeMismatch` |
+| `invoice.invoiceNumber` (system, D-91 read) | extracted | `IsInvoiceNumberShaped`; otherwise reason `submission.invoice_number_mismatch_not_shown` (cites the typed number only; headline "Invoice number read differs from the submission"); the read stays as evidence (field, confidence) with no text | `BillingSystemFindings.InvoiceNumberMismatch` |
+| `line.refusedCode` (system) | model output | `IsCodeShaped` (D-125 review (b), unchanged) | `CodeRefused` |
+| `line.expenseCode` (ExpenseRule) | billed code, else AI-assigned | `IsCodeShaped` | mapper `MessageOf` |
+| `line.activityCode`, `line.taskCode` (NonBillableActivity) | extracted / AI-assigned | `IsCodeShaped` | mapper |
+| `invoice.firmInvoiceNumber` (Duplicate) | the submission's firm invoice number | `IsInvoiceNumberShaped` | mapper |
+| `line.timekeeperName` (ApprovedTimekeeper, ApprovedRate, TimeIncrement, DailyHoursCap, NonBillableActivity, Duplicate) | extracted | `IsNameShaped` | mapper |
+
+- The mapper filters the facts BEFORE choosing a message, so a version template that names a dropped token no longer renders and the existing fallback (default wording, then headline only) is used: the finding still holds. The value-read evidence text is dropped by the same rule (the evidence line keeps field and confidence).
+- The two variants are flag-only system reasons; the D-91 variant keeps the mismatch's primary-reason precedence (D-125 review (a)).
+- Not guarded (not firm text, or bounded): numbers, dates and money (formatted by `BillingText`), rule parameters (`rule.*`, `observation`), `missingField`, `duplicateOf.trackingNumber`, `coreRecord.*`, `codeSet.name` (configuration), `line.suggestedCode` (a code of the line's code set), `submission.invoiceNumber` (the submitter's typed number: at most 89 characters, `TrackingNumberAllocator.MaxFirmInvoiceNumberLength`, checked at submission).
+
+**2. Preflight at persist.** `InvoiceSubmissionPersister.SignalPlanJson` runs `SignalWriter.PreflightRefusal` on every mapped entry before rendering it. A refused entry is left out of the plan; the rest is kept. `BuildFindingsJson` records the refused ones as `signalPlanRefusals: [{ policyCode, subject: { entity, id }, code }]` (no values; present only when an entry was refused), and `PersistAsync` logs them once at Warning (policy and refusal codes only). The finding itself stays in `findings`.
+
+**3. Permanent vs transient at write time** (`InvoiceSubmissionAfterSteps.PermanentWriteRefusal`, `PermanentSkipCodes`).
+
+| Permanent (recorded, the run continues) | Code recorded |
+|---|---|
+| `ArgumentException` | `SignalWriter.PreflightRefusal(request)` (e.g. `sentence_too_long`, `headline_too_long`), else `request_refused` |
+| `SignalSentenceTemplateException` | the preflight code, else `sentence_template_invalid` |
+| `SignalWriterEscalationException` with no inner exception, or an `ArgumentException` inner (unverified subject, core record unresolved / ambiguous / not cataloged, matter lookup empty, owner mismatches on create or reconcile, no-core owner refused, a regarding pair refused by an argument check) | its `Reason` |
+| a deterministic privilege refusal (`SignalWriter.IsDeterministicPrivilegeRefusal`: 403 / 0x80040220 / 0x80040299, not wrapped in an escalation) | `dataverse_access_denied` |
+| skipped with `core_record_changed`, or with the ownership resolver's `record_owner_parent_unresolved`, `_secure_parent_not_isolated`, `_secure_team_unresolved`, `_secure_bu_ambiguous`, `_no_default_team`, `_acting_user_unresolved`, `_no_source`, `_record_missing` | the skip code |
+
+Transient (unchanged: the exception propagates or the step returns Retry): an escalation that wraps a read or resolver fault (`owner_read_back_failed`, a catalog or no-core resolver fault: the writer's refusal of an unknown state, as `IsDeterministicPrivilegeRefusal` treats it); a skip with `record_owner_parent_undetermined` (a derivation that failed) or any unlisted code; every other exception.
+
+A permanent refusal: one Error log (submission id, policy code, subject entity and id, code); recorded in the findings JSON as `signalWriteRefusals: [{ policyCode, subject: { entity, id }, code }]`, merged by (policy, subject, code) so a resume writes nothing new; counted (`SubmissionAfterStepsResult.SignalsRefused`, new); then the remaining Signals, the Decision Record (whose set is read after the Signals step, so a refused Signal is simply not in it), indexing, notify and the terminal status run as before. The refusals write moves the row version, so the terminal write re-reads it.
+
+**4. One failure never stops the others.** A permanent refusal is caught per Signal and the loop continues. A retryable failure code (`signal_write_skipped`, `signal_changed`) was already remembered while the loop went on; the loop comment that said "the rest are still written" is corrected to say exactly that. An exception that is not permanent still propagates out of the loop (unchanged; the job retries and every write is idempotent).
+
+**Tests.** `BillingCitableFactTests` (new): the two shapes; the read invoice number and the firm code cited in shape, and an injected phrase, a spaced value and a 3,000-character value not cited (variant reason, sentence and facts without the value, evidence without its text, `PreflightRefusal` null); each echoing rule fact (expense, activity, task code, timekeeper name, firm invoice number) cited in shape and not cited out of shape (injected, 3,000 characters, both), the finding still mapped; must-not-fire for other facts. `BillingSystemPolicyTests`: the two variants join the system-reason theories. `InvoiceSubmissionPersisterTests` (+3): the refused entry dropped and recorded, the rest kept; no member when nothing is refused; `PersistAsync` commits and warns once with codes only. `InvoiceSubmissionAfterStepsTests` (+14): each permanent class (7) completes an AutoRejected run with one record, Rejected terminal, the following system Signal written, one recorded refusal and one Error log; three transient faults still propagate with no record or terminal; `record_owner_parent_undetermined` still retries; idempotent recording across a crash and `ResumeAsync`; a Blocked run completes; and one test over the REAL `SignalWriter` (its Dataverse dependencies all throw): (a) the persisted plan no longer holds the 2,100-character entry and the record happens, (b) a plan stored before the preflight is refused by the real writer before any I/O (`sentence_too_long`), recorded, and the record and terminal still happen.
+
+**Fail-before evidence.** Mutations (non-constant expressions), each applied, the named suite run, the source restored byte-identical:
+
+| Mutation | Suite | Failing |
+|---|---|---|
+| M1 read number always cited | Billing (1,550) | 5 |
+| M2 firm code always cited | Billing | 3 |
+| M3 `IsCitable` always true | Billing | 5 (every rule-fact out-of-shape row) |
+| M4 no preflight at persist | InvoiceSubmission (416) | 2 |
+| M5 no Warning at persist | InvoiceSubmission | 1 |
+| M6 no exception classified permanent (the old behaviour) | InvoiceSubmission (430) | 8 |
+| M7 permanent skip codes ignored | InvoiceSubmission | 2 |
+| M8 every escalation permanent | InvoiceSubmission | 2 (read-back, catalog fault) |
+| M9 refusals not recorded | InvoiceSubmission | 9 |
+| M10 recording not idempotent | InvoiceSubmission | 1 |
+| M11 privilege refusal not permanent | InvoiceSubmission | 2 |
+
+All 11 killed.
+
+**Verification.** `dotnet build src/server/api/Sprk.Bff.Api/` 0 warnings / 0 errors. Broad filtered unit run 8,247 passed / 0 failed / 11 skipped. `Spaarke.ArchTests` 1,214 passed. No new interface, registration or package; the ADR-010 census is unchanged.
+
+**Known limits.**
+- K1: `TodoRegardingBuilder` throws `InvalidOperationException` for some deterministic states (lines ~220, ~307); the writer wraps it as `subject_pair_unresolved`, and because the Dataverse client also throws `InvalidOperationException` for I/O failures, that inner is classified transient. Such a Signal is still retried until the handler gives up.
+- K2: a transient exception still aborts the loop; a permanent refusal met earlier in the same run is recorded on the next run (it recurs deterministically), not on this one.
+- K3: the evidence lines of a stored plan written before this change keep the raw value text; `sprk_evidencerefs` is not length-checked by the writer's preflight.
+- K4: the name shape cannot tell a crafted phrase written in name characters (letters, spaces, `. , ' -`, at most 100) from a name; it is shown as the timekeeper name. The length problem is closed.
+- K5: `docs/data-model/sprk_ruleset.md` lists the system reasons and does not name the two `_not_shown` variants yet.
+
+**Open questions.**
+1. The brief named "unresolved subject pair" as permanent; the writer's own contract (`IsDeterministicPrivilegeRefusal` remarks) says an escalation wrapping a fault is retryable. Implemented: permanent only when the escalation wraps no fault or an argument error (K1). Confirm, or name the inner types to treat as permanent.
+2. The owner-refusal skip codes are treated as permanent within a job's retry window; a configuration fix (a default team added) does not re-raise the Signal for an invoice that already completed. Confirm.
+
 ## 14. Part E - the handler (2026-10-19)
 
 **Files.**
