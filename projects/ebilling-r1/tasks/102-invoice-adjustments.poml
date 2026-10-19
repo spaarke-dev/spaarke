@@ -46,6 +46,14 @@
     <constraint source="NFR-09">Removing an adjustment deactivates the row (audited), never deletes it; inactive Adjustment lines are excluded from totals (confirm 016 does this; escalation otherwise).</constraint>
     <constraint source="ADR-001, ADR-008, ADR-019">Route conventions from 100; In Review only (409).</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">Placement BFF (B4 live request); publish-size delta; no new HIGH CVE; no package.</constraint>
+    <constraint source="owner D-128 / D-129 (2026-10-19), 049 credit totals">Credit lines in reviewer corrections and adjustments:
+- A reviewer may DISALLOW a credit line (D-128): it raises the payable total, and the adjustment report shows it.
+- A reviewer may REDUCE a credit line (D-129 (3)) to an approved amount between the billed credit and 0. Accepting more credit than billed, or flipping the sign, stays refused (line-approved-amount-invalid).
+- Do not add any refusal of negative lines. D-105 still holds for automatic rules: NonBillableActivity never suggests disallowing a negative amount.
+- A percent adjustment applies to the fee (or expense) base clamped at zero (D-129 (2)): on a net-negative base it adjusts nothing. A fixed adjustment still applies.
+- The FR-32 floor (approved total not below zero) applies only to invoices billed at zero or more; a credit memo has no extra limit (D-129 (1)).
+- Counted spend now sums the approved total (D-130 (2)), so every correction or adjustment that changes sprk_approvedtotal must trigger the totals recalculation (016) as today, and spend follows.
+See projects/ebilling-r1/notes/049-credit-totals.md.</constraint>
   </constraints>
 
   <knowledge>
