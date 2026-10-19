@@ -39,8 +39,17 @@ public static class SubmissionHoldReasons
     /// <summary>A Duplicate finding about a line: only an invoice-level Duplicate may reject (design.md 6.1).</summary>
     public const string DuplicateAtLineLevel = "duplicate_at_line_level";
 
-    /// <summary>The reliability threshold cannot be used: the settings could not be read, or break the rejection invariant (<see cref="EbillingSettings.RejectionInvariantProblem"/>).</summary>
-    public const string SettingsUnavailable = "settings_unavailable";
+    /// <summary>
+    /// The settings could not be read (the reader threw), so there is no threshold to apply. Transient: task 049 may retry the decision
+    /// (073 review K1).
+    /// </summary>
+    public const string SettingsReadFailed = "settings_read_failed";
+
+    /// <summary>
+    /// The settings were read but break the rejection invariant (<see cref="EbillingSettings.RejectionInvariantProblem"/>), so the threshold
+    /// is not applied. Not transient: it lasts until an administrator fixes the settings row; a retry decides the same (073 review K1).
+    /// </summary>
+    public const string SettingsInvalid = "settings_invalid";
 
     /// <summary>The finding lists no extracted field it read, so nothing shows its inputs were reliable.</summary>
     public const string NoReadFields = "no_read_fields";
@@ -90,7 +99,7 @@ public sealed record SubmissionDecision
     /// <summary>One entry per finding given, in the same order.</summary>
     public required IReadOnlyList<FindingDecision> Findings { get; init; }
 
-    /// <summary>The threshold that was applied; <c>null</c> when it could not be used (see <see cref="SubmissionHoldReasons.SettingsUnavailable"/>).</summary>
+    /// <summary>The threshold that was applied; <c>null</c> when it could not be used (see <see cref="SubmissionHoldReasons.SettingsReadFailed"/> and <see cref="SubmissionHoldReasons.SettingsInvalid"/>).</summary>
     public decimal? ReliabilityThreshold { get; init; }
 
     /// <summary>The findings that rejected the submission: empty when it was accepted.</summary>
@@ -200,12 +209,16 @@ public sealed class SubmissionRejectionRule
         ArgumentNullException.ThrowIfNull(findings);
         ArgumentNullException.ThrowIfNull(consequenceOf);
 
-        decimal? threshold = settings is not null && settings.RejectionInvariantProblem is null ? settings.ReliabilityThreshold : null;
+        // Why the threshold cannot be used, when it cannot: not read at all (transient), or read but breaking the invariant (lasting).
+        var settingsHold = settings is null
+            ? SubmissionHoldReasons.SettingsReadFailed
+            : settings.RejectionInvariantProblem is not null ? SubmissionHoldReasons.SettingsInvalid : null;
+        decimal? threshold = settingsHold is null ? settings!.ReliabilityThreshold : null;
 
         var decided = new List<FindingDecision>(findings.Count);
         for (var i = 0; i < findings.Count; i++)
         {
-            decided.Add(DecideFinding(i, findings[i], consequenceOf(findings[i].PolicyVersionId), threshold));
+            decided.Add(DecideFinding(i, findings[i], consequenceOf(findings[i].PolicyVersionId), threshold, settingsHold));
         }
 
         return new SubmissionDecision
@@ -216,7 +229,8 @@ public sealed class SubmissionRejectionRule
         };
     }
 
-    private static FindingDecision DecideFinding(int index, BillingFinding finding, int? consequenceValue, decimal? threshold)
+    private static FindingDecision DecideFinding(
+        int index, BillingFinding finding, int? consequenceValue, decimal? threshold, string? settingsHold)
     {
         BillingConsequence? consequence = consequenceValue is { } v && Enum.IsDefined(typeof(BillingConsequence), v)
             ? (BillingConsequence)v
@@ -269,7 +283,7 @@ public sealed class SubmissionRejectionRule
         // 3. The threshold can be used.
         if (threshold is not { } limit)
         {
-            return Held(SubmissionHoldReasons.SettingsUnavailable);
+            return Held(settingsHold ?? SubmissionHoldReasons.SettingsReadFailed);
         }
 
         // 4. Every extracted field the finding read is reliable. The list is the finding's own; none listed is no evidence.

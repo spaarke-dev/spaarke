@@ -401,7 +401,7 @@ public class SubmissionRejectionRuleTests
         var rate = Finding(RuleType.ApprovedRate, [Extracted(new FieldRef(0, BillingFieldNames.Rate), capped)]);
         var timekeeper = Finding(RuleType.ApprovedTimekeeper, [Extracted(new FieldRef(0, BillingFieldNames.TimekeeperAsBilled), capped)]);
 
-        ShouldHold(Decide(rate, Reject, settings), SubmissionHoldReasons.SettingsUnavailable);
+        ShouldHold(Decide(rate, Reject, settings), SubmissionHoldReasons.SettingsInvalid);
         ShouldHold(Decide(timekeeper, Reject, settings), SubmissionHoldReasons.TypeHoldsOnly);
     }
 
@@ -457,7 +457,7 @@ public class SubmissionRejectionRuleTests
     {
         var decision = Decide(Finding(type), Reject, settings: null);
 
-        ShouldHold(decision, SubmissionHoldReasons.SettingsUnavailable);
+        ShouldHold(decision, SubmissionHoldReasons.SettingsReadFailed);
         decision.ReliabilityThreshold.Should().BeNull();
     }
 
@@ -482,7 +482,7 @@ public class SubmissionRejectionRuleTests
         decision.Outcome.Should().Be(broken ? SubmissionOutcome.Accepted : SubmissionOutcome.Rejected);
         if (broken)
         {
-            ShouldHold(decision, SubmissionHoldReasons.SettingsUnavailable);
+            ShouldHold(decision, SubmissionHoldReasons.SettingsInvalid);
             decision.ReliabilityThreshold.Should().BeNull("a threshold that breaks the invariant is not applied");
         }
     }
@@ -540,7 +540,7 @@ public class SubmissionRejectionRuleTests
 
         var decision = await Sut(settings, logger).DecideAsync(ResultOf([finding], version), CancellationToken.None);
 
-        ShouldHold(decision, SubmissionHoldReasons.SettingsUnavailable);
+        ShouldHold(decision, SubmissionHoldReasons.SettingsReadFailed);
         logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Message.Contains("could not be read"));
     }
 
@@ -565,8 +565,21 @@ public class SubmissionRejectionRuleTests
 
         var decision = await Sut(new FakeSettings(Settings(0.80m, 0.90m)), logger).DecideAsync(ResultOf([finding], version), CancellationToken.None);
 
-        ShouldHold(decision, SubmissionHoldReasons.SettingsUnavailable);
+        ShouldHold(decision, SubmissionHoldReasons.SettingsInvalid);
         logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("cannot back a rejection"));
+    }
+
+    [Fact]
+    public void ASettingsReadFailure_AndInvalidSettings_HoldUnderTwoDistinctReasons_K1()
+    {
+        // 073 review K1: a failed read is transient (049 may retry); a broken invariant lasts until the row is fixed. Both never reject.
+        var finding = Finding(RuleType.InvoiceAge);
+
+        ShouldHold(Decide(finding, Reject, settings: null), SubmissionHoldReasons.SettingsReadFailed);
+        ShouldHold(Decide(finding, Reject, Settings(0.80m, 0.90m)), SubmissionHoldReasons.SettingsInvalid);
+        ShouldHold(Decide(finding, Reject, Settings() with { ArithmeticFailCap = 0.95m }), SubmissionHoldReasons.SettingsInvalid);
+        SubmissionHoldReasons.SettingsReadFailed.Should().Be("settings_read_failed");
+        SubmissionHoldReasons.SettingsInvalid.Should().Be("settings_invalid");
     }
 
     // ── AiObservation (I-5) and stored Rejects that a type may not carry ─────────────────────────────────────────
