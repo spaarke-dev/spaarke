@@ -15,7 +15,7 @@
 
 ## Open owner / peer items
 
-1. **#2084 / DI-115 ADOPTED (D-168):** UAC builds SecureChildLineage for `sprk_policy` + `sprk_policyversion` after 099b (#2063), including the publish path's version create taking its owner from RecordOwnershipResolver (`OntologyAdminAuthoringService.cs` :1154, edited in UAC's PR; we give it two adversarial passes). **UAC #2091:** three re-file writers will call `AfterRefileAsync` (then 042b's re-own follows).
+1. **#2084 / DI-115 ADOPTED (D-168):** UAC builds SecureChildLineage for `sprk_policy` + `sprk_policyversion` after 099b (#2063), with publish refusing (`ontology.admin.rule_held_secure`, before any write) when the resolver answers a Secure team (A3, D-168 amended; no ownerid bind: the admin lacks prvAssign); RuleWizard maps the code; we give the PR two adversarial passes. **UAC #2091:** three re-file writers will call `AfterRefileAsync` (then 042b's re-own follows).
 2. **111 row 4** (owner): `/upload?entityType=sprk_project&entityId=<GUID>`, with the GUID taken from `/project/<GUID>`. Then close 111 → 114.
 3. **CORS** on `/api/v1/external/notifications` (R3 owns): if it recurs, get the UTC time and the OPTIONS status. **Never dispatch `deploy-external-spa.yml` from master** while R3's SPA work is off master.
 4. **POL-MATTER-NOBUDGET** is on (D-163): the owner bulk-closes the dev Signals after the next evaluation.
