@@ -93,6 +93,44 @@ public class InvoiceComplianceEvaluatorTests
             brokenFirm.PolicyId, "FIRM-INCREMENT", brokenFirm.PolicyVersionId, BillingEvaluationReasons.GateRefused));
     }
 
+    [Fact]
+    public void AFirmVersionItsHandlerRefuses_LeavesTheClientDefaultInForce_B2()
+    {
+        // Owner, 2026-10-18 (072 review B2): the client default applies when the firm version cannot be evaluated, whether the gate
+        // or the handler refuses it.
+        var clientDefault = Increment("CD-INCREMENT", "0.5");   // fires on 0.3 hours
+        var firm = Increment("FIRM-INCREMENT", "0.1", RuleSetScope.Firm);
+        var evaluator = Evaluator(handlers: (rule, origin, facts) => rule.PolicyCode == "FIRM-INCREMENT"
+            ? throw new BillingRuleRefusedException(BillingRuleRefusedException.ParameterMissing, rule.RuleType, "test")
+            : BillingRuleHandlers.Evaluate(rule, origin, facts));
+
+        var result = evaluator.Evaluate(Request(Line(0, EarlyLine), Line(1, LateLine)), Loaded(clientDefault, firm));
+
+        result.Findings.Should().HaveCount(2).And.OnlyContain(f => f.PolicyCode == "CD-INCREMENT",
+            "the refused firm version does not displace the client default on any line");
+        result.Refusals.Should().ContainSingle().Which.Should().Be(new BillingRuleRefusal(
+            firm.PolicyId, "FIRM-INCREMENT", firm.PolicyVersionId, BillingRuleRefusedException.ParameterMissing));
+    }
+
+    [Fact]
+    public void AClientDefaultDisplacedByAValidFirmVersion_IsNotRun()
+    {
+        // Control for B2's lazy handler run: a displaced client default is never judged, so its handler cannot refuse or log.
+        var clientDefault = Increment("CD-INCREMENT", "0.5");
+        var firm = Increment("FIRM-INCREMENT", "0.1", RuleSetScope.Firm);
+        var ran = new List<string>();
+        var evaluator = Evaluator(handlers: (rule, origin, facts) =>
+        {
+            ran.Add(rule.PolicyCode);
+            return BillingRuleHandlers.Evaluate(rule, origin, facts);
+        });
+
+        var result = evaluator.Evaluate(Request(Line(0, EarlyLine)), Loaded(clientDefault, firm));
+
+        result.Findings.Should().BeEmpty();
+        ran.Should().Equal("FIRM-INCREMENT");
+    }
+
     // ── In force (task 076 K3, spec MUST: only published versions) ───────────────────────────────────────────────
 
     [Fact]

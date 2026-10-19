@@ -66,8 +66,9 @@ public sealed record BillingEvaluationResult
 /// applies. When two versions of one policy are in force on one date (overlapping ranges left by a failed publish), the current
 /// version wins, else the highest version number.</para>
 /// <para><b>Firm over client default (D-39).</b> For one subject, when a firm rule set's version and a client default's version of
-/// the same rule type both apply, only the firm's is evaluated. A version the gate refuses does not count for this: the client
-/// default then still applies, so a broken firm rule never silently removes a check.</para>
+/// the same rule type both apply, only the firm's is evaluated. Only a firm version that both the gate and its handler accept counts
+/// for this: when the firm version cannot be evaluated, the client default still applies (owner, 2026-10-18; 072 review B2), so a
+/// broken firm rule never silently removes a check.</para>
 /// <para><b>Refusals (FR-24).</b> A version the gate refuses (logged and metered by the gate) or whose handler refuses it (logged
 /// here as <see cref="OntologyWriterEvents.PolicyVersionInvalid"/> and metered) produces no finding; the other versions still run.
 /// Only <see cref="BillingRuleRefusedException"/> is caught; any other exception is a defect and propagates.</para>
@@ -181,18 +182,63 @@ public sealed class InvoiceComplianceEvaluator
             }
         }
 
-        // 3. D-39 precedence per subject, among the accepted versions.
+        // 3. Each version's handler, at most once, on the whole fact set, and only when it is needed: a firm version's to decide
+        //    precedence, any other's when it applies. A handler refusal is logged and metered here (FR-24). ApprovedRate on a
+        //    currency it cannot judge is not run (D-20, step 5) and still counts as a valid firm rule.
+        var currencySkip = CurrencySkipReason(request, loaded.ReliabilityThreshold);
+        var judgedByVersion = new Dictionary<Guid, IReadOnlyList<BillingFinding>?>();
+        var handlerRefusals = new Dictionary<Guid, BillingRuleRefusal>();
+        bool HandlerAccepts(BillingRuleCandidate candidate, BillingRuleDefinition definition)
+        {
+            if (judgedByVersion.TryGetValue(candidate.PolicyVersionId, out var done))
+            {
+                return done is not null;
+            }
+
+            if (definition.RuleType == RuleType.ApprovedRate && currencySkip is not null)
+            {
+                judgedByVersion[candidate.PolicyVersionId] = [];
+                return true;
+            }
+
+            try
+            {
+                judgedByVersion[candidate.PolicyVersionId] = _handlers(
+                    definition, new BillingRuleOrigin(candidate.PolicyId, candidate.ClauseReference, candidate.ClauseLocation), facts);
+                return true;
+            }
+            catch (BillingRuleRefusedException ex)
+            {
+                _logger.LogError(
+                    OntologyWriterEvents.PolicyVersionInvalid,
+                    "Billing evaluation of submission {SubmissionId}: the handler refused policy {PolicyCode} version {PolicyVersionId} ({RuleType}): {ReasonCode}. The rule produces no finding; the other rules still run.",
+                    request.SubmissionId, candidate.PolicyCode, candidate.PolicyVersionId, ex.RuleType, ex.ReasonCode);
+                OntologyWriterTelemetry.RecordBillingRuleInvalid(ex.ReasonCode == BillingRuleRefusedException.NoHandler
+                    ? OntologyWriterFailureReason.RuleTypeUnsupported
+                    : OntologyWriterFailureReason.SchemaInvalid);
+                judgedByVersion[candidate.PolicyVersionId] = null;
+                handlerRefusals[candidate.PolicyVersionId] =
+                    new BillingRuleRefusal(candidate.PolicyId, candidate.PolicyCode, candidate.PolicyVersionId, ex.ReasonCode);
+                return false;
+            }
+        }
+
+        // 4. D-39 precedence per subject, among the versions both the gate and the handler accept (072 review B2, owner 2026-10-18:
+        //    a firm version that cannot be evaluated leaves the client default in force).
         var subjectsByVersion = new Dictionary<Guid, HashSet<BillingSubject>>();
         foreach (var (subject, versions) in selectedBySubject)
         {
-            var usable = versions.Where(v => accepted.ContainsKey(v.PolicyVersionId)).ToList();
-            var firmTypes = usable
-                .Where(v => v.Scope == RuleSetScope.Firm)
+            var firmTypes = versions
+                .Where(v => v.Scope == RuleSetScope.Firm
+                            && accepted.TryGetValue(v.PolicyVersionId, out var firmDefinition)
+                            && HandlerAccepts(v, firmDefinition))
                 .Select(v => accepted[v.PolicyVersionId].RuleType)
                 .ToHashSet();
-            foreach (var version in usable)
+            foreach (var version in versions)
             {
-                if (version.Scope != RuleSetScope.Firm && firmTypes.Contains(accepted[version.PolicyVersionId].RuleType))
+                if (!accepted.TryGetValue(version.PolicyVersionId, out var definition)
+                    || (version.Scope != RuleSetScope.Firm && firmTypes.Contains(definition.RuleType))
+                    || !HandlerAccepts(version, definition))
                 {
                     continue;
                 }
@@ -206,8 +252,10 @@ public sealed class InvoiceComplianceEvaluator
             }
         }
 
-        // 4. Each applicable version's handler, once, on the whole fact set; keep the findings for the subjects it applies to.
-        var currencySkip = CurrencySkipReason(request, loaded.ReliabilityThreshold);
+        // The handler refusals follow the gate's, in the stable candidate order.
+        refusals.AddRange(candidates.Where(c => handlerRefusals.ContainsKey(c.PolicyVersionId)).Select(c => handlerRefusals[c.PolicyVersionId]));
+
+        // 5. Keep each applicable version's findings for the subjects it applies to.
         var skips = new List<BillingRuleSkip>();
         var findings = new List<(BillingFinding Finding, int Sequence)>();
         var rulesByVersion = new Dictionary<Guid, BillingRuleCandidate>();
@@ -222,25 +270,7 @@ public sealed class InvoiceComplianceEvaluator
                 continue;
             }
 
-            IReadOnlyList<BillingFinding> judged;
-            try
-            {
-                judged = _handlers(
-                    definition, new BillingRuleOrigin(candidate.PolicyId, candidate.ClauseReference, candidate.ClauseLocation), facts);
-            }
-            catch (BillingRuleRefusedException ex)
-            {
-                _logger.LogError(
-                    OntologyWriterEvents.PolicyVersionInvalid,
-                    "Billing evaluation of submission {SubmissionId}: the handler refused policy {PolicyCode} version {PolicyVersionId} ({RuleType}): {ReasonCode}. The rule produces no finding; the other rules still run.",
-                    request.SubmissionId, candidate.PolicyCode, candidate.PolicyVersionId, ex.RuleType, ex.ReasonCode);
-                OntologyWriterTelemetry.RecordBillingRuleInvalid(ex.ReasonCode == BillingRuleRefusedException.NoHandler
-                    ? OntologyWriterFailureReason.RuleTypeUnsupported
-                    : OntologyWriterFailureReason.SchemaInvalid);
-                refusals.Add(new BillingRuleRefusal(candidate.PolicyId, candidate.PolicyCode, candidate.PolicyVersionId, ex.ReasonCode));
-                continue;
-            }
-
+            var judged = judgedByVersion[candidate.PolicyVersionId]!;
             var kept = judged.Where(f => applies.Contains(f.Subject));
             if (definition.RuleType == RuleType.ExpenseRule && currencySkip is not null)
             {
