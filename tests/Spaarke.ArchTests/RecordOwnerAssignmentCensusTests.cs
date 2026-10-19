@@ -254,7 +254,10 @@ public class RecordOwnerAssignmentCensusTests
             + "team (D-134), with secure-parent precedence. The commit route refuses a record whose Signals span two secure "
             + "families (#1778) before any write. Ontology task 042: WriteGateDecisionAsync (the communications gate's decision, "
             + "authorize and deny) reaches the SAME single create (CreateAsync, pinned by DecisionRecordContextImmutabilityTests) "
-            + "and the SAME owner answer over the core, the communication and every derived core; it asks with no requester."),
+            + "and the SAME owner answer over the core, the communication and every derived core; it asks with no requester. "
+            + "Ontology task 042b (D-169): a user-owned gate record of an UNFILED communication is then shared Read with the "
+            + "communication's internal sharees (GateDecisionRecordSharing, never a team-owned or secure record); filing the "
+            + "communication re-owns it to the resolver's team, reads the owner back, and only then revokes those shares."),
         new CensusEntry("SignalWriter.cs", "sprk_signal", 1, Disposition.Routed,
             "Ontology task 143 (contract C3, audit F2/F3, D-130): BuildEntity writes RecordOwnershipResolver's answer over the "
             + "Signal's parents (its core record, its subject and every core-ancestor stamp) onto the row with ApplyTo, with "
@@ -342,6 +345,12 @@ public class RecordOwnerAssignmentCensusTests
             + "(Permanent, agreed with ontology): the rule is created as the caller, author-owned, because CheckScopeAsync refuses a "
             + "Secure or Restricted matter scope before the create, so a new rule is never filed under a Secure matter; one whose "
             + "matter turns Secure later is re-owned by SecureChildReconciler and the two-minute SecureChildReconciliationJob."),
+        // ── spaarke-ontology-platform-r1 task 042b (D-169): the gate Decision Record follows its communication's filing ──────
+        new UnscannedWriter("GateDecisionRecordSharing.cs", "AssignRequest re-own of a filed communication's gate Decision Record",
+            "Called once per communication re-file from SecureChildReconciler.AfterRefileAsync (after UAC's own steps; 042b round 2). "
+            + "ReownAfterFilingAsync asks IRecordOwnershipResolver over the communication and the record's core stamps "
+            + "(KeepCreatorUnlessTargetIsTeamOwned); a secure answer is left to SecureChildReconciler, Unchanged or a refusal "
+            + "keeps the user owner and its shares. The assign is read back before any share is revoked."),
     };
 
     /// <summary>Seams that must refuse an owner-less create, by the method that builds the row.</summary>
@@ -578,7 +587,9 @@ public class RecordOwnerAssignmentCensusTests
         // spaarke-ontology-platform-r1 task 149 (D-144 as amended, owner ruling on uac-r2 F1 of PR #1907): the ONE owner write the Decision
         // Record writer makes itself. A gate decision about an UNFILED communication (the resolver answered Unchanged: not team-owned and
         // filed under nothing) is owned by the communication's own owning user, as read from the row; the business unit's default team is
-        // never applied, and the secure-if-any check (the Secure Record team) is still the resolver's.
+        // never applied, and the secure-if-any check (the Secure Record team) is still the resolver's. Task 042b (D-169): that
+        // user-owned record is shared Read with the communication's internal sharees, and re-owned to the resolver's team on filing
+        // (GateDecisionRecordSharing, an UnscannedWriter above).
         new OwnerWriteEntry("DecisionRecordWriter.cs", "FiledAndOwnedAsync", 1, OwnerWriteKind.Routed,
             "D-144 as amended: only after IRecordOwnershipResolver answered Unchanged for a communication-gate decision and the second ask "
             + "answered an ordinary team or NoDefaultOwnerTeam; every other answer refuses; the owner is the communication's own owner "
@@ -701,6 +712,127 @@ public class RecordOwnerAssignmentCensusTests
                           " public async Task<OrdinaryRowReownResult> ReownOrdinaryRowAsync(string table, Guid id, Guid teamId, CancellationToken ct) { return null; }\n}",
         };
         Assert.Equal(new[] { ("Seed.cs", "Caller") }, ScanCalls(seeded, OrdinaryReownCall).Keys.ToArray());
+    }
+
+    // ── Ontology 042b round 3 (adversarial K3): the Assign primitive ─────────────────────────────────────────────────────────────
+    // OntologyWriterDataverseClient.AssignAsync re-owns a row of ANY table through an SDK AssignRequest, a shape the owner-write scanner
+    // above does not see (MAINTENANCE PROCEDURE item 4). Every caller of it, and every AssignRequest, is listed here by member with its
+    // count, so a new caller fails the build until it is reviewed (it must take its owner from IRecordOwnershipResolver).
+    private sealed record AssignCaller(string FileName, string Member, int Calls, string Reason);
+
+    private static readonly IReadOnlyList<AssignCaller> AssignCallers = new[]
+    {
+        new AssignCaller("OntologyWriterDataverseClient.cs", "AssignAsync", 1,
+            "The primitive itself: an SDK AssignRequest on the ontology writer's connection, which holds Assign on sprk_decisionrecord only "
+            + "(D-33c); any other table fails on the platform."),
+        new AssignCaller("GateDecisionRecordSharing.cs", "ReownAsync", 1,
+            "Ontology 042b (D-169): the gate Decision Record re-own, only after IRecordOwnershipResolver answered an ordinary team for the "
+            + "communication and the record's stamps; the owner is read back before any share is revoked."),
+    };
+
+    // 042b round 4: a member access on AssignAsync with any spacing (a call, a method group, `this.`, `?.`, a line break after the dot or
+    // before the parenthesis), and `new AssignRequest` however qualified (`global::`, a namespace).
+    private static readonly Regex AssignCall = new(
+        @"\.\s*AssignAsync\b|\bnew\s+(?:global::)?(?:\w+\s*\.\s*)*AssignRequest\b", RegexOptions.Compiled);
+
+    // 042b round 4: a regex over call shapes cannot see an AssignRequest built through a using alias (`new Assign { ... }`) or a
+    // target-typed `new()`. Both need the TYPE named somewhere in code (the alias's declaration, the variable's or parameter's type), so the
+    // type token itself is censused, by member, wherever it appears outside comments. Only the primitive names it today.
+    private static readonly Regex AssignRequestToken = new(@"\bAssignRequest\b", RegexOptions.Compiled);
+
+    private static readonly IReadOnlyList<AssignCaller> AssignRequestTokens = new[]
+    {
+        new AssignCaller("OntologyWriterDataverseClient.cs", "AssignAsync", 1,
+            "The primitive itself: the one AssignRequest the server builds (see AssignCallers)."),
+    };
+
+    private static List<string> AssignCensusProblems(
+        Dictionary<(string File, string Member), List<int>> actual, IReadOnlyList<AssignCaller> listed)
+    {
+        var expected = listed.ToDictionary(c => (c.FileName, c.Member), c => c.Calls);
+        var problems = new List<string>();
+        foreach (var ((file, member), lines) in actual.OrderBy(kv => kv.Key.File, StringComparer.Ordinal))
+        {
+            if (!expected.TryGetValue((file, member), out var count))
+                problems.Add($"UNLISTED Assign caller {file}.{member}: lines {string.Join(", ", lines)}");
+            else if (count != lines.Count)
+                problems.Add($"COUNT CHANGED for {file}.{member}: census says {count}, source has {lines.Count}");
+        }
+
+        problems.AddRange(expected.Keys.Where(k => !actual.ContainsKey(k)).Select(k => $"STALE Assign census entry {k.FileName}.{k.Member}"));
+        return problems;
+    }
+
+    [Fact(DisplayName = "Ontology 042b r3: every AssignAsync call and AssignRequest in the server is censused, by member, with its count")]
+    public void EveryAssignCallerIsCensused()
+    {
+        var files = ServerFiles();
+        var problems = AssignCensusProblems(ScanCalls(files, AssignCall), AssignCallers)
+            .Concat(AssignCensusProblems(ScanCalls(files, AssignRequestToken), AssignRequestTokens).Select(p => "AssignRequest token: " + p))
+            .ToList();
+        Assert.True(problems.Count == 0,
+            "The Assign census does not match the source (ontology 042b rounds 3-4). An Assign re-owns a row of any table outside the "
+            + "owner-write scanner; a new caller, or a new mention of the AssignRequest type (an alias, a target-typed new()), must take its "
+            + "owner from IRecordOwnershipResolver and be listed with its reason:\n"
+            + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "Ontology 042b r3/r4: negative control — every AssignAsync access and AssignRequest shape fails the Assign census; a declaration does not")]
+    public void AssignCallDetector_NegativeControl()
+    {
+        var code = SourceScan.CodeText(new[]
+        {
+            "using AssignAlias = Microsoft.Crm.Sdk.Messages.AssignRequest;",
+            "internal sealed class Seeded",
+            "{",
+            "    public Task AssignAsync(string table, Guid id, EntityReference assignee, CancellationToken ct = default) => Task.CompletedTask;",
+            "    private async Task Rogue(Guid id, Guid team) { await _writer.AssignAsync(\"account\", id, new EntityReference(\"team\", team)); }",
+            "    private Task Raw(Guid id, Guid team) => _org.ExecuteAsync(new AssignRequest { Target = new EntityReference(\"contact\", id) });",
+            "    private Task Qualified(Guid id) => _org.ExecuteAsync(new Microsoft.Crm.Sdk.Messages.AssignRequest { Target = null });",
+            "    private Task Global(Guid id) => _org.ExecuteAsync(new global::Microsoft.Crm.Sdk.Messages.AssignRequest { Target = null });",
+            "    private Task Aliased(Guid id) => _org.ExecuteAsync(new AssignAlias { Target = null });",
+            "    private Task TargetTyped(Guid id) { AssignRequest request = new() { Target = null }; return _org.ExecuteAsync(request); }",
+            "    private async Task DotThenBreak(Guid id) { await _writer.",
+            "        AssignAsync(\"account\", id, null!); }",
+            "    private async Task BreakThenParen(Guid id) { await _writer.AssignAsync",
+            "        (\"account\", id, null!); }",
+            "    private Func<string, Guid, EntityReference, CancellationToken, Task> MethodGroup() { var f = _writer.AssignAsync; return f; }",
+            "    private async Task ThisCall(Guid id) { await this.AssignAsync(\"account\", id, null!); }",
+            "    private async Task Conditional(Guid id) { await _writer?.AssignAsync(\"account\", id, null!)!; }",
+            "    private async Task Threads(ThreadResolutionRequest r) { await _threads.ResolveAndAssignAsync(r); }",
+            "    private async Task Private(Guid id) { await AssignAsync(\"sprk_signal\", id, null!); }",
+            "    private Task Request(Guid id) => _org.ExecuteAsync(new AssignRequestFactory().Build(id));",
+            "    // a comment naming _writer.AssignAsync( and new AssignRequest is not code",
+            "}",
+        });
+        var files = new Dictionary<string, string> { ["Seeded.cs"] = code };
+        var sites = ScanCalls(files, AssignCall);
+        var tokens = ScanCalls(files, AssignRequestToken);
+
+        // Must fire (the call regex): every member access on AssignAsync and every `new [global::][Ns.]AssignRequest`.
+        Assert.Equal(
+            new[] { "BreakThenParen", "Conditional", "DotThenBreak", "Global", "MethodGroup", "Qualified", "Raw", "Rogue", "ThisCall" },
+            sites.Keys.Select(k => k.Member).OrderBy(m => m, StringComparer.Ordinal));
+
+        // Must fire (the type token): the alias's declaration (outside any member) and the target-typed new()'s variable type — the two
+        // shapes the call regex cannot see — plus every spelled AssignRequest.
+        Assert.Equal(
+            new[] { "(file)", "Global", "Qualified", "Raw", "TargetTyped" },
+            tokens.Keys.Select(k => k.Member).OrderBy(m => m, StringComparer.Ordinal));
+
+        // Must not fire on either: the declaration, ResolveAndAssignAsync, the unqualified private call, AssignRequestFactory, the comment.
+        foreach (var quiet in new[] { "Seeded", "AssignAsync", "Threads", "Private", "Request" })
+        {
+            Assert.DoesNotContain(sites.Keys, k => k.Member == quiet);
+            Assert.DoesNotContain(tokens.Keys, k => k.Member == quiet);
+        }
+
+        var problems = AssignCensusProblems(sites, new[] { new AssignCaller("Seeded.cs", "Raw", 1, "listed"), new AssignCaller("Seeded.cs", "Gone", 1, "stale") });
+        Assert.Equal(9, problems.Count);
+        Assert.Contains(problems, p => p.StartsWith("UNLISTED Assign caller Seeded.cs.Rogue", StringComparison.Ordinal));
+        Assert.Contains(problems, p => p.StartsWith("STALE Assign census entry Seeded.cs.Gone", StringComparison.Ordinal));
+        Assert.Empty(AssignCensusProblems(sites, sites.Select(kv => new AssignCaller(kv.Key.File, kv.Key.Member, kv.Value.Count, "x")).ToList()));
+        Assert.Contains(AssignCensusProblems(tokens, AssignRequestTokens), p => p.StartsWith("UNLISTED Assign caller Seeded.cs.(file)", StringComparison.Ordinal));
     }
 
     /// <summary>(file, member) → the 1-based lines of each match of <paramref name="call"/>.</summary>
