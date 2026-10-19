@@ -85,15 +85,21 @@ export const MAX_DEPARTMENT_LENGTH = 100;
 export type RegistrationField = 'firstName' | 'lastName' | 'department';
 export type RegistrationFieldErrors = Partial<Record<RegistrationField, string>>;
 
-// Mirrors the BFF's closed rule: no control characters in any value.
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
+// Mirrors the BFF's closed rule: no control characters (U+0000-U+001F, U+007F) in any value. A char-code check, not
+// a regex with escapes: the external-SPA source scan (ExternalSpaGridViewSelectorGuardTests) refuses unicode escapes.
+function hasControlCharacter(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
 
 function fieldError(label: string, value: string, max: number, required: boolean): string | undefined {
   const trimmed = value.trim();
   if (required && trimmed.length === 0) return `${label} is required.`;
   if (trimmed.length > max) return `${label} must be at most ${max} characters.`;
-  if (CONTROL_CHARACTERS.test(trimmed)) return `${label} contains characters that are not allowed.`;
+  if (hasControlCharacter(trimmed)) return `${label} contains characters that are not allowed.`;
   return undefined;
 }
 
