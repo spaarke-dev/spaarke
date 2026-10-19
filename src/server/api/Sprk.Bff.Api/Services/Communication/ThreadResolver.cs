@@ -120,13 +120,22 @@ public sealed class ThreadResolver : IThreadResolver
 
     /// <inheritdoc />
     public Task<ThreadAssignment?> ResolveAndAssignAsync(ThreadResolutionRequest request, CancellationToken ct = default) =>
-        ResolveAndAssignCoreAsync(request, joinRunsAfterRefile: true, ct);
+        ResolveAndAssignCoreAsync(request, EveryJoinRunsTheStep, ct);
 
-    /// <param name="joinRunsAfterRefile">#2091: whether a JOIN that files the message under a record thread runs the step after
-    /// a re-file (<see cref="JoinThreadAsync"/>). <c>false</c> only inside <see cref="ReconcileThreadForFilingAsync"/>, which is
-    /// itself that step's thread reconcile.</param>
+    /// <summary>A capture or send path's join: every join that files the message under a record thread runs the step after a re-file.</summary>
+    private static readonly Func<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent, bool> EveryJoinRunsTheStep = static _ => true;
+
+    /// <summary>A join inside the step after a re-file (<see cref="FilingReconcileHost.AfterRefileStep"/>): the step runs after it.</summary>
+    private static readonly Func<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent, bool> NoJoinRunsTheStep = static _ => false;
+
+    /// <param name="joinRunsAfterRefileFor">#2091: whether a JOIN that files the message under the record thread's record (the
+    /// argument) runs the step after a re-file (<see cref="JoinThreadAsync"/>). Every join on the capture and send paths does;
+    /// inside <see cref="ReconcileThreadForFilingAsync(Guid, FilingReconcileHost, CancellationToken)"/> only a standalone
+    /// reconcile's join under a record the email is not filed to does (#2110).</param>
     private async Task<ThreadAssignment?> ResolveAndAssignCoreAsync(
-        ThreadResolutionRequest request, bool joinRunsAfterRefile, CancellationToken ct)
+        ThreadResolutionRequest request,
+        Func<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent, bool> joinRunsAfterRefileFor,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -147,11 +156,9 @@ public sealed class ThreadResolver : IThreadResolver
             // step after a re-file follows (#2091).
             if (resolution.ExistingThreadId is { } existing)
             {
-                var joined = joinRunsAfterRefile
-                    ? await JoinThreadAsync(
-                        _entityService, _ownership, _scopeFactory, _logger, request.CommunicationId, existing,
-                        token => AssignThreadAsync(request.CommunicationId, existing, token), ct)
-                    : await AssignThreadReconcilingOwnerAsync(request.CommunicationId, existing, ct);
+                var joined = await JoinThreadAsync(
+                    _entityService, _ownership, _scopeFactory, _logger, request.CommunicationId, existing,
+                    token => AssignThreadAsync(request.CommunicationId, existing, token), joinRunsAfterRefileFor, ct);
                 _logger.LogInformation(
                     "Joined existing thread {ThreadId} | CommunicationId: {CommunicationId}, Channel: {ChannelType}",
                     existing, request.CommunicationId, request.ChannelType);
@@ -343,7 +350,7 @@ public sealed class ThreadResolver : IThreadResolver
     /// <paramref name="scopeFactory"/>, opened only for a reparent. A host without one leaves the message's sharing as it was
     /// and logs an error, as the playbook update node does.</para>
     /// </remarks>
-    internal static async Task<ThreadAssignment> JoinThreadAsync(
+    internal static Task<ThreadAssignment> JoinThreadAsync(
         IGenericEntityService entityService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         IServiceScopeFactory? scopeFactory,
@@ -351,17 +358,40 @@ public sealed class ThreadResolver : IThreadResolver
         Guid communicationId,
         Guid threadId,
         Func<CancellationToken, Task> assign,
+        CancellationToken ct) =>
+        JoinThreadAsync(entityService, ownership, scopeFactory, logger, communicationId, threadId, assign, EveryJoinRunsTheStep, ct);
+
+    /// <summary>
+    /// <see cref="JoinThreadAsync(IGenericEntityService, Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver, IServiceScopeFactory?, ILogger, Guid, Guid, Func{CancellationToken, Task}, CancellationToken)"/>,
+    /// running the step only when <paramref name="runsStepFor"/> answers <c>true</c> for the record the join files the message
+    /// under (#2110). A join it answers <c>false</c> for opens no scope, reads nothing and runs no step — as
+    /// <see cref="AssignToThreadReconcilingOwnerAsync"/>.
+    /// </summary>
+    private static async Task<ThreadAssignment> JoinThreadAsync(
+        IGenericEntityService entityService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        IServiceScopeFactory? scopeFactory,
+        ILogger logger,
+        Guid communicationId,
+        Guid threadId,
+        Func<CancellationToken, Task> assign,
+        Func<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent, bool> runsStepFor,
         CancellationToken ct)
     {
         IServiceScope? scope = null;
         try
         {
+            var runsStep = false;
             Sprk.Bff.Api.Services.Access.SecureChildReconciler? children = null;
             Func<Task<bool>>? wasIsolated = null;
             var (assignment, refiled) = await JoinCoreAsync(
                 entityService, ownership, communicationId, threadId, assign,
-                beforeRefileWrite: async token =>
+                beforeRefileWrite: async (filedUnder, token) =>
                 {
+                    if (!runsStepFor(filedUnder))
+                        return;
+
+                    runsStep = true;
                     scope = scopeFactory?.CreateScope();
                     children = scope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureChildReconciler>();
                     if (children is not null)
@@ -372,7 +402,7 @@ public sealed class ThreadResolver : IThreadResolver
                 },
                 ct).ConfigureAwait(false);
 
-            if (!refiled)
+            if (!refiled || !runsStep)
                 return assignment;
 
             if (children is null || wasIsolated is null)
@@ -403,7 +433,8 @@ public sealed class ThreadResolver : IThreadResolver
     /// reparent ran (a record thread anchored to an ownership parent), wrote (<paramref name="assign"/> ran), and moved what
     /// it is filed under (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.ParentsUnchanged"/> is false).
     /// <paramref name="beforeRefileWrite"/> runs only on that reparent, inside its write and immediately before
-    /// <paramref name="assign"/>; a join that files the message under nothing never calls it.
+    /// <paramref name="assign"/>, told the record the join files the message under; a join that files the message under
+    /// nothing never calls it.
     /// </summary>
     private static async Task<(ThreadAssignment Assignment, bool Refiled)> JoinCoreAsync(
         IGenericEntityService entityService,
@@ -411,7 +442,7 @@ public sealed class ThreadResolver : IThreadResolver
         Guid communicationId,
         Guid threadId,
         Func<CancellationToken, Task> assign,
-        Func<CancellationToken, Task>? beforeRefileWrite,
+        Func<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent, CancellationToken, Task>? beforeRefileWrite,
         CancellationToken ct)
     {
         var threadRow = await entityService.RetrieveAsync(
@@ -436,13 +467,14 @@ public sealed class ThreadResolver : IThreadResolver
         }
 
         var wrote = false;
+        var filedUnder = new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(anchor.RecordType, recordId);
         var reparent = await ownership.ReparentAsync(
             new Sprk.Bff.Api.Services.Dataverse.RecordReparent
             {
                 EntityLogicalName = "sprk_communication",
                 RecordId = communicationId,
                 ParentChanges = new Dictionary<string, EntityReference?>(),
-                InheritedParents = new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(anchor.RecordType, recordId) },
+                InheritedParents = new[] { filedUnder },
                 // Task 146 b2: the column the JOIN writes — put back if the owner assignment that must follow it fails, so
                 // the message is never left in a secure record's thread while owned elsewhere.
                 AttachColumns = new[] { ThreadLookupOnCommunication },
@@ -451,7 +483,7 @@ public sealed class ThreadResolver : IThreadResolver
             async token =>
             {
                 if (beforeRefileWrite is not null)
-                    await beforeRefileWrite(token);
+                    await beforeRefileWrite(filedUnder, token);
                 await assign(token);
                 wrote = true;
             },
@@ -655,7 +687,11 @@ public sealed class ThreadResolver : IThreadResolver
     /// <para><b>A private thread is left alone</b> (note §2: an email in a private thread without a grant is the invariant's
     /// exception) — neither anchored nor emptied of the email.</para>
     /// </remarks>
-    public async Task ReconcileThreadForFilingAsync(Guid communicationId, CancellationToken ct = default)
+    public Task ReconcileThreadForFilingAsync(Guid communicationId, CancellationToken ct = default) =>
+        ReconcileThreadForFilingAsync(communicationId, FilingReconcileHost.AfterRefileStep, ct);
+
+    /// <inheritdoc />
+    public async Task ReconcileThreadForFilingAsync(Guid communicationId, FilingReconcileHost host, CancellationToken ct = default)
     {
         try
         {
@@ -691,7 +727,7 @@ public sealed class ThreadResolver : IThreadResolver
                 // whose thread resolution failed) never shows on a record's panel. Resolve its thread now, through the same
                 // join→grant sequence as the capture paths; an unfiled email without a thread is left as it is.
                 if (regarding is not null)
-                    await ResolveMissingThreadAsync(email, communicationId, ct);
+                    await ResolveMissingThreadAsync(email, communicationId, host, ct);
                 else
                     _logger.LogDebug("Filing reconcile skipped: {CommunicationId} is unfiled and has no thread", communicationId);
                 return;
@@ -1134,8 +1170,8 @@ public sealed class ThreadResolver : IThreadResolver
         if (recordThreadId == fromThreadId)
             return false;
 
-        // #2091: the S6 join without the step after a re-file — this IS that step's thread reconcile, and the default thread is
-        // R's, the record the email is already filed to.
+        // #2091: the S6 join without the step after a re-file — inside that step this IS its thread reconcile, and from the sweep
+        // (#2110) it adds no parent either: the default thread is R's, the record the email is already filed to.
         await AssignThreadReconcilingOwnerAsync(communicationId, recordThreadId, ct);
         _logger.LogInformation(
             "Filing reconcile moved {CommunicationId} from thread {FromThreadId} to the default thread {ThreadId} of " +
@@ -1188,10 +1224,21 @@ public sealed class ThreadResolver : IThreadResolver
     /// key strategy creates a thread anchored to the email's regarding, owned by its record's team, S6) — and is granted to
     /// the audience that join fixed (#1629).
     /// </summary>
-    private async Task ResolveMissingThreadAsync(DataverseEntity email, Guid communicationId, CancellationToken ct)
+    /// <remarks>
+    /// #2110 (ontology K2): the thread the email's conversation key finds may be anchored to a record R2 the email is not filed
+    /// to, and the join files it under R2 too (S6). Inside the step after a re-file (<see cref="FilingReconcileHost.AfterRefileStep"/>)
+    /// the step's mirror, its pass and its gate step run after this reconcile and see that join, so the join runs none of its
+    /// own. On its own (<see cref="FilingReconcileHost.Standalone"/>, the backfill sweep) nothing else follows it: a join under a
+    /// record the email is NOT filed to runs the step once for that join; a join under a record it is filed to adds no parent
+    /// and runs none.
+    /// </remarks>
+    private async Task ResolveMissingThreadAsync(
+        DataverseEntity email, Guid communicationId, FilingReconcileHost host, CancellationToken ct)
     {
-        // #2091: this is the filing reconcile — the step after a re-file is the one running (or, from the sweep, the filing it
-        // follows ran it) — so a join here runs none of its own.
+        var joinRunsAfterRefileFor = host == FilingReconcileHost.Standalone
+            ? (Func<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent, bool>)(filedUnder =>
+                !IsFiledTo(email, new ThreadAnchor(filedUnder.EntityLogicalName, filedUnder.RecordId, ThreadPairAgreement.NoPair, null)))
+            : NoJoinRunsTheStep;
         var assignment = await ResolveAndAssignCoreAsync(
             new ThreadResolutionRequest
             {
@@ -1204,7 +1251,7 @@ public sealed class ThreadResolver : IThreadResolver
                     Subject = email.GetAttributeValue<string>(SubjectField),
                 },
             },
-            joinRunsAfterRefile: false,
+            joinRunsAfterRefileFor,
             ct);
         if (assignment is null)
             return; // logged by ResolveAndAssignAsync (NFR-02)

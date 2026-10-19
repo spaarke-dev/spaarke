@@ -215,6 +215,41 @@ public sealed partial class SecureChildOwnershipAiToolTests
         gateOrg.Verify(o => o.ExecuteAsync(It.IsAny<Microsoft.Crm.Sdk.Messages.AssignRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact(DisplayName = "#2110 (ontology K2): the sweep's standalone reconcile — a threadless email joining a thread under a record it is NOT filed to runs the step once for the join")]
+    public async Task SweepReconcile_AThreadlessEmailJoiningAnotherRecordsThread_RunsTheStepOnce_2110()
+    {
+        var (gate, gateOrg, gateLog) = GateHelperOverTheShareWorld();
+        _gateOverShareWorld = gate;
+        AMessageFiledUnderTheOrdinaryMatter_AndAThreadOf(SecureMatter);
+        AThreadlessEmail();
+
+        await JoiningResolver(StepScopes()).ReconcileThreadForFilingAsync(
+            JoiningMessage, FilingReconcileHost.Standalone, CancellationToken.None);
+
+        AssertTheJoinRanTheStepIntoSecure(gateOrg, gateLog);
+        GateStepRuns(gateLog).Should().Be(1, "one move, one step");
+    }
+
+    [Fact(DisplayName = "#2110 (ontology K2): the sweep's standalone reconcile — a threadless email joining the thread of the record it IS filed to adds no parent and runs no step")]
+    public async Task SweepReconcile_AThreadlessEmailJoiningTheThreadOfItsOwnRecord_RunsNoStep_2110()
+    {
+        var (gate, gateOrg, gateLog) = GateHelperOverTheShareWorld();
+        _gateOverShareWorld = gate;
+        AMessageFiledUnderTheOrdinaryMatter_AndAThreadOf(OrdinaryMatter);
+        AThreadlessEmail();
+
+        // A strict scope factory: a step would open a scope, and the join would fail.
+        await JoiningResolver(new Mock<IServiceScopeFactory>(MockBehavior.Strict).Object).ReconcileThreadForFilingAsync(
+            JoiningMessage, FilingReconcileHost.Standalone, CancellationToken.None);
+
+        _threadStamps.Should().ContainSingle("the email joined the thread");
+        ShareWorld.OwnerOf("sprk_decisionrecord", GateRecordOfJoiningMessage).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser),
+            "no step ran: the gate record is not re-owned by this join (the filing the sweep follows ran it)");
+        GateStepRuns(gateLog).Should().Be(0);
+        gateOrg.Verify(o => o.ExecuteAsync(It.IsAny<Microsoft.Crm.Sdk.Messages.AssignRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _stepThreads.Invocations.Should().BeEmpty();
+    }
+
     private static readonly Guid GrantSharee = Guid.Parse("a2110000-0000-4000-8000-0000000000b3");
 
     [Fact(DisplayName = "#2110 (UAC F1): a message that LEFT isolation loses its old mirror BEFORE the thread reconcile, so the reconcile's #1629 read grant to its new record survives")]
