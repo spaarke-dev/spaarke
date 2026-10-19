@@ -38,7 +38,8 @@ public class SpendHeldAndPendingTests
         public List<Entity> Invoices { get; } = new();
         public List<Entity> Submissions { get; } = new();
 
-        public Entity Invoice(decimal amount, int statusCode, string parentEntity = "sprk_matter", Guid? parent = null)
+        /// <summary><paramref name="amount"/> is the billed total; <paramref name="approved"/> is the approved total (D-130), absent when null.</summary>
+        public Entity Invoice(decimal amount, int statusCode, string parentEntity = "sprk_matter", Guid? parent = null, decimal? approved = null)
         {
             var invoice = new Entity("sprk_invoice", Guid.NewGuid())
             {
@@ -46,6 +47,11 @@ public class SpendHeldAndPendingTests
                 ["statuscode"] = new OptionSetValue(statusCode),
                 [parentEntity] = new EntityReference(parentEntity, parent ?? Matter),
             };
+            if (approved is { } approvedTotal)
+            {
+                invoice["sprk_approvedtotal"] = new Money(approvedTotal);
+            }
+
             Invoices.Add(invoice);
             return invoice;
         }
@@ -91,6 +97,7 @@ public class SpendHeldAndPendingTests
             return c.Operator switch
             {
                 "null" => value is null,
+                "not-null" => value is not null,
                 "eq" => value is not null && Text(value) == c.Values.Single(),
                 "in" => value is not null && c.Values.Contains(Text(value)),
                 _ => throw new NotSupportedException("operator " + c.Operator),
@@ -140,11 +147,29 @@ public class SpendHeldAndPendingTests
             var root = query.Criteria.Conditions
                 .Select(c => new Cond(string.IsNullOrEmpty(c.EntityName) ? null : c.EntityName, c.AttributeName, Op(c.Operator), c.Values.Select(Text).ToList()))
                 .ToList();
-            return Filter(link, root).Select(r => r.Invoice).ToList();
+            // Dataverse returns only the selected columns: a column the query forgets to select reads as empty. Project the same way, so
+            // a rollup that left sprk_approvedtotal out of its ColumnSet would silently fall back to the billed total HERE too.
+            return Filter(link, root).Select(r => Project(r.Invoice, query.ColumnSet)).ToList();
         }
 
-        /// <summary>The rollup's sum over a query: what <c>FinanceBaseValues.SumMoney</c> makes of the returned rows.</summary>
-        public decimal Sum(QueryExpression query) => FinanceBaseValues.SumMoney(Run(query), "sprk_totalamount");
+        private static Entity Project(Entity invoice, ColumnSet columns)
+        {
+            if (columns.AllColumns)
+            {
+                return invoice;
+            }
+
+            var projected = new Entity(invoice.LogicalName, invoice.Id);
+            foreach (var column in columns.Columns.Where(invoice.Contains))
+            {
+                projected[column] = invoice[column];
+            }
+
+            return projected;
+        }
+
+        /// <summary>The rollup's sum over a query: what <c>FinanceBaseValues.SumSpend</c> (the D-130 amount rule) makes of the returned rows.</summary>
+        public decimal Sum(QueryExpression query) => FinanceBaseValues.SumSpend(Run(query));
 
         private static string Op(ConditionOperator op) => op switch
         {
@@ -154,7 +179,8 @@ public class SpendHeldAndPendingTests
             _ => throw new NotSupportedException("operator " + op),
         };
 
-        /// <summary>Runs a grouped aggregate FetchXML: the sum of <c>sprk_totalamount</c> per parent, in the aliased shape Dataverse returns.</summary>
+        /// <summary>Runs a grouped aggregate FetchXML: the sum of the aggregated column per parent (a SQL sum: nulls are skipped, a group
+        /// of only nulls sums to null), in the aliased shape Dataverse returns.</summary>
         public EntityCollection RunFetch(string fetchXml)
         {
             var fetch = XElement.Parse(fetchXml);
@@ -171,6 +197,7 @@ public class SpendHeldAndPendingTests
 
             var root = entity.Element("filter")!.Elements("condition").Select(Parse).ToList();
             var groupBy = entity.Elements("attribute").Single(a => a.Attribute("groupby") is not null).Attribute("name")!.Value;
+            var summed = entity.Elements("attribute").Single(a => (string?)a.Attribute("aggregate") == "sum").Attribute("name")!.Value;
             var result = new EntityCollection();
             foreach (var group in Filter(link, root).GroupBy(r => Text(r.Invoice.Contains(groupBy) ? r.Invoice[groupBy] : null)))
             {
@@ -178,11 +205,17 @@ public class SpendHeldAndPendingTests
                 result.Entities.Add(new Entity("sprk_invoice")
                 {
                     ["parent"] = new AliasedValue("sprk_invoice", groupBy, sample.Contains(groupBy) ? sample[groupBy] : null),
-                    ["total"] = new AliasedValue("sprk_invoice", "sprk_totalamount", new Money(group.Sum(r => ((Money)r.Invoice["sprk_totalamount"]).Value))),
+                    ["total"] = new AliasedValue("sprk_invoice", summed, SqlSum(group.Select(r => r.Invoice.GetAttributeValue<Money>(summed)))),
                 });
             }
 
             return result;
+        }
+
+        private static Money? SqlSum(IEnumerable<Money?> values)
+        {
+            var present = values.Where(v => v is not null).ToList();
+            return present.Count == 0 ? null : new Money(present.Sum(v => v!.Value));
         }
 
         private static Cond Parse(XElement c) => new(
@@ -255,8 +288,12 @@ public class SpendHeldAndPendingTests
     public void D102_CountedSpendQueries_HaveNoHeldPredicate_AndAdmitNoInReview()
     {
         FinanceRollupService.BuildInvoiceQuery(Matter, "sprk_matter").LinkEntities.Should().BeEmpty();
-        XElement.Parse(FinanceBaseValues.BuildGroupedSumFetchXml("sprk_matter", forInvoices: true, new[] { Matter }))
-            .Descendants("link-entity").Should().BeEmpty();
+        foreach (var part in FinanceBaseValues.SpendAmountPartsInReadOrder)
+        {
+            XElement.Parse(FinanceBaseValues.BuildGroupedSpendFetchXml("sprk_matter", part, new[] { Matter }))
+                .Descendants("link-entity").Should().BeEmpty();
+        }
+
         FinanceBaseValues.CountedInvoiceStatuses.Should().NotContain(InvoiceStatusCodes.InReview);
     }
 
@@ -406,7 +443,14 @@ public class SpendHeldAndPendingTests
         rollup.Criteria.Conditions.Should().Contain(c => c.EntityName == "held" && c.AttributeName == "sprk_invoicesubmissionid" && c.Operator == ConditionOperator.Null);
         rollup.Criteria.Conditions.Single(c => c.AttributeName == "statuscode").Values.Cast<int>().Should().Equal(InvoiceStatusCodes.InReview);
 
-        var fetch = XElement.Parse(FinanceBaseValues.BuildGroupedPendingSumFetchXml("sprk_matter", new[] { Matter }));
+        foreach (var part in FinanceBaseValues.SpendAmountPartsInReadOrder)
+        {
+            AssertPendingFetchShape(XElement.Parse(FinanceBaseValues.BuildGroupedPendingSpendFetchXml("sprk_matter", part, new[] { Matter })), held);
+        }
+    }
+
+    private static void AssertPendingFetchShape(XElement fetch, IReadOnlyList<(string Column, string)> held)
+    {
         var le = fetch.Descendants("link-entity").Single();
         ((string)le.Attribute("name")!, (string)le.Attribute("from")!, (string)le.Attribute("to")!, (string)le.Attribute("link-type")!, (string)le.Attribute("alias")!)
             .Should().Be(("sprk_invoicesubmission", "sprk_invoice", "sprk_invoiceid", "outer", "held"));
@@ -419,15 +463,18 @@ public class SpendHeldAndPendingTests
     }
 
     [Theory(DisplayName = "D-104: the grouped pending query keeps the parent lookup, grouping and aggregate of the counted query")]
-    [InlineData("sprk_matter")]
-    [InlineData("sprk_project")]
-    public void D104_TheGroupedPendingQuery_IsTheCountedShape_WithPendingStatusesAndTheHeldExclusion(string parent)
+    [InlineData("sprk_matter", FinanceBaseValues.SpendAmountPart.ApprovedTotal, "sprk_approvedtotal")]
+    [InlineData("sprk_matter", FinanceBaseValues.SpendAmountPart.BilledWhereNoApprovedTotal, "sprk_totalamount")]
+    [InlineData("sprk_project", FinanceBaseValues.SpendAmountPart.ApprovedTotal, "sprk_approvedtotal")]
+    [InlineData("sprk_project", FinanceBaseValues.SpendAmountPart.BilledWhereNoApprovedTotal, "sprk_totalamount")]
+    public void D104_TheGroupedPendingQuery_IsTheCountedShape_WithPendingStatusesAndTheHeldExclusion(
+        string parent, FinanceBaseValues.SpendAmountPart part, string summed)
     {
-        var fetch = XElement.Parse(FinanceBaseValues.BuildGroupedPendingSumFetchXml(parent, new[] { Matter }));
+        var fetch = XElement.Parse(FinanceBaseValues.BuildGroupedPendingSpendFetchXml(parent, part, new[] { Matter }));
         fetch.Attribute("aggregate")!.Value.Should().Be("true");
         fetch.Element("entity")!.Attribute("name")!.Value.Should().Be("sprk_invoice");
         fetch.Element("entity")!.Elements("attribute").Select(a => (a.Attribute("name")!.Value, a.Attribute("aggregate")?.Value, a.Attribute("groupby")?.Value))
-            .Should().BeEquivalentTo(new (string, string?, string?)[] { ("sprk_totalamount", "sum", null), (parent, null, "true") });
+            .Should().BeEquivalentTo(new (string, string?, string?)[] { (summed, "sum", null), (parent, null, "true") });
         FinanceRollupService.BuildPendingInvoiceQuery(Matter, parent).Criteria.Conditions.Single(c => c.AttributeName == parent)
             .Operator.Should().Be(ConditionOperator.Equal);
     }
@@ -465,5 +512,252 @@ public class SpendHeldAndPendingTests
     {
         await FluentActions.Invoking(() => FinanceBaseValues.ReadPendingSpendAsync(new Store().AsService(), "sprk_event", new[] { Matter }, CancellationToken.None))
             .Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    // ---- D-130 (2): spend sums the APPROVED total, falling back to the billed total where it is empty, on BOTH paths ----
+    // Each test asserts the rollup path (FinanceRollupService's query + FinanceBaseValues.SumSpend) and the live path
+    // (FinanceBaseValues.ReadAsync / ReadPendingSpendAsync through the grouped FetchXML) on the same rows.
+
+    private static async Task BothPathsCountedSpendShouldBe(Store store, decimal expected, string because = "")
+    {
+        RollupCountedSpend(store).Should().Be(expected, "rollup path " + because);
+        (await LiveCountedSpend(store)).Should().Be(expected, "live path " + because);
+    }
+
+    private static async Task BothPathsPendingSpendShouldBe(Store store, decimal expected, string because = "")
+    {
+        RollupPendingSpend(store).Should().Be(expected, "rollup path " + because);
+        (await LivePendingSpend(store)).Should().Be(expected, "live path " + because);
+    }
+
+    [Fact(DisplayName = "D-130 must-fire: an Approved invoice with a disallowed line counts its APPROVED total, not the billed total (both paths)")]
+    public async Task D130_AnApprovedInvoiceWithADisallowedLine_CountsItsApprovedTotal()
+    {
+        var store = new Store();
+        store.Invoice(1000m, InvoiceStatusCodes.Approved, approved: 800m);   // a 200 charge was disallowed
+
+        await BothPathsCountedSpendShouldBe(store, 800m, "(billed 1000 would be the pre-D-130 answer)");
+    }
+
+    [Fact(DisplayName = "D-130 must-fire: an invoice with NO approved total counts its billed total (both paths)")]
+    public async Task D130_AnInvoiceWithNoApprovedTotal_CountsItsBilledTotal()
+    {
+        var store = new Store();
+        store.Invoice(1000m, InvoiceStatusCodes.Approved);
+
+        await BothPathsCountedSpendShouldBe(store, 1000m);
+    }
+
+    [Fact(DisplayName = "D-130: an approved total of ZERO is a value, not an empty one: it counts 0 and does not fall back to the billed total (both paths)")]
+    public async Task D130_AnApprovedTotalOfZero_CountsZero_NotTheBilledTotal()
+    {
+        var store = new Store();
+        store.Invoice(500m, InvoiceStatusCodes.Approved, approved: 0m);   // every charge disallowed
+
+        await BothPathsCountedSpendShouldBe(store, 0m);
+    }
+
+    [Fact(DisplayName = "D-130: mixed invoices sum correctly - approved where there is one, billed where there is not, other statuses and parents left out (both paths)")]
+    public async Task D130_MixedInvoices_SumApprovedWhereSet_BilledWhereNot()
+    {
+        var store = new Store();
+        store.Invoice(100m, InvoiceStatusCodes.Approved, approved: 80m);       //  80
+        store.Invoice(50m, InvoiceStatusCodes.SentToAp);                       //  50 (no approved total)
+        store.Invoice(300m, InvoiceStatusCodes.Paid, approved: 300m);          // 300 (nothing disallowed)
+        store.Invoice(40m, InvoiceStatusCodes.Approved, approved: 0m);         //   0
+        store.Invoice(999m, InvoiceStatusCodes.InReview, approved: 900m);      // pending, not counted
+        store.Invoice(999m, InvoiceStatusCodes.Rejected, approved: 900m);      // not counted
+        store.Invoice(999m, InvoiceStatusCodes.Approved, "sprk_matter", OtherMatter, approved: 900m);   // another matter
+        store.Invoice(999m, InvoiceStatusCodes.Approved, "sprk_project", Project, approved: 900m);      // a project, not this matter
+
+        await BothPathsCountedSpendShouldBe(store, 430m);
+    }
+
+    [Fact(DisplayName = "D-130 + D-127: an approved credit memo (negative approved total) LOWERS counted spend, with or without an approved total (both paths)")]
+    public async Task D130_ACreditMemo_LowersSpend()
+    {
+        var store = new Store();
+        store.Invoice(1000m, InvoiceStatusCodes.Approved);
+        await BothPathsCountedSpendShouldBe(store, 1000m);
+
+        store.Invoice(-250m, InvoiceStatusCodes.Approved, approved: -250m);    // credit memo with an approved total
+        await BothPathsCountedSpendShouldBe(store, 750m, "(credit memo with an approved total)");
+
+        store.Invoice(-100m, InvoiceStatusCodes.Paid);                         // credit memo with no approved total: billed, signed
+        await BothPathsCountedSpendShouldBe(store, 650m, "(credit memo falling back to its billed total)");
+
+        store.Invoice(-60m, InvoiceStatusCodes.Approved, approved: -40m);      // reviewer reduced a credit line (D-129): payable credit is smaller
+        await BothPathsCountedSpendShouldBe(store, 610m, "(the approved credit, not the billed credit)");
+    }
+
+    [Fact(DisplayName = "D-130: the two paths agree on a seeded random world of invoices, with and without approved totals and credits")]
+    public async Task D130_BothPaths_AgreeOnARandomWorld()
+    {
+        var random = new Random(130);
+        var statuses = new[]
+        {
+            InvoiceStatusCodes.InReview, InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid,
+            InvoiceStatusCodes.Rejected, InvoiceStatusCodes.ReturnedToFirm, InvoiceStatusCodes.Cancelled,
+        };
+        var store = new Store();
+        decimal expectedCounted = 0m;
+        decimal expectedPending = 0m;
+        for (var i = 0; i < 200; i++)
+        {
+            var status = statuses[random.Next(statuses.Length)];
+            var billed = random.Next(-300, 1000);
+            decimal? approved = random.Next(3) == 0 ? null : billed - random.Next(0, 4) * 25;
+            var invoice = store.Invoice(billed, status, approved: approved);
+            var amount = approved ?? billed;
+            if (FinanceBaseValues.CountedInvoiceStatuses.Contains(status))
+            {
+                expectedCounted += amount;
+            }
+            else if (status == InvoiceStatusCodes.InReview)
+            {
+                if (random.Next(4) == 0)
+                {
+                    store.Blocked(invoice);   // held: left out of pending
+                }
+                else
+                {
+                    if (random.Next(2) == 0) store.Submission(invoice, InvoiceSubmissionStatus.Accepted, null);   // several links: still once
+                    expectedPending += amount;
+                }
+            }
+        }
+
+        await BothPathsCountedSpendShouldBe(store, expectedCounted);
+        await BothPathsPendingSpendShouldBe(store, expectedPending);
+    }
+
+    [Fact(DisplayName = "D-130 pending (D-104): Pending Spend uses the same amount rule - approved total, else billed, credit memos signed - and still excludes held (both paths)")]
+    public async Task D130_PendingSpend_UsesTheSameAmountRule()
+    {
+        var store = new Store();
+        store.Invoice(100m, InvoiceStatusCodes.InReview, approved: 90m);      //  90
+        store.Invoice(50m, InvoiceStatusCodes.InReview);                      //  50
+        store.Invoice(70m, InvoiceStatusCodes.InReview, approved: 0m);        //   0
+        store.Invoice(-30m, InvoiceStatusCodes.InReview, approved: -30m);     // -30 (credit memo)
+        store.Blocked(store.Invoice(500m, InvoiceStatusCodes.InReview, approved: 400m));   // held: left out whatever its amount
+        var resubmitted = store.Invoice(20m, InvoiceStatusCodes.InReview, approved: 15m);
+        store.Submission(resubmitted, InvoiceSubmissionStatus.Accepted, null);
+        store.Submission(resubmitted, InvoiceSubmissionStatus.Failed, "ebilling.processing.failed");   // two links: counted once, as 15
+        store.Invoice(900m, InvoiceStatusCodes.Approved, approved: 800m);     // actual spend, not pending
+
+        await BothPathsPendingSpendShouldBe(store, 125m);
+        await BothPathsCountedSpendShouldBe(store, 800m);
+    }
+
+    [Fact(DisplayName = "D-130 D-102 must-fire stays: a held invoice with an approved total is still left out of counted spend (both paths)")]
+    public async Task D130_AHeldInvoice_WithAnApprovedTotal_IsStillNotCountedSpend()
+    {
+        var store = new Store();
+        store.Blocked(store.Invoice(100m, InvoiceStatusCodes.InReview, approved: 100m));
+
+        await BothPathsCountedSpendShouldBe(store, 0m);
+    }
+
+    [Fact(DisplayName = "D-130: the rollup's invoice queries select BOTH amount columns (a missing column would read as empty and silently fall back to billed)")]
+    public void D130_TheRollupQueries_SelectBothAmountColumns()
+    {
+        foreach (var query in new[]
+        {
+            FinanceRollupService.BuildInvoiceQuery(Matter, "sprk_matter"),
+            FinanceRollupService.BuildPendingInvoiceQuery(Matter, "sprk_matter"),
+        })
+        {
+            query.ColumnSet.AllColumns.Should().BeFalse();
+            query.ColumnSet.Columns.Should().Contain(new[] { "sprk_approvedtotal", "sprk_totalamount", "sprk_invoicedate", "statuscode" });
+        }
+    }
+
+    [Fact(DisplayName = "D-130: the stored figures (total, current month, prior month, timeline, count) all use the approved-else-billed amount")]
+    public void D130_TheRollupFigures_UseTheApprovedTotal_ForTotalMonthsTimelineVelocityAndAverage()
+    {
+        var now = new DateTime(2026, 10, 19, 12, 0, 0, DateTimeKind.Utc);
+        static Entity Dated(decimal billed, decimal? approved, DateTime date)
+        {
+            var e = new Entity("sprk_invoice", Guid.NewGuid()) { ["sprk_totalamount"] = new Money(billed), ["sprk_invoicedate"] = date };
+            if (approved is { } a) e["sprk_approvedtotal"] = new Money(a);
+            return e;
+        }
+
+        var invoices = new List<Entity>
+        {
+            Dated(1000m, 800m, new DateTime(2026, 10, 3)),     // this month, approved 800
+            Dated(200m, null, new DateTime(2026, 10, 9)),      // this month, billed 200
+            Dated(500m, 400m, new DateTime(2026, 9, 12)),      // last month, approved 400
+            Dated(-100m, -100m, new DateTime(2026, 9, 20)),    // last month, credit memo
+            Dated(300m, 0m, new DateTime(2026, 8, 1)),         // August, fully disallowed
+        };
+
+        var figures = FinanceRollupService.ComputeSpendFigures(invoices, now);
+
+        figures.TotalSpend.Should().Be(1300m);                 // 800 + 200 + 400 - 100 + 0 (billed would be 1900)
+        figures.CurrentMonthSpend.Should().Be(1000m);
+        figures.PriorMonthSpend.Should().Be(300m);
+        figures.InvoiceCount.Should().Be(5);
+        figures.MonthlyBuckets["2026-10"].Should().Be(1000m);
+        figures.MonthlyBuckets["2026-09"].Should().Be(300m);
+        figures.MonthlyBuckets["2026-08"].Should().Be(0m);
+        (figures.TotalSpend / figures.InvoiceCount).Should().Be(260m, "the stored average invoice is the total over the count");
+        SpendSnapshotService.ComputeVelocityPct(figures.CurrentMonthSpend, figures.PriorMonthSpend)!.Value
+            .Should().BeApproximately(233.33m, 0.01m, "(1000 - 300) / 300; on billed totals it would be a different number");
+    }
+
+    // ---- D-130 fail-closed: the live reader runs two queries per spend read and still never reads an unknown shape as zero ----
+
+    private static EntityCollection Rows(object? parent, object? total) =>
+        new() { Entities = { new Entity("sprk_invoice") { ["parent"] = new AliasedValue("sprk_invoice", "sprk_matter", parent), ["total"] = new AliasedValue("sprk_invoice", "sprk_totalamount", total) } } };
+
+    [Theory(DisplayName = "D-130 fail-closed: an unreadable row in EITHER of the two spend queries throws; a half-read spend never comes back smaller")]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task D130_AnUnreadableShapeInEitherPart_Throws_NotAPartialSum(int badCall)
+    {
+        var calls = 0;
+        var service = new Mock<IGenericEntityService>();
+        service.Setup(s => s.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((FetchExpression _, CancellationToken _) =>
+                Task.FromResult(calls++ == badCall ? Rows(Matter, "oops") : Rows(Matter, new Money(10m))));
+
+        await FluentActions.Invoking(() => FinanceBaseValues.ReadAsync(service.Object, "sprk_matter", new[] { Matter }, needSpend: true, needBudget: false, CancellationToken.None))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*sum*unexpected type*String*");
+        calls.Should().BeLessThanOrEqualTo(2);
+    }
+
+    [Theory(DisplayName = "D-130 fail-closed: a Dataverse failure in EITHER pending spend query propagates, and pending is never read as zero")]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task D130_ADataverseFailureInEitherPendingPart_Propagates(int failingCall)
+    {
+        var calls = 0;
+        var service = new Mock<IGenericEntityService>();
+        service.Setup(s => s.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((FetchExpression _, CancellationToken _) =>
+                calls++ == failingCall ? Task.FromException<EntityCollection>(new TimeoutException("dataverse")) : Task.FromResult(Rows(Matter, new Money(10m))));
+
+        await FluentActions.Invoking(() => FinanceBaseValues.ReadPendingSpendAsync(service.Object, "sprk_matter", new[] { Matter }, CancellationToken.None))
+            .Should().ThrowAsync<TimeoutException>();
+    }
+
+    [Fact(DisplayName = "D-130: the live spend read sends exactly the two parts (billed-where-no-approved first, approved second) plus one budget query when budget is needed")]
+    public async Task D130_TheLiveRead_SendsTheTwoParts_InTheDocumentedOrder()
+    {
+        var sent = new List<XElement>();
+        var service = new Mock<IGenericEntityService>();
+        service.Setup(s => s.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((FetchExpression fetch, CancellationToken _) =>
+            {
+                sent.Add(XElement.Parse(fetch.Query));
+                return Task.FromResult(new EntityCollection());
+            });
+
+        await FinanceBaseValues.ReadAsync(service.Object, "sprk_matter", new[] { Matter }, needSpend: true, needBudget: true, CancellationToken.None);
+
+        sent.Select(f => f.Element("entity")!.Attribute("name")!.Value).Should().Equal("sprk_invoice", "sprk_invoice", "sprk_budget");
+        sent.Take(2).Select(f => f.Descendants("attribute").Single(a => a.Attribute("aggregate") is not null).Attribute("name")!.Value)
+            .Should().Equal("sprk_totalamount", "sprk_approvedtotal");
     }
 }

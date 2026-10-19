@@ -27,6 +27,12 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
     // FinanceBaseValues.HeldSubmissionConditions. A consumer that spells the submission columns or the reason code has its own copy.
     private static readonly Regex HeldPredicateSpelling = new(@"sprk_processingstatus|sprk_outcomereasoncode|ebilling\.submission\.blocked", RegexOptions.Compiled);
 
+    // ebilling-r1 D-130: the spend AMOUNT rule (approved total, else billed total) is defined once, in FinanceBaseValues.SpendAmount /
+    // SumSpend / SpendAmountColumns. A consumer that names either amount column has its own copy (and would drift, e.g. back to the
+    // billed total alone).
+    private static readonly Regex AmountRuleSpelling = new(
+        @"sprk_approvedtotal|sprk_totalamount|InvoiceApprovedTotal|InvoiceTotalAmount|Invoice_TotalAmount", RegexOptions.Compiled);
+
     internal static IReadOnlyList<string> Violations(string code)
     {
         var found = new List<string>();
@@ -35,6 +41,7 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
         if (CountedStatusConstant.IsMatch(code)) found.Add("names an InvoiceStatusCodes value instead of using FinanceBaseValues.CountedInvoiceStatuses");
         if (PercentFormula.IsMatch(code)) found.Add("multiplies by 100 itself instead of FinanceBaseValues.UtilizationPercent");
         if (HeldPredicateSpelling.IsMatch(code)) found.Add("spells the held-submission predicate instead of FinanceBaseValues.HeldSubmissionConditions");
+        if (AmountRuleSpelling.IsMatch(code)) found.Add("names an invoice amount column instead of FinanceBaseValues.SpendAmount / SumSpend / SpendAmountColumns");
         return found;
     }
 
@@ -51,6 +58,16 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
     public void RollupAndEvaluator_UseFinanceBaseValues_AndKeepNoPrivateCopy(string relativePath) =>
         Assert.True(Violations(CodeOf(relativePath)).Count == 0,
             relativePath + ": " + string.Join("; ", Violations(CodeOf(relativePath))));
+
+    // The AI tool handler totals spend from the rollup's own query, so it follows the same amount rule (D-130). It keeps its own
+    // utilization arithmetic (not in scope here), so only the amount rule is guarded for it.
+    [Fact(DisplayName = "ebilling-r1 D-130: the financial calculation tool handler takes the spend amount from FinanceBaseValues, with no copy of the rule")]
+    public void TheToolHandler_UsesTheSharedAmountRule()
+    {
+        var code = CodeOf("Services/Finance/Tools/FinancialCalculationToolHandler.cs");
+        Assert.DoesNotMatch(AmountRuleSpelling, code);
+        Assert.Contains("FinanceBaseValues.SpendAmount(", code, StringComparison.Ordinal);
+    }
 
     [Fact(DisplayName = "Task 025b control: the detector fires on a private copy of the status set and the formula")]
     public void TheDetector_FiresOnAPrivateCopy()
@@ -76,6 +93,17 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
     [Fact(DisplayName = "ebilling-r1 049 control: the detector stays quiet on the shared held predicate")]
     public void TheDetector_StaysQuietOnTheSharedHeldPredicate() =>
         Assert.Empty(Violations("foreach (var (column, value) in FinanceBaseValues.HeldSubmissionConditions) { link.AddCondition(column, ConditionOperator.Equal, value); }"));
+
+    [Fact(DisplayName = "ebilling-r1 D-130 control: the detector fires on a private copy of the spend amount rule")]
+    public void TheDetector_FiresOnAPrivateAmountRule()
+    {
+        var copy = "var c = FinanceBaseValues.X; var a = e.GetAttributeValue<Money>(\"sprk_approvedtotal\")?.Value ?? e.GetAttributeValue<Money>(Invoice_TotalAmount)?.Value ?? 0m;";
+        Assert.Equal(new[] { "names an invoice amount column instead of FinanceBaseValues.SpendAmount / SumSpend / SpendAmountColumns" }, Violations(copy));
+    }
+
+    [Fact(DisplayName = "ebilling-r1 D-130 control: the detector stays quiet on the shared amount rule")]
+    public void TheDetector_StaysQuietOnTheSharedAmountRule() =>
+        Assert.Empty(Violations("var total = FinanceBaseValues.SumSpend(invoices); var one = FinanceBaseValues.SpendAmount(invoice); var cols = FinanceBaseValues.SpendAmountColumns;"));
 
     [Fact(DisplayName = "Task 025b control: the detector stays quiet on the shared call")]
     public void TheDetector_StaysQuietOnTheSharedCall() =>

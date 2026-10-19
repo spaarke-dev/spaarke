@@ -1655,6 +1655,29 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task Run_SpendThreshold_SumsTheApprovedTotal_FallingBackToTheBilledTotal_AndACreditMemoLowersIt()
+    {
+        // ebilling-r1 D-130 (2): spend sums each counted invoice's approved total, else its billed total (here through the evaluator and
+        // FinanceBaseValues.ReadAsync). Billed alone would be 1000 + 400 + 50 = 1450, over the 1000 threshold; the amounts are 800 + 400 - 250 = 950.
+        const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_totalspendtodate","operator":">=","value":1000}}""";
+        var h = new Harness().WithThresholdPolicy(body, "Spend to date is {{sprk_totalspendtodate}}.");
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId) { ["sprk_matterid"] = MatterId });
+        h.WithInvoice("sprk_matter", MatterId, 1000m, InvoiceStatusCodes.Approved, approved: 800m)   // 200 disallowed: counts 800
+            .WithInvoice("sprk_matter", MatterId, 400m, InvoiceStatusCodes.Paid)                      // no approved total: counts 400
+            .WithInvoice("sprk_matter", MatterId, 50m, InvoiceStatusCodes.Approved, approved: -250m)  // a credit memo's approved total: lowers spend
+            .WithInvoice("sprk_matter", MatterId, 900m, InvoiceStatusCodes.InReview, approved: 900m); // pending: not counted
+
+        await h.RunAsync();
+
+        h.Org.CreatedPayloads.Should().BeEmpty("950 is under 1000 although the billed totals add to 1450");
+
+        h.WithInvoice("sprk_matter", MatterId, 60m, InvoiceStatusCodes.SentToAp);                     // 950 + 60 = 1010
+        h.Org.ResetCounts();
+        await h.RunAsync();
+        h.Org.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_sentence").Should().Be("Spend to date is 1010.");
+    }
+
+    [Fact]
     public async Task Run_ThresholdPolicy_ReadsTheBaseRowsWithGroupedQueries_NotOneQueryPerSubject()
     {
         var h = new Harness().WithThresholdPolicy();
@@ -1665,9 +1688,11 @@ public partial class SignalReevaluationJobTests
 
         await h.RunAsync();
 
-        h.Sysadmin.AggregateFetches.Should().HaveCount(2, "one grouped query for invoices and one for budgets, for all five matters");
+        // ebilling-r1 D-130: an aggregate cannot coalesce per row, so spend is two grouped invoice queries (the approved total, and the
+        // billed total where there is none), plus the one budget query: still grouped, never one query per matter.
+        h.Sysadmin.AggregateFetches.Should().HaveCount(3, "two grouped queries for invoices and one for budgets, for all five matters");
         h.Sysadmin.AggregateFetches.Select(f => XElement.Parse(f).Element("entity")!.Attribute("name")!.Value)
-            .Should().BeEquivalentTo("sprk_invoice", "sprk_budget");
+            .Should().BeEquivalentTo("sprk_invoice", "sprk_invoice", "sprk_budget");
         h.Sysadmin.AggregateFetches.Should().OnlyContain(f => f.Contains("aggregate=\"true\"") && f.Contains("groupby=\"true\""));
     }
 
@@ -1689,7 +1714,8 @@ public partial class SignalReevaluationJobTests
 
         await h.RunAsync();
 
-        h.Sysadmin.AggregateFetches.Should().ContainSingle().Which.Should().Contain("sprk_invoice");
+        h.Sysadmin.AggregateFetches.Should().HaveCount(2, "the two parts of the D-130 amount rule, both over invoices, none over budgets")
+            .And.OnlyContain(f => f.Contains("sprk_invoice"));
         h.Org.CreatedPayloads.Should().BeEmpty("30000 + 15000 + 4000 = 49000 is under 50000, and the uncounted rows must not be added");
 
         h.WithInvoice("sprk_matter", MatterId, 1000m); // Approved (the default): now exactly 50000, at-least is inclusive
@@ -2652,14 +2678,22 @@ public partial class SignalReevaluationJobTests
             return this;
         }
 
-        public Harness WithInvoice(string parent, Guid parentId, decimal amount, int status = InvoiceStatusCodes.Approved)
+        /// <param name="amount">The billed total (<c>sprk_totalamount</c>).</param>
+        /// <param name="approved">The approved total (<c>sprk_approvedtotal</c>, D-130); the column is absent when null.</param>
+        public Harness WithInvoice(string parent, Guid parentId, decimal amount, int status = InvoiceStatusCodes.Approved, decimal? approved = null)
         {
-            Sysadmin.InvoiceRows.Add(new Entity("sprk_invoice", Guid.NewGuid())
+            var invoice = new Entity("sprk_invoice", Guid.NewGuid())
             {
                 [parent] = new EntityReference(parent, parentId),
                 ["sprk_totalamount"] = new Money(amount),
                 ["statuscode"] = new OptionSetValue(status),
-            });
+            };
+            if (approved is { } approvedTotal)
+            {
+                invoice["sprk_approvedtotal"] = new Money(approvedTotal);
+            }
+
+            Sysadmin.InvoiceRows.Add(invoice);
             return this;
         }
 
@@ -3344,8 +3378,11 @@ public partial class SignalReevaluationJobTests
             var conditions = entity.Element("filter")!.Elements("condition").ToList();
             // A condition this fake does not model would be silently ignored (the rows would be summed as if it were absent), so a
             // fetch that gains a filter (a status column, a held flag, ...) fails the test instead of passing on a wrong sum.
-            var unknown = conditions.Select(c => (string)c.Attribute("attribute")!).Where(a => a != lookup && a != "statuscode").ToList();
+            var unknown = conditions.Select(c => (string)c.Attribute("attribute")!).Where(a => a != lookup && a != "statuscode" && a != "sprk_approvedtotal").ToList();
             if (unknown.Count > 0) throw new InvalidOperationException("The aggregate fake does not model a condition on: " + string.Join(", ", unknown));
+            // D-130: the two parts of the amount rule split invoices on whether the approved total is empty (null / not-null, nothing else).
+            var approvedTotalTest = conditions.SingleOrDefault(c => (string)c.Attribute("attribute")! == "sprk_approvedtotal")?.Attribute("operator")?.Value;
+            if (approvedTotalTest is not (null or "null" or "not-null")) throw new InvalidOperationException("The aggregate fake models only null / not-null on sprk_approvedtotal, not " + approvedTotalTest);
             var parents = conditions.Single(c => (string)c.Attribute("attribute")! == lookup && (string)c.Attribute("operator")! == "in")
                 .Elements("value").Select(v => Guid.Parse(v.Value)).ToHashSet();
             var statuses = conditions.SingleOrDefault(c => (string)c.Attribute("attribute")! == "statuscode")
@@ -3354,7 +3391,8 @@ public partial class SignalReevaluationJobTests
             var result = new EntityCollection();
             var rows = (name == "sprk_invoice" ? InvoiceRows : BudgetRows).Where(r =>
                 r.GetAttributeValue<EntityReference>(lookup) is { } p && parents.Contains(p.Id)
-                && (statuses is null || r.GetAttributeValue<OptionSetValue>("statuscode") is { } s && statuses.Contains(s.Value)));
+                && (statuses is null || r.GetAttributeValue<OptionSetValue>("statuscode") is { } s && statuses.Contains(s.Value))
+                && (approvedTotalTest is null || (approvedTotalTest == "not-null") == r.Contains("sprk_approvedtotal")));
             foreach (var byParent in rows.GroupBy(r => r.GetAttributeValue<EntityReference>(lookup)!.Id))
             {
                 result.Entities.Add(new Entity(name)

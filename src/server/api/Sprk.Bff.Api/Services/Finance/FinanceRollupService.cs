@@ -43,7 +43,6 @@ public class FinanceRollupService
     private const string InvoiceEntity = FinanceBaseValues.InvoiceEntity;
     private const string Invoice_Matter = FinanceBaseValues.MatterEntity;
     private const string Invoice_Project = FinanceBaseValues.ProjectEntity;
-    private const string Invoice_TotalAmount = FinanceBaseValues.InvoiceTotalAmount;
     private const string Invoice_StatusCode = FinanceBaseValues.InvoiceStatusCodeColumn;
     private const string Invoice_InvoiceDate = "sprk_invoicedate";
 
@@ -190,41 +189,12 @@ public class FinanceRollupService
         var totalBudget = budgetTask.Result;
 
         // Step 2: Compute all fields
-        var now = DateTime.UtcNow;
-        var currentMonthKey = now.ToString("yyyy-MM", CultureInfo.InvariantCulture);
-        var priorMonthKey = now.AddMonths(-1).ToString("yyyy-MM", CultureInfo.InvariantCulture);
-
-        decimal totalSpend = FinanceBaseValues.SumMoney(invoices, Invoice_TotalAmount);
-        decimal currentMonthSpend = 0m;
-        decimal priorMonthSpend = 0m;
-        int invoiceCount = invoices.Count;
-
-        // Monthly buckets for timeline (last 12 months)
-        var monthlyBuckets = new SortedDictionary<string, decimal>();
-        for (int i = 11; i >= 0; i--)
-        {
-            var key = now.AddMonths(-i).ToString("yyyy-MM", CultureInfo.InvariantCulture);
-            monthlyBuckets[key] = 0m;
-        }
-
-        foreach (var invoice in invoices)
-        {
-            var amount = invoice.GetAttributeValue<Money>(Invoice_TotalAmount)?.Value ?? 0m;
-
-            var invoiceDate = invoice.GetAttributeValue<DateTime?>(Invoice_InvoiceDate);
-            if (invoiceDate.HasValue)
-            {
-                var monthKey = invoiceDate.Value.ToString("yyyy-MM", CultureInfo.InvariantCulture);
-
-                if (monthKey == currentMonthKey)
-                    currentMonthSpend += amount;
-                else if (monthKey == priorMonthKey)
-                    priorMonthSpend += amount;
-
-                if (monthlyBuckets.ContainsKey(monthKey))
-                    monthlyBuckets[monthKey] += amount;
-            }
-        }
+        var figures = ComputeSpendFigures(invoices, DateTime.UtcNow);
+        var totalSpend = figures.TotalSpend;
+        var currentMonthSpend = figures.CurrentMonthSpend;
+        var priorMonthSpend = figures.PriorMonthSpend;
+        var invoiceCount = figures.InvoiceCount;
+        var monthlyBuckets = figures.MonthlyBuckets;
 
         var remainingBudget = totalBudget - totalSpend;
         var utilization = FinanceBaseValues.UtilizationPercent(totalSpend, totalBudget) ?? 0m;
@@ -250,8 +220,8 @@ public class FinanceRollupService
         // Pending Spend (D-104): In Review and not held, kept apart from actual spend; it feeds nothing else here.
         await WriteRollupAsync(
             _fieldMappingService, _logger, parentEntityName, parentId, fields,
-            async token => FinanceBaseValues.SumMoney(
-                await QueryPendingInvoicesAsync(serviceClient, parentId, invoiceLookupField, token), Invoice_TotalAmount),
+            async token => FinanceBaseValues.SumSpend(
+                await QueryPendingInvoicesAsync(serviceClient, parentId, invoiceLookupField, token)),
             ct);
 
         _logger.LogInformation(
@@ -271,6 +241,54 @@ public class FinanceRollupService
             AverageInvoiceAmount = averageInvoice,
             MonthlySpendTimeline = timelineJson
         };
+    }
+
+    /// <summary>The figures the rollup derives from the parent's counted invoices alone (no budget).</summary>
+    internal sealed record SpendFigures(
+        decimal TotalSpend, decimal CurrentMonthSpend, decimal PriorMonthSpend, int InvoiceCount, SortedDictionary<string, decimal> MonthlyBuckets);
+
+    /// <summary>
+    /// Total, current-month, prior-month and 12-month timeline spend over <paramref name="invoices"/> (the counted invoices).
+    /// D-130: every figure uses each invoice's <see cref="FinanceBaseValues.SpendAmount"/> (approved total, else billed total), so a
+    /// reviewer's disallowance lowers the total, the month it belongs to, the velocity and the average alike. Internal so a test can
+    /// run it without a live <c>ServiceClient</c>.
+    /// </summary>
+    internal static SpendFigures ComputeSpendFigures(IReadOnlyCollection<Entity> invoices, DateTime now)
+    {
+        var currentMonthKey = now.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+        var priorMonthKey = now.AddMonths(-1).ToString("yyyy-MM", CultureInfo.InvariantCulture);
+
+        decimal currentMonthSpend = 0m;
+        decimal priorMonthSpend = 0m;
+
+        // Monthly buckets for timeline (last 12 months)
+        var monthlyBuckets = new SortedDictionary<string, decimal>();
+        for (int i = 11; i >= 0; i--)
+        {
+            var key = now.AddMonths(-i).ToString("yyyy-MM", CultureInfo.InvariantCulture);
+            monthlyBuckets[key] = 0m;
+        }
+
+        foreach (var invoice in invoices)
+        {
+            var amount = FinanceBaseValues.SpendAmount(invoice);
+
+            var invoiceDate = invoice.GetAttributeValue<DateTime?>(Invoice_InvoiceDate);
+            if (invoiceDate.HasValue)
+            {
+                var monthKey = invoiceDate.Value.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+
+                if (monthKey == currentMonthKey)
+                    currentMonthSpend += amount;
+                else if (monthKey == priorMonthKey)
+                    priorMonthSpend += amount;
+
+                if (monthlyBuckets.ContainsKey(monthKey))
+                    monthlyBuckets[monthKey] += amount;
+            }
+        }
+
+        return new SpendFigures(FinanceBaseValues.SumSpend(invoices), currentMonthSpend, priorMonthSpend, invoices.Count, monthlyBuckets);
     }
 
     /// <summary>
@@ -310,7 +328,7 @@ public class FinanceRollupService
     {
         var query = new QueryExpression(InvoiceEntity)
         {
-            ColumnSet = new ColumnSet(Invoice_TotalAmount, Invoice_InvoiceDate, Invoice_StatusCode),
+            ColumnSet = InvoiceColumns(),
             Criteria = new FilterExpression(LogicalOperator.And)
         };
         query.Criteria.AddCondition(lookupField, ConditionOperator.Equal, parentId);
@@ -333,13 +351,18 @@ public class FinanceRollupService
         return query;
     }
 
+    /// <summary>The invoice columns both spend queries read: the two amount columns of <see cref="FinanceBaseValues.SpendAmount"/>
+    /// (a column left out would read as empty and fall back to the billed total without a sound), the date and the status.</summary>
+    private static ColumnSet InvoiceColumns() =>
+        new(FinanceBaseValues.SpendAmountColumns.Append(Invoice_InvoiceDate).Append(Invoice_StatusCode).ToArray());
+
     /// <summary>The invoice query: the parent's invoices whose status is one of <see cref="FinanceBaseValues.CountedInvoiceStatuses"/>.
     /// Internal so a test can pin it against the grouped query the Signal evaluator sends (same lookups, same status set).</summary>
     internal static QueryExpression BuildInvoiceQuery(Guid parentId, string lookupField)
     {
         var query = new QueryExpression(InvoiceEntity)
         {
-            ColumnSet = new ColumnSet(Invoice_TotalAmount, Invoice_InvoiceDate, Invoice_StatusCode),
+            ColumnSet = InvoiceColumns(),
             Criteria = new FilterExpression(LogicalOperator.And)
         };
         query.Criteria.AddCondition(lookupField, ConditionOperator.Equal, parentId);

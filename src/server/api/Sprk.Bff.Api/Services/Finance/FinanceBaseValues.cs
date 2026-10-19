@@ -21,9 +21,9 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// <see cref="FinanceRollupService"/>, which runs on a form subgrid edit or a never-enqueued job, so a stored value can be
 /// arbitrarily stale. A rule that asserts "utilization has reached 90 percent" must not rest on a copy nothing keeps current.
 /// No nightly mass write is added to refresh them (D-61).</para>
-/// <para><b>The rules</b> (copied from <see cref="FinanceRollupService"/>, which now calls this class): spend = the sum of
-/// <c>sprk_invoice.sprk_totalamount</c> over the parent's invoices whose status is one of
-/// <see cref="CountedInvoiceStatuses"/>; budget = the sum of <c>sprk_budget.sprk_totalbudget</c> over the parent's budgets;
+/// <para><b>The rules</b> (copied from <see cref="FinanceRollupService"/>, which now calls this class): spend = the sum of each
+/// invoice's <see cref="SpendAmount"/> (the approved total, else the billed total; owner decision D-130) over the parent's invoices
+/// whose status is one of <see cref="CountedInvoiceStatuses"/>; budget = the sum of <c>sprk_budget.sprk_totalbudget</c> over the parent's budgets;
 /// utilization = <c>spend / budget * 100</c> (a PERCENT: 100 means fully spent) when budget is above zero, otherwise undefined
 /// (<see cref="FinanceRollupService"/> stores 0; the evaluator treats it as a missing input).</para>
 /// <para>§11: <i>Existing</i> - the same sums and formula lived privately in <see cref="FinanceRollupService"/>. <i>Extension</i> -
@@ -37,6 +37,9 @@ public static class FinanceBaseValues
 
     public const string InvoiceEntity = "sprk_invoice";
     public const string InvoiceTotalAmount = "sprk_totalamount";
+    /// <summary>The invoice's approved (payable) total: the billed total minus the reviewer's line and invoice adjustments. Negative
+    /// on a credit memo (D-127). Empty until the totals service has computed it. Same column as <c>InvoiceTotalsService.InvoiceApprovedTotal</c>.</summary>
+    public const string InvoiceApprovedTotal = "sprk_approvedtotal";
     /// <summary>The invoice status column: <c>statuscode</c>, never <c>statecode</c> (Paid is Inactive and still counts). The
     /// retired invoice-status choice column is gone (ebilling-r1 task 015, D-41).</summary>
     public const string InvoiceStatusCodeColumn = "statuscode";
@@ -58,6 +61,45 @@ public static class FinanceBaseValues
     {
         InvoiceStatusCodes.Approved, InvoiceStatusCodes.SentToAp, InvoiceStatusCodes.Paid,
     };
+
+    /// <summary>The invoice columns <see cref="SpendAmount"/> reads. A query that feeds <see cref="SpendAmount"/> must select both: a
+    /// column left out reads as empty, and an empty approved total silently falls back to the billed total.</summary>
+    public static readonly IReadOnlyList<string> SpendAmountColumns = new[] { InvoiceApprovedTotal, InvoiceTotalAmount };
+
+    /// <summary>
+    /// The ONE amount rule (owner decision D-130 (2); counted spend AND Pending Spend): an invoice's spend amount is its approved
+    /// (payable) total, <c>sprk_approvedtotal</c>, when that has a value, otherwise its billed total, <c>sprk_totalamount</c>; when
+    /// neither has a value it is 0. "Has a value" is not-null, so an approved total of 0 (every charge disallowed) counts as 0 and
+    /// does NOT fall back to the billed total. Signed: a credit memo's negative approved total lowers spend (D-127). A reviewer's
+    /// disallowances and reductions therefore lower spend. The grouped FetchXML cannot coalesce per row, so it is split into the two
+    /// parts of <see cref="SpendAmountPart"/> and summed by the reader; both must stay equal to this rule.
+    /// </summary>
+    public static decimal SpendAmount(Entity invoice)
+    {
+        ArgumentNullException.ThrowIfNull(invoice);
+        return invoice.GetAttributeValue<Money>(InvoiceApprovedTotal)?.Value
+            ?? invoice.GetAttributeValue<Money>(InvoiceTotalAmount)?.Value
+            ?? 0m;
+    }
+
+    /// <summary>The sum of <see cref="SpendAmount"/> over <paramref name="invoices"/>.</summary>
+    public static decimal SumSpend(IEnumerable<Entity> invoices) => invoices.Sum(SpendAmount);
+
+    /// <summary>The two halves of <see cref="SpendAmount"/> as grouped aggregates: the approved total of invoices that have one, and
+    /// the billed total of invoices that do not. Each invoice falls in exactly one half, so the halves never overlap.</summary>
+    public enum SpendAmountPart
+    {
+        /// <summary>Sum of <c>sprk_approvedtotal</c> over invoices where it is not null.</summary>
+        ApprovedTotal,
+        /// <summary>Sum of <c>sprk_totalamount</c> over invoices where <c>sprk_approvedtotal</c> is null.</summary>
+        BilledWhereNoApprovedTotal,
+    }
+
+    /// <summary>The parts in the order the reader runs them. The billed fallback runs FIRST so that the one race between the two
+    /// queries (an invoice's approved total going from empty to set between them) can only count that invoice twice, never in
+    /// neither: a Threshold must not read a transient shortfall as headroom. An approved total never goes back to empty.</summary>
+    internal static readonly IReadOnlyList<SpendAmountPart> SpendAmountPartsInReadOrder =
+        new[] { SpendAmountPart.BilledWhereNoApprovedTotal, SpendAmountPart.ApprovedTotal };
 
     /// <summary>The parent column that stores Pending Spend (matter and project; ebilling-r1 owner decision D-104). Written only by
     /// <see cref="FinanceRollupService"/>. It is NOT in <see cref="IsDerived"/> yet: a Threshold cannot name it until ontology-r1
@@ -172,8 +214,8 @@ public static class FinanceBaseValues
 
     /// <summary>
     /// The base values of <paramref name="parentIds"/> read with GROUPED aggregate queries: per chunk of
-    /// <see cref="ParentChunkSize"/> parents, one query for the invoices (when spend is needed) and one for the budgets (when
-    /// budget is needed), never one query per parent. A parent with no rows has spend/budget 0 (a sum of nothing, as the rollup
+    /// <see cref="ParentChunkSize"/> parents, two queries for the invoices (when spend is needed: the two parts of
+    /// <see cref="SpendAmount"/>, added here) and one for the budgets (when budget is needed), never one query per parent. A parent with no rows has spend/budget 0 (a sum of nothing, as the rollup
     /// computes). A Dataverse failure propagates: the caller must treat the value as unknown.
     /// </summary>
     public static async Task<IReadOnlyDictionary<Guid, (decimal Spend, decimal Budget)>> ReadAsync(
@@ -186,12 +228,11 @@ public static class FinanceBaseValues
         foreach (var chunk in parentIds.Distinct().Chunk(ParentChunkSize))
         {
             var spend = needSpend
-                ? ReadGroupedSums(await entities.RetrieveMultipleAsync(
-                    new FetchExpression(BuildGroupedSumFetchXml(parentEntity, forInvoices: true, chunk)), ct).ConfigureAwait(false))
+                ? await ReadSpendPartsAsync(entities, part => BuildGroupedSpendFetchXml(parentEntity, part, chunk), ct).ConfigureAwait(false)
                 : new Dictionary<Guid, decimal>();
             var budget = needBudget
                 ? ReadGroupedSums(await entities.RetrieveMultipleAsync(
-                    new FetchExpression(BuildGroupedSumFetchXml(parentEntity, forInvoices: false, chunk)), ct).ConfigureAwait(false))
+                    new FetchExpression(BuildGroupedBudgetFetchXml(parentEntity, chunk)), ct).ConfigureAwait(false))
                 : new Dictionary<Guid, decimal>();
             foreach (var id in chunk)
             {
@@ -203,8 +244,8 @@ public static class FinanceBaseValues
     }
 
     /// <summary>
-    /// The live PENDING spend (D-104) of <paramref name="parentIds"/>: per chunk of <see cref="ParentChunkSize"/> parents, one
-    /// grouped query over the In Review invoices that are not held. A parent with no such invoice has 0. A Dataverse failure or a
+    /// The live PENDING spend (D-104) of <paramref name="parentIds"/>: per chunk of <see cref="ParentChunkSize"/> parents, two
+    /// grouped queries (the two parts of <see cref="SpendAmount"/>, D-130) over the In Review invoices that are not held. A parent with no such invoice has 0. A Dataverse failure or a
     /// result of a shape <see cref="ReadGroupedSums"/> does not know propagates: pending spend is never read as zero by default.
     /// </summary>
     /// <remarks><b>Call it only with an application identity</b> (ontology-r1 review K2, 2026-10-19). The held exclusion is an
@@ -219,8 +260,7 @@ public static class FinanceBaseValues
         var result = new Dictionary<Guid, decimal>(parentIds.Count);
         foreach (var chunk in parentIds.Distinct().Chunk(ParentChunkSize))
         {
-            var pending = ReadGroupedSums(await entities.RetrieveMultipleAsync(
-                new FetchExpression(BuildGroupedPendingSumFetchXml(parentEntity, chunk)), ct).ConfigureAwait(false));
+            var pending = await ReadSpendPartsAsync(entities, part => BuildGroupedPendingSpendFetchXml(parentEntity, part, chunk), ct).ConfigureAwait(false);
             foreach (var id in chunk)
             {
                 result[id] = pending.GetValueOrDefault(id);
@@ -233,22 +273,52 @@ public static class FinanceBaseValues
     internal const string ParentAlias = "parent";
     internal const string SumAlias = "total";
 
-    /// <summary>The grouped aggregate query: the sum of the invoice amounts (counted statuses only) or of the budget totals,
-    /// grouped by the parent lookup, over the given parents.</summary>
-    internal static string BuildGroupedSumFetchXml(string parentEntity, bool forInvoices, IEnumerable<Guid> parentIds) =>
-        BuildGroupedFetchXml(parentEntity, forInvoices ? InvoiceEntity : BudgetEntity, forInvoices ? InvoiceTotalAmount : BudgetTotalBudget,
-            parentIds, forInvoices ? CountedInvoiceStatuses : null, excludeHeld: false);
+    /// <summary>Runs both parts of <see cref="SpendAmount"/> (<see cref="SpendAmountPartsInReadOrder"/>) and adds them per parent.
+    /// Each result goes through <see cref="ReadGroupedSums"/>, so a row of a shape it does not know throws from either part: a
+    /// half-read spend never comes back as a smaller number.</summary>
+    private static async Task<Dictionary<Guid, decimal>> ReadSpendPartsAsync(
+        IGenericEntityService entities, Func<SpendAmountPart, string> fetchXmlFor, CancellationToken ct)
+    {
+        var total = new Dictionary<Guid, decimal>();
+        foreach (var part in SpendAmountPartsInReadOrder)
+        {
+            var sums = ReadGroupedSums(await entities.RetrieveMultipleAsync(new FetchExpression(fetchXmlFor(part)), ct).ConfigureAwait(false));
+            foreach (var (parent, amount) in sums)
+            {
+                total[parent] = total.GetValueOrDefault(parent) + amount;
+            }
+        }
 
-    /// <summary>The grouped aggregate query for PENDING spend (D-104): the sum of the amounts of the parents' invoices whose status
-    /// is in <see cref="PendingInvoiceStatuses"/> and that are not held (<see cref="HeldSubmissionConditions"/>), grouped by the
-    /// parent lookup.</summary>
-    internal static string BuildGroupedPendingSumFetchXml(string parentEntity, IEnumerable<Guid> parentIds) =>
-        BuildGroupedFetchXml(parentEntity, InvoiceEntity, InvoiceTotalAmount, parentIds, PendingInvoiceStatuses, excludeHeld: true);
+        return total;
+    }
+
+    /// <summary>One grouped aggregate query for counted spend: the <paramref name="part"/> of <see cref="SpendAmount"/> over the
+    /// parents' invoices in <see cref="CountedInvoiceStatuses"/>, grouped by the parent lookup, over the given parents. The two parts
+    /// together are the counted spend (<see cref="ReadAsync"/> adds them).</summary>
+    internal static string BuildGroupedSpendFetchXml(string parentEntity, SpendAmountPart part, IEnumerable<Guid> parentIds) =>
+        BuildGroupedFetchXml(parentEntity, InvoiceEntity, part, parentIds, CountedInvoiceStatuses, excludeHeld: false);
+
+    /// <summary>The grouped aggregate query for the sum of the budget totals, grouped by the parent lookup, over the given parents.</summary>
+    internal static string BuildGroupedBudgetFetchXml(string parentEntity, IEnumerable<Guid> parentIds) =>
+        BuildGroupedFetchXml(parentEntity, BudgetEntity, part: null, parentIds, statuses: null, excludeHeld: false);
+
+    /// <summary>One grouped aggregate query for PENDING spend (D-104): the <paramref name="part"/> of <see cref="SpendAmount"/> over
+    /// the parents' invoices whose status is in <see cref="PendingInvoiceStatuses"/> and that are not held
+    /// (<see cref="HeldSubmissionConditions"/>), grouped by the parent lookup. D-130: the same amount rule as counted spend.</summary>
+    internal static string BuildGroupedPendingSpendFetchXml(string parentEntity, SpendAmountPart part, IEnumerable<Guid> parentIds) =>
+        BuildGroupedFetchXml(parentEntity, InvoiceEntity, part, parentIds, PendingInvoiceStatuses, excludeHeld: true);
 
     private static string BuildGroupedFetchXml(
-        string parentEntity, string entityName, string sumColumn, IEnumerable<Guid> parentIds, IReadOnlyList<int>? statuses, bool excludeHeld)
+        string parentEntity, string entityName, SpendAmountPart? part, IEnumerable<Guid> parentIds, IReadOnlyList<int>? statuses, bool excludeHeld)
     {
         var lookup = ParentLookup(parentEntity);
+        var sumColumn = part switch
+        {
+            null => BudgetTotalBudget,
+            SpendAmountPart.ApprovedTotal => InvoiceApprovedTotal,
+            SpendAmountPart.BilledWhereNoApprovedTotal => InvoiceTotalAmount,
+            _ => throw new ArgumentOutOfRangeException(nameof(part), part, "Unknown spend amount part."),
+        };
         var entity = new XElement("entity", new XAttribute("name", entityName),
             new XElement("attribute",
                 new XAttribute("name", sumColumn),
@@ -257,6 +327,13 @@ public static class FinanceBaseValues
         var filter = new XElement("filter", new XAttribute("type", "and"),
             new XElement("condition", new XAttribute("attribute", lookup), new XAttribute("operator", "in"),
                 parentIds.Select(id => new XElement("value", id.ToString("D", CultureInfo.InvariantCulture)))));
+        if (part is { } p)
+        {
+            // Which half of SpendAmount this query sums: invoices WITH an approved total (sum it) or WITHOUT one (sum the billed total).
+            filter.Add(new XElement("condition", new XAttribute("attribute", InvoiceApprovedTotal),
+                new XAttribute("operator", p == SpendAmountPart.ApprovedTotal ? "not-null" : "null")));
+        }
+
         if (statuses is not null)
         {
             filter.Add(new XElement("condition", new XAttribute("attribute", InvoiceStatusCodeColumn), new XAttribute("operator", "in"),

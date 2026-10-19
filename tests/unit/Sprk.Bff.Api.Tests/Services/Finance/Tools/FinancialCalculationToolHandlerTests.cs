@@ -164,7 +164,8 @@ public class FinancialCalculationToolHandlerTests
         var query = FinancialCalculationToolHandler.BuildInvoiceQuery(lookup, parentId);
 
         query.EntityName.Should().Be("sprk_invoice");
-        query.ColumnSet.Columns.Should().Contain("sprk_totalamount").And.Contain("statuscode");
+        // D-130: the tool's totals follow the rollup's amount rule (approved total, else billed), so both columns are read.
+        query.ColumnSet.Columns.Should().Contain("sprk_totalamount").And.Contain("sprk_approvedtotal").And.Contain("statuscode");
         query.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == lookup && c.Operator == ConditionOperator.Equal)
             .Which.Values.Should().Equal(parentId);
         var status = query.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "statuscode").Subject;

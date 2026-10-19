@@ -10,7 +10,7 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Seam.Signals;
 
 /// <summary>
-/// Real-Dataverse seam for the grouped aggregate the Signal evaluator sends (<see cref="FinanceBaseValues.BuildGroupedSumFetchXml"/>,
+/// Real-Dataverse seam for the grouped aggregate the Signal evaluator sends (<see cref="FinanceBaseValues.BuildGroupedSpendFetchXml"/>,
 /// read back by <see cref="FinanceBaseValues.ReadGroupedSums"/>; task 025b, owner decision D-122). The unit tests build the
 /// FetchXML and feed the reader hand-made rows; only Dataverse can say that this query is accepted, that the alias and group-by
 /// columns come back in the shape the reader expects, and that the counted-status filter selects real <c>statuscode</c> values
@@ -99,7 +99,7 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
 
     /// <summary>
     /// READ-ONLY (049, ontology-r1 review K1): Dataverse accepts both Pending Spend (D-104) query shapes, the aggregate FetchXML
-    /// (<see cref="FinanceBaseValues.BuildGroupedPendingSumFetchXml"/>, with <c>entityname</c> on a root condition inside an
+    /// (<see cref="FinanceBaseValues.BuildGroupedPendingSpendFetchXml"/>, with <c>entityname</c> on a root condition inside an
     /// aggregate) and the rollup's QueryExpression (<see cref="FinanceRollupService.BuildPendingInvoiceQuery"/>), and the reader
     /// reads the result. It creates nothing: the ids belong to no row, so each query must run and return no rows (0, never a throw).
     /// The anti-join semantics are pinned by the unit tests; this proves only that the shapes are accepted.

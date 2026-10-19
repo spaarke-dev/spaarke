@@ -27,7 +27,6 @@ public class FinancialCalculationToolHandler : IAiToolHandler
     // Entity and field constants
     private const string Invoice_Matter = "sprk_matter";
     private const string Invoice_Project = "sprk_project";
-    private const string Invoice_TotalAmount = "sprk_totalamount";
 
     private const string MatterEntity = "sprk_matter";
     private const string ProjectEntity = "sprk_project";
@@ -152,11 +151,7 @@ public class FinancialCalculationToolHandler : IAiToolHandler
 
         foreach (var invoice in invoiceResults.Entities)
         {
-            var amount = invoice.GetAttributeValue<Money>(Invoice_TotalAmount);
-            if (amount != null)
-            {
-                totalSpend += amount.Value;
-            }
+            totalSpend += FinanceBaseValues.SpendAmount(invoice);   // D-130: approved total, else billed total
         }
 
         _logger.LogDebug(
@@ -201,11 +196,7 @@ public class FinancialCalculationToolHandler : IAiToolHandler
 
         foreach (var invoice in invoiceResults.Entities)
         {
-            var amount = invoice.GetAttributeValue<Money>(Invoice_TotalAmount);
-            if (amount != null)
-            {
-                totalSpend += amount.Value;
-            }
+            totalSpend += FinanceBaseValues.SpendAmount(invoice);   // D-130: approved total, else billed total
         }
 
         _logger.LogDebug(
