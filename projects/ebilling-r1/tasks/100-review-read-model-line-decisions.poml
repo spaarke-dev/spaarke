@@ -67,6 +67,11 @@
 - Serialise decisions per invoice (one at a time per invoice). The recorder's "already recorded" check and its create are not atomic (K-4).
 - Build Values the same way on every attempt (same types, same decimal scale), so that an honest retry hashes to the same content (K-5, unless 074's follow-up normalises decimals).</constraint>
     <constraint source="ontology-r1 (2026-10-18), Signal evidence read rule (D-123)">SignalReadService strips text and source from every evidence line that is not a {table}:{guid} witness (fail-closed by design; ontology-r1 will not exempt billing lines). A merged billing Signal therefore reaches a reader with its 2nd and later reasons as bare codes marked withheld. The review page renders each reason's text from its reason code and the catalogue template, using the Signal's own invoice and line facts that the reader may see. It never relies on stored per-reason text. sprk_sentence (the primary sentence) stays readable. A withheld Duplicate reason renders only the withheld template. If stored per-reason text has to be readable as-is, send ontology-r1 a design that makes those lines access-checkable (a witness ref to the invoice or line) before building it.</constraint>
+    <constraint source="owner D-128 / D-129 / D-130 (2026-10-19); ontology-r1 D-130 review">Line decisions drive spend:
+- Counted spend sums the approved total (D-130 (2)). Today nothing recalculates sprk_approvedtotal after submission; IInvoiceTotalsService.RecalculateAsync's only caller is the 049 persister.
+- So every line decision that changes an approved amount (Reduce, Disallow, Accept after a Reduce, bulk and accept-clean) calls RecalculateAsync in the same request, and a test shows sprk_approvedtotal changes.
+- Credit lines: Disallow is allowed (D-128). Reduce is allowed to an amount between the billed credit and 0 (D-129 (3)). Never refuse a line for being negative.
+- The matter and project stored rollup is refreshed by the rollup (FinanceRollupService), not here. Say in the notes when it runs after a decision.</constraint>
   </constraints>
 
   <knowledge>

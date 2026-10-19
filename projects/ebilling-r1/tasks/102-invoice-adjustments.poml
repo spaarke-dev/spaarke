@@ -52,7 +52,7 @@
 - Do not add any refusal of negative lines. D-105 still holds for automatic rules: NonBillableActivity never suggests disallowing a negative amount.
 - A percent adjustment applies to the fee (or expense) base clamped at zero (D-129 (2)): on a net-negative base it adjusts nothing. A fixed adjustment still applies.
 - The FR-32 floor (approved total not below zero) applies only to invoices billed at zero or more; a credit memo has no extra limit (D-129 (1)).
-- Counted spend now sums the approved total (D-130 (2)), so every correction or adjustment that changes sprk_approvedtotal must trigger the totals recalculation (016) as today, and spend follows.
+- Counted spend now sums the approved total (D-130 (2)). Today nothing recalculates sprk_approvedtotal after submission: IInvoiceTotalsService.RecalculateAsync's only caller is the 049 persister. So THIS task must call RecalculateAsync after every write that changes a line's approved amount or an adjustment, and a test must show sprk_approvedtotal changes (ontology-r1 D-130 review).
 See projects/ebilling-r1/notes/049-credit-totals.md.</constraint>
   </constraints>
 

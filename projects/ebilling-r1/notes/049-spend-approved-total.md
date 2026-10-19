@@ -122,3 +122,11 @@ Spend, in the live Threshold input and in the stored `sprk_totalspendtodate`, is
 ## Live check (main session, 2026-10-19)
 
 The read-only seam case `FinanceBaseValuesSeamTests.PendingSpendQueries_AreAcceptedByDataverse_ReadOnly` now also sends `FinanceBaseValues.ReadAsync` (both counted parts plus the budget query). It passed against spaarkedev1, run as the operator with ids that match no row; it creates nothing. Dataverse accepts `null` / `not-null` on `sprk_approvedtotal` inside the grouped aggregates, for both counted spend and Pending Spend, on matter and project. The real-row semantic case still creates rows, so running it needs the owner's OK.
+
+## Who keeps sprk_approvedtotal current (ontology-r1 review, 2026-10-19)
+
+D-130's promise that reviewer disallowances, reductions and credit memos lower spend holds only once the reviewer write paths recalculate totals. Today `IInvoiceTotalsService.RecalculateAsync` has one caller, the 049 persister at submission. The pending tasks own the other callers, and their POMLs now carry this as a tested constraint:
+- 100: line decisions (Reduce, Disallow, bulk, accept-clean);
+- 101: corrections;
+- 102: adjustments.
+None is built yet, so nothing is wrong in shipped code. Until they land, the approved total equals the submission-time total. The stored matter and project spend follows at the next rollup.
