@@ -390,7 +390,11 @@ public class ADR010_DITests
         // IEbillingNotificationSink -> NoOpEbillingNotificationSink. Seam justification: task 132 replaces the no-op with a job-enqueuing sink
         // (recipients, email, SPA feed, approver in-app), and 049's processor tests fake the seam. Falsifiable: if 132 is dropped, register the
         // concrete and lower this back to 166. The 049 processor (part B) may add its own entry; sum the raises at merge.
-        const int knownOneToOneCeiling = 167;
+        // ───────── Ceiling RAISED 167 → 168, 2026-10-19 (ebilling-r1 task 049 part C; +1 interface) ─────────
+        // IInvoiceSubmissionPersister -> InvoiceSubmissionPersister. Seam justification: part E's handler tests fake persistence (the commit,
+        // retry, re-evaluate and resume branches) the same way they fake IInvoiceSubmissionProcessor, without a Dataverse transaction double.
+        // Falsifiable: if the handler tests drive the real persister over a fake IGenericEntityService, register the concrete and lower to 167.
+        const int knownOneToOneCeiling = 168;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

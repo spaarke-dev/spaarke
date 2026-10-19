@@ -451,11 +451,11 @@ public class InvoiceSubmissionProcessorTests
 
     // ── builders ──
 
-    private static BillingRuleCandidate InvoiceAgeReject() => Version("BILL-AGE", RuleType.InvoiceAge) with { Consequence = Reject };
+    internal static BillingRuleCandidate InvoiceAgeReject() => Version("BILL-AGE", RuleType.InvoiceAge) with { Consequence = Reject };
 
-    private static ExtractedInvoiceField<T> F<T>(T value, decimal? confidence = 0.99m) => new() { Value = value, Confidence = confidence, Page = 1 };
+    internal static ExtractedInvoiceField<T> F<T>(T value, decimal? confidence = 0.99m) => new() { Value = value, Confidence = confidence, Page = 1 };
 
-    private static ExtractedInvoiceLine FeeLine(DateOnly? date = null, decimal hours = 1.5m, decimal amount = 750m) => new()
+    internal static ExtractedInvoiceLine FeeLine(DateOnly? date = null, decimal hours = 1.5m, decimal amount = 750m) => new()
     {
         LineType = InvoiceLineType.Fee,
         RowIndex = 0,
@@ -473,7 +473,7 @@ public class InvoiceSubmissionProcessorTests
         ExpenseCodeAsBilled = F<string?>(null, null),
     };
 
-    private sealed class Harness
+    internal sealed class Harness
     {
         public IReadOnlyList<BillingRuleCandidate> Rules { get; init; } = [];
         public InvoiceSubmissionChannel Channel
@@ -591,7 +591,7 @@ public class InvoiceSubmissionProcessorTests
     }
 
     /// <summary>046 at its interface: combined confidence = the analyzer confidence (0 when none), every timekeeper matched unless told otherwise.</summary>
-    private sealed class FakeResolution : IInvoiceResolutionService
+    internal sealed class FakeResolution : IInvoiceResolutionService
     {
         private static readonly Guid MatchedTimekeeper = Guid.Parse("04900000-0000-4000-8000-0000000000c1");
 
@@ -658,7 +658,7 @@ public class InvoiceSubmissionProcessorTests
     }
 
     /// <summary>047 at its interface: one Coded result per line under a firm code set, with the configured observations.</summary>
-    private sealed class FakeCoding : ILineCodingService
+    internal sealed class FakeCoding : ILineCodingService
     {
         public LineCodingRequest? Request { get; private set; }
 

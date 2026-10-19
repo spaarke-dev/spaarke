@@ -280,6 +280,10 @@ public class RecordOwnerAssignmentCensusTests
     {
         new UnscannedWriter("InvoiceReviewService.cs", "document re-file under the new invoice",
             "Linking the document is a reparent (task 146); the invoice's own create-by-upsert is a census site (b2)."),
+        new UnscannedWriter("InvoiceSubmissionPersister.cs",
+            "transaction CreateRequests of sprk_invoice (via 014's BuildCreateRequest), sprk_billingevent and sprk_invoiceapproval rows built with deterministic ids",
+            "ebilling-r1 task 049 part C: ResolveOwnerAsync ForParents over the submission's one core record (secure-if-any), applied with "
+            + "RecordOwnerResolution.ApplyTo to every row; an unresolved owner refuses before the transaction, so nothing is created."),
         new UnscannedWriter("SpendSnapshotService.cs", "keyed UpsertRequest (sprk_spendsnapshot)",
             "Owned by the parent matter/project's team; a refusal skips the snapshot."),
         new UnscannedWriter("ExternalProjectDataEndpoints.cs", "Web API POST to a computed URL (document, event, to-do)",

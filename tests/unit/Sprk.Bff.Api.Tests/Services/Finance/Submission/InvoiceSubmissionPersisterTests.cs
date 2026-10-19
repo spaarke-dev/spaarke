@@ -1,0 +1,541 @@
+using System.Text.Json;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
+using Microsoft.Xrm.Sdk.Query;
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Coding;
+using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
+using Xunit;
+using static Sprk.Bff.Api.Tests.Domain.Signals.Billing.BillingEvaluationKit;
+using ProcessorHarness = Sprk.Bff.Api.Tests.Services.Finance.Submission.InvoiceSubmissionProcessorTests.Harness;
+
+namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
+
+/// <summary>
+/// ebilling-r1 task 049 part C: step 6, all-or-nothing persistence (<see cref="InvoiceSubmissionPersister"/>). The outcomes are produced by the
+/// real processor (part B harness: real 072 evaluation and 073 decision); Dataverse is a strict double, so any write outside the one
+/// transaction fails the test.
+/// </summary>
+public class InvoiceSubmissionPersisterTests
+{
+    private static readonly Guid Submission = Guid.Parse("04900000-0000-4000-8000-0000000000b1");
+    private static readonly Guid Matter = Guid.Parse("04900000-0000-4000-8000-0000000000a1");
+    private static readonly Guid Project = Guid.Parse("04900000-0000-4000-8000-0000000000a2");
+    private static readonly Guid Document = Guid.Parse("04900000-0000-4000-8000-0000000000d1");
+    private static readonly Guid Firm = Guid.Parse("04900000-0000-4000-8000-0000000000f1");
+    private static readonly Guid TeamId = Guid.Parse("04900000-0000-4000-8000-0000000000e7");
+    private static readonly Guid RecordTypeId = Guid.Parse("04900000-0000-4000-8000-0000000000e8");
+
+    private static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(Submission);
+
+    // ── the four persisted kinds ──
+
+    [Fact(DisplayName = "049 C: Accepted is ONE transaction: invoice (In Review), lines, approval, document link, submission update")]
+    public async Task Accepted_IsOneTransaction_WithEveryRow()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Accepted);
+        var store = new Store();
+
+        var result = await store.Build().PersistAsync(outcome, "corr-1");
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        result.InvoiceId.Should().Be(InvoiceId);
+        result.LineIds.Should().Equal(new Dictionary<int, Guid> { [0] = InvoiceSubmissionPersister.LineIdFor(Submission, 0) });
+        result.ApprovalId.Should().Be(InvoiceSubmissionPersister.ApprovalIdFor(Submission));
+        store.Transactions.Should().ContainSingle("FR-20: everything in one transaction");
+
+        var requests = store.Transactions[0];
+        requests.Select(Describe).Should().Equal(
+            "Create sprk_invoice", "Create sprk_billingevent", "Create sprk_invoiceapproval", "Update sprk_document", "Update sprk_invoicesubmission");
+
+        var invoice = Target(requests[0]);
+        invoice.Id.Should().Be(InvoiceId);
+        invoice.GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(0);
+        invoice.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview, "status only through 014");
+        invoice.GetAttributeValue<string>("sprk_trackingnumber").Should().Be("INV-100.2", "D-124: the tracking number is copied from the submission");
+        invoice.GetAttributeValue<string>("sprk_invoicenumber").Should().Be("INV-100", "the firm number as typed (D-91)");
+        invoice.GetAttributeValue<EntityReference>("sprk_vendororg").Id.Should().Be(Firm);
+        invoice.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(Matter, "filed under the core record that was judged");
+        invoice.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(Matter.ToString("D"));
+        invoice.GetAttributeValue<EntityReference>("sprk_regardingrecordtype").Id.Should().Be(RecordTypeId);
+        invoice.GetAttributeValue<string>("sprk_correlationid").Should().Be("corr-1");
+        invoice.GetAttributeValue<EntityReference>("sprk_document").Id.Should().Be(Document);
+        invoice.GetAttributeValue<Money>("sprk_totalamount").Value.Should().Be(750m);
+
+        var line = Target(requests[1]);
+        line.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId);
+        line.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(Matter, "D-75: the line's own core lookup");
+        line.GetAttributeValue<int>("sprk_linesequence").Should().Be(1);
+        line.GetAttributeValue<OptionSetValue>("sprk_costtype").Value.Should().Be(InvoiceSubmissionPersister.CostTypeFee);
+        line.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be(InvoiceSubmissionPersister.LineStatusPending);
+        line.GetAttributeValue<Money>("sprk_amount").Value.Should().Be(750m);
+        line.GetAttributeValue<decimal>("sprk_quantity").Should().Be(1.5m, "a fee line's hours");
+        line.GetAttributeValue<string>("sprk_timekeeper").Should().Be("Jane Smith");
+        line.GetAttributeValue<EntityReference>("sprk_resolvedtimekeeper").Should().NotBeNull();
+        line.GetAttributeValue<Money>("sprk_approvedrate").Value.Should().Be(500m);
+        line.GetAttributeValue<decimal>("sprk_codingconfidence").Should().Be(0.95m);
+        line.GetAttributeValue<string>("sprk_taskcodeasbilled").Should().Be("L110");
+        using (var confidence = JsonDocument.Parse(line.GetAttributeValue<string>("sprk_extractionconfidence")))
+        {
+            var coding = confidence.RootElement.GetProperty("coding");
+            coding.GetProperty("codeSetSource").GetString().Should().Be(nameof(CodeSetSource.FirmCodes), "047/048 review: stored with the line");
+            coding.GetProperty("needsReview").GetBoolean().Should().BeFalse();
+            confidence.RootElement.GetProperty("fields").GetProperty("Hours").GetProperty("page").GetInt32().Should().Be(1);
+        }
+
+        var approval = Target(requests[2]);
+        approval.GetAttributeValue<OptionSetValue>("sprk_approvalstatus").Value.Should().Be(InvoiceSubmissionPersister.ApprovalStatusPending);
+        approval.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId);
+        approval.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(Matter);
+        approval.Attributes.Keys.Should().NotContain(k => k.Contains("approver"), "approvers are 103's");
+
+        var document = Target(requests[3]);
+        document.Id.Should().Be(Document);
+        document.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId);
+
+        var submission = Target(requests[4]);
+        submission.Id.Should().Be(Submission);
+        submission.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId, "the link is the commit marker");
+        submission.GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value.Should().Be((int)InvoiceSubmissionStatus.Accepted);
+        submission["sprk_outcomereasoncode"].Should().BeNull();
+        using (var findings = JsonDocument.Parse(submission.GetAttributeValue<string>("sprk_findingsjson")))
+        {
+            findings.RootElement.GetProperty("invoiceId").GetString().Should().Be(InvoiceId.ToString("D"));
+            findings.RootElement.GetProperty("decision").GetProperty("outcome").GetString().Should().Be("Accepted");
+        }
+
+        store.TotalsCalls.Should().Equal(InvoiceId);
+    }
+
+    [Fact(DisplayName = "049 C (D-101): AutoRejected creates the invoice Rejected through 014, no approval; the submission is Rejected with the deciding code and the findings")]
+    public async Task AutoRejected_InvoiceRejected_FindingsOnTheSubmission_NoApproval()
+    {
+        var harness = new ProcessorHarness { Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()] };
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20))];
+        var outcome = await harness.RunAsync();
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AutoRejected);
+        var store = new Store();
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        result.ApprovalId.Should().BeNull();
+        var requests = store.Transactions.Should().ContainSingle().Subject;
+        requests.Select(Describe).Should().NotContain("Create sprk_invoiceapproval");
+        var invoice = Target(requests[0]);
+        invoice.GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(1);
+        invoice.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.Rejected);
+
+        var submission = Target(requests[^1]);
+        submission.GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value.Should().Be((int)InvoiceSubmissionStatus.Rejected);
+        submission.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(outcome.ReasonCode).And.NotBeNullOrEmpty();
+        submission.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(InvoiceId, "the findings and the invoice are linked to each other");
+        using var findings = JsonDocument.Parse(submission.GetAttributeValue<string>("sprk_findingsjson"));
+        var deciding = findings.RootElement.GetProperty("findings").EnumerateArray().Should().ContainSingle(f => f.GetProperty("rejects").GetBoolean()).Subject;
+        deciding.GetProperty("reasonCode").GetString().Should().Be(outcome.ReasonCode);
+        deciding.GetProperty("policyVersionId").GetString().Should().NotBeNullOrEmpty();
+        deciding.GetProperty("valuesRead").GetArrayLength().Should().BeGreaterThan(0);
+        findings.RootElement.GetProperty("invoiceId").GetString().Should().Be(InvoiceId.ToString("D"));
+    }
+
+    [Fact(DisplayName = "049 C (D-101): Blocked creates the invoice In Review (held) with its approval; the submission is Rejected + ebilling.submission.blocked")]
+    public async Task Blocked_InvoiceInReview_SubmissionRejectedBlocked()
+    {
+        var harness = new ProcessorHarness { Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()], Channel = InvoiceSubmissionChannel.Internal };
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20))];
+        var outcome = await harness.RunAsync();
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Blocked);
+        var store = new Store();
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var requests = store.Transactions.Should().ContainSingle().Subject;
+        Target(requests[0]).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
+        requests.Select(Describe).Should().Contain("Create sprk_invoiceapproval");
+        var submission = Target(requests[^1]);
+        submission.GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value.Should().Be(100000003);
+        submission.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(SubmissionReasonCodes.Blocked);
+    }
+
+    [Fact(DisplayName = "049 C (D-126): read but not coded -> invoice In Review, lines uncoded, approval, submission Accepted, hold finding stored")]
+    public async Task AcceptedUncoded_InvoiceHeld_LinesUncoded()
+    {
+        var harness = new ProcessorHarness();
+        harness.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
+        var outcome = await harness.RunAsync();
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AcceptedUncoded);
+        var store = new Store();
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var requests = store.Transactions.Should().ContainSingle().Subject;
+        Target(requests[0]).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
+        var line = Target(requests[1]);
+        line.Attributes.Should().NotContainKey("sprk_codingconfidence", "the lines are uncoded");
+        using (var confidence = JsonDocument.Parse(line.GetAttributeValue<string>("sprk_extractionconfidence")))
+        {
+            confidence.RootElement.GetProperty("coding").GetProperty("status").GetString().Should().Be("NotCoded");
+            confidence.RootElement.GetProperty("coding").GetProperty("hold").GetString().Should().Be(SubmissionReasonCodes.CodingNoCodeSetHold);
+        }
+
+        requests.Select(Describe).Should().Contain("Create sprk_invoiceapproval");
+        var submission = Target(requests[^1]);
+        submission.GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value.Should().Be((int)InvoiceSubmissionStatus.Accepted);
+        using var findings = JsonDocument.Parse(submission.GetAttributeValue<string>("sprk_findingsjson"));
+        findings.RootElement.GetProperty("pipelineFindings").EnumerateArray()
+            .Select(f => f.GetProperty("reasonCode").GetString()).Should().Contain(SubmissionReasonCodes.CodingNoCodeSetHold);
+    }
+
+    // ── line rows ──
+
+    [Fact(DisplayName = "049 C (D-121): a credit line keeps its negative amount and hours")]
+    public async Task CreditLine_IsStoredNegative()
+    {
+        var harness = new ProcessorHarness();
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(), InvoiceSubmissionProcessorTests.FeeLine(hours: -1m, amount: -500m)];
+        var outcome = await harness.RunAsync();
+        var store = new Store();
+
+        await store.Build().PersistAsync(outcome, null);
+
+        var credit = Target(store.Transactions.Single()[2]);
+        credit.GetAttributeValue<int>("sprk_linesequence").Should().Be(2);
+        credit.GetAttributeValue<Money>("sprk_amount").Value.Should().Be(-500m);
+        credit.GetAttributeValue<decimal>("sprk_quantity").Should().Be(-1m);
+        Target(store.Transactions.Single()[0]).GetAttributeValue<Money>("sprk_totalamount").Value.Should().Be(250m, "the billed total is signed");
+    }
+
+    [Fact(DisplayName = "049 C: a line with a finding is Flagged")]
+    public async Task LineWithAFinding_IsFlagged()
+    {
+        var harness = new ProcessorHarness { Rules = [Version("BILL-AI", RuleType.AiObservation)] };
+        harness.Coding.Observations = [new InvoiceLineObservation { Type = InvoiceLineObservationType.BlockBilling, Confidence = 0.99m, QuotedText = "x" }];
+        var outcome = await harness.RunAsync();
+        outcome.Evaluation!.Findings.Should().Contain(f => f.Subject.Kind == BillingSubjectKind.Line && f.Subject.LineIndex == 0);
+        var store = new Store();
+
+        await store.Build().PersistAsync(outcome, null);
+
+        Target(store.Transactions.Single()[1]).GetAttributeValue<OptionSetValue>("sprk_linestatus").Value
+            .Should().Be(InvoiceSubmissionPersister.LineStatusFlagged);
+    }
+
+    // ── owner ──
+
+    [Fact(DisplayName = "049 C (uac-r2): the owner is resolved once from the core record and applied to every created row")]
+    public async Task Owner_IsResolvedFromTheCoreRecord_OnEveryRow()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store();
+
+        await store.Build().PersistAsync(outcome, null);
+
+        store.OwnerContexts.Should().ContainSingle().Which.Parents.Should().Equal(new RecordOwnershipParent("sprk_matter", Matter));
+        foreach (var create in store.Transactions.Single().OfType<CreateRequest>())
+        {
+            create.Target.GetAttributeValue<EntityReference>("ownerid").Should().Be(new EntityReference("team", TeamId), create.Target.LogicalName);
+        }
+    }
+
+    [Fact(DisplayName = "049 C: an owner that cannot be resolved refuses before any write")]
+    public async Task OwnerRefused_RefusesBeforeAnyWrite()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { Owner = RecordOwnerResolution.Refused("record_owner_parent_undetermined", "no") };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be("record_owner_parent_undetermined");
+        store.Transactions.Should().BeEmpty();
+    }
+
+    // ── faults ──
+
+    [Fact(DisplayName = "049 C (FR-20): a fault at the line request persists nothing and leaves the submission for retry, never Accepted")]
+    public async Task FaultAtTheLineRequest_PersistsNothing_Retry()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { TransactionFault = new DataverseTransactionException("line refused", failedRequestIndex: 1, outcomeUnknown: false, null) };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Retry);
+        result.ReasonCode.Should().Be(InvoiceSubmissionPersister.TransactionFailedCode);
+        result.InvoiceId.Should().BeNull("nothing was committed");
+        Describe(store.Transactions.Single()[1]).Should().Be("Create sprk_billingevent", "the fault named the line request");
+        store.TotalsCalls.Should().BeEmpty();
+        store.Submission.Attributes.Should().NotContainKey("sprk_invoice");
+        store.Submission.GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value.Should().Be((int)InvoiceSubmissionStatus.Processing,
+            "the strict double proves no write outside the failed transaction");
+    }
+
+    [Fact(DisplayName = "049 C: an unknown outcome whose re-read shows the link is committed (resume), with the totals")]
+    public async Task OutcomeUnknown_Linked_IsCommitted()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store
+        {
+            TransactionFault = new DataverseTransactionException("timeout", null, outcomeUnknown: true, new TimeoutException()),
+            CommitDespiteFault = true,
+        };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        result.InvoiceId.Should().Be(InvoiceId);
+        result.LineIds.Should().ContainKey(0);
+        store.TotalsCalls.Should().Equal(InvoiceId);
+        store.Transactions.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "049 C: an unknown outcome whose re-read shows no link is a retry, nothing assumed")]
+    public async Task OutcomeUnknown_NotLinked_IsRetry()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { TransactionFault = new DataverseTransactionException("timeout", null, outcomeUnknown: true, new TimeoutException()) };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Retry);
+        result.ReasonCode.Should().Be(InvoiceSubmissionPersister.TransactionOutcomeUnknownCode);
+        result.InvoiceId.Should().BeNull();
+        store.TotalsCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 C (016): a totals failure after the commit is a retry that resumes, never a second invoice")]
+    public async Task TotalsFailure_AfterCommit_RetryResumes_NoSecondInvoice()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { TotalsFault = new InvalidOperationException("totals down") };
+
+        var first = await store.Build().PersistAsync(outcome, null);
+        store.TotalsFault = null;
+        var second = await store.Build().PersistAsync(outcome, null);
+
+        first.Status.Should().Be(SubmissionPersistStatus.Retry);
+        first.ReasonCode.Should().Be(InvoiceSubmissionPersister.TotalsFailedCode);
+        first.InvoiceId.Should().Be(InvoiceId, "the invoice was committed");
+        second.Status.Should().Be(SubmissionPersistStatus.Resumed);
+        second.InvoiceId.Should().Be(InvoiceId);
+        store.Transactions.Should().ContainSingle("the retry resumes from the link and creates nothing");
+        store.TotalsCalls.Should().Equal(InvoiceId, InvoiceId);
+    }
+
+    // ── re-check and resume ──
+
+    [Fact(DisplayName = "049 C (072 part L): a core record changed since the evaluation is re-evaluated, never persisted")]
+    public async Task CoreRecordChanged_ReEvaluates_PersistsNothing()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store();
+        store.Submission.Attributes.Remove("sprk_regardingmatter");
+        store.Submission["sprk_regardingproject"] = new EntityReference("sprk_project", Project);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.ReEvaluate);
+        result.CurrentSubmission!.GetAttributeValue<EntityReference>("sprk_regardingproject").Id.Should().Be(Project);
+        store.Transactions.Should().BeEmpty();
+        store.OwnerContexts.Should().BeEmpty();
+        store.TotalsCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 C (NFR-08): a submission already linked creates no rows and returns the stored invoice and line ids")]
+    public async Task AlreadyLinked_CreatesNothing_ReturnsStoredIds()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var storedInvoice = Guid.NewGuid();
+        var storedLine = Guid.NewGuid();
+        var store = new Store();
+        store.Submission["sprk_invoice"] = new EntityReference("sprk_invoice", storedInvoice);
+        store.StoredLines.Add(new Entity("sprk_billingevent", storedLine) { ["sprk_linesequence"] = 1 });
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Resumed);
+        result.InvoiceId.Should().Be(storedInvoice);
+        result.LineIds.Should().Equal(new Dictionary<int, Guid> { [0] = storedLine });
+        store.Transactions.Should().BeEmpty();
+        store.TotalsCalls.Should().Equal(storedInvoice);
+    }
+
+    [Fact(DisplayName = "049 C: a deleted submission is SubmissionMissing with nothing written")]
+    public async Task MissingSubmission_WritesNothing()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { SubmissionDeleted = true };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.SubmissionMissing);
+        store.Transactions.Should().BeEmpty();
+    }
+
+    // ── contract ──
+
+    [Fact(DisplayName = "049 C (D-101): a Failed or RejectedUnreadable outcome is never persisted")]
+    public async Task NotReadOutcome_IsACallerError()
+    {
+        var store = new Store();
+        var failed = new SubmissionEvaluationOutcome { Kind = SubmissionEvaluationKind.Failed, SubmissionId = Submission, ReasonCode = "x" };
+        var unreadable = new SubmissionEvaluationOutcome { Kind = SubmissionEvaluationKind.RejectedUnreadable, SubmissionId = Submission, ReasonCode = "y" };
+
+        await FluentActions.Invoking(() => store.Build().PersistAsync(failed, null)).Should().ThrowAsync<ArgumentException>();
+        await FluentActions.Invoking(() => store.Build().PersistAsync(unreadable, null)).Should().ThrowAsync<ArgumentException>();
+        store.Transactions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 C: ids are deterministic per submission, so a retry reuses them")]
+    public void Ids_AreDeterministic()
+    {
+        InvoiceSubmissionPersister.InvoiceIdFor(Submission).Should().Be(InvoiceSubmissionPersister.InvoiceIdFor(Submission));
+        InvoiceSubmissionPersister.InvoiceIdFor(Submission).Should().NotBe(InvoiceSubmissionPersister.InvoiceIdFor(Guid.NewGuid()));
+        InvoiceSubmissionPersister.LineIdFor(Submission, 0).Should().NotBe(InvoiceSubmissionPersister.LineIdFor(Submission, 1));
+        new[] { InvoiceSubmissionPersister.InvoiceIdFor(Submission), InvoiceSubmissionPersister.LineIdFor(Submission, 0), InvoiceSubmissionPersister.ApprovalIdFor(Submission) }
+            .Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact(DisplayName = "049 C (D-112): a withheld finding's group stores no values read")]
+    public async Task WithheldFinding_StoresNoValuesRead()
+    {
+        var harness = new ProcessorHarness { Rules = [Version("BILL-AI", RuleType.AiObservation)] };
+        harness.Coding.Observations = [new InvoiceLineObservation { Type = InvoiceLineObservationType.BlockBilling, Confidence = 0.99m, QuotedText = "x" }];
+        var outcome = await harness.RunAsync();
+        var withheld = outcome with
+        {
+            Evaluation = outcome.Evaluation! with { Findings = [.. outcome.Evaluation.Findings.Select(f => f with { DetailWithheld = true })] },
+        };
+
+        using var visible = JsonDocument.Parse(InvoiceSubmissionPersister.BuildFindingsJson(outcome, InvoiceId));
+        using var hidden = JsonDocument.Parse(InvoiceSubmissionPersister.BuildFindingsJson(withheld, InvoiceId));
+
+        visible.RootElement.GetProperty("findings")[0].TryGetProperty("valuesRead", out _).Should().BeTrue("must-not-fire: a visible finding keeps its values");
+        hidden.RootElement.GetProperty("findings")[0].TryGetProperty("valuesRead", out _).Should().BeFalse();
+        hidden.RootElement.GetProperty("findings")[0].GetProperty("detailWithheld").GetBoolean().Should().BeTrue();
+    }
+
+    // ── harness ──
+
+    private static Entity Target(OrganizationRequest request) => request switch
+    {
+        CreateRequest c => c.Target,
+        UpdateRequest u => u.Target,
+        _ => throw new InvalidOperationException(request.GetType().Name),
+    };
+
+    private static string Describe(OrganizationRequest request) =>
+        $"{request.GetType().Name.Replace("Request", string.Empty)} {Target(request).LogicalName}";
+
+    private sealed class Store
+    {
+        public Entity Submission { get; } = new("sprk_invoicesubmission", InvoiceSubmissionPersisterTests.Submission)
+        {
+            ["sprk_trackingnumber"] = "INV-100.2",
+            ["sprk_submissionsequence"] = 2,
+            ["sprk_firminvoicenumber"] = "INV-100",
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", Firm),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Matter),
+            ["sprk_document"] = new EntityReference("sprk_document", Document),
+            ["createdon"] = new DateTime(2026, 6, 5, 23, 30, 0, DateTimeKind.Utc),
+            ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Spa),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Processing),
+        };
+
+        public List<Entity> StoredLines { get; } = [];
+        public List<IReadOnlyList<OrganizationRequest>> Transactions { get; } = [];
+        public List<Guid> TotalsCalls { get; } = [];
+        public List<RecordOwnershipContext> OwnerContexts { get; } = [];
+        public Exception? TransactionFault { get; init; }
+        public bool CommitDespiteFault { get; init; }
+        public Exception? TotalsFault { get; set; }
+        public bool SubmissionDeleted { get; init; }
+        public RecordOwnerResolution Owner { get; init; } = RecordOwnerResolution.Owned(TeamId);
+
+        public InvoiceSubmissionPersister Build()
+        {
+            var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+            entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) => entity switch
+                {
+                    "sprk_invoicesubmission" when SubmissionDeleted => throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"),
+                    "sprk_invoicesubmission" => Copy(Submission),
+                    _ => new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = "M-1" },
+                });
+            entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => new EntityCollection(StoredLines));
+            entities.Setup(e => e.ExecuteTransactionAsync(It.IsAny<IReadOnlyList<OrganizationRequest>>(), It.IsAny<CancellationToken>()))
+                .Returns((IReadOnlyList<OrganizationRequest> requests, CancellationToken _) =>
+                {
+                    Transactions.Add(requests);
+                    if (TransactionFault is null || CommitDespiteFault)
+                    {
+                        Apply(requests);
+                    }
+
+                    return TransactionFault is null ? Task.CompletedTask : Task.FromException(TransactionFault);
+                });
+
+            var recordTypes = new Mock<ICommunicationDataverseService>();
+            recordTypes.Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Entity("sprk_recordtype_ref", RecordTypeId) { [RegardingRecordType.RecordNumberFieldColumn] = "sprk_matternumber" });
+
+            var ownership = new Mock<IRecordOwnershipResolver>(MockBehavior.Strict);
+            ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+                .Callback((RecordOwnershipContext context, CancellationToken _) => OwnerContexts.Add(context))
+                .ReturnsAsync(() => Owner);
+
+            var totals = new Mock<IInvoiceTotalsService>(MockBehavior.Strict);
+            totals.Setup(t => t.RecalculateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .Returns((Guid invoiceId, CancellationToken _) =>
+                {
+                    TotalsCalls.Add(invoiceId);
+                    return TotalsFault is { } fault
+                        ? Task.FromException<InvoiceTotalsCalculation>(fault)
+                        : Task.FromResult(new InvoiceTotalsCalculation(0m, 0m, 0m, 0m, 0m, new Dictionary<Guid, decimal>(), null));
+                });
+
+            return new InvoiceSubmissionPersister(
+                entities.Object,
+                recordTypes.Object,
+                ownership.Object,
+                new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance),
+                totals.Object,
+                NullLogger<InvoiceSubmissionPersister>.Instance);
+        }
+
+        /// <summary>The committed transaction's effect on the submission row (the only row a later read looks at).</summary>
+        private void Apply(IReadOnlyList<OrganizationRequest> requests)
+        {
+            foreach (var update in requests.OfType<UpdateRequest>().Where(u => u.Target.LogicalName == "sprk_invoicesubmission"))
+            {
+                foreach (var (column, value) in update.Target.Attributes)
+                {
+                    Submission[column] = value;
+                }
+            }
+        }
+
+        private static Entity Copy(Entity row)
+        {
+            var copy = new Entity(row.LogicalName, row.Id);
+            foreach (var (column, value) in row.Attributes)
+            {
+                copy[column] = value;
+            }
+
+            return copy;
+        }
+    }
+}
