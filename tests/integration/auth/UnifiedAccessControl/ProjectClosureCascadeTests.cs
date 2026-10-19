@@ -1214,6 +1214,33 @@ public class ProjectClosureCascadeTests
     }
 
     /// <summary>
+    /// #2104 round 2 (F1): a partial revocation whose container is proven clean reports it cleared with nothing left
+    /// over: no oversized organization and no uncleared grantee beside <c>containerCleared: true</c>, which would
+    /// contradict it.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_PartialRevocation_OversizedOrganizationButTheContainerProvenClean_ReportsNothingUncleared()
+    {
+        var table = new FakeGrantTable();
+        table.SeedOrganizationGrant(OrganizationId, ProjectId).StateCode = 1;
+        var stubborn = table.SeedContactGrant(ContactId, ProjectId);
+        table.FailDeactivationFor.Add(stubborn.Id);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+        ArrangeOversizedOrganization(client);
+
+        var problem = Problem(await CloseProject(client,
+            spe: SpeAnswering(_ => Removed, new(), noContactPermissionRemains: true),
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer)));
+
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosurePartialRevocationReason);
+        problem.ProblemDetails.Extensions["containerCleared"].Should().Be(true);
+        problem.ProblemDetails.Extensions["organizationsTooLarge"].Should().Be(0);
+        problem.ProblemDetails.Extensions["granteesNotCleared"].Should().Be(0);
+        problem.ProblemDetails.Detail.Should().Contain("confirmed removed");
+    }
+
+    /// <summary>
     /// #2104: a revoked project whose container cannot be determined, retried: the grantees revoked earlier may still
     /// be on it, so the retry is not a 200. A project that never had a grant has nobody to clear, wherever its container
     /// is: 200.

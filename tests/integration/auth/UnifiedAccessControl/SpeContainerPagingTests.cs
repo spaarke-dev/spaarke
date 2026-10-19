@@ -820,21 +820,46 @@ public class SpeContainerPagingTests
     }
 
     /// <summary>F1: an INCOMPLETE read proves nothing about the unread tail — never "none remains", even when every
-    /// permission it did see is marker-owned.</summary>
+    /// permission it did see is accounted for: the contact's own (removed here) and marker-owned ones (the key's match
+    /// makes the markers read).</summary>
     [Fact]
     public async Task RemoveMemberships_Confirming_OnAnIncompleteRead_NeverReportsNoneRemains()
     {
         var pages = Enumerable
             .Range(0, SpeContainerMembershipService.MaxPermissionPages + 2)
-            .Select(i => Page(NextLink, UserPermission($"perm-{i}", $"writer{i}@spaarke.example")))
+            .Select(i => i == 0
+                ? Page(NextLink, UserPermission("perm-a", "a@client-firm.com"), UserPermission($"perm-{i}", $"writer{i}@spaarke.example"))
+                : Page(NextLink, UserPermission($"perm-{i}", $"writer{i}@spaarke.example")))
             .ToArray();
         var markers = Enumerable.Range(0, SpeContainerMembershipService.MaxPermissionPages + 2)
             .ToDictionary(i => $"{SpeContainerMembershipService.JitWriterMarkerPrefix}{Guid.NewGuid():N}", i => $"perm-{i}");
+        var adapter = new ScriptedPermissionAdapter(pages, markers: markers);
 
-        var removal = await ServiceOver(new ScriptedPermissionAdapter(pages, markers: markers))
-            .RemoveMembershipsAsync(ContainerId, [], NoInternalUsers, confirmNoContactPermission: true);
+        var removal = await ServiceOver(adapter)
+            .RemoveMembershipsAsync(ContainerId, Keys("a@client-firm.com"), NoInternalUsers, confirmNoContactPermission: true);
 
-        removal.NoContactPermissionRemains.Should().BeFalse();
+        adapter.MarkerReadCount.Should().Be(1, "precondition: every permission seen is marker-owned or the contact's");
+        adapter.DeletedUrls.Should().ContainSingle().Which.Should().Contain("perm-a");
+        removal.NoContactPermissionRemains.Should().BeFalse("the unread tail may hold a contact permission");
+    }
+
+    /// <summary>F1: a contact permission whose DELETE failed is still on the container — never "none remains".</summary>
+    [Fact]
+    public async Task RemoveMemberships_Confirming_WhenTheContactsDeleteFails_NeverReportsNoneRemains()
+    {
+        var adapter = new ScriptedPermissionAdapter(
+            [Page(null,
+                UserPermission("perm-jit", "internal.user@spaarke.example", userId: InternalUserId),
+                UserPermission("perm-a", "a@client-firm.com"))],
+            markers: JitMarkerFor("perm-jit"),
+            deleteFailure: new InvalidOperationException("Graph refused the delete"));
+
+        var removal = await ServiceOver(adapter)
+            .RemoveMembershipsAsync(ContainerId, Keys("a@client-firm.com"), NoInternalUsers, confirmNoContactPermission: true);
+
+        adapter.DeletedUrls.Should().ContainSingle().Which.Should().Contain("perm-a");
+        removal.Results[Key("a@client-firm.com")].Success.Should().BeFalse();
+        removal.NoContactPermissionRemains.Should().BeFalse("the contact's permission was not removed");
     }
 
     /// <summary>F1: the contact's own permission was the only unmanaged one, and this call removed it — none remains.</summary>
@@ -942,20 +967,24 @@ public class SpeContainerPagingTests
         private readonly PermissionCollectionResponse[] _pages;
         private readonly IReadOnlyDictionary<string, string>? _markers;
         private readonly Exception? _markerFailure;
+        private readonly Exception? _deleteFailure;
         private int _index;
 
         /// <param name="pages">The permission pages, served in order.</param>
         /// <param name="markers">#2105: the container's grant markers (custom property name to permission id), served
         /// to the marker read. None by default.</param>
         /// <param name="markerFailure">#2105: thrown by the marker read instead.</param>
+        /// <param name="deleteFailure">#2104 round 2: thrown by every permission DELETE (after it is recorded).</param>
         public ScriptedPermissionAdapter(
             PermissionCollectionResponse[] pages,
             IReadOnlyDictionary<string, string>? markers = null,
-            Exception? markerFailure = null)
+            Exception? markerFailure = null,
+            Exception? deleteFailure = null)
         {
             _pages = pages;
             _markers = markers;
             _markerFailure = markerFailure;
+            _deleteFailure = deleteFailure;
         }
 
         public List<string> RequestedUrls { get; } = [];
@@ -1023,10 +1052,10 @@ public class SpeContainerPagingTests
             Dictionary<string, ParsableFactory<IParsable>>? errorMapping = default,
             CancellationToken cancellationToken = default)
         {
-            // The permission DELETE lands here. Recorded, and treated as succeeding.
+            // The permission DELETE lands here. Recorded, and treated as succeeding unless a failure was scripted.
             RequestedUrls.Add(requestInfo.URI.ToString());
             DeletedUrls.Add(requestInfo.URI.ToString());
-            return Task.CompletedTask;
+            return _deleteFailure is null ? Task.CompletedTask : Task.FromException(_deleteFailure);
         }
 
         /// <summary>The container as Kiota deserializes it: each custom property an <see cref="UntypedObject"/> whose
