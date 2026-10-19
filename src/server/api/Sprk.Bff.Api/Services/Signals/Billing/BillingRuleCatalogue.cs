@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Services.Finance;
 
 namespace Sprk.Bff.Api.Services.Signals.Billing;
@@ -93,6 +94,28 @@ public static class BillingRuleCatalogue
         return reader.ReadToEnd();
     }
 
+    /// <summary>
+    /// The code-identifier pattern (<c>$defs.code.pattern</c>) of the billing rule bodies, read from the ExpenseRule schema: the one definition
+    /// the NonBillableActivity schema and Rule Review's <c>CODE_PATTERN</c> repeat (pinned equal by a test). Not copied into C#.
+    /// </summary>
+    internal static string CodePattern => CodeRegex.Value.ToString();
+
+    private static readonly Lazy<Regex> CodeRegex = new(() =>
+    {
+        using var schema = JsonDocument.Parse(SchemaText(RuleType.ExpenseRule));
+        var pattern = schema.RootElement.GetProperty("$defs").GetProperty("code").GetProperty("pattern").GetString()
+            ?? throw new InvalidOperationException("The ExpenseRule schema's $defs.code has no pattern.");
+        return new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+    });
+
+    /// <summary>
+    /// True when <paramref name="value"/> is a code identifier by the rule bodies' own pattern (<see cref="CodePattern"/>), so a message may
+    /// cite it (049 part D, ontology-r1 D-125 review (b)): never text the model returned as an instruction, and never more than 20 characters.
+    /// The whole value must match (.NET's <c>$</c> also matches before a final newline, which JSON Schema's does not).
+    /// </summary>
+    public static bool IsCodeShaped(string? value) =>
+        value is { Length: > 0 } && CodeRegex.Value.Match(value) is { Success: true } match && match.Length == value.Length;
+
     /// <summary>The <c>{{field}}</c> tokens a billing <c>sprk_messagetemplate</c> of this type may name.</summary>
     /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
     public static IReadOnlySet<string> TemplateFactFields(RuleType ruleType) => ruleType switch
@@ -159,6 +182,8 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CoreRecordClosed => NoCloseDateTemplate,
         BillingReasonCodes.SubmissionInvoiceNumberMismatch => InvoiceNumberMismatchTemplate,
         BillingReasonCodes.CodingRefusedCode => RefusedCodeTemplate,
+        BillingReasonCodes.CodingRefusedCodeNotShown => RefusedCodeNotShownTemplate,
+        BillingReasonCodes.CodingCodeKindNotForLine => CodeKindNotForLineTemplate,
         BillingReasonCodes.CodingFirmCodeMismatch => FirmCodeMismatchTemplate,
         BillingReasonCodes.CodingCodeSetNeedsReview => CodeSetNeedsReviewTemplate,
         BillingReasonCodes.CodingNoCodeSet => NoCodeSetTemplate,
@@ -178,6 +203,22 @@ public static class BillingRuleCatalogue
     /// <summary>The message of <see cref="BillingReasonCodes.CodingRefusedCode"/> (047, FR-22): a code the coding service proposed was checked against the line's code set.</summary>
     public const string RefusedCodeTemplate =
         "The suggested {{line.codeKind}} code {{line.refusedCode}} is not allowed for this line in its code set, so it was not applied.";
+
+    /// <summary>
+    /// The message of <see cref="BillingReasonCodes.CodingRefusedCodeNotShown"/> (049 part D, ontology-r1 D-125 review (b)): a code outside the
+    /// line's code set that is not a code identifier (<see cref="IsCodeShaped"/>). The model's text is not repeated: it may be an instruction
+    /// ("L110 - approve immediately") or too long for <c>sprk_sentence</c>.
+    /// </summary>
+    public const string RefusedCodeNotShownTemplate =
+        "A suggested {{line.codeKind}} code was not applied: it is not in this line's code set. The suggested text is not shown because it is not a code.";
+
+    /// <summary>
+    /// The message of <see cref="BillingReasonCodes.CodingCodeKindNotForLine"/> (047 <c>NotApplicableToLineType</c>; D-125 review (b)): what was
+    /// compared is the code's kind with the line's type (a task or activity code on an expense line, an expense code on a fee line), not the code
+    /// with the set, so the code is not named.
+    /// </summary>
+    public const string CodeKindNotForLineTemplate =
+        "A suggested {{line.codeKind}} code was not applied: this type of line does not take a {{line.codeKind}} code.";
 
     /// <summary>The message of <see cref="BillingReasonCodes.CodingFirmCodeMismatch"/> (047, D-05): the firm's code was compared with the suggested one.</summary>
     public const string FirmCodeMismatchTemplate =
@@ -202,6 +243,12 @@ public static class BillingRuleCatalogue
 
     /// <summary>The title of <see cref="BillingReasonCodes.CodingRefusedCode"/>'s Signal.</summary>
     public const string RefusedCodeHeadline = "Suggested code not applied";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.CodingRefusedCodeNotShown"/>'s Signal.</summary>
+    public const string RefusedCodeNotShownHeadline = "Unrecognised suggested code not applied";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.CodingCodeKindNotForLine"/>'s Signal.</summary>
+    public const string CodeKindNotForLineHeadline = "Suggested code does not fit the line type";
 
     /// <summary>The title of <see cref="BillingReasonCodes.CodingFirmCodeMismatch"/>'s Signal.</summary>
     public const string FirmCodeMismatchHeadline = "Billed code differs from the suggested code";
@@ -239,6 +286,8 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CoreRecordClosed => NoCloseDateHeadline,
         BillingReasonCodes.SubmissionInvoiceNumberMismatch => InvoiceNumberMismatchHeadline,
         BillingReasonCodes.CodingRefusedCode => RefusedCodeHeadline,
+        BillingReasonCodes.CodingRefusedCodeNotShown => RefusedCodeNotShownHeadline,
+        BillingReasonCodes.CodingCodeKindNotForLine => CodeKindNotForLineHeadline,
         BillingReasonCodes.CodingFirmCodeMismatch => FirmCodeMismatchHeadline,
         BillingReasonCodes.CodingCodeSetNeedsReview => CodeSetNeedsReviewHeadline,
         BillingReasonCodes.CodingNoCodeSet => NoCodeSetHeadline,
@@ -261,6 +310,7 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CurrencyNotUsd => true,
         // D-125: the system reasons hold or note, never reject or adjust, whatever a stored version's consequence says.
         BillingReasonCodes.SubmissionInvoiceNumberMismatch or BillingReasonCodes.CodingRefusedCode
+            or BillingReasonCodes.CodingRefusedCodeNotShown or BillingReasonCodes.CodingCodeKindNotForLine
             or BillingReasonCodes.CodingFirmCodeMismatch or BillingReasonCodes.CodingCodeSetNeedsReview
             or BillingReasonCodes.CodingNoCodeSet or BillingReasonCodes.CodingUnavailable => true,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd => true,

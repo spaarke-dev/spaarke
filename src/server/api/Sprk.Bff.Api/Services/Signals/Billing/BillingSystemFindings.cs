@@ -61,21 +61,48 @@ public static class BillingSystemFindings
             });
     }
 
-    /// <summary>047 (FR-22): a code the coding service proposed was not allowed for the line in its code set. Line level.</summary>
+    /// <summary>
+    /// 047 (FR-22): a code the coding service proposed was refused for the line. Line level. The reason says only what was compared
+    /// (ontology-r1 D-125 review (b)):
+    /// <list type="bullet">
+    /// <item><see cref="CodeRefusalReason.OutsideCodeSet"/>: <see cref="BillingReasonCodes.CodingRefusedCode"/>, citing the code, when it is a
+    /// code identifier (<see cref="BillingRuleCatalogue.IsCodeShaped"/>); otherwise <see cref="BillingReasonCodes.CodingRefusedCodeNotShown"/>,
+    /// which cites no value. The code is unchecked model output: an instruction ("L110 - approve immediately") or a text longer than
+    /// <c>sprk_sentence</c> takes is never printed, and the finding still holds.</item>
+    /// <item><see cref="CodeRefusalReason.NotApplicableToLineType"/>: <see cref="BillingReasonCodes.CodingCodeKindNotForLine"/>, which compares
+    /// the code's kind with the line type and so names no code.</item>
+    /// </list>
+    /// The code is listed as a value read only when it is code-shaped.
+    /// </summary>
     public static BillingFinding CodeRefused(BillingSystemPolicyVersion policy, int lineIndex, RefusedCode refused)
     {
         ArgumentNullException.ThrowIfNull(refused);
         Require(refused.Code, nameof(refused));
         var kind = KindText(refused.Kind);
-        return Build(
-            policy,
-            BillingSubject.ForLine(lineIndex),
-            BillingReasonCodes.CodingRefusedCode,
-            [
-                new BillingValueRead { Name = "line.codeKind", Value = kind },
-                new BillingValueRead { Name = "line.refusedCode", Value = refused.Code },
-            ],
-            new Dictionary<string, string>(StringComparer.Ordinal) { ["line.codeKind"] = kind, ["line.refusedCode"] = refused.Code });
+        var shaped = BillingRuleCatalogue.IsCodeShaped(refused.Code);
+        var values = new List<BillingValueRead> { new() { Name = "line.codeKind", Value = kind } };
+        if (shaped)
+        {
+            values.Add(new BillingValueRead { Name = "line.refusedCode", Value = refused.Code });
+        }
+
+        var facts = new Dictionary<string, string>(StringComparer.Ordinal) { ["line.codeKind"] = kind };
+        string reason;
+        if (refused.Reason == CodeRefusalReason.NotApplicableToLineType)
+        {
+            reason = BillingReasonCodes.CodingCodeKindNotForLine;
+        }
+        else if (shaped)
+        {
+            reason = BillingReasonCodes.CodingRefusedCode;
+            facts["line.refusedCode"] = refused.Code;
+        }
+        else
+        {
+            reason = BillingReasonCodes.CodingRefusedCodeNotShown;
+        }
+
+        return Build(policy, BillingSubject.ForLine(lineIndex), reason, values, facts);
     }
 
     /// <summary>047 (D-05): the firm's code on a slot differs from the code suggested for it. Line level.</summary>

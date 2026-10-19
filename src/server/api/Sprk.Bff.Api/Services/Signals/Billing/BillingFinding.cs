@@ -176,6 +176,12 @@ public static class BillingReasonCodes
     // SubmissionIntegrity (D-125): findings task 049 creates directly, never from a rule body. Flag only.
     public const string SubmissionInvoiceNumberMismatch = "submission.invoice_number_mismatch";
     public const string CodingRefusedCode = "coding.refused_code";
+
+    /// <summary>A code outside the line's code set that is not a code identifier, so its text is not cited (049 part D, D-125 review (b)).</summary>
+    public const string CodingRefusedCodeNotShown = "coding.refused_code_not_shown";
+
+    /// <summary>A code of a kind the line's type does not take (047 <c>NotApplicableToLineType</c>; D-125 review (b)).</summary>
+    public const string CodingCodeKindNotForLine = "coding.code_kind_not_for_line";
     public const string CodingFirmCodeMismatch = "coding.firm_code_mismatch";
     public const string CodingCodeSetNeedsReview = "coding.code_set_needs_review";
 

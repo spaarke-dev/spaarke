@@ -196,8 +196,11 @@ public static class BillingFindingSignalMapper
         var consequence = members.Select(m => m.Consequence).MaxBy(Strength);
         // ontology-r1 W re-check F2: in a Flag tie a flag-only note sorts first by code (currency_not_usd < missing_field), and as the
         // primary it would title and rank a real Flag breach as a note. A real breach at the winning consequence takes precedence.
+        // ontology-r1 D-125 review (a): among flag-only notes the D-91 invoice-number mismatch titles the Signal. It sorts after the coding
+        // notes by code, and a non-primary reason survives only as an evidence line that the read path strips.
         var primary = members.Where(m => m.Consequence == consequence)
             .OrderBy(m => BillingRuleCatalogue.IsFlagOnlyReason(m.Finding.ReasonCode) ? 1 : 0)
+            .ThenBy(m => m.Finding.ReasonCode == BillingReasonCodes.SubmissionInvoiceNumberMismatch ? 0 : 1)
             .First();
         var withheld = members.Any(m => m.Finding.DetailWithheld);
 

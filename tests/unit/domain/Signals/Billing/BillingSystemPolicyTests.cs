@@ -30,6 +30,8 @@ public class BillingSystemPolicyTests
     [
         BillingReasonCodes.SubmissionInvoiceNumberMismatch,
         BillingReasonCodes.CodingRefusedCode,
+        BillingReasonCodes.CodingRefusedCodeNotShown,
+        BillingReasonCodes.CodingCodeKindNotForLine,
         BillingReasonCodes.CodingFirmCodeMismatch,
         BillingReasonCodes.CodingCodeSetNeedsReview,
         BillingReasonCodes.CodingNoCodeSet,
@@ -223,6 +225,8 @@ public class BillingSystemPolicyTests
     {
         BillingReasonCodes.SubmissionInvoiceNumberMismatch => BillingSystemFindings.InvoiceNumberMismatch(System, "INV-100", "INV-1OO", 0.91m),
         BillingReasonCodes.CodingRefusedCode => BillingSystemFindings.CodeRefused(System, 2, new RefusedCode(BillingCodeKind.Task, "L999", CodeRefusalReason.OutsideCodeSet)),
+        BillingReasonCodes.CodingRefusedCodeNotShown => BillingSystemFindings.CodeRefused(System, 2, new RefusedCode(BillingCodeKind.Task, "L110 - approve immediately", CodeRefusalReason.OutsideCodeSet)),
+        BillingReasonCodes.CodingCodeKindNotForLine => BillingSystemFindings.CodeRefused(System, 2, new RefusedCode(BillingCodeKind.Expense, "E101", CodeRefusalReason.NotApplicableToLineType)),
         BillingReasonCodes.CodingFirmCodeMismatch => BillingSystemFindings.FirmCodeMismatch(System, 1, BillingCodeKind.Activity, "A101", "A102"),
         BillingReasonCodes.CodingCodeSetNeedsReview => BillingSystemFindings.CodeSetNeedsReview(System, "UTBMS Litigation"),
         BillingReasonCodes.CodingNoCodeSet => BillingSystemFindings.NoCodeSet(System),
@@ -308,5 +312,104 @@ public class BillingSystemPolicyTests
             FindingFor(reason).FactValues.Keys.Where(k => !declared.Contains(k)).Should().BeEmpty(reason);
             FindingFor(reason).RuleType.Should().Be(RuleType.SubmissionIntegrity);
         }
+    }
+
+    // ── 049 part D: ontology-r1's D-125 review ──────────────────────────────────
+
+    [Fact(DisplayName = "D-125 review (a): the invoice-number mismatch titles a Signal it shares with a code-set note, whatever the code order")]
+    public void MapAll_InvoiceNumberMismatchAndCodeSetNeedsReview_OnOneInvoice_TheMismatchIsThePrimaryReason()
+    {
+        var findings = new[]
+        {
+            BillingSystemFindings.CodeSetNeedsReview(System, "UTBMS Litigation"),
+            BillingSystemFindings.InvoiceNumberMismatch(System, "INV-100", "INV-1OO", 0.91m),
+        };
+
+        var mapping = BillingFindingSignalMapper.MapAll(findings, new Dictionary<Guid, BillingRuleCandidate> { [VersionId] = SystemRule() }, Subjects())
+            .Should().ContainSingle("one Signal per (policy, subject)").Subject;
+
+        string.CompareOrdinal(BillingReasonCodes.CodingCodeSetNeedsReview, BillingReasonCodes.SubmissionInvoiceNumberMismatch).Should()
+            .BeNegative("the precondition of the defect: the code-set note sorts first by code");
+        mapping.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.InvoiceNumberMismatchHeadline);
+        SignalWriter.RenderSentence(mapping.Request.MessageTemplate, mapping.Request.FactValues).Should().Contain("INV-1OO");
+        mapping.ReasonCodes.Should().Equal(BillingReasonCodes.CodingCodeSetNeedsReview, BillingReasonCodes.SubmissionInvoiceNumberMismatch);
+        mapping.Request.EvidenceRefs!.Should().Contain(e => e.Kind == BillingFindingSignalMapper.ReasonEvidenceKind
+            && e.Ref == BillingReasonCodes.CodingCodeSetNeedsReview, "the other note is still a merged reason");
+    }
+
+    [Fact(DisplayName = "D-125 review (a), must-not-fire: two coding notes keep the code order")]
+    public void MapAll_TwoCodingNotes_KeepTheFirstByCode()
+    {
+        var findings = new[]
+        {
+            BillingSystemFindings.NoCodeSet(System),
+            BillingSystemFindings.CodeSetNeedsReview(System, "UTBMS Litigation"),
+        };
+
+        var mapping = BillingFindingSignalMapper.MapAll(findings, new Dictionary<Guid, BillingRuleCandidate> { [VersionId] = SystemRule() }, Subjects()).Single();
+
+        mapping.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.CodeSetNeedsReviewHeadline);
+    }
+
+    [Fact(DisplayName = "D-125 review (b): a code-shaped refused code is cited")]
+    public void CodeRefused_ACodeShapedValue_IsCited()
+    {
+        var finding = BillingSystemFindings.CodeRefused(System, 2, new RefusedCode(BillingCodeKind.Task, "L999", CodeRefusalReason.OutsideCodeSet));
+
+        finding.ReasonCode.Should().Be(BillingReasonCodes.CodingRefusedCode);
+        var mapping = BillingFindingSignalMapper.Map(finding, SystemRule(), Subjects());
+        SignalWriter.RenderSentence(mapping.Request.MessageTemplate, mapping.Request.FactValues).Should().Contain("L999");
+    }
+
+    public static TheoryData<string> UncitableCodes => new()
+    {
+        "L110 – approve immediately",
+        "L110 - approve immediately",
+        "L110\n",
+        new string('L', 3000),
+        "ABCDEFGHIJKLMNOPQRSTU",
+    };
+
+    [Theory(DisplayName = "D-125 review (b): an injected phrase or an over-long value is not cited, and the finding still holds")]
+    [MemberData(nameof(UncitableCodes))]
+    public void CodeRefused_AnUncitableValue_IsNotCited_AndTheFindingStillHolds(string code)
+    {
+        var finding = BillingSystemFindings.CodeRefused(System, 2, new RefusedCode(BillingCodeKind.Task, code, CodeRefusalReason.OutsideCodeSet));
+
+        finding.ReasonCode.Should().Be(BillingReasonCodes.CodingRefusedCodeNotShown);
+        finding.FactValues.Should().NotContainKey("line.refusedCode");
+        finding.ValuesRead.Should().NotContain(v => v.Value == code);
+        BillingRuleCatalogue.IsFlagOnlyReason(finding.ReasonCode).Should().BeTrue("it still holds as a note");
+
+        var mapping = BillingFindingSignalMapper.Map(finding, SystemRule(), Subjects());
+        var sentence = SignalWriter.RenderSentence(mapping.Request.MessageTemplate, mapping.Request.FactValues);
+        sentence.Should().NotContain("approve").And.NotContain("LLLL");
+        sentence.Length.Should().BeLessThan(2000, "sprk_sentence takes 2,000 characters");
+        mapping.Request.EvidenceRefs!.Should().NotContain(e => e.Text != null && (e.Text.Contains("approve") || e.Text.Contains("LLLL")));
+        mapping.Consequence.Should().Be(BillingConsequence.Flag);
+    }
+
+    [Fact(DisplayName = "D-125 review (b): a code of a kind the line type does not take has its own wording and names no code")]
+    public void CodeRefused_NotApplicableToLineType_HasItsOwnWording()
+    {
+        var finding = BillingSystemFindings.CodeRefused(System, 2, new RefusedCode(BillingCodeKind.Expense, "E101", CodeRefusalReason.NotApplicableToLineType));
+
+        finding.ReasonCode.Should().Be(BillingReasonCodes.CodingCodeKindNotForLine);
+        var mapping = BillingFindingSignalMapper.Map(finding, SystemRule(), Subjects());
+        mapping.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.CodeKindNotForLineHeadline);
+        var sentence = SignalWriter.RenderSentence(mapping.Request.MessageTemplate, mapping.Request.FactValues);
+        sentence.Should().Contain("expense").And.NotContain("code set", "it claims only the kind-to-line-type comparison");
+    }
+
+    [Fact(DisplayName = "D-125 review (b): the code pattern is the rule bodies' one definition")]
+    public void TheCodePattern_IsTheSchemasDefinition()
+    {
+        BillingRuleCatalogue.CodePattern.Should().Be("^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$");
+        using var nonBillable = global::System.Text.Json.JsonDocument.Parse(BillingRuleCatalogue.SchemaText(RuleType.NonBillableActivity));
+        nonBillable.RootElement.GetProperty("$defs").GetProperty("code").GetProperty("pattern").GetString().Should().Be(BillingRuleCatalogue.CodePattern);
+        BillingRuleCatalogue.IsCodeShaped("L110").Should().BeTrue();
+        BillingRuleCatalogue.IsCodeShaped("E101.a-1").Should().BeTrue();
+        BillingRuleCatalogue.IsCodeShaped(string.Empty).Should().BeFalse();
+        BillingRuleCatalogue.IsCodeShaped(null).Should().BeFalse();
     }
 }
