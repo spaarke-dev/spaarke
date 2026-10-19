@@ -72,8 +72,8 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 070 | ✅ [done] | Billing rule-type catalogue: schemas, describer, validation, fail-closed refusal | FULL | opus / high | none | 019, 029 |
 | 071 | 🟡 [wip] | Rule handlers for the 11 billing rule types | FULL | sonnet / xhigh | P3-B | 070 |
 | 072 | 🟡 [wip] | `InvoiceComplianceEvaluator` | FULL | opus / high | P3-C | 071, 017, 018 |
-| 073 | 🟡 [wip] | Rejection rule and reject-eligibility at publish | FULL | sonnet / xhigh | none | 072, 025 |
-| 074 | 🟡 [wip] | Billing actions in `DecisionActionCatalog` | FULL | opus / high | P3-B | 070 |
+| 073 | ✅ [done] | Rejection rule and reject-eligibility at publish | FULL | sonnet / xhigh | none | 072, 025 |
+| 074 | ✅ [done] | Billing actions in `DecisionActionCatalog` | FULL | opus / high | P3-B | 070 |
 | 075 | ✅ [done] | Rule drafting Action `BILLING-RULE-DRAFT@v1` and job | STANDARD | sonnet / high | P3-B | 041, 070 |
 | 076 | ✅ [done] | Rule set endpoints: proposals, edit, publish, visibility | FULL | sonnet / high | P3-B | 019, 070 |
 | 077 | ✅ [done] | Rule Review code page | STANDARD | sonnet / high | P3-C | 076 |

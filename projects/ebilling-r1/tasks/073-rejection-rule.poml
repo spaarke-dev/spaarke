@@ -4,7 +4,7 @@
     <title>Rejection rule and reject-eligibility at publish</title>
     <phase>3 Rules (WP3) — wave W3-4</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-class guard: a submission may be rejected only under all three FR-26 conditions; AI must never reject (I-5). A wrong guard rejects valid invoices (NFR-06).</rigor-reason>
     <model-tier>sonnet</model-tier>
