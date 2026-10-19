@@ -151,16 +151,19 @@ public static class InvoiceTransitionReasons
 
 /// <summary>The result of <see cref="IInvoiceLifecycleService.BuildCreateRequest"/>.</summary>
 /// <param name="Requested">The initial status the caller asked for.</param>
-/// <param name="Request">The <c>CreateRequest</c> to place in a transaction (<c>IGenericEntityService.ExecuteTransactionAsync</c>); null when refused.</param>
+/// <param name="Requests">The requests to place, in this order, in one transaction (<c>IGenericEntityService.ExecuteTransactionAsync</c>);
+/// empty when refused. Today one <c>CreateRequest</c> carrying the status pair. A list (task 049 part C) so that, if Dataverse refuses a create
+/// directly in Rejected live, this becomes a create (In Review) followed by a state change with no signature change for callers.</param>
 /// <param name="Reason">Set only when refused; one of <see cref="InvoiceTransitionReasons"/>.</param>
-public sealed record InvoiceCreateRequestResult(InvoiceLifecycleStatus Requested, CreateRequest? Request, string? Reason)
+public sealed record InvoiceCreateRequestResult(InvoiceLifecycleStatus Requested, IReadOnlyList<OrganizationRequest> Requests, string? Reason)
 {
-    /// <summary>True when <see cref="Request"/> is set; a refused result has no request, so it cannot be sent by mistake.</summary>
-    public bool Succeeded => Request is not null;
+    /// <summary>True when <see cref="Requests"/> is not empty; a refused result has no request, so it cannot be sent by mistake.</summary>
+    public bool Succeeded => Requests.Count > 0;
 
-    internal static InvoiceCreateRequestResult Built(InvoiceLifecycleStatus requested, CreateRequest request) => new(requested, request, null);
+    internal static InvoiceCreateRequestResult Built(InvoiceLifecycleStatus requested, IReadOnlyList<OrganizationRequest> requests) =>
+        new(requested, requests, null);
 
-    internal static InvoiceCreateRequestResult Refuse(InvoiceLifecycleStatus requested, string reason) => new(requested, null, reason);
+    internal static InvoiceCreateRequestResult Refuse(InvoiceLifecycleStatus requested, string reason) => new(requested, [], reason);
 }
 
 /// <summary>The result of <see cref="IInvoiceLifecycleService.TransitionAsync"/>.</summary>
@@ -203,8 +206,9 @@ public interface IInvoiceLifecycleService
     Task<InvoiceTransitionResult> TransitionAsync(Guid invoiceId, InvoiceLifecycleStatus target, CancellationToken ct = default);
 
     /// <summary>
-    /// Builds, without sending, the <c>CreateRequest</c> that creates <paramref name="invoice"/> directly in <paramref name="initialStatus"/>:
-    /// a copy of the row with this service's <c>statecode</c> + <c>statuscode</c> pair added. Only <see cref="InvoiceLifecycleStatus.InReview"/>
+    /// Builds, without sending, the requests that create <paramref name="invoice"/> directly in <paramref name="initialStatus"/>: today one
+    /// <c>CreateRequest</c> of a copy of the row with this service's <c>statecode</c> + <c>statuscode</c> pair added. The caller places the list,
+    /// in order, in its transaction. Only <see cref="InvoiceLifecycleStatus.InReview"/>
     /// and <see cref="InvoiceLifecycleStatus.Rejected"/> are allowed (D-101: an invoice is created In Review, or as an automatic rejection);
     /// every other status, and a row that already carries a status column, is refused with a stable reason and no request.
     /// </summary>
@@ -295,7 +299,7 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
         row[StateCode] = new OptionSetValue(InvoiceStatusCodes.StateCodeOf(initialStatus));
         row[StatusCode] = new OptionSetValue(InvoiceStatusCodes.StatusCodeOf(initialStatus));
 
-        return InvoiceCreateRequestResult.Built(initialStatus, new CreateRequest { Target = row });
+        return InvoiceCreateRequestResult.Built(initialStatus, [new CreateRequest { Target = row }]);
     }
 
     /// <inheritdoc />

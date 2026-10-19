@@ -368,7 +368,7 @@ public sealed class InvoiceLifecycleServiceTests
         result.Succeeded.Should().BeTrue();
         result.Reason.Should().BeNull();
         result.Requested.Should().Be(initial);
-        var target = result.Request!.Target;
+        var target = result.Requests.Should().ContainSingle().Which.Should().BeOfType<CreateRequest>().Which.Target;
         target.LogicalName.Should().Be("sprk_invoice");
         target.Id.Should().Be(InvoiceId, "the caller's client-chosen id is kept, so the transaction's other rows can point at it");
         target.GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(expectedState);
@@ -390,7 +390,7 @@ public sealed class InvoiceLifecycleServiceTests
         var result = CreateService().BuildCreateRequest(NewInvoice(), initial);
 
         result.Succeeded.Should().BeFalse();
-        result.Request.Should().BeNull("a refused create can never be sent by mistake");
+        result.Requests.Should().BeEmpty("a refused create can never be sent by mistake");
         result.Reason.Should().Be(InvoiceTransitionReasons.InitialStatusNotAllowed);
         result.Requested.Should().Be(initial);
     }
@@ -417,7 +417,7 @@ public sealed class InvoiceLifecycleServiceTests
         var result = CreateService().BuildCreateRequest(invoice, InvoiceLifecycleStatus.InReview);
 
         result.Succeeded.Should().BeFalse();
-        result.Request.Should().BeNull();
+        result.Requests.Should().BeEmpty();
         result.Reason.Should().Be(InvoiceTransitionReasons.StatusSuppliedByCaller);
     }
 
@@ -433,7 +433,7 @@ public sealed class InvoiceLifecycleServiceTests
     [Fact]
     public void BuildCreateRequest_BuildsAnOrdinaryCreateRequest_ThatSitsInsideOneTransaction()
     {
-        var created = CreateService().BuildCreateRequest(NewInvoice(), InvoiceLifecycleStatus.Rejected).Request!;
+        var created = CreateService().BuildCreateRequest(NewInvoice(), InvoiceLifecycleStatus.Rejected).Requests.Single();
         var line = new CreateRequest { Target = new Entity("sprk_billingevent", Guid.NewGuid()) };
 
         var transaction = DataverseServiceClientImpl.BuildTransaction([created, line]);
