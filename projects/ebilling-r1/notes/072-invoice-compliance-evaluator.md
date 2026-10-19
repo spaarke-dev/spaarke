@@ -619,9 +619,10 @@ unchanged (the existing negative case, and a new "hours and amount both present 
 **Currency.** `CurrencySkipReason` order is: missing, then unclear (unknown or below-floor confidence, whatever the code is), then
 not USD. A low-confidence "EUR" is `billing.currency.unreliable`. `BillingCurrency.Normalise` reads `$`, `US$` and `USD$` (any case,
 trimmed) as USD; `CA$` stays foreign. RequiredData goes through the same normaliser, so the two paths still agree (the D-119 theory
-covers it). *Open point, not changed:* RequiredData's own flag-only `required_data.currency_not_usd` does not look at the currency's
-confidence (071's rule: it reports a currency that was read), so a low-confidence EUR with a RequiredData rule gets D-115's "unclear"
-and RequiredData's "not USD" together. Both are flags. Say if RequiredData should stay silent below the floor.
+covers it). *Follow-up commit (main session's answer on this point, D-123):* RequiredData's flag-only
+`required_data.currency_not_usd` now stays quiet when the currency confidence (`HeaderConfidence["Currency"]`) is unknown or below the
+reliability floor, the evaluator's own test (`HandlerContext` marks the read from the same threshold; the floor itself is reliable). A
+low-confidence EUR with a RequiredData rule therefore gets only D-115's "unclear"; a reliable EUR still gets both "not USD" flags.
 
 ### 13.3 Known limits (recorded, not changed)
 
@@ -651,11 +652,12 @@ so the tests compile and fail on behaviour). Counts are failing cases.
 | A7 extension (the hours-no-amount case; the both-present control passes on both) | 1 | 0 |
 | Currency (low-confidence EUR x2, `US$` x3, `USD$` in two paths, RequiredData `US$` and `USD$`) | 9 | 0 |
 | Optional mapper test (downgraded version, Flag Signal, fingerprint) | pin, 0 | 0 |
+| RequiredData silent below the currency floor (follow-up commit; handler x2, evaluator x2 for 0.50 and unknown; the floor and reliable-EUR controls pass on both) | 4 | 0 |
 
 Suites (at the final code commit):
 - `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
-- `Sprk.Bff.Api.Tests` filtered `Billing|Compliance|Rejection|RuleSet|Finance|Signal|PolicyVersion|DecisionRecord`: 4,906 passed, 6
-  skipped (live Dataverse), 0 failed.
+- `Sprk.Bff.Api.Tests` filtered `Billing|Compliance|Rejection|RuleSet|Finance|Signal|PolicyVersion|DecisionRecord`: 4,912 passed, 6
+  skipped (live Dataverse), 0 failed (4,906 before the RequiredData follow-up).
 - `Spaarke.ArchTests`: 1,207 / 1,207.
 
 Existing tests changed: `ADowngradedFirmVersion_StillDisplacesTheClientDefault_D39_K2` was replaced by the F1-b tests; RequiredData's

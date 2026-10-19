@@ -166,6 +166,32 @@ public class RequiredDataHandlerTests
         finding.Value("invoice.currency").Value.Should().Be(currency);
     }
 
+    [Theory]
+    [InlineData(0.50)]  // below the 0.90 floor
+    [InlineData(null)]  // unknown counts as below the floor
+    public void MustNotFire_ForANonUsdCurrencyReadBelowTheConfidenceFloor_D123(double? confidence)
+    {
+        // A "EUR" read with doubt may be a misread "USD"; "not USD" would say more than was tested. D-115's "unclear" reports it.
+        var facts = Facts(Fee(0)) with
+        {
+            Invoice = Invoice() with { Currency = "EUR", FieldConfidence = Confidence().With(BillingFieldNames.Currency, (decimal?)confidence) },
+        };
+
+        Run(Required("narrative"), facts).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void MustFire_ForANonUsdCurrencyReadAtTheConfidenceFloor_D123()
+    {
+        // Control: the floor itself is reliable (the evaluator's test is confidence >= floor).
+        var facts = Facts(Fee(0)) with
+        {
+            Invoice = Invoice() with { Currency = "EUR", FieldConfidence = Confidence().With(BillingFieldNames.Currency, Threshold) },
+        };
+
+        Run(Required("narrative"), facts).Should().ContainSingle().Which.ReasonCode.Should().Be(BillingReasonCodes.CurrencyNotUsd);
+    }
+
     [Fact]
     public void TheCurrencyCheck_DoesNotDependOnTheFieldsTheRuleLists()
     {

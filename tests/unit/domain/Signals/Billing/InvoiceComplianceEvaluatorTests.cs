@@ -709,6 +709,27 @@ public class InvoiceComplianceEvaluatorTests
         codes.Contains(BillingReasonCodes.RateAboveApproved).Should().Be(notCheckedReason is null, "rates are checked exactly when USD");
     }
 
+    [Theory]
+    [InlineData(0.50, BillingEvaluationReasons.CurrencyUnreliable, false)]
+    [InlineData(null, BillingEvaluationReasons.CurrencyUnreliable, false)]
+    [InlineData(0.95, BillingEvaluationReasons.CurrencyNotUsd, true)]
+    public void ALowConfidenceEur_GetsOnlyD115sUnclear_AReliableEurGetsBothNotUsdFlags_D123(
+        double? confidence, string notChecked, bool requiredDataFlag)
+    {
+        var rate = Version("CD-RATE", RuleType.ApprovedRate);
+        var required = Version("CD-REQUIRED", RuleType.RequiredData);
+        var request = Request(Fee(0)) with
+        {
+            Currency = "EUR",
+            HeaderConfidence = Confidence().With(BillingFieldNames.Currency, (decimal?)confidence),
+        };
+
+        var codes = Evaluate(request, Loaded(rate, required)).Findings.Select(f => f.ReasonCode).ToList();
+
+        codes.Should().Contain(notChecked);
+        codes.Contains(BillingReasonCodes.CurrencyNotUsd).Should().Be(requiredDataFlag, "RequiredData uses the evaluator's floor");
+    }
+
     [Fact]
     public void RatesNotChecked_IsNotRaised_WhenNoMoneyRuleIsInForce_D115()
     {

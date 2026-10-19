@@ -18,7 +18,9 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// <c>currency</c>, message <see cref="BillingRuleCatalogue.CurrencyNotUsdTemplate"/>; that reason is flag-only
 /// (<see cref="BillingRuleCatalogue.IsFlagOnlyReason"/>). It is a finding, never an exception, and it does not depend on the rule listing a field: the rule's
 /// vocabulary has no currency member, and a foreign-currency invoice is unsupported however the rule is configured. A currency
-/// that was not read is not flagged (no evidence); the evaluator's flag-only D-115 finding reports it instead. A bare "$" is USD
+/// that was not read, or was read below the confidence floor (<c>HeaderConfidence["Currency"]</c> unknown or under the reliability
+/// threshold, the evaluator's own test), is not flagged (no evidence, D-123); the evaluator's flag-only D-115 finding reports it
+/// instead ("missing" or "unclear"). A bare "$" is USD
 /// (D-119), as it is for the evaluator's money rules, so a "$" invoice is never both rate-checked and flagged "not USD".</para>
 /// <para><b>An absent value is not reliably absent.</b> A missing field's confidence is whatever the fact set holds for it, or
 /// unknown, which task 073 treats as not reliable: a field the extraction simply failed to find cannot reject an invoice (NFR-06).</para>
@@ -56,8 +58,14 @@ internal static class RequiredDataHandler
         var currency = BillingText.Text(invoice.Currency);
         if (currency is not null && !BillingCurrency.IsUsd(currency))
         {
-            var values = new[] { context.HeaderField("invoice.currency", BillingFieldNames.Currency, currency) };
-            findings.Add(context.Finding(BillingSubject.ForInvoice(), BillingReasonCodes.CurrencyNotUsd, values, new FactValues().Add("missingField", "currency")));
+            // Only a currency read reliably is reported as "not USD" (D-123): a "EUR" read below the floor, or with no known
+            // confidence, may be a misread "USD", and the evaluator's D-115 finding says "unclear" for it. Same floor as the
+            // evaluator's (HandlerContext marks a read below it from the same ReliabilityThreshold).
+            var read = context.HeaderField("invoice.currency", BillingFieldNames.Currency, currency);
+            if (!read.BelowReliabilityThreshold)
+            {
+                findings.Add(context.Finding(BillingSubject.ForInvoice(), BillingReasonCodes.CurrencyNotUsd, new[] { read }, new FactValues().Add("missingField", "currency")));
+            }
         }
 
         foreach (var line in context.Facts.Lines)
