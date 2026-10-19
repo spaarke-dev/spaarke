@@ -4,7 +4,7 @@
 > task `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path;
 > D-123 secure family; D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-169). Deferred work: one self-contained GitHub issue per item, label
-> `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-119**). Sub-agents never edit this file.
+> `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-120**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -51,7 +51,7 @@
 - **ebilling D-130 (2) approved-total spend** (`1549ff165..cd690dbe2`, review worktree `C:\wts-eb130`): PASS 2026-10-19 (unit 410/0, guard 11/0). Sent K1 (race comment wrong: double count moves spend either way under credit memos / `le`/`lt`; fix comment+note, optional billed re-read guard), K2 (fake null-vs-absent `SignalReevaluationJobTests.cs:3395`). Q8 answer: NOT AuthorableColumns; expose `SpendAmountColumns` from FinanceBaseValues + extend `SignalPredicateTests.cs:174` not-field-secured assert (ebilling may do it; else our post-074 lane). Reported outside-diff: approved total not recalculated after reviewer decisions (only caller `InvoiceSubmissionPersister.cs:347`). Re-check their fix range.
 
 - **uac-r2 #2110** (#2091 follow-up, `6b7cb018e`, review worktree `C:\wts-2110`): gate-DR interaction PASS sent (K1 same-parent skip removes a 50317 retry path; K2 sweep-job join R2 no step; K3 thread lookup not an ownership parent). uac-r2 merges after their own pass.
-- **Lane 042c** PR #2113 (`fix/ontology-042c-gate-dr-thread-filed`, `C:\wts-042c`, head `910261d84`): thread-filed (team-owned) communication -> gate DR re-owned at write. 2 adversarial passes clean after fix round; publish +234 B zipped, 192 files. Awaiting uac-r2 OK + green CI, then merge into docs branch (merge script with base docs/ontology-platform-design).
+- **Lane 042c** PR #2113 (head `09ba17258`): uac-r2 OK after the resolver-fault test; merging into docs on green CI (background merge script). After merge: it reaches master with the next docs->master sync. #2114 = DI-119 (pre-existing, under-share on owner-only change).
 - **ebilling D-130**: CLOSED from our side (`77690aa4f` PASS 381/0). Keep `C:\wts-eb130` for part D review.
 
 ## Promises to peers
