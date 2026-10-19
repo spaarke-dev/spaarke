@@ -18,7 +18,8 @@ internal static class BillingMath
     /// The one definition of a credit line (D-105): a line with negative hours or a negative amount, a reversal or a write-off
     /// of an earlier charge. A charge rule never judges it as a charge (ApprovedRate, ExpenseRule, InvoiceAge, CoreRecordWindow
     /// skip it; NonBillableActivity never suggests disallowing it), so a credit cannot be rejected or reduced as if it were
-    /// billed. The credit stays on the invoice, visible to the reviewer. A line with no hours and no amount is not a credit.
+    /// billed. The credit stays on the invoice, visible to the reviewer. A line with no hours and no amount is not a credit, but
+    /// nor is it shown not to be one: its findings list both as unknown reads (<see cref="HandlerContext.WithCreditTestReads"/>).
     /// Every handler asks this method; none repeats the sign test.
     /// </summary>
     internal static bool IsCreditLine(BillingLineFacts line) => line.Hours < 0m || line.Amount < 0m;
@@ -138,12 +139,34 @@ internal sealed class HandlerContext
     /// could not be trusted. Task 073 checks the confidence of the read fields and never infers them, so every such finding lists
     /// them. A value already in <paramref name="values"/> is not repeated; a field the line does not have was not read.
     /// Appended in a fixed order (Hours, then Amount) after the finding's own values.
+    /// <para><b>Both absent (071 round 3, F4): a deliberate exception to "an absent field is not invented".</b> When the line has
+    /// NEITHER Hours NOR Amount, the credit test had nothing to judge, so "not a credit" is not evidence: "(2.5) @ 650 = (1,625.00)"
+    /// whose bracketed numbers did not parse would otherwise be judged as a charge with every read reliable, and 073 could reject a
+    /// credit. Both are then listed as null-valued reads with unknown confidence (below the floor), so 073 holds the finding. One
+    /// absent is normal (an expense line has no hours) and is not listed.</para>
     /// </summary>
     internal IReadOnlyList<BillingValueRead> WithCreditTestReads(BillingLineFacts line, IEnumerable<BillingValueRead> values)
     {
         var all = values.ToList();
         var hours = new FieldRef(line.Index, BillingFieldNames.Hours);
         var amount = new FieldRef(line.Index, BillingFieldNames.Amount);
+
+        if (line.Hours is null && line.Amount is null)
+        {
+            // Added unless the finding already lists the field with unknown confidence: a read of it with a known confidence (the
+            // line's map can hold one for a value that did not parse) must not make the credit test look reliable.
+            if (!all.Any(v => v.ExtractedField == hours && v.Confidence is null))
+            {
+                all.Add(Extracted("line.hours", hours, null, (decimal?)null));
+            }
+
+            if (!all.Any(v => v.ExtractedField == amount && v.Confidence is null))
+            {
+                all.Add(Extracted("line.amount", amount, null, (decimal?)null));
+            }
+
+            return all;
+        }
 
         if (line.Hours is not null && !all.Any(v => v.ExtractedField == hours))
         {

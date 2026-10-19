@@ -959,6 +959,48 @@ public class SubmissionRejectionRuleTests
         decision.DecidingFindings.Single().Finding.ReadFields.Should().Contain(new FieldRef(0, BillingFieldNames.Rate));
     }
 
+    // ── 071 round 3 (F4): a line with neither hours nor amount cannot be shown not to be a credit ─────────────────────
+
+    [Fact]
+    public async Task AnApprovedRateFinding_OnALineWithNeitherHoursNorAmount_IsHeld_NotRejected_071Round3()
+    {
+        // "(2.5) @ 650 = (1,625.00)": neither bracketed number parsed, the rate did. Judged as a charge, the finding must not reject.
+        var rule = Version("BILL-RATE", RuleType.ApprovedRate) with { Consequence = Reject };
+        var request = Request(Fee(0) with { BilledRate = 650m, Hours = null, Amount = null });
+        var result = Evaluator().Evaluate(request, Loaded(rule));
+        var finding = result.Findings.Should().ContainSingle().Subject;
+        finding.ReasonCode.Should().Be(BillingReasonCodes.RateAboveApproved);
+        foreach (var field in new[] { BillingFieldNames.Hours, BillingFieldNames.Amount })
+        {
+            var reads = finding.ValuesRead.Where(v => v.ExtractedField == new FieldRef(0, field)).ToList();
+            reads.Should().ContainSingle($"the credit test's {field} is listed although the line has none");
+            reads[0].Value.Should().BeNull();
+            reads[0].Confidence.Should().BeNull();
+            reads[0].BelowReliabilityThreshold.Should().BeTrue();
+        }
+
+        var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
+
+        decision.Outcome.Should().NotBe(SubmissionOutcome.Rejected);
+        ShouldHold(decision, SubmissionHoldReasons.ReadFieldConfidenceUnknown);
+        decision.Findings.Single().UnreliableFields.Should().BeEquivalentTo([new FieldRef(0, BillingFieldNames.Hours), new FieldRef(0, BillingFieldNames.Amount)]);
+    }
+
+    [Fact]
+    public async Task OnlyOneOfHoursAndAmountAbsent_IsNotInvented_TheFindingStillRejects_071Round3()
+    {
+        // Negative case: an expense line has no hours. Its amount answers the credit test, so nothing is added and the Reject stands.
+        var rule = ExpenseRejectRule("E109");
+        var line = Expense(0) with { BilledExpenseCode = "E109", Hours = null, Amount = 60m };
+        var result = Evaluator().Evaluate(Request(line), Loaded(rule));
+        var finding = result.Findings.Should().ContainSingle().Subject;
+        finding.ReadFields.Should().NotContain(new FieldRef(0, BillingFieldNames.Hours));
+
+        var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SubmissionOutcome.Rejected);
+    }
+
     // ── 073 review F1-a: never reject on an AI-assigned input ────────────────────────────────────────────────────
 
     private static BillingRuleCandidate ExpenseRejectRule(string code) =>
