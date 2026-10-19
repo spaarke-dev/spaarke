@@ -383,6 +383,29 @@ public class InvoiceComplianceEvaluatorTests
             broken.PolicyId, "CD-TIMEKEEPER", broken.PolicyVersionId, BillingEvaluationReasons.GateRefused));
     }
 
+    // ── ReceivedOn is required data, never the default date (072 part W) ─────────────────────────────────────────
+
+    [Fact]
+    public async Task ADefaultReceivedOn_IsRefused_BeforeAnythingIsReadOrJudged()
+    {
+        var request = Request(Line(0, null)) with { InvoiceDate = null, ReceivedOn = default };
+
+        var evaluate = () => Evaluate(request, Loaded(Increment("CD-INCREMENT", "0.5")));
+        var evaluateAsync = () => Evaluator().EvaluateAsync(request, CancellationToken.None);
+
+        evaluate.Should().Throw<ArgumentException>().WithParameterName("request").WithMessage("*ReceivedOn*");
+        // The kit's loader is a strict mock with no setup: reaching it would throw a MockException, not this.
+        await evaluateAsync.Should().ThrowAsync<ArgumentException>().WithParameterName("request");
+    }
+
+    [Fact]
+    public void ARealReceivedOn_JudgesAnUndatedSubject_Control()
+    {
+        var request = Request(Line(0, null)) with { InvoiceDate = null };
+
+        Evaluate(request, Loaded(Increment("CD-INCREMENT", "0.5"))).Findings.Should().ContainSingle();
+    }
+
     [Fact]
     public void AnyOtherHandlerException_IsADefect_AndPropagates()
     {

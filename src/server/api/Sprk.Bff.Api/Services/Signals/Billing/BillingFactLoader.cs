@@ -37,6 +37,9 @@ public sealed record BillingEvaluationRequest
     /// <summary>
     /// The date the submission was received (<c>sprk_invoicesubmission</c>, task 049 supplies it as data, never a clock read). The
     /// judging date of a subject with no line date and no invoice date, so version selection stays deterministic (072 review A3).
+    /// A UTC date (the received timestamp's UTC calendar day, as rule versions take effect at midnight UTC, task 076). Never
+    /// <c>default</c> (0001-01-01): no version is in force on it, so every undated subject would silently be judged by nothing;
+    /// <see cref="InvoiceComplianceEvaluator"/> throws <see cref="ArgumentException"/> instead (072 part W).
     /// </summary>
     public required DateOnly ReceivedOn { get; init; }
 

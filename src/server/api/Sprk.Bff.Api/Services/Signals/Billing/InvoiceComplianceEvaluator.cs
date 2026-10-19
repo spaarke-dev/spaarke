@@ -126,6 +126,7 @@ public sealed class InvoiceComplianceEvaluator
     public async Task<BillingEvaluationResult> EvaluateAsync(BillingEvaluationRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        RequireReceivedOn(request);
         var loaded = await _loader.LoadAsync(request, ct).ConfigureAwait(false);
         return Evaluate(request, loaded);
     }
@@ -135,6 +136,7 @@ public sealed class InvoiceComplianceEvaluator
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(loaded);
+        RequireReceivedOn(request);
 
         var facts = new BillingFactSet
         {
@@ -350,6 +352,20 @@ public sealed class InvoiceComplianceEvaluator
             Skips = skips,
             Facts = facts,
         };
+    }
+
+    /// <summary>
+    /// A default <see cref="BillingEvaluationRequest.ReceivedOn"/> (0001-01-01, a request built without it) has no version in force,
+    /// so every undated subject would silently be judged by nothing: a caller bug, refused before anything is read (072 part W).
+    /// </summary>
+    private static void RequireReceivedOn(BillingEvaluationRequest request)
+    {
+        if (request.ReceivedOn == default)
+        {
+            throw new ArgumentException(
+                "BillingEvaluationRequest.ReceivedOn is the default date (0001-01-01); set it to the submission's received date (UTC).",
+                nameof(request));
+        }
     }
 
     /// <summary>
