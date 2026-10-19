@@ -246,6 +246,7 @@ public class CommunicationThreadFilingSweepJobTests
         filing.GetProperty("sample").GetArrayLength().Should().Be(3);
 
         _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<FilingReconcileHost>(), It.IsAny<CancellationToken>()), Times.Never);
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         _resolver.Verify(r => r.ReconcileAnchoredThreadOwnerAsync(It.IsAny<Guid>(), false, It.IsAny<CancellationToken>()), Times.Never,
             "a dry run asks the owner question only as a dry run");
         _entity.Verify(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -265,6 +266,7 @@ public class CommunicationThreadFilingSweepJobTests
 
         Result(result).GetProperty("apply").GetBoolean().Should().BeFalse();
         _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<FilingReconcileHost>(), It.IsAny<CancellationToken>()), Times.Never);
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -377,6 +379,7 @@ public class CommunicationThreadFilingSweepJobTests
         result.Success.Should().BeTrue();
         Result(result).GetProperty("filing").GetProperty("candidates").GetInt32().Should().Be(0);
         _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<FilingReconcileHost>(), It.IsAny<CancellationToken>()), Times.Never);
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -394,6 +397,7 @@ public class CommunicationThreadFilingSweepJobTests
         filing.GetProperty("skippedInactiveThread").GetInt32().Should().Be(1, "still reported");
         filing.GetProperty("candidates").GetInt32().Should().Be(0);
         _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<FilingReconcileHost>(), It.IsAny<CancellationToken>()), Times.Never);
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

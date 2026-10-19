@@ -100,6 +100,32 @@ public sealed class SecureChildReconcilerGateDecisionRecordTests
     }
 
     [Fact]
+    public async Task AfterRefile_OfACommunication_WhenTheThreadReconcileThrows_StillMirrorsAndReownsTheGateDecisionRecord_2110()
+    {
+        // #2110 (ontology re-check K3): the thread reconcile runs first, so a fault in it must not skip the mirror, the pass or
+        // the gate Decision Record step after it, and the re-file never fails.
+        var gate = SharedGateRecord();
+        _threads.Setup(t => t.ReconcileThreadForFilingAsync(CommunicationId, It.IsAny<CancellationToken>()))
+            .Callback(() => gate.Calls.Add("thread-reconcile"))
+            .ThrowsAsync(new InvalidOperationException("Test: the thread reconcile faulted."));
+        var uac = new Mock<IGenericEntityService>();
+        uac.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((query, _) => gate.Calls.Add($"uac-query:{query.EntityName}"))
+            .ReturnsAsync(new EntityCollection());
+
+        var refile = async () => await Reconciler(gate.Sharing, uac).AfterRefileAsync(
+            "sprk_communication", CommunicationId, NotIsolated, CancellationToken.None);
+
+        await refile.Should().NotThrowAsync();
+        var reconcile = gate.Calls.IndexOf("thread-reconcile");
+        reconcile.Should().BeGreaterThanOrEqualTo(0);
+        gate.Calls.FindIndex(c => c.StartsWith("uac-query:", StringComparison.Ordinal))
+            .Should().BeGreaterThan(reconcile, "the mirror still runs after the faulted reconcile");
+        gate.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam")!.Id.Should().Be(MatterTeam);
+        gate.RecordSharees(RecordId).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task AfterRefile_PlacedByWriter_SkipsOnlyTheThreadReconcile_AndStillReownsTheGateDecisionRecord_2091()
     {
         // #2091 (a): a thread join IS the communication's thread placement, so it skips the step's thread reconcile — and every

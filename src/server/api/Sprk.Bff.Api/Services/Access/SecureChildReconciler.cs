@@ -918,7 +918,17 @@ public sealed class SecureChildReconciler
                 mirrorTakenOff = true;
             }
 
-            await _threads!.ReconcileThreadForFilingAsync(childId, CancellationToken.None).ConfigureAwait(false);
+            // Guarded (#2110 ontology re-check K3): it now runs before the mirror, the pass and the gate step, so a fault here
+            // must not skip them. The resolver is best-effort and does not throw today; a fault leaves the thread for the sweep.
+            try
+            {
+                await _threads!.ReconcileThreadForFilingAsync(childId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id}: the thread reconcile after its re-file failed; its " +
+                    "mirror, descendants and gate step still run, and the filing sweep reconciles the thread.", table, childId);
+            }
         }
 
         // (1) The row's own mirror, on the owner and thread the reconcile left — one implementation (task 149's synchronizer);
