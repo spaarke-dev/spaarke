@@ -74,6 +74,7 @@ public static class FinanceBaseValues
     public const string SubmissionEntity = "sprk_invoicesubmission";
     internal const string SubmissionInvoiceLookup = "sprk_invoice";
     internal const string SubmissionKeyColumn = "sprk_invoicesubmissionid";
+    internal const string InvoiceKeyColumn = "sprk_invoiceid";
     internal const string SubmissionStatusColumn = "sprk_processingstatus";
     internal const string SubmissionReasonColumn = "sprk_outcomereasoncode";
 
@@ -207,6 +208,10 @@ public static class FinanceBaseValues
     /// grouped query over the In Review invoices that are not held. A parent with no such invoice has 0. A Dataverse failure or a
     /// result of a shape <see cref="ReadGroupedSums"/> does not know propagates: pending spend is never read as zero by default.
     /// </summary>
+    /// <remarks><b>Call it only with an application identity</b> (ontology-r1 review K2, 2026-10-19). The held exclusion is an
+    /// outer join to the user-owned <c>sprk_invoicesubmission</c>, and row security applies to the joined rows: a caller who cannot
+    /// read the blocking submission would see a held invoice counted as pending (fail open). The ontology evaluator calls it with its
+    /// own app identity; there is no user-identity caller.</remarks>
     public static async Task<IReadOnlyDictionary<Guid, decimal>> ReadPendingSpendAsync(
         IGenericEntityService entities, string parentEntity, IReadOnlyCollection<Guid> parentIds, CancellationToken ct)
     {
@@ -263,7 +268,7 @@ public static class FinanceBaseValues
         {
             // LEFT OUTER link to the blocking submissions, then keep only the invoices that found none (see HeldSubmissionConditions).
             entity.Add(new XElement("link-entity",
-                new XAttribute("name", SubmissionEntity), new XAttribute("from", SubmissionInvoiceLookup), new XAttribute("to", "sprk_invoiceid"),
+                new XAttribute("name", SubmissionEntity), new XAttribute("from", SubmissionInvoiceLookup), new XAttribute("to", InvoiceKeyColumn),
                 new XAttribute("link-type", "outer"), new XAttribute("alias", HeldAlias),
                 new XElement("filter", new XAttribute("type", "and"),
                     HeldSubmissionConditions.Select(c => new XElement("condition",

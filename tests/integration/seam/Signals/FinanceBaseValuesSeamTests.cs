@@ -97,6 +97,34 @@ public sealed class FinanceBaseValuesSeamTests : IClassFixture<SignalWriterSeamT
         }
     }
 
+    /// <summary>
+    /// READ-ONLY (049, ontology-r1 review K1): Dataverse accepts both Pending Spend (D-104) query shapes, the aggregate FetchXML
+    /// (<see cref="FinanceBaseValues.BuildGroupedPendingSumFetchXml"/>, with <c>entityname</c> on a root condition inside an
+    /// aggregate) and the rollup's QueryExpression (<see cref="FinanceRollupService.BuildPendingInvoiceQuery"/>), and the reader
+    /// reads the result. It creates nothing: the ids belong to no row, so each query must run and return no rows (0, never a throw).
+    /// The anti-join semantics are pinned by the unit tests; this proves only that the shapes are accepted.
+    /// </summary>
+    [Fact]
+    public async Task PendingSpendQueries_AreAcceptedByDataverse_ReadOnly()
+    {
+        if (!_dv.IsLive) return;
+
+        var op = _dv.OperatorClient;
+        var nobody = Guid.NewGuid();
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((FetchExpression fetch, CancellationToken _) => op.RetrieveMultipleAsync(fetch, CancellationToken.None));
+
+        foreach (var parent in new[] { FinanceBaseValues.MatterEntity, FinanceBaseValues.ProjectEntity })
+        {
+            var pending = await FinanceBaseValues.ReadPendingSpendAsync(entities.Object, parent, new[] { nobody }, CancellationToken.None);
+            pending[nobody].Should().Be(0m, $"the grouped pending query on {parent} is accepted and an id with no invoices sums to 0");
+
+            var rows = await op.RetrieveMultipleAsync(FinanceRollupService.BuildPendingInvoiceQuery(nobody, parent));
+            rows.Entities.Should().BeEmpty($"the rollup's pending query on {parent} is accepted");
+        }
+    }
+
     /// <summary>Creates a test invoice (it starts In Review, the statuscode default) and, for any other status, moves it there
     /// with the statecode / statuscode pair Dataverse requires. A direct write is fine for these throwaway rows; product code moves
     /// an invoice only through <see cref="InvoiceLifecycleService"/>.</summary>

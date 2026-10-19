@@ -7,7 +7,7 @@
     item as skipped and makes no write (no publish either).
 
     Items:
-      1  sprk_matter.sprk_pendingspend  - Money, precision 2, 0 .. 1,000,000,000 (same shape as sprk_totalspendtodate).
+      1  sprk_matter.sprk_pendingspend  - Money, precision 2, -922337203685477 .. 922337203685477 (the range of sprk_totalspendtodate: a sum, not one invoice).
       2  sprk_project.sprk_pendingspend - the same column on the project.
 
     Pending Spend is the sum of sprk_invoice.sprk_totalamount over the parent's In Review invoices that are NOT held
@@ -73,7 +73,11 @@ try {
     foreach ($t in $Parents) {
         Write-Host "$n. $t.sprk_pendingspend" -ForegroundColor Cyan
         Set-EbEntity $t
-        Add-Column 'sprk_pendingspend' (New-MoneyDef 'sprk_PendingSpend' 'Pending Spend' $Description) 'Money'
+        # A sum of invoices, so the range of sprk_totalspendtodate, not New-MoneyDef's per-invoice 0 .. 1e9 (ontology-r1 review F4).
+        $def = New-MoneyDef 'sprk_PendingSpend' 'Pending Spend' $Description
+        $def.MinValue = -922337203685477
+        $def.MaxValue = 922337203685477
+        Add-Column 'sprk_pendingspend' $def 'Money'
         $n++
     }
 

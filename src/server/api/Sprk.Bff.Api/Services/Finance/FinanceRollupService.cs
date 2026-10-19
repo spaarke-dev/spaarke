@@ -92,7 +92,6 @@ public class FinanceRollupService
     /// </remarks>
     internal static Dictionary<string, object?> BuildRollupFields(
         decimal totalSpend,
-        decimal pendingSpend,
         int invoiceCount,
         decimal currentMonthSpend,
         decimal totalBudget,
@@ -103,7 +102,6 @@ public class FinanceRollupService
         string timelineJson) => new()
         {
             [Field_TotalSpendToDate] = totalSpend,
-            [Field_PendingSpend] = pendingSpend,
             [Field_InvoiceCount] = invoiceCount,
             [Field_MonthlySpendCurrent] = currentMonthSpend,
             [Field_TotalBudget] = totalBudget,
@@ -113,6 +111,51 @@ public class FinanceRollupService
             [Field_AverageInvoiceAmount] = averageInvoice,
             [Field_MonthlySpendTimeline] = timelineJson
         };
+
+    /// <summary>The Pending Spend payload (D-104), written in its own PATCH after <see cref="BuildRollupFields"/>'s: see
+    /// <see cref="WriteRollupAsync"/>.</summary>
+    internal static Dictionary<string, object?> BuildPendingSpendFields(decimal pendingSpend) => new()
+    {
+        [Field_PendingSpend] = pendingSpend
+    };
+
+    /// <summary>
+    /// Writes the counted rollup, then Pending Spend (D-104) separately. The counted write is the established contract and its
+    /// failures propagate as before. Pending Spend is new: its column and its query's join to <c>sprk_invoicesubmission</c> may not
+    /// exist yet on an environment the BFF reaches before the schema script runs, and Dataverse refuses a whole PATCH that names
+    /// an unknown column. So a failure to read or write it is logged as an Error and leaves the stored value as it was (never 0);
+    /// it never stops total spend, budget, velocity or the timeline from updating (ontology-r1 review F1, 2026-10-19).
+    /// </summary>
+    /// <returns>Whether Pending Spend was written.</returns>
+    internal static async Task<bool> WriteRollupAsync(
+        IFieldMappingDataverseService writer,
+        ILogger logger,
+        string parentEntityName,
+        Guid parentId,
+        Dictionary<string, object?> countedFields,
+        Func<CancellationToken, Task<decimal>> readPendingSpend,
+        CancellationToken ct)
+    {
+        // UPDATE-ONLY (task 130): never create. A plain PATCH upserts, so a parent deleted after the caller's
+        // authorization check (or a background job's stale id) would be recreated as an empty row carrying
+        // only these rollup fields. A missing parent surfaces as KeyNotFoundException → the endpoint's uniform 404.
+        await writer.UpdateExistingRecordFieldsAsync(parentEntityName, parentId, countedFields, ct);
+
+        try
+        {
+            var pendingSpend = await readPendingSpend(ct);
+            await writer.UpdateExistingRecordFieldsAsync(parentEntityName, parentId, BuildPendingSpendFields(pendingSpend), ct);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(
+                ex,
+                "Pending Spend (D-104) not updated for {Entity} {EntityId}; the counted rollup was written and the stored pending value is unchanged",
+                parentEntityName, parentId);
+            return false;
+        }
+    }
 
     /// <summary>Recalculate and persist financial fields for a matter.</summary>
     public virtual Task<RecalculateFinanceResponse> RecalculateMatterAsync(Guid matterId, CancellationToken ct = default)
@@ -139,14 +182,11 @@ public class FinanceRollupService
         // Step 1: Parallel queries — invoices and budgets
         var invoiceTask = QueryInvoicesAsync(serviceClient, parentId, invoiceLookupField, ct);
         var budgetTask = QueryBudgetTotalAsync(serviceClient, parentId, budgetLookupField, ct);
-        var pendingTask = QueryPendingInvoicesAsync(serviceClient, parentId, invoiceLookupField, ct);
 
-        await Task.WhenAll(invoiceTask, budgetTask, pendingTask);
+        await Task.WhenAll(invoiceTask, budgetTask);
 
         var invoices = invoiceTask.Result;
         var totalBudget = budgetTask.Result;
-        // Pending Spend (D-104): In Review and not held, kept apart from actual spend; it feeds nothing else below.
-        var pendingSpend = FinanceBaseValues.SumMoney(pendingTask.Result, Invoice_TotalAmount);
 
         // Step 2: Compute all fields
         var now = DateTime.UtcNow;
@@ -196,13 +236,22 @@ public class FinanceRollupService
 
         // Step 3: Write back to parent entity — through the NARROW interface (→ DataverseWebApiService).
         var fields = BuildRollupFields(
-            totalSpend, pendingSpend, invoiceCount, currentMonthSpend, totalBudget,
-            remainingBudget, utilization, velocity ?? 0m, averageInvoice, timelineJson);
+            totalSpend: totalSpend,
+            invoiceCount: invoiceCount,
+            currentMonthSpend: currentMonthSpend,
+            totalBudget: totalBudget,
+            remainingBudget: remainingBudget,
+            utilization: utilization,
+            velocity: velocity ?? 0m,
+            averageInvoice: averageInvoice,
+            timelineJson: timelineJson);
 
-        // UPDATE-ONLY (task 130): never create. A plain PATCH upserts, so a parent deleted after the caller's
-        // authorization check (or a background job's stale id) would be recreated as an empty row carrying
-        // only these rollup fields. A missing parent surfaces as KeyNotFoundException → the endpoint's uniform 404.
-        await _fieldMappingService.UpdateExistingRecordFieldsAsync(parentEntityName, parentId, fields, ct);
+        // Pending Spend (D-104): In Review and not held, kept apart from actual spend; it feeds nothing else here.
+        await WriteRollupAsync(
+            _fieldMappingService, _logger, parentEntityName, parentId, fields,
+            async token => FinanceBaseValues.SumMoney(
+                await QueryPendingInvoicesAsync(serviceClient, parentId, invoiceLookupField, token), Invoice_TotalAmount),
+            ct);
 
         _logger.LogInformation(
             "Finance rollup complete for {Entity} {EntityId}: " +
@@ -270,7 +319,7 @@ public class FinanceRollupService
             FinanceBaseValues.PendingInvoiceStatuses.Cast<object>().ToArray());
 
         var held = query.AddLink(
-            FinanceBaseValues.SubmissionEntity, "sprk_invoiceid", FinanceBaseValues.SubmissionInvoiceLookup, JoinOperator.LeftOuter);
+            FinanceBaseValues.SubmissionEntity, FinanceBaseValues.InvoiceKeyColumn, FinanceBaseValues.SubmissionInvoiceLookup, JoinOperator.LeftOuter);
         held.EntityAlias = FinanceBaseValues.HeldAlias;
         held.Columns = new ColumnSet(false);
         foreach (var (column, value) in FinanceBaseValues.HeldSubmissionConditions)

@@ -9,7 +9,7 @@
 |---|---|
 | `Services/Finance/FinanceBaseValues.cs` | Adds `PendingInvoiceStatuses` (In Review), `HeldSubmissionConditions` (the one held predicate), `PendingSpendColumn`, `BuildGroupedPendingSumFetchXml`, `ReadPendingSpendAsync`. `BuildGroupedSumFetchXml` now delegates to one private builder; its output is byte-identical (existing tests pass unchanged). |
 | `Services/Finance/FinanceRollupService.cs` | A third parallel query (`BuildPendingInvoiceQuery`) and `sprk_pendingspend` in `BuildRollupFields` (new required `pendingSpend` argument). Counted spend (`BuildInvoiceQuery`) is unchanged. |
-| `scripts/ebilling/Deploy-EbillingPendingSpendSchema.ps1` | Idempotent additive script: `sprk_matter.sprk_pendingspend` and `sprk_project.sprk_pendingspend` (Money, precision 2, 0 .. 1e9). Parse-checked only. NOT run against any environment. |
+| `scripts/ebilling/Deploy-EbillingPendingSpendSchema.ps1` | Idempotent additive script: `sprk_matter.sprk_pendingspend` and `sprk_project.sprk_pendingspend` (Money, precision 2, -922337203685477 .. 922337203685477, the range of `sprk_totalspendtodate`; corrected in the review round). Parse-checked only. NOT run against any environment. |
 | `docs/data-model/sprk_invoice-matter-project.md` | A row per parent for the new column. |
 | tests | `SpendHeldAndPendingTests.cs` (new, 18 tests), `FinanceRollupPayloadTests.cs` (new argument, new assertion), `FinanceBaseValuesSingleDefinitionGuardTests.cs` (guard: no consumer spells the held predicate; 2 new controls). |
 
@@ -87,11 +87,28 @@ Their follow-up (not done here; their files were not edited):
 |---|---|
 | Column logical name | `sprk_pendingspend` |
 | Entities | `sprk_matter`, `sprk_project` (the same name on both) |
-| Type | Currency (Money), precision 2, min 0, max 1,000,000,000; stored, plain (not calculated or rollup) |
+| Type | Currency (Money), precision 2, min -922337203685477, max 922337203685477 (the range of `sprk_totalspendtodate`: it stores a sum, so not the per-invoice 0 .. 1e9; corrected in the review round); stored, plain (not calculated or rollup) |
 | Writer | `FinanceRollupService` only (stored copy; can be stale like `sprk_totalspendtodate`) |
 | Live measure | `FinanceBaseValues.ReadPendingSpendAsync(entities, parentEntity, parentIds, ct)` -> `parentId -> decimal` (parents with none are 0). Constant: `FinanceBaseValues.PendingSpendColumn` |
 | Held predicate | `FinanceBaseValues.HeldSubmissionConditions` (status Rejected + reason `ebilling.submission.blocked` on a linked `sprk_invoicesubmission`) |
 
-To make a Threshold able to use it they need to: add `sprk_pendingspend` to `PolicyVersionValidator.AuthorableColumns`; add its range to the `PredicateCompiler` ranges (0 .. 1e9, Currency, like `sprk_totalspendtodate`); add a `RuleBodyDescriber` label ("Pending spend"); and, if the Threshold is to read it from base rows instead of the stored copy (the D-122 rule), add it to `FinanceBaseValues.DerivedColumns` / `Needs` / `ValueOf` and make `SignalEvaluator` call `ReadPendingSpendAsync` (the current `ReadAsync` tuple was left untouched on purpose). Until then the column is stored but unusable in a rule, which is safe. `FinanceBaseValues.IsDerived` deliberately returns false for it today.
+To make a Threshold able to use it they need to: add `sprk_pendingspend` to `PolicyVersionValidator.AuthorableColumns`; add its range to the `PredicateCompiler` ranges (±922337203685477, Currency, like `sprk_totalspendtodate`); add a `RuleBodyDescriber` label ("Pending spend"); and, if the Threshold is to read it from base rows instead of the stored copy (the D-122 rule), add it to `FinanceBaseValues.DerivedColumns` / `Needs` / `ValueOf` and make `SignalEvaluator` call `ReadPendingSpendAsync` (the current `ReadAsync` tuple was left untouched on purpose). Until then the column is stored but unusable in a rule, which is safe. `FinanceBaseValues.IsDerived` deliberately returns false for it today.
 
 Range to send them: the commit(s) on branch `worktree-agent-a4620f6f07c910055` from `c342f4b9a` (see the report).
+
+## ontology-r1 review round (2026-10-19)
+
+ontology-r1 reviewed `be84b2a8f`. The counted spend and held/pending logic held. The old and new counted FetchXML are byte-identical across 12 combinations. Its mutations were all caught: dropping the null check, moving the reason condition to the outer filter, and adding In Review to the counted set.
+
+| Finding | Fix |
+|---|---|
+| F1: `sprk_pendingspend` was in the single rollup PATCH, and the pending query (joined to `sprk_invoicesubmission`) ran in the same `Task.WhenAll`. On an environment the BFF reaches before the schema script, every recalculate failed (500), none of the ten stored fields updated, and `SpendSnapshotGenerationJobHandler` retried and then poisoned the job. | `FinanceRollupService.WriteRollupAsync` writes the counted rollup first. A failure there still propagates (404 / 500 as before). Then it reads Pending Spend and writes it in its own PATCH (`BuildPendingSpendFields`). A failure to read or write pending is logged as an Error and leaves the stored value unchanged, never 0. Tests in `FinanceRollupPendingSpendWriteTests`: a pending query failure or a pending write failure still writes the counted fields; a counted failure propagates and pending is not attempted; cancellation is not swallowed. Mutation: narrowing the catch fails 3 of the 5. |
+| F4: the column used the shared `New-MoneyDef` range (0 .. 1e9, the per-invoice `sprk_totalamount` range), but it stores a sum | The script overrides the range to ±922337203685477, as on `sprk_totalspendtodate`. The data-model rows, script header and "For ontology-r1" range are corrected. The script had not run anywhere. |
+| K6: `BuildRollupFields` took `totalSpend, pendingSpend, ...` positionally | Pending is no longer in that payload, and the call uses named arguments. `"sprk_invoiceid"` is now `FinanceBaseValues.InvoiceKeyColumn`, used by both builders. |
+
+**Known limits:**
+- **K1, resolved for the query shapes.** The read-only seam case `FinanceBaseValuesSeamTests.PendingSpendQueries_AreAcceptedByDataverse_ReadOnly` ran against spaarkedev1 on 2026-10-19 and passed. It sends both pending shapes, for matter and project, with ids that match no row, and creates nothing. The aggregate FetchXML (with `entityname` on a root condition) and the rollup's QueryExpression are both accepted, and the reader reads the result. The anti-join's semantics on real rows are pinned by the unit tests only. A live semantic case needs created submissions, which is a live write needing the owner's OK.
+- **K2, fail open for a user identity.** The outer join applies row security to the user-owned `sprk_invoicesubmission`, so a caller who cannot read the blocking submission would see a held invoice counted as pending. `ReadPendingSpendAsync`'s doc comment now says to call it only with an application identity. There is no user-identity caller; ontology's follow-up uses the evaluator's app identity.
+- **K3, the reason-code literal.** `FinanceBaseValues.BlockedReasonCode` stays the literal `"ebilling.submission.blocked"` (`TODO(049)`) until 049 part B creates `SubmissionReasonCodes.Blocked`. Part B swaps it so there is one definition.
+- **K4, pending briefly wrong or stale.** A rollup that runs between 049 step 6 (the invoice committed In Review) and the submission being marked Rejected and blocked counts a soon-to-be-held invoice as pending. Override and Return do not trigger a recalculation, so pending stays stale until the next rollup. To revisit with 105, which could trigger a recalculation on release.
+- **K5, by design.** In Review is statuscode 1, the default, so every invoice created without an explicit status counts as pending. This matches D-103 / D-104.
