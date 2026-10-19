@@ -1686,18 +1686,19 @@ public sealed class SecureChildReconciler
         /// owner; and, mid-unsecure, the root is named as the one whose flag is not a failed provisioning. A GRANT row takes its
         /// root lookup only (UAC task 099b review round 3, K1): the parent the grant core hands the resolver when it creates
         /// the row (<c>GrantExternalAccessEndpoint.ResolveGrantOwnerAsync</c>), so a transition and a create cannot disagree on
-        /// its owner — its other lookups (<c>sprk_invoice</c> is an ownership parent) do not file it.
+        /// its owner — its other lookups (<c>sprk_invoice</c> is an ownership parent) do not file it. A citation lookup (#2084: a
+        /// Signal's rule, <see cref="RecordOwnershipResolver.IsCitation"/>) files nothing and is left out.
         /// </summary>
         private RecordOwnershipContext ContextFor(Entity row)
         {
             var parents = IsGrant(row.LogicalName)
                 ? GrantRootParent(row)
-                : RecordOwnershipContext.ParentsOf(row.Attributes).ToList();
+                : RecordOwnershipContext.ParentsOf(row).ToList();
             if (string.Equals(row.LogicalName, CommunicationTable, StringComparison.OrdinalIgnoreCase)
                 && row.GetAttributeValue<EntityReference>(ThreadLookupOnCommunication) is { Id: var threadId } && threadId != Guid.Empty
                 && _byRef.TryGetValue(("sprk_communicationthread", threadId), out var thread))
             {
-                parents.AddRange(RecordOwnershipContext.ParentsOf(thread.Attributes));
+                parents.AddRange(RecordOwnershipContext.ParentsOf(thread));
             }
 
             return new RecordOwnershipContext
