@@ -607,6 +607,91 @@ Test-only follow-up to ontology-r1's review of `SignalWriter.CloseActedByAutomat
 - K1: Dataverse stores `sprk_resolvedon` to the second, so a system close in the same second after the read reads as before it -> LeftAsIs. It fails safe, and matches the commit route's `SystemClosedSince`. Do not round `setReadAt` down: that would fail open.
 - K4: the extra Information logs on Closed / ChangedSinceRead carry ids and the policy code only. The row-version line duplicates the one in `LinkConditionClearedRecordAsync` (~:1096); a shared helper is optional.
 
+### 13c. D-122 wiring (rejection resolves every open Signal)
+
+Supersedes section 7's "`ResolvedSignalIds` is empty" and section 13 open item 1. File: `InvoiceSubmissionAfterSteps.cs` only (plus its tests and the flow tests). `SignalWriter`, the recorder and the writer are unchanged.
+
+**Order (AutoRejected only; agreed with ontology-r1, the commit route's order).**
+1. Signal writes, as before. Any failure returns Retry before step 2.
+2. **The set.** If the findings JSON already holds a stored set, it is used and nothing is read (the set is frozen: the record's hash covers it). Otherwise it is read once, app-only:
+   - the clock (`TimeProvider`) is read first and becomes `setReadAtUtc`, so a system close after the read is at or after it (the writer's re-close rule);
+   - the invoice's lines: `sprk_billingevent` where `sprk_invoice` = the invoice (the persister's resume query);
+   - the Signals: one query, `sprk_regardinginvoice` = the invoice OR `sprk_regardinginvoiceline` in the lines; each row's dedupe key is parsed (`SignalWriter.TryParseDedupeKey`), the subject must be the invoice or one of its lines, and the latest episode per (policy, subject) decides, as `LatestEpisodeAsync` does;
+   - kept: latest episodes whose status is Open or Acknowledged, ordered by id. Never the write results (a refresh or skip returns no id).
+   - The set is written into `sprk_findingsjson` BEFORE the record. The write moves the row version, so the terminal write re-reads it.
+3. **The record**, `ResolvedSignalIds` = the stored set's ids.
+4. **The closes**: `SignalWriter.CloseActedByAutomatedDecisionAsync(signalId, recordId, setReadAtUtc, policyCode)` for each Signal in the stored set, with the STORED `setReadAtUtc` (a resume does not use its own clock).
+5. Indexing (not for a rejection), notify, terminal status last, as before.
+
+Accepted, AcceptedUncoded and Blocked read no set, store none and close nothing. `ResumeAsync` runs the same steps from the stored state.
+
+**Stored shape** (findings JSON member `resolvedSignalSet`):
+```json
+{ "setReadAtUtc": "2026-10-19T09:00:00.0000000Z",
+  "signals": [ { "id": "<signal id>", "policyCode": "BILL-AGE" } ],
+  "recordPredatesSet": true }
+```
+`recordPredatesSet` appears only on the pre-D-122 path below. A member that is present but unreadable makes the whole findings JSON unreadable (`findings_unreadable`, Refused); it is never silently re-read.
+
+**"Already Acted by this record".** Because the set is stored before the record exists, a fresh read never happens after a close by this record: a resume after a partial close finds the stored set and re-closes from it (`AlreadyClosedByThisRecord` for the closed ones, no second write). The fresh read therefore needs no "this record" clause, and the record id (assigned at create, not deterministic) is not known at read time anyway.
+
+**Pre-D-122 records.** A record written by the earlier code lists no Signal, and its hash is over the empty list, so recording it again with a non-empty set returns `review_invalid` (same id and code, other content). Handling, used only when the set is not empty:
+- On `review_invalid`, the same decision is recorded once more with the empty list. A success (normally `AlreadyRecorded`) means the record lists no Signal: the stored set is rewritten as empty with `recordPredatesSet: true`, nothing is closed, and the run continues. Later resumes use the stored empty set directly.
+- A refusal on the second call is classified as any refusal (permanent Refused, transient Retry).
+- Why this cannot write a wrong record: `review_invalid` from the first call means a record exists under the key (or the request is invalid in a way the set does not affect: the ids are distinct and non-empty by construction). The second call can create only if no record exists under the key, which would need a concurrent delete between the two calls. Even then the new record lists no Signal and closes none, which is consistent.
+- Detection without this fallback would need the writer's private lookup (writer identity, `sprk_steps` key) copied into the after-steps; rejected.
+
+**A listed Signal that no longer exists.**
+- Before the store: impossible by construction (the set is read from existing rows).
+- After the store and before the record: the writer refuses the record with `owner_refused`. The after-steps then read the set's ids (one query by `sprk_signalid` in the set). If any is missing, the result is Refused with `ebilling.submission.resolved_signal_missing` (`ResolvedSignalMissingCode`, permanent: the set is frozen, so a retry cannot change it). If all exist, `owner_refused` stands as before.
+- After the record (deleted before its close): the close's read fails with ObjectDoesNotExist. That Signal has nothing to close: one Warning, the run continues. The record still lists it, which is true at decision time.
+- Alternative not taken (open question below): when `owner_refused` proves no record exists under the key, the set could be shrunk and re-stored safely, avoiding a Failed submission.
+
+**Close outcomes.**
+
+| Outcome | Handling |
+|---|---|
+| Closed, AlreadyClosedByThisRecord | Done |
+| LeftAsIs | Stays listed in the record; one Information line (submission, Signal and record ids, policy code) |
+| ChangedSinceRead | Every Signal is still attempted, then Retry `ebilling.submission.signal_changed`; the submission stays Processing; nothing notified, no terminal |
+| ObjectDoesNotExist | One Warning, continue (above) |
+| Any other exception | Propagates, as a Signal write fault does (part E: transient, stays Processing) |
+
+**Seams and census.** The internal test constructor gains `closeActed` (production: `SignalWriter.CloseActedByAutomatedDecisionAsync`) and an optional `TimeProvider` (production: `TimeProvider.System`). The public constructor's signature is unchanged, so DI and the ADR-010 ceiling are unchanged; no ArchTest census changed.
+
+**Tests.** `InvoiceSubmissionAfterStepsTests` (+10): every open Signal on the invoice and its lines (written now, an earlier episode's, Acknowledged; resolved and other-invoice ones untouched); Accepted and Blocked close nothing; the set stored before the record with a crash between (ResumeAsync uses the stored set, no fresh read, the stored read time); a Signal opened after the read stays open; a resume after a partial close (no double write); ChangedSinceRead → Retry, then completes; LeftAsIs stays listed with one Information line; the pre-D-122 record; the missing listed Signal (and plain owner_refused); a not-found close skipped and a transient close fault propagated. `InvoiceSubmissionProcessingFlowTests`: the rejected SPA flow closes every Signal with the one record and stores the set; the blocked flow closes nothing.
+
+**Fail-before evidence.**
+- Against the base sources (0307881b5) the new tests do not compile: CS0426 (`ResolvedSignalSet`).
+- Mutations (non-constant expressions), each run on the after-steps and flow tests (81):
+
+| Mutation | Tests failing |
+|---|---|
+| M1 the close step gets an empty set | 7 (the flow rejection, every-open-Signal, stored-before-record, partial close, LeftAsIs, close faults, ChangedSinceRead) |
+| M2 a stored set ignored (re-read every run) | 10 (the 13c resume tests and the 13a / part D crash-resume tests) |
+| M3 the set not stored before the record | 13 |
+| M4 ChangedSinceRead ignored | 1 |
+| M5 resolved Signals listed (status filter off) | 1 |
+| M6 Acknowledged not treated as open | 1 |
+| M7 earliest episode per key instead of latest | 1 |
+| M8 pre-D-122 fallback off | 1 |
+| M9 the fallback keeps the read set (closes Signals the record does not list) | 1 |
+| M10 missing-Signal check off | 1 |
+| M11 a not-found close propagates | 1 |
+| M12 LeftAsIs not logged | 1 |
+| M13 the close uses the run's clock, not the stored read time | 1 |
+| M14 the record lists no Signal | 5 |
+| M15 the read time taken after the read | 1 |
+| M16 `resolved_signal_missing` treated as transient | 1 |
+
+All 16 killed; the source was restored byte-identical after the run.
+
+**Verification.** `dotnet build src/server/api/Sprk.Bff.Api/` 0 warnings / 0 errors. Broad filtered unit run 8,182 passed / 0 failed / 11 skipped (after-steps 57 → 67; after-steps + flow 81). ArchTests 1,214 passed, unchanged.
+
+**Open questions.**
+1. Missing listed Signal after the store: Refused (as briefed) or shrink-and-re-store (safe while no record exists under the key)?
+2. A listed Signal deleted after the record is skipped with a Warning rather than retried forever. Confirm.
+
 ## 14. Part E - the handler (2026-10-19)
 
 **Files.**
