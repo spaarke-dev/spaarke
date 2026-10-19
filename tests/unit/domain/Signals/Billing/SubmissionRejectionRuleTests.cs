@@ -921,6 +921,75 @@ public class SubmissionRejectionRuleTests
         decision.DecidingFindings.Single().Finding.ReadFields.Should().Contain(new FieldRef(0, BillingFieldNames.Rate));
     }
 
+    // ── 073 review F1-a: never reject on an AI-assigned input ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ARealEvaluation_ExpenseRuleOnTheAiAssignedCode_DoesNotReject_EvenAtHighCodingConfidence_F1a()
+    {
+        // The firm billed E101 (read at 0.97); the coding Action assigned E109 (its self-reported 0.92). An ExpenseRule that lists E109 as
+        // non-reimbursable fires on the AI's code. 0.92 clears the 0.90 threshold, but it is not a D-47 combined score: hold, never reject.
+        var rule = Version("BILL-EXP", RuleType.ExpenseRule, """{"type":"ExpenseRule","nonReimbursableCodes":["E109"]}""") with { Consequence = Reject };
+        var line = Expense(0) with
+        {
+            ExpenseCode = "E109",
+            BilledExpenseCode = "E101",
+            FieldConfidence = Confidence().With(BillingFieldNames.ExpenseCode, 0.92m).With(BillingFieldNames.BilledExpenseCode, 0.97m),
+        };
+        var result = Evaluator().Evaluate(Request(line), Loaded(rule));
+        result.Findings.Should().ContainSingle().Which.ReasonCode.Should().Be(BillingReasonCodes.ExpenseCodeNotReimbursable);
+
+        var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
+
+        ShouldHold(decision, SubmissionHoldReasons.AiAssignedInput);
+        Only(decision).UnreliableFields.Should().Equal(new FieldRef(0, BillingFieldNames.ExpenseCode));
+    }
+
+    [Fact]
+    public async Task ARealEvaluation_ReadingOnlyExtractedFieldsWithCombinedScores_StillRejects_F1aControl()
+    {
+        // The must-not-fire control: an InvoiceAge finding reads the line date and the invoice date (extracted, D-47 scores) and nothing
+        // the AI assigned, so the AI-assigned hold leaves it alone and it rejects.
+        var rule = Version("BILL-AGE", RuleType.InvoiceAge, """{"type":"InvoiceAge","maxAgeDays":10}""") with { Consequence = Reject };
+        var result = Evaluator().Evaluate(Request(Fee(0)), Loaded(rule));
+        var finding = result.Findings.Should().ContainSingle().Subject;
+        finding.ReadFields.Should().NotBeEmpty().And.OnlyContain(f => !BillingFieldNames.IsAiAssigned(f.Field));
+
+        var decision = await Sut(new FakeSettings(Settings())).DecideAsync(result, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SubmissionOutcome.Rejected);
+    }
+
+    [Theory]
+    [InlineData(BillingFieldNames.TaskCode)]
+    [InlineData(BillingFieldNames.ActivityCode)]
+    [InlineData(BillingFieldNames.ExpenseCode)]
+    [InlineData(BillingFieldNames.ObservationBlockBilling)]
+    [InlineData("Observation.SomethingNew")]
+    public void AFindingThatReadsAnAiAssignedField_Holds_WhateverItsConfidence(string aiField)
+    {
+        var line = BillingSubject.ForLine(0);
+        var values = new List<BillingValueRead> { Extracted(new FieldRef(0, BillingFieldNames.Amount), 1m), Extracted(new FieldRef(0, aiField), 1m) };
+
+        var decision = Decide(Finding(RuleType.ExpenseRule, values, subject: line), Reject, Settings());
+
+        ShouldHold(decision, SubmissionHoldReasons.AiAssignedInput);
+        Only(decision).UnreliableFields.Should().Equal(new FieldRef(0, aiField));
+    }
+
+    [Theory]
+    [InlineData(BillingFieldNames.BilledTaskCode)]
+    [InlineData(BillingFieldNames.BilledActivityCode)]
+    [InlineData(BillingFieldNames.BilledExpenseCode)]
+    [InlineData("ObservationLike")]
+    public void TheFirmBilledCodes_AreExtracted_NotAiAssigned_AndCanReject(string field)
+    {
+        BillingFieldNames.IsAiAssigned(field).Should().BeFalse();
+        var values = new List<BillingValueRead> { Extracted(new FieldRef(0, field), 0.99m) };
+
+        Decide(Finding(RuleType.ExpenseRule, values, subject: BillingSubject.ForLine(0)), Reject, Settings())
+            .Outcome.Should().Be(SubmissionOutcome.Rejected);
+    }
+
     [Fact]
     public async Task ARealEvaluation_WithAMisreadRate_DoesNotReject_NFR06()
     {

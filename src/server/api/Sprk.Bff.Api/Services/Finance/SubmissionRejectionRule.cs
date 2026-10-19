@@ -61,6 +61,13 @@ public static class SubmissionHoldReasons
     /// <summary>The finding lists no extracted field it read, so nothing shows its inputs were reliable.</summary>
     public const string NoReadFields = "no_read_fields";
 
+    /// <summary>
+    /// The finding read a field the AI assigned rather than read from the invoice (<see cref="BillingFieldNames.IsAiAssigned"/>: the coding
+    /// Action's task, activity or expense code, or an AI observation). Its confidence is the model's own report, not a D-47 combined
+    /// score, so it never supports a rejection (I-5; 073 review F1-a).
+    /// </summary>
+    public const string AiAssignedInput = "ai_assigned_input";
+
     /// <summary>A read field has no confidence, or one outside 0 to 1.</summary>
     public const string ReadFieldConfidenceUnknown = "read_field_confidence_unknown";
 
@@ -86,8 +93,8 @@ public sealed record FindingDecision
     public string? HeldBecause { get; init; }
 
     /// <summary>
-    /// The read fields (as the finding lists them in <see cref="BillingFinding.ReadFields"/>) that were unknown, outside 0 to 1 or
-    /// below the threshold: what a reviewer should correct. Empty unless the finding was held on its read fields.
+    /// The read fields (as the finding lists them in <see cref="BillingFinding.ReadFields"/>) that were AI-assigned, unknown, outside 0 to
+    /// 1 or below the threshold: what a reviewer should check. Empty unless the finding was held on its read fields.
     /// </summary>
     public IReadOnlyList<FieldRef> UnreliableFields { get; init; } = [];
 
@@ -127,6 +134,8 @@ public sealed record SubmissionDecision
 /// <para><b>Fail closed.</b> Anything that cannot be established counts against rejecting: a consequence that is missing or unknown, a
 /// read field with no confidence (or one outside 0 to 1), a finding that lists no read field, a threshold that cannot be read or breaks
 /// <see cref="EbillingSettings.RejectionInvariantProblem"/>. Each gives Accepted plus a Flag, never Rejected.</para>
+/// <para><b>Never on an AI-assigned input.</b> A finding that read a field the AI assigned (<see cref="BillingFieldNames.IsAiAssigned"/>)
+/// holds, whatever that field's confidence: it is the model's own report, not a D-47 combined score (I-5).</para>
 /// <para><b>Read fields are used as stated.</b> The decider checks the extracted values a finding lists
 /// (<see cref="BillingFinding.ReadFields"/>, task 071) and never works out which fields a rule type reads. A comparison is
 /// <c>confidence &gt;= threshold</c> against the threshold read from settings at decide time, not <see cref="BillingValueRead.BelowReliabilityThreshold"/>
@@ -305,6 +314,13 @@ public sealed class SubmissionRejectionRule
         if (readFields.Length == 0)
         {
             return Held(SubmissionHoldReasons.NoReadFields);
+        }
+
+        // Never on an AI-assigned input (I-5): its confidence is the model's self-report, which D-47 does not let gate a rejection.
+        var aiAssigned = readFields.Where(f => BillingFieldNames.IsAiAssigned(f.Field)).ToArray();
+        if (aiAssigned.Length > 0)
+        {
+            return Held(SubmissionHoldReasons.AiAssignedInput, aiAssigned);
         }
 
         var unknown = new List<FieldRef>();

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance.Resolution;
 
@@ -52,10 +53,26 @@ public static class BillingFieldNames
 
     public const string BilledExpenseCode = "BilledExpenseCode";
 
-    /// <summary>An AI observation of block billing; its confidence is the observation's own.</summary>
-    public const string ObservationBlockBilling = "Observation.BlockBilling";
+    /// <summary>The prefix of every AI observation field: the whole family is AI-assigned (<see cref="IsAiAssigned"/>).</summary>
+    public const string ObservationPrefix = "Observation.";
 
-    public const string ObservationVagueDescription = "Observation.VagueDescription";
+    /// <summary>An AI observation of block billing; its confidence is the observation's own.</summary>
+    public const string ObservationBlockBilling = ObservationPrefix + "BlockBilling";
+
+    public const string ObservationVagueDescription = ObservationPrefix + "VagueDescription";
+
+    /// <summary>
+    /// The fields whose value the AI assigned rather than read from the invoice (073 review F1-a): the coding Action's task, activity
+    /// and expense codes (047) and, by <see cref="ObservationPrefix"/>, every AI observation. Their confidence is the model's own
+    /// report, not a D-47 combined score, so a finding that read one can never reject a submission (I-5); it holds as a Flag.
+    /// The firm-billed codes (<see cref="BilledTaskCode"/> and the others) are extracted fields and are not in this set.
+    /// </summary>
+    public static IReadOnlySet<string> AiAssigned { get; } =
+        new[] { TaskCode, ActivityCode, ExpenseCode }.ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>True for a field in <see cref="AiAssigned"/> or under <see cref="ObservationPrefix"/> (ordinal).</summary>
+    public static bool IsAiAssigned(string? field) =>
+        field is not null && (AiAssigned.Contains(field) || field.StartsWith(ObservationPrefix, StringComparison.Ordinal));
 }
 
 /// <summary>Everything one billing rule is judged against: one submission, its lines and the reference data they need.</summary>
