@@ -572,13 +572,13 @@ re-check items (F2, the EventId, the optional mapper test). Read first: sections
 
 | Item | Commit | Change |
 |---|---|---|
-| F1-a | `d6fd76790` | `core_record_window.closed_to_billing` and `core_record_window.core_record_closed` get their own token-free `ReasonTemplate` (`ClosedToBillingTemplate`, `NoCloseDateTemplate`). The mapper already took a reason's template before the version's and the type's, so only the catalogue changed. `before_open` / `after_close` keep the version's template (they are about the dates). |
-| F2 | `ced33d2fa` | `BillingRuleCatalogue.ReasonHeadline`: a reason with its own sentence has its own `sprk_name`. The mapper uses it when the PRIMARY reason has one (and the group is not withheld). A flag-only primary reason takes lane Decide and severity Info. |
-| F1-b | `35831d102` | A downgraded firm version is left out of the D-39 precedence set (`!downgraded.ContainsKey(...)`). It still runs as Flag; the client default stays in force. |
-| EventId | `cf170c812` | The consequence-downgrade Warning has its own `EventId` 50316 (`PolicyVersionConsequenceDowngraded`), no longer 50301. |
-| Optional mapper test | `17e6fbeb7` | A downgraded version maps to a Flag Signal with a Flag fingerprint. A pin: the behaviour already held, so no fail-before. |
-| A7 extension | `3ca2fbc7a` | A line with Hours (not negative) and no Amount lists Amount as an unknown read (null value, unknown confidence, below the floor). |
-| Currency | `1bc84c209` | Confidence is checked before "not USD"; `US$` and `USD$` are USD in the one shared normaliser. |
+| F1-a | `4795a4209` | `core_record_window.closed_to_billing` and `core_record_window.core_record_closed` get their own token-free `ReasonTemplate` (`ClosedToBillingTemplate`, `NoCloseDateTemplate`). The mapper already took a reason's template before the version's and the type's, so only the catalogue changed. `before_open` / `after_close` keep the version's template (they are about the dates). |
+| F2 | `2ef271b57` | `BillingRuleCatalogue.ReasonHeadline`: a reason with its own sentence has its own `sprk_name`. The mapper uses it when the PRIMARY reason has one (and the group is not withheld). A flag-only primary reason takes lane Decide and severity Info. |
+| F1-b | `0da5c4b08` | A downgraded firm version is left out of the D-39 precedence set (`!downgraded.ContainsKey(...)`). It still runs as Flag; the client default stays in force. |
+| EventId | `229cdbd7a` | The consequence-downgrade Warning has its own `EventId` 50316 (`PolicyVersionConsequenceDowngraded`), no longer 50301. |
+| Optional mapper test | `05bdb0213` | A downgraded version maps to a Flag Signal with a Flag fingerprint. A pin: the behaviour already held, so no fail-before. |
+| A7 extension | `61a2bd9c9` | A line with Hours (not negative) and no Amount lists Amount as an unknown read (null value, unknown confidence, below the floor). |
+| Currency | `3668c83da` | Confidence is checked before "not USD"; `US$` and `USD$` are USD in the one shared normaliser. |
 | Doc fix, this section | this notes commit | W.3 publish delta corrected; W.2 and W.5 updated; this section. |
 
 ### 13.2 Behaviour
