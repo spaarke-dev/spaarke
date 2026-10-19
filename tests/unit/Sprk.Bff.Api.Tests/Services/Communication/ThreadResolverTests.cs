@@ -1969,6 +1969,83 @@ public class ThreadResolverTests
             "an internal resolution adds no privacy condition");
     }
 
+    // ── #2091: the filing reconcile IS the step after a re-file's thread step — its own joins run no step of their own ──────
+
+    /// <summary>A host's scope factory that fails the moment a scope is opened: the step after a re-file would open one.</summary>
+    private static ScopesThatMustNotBeOpened NoStepScopes() => new();
+
+    private sealed class ScopesThatMustNotBeOpened : Microsoft.Extensions.DependencyInjection.IServiceScopeFactory
+    {
+        public Microsoft.Extensions.DependencyInjection.IServiceScope CreateScope() =>
+            throw new InvalidOperationException("Test: the filing reconcile's own join opened a scope for the step after a re-file.");
+    }
+
+    private ThreadResolver CreateFilingSutWithScopes(
+        Microsoft.Extensions.DependencyInjection.IServiceScopeFactory scopes, params IThreadKeyStrategy[] strategies) =>
+        new(strategies, _entity.Object, _owners, NullLogger<ThreadResolver>.Instance, _grants.Object, SecureNames, scopes);
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_TheMoveToTheRecordsDefaultThread_RunsNoStepAfterARefile_2091()
+    {
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
+        SetupReconcileThreadRead(threadId, OpenThread(threadId));
+        SetupThreadMessagesForFiling(
+            threadId,
+            Message(communicationId, "sprk_matter", matter),
+            Message(Guid.NewGuid(), entityType: null, Guid.Empty, type: CommunicationTypeMessage));
+        var recordThread = SetupRecordsDefaultThread("sprk_matter", matter);
+
+        await CreateFilingSutWithScopes(NoStepScopes()).ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        VerifyOnlyTheEmailMoved(communicationId, threadId, recordThread, "sprk_matter", matter);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_AThreadlessEmailJoiningARecordThread_RunsNoStepAfterARefile_2091()
+    {
+        var communicationId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        var existing = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId: null, "sprk_matter", matter);
+        _entity
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", existing, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Thread(existing, regardingType: "sprk_matter", regardingId: matter.ToString(), threadType: ThreadTypeRecordAnchored));
+
+        await CreateFilingSutWithScopes(
+                NoStepScopes(), new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.Join(existing)))
+            .ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        VerifyAssigned(communicationId, existing, Times.Once());
+        _owners.Reparents.Should().ContainSingle("the join files the email under the thread's record (S6)");
+    }
+
+    [Fact]
+    public async Task ResolveAndAssignAsync_JoiningARecordThread_InAHostWithoutTheReconciler_StillJoins_AndLogsAnError_2091()
+    {
+        var request = Request(CommunicationType.Email);
+        var existing = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _entity
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", existing, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Thread(existing, regardingType: "sprk_matter", regardingId: matter.ToString(), threadType: ThreadTypeRecordAnchored));
+        var log = new CapturingLogger<ThreadResolver>();
+        var sut = new ThreadResolver(
+            new[] { new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.Join(existing)) }, _entity.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), log);
+
+        var result = await sut.ResolveAndAssignAsync(request, CancellationToken.None);
+
+        result.Should().Be(ThreadAssignment.Anchored(existing, "sprk_matter", matter), "the join stands");
+        VerifyAssigned(request.CommunicationId, existing, Times.Once());
+        log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error
+                                          && e.Message.Contains("no SecureChildReconciler is registered", StringComparison.Ordinal)
+                                          && e.Message.Contains(request.CommunicationId.ToString(), StringComparison.Ordinal),
+            "a host without the reconciler skips the step after a re-file loudly, never silently");
+    }
+
     [Fact]
     public async Task ReconcileThreadForFiling_UnfiledEmailWithNoThread_DoesNothing()
     {

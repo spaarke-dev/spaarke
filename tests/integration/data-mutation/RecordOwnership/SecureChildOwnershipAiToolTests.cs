@@ -784,6 +784,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_sentby", "systemuser", "sprk_SentBy"),
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                // #2091 (b): a communication's project filing (SecureChildLineage: sprk_communication.sprk_regardingproject).
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
             },
             ["sprk_document"] = new[]
             {

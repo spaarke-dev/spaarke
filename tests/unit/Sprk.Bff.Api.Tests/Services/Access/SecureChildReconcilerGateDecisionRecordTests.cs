@@ -72,6 +72,50 @@ public sealed class SecureChildReconcilerGateDecisionRecordTests
             .And.BeLessThan(gate.Calls.FindIndex(c => c.StartsWith("assign:", StringComparison.Ordinal)), "after UAC's own steps");
     }
 
+    [Fact]
+    public async Task AfterRefile_PlacedByWriter_SkipsOnlyTheThreadReconcile_AndStillReownsTheGateDecisionRecord_2091()
+    {
+        // #2091 (a): a thread join IS the communication's thread placement, so it skips the step's thread reconcile — and every
+        // other step runs, the gate Decision Record re-own included.
+        var gate = SharedGateRecord();
+
+        await Reconciler(gate.Sharing).AfterRefileAsync(
+            "sprk_communication", CommunicationId, NotIsolated, RefileThreadStep.PlacedByWriter, CancellationToken.None);
+
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        gate.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(MatterTeam);
+        gate.RecordSharees(RecordId).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AfterRefile_PlacedByWriter_AGateReownFault_LogsFilingReownFailed50317_AndNeverThrows_2091()
+    {
+        // #2091 (c): with the thread reconcile skipped, a failure of the gate Decision Record step is still logged as
+        // FilingReownFailed (event id 50317) and never fails the re-file.
+        var gate = SharedGateRecord();
+        gate.AssignLands = false;
+        gate.AssignFault = new InvalidOperationException("Test: Dataverse refused the Assign.");
+
+        var act = () => Reconciler(gate.Sharing).AfterRefileAsync(
+            "sprk_communication", CommunicationId, NotIsolated, RefileThreadStep.PlacedByWriter, CancellationToken.None);
+
+        await act.Should().NotThrowAsync("the re-file it follows has landed");
+        gate.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.EventId.Id == 50317
+                                               && e.EventId == DecisionRecordEvents.FilingReownFailed);
+        gate.RecordSharees(RecordId).Should().Equal(new[] { Sharee }, "the shares stay until a team owner reads back");
+    }
+
+    [Fact]
+    public async Task AfterRefile_Reconcile_RunsTheThreadReconcileOnce_2091()
+    {
+        // Must-fire control: every other writer (the four-argument overload) has the communication's thread follow the filing.
+        var gate = SharedGateRecord();
+
+        await Reconciler(gate.Sharing).AfterRefileAsync("sprk_communication", CommunicationId, NotIsolated, CancellationToken.None);
+
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(CommunicationId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Theory]
     [InlineData("sprk_event")]
     [InlineData("sprk_document")]

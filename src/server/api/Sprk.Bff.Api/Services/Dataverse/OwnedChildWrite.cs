@@ -1454,6 +1454,13 @@ internal static class OwnedChildWrite
         /// <summary>The caller's PATCH ran inside the re-file and the owner is decided and applied.</summary>
         public bool Written { get; init; }
 
+        /// <summary>
+        /// #2091: <see cref="Written"/>, but the reparent found it moved nothing the row is filed under
+        /// (<see cref="RecordOwnerResolution.ParentsUnchanged"/>: every lookup it sets already names that record in that column,
+        /// and every column it clears held no parent) — no re-file, so a writer runs no step after one.
+        /// </summary>
+        public bool ParentsUnchanged { get; init; }
+
         /// <summary>The caller's own rights refused it (no AppendTo on a record named) — nothing written.</summary>
         public string? Denied { get; init; }
 
@@ -1604,7 +1611,7 @@ internal static class OwnedChildWrite
             {
                 { IsForbidden: true } => new RefileOutcome { Forbidden = resolution },
                 { IsRefused: true } => new RefileOutcome { OwnerRefusal = resolution },
-                _ => new RefileOutcome { Written = true },
+                _ => new RefileOutcome { Written = true, ParentsUnchanged = resolution.ParentsUnchanged },
             };
         }
         catch (CallerWriteFailedException failed)
