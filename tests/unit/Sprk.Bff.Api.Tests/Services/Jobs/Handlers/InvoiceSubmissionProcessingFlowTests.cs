@@ -36,11 +36,14 @@ namespace Sprk.Bff.Api.Tests.Services.Jobs.Handlers;
 /// </summary>
 /// <remarks>
 /// <para>Maintain-class (ADR-038): the all-or-nothing and idempotent-redelivery guarantees of FR-20 / NFR-08.</para>
-/// <para><b>ResumeAsync.</b> <see cref="IInvoiceSubmissionAfterSteps.ResumeAsync"/> is implemented by a parallel change (D-122). Until it lands the
-/// real class throws, so the redelivery tests here wrap the real after-steps in <see cref="ResumingAfterSteps"/>, a test-only stand-in that
-/// resumes by running the real <c>RunAsync</c> from the stored state. The handler's own contract (a Processing submission with its link is
-/// resumed through <c>ResumeAsync</c>; the processor and the persister are never called) is proved against the strict fake in
-/// <see cref="InvoiceSubmissionProcessingJobHandlerTests"/>; the stand-in is replaced by the real method when it merges.</para>
+/// <para><b>ResumeAsync.</b> The redelivery tests go through the REAL <see cref="IInvoiceSubmissionAfterSteps.ResumeAsync"/>: a Processing
+/// submission that links its invoice is resumed from the stored state, and the handler never calls the processor or the persister
+/// (<c>flow.Spy.Calls == 0</c>). A resume is observable in what it does: it re-runs the invoice totals (016) once more, then the steps. The
+/// handler's own routing contract is also proved against the strict fake in <see cref="InvoiceSubmissionProcessingJobHandlerTests"/>.</para>
+/// <para><b>The Dataverse double behaves like Dataverse.</b> The submission row has a row version that every write bumps (a transaction update,
+/// a plain update and a conditional bulk update alike); <c>BulkUpdateIfRowVersionsMatchAsync</c> applies only when the expected version is the
+/// current one and otherwise throws <see cref="System.Data.DBConcurrencyException"/>, as <c>DataverseServiceClientImpl</c> does. The version is
+/// returned on a read only when <c>versionnumber</c> is requested.</para>
 /// </remarks>
 public sealed class InvoiceSubmissionProcessingFlowTests
 {
@@ -52,35 +55,6 @@ public sealed class InvoiceSubmissionProcessingFlowTests
     private sealed class Crash : Exception
     {
         public Crash() : base("simulated process crash") { }
-    }
-
-    /// <summary>Test-only stand-in for the D-122 <c>ResumeAsync</c>: resumes from the stored link and findings, re-running the real RunAsync.</summary>
-    private sealed class ResumingAfterSteps(IInvoiceSubmissionAfterSteps real, Flow flow) : IInvoiceSubmissionAfterSteps
-    {
-        public int ResumeCalls { get; private set; }
-
-        public Task<SubmissionAfterStepsResult> RunAsync(SubmissionPersistResult persisted, string? correlationId, CancellationToken ct = default) =>
-            real.RunAsync(persisted, correlationId, ct);
-
-        public void PreflightRejection(SubmissionEvaluationOutcome outcome) => real.PreflightRejection(outcome);
-
-        public Task<SubmissionAfterStepsResult> ResumeAsync(Guid submissionId, string? correlationId, CancellationToken ct = default)
-        {
-            ResumeCalls++;
-            var kind = Enum.Parse<SubmissionEvaluationKind>(
-                JsonNode.Parse(flow.Row.GetAttributeValue<string>("sprk_findingsjson"))!["kind"]!.GetValue<string>());
-            var terminal = kind is SubmissionEvaluationKind.AutoRejected or SubmissionEvaluationKind.Blocked
-                ? InvoiceSubmissionStatus.Rejected
-                : InvoiceSubmissionStatus.Accepted;
-            return real.RunAsync(new SubmissionPersistResult
-            {
-                Status = SubmissionPersistStatus.Resumed,
-                SubmissionId = submissionId,
-                InvoiceId = flow.Row.GetAttributeValue<EntityReference>("sprk_invoice").Id,
-                TerminalStatus = terminal,
-                TerminalReasonCode = flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode"),
-            }, correlationId, ct);
-        }
     }
 
     /// <summary>Wraps the processor to count and, for the concurrency test, hold the first evaluation open.</summary>
@@ -138,8 +112,8 @@ public sealed class InvoiceSubmissionProcessingFlowTests
             Recorder = new BillingDecisionRecorder(Records.Writer, new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object, NullLogger<BillingDecisionRecorder>.Instance);
 
             Entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) => entity == FinanceBaseValues.SubmissionEntity
-                    ? Copy(Row)
+                .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) => entity == FinanceBaseValues.SubmissionEntity
+                    ? ReadSubmission(columns)
                     : new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = "M-1" });
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName switch
@@ -176,14 +150,44 @@ public sealed class InvoiceSubmissionProcessingFlowTests
             Entities.Setup(e => e.UpdateAsync(FinanceBaseValues.SubmissionEntity, SubmissionId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
                 .Returns((string _, Guid _, Dictionary<string, object> fields, CancellationToken _) =>
                 {
-                    if (fields.TryGetValue("sprk_processingstatus", out var status))
-                    {
-                        StatusHistory.Add(((OptionSetValue)status).Value);
-                    }
-
                     Apply(fields);
                     return Task.CompletedTask;
                 });
+            // Dataverse's conditional bulk update: every row must be at the expected version, else nothing is applied and the call throws
+            // DBConcurrencyException (DataverseServiceClientImpl.MapConditionalBulkFailure).
+            Entities.Setup(e => e.BulkUpdateIfRowVersionsMatchAsync(FinanceBaseValues.SubmissionEntity, It.IsAny<List<(Guid id, Dictionary<string, object> fields, long rowVersion)>>(), It.IsAny<CancellationToken>()))
+                .Returns((string _, List<(Guid id, Dictionary<string, object> fields, long rowVersion)> updates, CancellationToken _) =>
+                {
+                    ConditionalUpdates++;
+                    if (updates.Any(u => u.id != SubmissionId || u.rowVersion != Version))
+                    {
+                        return Task.FromException(new System.Data.DBConcurrencyException("the submission changed since it was read"));
+                    }
+
+                    foreach (var update in updates)
+                    {
+                        Apply(update.fields);
+                    }
+
+                    return Task.CompletedTask;
+                });
+        }
+
+        /// <summary>The submission's row version: starts at 1 and every write (any path) bumps it, as Dataverse's <c>versionnumber</c> does.</summary>
+        public long Version { get; private set; } = 1;
+
+        public int ConditionalUpdates { get; private set; }
+
+        private Entity ReadSubmission(string[]? columns)
+        {
+            var copy = Copy(Row);
+            copy.RowVersion = Version.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (columns is not null && columns.Contains("versionnumber", StringComparer.Ordinal))
+            {
+                copy["versionnumber"] = Version;
+            }
+
+            return copy;
         }
 
         public Guid? LinkedInvoice => Row.GetAttributeValue<EntityReference>("sprk_invoice")?.Id;
@@ -192,14 +196,12 @@ public sealed class InvoiceSubmissionProcessingFlowTests
 
         public IEnumerable<Entity> CreatedOf(string table) => Created.Where(c => c.LogicalName == table);
 
-        public InvoiceSubmissionProcessingJobHandler BuildHandler(bool resumeStandIn = false)
+        public InvoiceSubmissionProcessingJobHandler BuildHandler()
         {
             var processor = new SpyProcessor(Harness.Build(), this);
             Spy = processor;
             var persister = BuildPersister();
             var after = BuildAfterSteps();
-            ResumingAfterSteps? resuming = resumeStandIn ? new ResumingAfterSteps(after, this) : null;
-            Resuming = resuming;
 
             var documents = new Mock<IDocumentDataverseService>(MockBehavior.Strict);
             documents.Setup(d => d.GetDocumentAsync(DocumentId.ToString(), It.IsAny<CancellationToken>()))
@@ -214,7 +216,7 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 TestRecordContainerResolver.ForBusinessUnitContainers("drive-1"),
                 processor,
                 persister,
-                (IInvoiceSubmissionAfterSteps?)resuming ?? after,
+                after,
                 BuildSink(),
                 Locks,
                 Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = Enabled }),
@@ -222,8 +224,6 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         }
 
         public SpyProcessor? Spy { get; private set; }
-
-        public ResumingAfterSteps? Resuming { get; private set; }
 
         private IEbillingNotificationSink? _sink;
 
@@ -339,8 +339,15 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         {
             foreach (var (column, value) in attributes)
             {
+                if (column == "sprk_processingstatus")
+                {
+                    StatusHistory.Add(((OptionSetValue)value).Value);
+                }
+
                 Row[column] = value;
             }
+
+            Version++;
         }
 
         private static Entity Copy(Entity source)
@@ -411,6 +418,7 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         flow.SignalWrites.Should().NotBeEmpty("the finding is a Signal");
         flow.LinkedInvoice.Should().Be(InvoiceId);
         flow.Status.Should().Be((int)InvoiceSubmissionStatus.Accepted);
+        flow.ConditionalUpdates.Should().Be(1, "the terminal status is one conditional write on the row version (13a B)");
         flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode").Should().BeNull();
         flow.Jobs.Should().ContainSingle(j => j.JobType == "InvoiceIndexing").Which.SubjectId.Should().Be(InvoiceId.ToString());
         flow.Notified.Should().ContainSingle().Which.Outcome.Should().Be(SubmissionDecisionOutcome.Accepted);
@@ -598,7 +606,7 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         flow.CrashAtSignalWrite = 0;
         var job = Job();
 
-        var first = await flow.BuildHandler(resumeStandIn: true).ProcessAsync(job, CancellationToken.None);
+        var first = await flow.BuildHandler().ProcessAsync(job, CancellationToken.None);
 
         first.Status.Should().Be(JobStatus.Failed, "a Signal write fault is transient");
         flow.Transactions.Should().ContainSingle();
@@ -609,11 +617,11 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         flow.Notified.Should().BeEmpty();
         flow.RecordCreates.Should().Be(0, "the Decision Record comes after the Signals");
 
-        var redelivered = flow.BuildHandler(resumeStandIn: true);
+        var redelivered = flow.BuildHandler();
         var second = await redelivered.ProcessAsync(job, CancellationToken.None);
 
         second.Status.Should().Be(JobStatus.Completed);
-        flow.Resuming!.ResumeCalls.Should().Be(1, "a Processing submission that links its invoice is resumed");
+        flow.TotalsCalls.Should().Equal([InvoiceId, InvoiceId], "the real resume re-runs the invoice totals once (the first run's, then the resume's)");
         flow.Spy!.Calls.Should().Be(0, "a resume never re-runs the read, the coding or the evaluation");
         flow.Transactions.Should().ContainSingle("no second invoice, ever");
         flow.CreatedOf("sprk_invoice").Should().ContainSingle();
