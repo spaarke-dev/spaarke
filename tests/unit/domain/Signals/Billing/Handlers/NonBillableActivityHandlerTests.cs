@@ -99,6 +99,24 @@ public class NonBillableActivityHandlerTests
             new BillingSuggestedAdjustment(BillingAdjustmentKind.Disallow, 575m), null);
     }
 
+    [Theory]
+    [InlineData("A101", null)]
+    [InlineData(null, "L160")]
+    public void D128_AReviewersManualDisallowOfACredit_DoesNotChangeTheAutomaticRule_ACreditIsStillNeverSuggested(string? activity, string? task)
+    {
+        // D-128 lets a reviewer disallow a credit by hand (016 sums it signed). It is a manual decision only: the automatic
+        // suggestion of this rule stays as D-105 set it, for either listed code and even for the smallest credit.
+        var facts = Facts(
+            Fee(0) with { ActivityCode = activity, TaskCode = task, Amount = -0.01m },
+            Fee(1) with { ActivityCode = activity, TaskCode = task, Amount = 0.01m });
+
+        var findings = Run(NonBillable, facts);
+
+        findings.Should().HaveCount(2, "the credit still fires, so the reviewer sees it");
+        findings[0].SuggestedAdjustment.Should().BeNull("a negative amount is never suggested for disallow");
+        findings[1].SuggestedAdjustment.Should().Be(new BillingSuggestedAdjustment(BillingAdjustmentKind.Disallow, 0.01m));
+    }
+
     [Fact]
     public void AZeroAmount_IsNotACredit_AndStillSuggestsTheDisallow_D105()
     {

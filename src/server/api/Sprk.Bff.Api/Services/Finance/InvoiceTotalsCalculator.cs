@@ -42,7 +42,10 @@ public sealed record InvoiceLineInput(
 /// <summary>Stable reason codes of a refusal (FR-32). Callers branch on these; never on the message.</summary>
 public static class InvoiceTotalsRefusalCodes
 {
-    /// <summary>The approved total would be below zero (FR-32).</summary>
+    /// <summary>
+    /// The approved total would be below zero on an invoice whose billed total is not (FR-32): the adjustments exceed what was billed. Not raised
+    /// for a credit memo (a negative billed total, D-127), whose approved total is legitimately negative.
+    /// </summary>
     public const string ApprovedTotalNegative = "invoice-totals.approved-total-negative";
 
     /// <summary>A line has no usable cost type, so it cannot be placed in the fees, expenses or adjustments.</summary>
@@ -50,14 +53,6 @@ public static class InvoiceTotalsRefusalCodes
 
     /// <summary>The invoice has no billed total (<c>sprk_totalamount</c>), so no approved total can be derived.</summary>
     public const string BilledTotalMissing = "invoice-totals.billed-total-missing";
-
-    /// <summary>
-    /// A stored total (fees, expenses, line adjustments or invoice adjustments) would be below zero, which the platform minimum of 0 on those
-    /// columns refuses to store. Credit lines (D-121) make this reachable: a cost type whose credits exceed its charges sums below zero, and so does
-    /// a credit line that is Disallowed with nothing to offset it. Replaces the earlier per-line refusal of any negative Fee or Expense amount,
-    /// which D-121 lifted.
-    /// </summary>
-    public const string TotalBelowStorableMinimum = "invoice-totals.total-below-storable-minimum";
 
     /// <summary>A Reduced line has no approved amount, or one that is negative or above the billed amount.</summary>
     public const string LineApprovedAmountInvalid = "invoice-totals.line-approved-amount-invalid";
@@ -103,10 +98,16 @@ public sealed record InvoiceTotalsCalculation(
 /// <para><b>Fail closed.</b> Input that the formula cannot place (a line with no cost type, a Reduced line with no usable approved amount,
 /// an Adjustment line with no method/value, a missing billed total) refuses the whole calculation rather than being skipped, because a
 /// skipped line silently changes what the firm is paid. An Adjustment line's own status is never read: only Fee and Expense lines are decided.</para>
-/// <para><b>Credit lines (D-121).</b> A Fee or Expense line may be negative (a credit or reversal) and is summed as a signed value; the stored
-/// <c>sprk_amount</c> accepts it since the column's minimum was lowered. The stored totals still have a minimum of 0, so a result that would put
-/// the fees, expenses or either adjustments total below zero is refused (<see cref="InvoiceTotalsRefusalCodes.TotalBelowStorableMinimum"/>), as is a
-/// negative approved total.</para>
+/// <para><b>Credit lines and credit memos (D-121, D-127, D-128).</b> A Fee or Expense line may be negative (a credit or reversal) and is summed as a
+/// signed value, so a cost type's total, the billed total and the approved total may all be negative (an all-credit invoice is a credit memo);
+/// the stored columns accept it since their minimums were lowered. Nothing is refused for being below zero except an approved total that goes
+/// below zero on an invoice that was not itself negative. A Disallowed credit is summed signed too: its adjustment is the negative amount, so
+/// disallowing a credit raises the approved total (the reviewer does not recognise the reversal). A Reduced credit stays refused: no approved
+/// amount is valid for it.</para>
+/// <para><b>Percent adjustments on a negative fee base.</b> A percent adjustment is <c>value% x</c> the signed base, so on a net-negative fee base
+/// it is negative (a negative Adjustment-line amount, which the column accepts) and lessens the credit by that percentage. This is the same
+/// figure as taking the percentage of each fee line separately, which is the property that makes the rule predictable. The base is never
+/// clamped at zero.</para>
 /// </remarks>
 public static class InvoiceTotalsCalculator
 {
@@ -187,18 +188,11 @@ public static class InvoiceTotalsCalculator
 
         invoiceAdjustments = Round(invoiceAdjustments);
 
-        // The four stored totals have a platform minimum of 0. With credit lines (D-121) a sum can fall below it, and the write would fault
-        // after the invoice is committed; refuse here instead, as every other unstorable result is (nothing is written).
-        if (fees < 0m || expenses < 0m || lineAdjustmentsTotal < 0m || invoiceAdjustments < 0m)
-        {
-            return Refused(new InvoiceTotalsRefusal(
-                InvoiceTotalsRefusalCodes.TotalBelowStorableMinimum,
-                "A fees, expenses or adjustments total would be below zero (credit lines exceed the charges they credit), and the platform minimum of 0 would refuse it."));
-        }
-
         var approved = Round(billed - lineAdjustmentsTotal - invoiceAdjustments);
 
-        InvoiceTotalsRefusal? negative = approved < 0m
+        // FR-32 refuses adjustments that exceed the billed total. A credit memo (billed total below zero, D-127) legitimately has a negative approved
+        // total, so the refusal applies only when the billed total itself is not negative.
+        InvoiceTotalsRefusal? negative = approved < 0m && billed >= 0m
             ? new InvoiceTotalsRefusal(
                 InvoiceTotalsRefusalCodes.ApprovedTotalNegative,
                 "The adjustments exceed the billed total: the approved total would be "

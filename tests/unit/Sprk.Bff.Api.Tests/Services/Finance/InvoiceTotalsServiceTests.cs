@@ -117,15 +117,29 @@ public sealed class InvoiceTotalsServiceTests
     }
 
     [Fact]
-    public async Task Recalculate_WhenCreditsWouldTakeAStoredTotalBelowZero_ReturnsTheRefusal_AndWritesNothing()
+    // D-127: an all-credit invoice (a credit memo) has negative totals, which are stored as computed.
+    public async Task Recalculate_OfAnAllCreditInvoice_StoresTheNegativeTotals_D127()
     {
-        GivenInvoice(950L);
-        GivenLines(Line(InvoiceLineCostType.Fee, 1000m), Line(InvoiceLineCostType.Expense, -50m));
+        GivenInvoice(-300L, version: 9L);
+        GivenLines(Line(InvoiceLineCostType.Fee, -200m), Line(InvoiceLineCostType.Fee, -100m));
+
+        Dictionary<string, object?>? invoiceWrite = null;
+        _records
+            .Setup(r => r.UpdateRecordFieldsIfUnchangedAsync("sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), 9L, It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, long, CancellationToken>((_, _, f, _, _) => invoiceWrite = f)
+            .Returns(Task.CompletedTask);
 
         var result = await CreateService().RecalculateAsync(InvoiceId);
 
-        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.TotalBelowStorableMinimum);
-        VerifyNothingWritten();
+        result.IsRefused.Should().BeFalse();
+        invoiceWrite.Should().BeEquivalentTo(new Dictionary<string, object?>
+        {
+            ["sprk_feestotal"] = -300m,
+            ["sprk_expensestotal"] = 0m,
+            ["sprk_lineadjustmentstotal"] = 0m,
+            ["sprk_invoiceadjustmentstotal"] = 0m,
+            ["sprk_approvedtotal"] = -300m,
+        });
     }
 
     [Fact]

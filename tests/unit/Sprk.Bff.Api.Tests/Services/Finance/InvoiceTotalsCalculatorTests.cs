@@ -252,23 +252,67 @@ public sealed class InvoiceTotalsCalculatorTests
     }
 
     [Fact]
-    public void CreditsThatExceedTheirTypesCharges_AreRefused_BecauseTheStoredTotalCannotBeNegative()
+    public void CreditsThatExceedTheirTypesCharges_AreSummedSigned_AndNotRefused_D127()
     {
-        // The expense credit has no expense charge to offset it: sprk_expensestotal (minimum 0) could not hold -50.
+        // The expense credit has no expense charge to offset it: the expenses total is -50 (the column accepts it since D-127).
         var result = InvoiceTotalsCalculator.Calculate(950m, new[] { Fee(1000m), Expense(-50m) });
 
-        result.IsRefused.Should().BeTrue();
-        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.TotalBelowStorableMinimum);
-        result.FeesTotal.Should().Be(0m, "a refused result carries no figures that could be stored");
-        result.ExpensesTotal.Should().Be(0m);
+        result.IsRefused.Should().BeFalse();
+        result.FeesTotal.Should().Be(1000m);
+        result.ExpensesTotal.Should().Be(-50m);
+        result.ApprovedTotal.Should().Be(950m);
     }
 
     [Fact]
-    public void AllCreditInvoice_IsRefused_BecauseTheFeesTotalWouldBeNegative()
+    public void AllCreditInvoice_GivesANegativeTotal_AndIsNotRefused_D127()
     {
-        var result = InvoiceTotalsCalculator.Calculate(-300m, new[] { Fee(-300m) });
+        // A credit memo: the billed total is the signed sum, and so are the fees and the approved total.
+        var result = InvoiceTotalsCalculator.Calculate(-300m, new[] { Fee(-200m), Fee(-100m) });
 
-        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.TotalBelowStorableMinimum);
+        result.IsRefused.Should().BeFalse();
+        result.FeesTotal.Should().Be(-300m);
+        result.ExpensesTotal.Should().Be(0m);
+        result.LineAdjustmentsTotal.Should().Be(0m);
+        result.InvoiceAdjustmentsTotal.Should().Be(0m);
+        result.ApprovedTotal.Should().Be(-300m);
+    }
+
+    [Fact]
+    public void AllCreditInvoice_WithFeeAndExpenseCredits_KeepsEachCostTypeNegative_D127()
+    {
+        var result = InvoiceTotalsCalculator.Calculate(-125.50m, new[] { Fee(-100m), Expense(-25.50m) });
+
+        result.IsRefused.Should().BeFalse();
+        result.FeesTotal.Should().Be(-100m);
+        result.ExpensesTotal.Should().Be(-25.50m);
+        result.ApprovedTotal.Should().Be(-125.50m);
+    }
+
+    [Fact]
+    public void MixedInvoice_NetsChargesAndCredits_AndTheNetMayBeNegative_D127()
+    {
+        // Net positive: 1000 - 400 = 600.
+        var positive = InvoiceTotalsCalculator.Calculate(600m, new[] { Fee(1000m), Fee(-400m) });
+        positive.IsRefused.Should().BeFalse();
+        positive.FeesTotal.Should().Be(600m);
+        positive.ApprovedTotal.Should().Be(600m);
+
+        // Net negative: 300 - 1000 = -700, still stored as is.
+        var negative = InvoiceTotalsCalculator.Calculate(-700m, new[] { Fee(300m), Fee(-1000m) });
+        negative.IsRefused.Should().BeFalse();
+        negative.FeesTotal.Should().Be(-700m);
+        negative.ApprovedTotal.Should().Be(-700m);
+    }
+
+    [Fact]
+    public void AnInvoiceThatWasNotNegative_StillRefusesAnApprovedTotalBelowZero_D127()
+    {
+        // FR-32 is about adjustments that exceed what was billed. Billed 100 (200 of work, a 100 credit), 150 of charges disallowed: -50, refused.
+        var result = InvoiceTotalsCalculator.Calculate(
+            100m, new[] { Fee(200m), Fee(-100m), Fee(150m, InvoiceLineStatus.Disallowed) });
+
+        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.ApprovedTotalNegative);
+        result.ApprovedTotal.Should().Be(-50m);
     }
 
     [Fact]
@@ -283,17 +327,75 @@ public sealed class InvoiceTotalsCalculatorTests
     }
 
     [Fact]
-    public void DisallowedCreditLine_WithNothingToOffsetIt_IsRefused_ButIsSummedWhenTheChargesCoverIt()
+    public void DisallowedCreditLine_IsSummedSigned_AndRaisesThePayableTotal_D128()
     {
-        // Disallowing a credit puts a negative figure in the line-adjustments total; alone it could not be stored.
-        var alone = InvoiceTotalsCalculator.Calculate(900m, new[] { Fee(1000m), Fee(-100m, InvoiceLineStatus.Disallowed) });
-        alone.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.TotalBelowStorableMinimum);
+        // 1000 of work, a 100 credit: billed 900. Disallowing the credit: its adjustment is -100, so the approved total is 900 - (-100) = 1000.
+        var result = InvoiceTotalsCalculator.Calculate(900m, new[] { Fee(1000m), Fee(-100m, InvoiceLineStatus.Disallowed) });
 
-        // Offset by a disallowed charge of 100: line adjustments = 100 + (-100) = 0, so the approved total is the billed total.
-        var offset = InvoiceTotalsCalculator.Calculate(
+        result.IsRefused.Should().BeFalse("nothing needs to offset a disallowed credit (D-128)");
+        result.LineAdjustmentsTotal.Should().Be(-100m);
+        result.ApprovedTotal.Should().Be(1000m, "disallowing a credit raises the payable total");
+    }
+
+    [Fact]
+    public void DisallowedCredit_OnACreditMemo_TakesTheApprovedTotalToZero_D128()
+    {
+        var result = InvoiceTotalsCalculator.Calculate(-100m, new[] { Fee(-100m, InvoiceLineStatus.Disallowed) });
+
+        result.IsRefused.Should().BeFalse();
+        result.LineAdjustmentsTotal.Should().Be(-100m);
+        result.ApprovedTotal.Should().Be(0m);
+    }
+
+    [Fact]
+    public void DisallowedCredit_OffsetByADisallowedCharge_NetsToNoChange_D128()
+    {
+        // Disallowed charge 100 (adjustment +100) and disallowed credit -100 (adjustment -100): the approved total is the billed total.
+        var result = InvoiceTotalsCalculator.Calculate(
             900m, new[] { Fee(1000m), Fee(100m, InvoiceLineStatus.Disallowed), Fee(-100m, InvoiceLineStatus.Disallowed) });
-        offset.IsRefused.Should().BeFalse();
-        offset.LineAdjustmentsTotal.Should().Be(0m);
+
+        result.IsRefused.Should().BeFalse();
+        result.LineAdjustmentsTotal.Should().Be(0m);
+        result.ApprovedTotal.Should().Be(900m);
+    }
+
+    [Fact]
+    public void PercentAdjustment_OnANetNegativeFeeBase_IsNegative_AndLessensTheCredit_D127()
+    {
+        // The rule: value% x the SIGNED fee base after the fee lines' own adjustments, never clamped at zero. Base = 300 - 1000 = -700,
+        // 10% = -70, so the approved total is -700 - (-70) = -630: the discount lessens the credit, as it would on each line separately.
+        var percent = Percent(10m);
+
+        var result = InvoiceTotalsCalculator.Calculate(-700m, new[] { Fee(300m), Fee(-1000m), percent });
+
+        result.IsRefused.Should().BeFalse();
+        result.AdjustmentLineAmounts[percent.Id].Should().Be(-70m);
+        result.InvoiceAdjustmentsTotal.Should().Be(-70m);
+        result.ApprovedTotal.Should().Be(-630m);
+    }
+
+    [Fact]
+    public void PercentAdjustment_OnANetNegativeBase_EqualsThePercentOfEachLine_D127()
+    {
+        // 10% of 300 is 30 and 10% of -1000 is -100: together -70, the same as 10% of the net -700.
+        var result = InvoiceTotalsCalculator.Calculate(-700m, new[] { Fee(300m), Fee(-1000m), Percent(10m) });
+
+        result.InvoiceAdjustmentsTotal.Should().Be(300m * 0.10m + -1000m * 0.10m);
+    }
+
+    [Fact]
+    public void PercentAdjustment_TakesADisallowedCreditOutOfTheBase_D128()
+    {
+        // Fees 300 and -1000, the credit disallowed: its adjustment is -1000, so the base is -700 - (-1000) = 300 and 10% = 30.
+        var percent = Percent(10m);
+
+        var result = InvoiceTotalsCalculator.Calculate(
+            -700m, new[] { Fee(300m), Fee(-1000m, InvoiceLineStatus.Disallowed), percent });
+
+        result.IsRefused.Should().BeFalse();
+        result.LineAdjustmentsTotal.Should().Be(-1000m);
+        result.AdjustmentLineAmounts[percent.Id].Should().Be(30m);
+        result.ApprovedTotal.Should().Be(-700m + 1000m - 30m);
     }
 
     [Fact]
