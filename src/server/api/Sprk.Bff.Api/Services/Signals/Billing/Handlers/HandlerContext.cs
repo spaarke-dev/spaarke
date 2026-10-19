@@ -25,6 +25,34 @@ internal static class BillingMath
     internal static bool IsCreditLine(BillingLineFacts line) => line.Hours < 0m || line.Amount < 0m;
 }
 
+/// <summary>
+/// The one currency normaliser of billing (D-119): used by the evaluator's money skip (D-20) and its "not checked" finding (D-115),
+/// and by RequiredData's currency check, so the two can never disagree about an invoice. R1 judges US dollars only.
+/// </summary>
+internal static class BillingCurrency
+{
+    internal const string UsDollars = "USD";
+
+    /// <summary>
+    /// The currency as an upper-case code, or <c>null</c> when none was read (absent or blank). A bare <c>"$"</c> is
+    /// <see cref="UsDollars"/> (D-119, owner); anything else is the trimmed text upper-cased with the invariant culture.
+    /// </summary>
+    internal static string? Normalise(string? currency)
+    {
+        var text = BillingText.Text(currency);
+        return text switch
+        {
+            null => null,
+            "$" => UsDollars,
+            _ => text.ToUpperInvariant(),
+        };
+    }
+
+    /// <summary>True when the currency read is US dollars (<c>USD</c> in any case, or a bare <c>"$"</c>). A currency that was not
+    /// read is not USD here; whether that is "missing" is the caller's question (D-115).</summary>
+    internal static bool IsUsd(string? currency) => Normalise(currency) == UsDollars;
+}
+
 /// <summary>Invariant text for the values a finding records, so a finding does not depend on the machine's culture.</summary>
 internal static class BillingText
 {

@@ -426,6 +426,39 @@ public class InvoiceComplianceEvaluatorTests
             .Should().BeEquivalentTo([BillingEvaluationReasons.CurrencyNotUsd, BillingReasonCodes.CurrencyNotUsd]);
     }
 
+    // ── D-119: one currency normaliser for the money skip and RequiredData ───────────────────────────────────────
+
+    public static TheoryData<string?, string?, bool> CurrencyPaths => new()
+    {
+        // currency read, the expected D-115 reason (null = rates checked), RequiredData's currency_not_usd fires
+        { "$", null, false },
+        { " $ ", null, false },
+        { "usd", null, false },
+        { "EUR", BillingEvaluationReasons.CurrencyNotUsd, true },
+        { "US$", BillingEvaluationReasons.CurrencyNotUsd, true },
+        { null, BillingEvaluationReasons.CurrencyMissing, false },
+        { "  ", BillingEvaluationReasons.CurrencyMissing, false },
+    };
+
+    [Theory]
+    [MemberData(nameof(CurrencyPaths))]
+    public void TheMoneySkip_AndRequiredData_AgreeOnTheCurrency_D119(string? currency, string? notCheckedReason, bool notUsdFlag)
+    {
+        var rate = Version("CD-RATE", RuleType.ApprovedRate);
+        var required = Version("CD-REQUIRED", RuleType.RequiredData);
+        var request = Request(Fee(0) with { BilledRate = 700m, Amount = 700m }) with { Currency = currency };
+
+        var codes = Evaluate(request, Loaded(rate, required)).Findings.Select(f => f.ReasonCode).ToList();
+
+        var currencyReasons = new[]
+        {
+            BillingEvaluationReasons.CurrencyMissing, BillingEvaluationReasons.CurrencyUnreliable, BillingEvaluationReasons.CurrencyNotUsd,
+        };
+        codes.Where(currencyReasons.Contains).Should().Equal(notCheckedReason is null ? [] : [notCheckedReason]);
+        codes.Contains(BillingReasonCodes.CurrencyNotUsd).Should().Be(notUsdFlag, "RequiredData uses the same normaliser");
+        codes.Contains(BillingReasonCodes.RateAboveApproved).Should().Be(notCheckedReason is null, "rates are checked exactly when USD");
+    }
+
     [Fact]
     public void RatesNotChecked_IsNotRaised_WhenNoMoneyRuleIsInForce_D115()
     {

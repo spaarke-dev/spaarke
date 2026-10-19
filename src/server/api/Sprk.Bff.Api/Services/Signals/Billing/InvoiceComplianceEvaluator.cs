@@ -340,18 +340,18 @@ public sealed class InvoiceComplianceEvaluator
             .FirstOrDefault();
 
     /// <summary>
-    /// D-20: why money cannot be judged on this invoice, or <c>null</c> when it can (USD, read reliably). <c>"$"</c> is read as USD
-    /// (049 caller obligation); the confidence is <c>HeaderConfidence["Currency"]</c> under exactly that key.
+    /// D-20: why money cannot be judged on this invoice, or <c>null</c> when it can (USD, read reliably). USD is decided by the one
+    /// shared normaliser (<see cref="BillingCurrency"/>, D-119: a bare <c>"$"</c> is USD), which RequiredData uses too; the
+    /// confidence is <c>HeaderConfidence["Currency"]</c> under exactly that key.
     /// </summary>
     internal static string? CurrencySkipReason(BillingEvaluationRequest request, decimal reliabilityThreshold)
     {
-        var currency = request.Currency?.Trim();
-        if (string.IsNullOrEmpty(currency))
+        if (BillingCurrency.Normalise(request.Currency) is null)
         {
             return BillingEvaluationReasons.CurrencyMissing;
         }
 
-        if (currency != "$" && !string.Equals(currency, "USD", StringComparison.OrdinalIgnoreCase))
+        if (!BillingCurrency.IsUsd(request.Currency))
         {
             return BillingEvaluationReasons.CurrencyNotUsd;
         }

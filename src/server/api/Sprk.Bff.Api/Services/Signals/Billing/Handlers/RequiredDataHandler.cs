@@ -12,20 +12,20 @@ namespace Sprk.Bff.Api.Services.Signals.Billing.Handlers;
 /// timekeeper, task code and activity code to fee lines; the expense code to expense lines; the line date and narrative to every
 /// line. The header fields are checked once. A value of only whitespace is missing. The codes are the ones the firm billed
 /// (<see cref="BillingLineFacts.BilledTaskCode"/> and its siblings), not the AI's: the rule asks what the invoice carries.</para>
-/// <para><b>Currency (FR-21, D-20).</b> R1 is USD only. Whenever this rule runs, an invoice whose currency is read and is not
-/// <c>USD</c> (case ignored) gets one invoice-level finding, reason <c>required_data.currency_not_usd</c>, <c>missingField</c> =
+/// <para><b>Currency (FR-21, D-20, D-119).</b> R1 is USD only. Whenever this rule runs, an invoice whose currency is read and is not
+/// USD by the one shared normaliser (<see cref="BillingCurrency.IsUsd"/>: <c>USD</c> in any case, or a bare <c>"$"</c>) gets one
+/// invoice-level finding, reason <c>required_data.currency_not_usd</c>, <c>missingField</c> =
 /// <c>currency</c>, message <see cref="BillingRuleCatalogue.CurrencyNotUsdTemplate"/>; that reason is flag-only
 /// (<see cref="BillingRuleCatalogue.IsFlagOnlyReason"/>). It is a finding, never an exception, and it does not depend on the rule listing a field: the rule's
 /// vocabulary has no currency member, and a foreign-currency invoice is unsupported however the rule is configured. A currency
-/// that was not read is not flagged (no evidence), and "$" is not USD.</para>
+/// that was not read is not flagged (no evidence); the evaluator's flag-only D-115 finding reports it instead. A bare "$" is USD
+/// (D-119), as it is for the evaluator's money rules, so a "$" invoice is never both rate-checked and flagged "not USD".</para>
 /// <para><b>An absent value is not reliably absent.</b> A missing field's confidence is whatever the fact set holds for it, or
 /// unknown, which task 073 treats as not reliable: a field the extraction simply failed to find cannot reject an invoice (NFR-06).</para>
 /// <para><b>Reads:</b> the missing field itself, or Currency; nothing else.</para>
 /// </remarks>
 internal static class RequiredDataHandler
 {
-    private const string UsDollars = "USD";
-
     // Header fields and line fields in the order of the 070 vocabulary, so output order does not depend on the body's order.
     private static readonly string[] HeaderOrder = ["firmInvoiceNumber", "invoiceDate", "billingPeriodStart", "billingPeriodEnd"];
     private static readonly string[] LineOrder = ["timekeeper", "lineDate", "narrative", "taskCode", "activityCode", "expenseCode"];
@@ -54,7 +54,7 @@ internal static class RequiredDataHandler
         }
 
         var currency = BillingText.Text(invoice.Currency);
-        if (currency is not null && !string.Equals(currency, UsDollars, StringComparison.OrdinalIgnoreCase))
+        if (currency is not null && !BillingCurrency.IsUsd(currency))
         {
             var values = new[] { context.HeaderField("invoice.currency", BillingFieldNames.Currency, currency) };
             findings.Add(context.Finding(BillingSubject.ForInvoice(), BillingReasonCodes.CurrencyNotUsd, values, new FactValues().Add("missingField", "currency")));
