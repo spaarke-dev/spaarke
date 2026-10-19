@@ -386,7 +386,11 @@ public class ADR010_DITests
         // 165 mappings, ICodeSetSuggestionProvider not among them.
         // ───────── Integration 2026-10-17 (ebilling-r1 merge of origin/master 1df4ee12d) ─────────
         // Both sides raised from 159: master +1 (ontology-r1 task 101, 160) and ebilling-r1 net +6 (165). Combined 166.
-        const int knownOneToOneCeiling = 166;
+        // ───────── Ceiling RAISED 166 → 167, 2026-10-19 (ebilling-r1 task 049 part A; +1 interface) ─────────
+        // IEbillingNotificationSink -> NoOpEbillingNotificationSink. Seam justification: task 132 replaces the no-op with a job-enqueuing sink
+        // (recipients, email, SPA feed, approver in-app), and 049's processor tests fake the seam. Falsifiable: if 132 is dropped, register the
+        // concrete and lower this back to 166. The 049 processor (part B) may add its own entry; sum the raises at merge.
+        const int knownOneToOneCeiling = 167;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

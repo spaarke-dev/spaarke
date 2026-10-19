@@ -92,6 +92,12 @@ public static class FinanceModule
         // statecode / statuscode. Scoped, unconditional (write-path owner; see the flag rule above). Callers: 103, 104, 150, 151.
         services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
 
+        // Notification seam of the submission pipeline (ebilling-r1 task 049 part A, Processing Pipeline step 9): the processor reports every
+        // Accepted / Rejected submission here after its decision commits. The no-op is the default; task 132 replaces THIS registration with its
+        // job-enqueuing sink, so the interface is a real seam (a second implementation is planned), not a 1:1 convenience (ADR-010).
+        // Scoped like its callers (the pipeline's scoped processor). Unconditional (flag rule above): the processor always calls it.
+        services.AddScoped<IEbillingNotificationSink, NoOpEbillingNotificationSink>();
+
         // Rate card and timekeeper import / publish (ebilling-r1 task 078, FR-29 / FR-08): template, all-or-nothing import into a Draft card,
         // overlap re-check and publish. Concrete (ADR-010: no interface, no second implementation). Scoped: holds the scoped Dataverse
         // clients and the SPE facade. Unconditional (flag rule above); the routes carry the kill switch.
