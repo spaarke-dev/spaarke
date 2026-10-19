@@ -20,10 +20,12 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ontology;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Tests.Integration.Workspace;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl.Ontology;
@@ -1035,7 +1037,7 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
                 It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("redis is down"));
         var service = new OntologyAdminAuthoringService(w, _fixture.Services.GetRequiredService<PolicyVersionValidator>(), _fixture.Engine,
-            cache.Object, TimeProvider.System, NullLogger<OntologyAdminAuthoringService>.Instance);
+            _fixture.Ownership, cache.Object, TimeProvider.System, NullLogger<OntologyAdminAuthoringService>.Instance);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim("oid", "oid-" + w.Caller.ToString("N")), new Claim("tid", WorkspaceTestConstants.TestTenantId)], "test"));
 
@@ -1464,11 +1466,18 @@ public sealed class OntologyAdminAuthoringTestFixture : WorkspaceTestFixture
 
     public RecordingEngine Engine { get; } = new();
 
+    /// <summary>#2084: the ownership resolver a publish asks before any write. Answers an ordinary team unless a test says otherwise.</summary>
+    public RecordOwnershipResolverDouble Ownership { get; } = new();
+
     public void Reset()
     {
         World.Reset();
         Engine.Reset();
         Engine.World = World;
+        Ownership.TeamId = RecordOwnershipResolverDouble.DefaultTeamId;
+        Ownership.IsSecureOwner = false;
+        Ownership.Fault = null;
+        Ownership.Requests.Clear();
     }
 
     public HttpClient ClientFor(string oid)
@@ -1493,6 +1502,8 @@ public sealed class OntologyAdminAuthoringTestFixture : WorkspaceTestFixture
             services.AddScoped<IDataverseUserClient>(_ => World);
             services.RemoveAll<IOntologyAdminAuthoringSignalEngine>();
             services.AddSingleton<IOntologyAdminAuthoringSignalEngine>(Engine);
+            services.RemoveAll<IRecordOwnershipResolver>();
+            services.AddSingleton<IRecordOwnershipResolver>(Ownership);
 
             services.AddAuthentication()
                 .AddScheme<AuthenticationSchemeOptions, AuthoringCallerHandler>(AuthoringCallerHandler.SchemeName, _ => { });

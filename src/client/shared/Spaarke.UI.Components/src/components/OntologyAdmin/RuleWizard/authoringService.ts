@@ -50,6 +50,11 @@ export const REASON_SCOPE_INTENT_REQUIRED = 'ontology.admin.scope_intent_require
  * field.
  */
 export const REASON_SCOPE_MATTER_SECURED = 'ontology.admin.scope_matter_secured';
+/**
+ * uac-r2 #2084 (owner round 102 item 4, A3): a publish of a rule its Secure matter's team holds. The new version would be that team's,
+ * so nothing is written. A 409 that names no matter: the rule cannot be changed here, only replaced by a new rule.
+ */
+export const REASON_RULE_HELD_SECURE = 'ontology.admin.rule_held_secure';
 
 // ---- wire shapes: the catalog -----------------------------------------------------------------------------------------------
 
@@ -397,6 +402,7 @@ const CONFLICT_MESSAGES: Readonly<Record<string, string | undefined>> = {
   [REASON_POLICY_RETIRED]: 'The rule is retired; a retired rule cannot be published.',
   [REASON_POLICY_CHANGED]:
     'The rule changed while this was being saved. Nothing new is in force; reload and try again.',
+  [REASON_RULE_HELD_SECURE]: "This rule is held by a Secure matter's team; publish a new rule instead.",
 };
 
 function firstMessage(fieldErrors: FieldErrors): string | null {

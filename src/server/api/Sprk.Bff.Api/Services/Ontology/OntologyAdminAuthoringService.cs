@@ -100,6 +100,19 @@ public sealed partial class OntologyAdminAuthoringService
     internal const string ScopeMatterSecuredMessage =
         "A rule cannot be limited to a Secure or Restricted matter, or to one whose access level could not be read.";
 
+    /// <summary>
+    /// unified-access-control-r2 #2084 (owner round 102 item 4; option A3, agreed with spaarke-ontology-platform-r1): the stable code
+    /// a publish returns, as a 409 with NOTHING written, when <see cref="IRecordOwnershipResolver"/> answers that a new version of the
+    /// rule belongs to the Secure Record Owners team: the rule is held by a Secure matter (its own matter or the one the request
+    /// names). The version would have to be created owned by that team, which the caller cannot do (no Assign on the table, and user
+    /// roles are not widened). The message names no matter.
+    /// </summary>
+    internal const string ReasonRuleHeldSecure = "ontology.admin.rule_held_secure";
+    internal const string RuleHeldSecureMessage = "This rule is held by a Secure matter's team; publish a new rule instead.";
+
+    /// <summary>#2084: the rule table, as the ownership resolver names a parent (a version is filed under its rule).</summary>
+    private const string PolicyTable = "sprk_policy";
+
     /// <summary>The privilege the dry run requires, asked FRESH on every request as the caller (F1-1): creating a policy version is
     /// what authoring a rule means (D-22).</summary>
     internal const string AuthoringPrivilegeName = "prvCreatesprk_PolicyVersion";
@@ -172,6 +185,7 @@ public sealed partial class OntologyAdminAuthoringService
     private readonly IDataverseUserClient _user;
     private readonly PolicyVersionValidator _validator;
     private readonly IOntologyAdminAuthoringSignalEngine _engine;
+    private readonly IRecordOwnershipResolver _ownership;
     private readonly ITenantCache _cache;
     private readonly TimeProvider _clock;
     private readonly ILogger<OntologyAdminAuthoringService> _logger;
@@ -180,6 +194,7 @@ public sealed partial class OntologyAdminAuthoringService
         IDataverseUserClient user,
         PolicyVersionValidator validator,
         IOntologyAdminAuthoringSignalEngine engine,
+        IRecordOwnershipResolver ownership,
         ITenantCache cache,
         TimeProvider clock,
         ILogger<OntologyAdminAuthoringService> logger)
@@ -187,6 +202,7 @@ public sealed partial class OntologyAdminAuthoringService
         _user = user ?? throw new ArgumentNullException(nameof(user));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -1145,6 +1161,13 @@ public sealed partial class OntologyAdminAuthoringService
                 }
             }
 
+            // #2084: the new version's owner, asked BEFORE any write (the version, the end stamp, the pointer and scope). A rule held by
+            // a Secure matter is refused with nothing written; an ordinary answer binds no owner, so the version stays the caller's.
+            if (await CheckVersionOwnerAsync(policy, request.MatterId, ct).ConfigureAwait(false) is { } held)
+            {
+                return held;
+            }
+
             var number = versions.Value!.Count == 0 ? 1 : versions.Value!.Max(v => v.Number) + 1;
             var versionId = Guid.NewGuid();
             var now = NowForDataverse();
@@ -1207,6 +1230,62 @@ public sealed partial class OntologyAdminAuthoringService
         {
             return Fault<OntologyVersionPublished>("publish", ex);
         }
+    }
+
+    /// <summary>
+    /// unified-access-control-r2 #2084 (owner round 102 item 4, option A3): who would own the version this publish creates, decided by
+    /// <see cref="IRecordOwnershipResolver"/> before anything is written. The version is filed under its rule; the rule's stored matter
+    /// and the matter the request names are passed too, so a rule whose matter turned Secure is caught while the reconciler has not yet
+    /// re-owned it, and so is a requested matter that turned Secure after <see cref="CheckScopeAsync"/> read it (secure-if-any).
+    /// <list type="bullet">
+    /// <item>The Secure Record Owners team: 409 <see cref="ReasonRuleHeldSecure"/>. The caller cannot create a row owned by that team
+    /// (no Assign on the table, and user roles are not widened), and a version owned by the caller would expose the rule's text.</item>
+    /// <item>An ordinary team, or <see cref="RecordOwnerOutcome.Unchanged"/>: null. No <c>ownerid</c> is bound; the version stays the
+    /// caller's, as before #2084.</item>
+    /// <item>A refusal (the owner could not be determined), an answer with no team, or a fault: 503, fail closed.</item>
+    /// </list>
+    /// </summary>
+    private async Task<OntologyAdminAuthoringResult<OntologyVersionPublished>?> CheckVersionOwnerAsync(
+        PolicyRow policy, Guid? matterScope, CancellationToken ct)
+    {
+        var parents = new List<RecordOwnershipParent> { new(PolicyTable, policy.Id) };
+        foreach (var matter in new[] { policy.MatterId, matterScope })
+        {
+            if (matter is { } id && id != Guid.Empty)
+            {
+                parents.Add(new RecordOwnershipParent(MatterSubject, id));
+            }
+        }
+
+        RecordOwnerResolution owner;
+        try
+        {
+            owner = await _ownership.ResolveOwnerAsync(
+                new RecordOwnershipContext { Parents = parents.Distinct().ToArray(), WhenUnfiled = UnfiledOwnership.KeepCreator }, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Ontology authoring: the owner of a new version of policy {PolicyId} could not be resolved ({ExceptionType}); " +
+                "nothing was written.", policy.Id, ex.GetType().Name);
+            return Fail<OntologyVersionPublished>(Failure.Unavailable);
+        }
+
+        if (owner.IsOwned && owner.IsSecureOwner)
+        {
+            _logger.LogInformation("Ontology authoring: policy {PolicyId} is held by a Secure matter's team; the publish is refused and nothing was written.",
+                policy.Id);
+            return Conflict<OntologyVersionPublished>(ReasonRuleHeldSecure);
+        }
+
+        if (owner.IsOwned || owner.Outcome == RecordOwnerOutcome.Unchanged)
+        {
+            return null;
+        }
+
+        _logger.LogWarning("Ontology authoring: the owner of a new version of policy {PolicyId} could not be determined ({RefusalCode}); " +
+            "nothing was written.", policy.Id, owner.RefusalCode ?? "no team");
+        return Fail<OntologyVersionPublished>(Failure.Unavailable);
     }
 
     /// <summary>

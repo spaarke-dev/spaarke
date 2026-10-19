@@ -51,6 +51,8 @@ public class RecordOwnerAssignmentCensusTests
         "sprk_emailreviewlog", "sprk_communicationchannelref", "sprk_fileversion", "sprk_emailartifact",
         "sprk_attachmentartifact", "sprk_eventlog", "sprk_invoicelineitem", "sprk_budgetbucket", "sprk_processingjob",
         "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision",
+        // #2084 (owner round 102 item 4): a matter-scoped rule and its versions joined the secure family.
+        "sprk_policy", "sprk_policyversion",
     };
 
     private enum Disposition
@@ -328,6 +330,18 @@ public class RecordOwnerAssignmentCensusTests
             + "app-only create). PATCH /api/v1/child-records/{table}/{id}, /api/v1/events/{id}/filing and "
             + "/api/communications/{id}/filing: OwnedChildWrite.RefileAsync (ReparentAsync); a PATCH that files nothing is the "
             + "caller's own update."),
+
+        // ── #2084 (owner round 102 item 4, option A3 agreed with spaarke-ontology-platform-r1) ─────────────────────────
+        new UnscannedWriter("OntologyAdminAuthoringService.cs",
+            "run-as-user POSTs to computed entity sets (sprk_policies, sprk_policyversions) + the publish's scope PATCH of sprk_policy.sprk_matter",
+            "PUBLISH (PublishVersionAsync): IRecordOwnershipResolver decides the new version's owner (secure-if-any over the rule, its "
+            + "stored matter and the requested matter) BEFORE the version POST, the end stamp and the pointer/scope PATCH. The Secure "
+            + "team answer is a 409 ontology.admin.rule_held_secure with nothing written (the caller has no Assign on the table and "
+            + "user roles are not widened); an ordinary answer binds no owner, so the version stays the caller's; a refusal or fault "
+            + "is a 503 with nothing written. SAVE (SavePolicyAsync, the rule and its first version in one deep insert) is WAIVED "
+            + "(Permanent, agreed with ontology): the rule is created as the caller, author-owned, because CheckScopeAsync refuses a "
+            + "Secure or Restricted matter scope before the create, so a new rule is never filed under a Secure matter; one whose "
+            + "matter turns Secure later is re-owned by SecureChildReconciler and the two-minute SecureChildReconciliationJob."),
     };
 
     /// <summary>Seams that must refuse an owner-less create, by the method that builds the row.</summary>
@@ -1708,6 +1722,10 @@ public class RecordOwnerAssignmentCensusTests
                                        + "(sprk_assignedto, statuscode Reassigned, reassigned-by) as the caller, after their Write. It writes no "
                                        + "regarding/filing lookup and no owner, so the row is filed under the same records and owned by the same "
                                        + "team before and after; re-filing stays on PATCH /events/{id}/filing.",
+        ["OntologyAdminRulesService.cs"] = "#2084: the Ontology admin rule routes PATCH a sprk_policy as the caller with scalar columns only: On/Off "
+                                           + "(SetEnabledAsync, sprk_enabled) and Retire (RetireAsync, statecode / statuscode / sprk_retiredreason), "
+                                           + "both through WriteAsync. Neither writes sprk_matter, a lookup or an owner, so the rule keeps its filing "
+                                           + "and its owner; a rule the Secure team holds is unreadable to a non-member, whose PATCH Dataverse refuses.",
         ["OntologyAdminClassificationService.cs"] = "Ontology platform R1 task 103 (D-22, FR-59): creates and PATCHes rows of sprk_triagecategory as the caller, "
                                                     + "writing only its own scalar columns (sprk_name, sprk_classifierguidance, sprk_enabled). The table is "
                                                     + "organisation-owned reference data (no ownerid, no business-unit filing) and no lookup is written, so "
@@ -1741,7 +1759,9 @@ public class RecordOwnerAssignmentCensusTests
     /// routes take it as. The census had seen only the field name, so a re-file core taking the client as a parameter would
     /// have been invisible to it.
     /// </summary>
-    private static readonly Regex RunAsUserWrite = new(@"\b(?:_dataverse|user)\s*\.\s*(?:PostAsync|PatchAsync)\s*\(", RegexOptions.Compiled);
+    /// <remarks>#2084: also the field <c>_user</c> (the Ontology admin services' name for the run-as-user client), which the scan did not
+    /// see, so their creates and re-files of <c>sprk_policy</c> / <c>sprk_policyversion</c> went unclassified.</remarks>
+    private static readonly Regex RunAsUserWrite = new(@"\b(?:_dataverse|_user|user)\s*\.\s*(?:PostAsync|PatchAsync)\s*\(", RegexOptions.Compiled);
 
     /// <summary>Files that POST or PATCH through the run-as-user client and are classified nowhere.</summary>
     private static List<string> UnclassifiedRunAsUserWrites(IReadOnlyDictionary<string, string> files)
@@ -1786,9 +1806,20 @@ public class RecordOwnerAssignmentCensusTests
                 "    static Task A(IDataverseUserClient user) => user.PatchAsync($\"{set}({id:D})\", body, ct);",
                 "}",
             }),
+            // #2084: the client held in a field named _user (the Ontology admin services' shape).
+            ["NewUserFieldCreate.cs"] = SourceScan.CodeText(new[]
+            {
+                "internal sealed class NewUserFieldCreate(IDataverseUserClient _user)",
+                "{",
+                "    Task A() => _user.PostAsync(ApiRoot + EntitySet, body, ct);",
+                "}",
+            }),
+            // Must not fire: a write through another client whose name merely ends in "user".
+            ["NotARunAsUserWrite.cs"] = "IDataverseUserClient unused; _appuser.PostAsync(x); superuser.PatchAsync(y);",
         };
 
-        Assert.Equal(new[] { "NewCreateHandler.cs", "NewRefileHandler.cs", "NewParameterRefile.cs" }, UnclassifiedRunAsUserWrites(files));
+        Assert.Equal(new[] { "NewCreateHandler.cs", "NewRefileHandler.cs", "NewParameterRefile.cs", "NewUserFieldCreate.cs" },
+            UnclassifiedRunAsUserWrites(files));
     }
 
     [Fact(DisplayName = "Task 146: every seam refuses a create with no resolved owner team")]

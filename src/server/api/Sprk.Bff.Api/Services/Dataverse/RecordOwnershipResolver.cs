@@ -322,6 +322,18 @@ public sealed record RecordOwnershipContext
     }
 
     /// <summary>
+    /// #2084: <see cref="ParentsOf(IEnumerable{KeyValuePair{string, object}})"/> for an EXISTING row read from Dataverse, minus
+    /// its citation lookups (<see cref="RecordOwnershipResolver.IsCitation"/>): a lookup to an ownership-parent table that names
+    /// what the row cites, not what it is filed under. Every reader that decides an existing row's owner from the row itself
+    /// (the reconciler's <c>ContextFor</c>, the resolver's look-through) uses this.
+    /// </summary>
+    public static IReadOnlyList<RecordOwnershipParent> ParentsOf(Entity row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return ParentsOf(row.Attributes.Where(a => !RecordOwnershipResolver.IsCitation(row.LogicalName, a.Key)));
+    }
+
+    /// <summary>
     /// The context for a row filed under <paramref name="parents"/> — nulls and non-parent types dropped, the first
     /// remaining parent primary — with the acting user (when the path has one) for a row left with no parent.
     /// </summary>
@@ -915,6 +927,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         "sprk_invoice",
         "sprk_kpiassessment",
         "sprk_memo",
+        // unified-access-control-r2 #2084 (owner round 102 item 4): a rule scoped to a matter is that matter's child, and the
+        // parent of its versions. sprk_policyversion is NOT listed: it is a lineage child only (SecureChildLineage), like
+        // sprk_signal, because Signals and Decision Records name the version they cite, which files nothing.
+        "sprk_policy",
         "sprk_reportcard",
         "sprk_spendsignal",
         "sprk_spendsnapshot",
@@ -922,6 +938,31 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     ];
 
     private static readonly HashSet<string> ParentSet = new(OwnershipParentEntities, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// #2084: lookups to an ownership-parent table that CITE rather than file — (table, column). A Signal names the rule that
+    /// raised it (<c>sprk_signal.sprk_policy</c>); it is filed under its subject and core record, never under the rule
+    /// (SecureChildLineage leaves the lookup out). Read as a parent, an all-matters rule owned in its author's business unit
+    /// would decide an ordinary Signal's team on an Unsecure, and a rule held by a Secure matter would pull a Signal about
+    /// another matter into isolation. <see cref="RecordOwnershipContext.ParentsOf(Entity)"/> drops them.
+    /// </summary>
+    private static readonly HashSet<(string Table, string Column)> CitationLookups = new(
+        [("sprk_signal", "sprk_policy")], CitationComparer.Instance);
+
+    /// <summary>True when <paramref name="column"/> of <paramref name="table"/> cites a record rather than files the row under it.</summary>
+    public static bool IsCitation(string? table, string? column) =>
+        table is not null && column is not null && CitationLookups.Contains((table, column));
+
+    private sealed class CitationComparer : IEqualityComparer<(string Table, string Column)>
+    {
+        public static readonly CitationComparer Instance = new();
+
+        public bool Equals((string Table, string Column) x, (string Table, string Column) y) =>
+            StringComparer.OrdinalIgnoreCase.Equals(x.Table, y.Table) && StringComparer.OrdinalIgnoreCase.Equals(x.Column, y.Column);
+
+        public int GetHashCode((string Table, string Column) obj) =>
+            HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Table), StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Column));
+    }
 
     /// <summary>True when a lookup to <paramref name="entityLogicalName"/> files a child under a parent for ownership.</summary>
     public static bool IsOwnershipParent(string? entityLogicalName) =>
@@ -1850,7 +1891,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         };
         query.Criteria.AddCondition($"{row.EntityLogicalName}id", ConditionOperator.Equal, row.RecordId);
         var entity = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        return entity is null ? null : RecordOwnershipContext.ParentsOf(entity.Attributes);
+        return entity is null ? null : RecordOwnershipContext.ParentsOf(entity);
     }
 
     /// <summary>
