@@ -1,11 +1,15 @@
+using System.Security.Claims;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+using Sprk.Bff.Api.Services.Identity;
 using Xunit;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 
@@ -26,10 +30,36 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 /// </remarks>
 public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
 {
+    private static readonly Guid CallerSystemUserId = Guid.Parse("0a0a0a0a-0000-0000-0000-00000000c411");
+
     private readonly Mock<IDataverseUserClient> _dataverse = new();
+    private readonly HttpContextAccessor _httpContextAccessor = new()
+    {
+        HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity("test")) }
+    };
+    private readonly Mock<ICallerSystemUserResolver> _callerResolver = new();
+    private readonly Mock<ISystemUserIdentityResolver> _identityResolver = new();
+    private ICallerSystemUserResolver? _callerResolverOverride;
+
+    public DataverseReadQueryHandlerTests()
+    {
+        // Default caller: a resolved INTERNAL systemuser (sprk_isexternal not true).
+        _callerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Resolved(CallerSystemUserId.ToString("D")));
+        _identityResolver
+            .Setup(r => r.IsExternalAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+    }
 
     private DataverseReadQueryHandler CreateHandler() =>
-        new(_dataverse.Object, CreateLogger<DataverseReadQueryHandler>());
+        new(_dataverse.Object, CreateLogger<DataverseReadQueryHandler>(), _httpContextAccessor,
+            _callerResolverOverride ?? _callerResolver.Object, _identityResolver.Object);
+
+    private void AsExternalCaller() =>
+        _identityResolver
+            .Setup(r => r.IsExternalAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
     private static AnalysisTool BuildReadQueryTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseReadQueryHandler), name: "SYS-Dataverse Read Query");
@@ -413,6 +443,256 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         description.Should().ContainEquivalentOf("relative-date filters",
             because: "overdue/due-today/due-this-week are the concrete failure case from live UAT");
         description.Should().Contain("dynamic date functions are not supported");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // ISS-010 (external-access r3 task 078) — external callers and communications
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private const string GuardClause = "sprk_isinternalonly eq false and _sprk_communicationthread_value ne null";
+    private const string OpenState = "100000000";
+    private const string PrivateState = "100000001";
+
+    private void SetupCommunicationMetadata() =>
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_communication')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""
+                {
+                  "EntitySetName": "sprk_communications",
+                  "PrimaryIdAttribute": "sprk_communicationid",
+                  "Attributes": [
+                    { "LogicalName": "sprk_subject", "AttributeType": "String" },
+                    { "LogicalName": "sprk_body", "AttributeType": "Memo" },
+                    { "LogicalName": "sprk_isinternalonly", "AttributeType": "Boolean" },
+                    { "LogicalName": "sprk_communicationthread", "AttributeType": "Lookup" }
+                  ]
+                }
+                """)));
+
+    private List<string> CaptureCommunicationQueries(string rowsJson)
+    {
+        var captured = new List<string>();
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communications?")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((p, _) => captured.Add(p))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(rowsJson)));
+        return captured;
+    }
+
+    private List<string> CaptureThreadReads(string threadsJson)
+    {
+        var captured = new List<string>();
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communicationthreads?")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((p, _) => captured.Add(p))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(threadsJson)));
+        return captured;
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnCommunicationWithOr_GuardIsAndedAroundWholePredicate()
+    {
+        AsExternalCaller();
+        SetupCommunicationMetadata();
+        var captured = CaptureCommunicationQueries("""{ "value": [] }""");
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args(
+            "SELECT sprk_subject FROM sprk_communication WHERE sprk_subject = 'a' OR sprk_subject = 'b'"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        captured.Should().ContainSingle().Which.Should().Be(
+            "sprk_communications?$select=sprk_communicationid,sprk_subject,_sprk_communicationthread_value" +
+            "&$filter=" + Uri.EscapeDataString($"(sprk_subject eq 'a' or sprk_subject eq 'b') and {GuardClause}") +
+            "&$top=50",
+            because: "the model's whole predicate is parenthesised and ANDed with flag-false + thread-set, so an OR cannot widen it");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnCommunication_HidesRowsWhoseThreadIsNotOpen()
+    {
+        AsExternalCaller();
+        SetupCommunicationMetadata();
+        var openThread = Guid.Parse("70000000-0000-0000-0000-000000000001");
+        var privateThread = Guid.Parse("70000000-0000-0000-0000-000000000002");
+        var openRow = Guid.Parse("c0000000-0000-0000-0000-000000000001");
+        var privateRow = Guid.Parse("c0000000-0000-0000-0000-000000000002");
+        var noThreadRow = Guid.Parse("c0000000-0000-0000-0000-000000000003");
+        // Dataverse has already applied the flag-false half (the query filter); these rows are the flag-false ones.
+        var captured = CaptureCommunicationQueries($$"""
+            {
+              "value": [
+                { "sprk_communicationid": "{{openRow:D}}", "sprk_subject": "Shared update", "_sprk_communicationthread_value": "{{openThread:D}}" },
+                { "sprk_communicationid": "{{privateRow:D}}", "sprk_subject": "Private thread item", "_sprk_communicationthread_value": "{{privateThread:D}}" },
+                { "sprk_communicationid": "{{noThreadRow:D}}", "sprk_subject": "No thread item", "_sprk_communicationthread_value": null }
+              ]
+            }
+            """);
+        var threadReads = CaptureThreadReads($$"""
+            {
+              "value": [
+                { "sprk_communicationthreadid": "{{openThread:D}}", "sprk_privacystate": {{OpenState}} },
+                { "sprk_communicationthreadid": "{{privateThread:D}}", "sprk_privacystate": {{PrivateState}} }
+              ]
+            }
+            """);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_subject FROM sprk_communication"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        captured.Should().ContainSingle().Which.Should().Be(
+            "sprk_communications?$select=sprk_communicationid,sprk_subject,_sprk_communicationthread_value" +
+            "&$filter=" + Uri.EscapeDataString(GuardClause) + "&$top=50",
+            because: "with no model WHERE the filter is the guard alone — true and null flags never leave Dataverse");
+        threadReads.Should().ContainSingle().Which.Should().Be(
+            "sprk_communicationthreads?$select=sprk_communicationthreadid,sprk_privacystate" +
+            $"&$filter=sprk_communicationthreadid eq {openThread:D} or sprk_communicationthreadid eq {privateThread:D}&$top=2");
+
+        var data = result.Data!.Value;
+        data.GetProperty("rowCount").GetInt32().Should().Be(1);
+        var row = data.GetProperty("rows").EnumerateArray().Single();
+        row.GetProperty("sprk_communicationid").GetString().Should().Be(openRow.ToString("D"));
+        row.TryGetProperty("sprk_communicationthread", out _).Should().BeFalse(
+            because: "the thread column was selected only for the guard and is not returned to the model");
+        row.TryGetProperty("_sprk_communicationthread_value", out _).Should().BeFalse();
+        ((IEnumerable<ToolResultCitation>)result.Metadata![ToolResultMetadataKeys.Citations]!)
+            .Should().ContainSingle(c => c.ChunkId == $"tables/sprk_communication/records/{openRow:D}");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerThreadPrivacyReadFails_ReturnsErrorWithNoRows()
+    {
+        AsExternalCaller();
+        SetupCommunicationMetadata();
+        CaptureCommunicationQueries($$"""
+            { "value": [ { "sprk_communicationid": "{{Guid.NewGuid():D}}", "sprk_subject": "x", "_sprk_communicationthread_value": "{{Guid.NewGuid():D}}" } ] }
+            """);
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communicationthreads?")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "Server error."));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_subject FROM sprk_communication"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse(because: "a thread-privacy fault can never turn into 'show it'");
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        result.Data.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("sprk_communicationthread")]
+    [InlineData("sprk_communicationattachment")]
+    [InlineData("sprk_communicationparticipant")]
+    public async Task ExecuteChatAsync_ExternalCallerOnOtherCommunicationFamilyTable_RefusedWithNoDataverseCall(string table)
+    {
+        AsExternalCaller();
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args($"SELECT sprk_name FROM {table}"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        result.ErrorMessage.Should().Contain("sprk_communication table only");
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the refusal comes before any Dataverse request, the metadata GET included");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_NoRequestPrincipal_TreatedAsExternal()
+    {
+        _httpContextAccessor.HttpContext = null;
+        // The real resolver: a missing principal is an honest Unresolved result.
+        _callerResolverOverride = new CallerSystemUserResolver(_identityResolver.Object, CreateLogger<CallerSystemUserResolver>());
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_name FROM sprk_communicationthread"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied, because: "an unresolvable caller is external (fail closed)");
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_CallerSystemUserUnresolved_TreatedAsExternal()
+    {
+        _callerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Unresolved("no-matching-systemuser"));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_name FROM sprk_communicationthread"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied, because: "an unresolvable caller is external (fail closed)");
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _identityResolver.Verify(r => r.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_InternalCallerOnCommunication_RequestUrlUnchangedAndNoThreadRead()
+    {
+        SetupCommunicationMetadata();
+        var rowId = Guid.NewGuid();
+        var captured = CaptureCommunicationQueries($$"""
+            { "value": [ { "sprk_communicationid": "{{rowId:D}}", "sprk_subject": "Internal-only note" } ] }
+            """);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args(
+            "SELECT sprk_subject FROM sprk_communication WHERE sprk_subject = 'a' OR sprk_subject = 'b'"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        captured.Should().ContainSingle().Which.Should().Be(
+            "sprk_communications?$select=sprk_communicationid,sprk_subject" +
+            "&$filter=" + Uri.EscapeDataString("sprk_subject eq 'a' or sprk_subject eq 'b'") + "&$top=50",
+            because: "an internal caller's query is byte-identical to the pre-ISS-010 translation");
+        result.Data!.Value.GetProperty("rowCount").GetInt32().Should().Be(1);
+        _dataverse.Verify(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communicationthreads?")), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_NonCommunicationTable_RequestUrlUnchangedAndExternalityNotResolved()
+    {
+        AsExternalCaller();
+        SetupAccountMetadata();
+        string? captured = null;
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("accounts?")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((p, _) => captured = p)
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "value": [] }""")));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT name FROM account WHERE name = 'x' OR name = 'y'"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        captured.Should().Be(
+            "accounts?$select=accountid,name&$filter=" + Uri.EscapeDataString("name eq 'x' or name eq 'y'") + "&$top=50");
+        _callerResolver.Verify(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()), Times.Never,
+            "externality is decided only for a communication-family table");
+    }
+
+    [Fact]
+    public async Task Telemetry_ExternalCommunicationGuard_LogsEntityAndReasonOnly_Adr015()
+    {
+        const string sensitiveLiteral = "Rothstein Confidential Matter 4711";
+        const string sensitiveRowValue = "Settlement figure 8,400,000 privileged";
+        AsExternalCaller();
+        SetupCommunicationMetadata();
+        CaptureCommunicationQueries($$"""
+            { "value": [ { "sprk_communicationid": "{{Guid.NewGuid():D}}", "sprk_subject": "{{sensitiveRowValue}}", "_sprk_communicationthread_value": "{{Guid.NewGuid():D}}" } ] }
+            """);
+        CaptureThreadReads("""{ "value": [] }""");
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args(
+            $"SELECT sprk_subject FROM sprk_communication WHERE sprk_subject = '{sensitiveLiteral}'"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("rowCount").GetInt32().Should().Be(0);
+        CapturedLogMessages.Should().Contain(m =>
+            m.FormattedMessage.Contains(ExternalCallerCommunicationGuard.LogEvent) &&
+            m.FormattedMessage.Contains("entity=sprk_communication") &&
+            m.FormattedMessage.Contains("reason=thread_not_open"));
+        AssertTelemetryRespectsAdr015(sensitiveLiteral, sensitiveRowValue);
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
