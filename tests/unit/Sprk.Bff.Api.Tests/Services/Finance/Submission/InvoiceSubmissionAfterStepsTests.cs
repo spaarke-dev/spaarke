@@ -196,8 +196,9 @@ public class InvoiceSubmissionAfterStepsTests
                 ["versionnumber"] = 100L,
             };
 
+            // R7: a read returns only the columns it asks for (as Dataverse does), so a column the code needs must be in its column list.
             Entities.Setup(e => e.RetrieveAsync(FinanceBaseValues.SubmissionEntity, Submission, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => Copy(Row));
+                .ReturnsAsync((string _, Guid _, string[] columns, CancellationToken _) => Copy(Row, columns));
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName switch
                 {
@@ -280,7 +281,7 @@ public class InvoiceSubmissionAfterStepsTests
         {
             foreach (var (k, v) in fields)
             {
-                Row[k] = v;
+                Row[k] = v is DBNull ? null : v; // DBNull.Value is the explicit clear
             }
 
             Row["versionnumber"] = Row.GetAttributeValue<long>("versionnumber") + 1;
@@ -573,12 +574,17 @@ public class InvoiceSubmissionAfterStepsTests
             return row;
         }
 
-        public static Entity Copy(Entity source)
+        public static Entity Copy(Entity source) => Copy(source, null);
+
+        public static Entity Copy(Entity source, string[]? columns)
         {
             var copy = new Entity(source.LogicalName, source.Id) { RowVersion = source.RowVersion };
             foreach (var (k, v) in source.Attributes)
             {
-                copy[k] = v;
+                if (columns is null || columns.Contains(k, StringComparer.Ordinal))
+                {
+                    copy[k] = v;
+                }
             }
 
             return copy;
@@ -2224,6 +2230,168 @@ public class InvoiceSubmissionAfterStepsTests
         world.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
         world.Row.Contains(AdminAttention).Should().BeFalse();
         world.Log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("Needs Admin Attention") && e.Message.Contains("TimeoutException"));
+    }
+
+    // ── R7 (D-133): completing the submission withdraws ONLY the "Processing stopped" segment, in the terminal update ──
+
+    private static string StoppedAttention => AdminAttentionText.StoppedNote("decision_owner_refused");
+
+    private static string SignalAttention => $"1 Signal could not be created: {Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.CoreRecordUnresolved} (BILL-AGE on line {LineId.ToString("D")[..8]})";
+
+    private static string Join(params string[] parts) => string.Join(AdminAttentionText.Separator, parts);
+
+    private static void AssertTerminalWasConditional(World world) =>
+        world.Entities.Invocations.Last().Method.Name.Should().Be(nameof(IGenericEntityService.BulkUpdateIfRowVersionsMatchAsync),
+            "the terminal status, with the attention change, is one conditional update");
+
+    [Fact(DisplayName = "049 R7: a stalled submission that a replay completes loses ONLY its Processing stopped segment; the Signal and policy segments stay, in the terminal update")]
+    public async Task Completion_WithdrawsOnlyTheStoppedSegment_InTheTerminalUpdate()
+    {
+        var outcome = await Accepted();
+        var world = new World(outcome);
+        world.Row[AdminAttention] = Join(SignalAttention, PolicyAttention("missing"), StoppedAttention);
+
+        var result = await world.Build().ResumeAsync(Submission, "corr-2");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        world.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+        StoredAttention(world).Should().Be(Join(SignalAttention, PolicyAttention("missing")));
+        world.TerminalWrites.Should().ContainSingle().Which[AdminAttention].Should().Be(Join(SignalAttention, PolicyAttention("missing")),
+            "the same update as the terminal status, so it rests on the row version the status does");
+        world.SubmissionUpdates.Should().NotContain(u => u.ContainsKey(AdminAttention), "no follow-on write");
+        AssertTerminalWasConditional(world);
+    }
+
+    [Fact(DisplayName = "049 R7: when the stopped segment is all there is, the column becomes null (code withdrawing its own now-false statement)")]
+    public async Task Completion_WithOnlyAStoppedSegment_NullsTheColumn()
+    {
+        var outcome = await Accepted();
+        var world = new World(outcome);
+        world.Row[AdminAttention] = StoppedAttention;
+
+        var result = await world.Build().ResumeAsync(Submission, "corr-2");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        StoredAttention(world).Should().BeNull();
+        world.TerminalWrites.Should().ContainSingle().Which.Should().ContainKey(AdminAttention).WhoseValue.Should().Be(DBNull.Value, "the explicit clear");
+        AssertTerminalWasConditional(world);
+    }
+
+    [Theory(DisplayName = "049 R7 (must not fire): a stored text with no stopped segment is never written - not null, not rewritten")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("Checked with the vendor; credit note pending")]
+    public async Task Completion_WithNoStoppedSegment_DoesNotTouchTheColumn(string? stored)
+    {
+        var outcome = await Accepted();
+        var world = new World(outcome);
+        if (stored is not null)
+        {
+            world.Row[AdminAttention] = stored;
+        }
+
+        var withSegments = new World(outcome);
+        withSegments.Row[AdminAttention] = Join(SignalAttention, PolicyAttention("missing"));
+
+        (await world.Build().ResumeAsync(Submission, "corr-2")).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        (await withSegments.Build().ResumeAsync(Submission, "corr-2")).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+
+        world.TerminalWrites.Should().ContainSingle().Which.Should().NotContainKey(AdminAttention);
+        withSegments.TerminalWrites.Should().ContainSingle().Which.Should().NotContainKey(AdminAttention);
+        world.SubmissionUpdates.Should().NotContain(u => u.ContainsKey(AdminAttention));
+        withSegments.SubmissionUpdates.Should().NotContain(u => u.ContainsKey(AdminAttention));
+        world.Row.Contains(AdminAttention).Should().Be(stored is not null);
+        if (stored is not null)
+        {
+            world.Row.GetAttributeValue<string>(AdminAttention).Should().Be(stored);
+        }
+
+        StoredAttention(withSegments).Should().Be(Join(SignalAttention, PolicyAttention("missing")));
+    }
+
+    [Fact(DisplayName = "049 R7: text an administrator typed is kept, before or after the stopped segment")]
+    public async Task Completion_KeepsAdministratorText()
+    {
+        var outcome = await Accepted();
+        var before = new World(outcome);
+        before.Row[AdminAttention] = Join("Vendor called, hold for review", StoppedAttention);
+        var after = new World(outcome);
+        after.Row[AdminAttention] = Join(SignalAttention, StoppedAttention, "Vendor called, hold for review");
+
+        (await before.Build().ResumeAsync(Submission, "corr-2")).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        (await after.Build().ResumeAsync(Submission, "corr-2")).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+
+        StoredAttention(before).Should().Be("Vendor called, hold for review");
+        StoredAttention(after).Should().Be(Join(SignalAttention, "Vendor called, hold for review"));
+    }
+
+    [Fact(DisplayName = "049 R7: a redelivery after completion writes nothing more (idempotent)")]
+    public async Task Completion_Withdrawal_IsIdempotentAcrossARedelivery()
+    {
+        var outcome = await Accepted();
+        var world = new World(outcome);
+        world.Row[AdminAttention] = Join(SignalAttention, StoppedAttention);
+
+        (await world.Build().ResumeAsync(Submission, "corr-2")).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        var writes = world.TerminalWrites.Count;
+        var version = world.Row.GetAttributeValue<long>("versionnumber");
+        var again = await world.Build().ResumeAsync(Submission, "corr-3");
+
+        again.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        again.AlreadyTerminal.Should().BeTrue();
+        world.TerminalWrites.Count.Should().Be(writes, "terminal already: no second write");
+        world.SubmissionUpdates.Should().BeEmpty();
+        world.Row.GetAttributeValue<long>("versionnumber").Should().Be(version);
+        StoredAttention(world).Should().Be(SignalAttention);
+    }
+
+    [Fact(DisplayName = "049 R7 (must not fire): the first run whose refusal wrote the Signal segment keeps it - the terminal update does not touch the column")]
+    public async Task Completion_AfterARefusalOnTheSameRun_KeepsTheSignalSegment()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome);
+        FailBillAge(world, "escalation");
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        StoredAttention(world).Should().Be(SignalAttention);
+        world.TerminalWrites.Should().ContainSingle().Which.Should().NotContainKey(AdminAttention);
+    }
+
+    [Fact(DisplayName = "049 R7: a concurrent change to the attention text moves the row version; the terminal update is refused and re-computed from the NEW text (the condition is not weakened)")]
+    public async Task Completion_ConcurrentAttentionChange_IsRecomputedOnTheNewVersion()
+    {
+        var outcome = await Accepted();
+        var world = new World(outcome);
+        world.Row[AdminAttention] = Join(SignalAttention, StoppedAttention);
+        world.OnTerminalWrite = () =>
+        {
+            world.OnTerminalWrite = null;
+            world.Apply(new Dictionary<string, object> { [AdminAttention] = Join(SignalAttention, StoppedAttention, "Reviewing now") });
+        };
+
+        var result = await world.Build().ResumeAsync(Submission, "corr-2");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        world.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+        StoredAttention(world).Should().Be(Join(SignalAttention, "Reviewing now"), "the text the administrator added meanwhile survives; the stale copy was not written back");
+        world.TerminalWrites.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "049 R7 (must not fire): a submission already terminal (a reviewer decided) is not written, so its attention text is untouched")]
+    public async Task NoTerminalWrite_LeavesTheStoppedSegment()
+    {
+        var outcome = await Accepted();
+        var world = new World(outcome);
+        world.Row[AdminAttention] = Join(SignalAttention, StoppedAttention);
+        world.Row[InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Rejected);
+
+        var result = await world.Build().ResumeAsync(Submission, "corr-2");
+
+        result.AlreadyTerminal.Should().BeTrue();
+        world.TerminalWrites.Should().BeEmpty();
+        StoredAttention(world).Should().Be(Join(SignalAttention, StoppedAttention));
     }
 
     [Fact(DisplayName = "049 F1-3: a permanent refusal on an Accepted-path Signal does not stop the run either (Blocked: indexed, terminal)")]

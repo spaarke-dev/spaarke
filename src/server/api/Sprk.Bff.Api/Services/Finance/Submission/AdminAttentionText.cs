@@ -10,8 +10,10 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// The text of <c>sprk_invoicesubmission.sprk_adminattention</c> ("Needs Admin Attention", D-133): why a submission needs an
 /// administrator's review, shown in the model-driven app's "Submissions needing attention" view. The marker is set when a billing Signal
 /// the submission should have could not be created (<see cref="InvoiceSubmissionPersister"/> for a plan entry the writer would refuse,
-/// <see cref="InvoiceSubmissionAfterSteps"/> for a permanent write refusal) and is NEVER cleared from code: the administrator clears it
-/// after review. Three sources write it, each as its own segment of the one text (joined by <see cref="Separator"/>, always in the order
+/// <see cref="InvoiceSubmissionAfterSteps"/> for a permanent write refusal) and is not cleared from code: the administrator clears it
+/// after review. The ONE exception (review fix R7, notes 14c): when the after-steps complete the submission they withdraw the
+/// "Processing stopped" segment, which has become false (<see cref="WithoutStopped"/>); every other segment and any text an
+/// administrator typed stays. Three sources write it, each as its own segment of the one text (joined by <see cref="Separator"/>, always in the order
 /// signals, system policy, processing stopped, so a merge is deterministic): (1) Signal plan and write refusals; (2) the system billing
 /// policy is missing, ambiguous, without a version in force or of the wrong type (review fix R5: the system Signals were not created;
 /// "disabled" is the administrator's own choice, D-125, and writes nothing); (3) processing stopped on a submission that links its invoice
@@ -190,6 +192,30 @@ internal static class AdminAttentionText
         return text.Length <= InvoiceSubmissionPersister.AdminAttentionMaxLength
             ? text
             : text[..(InvoiceSubmissionPersister.AdminAttentionMaxLength - 1)] + "…";
+    }
+
+    /// <summary>
+    /// R7: <paramref name="current"/> without its "Processing stopped" segment. <c>Changed</c> is false (and <c>Text</c> is
+    /// <paramref name="current"/> as it is) when there is no such segment: the caller then writes nothing. When it is true, <c>Text</c> is
+    /// every other segment in its stored order (the Signal, policy and any text an administrator typed are kept), or null when the stopped
+    /// segment was all there was: the one case where code empties the column, because it is withdrawing its own statement that has become
+    /// false (the submission completed), not clearing the administrator's review. Pure and total: it never throws.
+    /// </summary>
+    internal static (bool Changed, string? Text) WithoutStopped(string? current)
+    {
+        if (string.IsNullOrWhiteSpace(current))
+        {
+            return (false, current);
+        }
+
+        var parts = current.Split(Separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var kept = parts.Where(p => !p.StartsWith(StoppedPrefix, StringComparison.Ordinal)).ToList();
+        if (kept.Count == parts.Length)
+        {
+            return (false, current);
+        }
+
+        return (true, kept.Count == 0 ? null : string.Join(Separator, kept));
     }
 
     /// <summary>

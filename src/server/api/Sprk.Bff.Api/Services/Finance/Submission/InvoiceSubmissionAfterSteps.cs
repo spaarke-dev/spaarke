@@ -85,10 +85,16 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     [
         InvoiceSubmissionPersister.SubmissionFindingsJson, InvoiceSubmissionPersister.SubmissionInvoice, "sprk_channel", "sprk_document",
         InvoiceSubmissionPersister.SubmissionCorrelationId, InvoiceSubmissionPersister.SubmissionStatus, RowVersionColumn,
+        InvoiceSubmissionPersister.SubmissionAdminAttention,
     ];
 
-    /// <summary>The columns the terminal write re-reads after a row-version conflict (B: write only while Processing).</summary>
-    internal static readonly string[] StateColumns = [InvoiceSubmissionPersister.SubmissionStatus, RowVersionColumn];
+    /// <summary>
+    /// The columns the terminal write re-reads after a row-version conflict (B: write only while Processing). The attention text is read
+    /// WITH the row version, so the terminal update that withdraws the "Processing stopped" segment (R7) rests on the version it was
+    /// computed from.
+    /// </summary>
+    internal static readonly string[] StateColumns =
+        [InvoiceSubmissionPersister.SubmissionStatus, RowVersionColumn, InvoiceSubmissionPersister.SubmissionAdminAttention];
 
     // The "indexing needs DocumentIntelligence:Enabled" note (map row 9) is logged once per process.
     private static int _indexingNoteLogged;
@@ -465,7 +471,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         await NotifyOnceAsync(submission, submissionId, invoiceId, terminal, terminalReasonCode, ct).ConfigureAwait(false);
 
         // ── 5. Terminal status, LAST (D-130 a): Accepted / Rejected means complete; written only while Processing, on the row version ──
-        if (await WriteTerminalAsync(submissionId, rowVersion, terminal, terminalReasonCode, ct).ConfigureAwait(false) is { } stopped)
+        if (await WriteTerminalAsync(submissionId, rowVersion, submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention),
+                terminal, terminalReasonCode, ct).ConfigureAwait(false) is { } stopped)
         {
             return stopped with { InvoiceId = stopped.InvoiceId ?? invoiceId, SignalsWritten = written, DecisionRecordId = recordId };
         }
@@ -492,9 +499,16 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// the write is tried once more on the new version; now terminal → Completed with nothing written (a reviewer or another run decided).
     /// A <paramref name="rowVersion"/> of null (our own findings write moved it) re-reads before the first attempt. Returns null when the
     /// terminal was written, else the result the run ends with.
+    /// <para><b>R7 (the submission completes, so "Processing stopped" is no longer true).</b> The terminal update also carries
+    /// <c>sprk_adminattention</c> WITHOUT its "Processing stopped" segment (<see cref="AdminAttentionText.WithoutStopped"/>; null when that was
+    /// all there was), computed from the text read with the SAME row version the update is conditional on: nothing is added to the update, and
+    /// its row-version condition is the one it always had, when the stored text has no such segment (then the column is not in the update at
+    /// all). The computation cannot fault; a fault of the update itself is the terminal write's, as before. The Signal and policy segments
+    /// and any text an administrator typed stay. <paramref name="attention"/> is the text of the read that gave <paramref name="rowVersion"/>
+    /// (ignored when that is null: the re-read supplies both).</para>
     /// </summary>
     private async Task<SubmissionAfterStepsResult?> WriteTerminalAsync(
-        Guid submissionId, long? rowVersion, InvoiceSubmissionStatus terminal, string? reasonCode, CancellationToken ct)
+        Guid submissionId, long? rowVersion, string? attention, InvoiceSubmissionStatus terminal, string? reasonCode, CancellationToken ct)
     {
         for (var attempt = 0; attempt < 2; attempt++)
         {
@@ -512,6 +526,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 }
 
                 rowVersion = RowVersionOf(state);
+                attention = state.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention);
             }
 
             if (rowVersion is not { } version)
@@ -520,16 +535,27 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 return new SubmissionAfterStepsResult { Status = SubmissionAfterStepsStatus.Retry, SubmissionId = submissionId, ReasonCode = RowVersionMissingCode };
             }
 
+            var fields = new Dictionary<string, object>
+            {
+                [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)terminal),
+                [InvoiceSubmissionPersister.SubmissionReasonCode] = reasonCode!,
+            };
+            var withdrawn = AdminAttentionText.WithoutStopped(attention);
+            if (withdrawn.Changed)
+            {
+                // R7: DBNull.Value is the explicit clear (the builder's convention); a C# null would be skipped.
+                fields[InvoiceSubmissionPersister.SubmissionAdminAttention] = withdrawn.Text is { } kept ? (object)kept : DBNull.Value;
+            }
+
             try
             {
-                await _entities.BulkUpdateIfRowVersionsMatchAsync(FinanceBaseValues.SubmissionEntity,
-                [
-                    (submissionId, new Dictionary<string, object>
-                    {
-                        [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)terminal),
-                        [InvoiceSubmissionPersister.SubmissionReasonCode] = reasonCode!,
-                    }, version),
-                ], ct).ConfigureAwait(false);
+                await _entities.BulkUpdateIfRowVersionsMatchAsync(FinanceBaseValues.SubmissionEntity, [(submissionId, fields, version)], ct).ConfigureAwait(false);
+                if (withdrawn.Changed)
+                {
+                    _logger.LogInformation("Invoice submission {SubmissionId}: it completed, so its Processing stopped note was withdrawn from the attention text",
+                        submissionId);
+                }
+
                 return null;
             }
             catch (System.Data.DBConcurrencyException)

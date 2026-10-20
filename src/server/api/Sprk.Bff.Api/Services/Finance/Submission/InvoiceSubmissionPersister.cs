@@ -65,7 +65,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     internal const string SubmissionCorrelationId = "sprk_correlationid";
 
     /// <summary><c>sprk_invoicesubmission.sprk_adminattention</c> ("Needs Admin Attention", D-133; Text, 500): why an administrator should
-    /// review the submission. Set with the refusals (<see cref="AdminAttentionText"/>); never cleared from code.</summary>
+    /// review the submission. Set with the refusals (<see cref="AdminAttentionText"/>); not cleared from code, except that the after-steps withdraw the "Processing stopped" segment when the
+    /// submission completes (<see cref="AdminAttentionText.WithoutStopped"/>).</summary>
     internal const string SubmissionAdminAttention = "sprk_adminattention";
 
     /// <summary><c>sprk_invoicesubmission.sprk_adminattention</c> MaxLength (500).</summary>

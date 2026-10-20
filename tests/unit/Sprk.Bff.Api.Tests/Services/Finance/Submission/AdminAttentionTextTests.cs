@@ -158,6 +158,39 @@ public class AdminAttentionTextTests
         AdminAttentionText.Merge(null, findings, policy, stopped).Should().Be(AdminAttentionText.Merge(null, findings, policy, stopped));
     }
 
+    [Fact(DisplayName = "049 R7: WithoutStopped removes only the stopped segment and keeps every other segment in its stored order")]
+    public void WithoutStopped_RemovesOnlyTheStoppedSegment()
+    {
+        var signals = AdminAttentionText.Build([new AdminAttentionText.Item("BILL-AGE", "sprk_billingevent", "aaaaaaaa-0000-0000-0000-000000000000", "core_record_changed")])!;
+        var policy = AdminAttentionText.PolicyNote("BILL-SYSTEM-SUBMISSION", "missing")!;
+        var stopped = AdminAttentionText.StoppedNote("decision_owner_refused");
+        var sep = AdminAttentionText.Separator;
+
+        AdminAttentionText.WithoutStopped(string.Join(sep, signals, policy, stopped, "typed by an admin")).Should().Be((true, string.Join(sep, signals, policy, "typed by an admin")));
+        AdminAttentionText.WithoutStopped(string.Join(sep, "typed first", stopped)).Should().Be((true, "typed first"));
+        AdminAttentionText.WithoutStopped(stopped).Should().Be((true, (string?)null), "only a stopped segment: nothing is left");
+    }
+
+    [Theory(DisplayName = "049 R7 (must not fire): WithoutStopped reports no change, and returns the text as it is, when there is no stopped segment")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("typed by an admin")]
+    [InlineData("1 Signal could not be created: x (BILL on line 1) | System billing policy BILL-SYSTEM-SUBMISSION is missing: system Signals were not created")]
+    [InlineData("A note that mentions Processing stopped: in the middle")]
+    public void WithoutStopped_NoStoppedSegment_IsNoChange(string? current) =>
+        AdminAttentionText.WithoutStopped(current).Should().Be((false, current));
+
+    [Fact(DisplayName = "049 R7: removing the stopped segment is the inverse of merging it in - Merge then WithoutStopped gives the text before")]
+    public void WithoutStopped_UndoesMergeOfTheStoppedNote()
+    {
+        var policy = AdminAttentionText.PolicyNote("BILL-SYSTEM-SUBMISSION", "ambiguous");
+        var before = AdminAttentionText.Merge("typed by an admin", null, policy, null)!;
+        var stalled = AdminAttentionText.Merge(before, null, null, AdminAttentionText.StoppedNote("stored_state_mismatch"))!;
+
+        AdminAttentionText.WithoutStopped(stalled).Should().Be((true, before));
+    }
+
     [Fact(DisplayName = "049 D-133: FromFindings reads signalPlanRefusals then signalWriteRefusals; neither member gives null")]
     public void FromFindings_ReadsBothMembers()
     {
