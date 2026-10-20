@@ -35,7 +35,7 @@ The table's system `statecode` / `statuscode` keep the defaults (Active 1 / Inac
 |---|---|---|---|---|
 | Submissions needing attention (public, D-133) | `sprk_adminattention` is not empty **or** `sprk_processingstatus` = Failed (100000004) | `sprk_name`, `sprk_trackingnumber`, `sprk_vendororg`, `sprk_processingstatus`, `sprk_outcomereasoncode`, `sprk_adminattention`, `sprk_receivedon`, `modifiedon` | Modified on, newest first | `scripts/ebilling/Deploy-EbillingSubmissionAttentionSchema.ps1` (with the column) |
 
-The customer administrator opens it in the Matter Management app to review submissions whose Signal could not be created and submissions that failed, and clears `sprk_adminattention` once reviewed. The main form and the Active view (`Deploy-EbillingFormsViews.ps1`) are separate.
+The customer administrator opens it in the Matter Management app to review submissions whose Signal could not be created and submissions that failed, and clears `sprk_adminattention` once reviewed. The main form (`Deploy-EbillingFormsViews.ps1`) shows `sprk_adminattention` in its Submission section so the admin can clear it; the Active view is separate.
 
 ## Lookups
 

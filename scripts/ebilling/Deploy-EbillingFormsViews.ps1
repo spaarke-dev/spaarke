@@ -116,7 +116,7 @@ $Spec = [ordered]@{
     sprk_invoicesubmission = @{
         Form = 'Replace'; FormName = 'Information'
         Sections = @(
-            @{ Name = 'general'; Label = 'Submission'; Cols = 'sprk_name', 'sprk_trackingnumber', 'sprk_firminvoicenumber', 'sprk_submissionsequence', 'sprk_vendororg', 'sprk_submitter', 'sprk_channel', 'sprk_processingstatus', 'sprk_receivedon', 'sprk_ponumber', 'sprk_outcomereasoncode', 'sprk_correlationid', 'ownerid' }
+            @{ Name = 'general'; Label = 'Submission'; Cols = 'sprk_name', 'sprk_trackingnumber', 'sprk_firminvoicenumber', 'sprk_submissionsequence', 'sprk_vendororg', 'sprk_submitter', 'sprk_channel', 'sprk_processingstatus', 'sprk_receivedon', 'sprk_ponumber', 'sprk_outcomereasoncode', 'sprk_adminattention', 'sprk_correlationid', 'ownerid' }
             @{ Name = 'links'; Label = 'Resulting invoice and documents'; Cols = 'sprk_invoice', 'sprk_resubmissionof', 'sprk_document', 'sprk_reportdocument' }
             @{ Name = 'regarding'; Label = 'Regarding'; Cols = 'sprk_regardingmatter', 'sprk_regardingproject', 'sprk_regardingworkassignment' }
             @{ Name = 'findings'; Label = 'Findings and firm notice'; Cols = 'sprk_findingsjson', 'sprk_firmnoticetext' }
