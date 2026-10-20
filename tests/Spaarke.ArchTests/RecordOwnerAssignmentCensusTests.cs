@@ -123,6 +123,21 @@ public class RecordOwnerAssignmentCensusTests
     //      Behaviour tests (SecureChildOwnership*Tests, InvoiceReviewWritePathTests, TodoGenerationAssignedToTests) pin
     //      each EXISTING writer's owner; these limits bite only on new code.
     // =============================================================================================
+    /// <summary>The one waiver text for RuleSetService's sprk_policy and sprk_policyversion creates (ebilling-r1).</summary>
+    private const string RuleSetServicePolicyWaiver =
+        "ebilling-r1 RuleSetService (Billing-domain rules; the first version at CreateDraftRuleAsync and the edit-path version at EditAsync "
+        + "included). Same reasoning as #2084's authoring SavePolicyAsync waiver: a billing rule hangs off sprk_ruleset, and RuleSetService "
+        + "never writes sprk_policy.sprk_matter, so it can never be filed under a Secure matter; its owner is resolved through "
+        + "IRecordOwnershipResolver.ResolveOwnerAsync with NO parents (the caller's team) and a refusal writes nothing. "
+        + "Condition (1): RuleSetService never writes sprk_matter on sprk_policy, on create or update (RuleSetServiceNoMatterScopeGuardTests "
+        + "and RuleSetServiceOwnerTests.NoWrittenPolicyOrVersionRowCarriesAMatter fail the build otherwise); if a billing rule ever gains a "
+        + "matter scope, this waiver ends and the creates must be routed. "
+        + "Condition (2): both creates, the first version and the edit-path version, resolve the owner the same way "
+        + "(RuleSetServiceOwnerTests pins the identical no-parent context and the ApplyTo). "
+        + "Condition (3): it covers only Billing-domain rows written by RuleSetService; Ontology-domain policies stay under the authoring "
+        + "entries. "
+        + "Agreed: ontology-r1 2026-10-20; uac-r2 sign-off pending.";
+
     private static readonly IReadOnlyList<CensusEntry> Census = new[]
     {
         // ── Seams: shared persistence methods that refuse a row with no resolved owner team ─────────────────────
@@ -242,6 +257,13 @@ public class RecordOwnerAssignmentCensusTests
             "An Office job-tracking row (status and progress), authorized by its sprk_initiatedby creator lookup and "
             + "read app-only; not a child of any root in live metadata.",
             WaiverKind.Permanent),
+        // ebilling-r1 (waiver agreed with spaarke-ontology-platform-r1 2026-10-20): the billing rule's policy and its versions. The census
+        // keys on (file, table), so the one waiver is two entries with one text: sprk_policy (1 seen site: CreateDraftRuleAsync's policy) and
+        // sprk_policyversion (1 seen site: CreateDraftRuleAsync's first version). The edit-path version in RuleSetService.EditAsync is
+        // created with a caller-chosen id (VersionIdFor), a shape this scanner does not count (MAINTENANCE PROCEDURE item 4); the waiver
+        // covers it all the same, and RuleSetServiceNoMatterScopeGuardTests pins condition (1) in source.
+        new CensusEntry("RuleSetService.cs", "sprk_policy", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
+        new CensusEntry("RuleSetService.cs", "sprk_policyversion", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
         // WorkAssignmentEndpoints.cs's sprk_workassignment create is gone: task 166 deleted the caller-less route (S-76,
         // owner round 10 item 1), so its Pending waiver went with it (batch-4 integration).
 
