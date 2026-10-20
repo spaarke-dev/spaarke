@@ -341,5 +341,16 @@ Three save paths can produce a document from an internal-only email with no comm
     - linked to a visible communication;
     - no link anywhere in the chain and own Standard, which stays visible as today;
     - a 4-hop chain, which is hidden (bounded).
+- **T7 additions (word-add-in-r1 task 130 finding, 2026-10-20).**
+  - **T7a. The reconciler widens.** `ChildAccessPermissionReconciler` (task 173; owner rounds 81/84; `Services/Access/ChildAccessPermissionReconciler.cs:234-289` at origin/master 4f5f22694) writes the inherited value over every parented child's own value. So a filed document's own Restricted (T8's fallback, or a user's choice) is reset to its parent's value, which breaks rule 2 above.
+    - The fix: the reconciler writes the more restrictive of inherited and the child's own narrowing, and never widens below it.
+    - The stored value alone cannot tell a child's own Restricted from one inherited earlier. A parent that later widens must still widen an inherited Restricted. The own narrowing therefore needs its own BFF-written record: one column, or a reason on the row. T7 designs that with must-fire and must-not-fire tests:
+      - own Restricted survives the parent being Standard;
+      - an inherited Restricted follows a parent that widens back to Standard;
+      - an unreadable own narrowing writes nothing.
+  - **T7b. Legacy rows.** Documents saved through the three gap paths before T8 have no communication link. Rule 3 cannot see them, so they stay visible by root grants after T7. T7 needs a backfill that links them where the source email can be identified (through `sprk_communicationattachment`, or the .eml's message id; the Office owner confirms which) and reports the rest. Whether an unidentifiable legacy row becomes Restricted is an owner call, raised with T7.
+  - **Known limits (agreed with word-add-in-r1):**
+    - The reverse path, `CrossPathLink.FindAndLinkArchiveDocumentsAsync`, links a document later and keeps its fallback Restricted, which fails closed. Lifting a fallback Restricted once a link exists needs T7a's own-narrowing record to carry its reason; that is an owner design call, not built now.
+    - A byte-identical duplicate save returns the existing canonical document, which may be unlinked or linked to another email. The same bytes are already reachable under the canonical's own rule, so no new exposure.
 - **T8 — Office writer rule (Office owner; UAC reviews).** Gaps 2 and 3: capture or look up the communication for attachment saves; make the .eml link non-best-effort; Restricted only when the email cannot be identified. Must-fire tests: the canonical-link miss; an attachment of an unidentifiable email; the chain child → parent .eml that missed its link, which is hidden after T8. Must-not-fire tests: a linked save keeps its own default; an attachment of an identified, non-internal-only email stays Standard.
 - **ADR / architecture.** Amend I-14 in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` and the concise ADR-034 / auth constraint text: "a child's Access Permission may narrow partner visibility (Restricted hides it); it never widens it." Enforced by: T7's tests.
