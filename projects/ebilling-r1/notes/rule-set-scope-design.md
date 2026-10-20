@@ -13,6 +13,7 @@
 | Precedence | "**Most specific replaces, per rule type**: firm+record > record > firm > client default. This extends D-39. ... rule types not covered at a specific level fall through." This supersedes the earlier "all apply" answer. |
 | Inheritance | "Yes. A Matter's rule sets also apply to invoices on its Projects and Work assignments." |
 | Client level | "**No separate client record; use the business unit.** A rule set applies to **all business units by default**, or only to a chosen list ... When a list is set and the record's business unit is not on it, the rule set does not apply." |
+| Business-unit filter (point 6, settled 2026-10-20) | "The business-unit filter is on the **rule set only**, never on an individual rule. At the same level, a **business-unit-specific** eligible set beats an **all-business-units** set for the same rule type." |
 | Ownership (Q3) | Route the `sprk_ruleset` / `sprk_policy` / `sprk_policyversion` creates through `IRecordOwnershipResolver` with the core record as parent. The census moves to Routed. |
 | Firm visibility (Q4), re-own on a Secure change (Q5) | Unchanged from the issue body. |
 
@@ -257,8 +258,8 @@ Each item names its **must-fire** (MF) and **must-not-fire** (MNF) control.
 |---|---|---|---|
 | Q1 | uac-r2 | Which column holds a Secure record's home business unit? | A `sprk_homebusinessunit` lookup on the three core tables, stamped at create and untouched by the secure re-own (5.2 A). Interim behaviour B until then. |
 | Q2 | owner | Storage of the BU list | N:N `sprk_ruleset_businessunit` plus a "All business units" flag defaulting to Yes; an empty list never means all (S3, S4). Fallback: an intersect child table. |
-| Q3 | owner | Where the BU filter sits | An eligibility filter before precedence: a filtered-out specific set falls back to a less specific one. At the same level and distance, a BU-listed set beats an all-BU set (#2129 point 3). |
-| Q4 | owner | BU filter per rule or per rule set | Per rule set only (#2129 point 4): a set publishes, scopes and cites as a unit. |
+| Q3 | owner | Where the BU filter sits | An eligibility filter before precedence: a filtered-out specific set falls back to a less specific one. At the same level and distance, a BU-listed set beats an all-BU set (**settled**, D-171 point 6); the eligibility-before-precedence placement is still a proposal. |
+| Q4 | — | BU filter per rule or per rule set | **Settled** (D-171 point 6): per rule set only. |
 | Q5 | owner | Order within the record level | The nearer record wins (W > P > M). Level comes first, so F+M beats a project-only set. |
 | Q6 | owner | Do a Project's sets reach its Work assignments? | Yes (3.1), the same rule as Matter → children. Also: a W filed under an invoice or event inherits through it (#1630). |
 | Q7 | owner | Replacing by **type** removes **all** lower rules of that type. For example, a matter RequiredData rule (PO number) removes the client default's RequiredData rule (task code), and the same goes for the code lists of NonBillableActivity and ExpenseRule. Is that intended? | Confirm before 082. If not, mark those types *additive* in `BillingRuleCatalogue`, a closed per-type flag reviewed as code (D-27). |
