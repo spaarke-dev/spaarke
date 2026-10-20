@@ -36,6 +36,10 @@ public static class BlockedSubmissionErrors
     /// <summary>403: the caller does not hold the eBilling Override privilege, the probe could not tell, or the caller could not be identified.</summary>
     public const string NotPermitted = "ebilling.override.not_permitted";
 
+    /// <summary>403: the decision closes Signals and the caller lacks AppendTo on the invoice's core record or Write on a Signal's subject
+    /// (FR-51, the commit route's rule, asked as the caller). Nothing was changed.</summary>
+    public const string NotAuthorized = "ebilling.blocked.not_authorized";
+
     /// <summary>403 (Return only): the caller could not be identified as a Dataverse user, so the Decision Record could not name its decider.</summary>
     public const string DeciderUnverified = "ebilling.blocked.decider_unverified";
 
@@ -198,8 +202,16 @@ public sealed record BlockedDecisionResult
 /// its lines already exist, so an override changes nothing in them. It (1) records <c>override-submission</c> under the invoice
 /// (<see cref="BillingDecisionRecorder"/>, D-100), then (2) sets the submission Accepted with the code <see cref="SubmissionReasonCodes.Overridden"/>
 /// and stores the decision (who, when, why, the record) in <c>sprk_findingsjson</c> under <c>override</c>. Accepted leaves the held set,
-/// which releases the invoice to approval and to pending spend. The blocking findings are not touched: their Signals stay open on the
-/// invoice, the stored findings keep them, and the read marks them Overridden (FR-37, I-5).</para>
+/// which releases the invoice to approval and to pending spend. The blocking findings are not touched: the stored findings keep them and
+/// the read marks them Overridden (FR-37, I-5); their Signals are resolved by the decision (below).</para>
+/// <para><b>Signals (D-122, the human-decision close agreed with ontology-r1).</b> An override and a return each resolve every Open or
+/// Acknowledged Signal on the invoice and on its lines, of every policy: the set is read once and stored in <c>sprk_findingsjson</c> under
+/// <see cref="HumanDecisionSetMember"/> BEFORE the record (049's way, with this decision's id), the record lists it
+/// (<c>ResolvedSignalIds</c>), then each Signal is closed as Acted by the record naming the decider (app-identity writer, no
+/// impersonation), then the state changes. A retry reuses the stored set, never a fresh read. When the set is not empty the caller must
+/// first hold AppendTo on the invoice's core record and Write on every Signal's subject, asked as the caller (the commit route's rule);
+/// otherwise 403 <see cref="BlockedSubmissionErrors.NotAuthorized"/> and nothing is written. A failed close only warns; a repeat of a
+/// decided submission re-runs the close over the stored set with the stamped record.</para>
 /// <para><b>Return</b> (no privilege, D-73; the route requires the caller's rights on the submission). It records <c>return-to-firm</c>
 /// under the invoice, moves the invoice In Review to Returned to Firm through the lifecycle service (FR-06, D-43), and sets the submission's
 /// code to <see cref="SubmissionReasonCodes.Returned"/> with the decision in <c>return</c>.</para>
@@ -209,8 +221,8 @@ public sealed record BlockedDecisionResult
 /// is written, and only then does anything change (K-3). The decision id is derived from the submission id (a submission can be overridden,
 /// or returned, once), so a retry after any partial failure finds the same record and finishes; its content (decider and reason) is the
 /// same on every attempt, built only from the stored findings and the call (K-5). The decider is the authenticated caller's
-/// <c>systemuserid</c> from the on-behalf-of identity, never request input. The resolved Signals are NOT listed: a decision to accept
-/// or return does not close findings, and the policy version is the first deciding finding's, read from the stored findings.</para>
+/// <c>systemuserid</c> from the on-behalf-of identity, never request input. The resolved Signals are the stored set (above), and the
+/// policy version is the first deciding finding's, read from the stored findings.</para>
 /// <para><b>Fail closed.</b> No privilege, a probe that faults, a caller that cannot be identified, a missing reason, an unreadable
 /// finding set, a lock or read that faults, and a transition the lifecycle does not allow all refuse. Logs carry ids and codes only.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="BillingDecisionRecorder"/> (the record),
@@ -229,6 +241,13 @@ public sealed class SubmissionOverrideService
     private const int ReasonMaxLength = 2000;
     internal const string OverrideMember = "override";
     internal const string ReturnMember = "return";
+
+    /// <summary>The <c>sprk_findingsjson</c> member that stores the D-122 set an override or a return resolves, before its record:
+    /// <c>{ "decisionId", "setReadAtUtc", "signals": [ { "id", "policyCode" } ], "subjects": [ { "entity", "id" } ] }</c>. Separate from
+    /// 049's <c>resolvedSignalSet</c> (the automatic rejection's), which is left alone.</summary>
+    internal const string HumanDecisionSetMember = "humanDecisionSignalSet";
+
+    private static readonly string[] InvoiceDecisionColumns = [StatusCodeColumn, "sprk_matter", "sprk_project", "sprk_regardingworkassignment"];
     internal const string OverrideActionCode = "override-submission";
     internal const string ReturnActionCode = "return-to-firm";
     private const string OverrideDeciderRole = "internal user with the eBilling Override privilege";
@@ -251,6 +270,7 @@ public sealed class SubmissionOverrideService
     private readonly CallerRecordAccessProbe _probe;
     private readonly Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> _record;
     private readonly Action<BillingDecision> _preflight;
+    private readonly HumanDecisionSignalClose.CloseActed _closeActed;
     private readonly TimeProvider _time;
     private readonly ILogger<SubmissionOverrideService> _logger;
 
@@ -261,15 +281,18 @@ public sealed class SubmissionOverrideService
         IIdempotencyService idempotency,
         IEbillingNotificationSink sink,
         CallerRecordAccessProbe probe,
+        SignalWriter signals,
         ILogger<SubmissionOverrideService> logger)
         : this(
             entities, lifecycle, idempotency, sink, probe, logger,
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
-            recorder.Preflight)
+            recorder.Preflight,
+            (signals ?? throw new ArgumentNullException(nameof(signals))).CloseActedByDecisionAsync)
     {
     }
 
-    /// <summary>The seam the unit tests use: the recorder is concrete, so it is passed as its two calls (the pattern of 049's after-steps).</summary>
+    /// <summary>The seam the unit tests use: the recorder and the Signal writer are concrete, so they are passed as their calls (the pattern
+    /// of 049's after-steps).</summary>
     internal SubmissionOverrideService(
         IGenericEntityService entities,
         IInvoiceLifecycleService lifecycle,
@@ -279,8 +302,10 @@ public sealed class SubmissionOverrideService
         ILogger<SubmissionOverrideService> logger,
         Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> record,
         Action<BillingDecision> preflight,
+        HumanDecisionSignalClose.CloseActed closeActed,
         TimeProvider? time = null)
     {
+        _closeActed = closeActed ?? throw new ArgumentNullException(nameof(closeActed));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
@@ -509,6 +534,12 @@ public sealed class SubmissionOverrideService
 
         if (Refusal(verb, Classify(row), submissionId, row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id) is { } early)
         {
+            if (early.Kind == BlockedDecisionKind.AlreadyDecided)
+            {
+                // A repeat finishes a close that only warned: the stored set, the stamped record (the response is unchanged).
+                await RecloseAsync(verb, row, token, ct).ConfigureAwait(false);
+            }
+
             return early;
         }
 
@@ -541,7 +572,7 @@ public sealed class SubmissionOverrideService
 
         try
         {
-            return await DecideLockedAsync(verb, submissionId, invoiceId, trimmed, decider!.Value, ct).ConfigureAwait(false);
+            return await DecideLockedAsync(verb, submissionId, invoiceId, trimmed, decider!.Value, token, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -558,15 +589,15 @@ public sealed class SubmissionOverrideService
     }
 
     private async Task<BlockedDecisionResult> DecideLockedAsync(
-        Verb verb, Guid submissionId, Guid invoiceId, string reason, Guid decider, CancellationToken ct)
+        Verb verb, Guid submissionId, Guid invoiceId, string reason, Guid decider, string? token, CancellationToken ct)
     {
         // Re-read under the lock: what was read before it may have been decided by the call that held it.
         Entity? row;
-        InvoiceLifecycleStatus? invoiceStatus;
+        Entity? invoice;
         try
         {
             row = await ReadSubmissionAsync(submissionId, ct).ConfigureAwait(false);
-            invoiceStatus = await ReadInvoiceStatusAsync(invoiceId, ct).ConfigureAwait(false);
+            invoice = await ReadInvoiceAsync(invoiceId, InvoiceDecisionColumns, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (!IsCallerCancellation(ex, ct))
         {
@@ -581,8 +612,15 @@ public sealed class SubmissionOverrideService
 
         if (Refusal(verb, Classify(row), submissionId, invoiceId) is { } refused)
         {
+            if (refused.Kind == BlockedDecisionKind.AlreadyDecided)
+            {
+                await RecloseAsync(verb, row, token, ct).ConfigureAwait(false);
+            }
+
             return refused;
         }
+
+        var invoiceStatus = StatusOf(invoice);
 
         // The invoice must still be where the decision expects it. Override releases a HELD invoice, so it must be In Review. Return
         // moves an In Review invoice, or finishes an interrupted return (the invoice already Returned to Firm, the submission not yet).
@@ -606,7 +644,32 @@ public sealed class SubmissionOverrideService
                 "The stored findings of this submission cannot be read, so the decision cannot be recorded.", invoiceId);
         }
 
-        var decision = BuildDecision(verb, stored, submissionId, invoiceId, decider, reason);
+        // ── D-122: the Signals this decision resolves. A set stored for THIS decision wins (a retry); otherwise it is read now. ──
+        var decisionId = verb == Verb.Override ? OverrideDecisionIdFor(submissionId) : ReturnDecisionIdFor(submissionId);
+        var held = ReadHumanDecisionSet(ParseRoot(findingsJson), decisionId);
+        var storeSet = held is null;
+        if (held is null)
+        {
+            try
+            {
+                held = await InvoiceSubmissionAfterSteps.ReadOpenSignalSetWithSubjectsAsync(_entities, _time, invoiceId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                _logger.LogWarning(ex, "Submission {SubmissionId}: the open Signals of invoice {InvoiceId} could not be read", submissionId, invoiceId);
+                return Unavailable(submissionId, invoiceId);
+            }
+        }
+
+        var (signalSet, subjects) = held.Value;
+
+        // ── FR-51, before any write: closing Signals (app identity, no impersonation) needs the caller's rights, asked as the caller. ──
+        if (await AuthorizeCloseAsync(submissionId, invoiceId, invoice!, signalSet, subjects, token, ct).ConfigureAwait(false) is { } denied)
+        {
+            return denied;
+        }
+
+        var decision = BuildDecision(verb, stored, submissionId, invoiceId, decider, reason, signalSet);
         try
         {
             _preflight(decision);
@@ -616,6 +679,51 @@ public sealed class SubmissionOverrideService
             _logger.LogWarning("Submission {SubmissionId}: the decision would be refused before any write ({Reason})", submissionId, ex.Reason);
             return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status400BadRequest, BlockedSubmissionErrors.DecisionInvalid,
                 "The decision is not valid.", invoiceId);
+        }
+
+        // ── The set is stored BEFORE the record (049's way), so a retry closes exactly it. ──
+        if (storeSet)
+        {
+            var withSet = WithHumanDecisionSet(findingsJson!, decisionId, signalSet, subjects);
+            if (withSet.Length > InvoiceSubmissionPersister.FindingsJsonMaxLength)
+            {
+                return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.FindingsTooLarge,
+                    "The decision could not be added to the stored findings.", invoiceId);
+            }
+
+            if (RowVersionOf(row) is not { } setVersion)
+            {
+                _logger.LogWarning("Submission {SubmissionId} was read without a row version; its decision is not written", submissionId);
+                return Unavailable(submissionId, invoiceId);
+            }
+
+            try
+            {
+                await _entities.BulkUpdateIfRowVersionsMatchAsync(
+                    Entity, [(submissionId, new Dictionary<string, object> { [InvoiceSubmissionPersister.SubmissionFindingsJson] = withSet }, setVersion)], ct)
+                    .ConfigureAwait(false);
+                // Our own write moved the row version: the state write below rests on the row as it now is.
+                row = await ReadSubmissionAsync(submissionId, ct).ConfigureAwait(false);
+            }
+            catch (System.Data.DBConcurrencyException)
+            {
+                // As at the state write: a concurrent run that finished this same decision makes this call a no-op, anything else a 409.
+                return await AfterConflictAsync(verb, submissionId, invoiceId, recordId: null, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                _logger.LogError(ex, "Submission {SubmissionId}: the Signal set could not be stored", submissionId);
+                return Unavailable(submissionId, invoiceId);
+            }
+
+            if (row is null || Classify(row) != Disposition.Blocked
+                || row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson) is not { } reread)
+            {
+                return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.ConcurrentChange,
+                    "The submission changed while the decision was written. Try again.", invoiceId);
+            }
+
+            findingsJson = reread;
         }
 
         // ── Record first (074 K-3): a refusal here leaves the submission and the invoice exactly as they were. ──
@@ -634,6 +742,9 @@ public sealed class SubmissionOverrideService
             return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status503ServiceUnavailable, BlockedSubmissionErrors.RecordUnavailable,
                 "The decision could not be recorded right now. Nothing was changed. Try again.", invoiceId);
         }
+
+        // ── The stored set, closed as Acted by the record naming the decider (a retry: AlreadyClosedByThisRecord). A failure only warns. ──
+        await HumanDecisionSignalClose.CloseSetAsync(_closeActed, signalSet, recorded.RecordId, decider, _logger, ct).ConfigureAwait(false);
 
         // ── Then change state. A failure from here on leaves a record a retry finds and finishes. ──
         if (verb == Verb.Return && invoiceStatus == InvoiceLifecycleStatus.InReview)
@@ -719,7 +830,7 @@ public sealed class SubmissionOverrideService
     /// The submission changed between the read and the conditional write. Re-read once: already decided this way means a concurrent run
     /// finished it (a no-op); anything else means it changed under us and the caller retries (the record is found again).
     /// </summary>
-    private async Task<BlockedDecisionResult> AfterConflictAsync(Verb verb, Guid submissionId, Guid invoiceId, Guid recordId, CancellationToken ct)
+    private async Task<BlockedDecisionResult> AfterConflictAsync(Verb verb, Guid submissionId, Guid invoiceId, Guid? recordId, CancellationToken ct)
     {
         Entity? row;
         try
@@ -818,10 +929,12 @@ public sealed class SubmissionOverrideService
     /// <summary>
     /// The Decision Record's decision, built only from the stored findings and the call, so every attempt builds the same one (074 K-5):
     /// the code on the invoice, the deterministic decision id, a human decider (the authenticated caller), the reason, the first deciding
-    /// finding's policy version, strings-only values, and the stored, scrubbed Signal plan as facts (D-112: never the raw findings). No Signal is resolved.
+    /// finding's policy version, strings-only values, and the stored, scrubbed Signal plan as facts (D-112: never the raw findings). It
+    /// resolves the stored D-122 set <paramref name="signals"/> (<c>ResolvedSignalIds</c>; its read time and policy codes in the facts).
     /// </summary>
     internal static BillingDecision BuildDecision(
-        Verb verb, InvoiceSubmissionAfterSteps.StoredFindings stored, Guid submissionId, Guid invoiceId, Guid decider, string reason)
+        Verb verb, InvoiceSubmissionAfterSteps.StoredFindings stored, Guid submissionId, Guid invoiceId, Guid decider, string reason,
+        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals)
     {
         var deciding = stored.DecidingIndexes
             .Select(i => stored.Findings.TryGetValue(i, out var f) ? f : null)
@@ -854,6 +967,7 @@ public sealed class SubmissionOverrideService
                 ["decision"] = p.Decision,
                 ["sentence"] = p.Sentence,
             }).ToList(),
+            [DecisionRecordWriter.BillingResolvedSetFact] = InvoiceLineDecisionService.SetFact(signals),
         };
         var values = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -871,9 +985,126 @@ public sealed class SubmissionOverrideService
             Reason: reason,
             Values: values,
             PolicyVersionId: deciding.Count > 0 ? deciding[0].PolicyVersionId : null,
-            ResolvedSignalIds: null,
+            ResolvedSignalIds: signals.Signals.Count > 0 ? signals.Signals.Select(s => s.Id).ToList() : null,
             Written: [new DecisionRecordRef(InvoiceReviewService.InvoiceEntity, invoiceId)]);
     }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // Signals (D-122): the stored set, the caller's rights, the close
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The set stored under <see cref="HumanDecisionSetMember"/> for <paramref name="decisionId"/>; null when none is stored for this
+    /// decision (another decision's set is not this one's). An unreadable member is treated as none, so a fresh read replaces it.</summary>
+    internal static (InvoiceSubmissionAfterSteps.ResolvedSignalSet Set, IReadOnlyList<(string Entity, Guid Id)> Subjects)? ReadHumanDecisionSet(
+        JsonObject? root, Guid decisionId)
+    {
+        if (root?[HumanDecisionSetMember] is not JsonObject node
+            || !Guid.TryParse(Text(node, "decisionId"), out var stored) || stored != decisionId)
+        {
+            return null;
+        }
+
+        try
+        {
+            var set = InvoiceSubmissionAfterSteps.ResolvedSignalSet.Parse(node);
+            var subjects = (node["subjects"] as JsonArray ?? throw new FormatException("The stored set has no subjects."))
+                .Select(n => n is JsonObject s && Text(s, "entity") is { Length: > 0 } entity && Guid.TryParse(Text(s, "id"), out var id) && id != Guid.Empty
+                    ? (entity, id)
+                    : throw new FormatException("A stored subject has no entity or id."))
+                .ToList();
+            return (set, subjects);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Adds the set under <see cref="HumanDecisionSetMember"/>; every other member is kept as it was.</summary>
+    internal static string WithHumanDecisionSet(
+        string findingsJson, Guid decisionId, InvoiceSubmissionAfterSteps.ResolvedSignalSet set, IReadOnlyList<(string Entity, Guid Id)> subjects)
+    {
+        var root = ParseRoot(findingsJson) ?? throw new FormatException("The stored findings are not a JSON object.");
+        var node = set.ToJson();
+        node["decisionId"] = decisionId.ToString("D");
+        node["subjects"] = new JsonArray(subjects
+            .Select(s => (JsonNode)new JsonObject { ["entity"] = s.Entity, ["id"] = s.Id.ToString("D") }).ToArray());
+        root[HumanDecisionSetMember] = node;
+        return root.ToJsonString();
+    }
+
+    /// <summary>
+    /// FR-51 when the set is not empty: AppendTo on the invoice's core record and Write on every Signal's subject (the invoice, its lines),
+    /// asked as the caller. Null when allowed or there is nothing to close.
+    /// </summary>
+    private async Task<BlockedDecisionResult?> AuthorizeCloseAsync(
+        Guid submissionId, Guid invoiceId, Entity invoice, InvoiceSubmissionAfterSteps.ResolvedSignalSet set,
+        IReadOnlyList<(string Entity, Guid Id)> subjects, string? token, CancellationToken ct)
+    {
+        if (set.Signals.Count == 0)
+        {
+            return null;
+        }
+
+        if (CoreOf(invoice) is not { } core)
+        {
+            _logger.LogWarning("Submission {SubmissionId}: invoice {InvoiceId} names no single core record; its Signals cannot be closed", submissionId, invoiceId);
+            return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.RecordRefused,
+                "The decision could not be recorded for this invoice.", invoiceId);
+        }
+
+        var refusal = await HumanDecisionSignalClose.AuthorizeAsync(_entities, _probe, token, core, subjects, _logger, ct).ConfigureAwait(false);
+        switch (refusal)
+        {
+            case DecisionCallerRefusal.None:
+                return null;
+            case DecisionCallerRefusal.Unavailable:
+                return Unavailable(submissionId, invoiceId);
+            default:
+                _logger.LogWarning("Submission {SubmissionId}: the caller may not close the invoice's Signals ({Refusal}); nothing was changed", submissionId, refusal);
+                return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status403Forbidden, BlockedSubmissionErrors.NotAuthorized,
+                    "You do not have permission to record a decision on this invoice's findings.", invoiceId);
+        }
+    }
+
+    /// <summary>
+    /// A repeat of a decided submission: re-runs the close over the set stored for that decision, with the record and the decider its stamp
+    /// names (a close that only warned is finished). The caller's rights are asked first, as for the decision; refused or unanswerable, or
+    /// nothing stored, and nothing is written. Never changes the repeat's answer; faults only warn.
+    /// </summary>
+    private async Task RecloseAsync(Verb verb, Entity row, string? token, CancellationToken ct)
+    {
+        var root = ParseRoot(row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson));
+        var submissionId = row.Id;
+        var stamp = ReadStamp(root, verb == Verb.Override ? OverrideMember : ReturnMember);
+        var decisionId = verb == Verb.Override ? OverrideDecisionIdFor(submissionId) : ReturnDecisionIdFor(submissionId);
+        if (stamp is null || ReadHumanDecisionSet(root, decisionId) is not { } held || held.Set.Signals.Count == 0
+            || row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id is not { } invoiceId)
+        {
+            return;
+        }
+
+        try
+        {
+            if (await ReadInvoiceAsync(invoiceId, InvoiceDecisionColumns, ct).ConfigureAwait(false) is not { } invoice
+                || await AuthorizeCloseAsync(submissionId, invoiceId, invoice, held.Set, held.Subjects, token, ct).ConfigureAwait(false) is not null)
+            {
+                _logger.LogWarning("Submission {SubmissionId}: the repeat did not re-close the stored Signals (the caller's rights or the invoice could not be shown)", submissionId);
+                return;
+            }
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning("Submission {SubmissionId}: the repeat could not check the stored Signals ({ExceptionType})", submissionId, ex.GetType().Name);
+            return;
+        }
+
+        await HumanDecisionSignalClose.CloseSetAsync(_closeActed, held.Set, stamp.RecordId, stamp.BySystemUserId, _logger, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The invoice's core record (the line decisions' rule, <see cref="InvoiceLineDecisionService.CoreOf"/>).</summary>
+    private static DecisionCoreRecord? CoreOf(Entity invoice) =>
+        InvoiceLineDecisionService.CoreOf(invoice) is { } core ? new DecisionCoreRecord(core.Entity, core.Id) : null;
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════
     // Reads and helpers
@@ -912,22 +1143,26 @@ public sealed class SubmissionOverrideService
     }
 
     /// <summary>The invoice's lifecycle status; null when it does not exist or its status is unknown to the lifecycle.</summary>
-    private async Task<InvoiceLifecycleStatus?> ReadInvoiceStatusAsync(Guid invoiceId, CancellationToken ct)
+    private async Task<InvoiceLifecycleStatus?> ReadInvoiceStatusAsync(Guid invoiceId, CancellationToken ct) =>
+        StatusOf(await ReadInvoiceAsync(invoiceId, [StatusCodeColumn], ct).ConfigureAwait(false));
+
+    /// <summary>The invoice with <paramref name="columns"/>; null when it does not exist.</summary>
+    private async Task<Entity?> ReadInvoiceAsync(Guid invoiceId, string[] columns, CancellationToken ct)
     {
-        Entity? invoice;
         try
         {
-            invoice = await _entities.RetrieveAsync(InvoiceReviewService.InvoiceEntity, invoiceId, [StatusCodeColumn], ct).ConfigureAwait(false);
+            return await _entities.RetrieveAsync(InvoiceReviewService.InvoiceEntity, invoiceId, columns, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsNotFound(ex))
         {
             return null;
         }
+    }
 
-        return invoice?.GetAttributeValue<OptionSetValue>(StatusCodeColumn)?.Value is { } code && InvoiceStatusCodes.TryFromStatusCode(code, out var status)
+    private static InvoiceLifecycleStatus? StatusOf(Entity? invoice) =>
+        invoice?.GetAttributeValue<OptionSetValue>(StatusCodeColumn)?.Value is { } code && InvoiceStatusCodes.TryFromStatusCode(code, out var status)
             ? status
             : null;
-    }
 
     private static BlockedDecisionResult Unavailable(Guid submissionId, Guid? invoiceId = null) =>
         BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status503ServiceUnavailable, BlockedSubmissionErrors.Unavailable,

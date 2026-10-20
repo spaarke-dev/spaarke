@@ -26,6 +26,7 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Models;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Services.Signals;
 using Xunit;
 using FinAuth = Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
@@ -457,6 +458,9 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
                 DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness()).Writer, identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
             builder.Services.AddScoped(_ => new InvoiceLineDecisionService(
                 host.Entities.Object, Mock.Of<IInvoiceTotalsService>(), recorder, locks.Object, Mock.Of<IRecordOwnershipResolver>(),
+                host.Probe,
+                // The fixture's lines carry no Signal, so nothing is closed; the route's authorization is what this suite proves.
+                (_, _, _, _, _, _) => Task.FromResult(SignalAutomatedCloseOutcome.Closed),
                 NullLogger<InvoiceLineDecisionService>.Instance));
 
             builder.WebHost.UseTestServer();

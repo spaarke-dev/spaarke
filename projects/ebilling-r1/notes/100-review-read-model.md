@@ -71,7 +71,7 @@ A first mutation run hung because the concurrency test blocked every caller insi
 
 ## 7. Known limits and open questions
 
-1. **Signals are not closed.** `SignalWriter` has no human-decision close entry (only the automated one), and this task may not change it. Decision Records are written without `PolicyVersionId` / `ResolvedSignalIds`, so the Signals behind the findings stay open. Needs an ontology-owned writer entry.
+1. ~~**Signals are not closed.**~~ Superseded: each line decision now closes its line's open Signals (section 9). Decision Records are still written without `PolicyVersionId`.
 2. **Retry-revert.** A repeat of a decision id after another reviewer re-decided the same line could re-apply the first decision (no cheap Decision Record lookup before the write). Narrow window; the lock and the row version cover concurrent use.
 3. **Concurrent approve (103) racing a line decision** is not atomic; 016's recalculation corrects the totals.
 4. **No source version on correction rows**: the analyzer/source version is not persisted anywhere, so `sprk_sourceversion` is empty.
@@ -87,3 +87,33 @@ A first mutation run hung because the concurrency test blocked every caller insi
 - Unit run with the project filter plus `InvoiceLine` and `OperationAccessPolicyCompleteness`: 8,508 passed, 0 failed, 11 skipped (8,519 total). It includes the 38 decision, 15 read and 42 contract tests and the completeness test.
 - `tests/Spaarke.ArchTests/`: 1,214 passed, 0 failed. ADR-010 class: 5 of 5 pass; the change adds two concrete services and no interface, so the 1:1 interface count is unchanged.
 - The completeness scanner (`OperationAccessPolicyCompletenessTests`) only discovers a string literal inside `AddFinanceAuthorizationFilter("...")`; the first draft passed the operation through a const and the scan test `SourceScan_DiscoversKnownCallSiteOperation` caught it. The routes now use the literal.
+
+## 9. Human-decision Signal close (D-122, agreed with ontology-r1)
+
+Each line's decision (Accept, Reduce, Disallow; single, multi-line and Accept all Clean) resolves every Open or Acknowledged Signal, of
+every policy, whose subject is THAT line. Another line's Signal is never touched. Each one is closed as **Acted**, never Dismissed.
+
+- **No impersonation.** The app-identity `SignalWriter.CloseActedByDecisionAsync` closes, with `decidedByUserId` = the decider (the
+  authenticated caller's `systemuserid`, never request input). The same conditional write sets `sprk_resolvedby`;
+  `sprk_resolutionnotes` is never written. Automated callers pass null and write exactly what they wrote before.
+- **Authorization before any write.** When the decision closes at least one Signal, the caller must hold AppendTo on the invoice's core
+  record and Write on each decided line that has a Signal, asked as the caller (the route passes its bearer token) through the caller-rights
+  probe: the commit route's own rule, `DecisionCallerRights`, moved verbatim out of `DecisionCommitService.CallerMayDecideAsync`. A missing
+  right, a missing token or an unanswerable probe is 403 `ebilling.decision.not_authorized` and nothing is written (no line, correction,
+  total, record or close). A decision that closes no Signal asks nothing beyond the route's filter (unchanged behaviour).
+- **The set is read before the record and stored with it.** Per line: the Signal ids are the record's `ResolvedSignalIds` (covered by the
+  hash); the read time and each policy code go in the facts (`resolvedSignalSet`, not hashed). The read is one query over the lines that
+  have no record yet, with the clock read first.
+- **A stored set wins.** For each line the service first asks `BillingDecisionRecorder.FindStoredResolvedSetAsync` (a read-only lookup in
+  `DecisionRecordWriter`, `FindBillingDecisionResolvedSetAsync`, through the "already recorded" lookup's own query: created by the writer
+  identity, billing codes only, at most 10 rows; more than one match fails closed). When the line's decision is already recorded under the
+  decision id, its stored set is used, never re-read or widened: a resend answers AlreadyRecorded (not review_invalid), a Signal raised
+  after the first read stays open, and re-closing by the same record is `AlreadyClosedByThisRecord` (nothing twice).
+- **A failed close only warns.** One Warning per Signal; the decision and its response are unchanged. A Signal that no longer exists has
+  nothing to close. A retry of the same decision id finishes the close over the stored set with the stored read time.
+
+Tests: `InvoiceLineDecisionServiceTests` region "D-122 / FR-51" (each outcome; multi-line; rights asked as the caller; no Signal asks
+nothing; missing AppendTo / Write / token is 403 with nothing written; a failed close warns; a deleted Signal; resend after success; retry
+after a failed close; a Signal read fault) and `DecisionRecordWriterTests` `Billing_StoredSet_*` (no record is null through the lookup's
+filter; round trip; empty set; two records fail closed; a person-created lookalike is never trusted; a set-less record listing Signals
+fails closed; a lookup fault; bad input refused without a read).

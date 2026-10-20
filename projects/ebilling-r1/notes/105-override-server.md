@@ -48,7 +48,7 @@ on the read needs the same question from a GET route, which a filter cannot answ
 5. Re-read the submission and the invoice under the lock; invoice must be In Review (Override) or In Review / already Returned to Firm (Return, finishing an interrupted return).
 6. Parse the stored findings (`InvoiceSubmissionAfterSteps.StoredFindings.Parse`): they must be a Blocked evaluation for THIS invoice with at least one deciding finding.
 7. Build the `BillingDecision` from the caller and the stored findings only; `Preflight` (the writer's I/O-free refusals).
-8. **Record first** (`BillingDecisionRecorder.RecordAsync`). A refusal or fault leaves the submission and the invoice exactly as they were.
+8. **Record first** (`BillingDecisionRecorder.RecordAsync`). A refusal or fault leaves the submission and the invoice exactly as they were, apart from the decision's Signal set, which is read, authorized and stored just before the record and closed just after it (section 9).
 9. Return only: `TransitionAsync(ReturnedToFirm)`; a refused or faulted move stops before the submission is touched.
 10. Conditional submission write (`BulkUpdateIfRowVersionsMatchAsync`): status/code and the stamp in `sprk_findingsjson`. A version conflict re-reads once: already decided this way is a no-op, anything else is `concurrent_change`.
 11. Override only: best-effort `SubmissionDecidedAsync(Accepted, Internal)` on the notification seam (task 132 notifies the eligible approvers). A sink fault never undoes the override.
@@ -61,8 +61,10 @@ idempotent by subject and decision id, content-hashed) and finishes the remainin
 
 Code `override-submission` / `return-to-firm`, subject = the invoice, decider `BillingDecider.Human(systemuserid-of-the-caller, role)`,
 Outcome `Overridden` / `Returned`, Reason = the trimmed reason, Values strings only (`submissionId`, `trackingNumber`), PolicyVersionId =
-the first deciding finding's version (read from the stored findings), `ResolvedSignalIds = null`, `Written` = the invoice. Facts carry the
-decision, outcome, tracking number, blocking reason codes and the stored, scrubbed Signal plan (D-112: never the raw findings).
+the first deciding finding's version (read from the stored findings), `ResolvedSignalIds` = the D-122 set (the open Signals on the
+invoice and its lines; null only when there are none, see section 9), `Written` = the invoice. Facts carry the decision, outcome, tracking
+number, blocking reason codes, the stored, scrubbed Signal plan (D-112: never the raw findings) and the set's read time and policy codes
+(`resolvedSignalSet`).
 
 ### Stored result and the read
 
@@ -143,7 +145,7 @@ The tests are for new code, so "before" is "the guarded behaviour removed". Each
 
 ## 7. Known limits
 
-- The blocking Signals stay open on the invoice after an override (`Services/Signals/**` is off limits and `SignalWriter` cannot re-mark a Signal). The "Overridden" mark is carried by the stored findings (`override` stamp), the read (`Overridden` on each blocking finding) and the Decision Record. Open question 1.
+- ~~The blocking Signals stay open on the invoice after an override.~~ Superseded: both decisions now close the open Signals on the invoice and its lines (section 9).
 - Return does not change the approval portion; it stays Pending on the Returned invoice (the invoice is final, Returned to Firm, D-43). Whether 103/104 expect the portion closed is theirs to decide.
 - The stamp stores `bySystemUserId`, not a display name; the review screens resolve the name.
 - A Decision Record can exist while the submission write failed. That is deliberate (record before mutate); the retry finds it. Nothing else reads it as a completed decision, because the stored stamp and the submission code are the state.
@@ -153,7 +155,41 @@ The tests are for new code, so "before" is "the guarded behaviour removed". Each
 
 ## 8. Open questions for the owner
 
-1. Do you want the blocking Signals themselves re-marked (resolved / "overridden") on an override? It needs a change in `Services/Signals/**` / `SignalWriter` (ontology-r1 owns them), so it was not done. Today the Signals stay open and the Overridden mark is on the findings and the Decision Record.
+1. ~~Do you want the blocking Signals themselves re-marked on an override?~~ Answered: yes, closed as Acted by the decision's record, in the shape agreed with ontology-r1 (section 9).
 2. FR-39 notification: Override calls the existing `SubmissionDecidedAsync(Accepted, Internal)` seam so task 132 can notify the approvers. Return sends nothing (the seam has no Returned outcome). Confirm that is the intended split, or add a Returned outcome to the seam in 132.
 3. Who may run `Deploy-EbillingOverridePrivilegeSchema.ps1` and in which environment first (creates a table and a role; idempotent; `-WhatIf` supported).
 4. 103 and 104 should adopt `SubmissionOverrideService.LockKey(invoiceId)` for approve/reject/return so all invoice decisions serialise. Confirm they will, or the key should move to a shared helper.
+
+## 9. Human-decision Signal close (D-122, agreed with ontology-r1)
+
+An override and a return both resolve every Open or Acknowledged Signal, of every policy, whose subject is the invoice or one of its
+lines (the set 049's automatic rejection resolves, read by the same shared `InvoiceSubmissionAfterSteps.ReadOpenSignalSetAsync`). Each one
+is closed as **Acted**, never Dismissed.
+
+- **No impersonation.** The app-identity `SignalWriter.CloseActedByDecisionAsync` closes, with `decidedByUserId` = the decider (the
+  caller's `systemuserid` from the on-behalf-of identity, never request input). The same conditional write sets `sprk_resolvedby`;
+  `sprk_resolutionnotes` is never written. Automated callers pass null and write exactly what they wrote before.
+- **Authorization before any write.** When the set is not empty, the caller must hold AppendTo on the invoice's core record and Write on
+  each Signal's subject (the invoice, the lines), asked as the caller through the caller-rights probe. That is the commit route's own rule
+  (`DecisionCallerRights`, moved verbatim out of `DecisionCommitService.CallerMayDecideAsync`). A missing right, or a question the probe
+  cannot answer, is 403 `ebilling.blocked.not_authorized` with nothing written. An invoice with no single core record is 409
+  `record_refused`. A decision with no Signal to close asks nothing beyond the route's own authorization.
+- **Order:** read the set (clock first), authorize, preflight, **store** the set in `sprk_findingsjson` under `humanDecisionSignalSet`
+  (`{decisionId, setReadAtUtc, signals[{id, policyCode}], subjects[{entity, id}]}`; 049's `resolvedSignalSet` is left alone), record
+  (`ResolvedSignalIds` = the set), close, then the state change as before. The set is stored even when empty, so a Signal raised between a
+  first attempt and its retry can never change the decision's content (the record's hash covers `ResolvedSignalIds`).
+- **A stored set wins.** A retry finds the set stored for this decision id and closes exactly it, with its stored read time; it is never
+  re-read or widened, so a Signal raised after the first read stays open. Closing again by the same record is
+  `AlreadyClosedByThisRecord` (nothing twice).
+- **A failed close only warns.** One Warning per Signal (ids and codes only); the decision and its response are unchanged. A Signal that
+  no longer exists has nothing to close. A repeat of a decided submission (`AlreadyDecided`) re-runs the close over the stored set with the
+  stamp's record and decider, after the same rights check; anything it cannot do only warns, and the repeat's answer is unchanged.
+- **Races.** Losing the race at the set store to a concurrent run of the same decision is the same `AlreadyDecided` no-op as losing it at
+  the state write; any other change is `concurrent_change`.
+
+Tests: `SubmissionOverrideServiceTests` region "D-122 / FR-51" (each verb closes the set as Acted naming the decider; the record lists the
+ids and the set is stored before it; rights asked as the caller; missing AppendTo / Write / an unanswerable probe are 403 with nothing
+written; no Signal asks nothing; a read fault is 503; a failed close warns; a repeat re-closes the stored set; a retry after the state write
+failed closes exactly the stored set and finds its record; the store race; no core record). Seeded mutation (authorization disabled in
+`HumanDecisionSignalClose.AuthorizeAsync`): 12 tests failed, among them
+`Decision_WithoutAppendToOnTheMatter_Is403_AndNothingIsWritten`.

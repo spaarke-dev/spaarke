@@ -1,17 +1,21 @@
 using System.Collections.Concurrent;
 using System.Data;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Services.Signals;
 using Xunit;
 
@@ -29,6 +33,28 @@ public sealed class InvoiceLineDecisionServiceTests
     private static readonly Guid Core = Guid.Parse("01000000-0000-4000-8000-0000000000c0");
     private static readonly Guid Reviewer = Decider;
     private const string Reason = "Rate above the agreed card";
+    private const string CallerToken = "caller-bearer-token";
+
+    /// <summary>One call of the app-identity close.</summary>
+    private sealed record CloseCall(Guid SignalId, Guid RecordId, DateTime SetReadAtUtc, string PolicyCode, Guid? DecidedBy);
+
+    /// <summary>Captures log entries (level and rendered message), so a warning is asserted, not assumed.</summary>
+    private sealed class ListLogger<T> : ILogger<T>
+    {
+        public readonly List<(LogLevel Level, string Message)> Entries = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (Entries)
+            {
+                Entries.Add((logLevel, formatter(state, exception)));
+            }
+        }
+    }
 
     private sealed class InMemoryLocks : IIdempotencyService
     {
@@ -82,6 +108,17 @@ public sealed class InvoiceLineDecisionServiceTests
         public RecordOwnerResolution Owner = RecordOwnerResolution.Owned(Guid.Parse("01000000-0000-4000-8000-0000000000d0"));
         private long _nextVersion = 10;
 
+        // ── D-122 / FR-51: the Signals on the lines, the caller's rights (asked as the caller), the app-identity close ──
+        public readonly List<Entity> Signals = [];
+        public readonly List<CloseCall> Closes = [];
+        public readonly Dictionary<Guid, Guid> ClosedBy = new();
+        public readonly List<(string? Token, string Set, Guid Id)> RightsAsked = [];
+        public readonly ListLogger<InvoiceLineDecisionService> Log = new();
+        public readonly Mock<CallerRecordAccessProbe> Probe = new(
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!) { CallBase = false };
+        public Func<string, Guid, AccessRights> Rights = (_, _) => AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo;
+        public Func<Guid, Exception?> CloseFault = _ => null;
+
         public World(decimal billedTotal = 1000m, int status = InvoiceStatusCodes.InReview)
         {
             Invoice = new Entity("sprk_invoice", InvoiceId)
@@ -118,6 +155,11 @@ public sealed class InvoiceLineDecisionServiceTests
                         {
                             "sprk_invoice" => new EntityCollection([Copy(Invoice)]),
                             "sprk_billingevent" => new EntityCollection(Lines.Select(Copy).ToList()),
+                            // The Signals whose subject lookup is any value the query names (the OR of invoice Equal / lines In).
+                            "sprk_signal" => new EntityCollection(Signals
+                                .Where(s => query.Criteria.Conditions.Any(c => s.GetAttributeValue<EntityReference>(c.AttributeName) is { } subject
+                                    && c.Values.Any(v => Equals(v, subject.Id))))
+                                .Select(Copy).ToList()),
                             _ => new EntityCollection(),
                         });
                     }
@@ -192,13 +234,71 @@ public sealed class InvoiceLineDecisionServiceTests
                 .Returns(Task.CompletedTask);
             Records.Setup(r => r.UpdateExistingRecordFieldsAsync("sprk_billingevent", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
+
+            Entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, CancellationToken _) => table + "s");
+            Probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string? token, string set, Guid id, CancellationToken _) =>
+                {
+                    lock (RightsAsked)
+                    {
+                        RightsAsked.Add((token, set, id));
+                    }
+
+                    return token == CallerToken ? Rights(set, id) : AccessRights.None;
+                });
         }
 
         public InvoiceLineDecisionService Service()
         {
             var recorder = new BillingDecisionRecorder(H.Writer, Identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
             var totals = new InvoiceTotalsService(Records.Object, Entities.Object, NullLogger<InvoiceTotalsService>.Instance);
-            return new InvoiceLineDecisionService(Entities.Object, totals, recorder, Locks, Ownership.Object, NullLogger<InvoiceLineDecisionService>.Instance);
+            return new InvoiceLineDecisionService(Entities.Object, totals, recorder, Locks, Ownership.Object, Probe.Object, CloseAsync, Log);
+        }
+
+        /// <summary>The app-identity close as the Signal writer behaves: Open/Acknowledged → Resolved Acted by the record; a repeat by the
+        /// same record → AlreadyClosedByThisRecord; resolved otherwise → LeftAsIs. Every call is recorded.</summary>
+        public Task<SignalAutomatedCloseOutcome> CloseAsync(
+            Guid signalId, Guid recordId, DateTime setReadAtUtc, string policyCode, Guid? decidedBy, CancellationToken ct)
+        {
+            lock (Closes)
+            {
+                Closes.Add(new CloseCall(signalId, recordId, setReadAtUtc, policyCode, decidedBy));
+                if (CloseFault(signalId) is { } fault)
+                {
+                    return Task.FromException<SignalAutomatedCloseOutcome>(fault);
+                }
+
+                var row = Signals.Single(s => s.Id == signalId);
+                if (ClosedBy.TryGetValue(signalId, out var by))
+                {
+                    return Task.FromResult(by == recordId ? SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord : SignalAutomatedCloseOutcome.LeftAsIs);
+                }
+
+                ClosedBy[signalId] = recordId;
+                row["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved);
+                return Task.FromResult(SignalAutomatedCloseOutcome.Closed);
+            }
+        }
+
+        /// <summary>An Open (or <paramref name="status"/>) Signal on a line, filed as the Signal writer files one: the dedupe key, the pair id
+        /// and the subject lookup. The writer's harness holds it too, so the record's resolved-Signal checks find it.</summary>
+        public Guid AddSignal(Guid lineId, string policyCode = "EB-RATE", int status = SignalWriter.SignalStatusOpen)
+        {
+            var id = Guid.NewGuid();
+            var lookup = SignalWriter.RegardingLookupByEntity["sprk_billingevent"];
+            Signals.Add(new Entity("sprk_signal", id)
+            {
+                ["sprk_dedupekey"] = SignalWriter.BuildDedupeKey(policyCode, "sprk_billingevent", lineId.ToString("D"), 1),
+                ["sprk_signalstatus"] = new OptionSetValue(status),
+                [lookup] = new EntityReference("sprk_billingevent", lineId),
+            });
+            H.Rows[("sprk_signal", id)] = new Entity("sprk_signal", id)
+            {
+                ["sprk_regardingrecordid"] = lineId.ToString("D"),
+                [lookup] = new EntityReference("sprk_billingevent", lineId),
+            };
+            return id;
         }
 
         public Entity AddLine(
@@ -258,7 +358,7 @@ public sealed class InvoiceLineDecisionServiceTests
 
     private static LineDecisionCommand Command(
         World w, LineDecisionAction action, IEnumerable<LineDecisionLine> lines, string? reason = null, Guid? decisionId = null, bool bulk = false) =>
-        new(w.InvoiceId, decisionId ?? Guid.NewGuid(), action, reason, lines.ToList(), Decider, bulk);
+        new(w.InvoiceId, decisionId ?? Guid.NewGuid(), action, reason, lines.ToList(), Decider, bulk, CallerToken);
 
     // ── Outcomes: the line, the totals, the ledger ──
 
@@ -733,7 +833,7 @@ public sealed class InvoiceLineDecisionServiceTests
         var service = new InvoiceLineDecisionService(
             w.Entities.Object, Mock.Of<IInvoiceTotalsService>(),
             new BillingDecisionRecorder(w.H.Writer, w.Identity.Object, NullLogger<BillingDecisionRecorder>.Instance),
-            locks.Object, w.Ownership.Object, NullLogger<InvoiceLineDecisionService>.Instance);
+            locks.Object, w.Ownership.Object, w.Probe.Object, w.CloseAsync, NullLogger<InvoiceLineDecisionService>.Instance);
 
         var result = await service.DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)]), CancellationToken.None);
 
@@ -850,4 +950,243 @@ public sealed class InvoiceLineDecisionServiceTests
 
     private static InvoiceLineStatus Status(World w, Entity line) =>
         (InvoiceLineStatus)w.Line(line.Id).GetAttributeValue<OptionSetValue>("sprk_linestatus").Value;
+
+    // ── D-122 / FR-51: the human-decision Signal close (the shape agreed with ontology-r1) ──
+
+    /// <summary>The set the line's record stored, read back through the writer (the same read a retry makes).</summary>
+    private static Task<DecisionRecordWriter.BillingStoredResolvedSet?> StoredSet(World w, string actionCode, Guid lineId, Guid decisionId) =>
+        new BillingDecisionRecorder(w.H.Writer, w.Identity.Object, NullLogger<BillingDecisionRecorder>.Instance)
+            .FindStoredResolvedSetAsync(actionCode, lineId, decisionId);
+
+    /// <summary>Nothing changed and nothing was closed: no line write, no correction, no total, no record, no close.</summary>
+    private static void NothingWritten(World w)
+    {
+        w.LineWrites.Should().BeEmpty();
+        w.Corrections.Should().BeEmpty();
+        w.TotalsWrites.Should().BeEmpty();
+        w.H.Created.Should().BeEmpty();
+        w.Closes.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "100: each outcome closes the decided line's Open and Acknowledged Signals, of every policy, as Acted by its record naming the decider; another line's Signal stays open")]
+    [InlineData(LineDecisionAction.Accept, "accept-line")]
+    [InlineData(LineDecisionAction.Reduce, "reduce-line")]
+    [InlineData(LineDecisionAction.Disallow, "disallow-line")]
+    public async Task EachOutcome_ClosesTheDecidedLinesSignals_AsActed_NamingTheDecider(LineDecisionAction action, string code)
+    {
+        var w = new World(billedTotal: 200m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var other = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var open = w.AddSignal(line.Id, "EB-RATE");
+        var acknowledged = w.AddSignal(line.Id, "EB-TASK", SignalWriter.SignalStatusAcknowledged);
+        var resolved = w.AddSignal(line.Id, "EB-OLD", SignalWriter.SignalStatusResolved);
+        var otherLines = w.AddSignal(other.Id, "EB-RATE");
+        var decisionId = Guid.NewGuid();
+        var before = DateTime.UtcNow;
+
+        var result = await w.Service().DecideAsync(
+            Command(w, action, [action == LineDecisionAction.Reduce ? new(line.Id, 60m) : new(line.Id)], action == LineDecisionAction.Accept ? null : Reason, decisionId),
+            CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        w.Closes.Select(c => c.SignalId).Should().BeEquivalentTo([open, acknowledged]);
+        w.Closes.Should().OnlyContain(c => c.DecidedBy == Decider, "the person is the authenticated decider, never request input");
+        w.Closes.Single(c => c.SignalId == acknowledged).PolicyCode.Should().Be("EB-TASK", "each Signal's own policy code");
+        w.ClosedBy.Should().NotContainKey(otherLines, "only the decided line's Signals");
+        w.ClosedBy.Should().NotContainKey(resolved, "a resolved Signal is not in the set");
+
+        var stored = (await StoredSet(w, code, line.Id, decisionId))!;
+        stored.Signals.Select(s => s.SignalId).Should().BeEquivalentTo([open, acknowledged], "the record lists the set it resolved");
+        w.Closes.Should().OnlyContain(c => c.RecordId == stored.RecordId && c.SetReadAtUtc == stored.SetReadAtUtc,
+            "closed by the line's own record, with the read time stored with it");
+        stored.SetReadAtUtc.Should().BeOnOrAfter(before.AddSeconds(-1)).And.BeOnOrBefore(DateTime.UtcNow);
+    }
+
+    [Fact(DisplayName = "100: a multi-line decision closes each line's Signals with that line's set only")]
+    public async Task MultiLineDecision_ClosesEachLinesOwnSet()
+    {
+        var w = new World(billedTotal: 300m);
+        var a = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var b = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var c = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var onA = w.AddSignal(a.Id);
+        var onB = w.AddSignal(b.Id);
+        var onC = w.AddSignal(c.Id);
+        var decisionId = Guid.NewGuid();
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Disallow, [new(a.Id), new(b.Id)], Reason, decisionId, bulk: true), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        w.ClosedBy.Keys.Should().BeEquivalentTo([onA, onB]);
+        w.ClosedBy.Should().NotContainKey(onC);
+        (await StoredSet(w, "disallow-line", a.Id, decisionId))!.Signals.Select(s => s.SignalId).Should().Equal(onA);
+        (await StoredSet(w, "disallow-line", b.Id, decisionId))!.Signals.Select(s => s.SignalId).Should().Equal(onB);
+    }
+
+    [Fact(DisplayName = "100: the caller's rights are asked as the caller: AppendTo on the core record and Write on each decided line that has a Signal")]
+    public async Task TheRights_AreAskedAsTheCaller_OnTheCoreAndEachLineWithASignal()
+    {
+        var w = new World(billedTotal: 200m);
+        var a = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var b = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        w.AddSignal(a.Id);
+
+        await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(a.Id), new(b.Id)], bulk: true), CancellationToken.None);
+
+        w.RightsAsked.Should().BeEquivalentTo([(CallerToken, "sprk_projects", Core), (CallerToken, "sprk_billingevents", a.Id)],
+            "b carries no Signal, so nothing beyond the route's own authorization is asked about it");
+    }
+
+    [Fact(DisplayName = "100: a decision that closes no Signal asks no record rights (the route's authorization stands alone)")]
+    public async Task NoSignal_AsksNoRecordRights()
+    {
+        var w = new World(billedTotal: 100m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)]), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        w.RightsAsked.Should().BeEmpty();
+        w.Closes.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "100: without AppendTo on the core record the decision is 403 and nothing is written")]
+    public async Task MissingAppendToOnTheCore_Is403_AndNothingIsWritten()
+    {
+        var w = new World(billedTotal: 100m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        w.AddSignal(line.Id);
+        w.Rights = (set, _) => set == "sprk_projects" ? AccessRights.Read | AccessRights.Write : AccessRights.Read | AccessRights.Write | AccessRights.AppendTo;
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Reduce, [new(line.Id, 60m)], Reason), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Forbidden);
+        result.Code.Should().Be(LineDecisionCodes.NotAuthorized);
+        NothingWritten(w);
+        Status(w, line).Should().Be(InvoiceLineStatus.Flagged);
+    }
+
+    [Fact(DisplayName = "100: without Write on a decided line that has a Signal the decision is 403 and nothing is written, not even the other lines")]
+    public async Task MissingWriteOnASubject_Is403_AndNothingIsWritten()
+    {
+        var w = new World(billedTotal: 200m);
+        var a = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var b = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        w.AddSignal(a.Id);
+        w.AddSignal(b.Id);
+        w.Rights = (set, id) => set == "sprk_billingevents" && id == b.Id
+            ? AccessRights.Read | AccessRights.AppendTo
+            : AccessRights.Read | AccessRights.Write | AccessRights.AppendTo;
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Disallow, [new(a.Id), new(b.Id)], Reason, bulk: true), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Forbidden);
+        NothingWritten(w);
+    }
+
+    [Fact(DisplayName = "100: a caller with no token holds no right, so a decision that closes Signals is 403 and nothing is written")]
+    public async Task NoCallerToken_Is403_WhenThereAreSignals()
+    {
+        var w = new World(billedTotal: 100m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        w.AddSignal(line.Id);
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)]) with { CallerBearerToken = null }, CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Forbidden);
+        NothingWritten(w);
+    }
+
+    [Fact(DisplayName = "100: a failed close only warns: the decision is Applied with the same response, and the line's other Signals are closed")]
+    public async Task CloseFailure_OnlyWarns_AndTheDecisionStands()
+    {
+        var w = new World(billedTotal: 100m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var failing = w.AddSignal(line.Id, "EB-RATE");
+        var fine = w.AddSignal(line.Id, "EB-TASK");
+        w.CloseFault = id => id == failing ? new TimeoutException("dataverse") : null;
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Reduce, [new(line.Id, 60m)], Reason), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        result.Code.Should().Be("ok", "the same answer as a decision whose close succeeded");
+        result.Lines!.Single().Status.Should().Be(nameof(InvoiceLineStatus.Reduced));
+        w.ClosedBy.Keys.Should().Equal(fine);
+        w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains(failing.ToString("D"), StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "100: a Signal that no longer exists has nothing to close: no warning, and the decision stands")]
+    public async Task ADeletedSignal_HasNothingToClose()
+    {
+        var w = new World(billedTotal: 100m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var gone = w.AddSignal(line.Id);
+        w.CloseFault = _ => new System.ServiceModel.FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = -2147220969 }, new System.ServiceModel.FaultReason("does not exist"));
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)]), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        w.Closes.Should().ContainSingle().Which.SignalId.Should().Be(gone);
+        w.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
+    }
+
+    [Fact(DisplayName = "100: a resend after success answers AlreadyRecorded (not review_invalid), closes the STORED set again (nothing twice) and leaves a later Signal open")]
+    public async Task Resend_AfterSuccess_ReusesTheStoredSet_ClosesNothingTwice_AndLeavesALaterSignalOpen()
+    {
+        var w = new World(billedTotal: 100m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var first = w.AddSignal(line.Id);
+        var command = Command(w, LineDecisionAction.Reduce, [new(line.Id, 60m)], Reason);
+        var service = w.Service();
+        (await service.DecideAsync(command, CancellationToken.None)).Status.Should().Be(LineDecisionStatus.Applied);
+        var firstClose = w.Closes.Single();
+        var raisedLater = w.AddSignal(line.Id, "EB-LATE");
+
+        var resend = await service.DecideAsync(command, CancellationToken.None);
+
+        resend.Status.Should().Be(LineDecisionStatus.Applied, "the stored set rebuilds the same decision, so the record answers it");
+        resend.Lines!.Single().AlreadyRecorded.Should().BeTrue();
+        w.H.Created.Should().ContainSingle();
+        w.Closes.Should().HaveCount(2, "the close re-runs over the stored set");
+        w.Closes[1].Should().Be(firstClose, "the same Signal, record, read time, code and decider");
+        w.ClosedBy.Should().ContainSingle().Which.Key.Should().Be(first, "AlreadyClosedByThisRecord: nothing is closed twice");
+        w.ClosedBy.Should().NotContainKey(raisedLater, "a Signal raised after the first attempt stays open");
+    }
+
+    [Fact(DisplayName = "100: a retry after the close failed finishes it over the stored set, with the stored read time")]
+    public async Task Retry_AfterAFailedClose_FinishesIt()
+    {
+        var w = new World(billedTotal: 100m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var signal = w.AddSignal(line.Id);
+        w.CloseFault = _ => new TimeoutException("dataverse");
+        var command = Command(w, LineDecisionAction.Accept, [new(line.Id)]);
+        var service = w.Service();
+        (await service.DecideAsync(command, CancellationToken.None)).Status.Should().Be(LineDecisionStatus.Applied);
+        w.ClosedBy.Should().BeEmpty();
+        w.CloseFault = _ => null;
+
+        (await service.DecideAsync(command, CancellationToken.None)).Status.Should().Be(LineDecisionStatus.Applied);
+
+        w.ClosedBy.Should().ContainKey(signal);
+        w.Closes[1].SetReadAtUtc.Should().Be(w.Closes[0].SetReadAtUtc, "the stored read time, not the retry's");
+        w.Closes[1].RecordId.Should().Be(w.Closes[0].RecordId);
+    }
+
+    [Fact(DisplayName = "100: when the open Signals cannot be read the decision is 'unavailable' and nothing is written")]
+    public async Task SignalReadFailure_ChangesNothing()
+    {
+        var w = new World(billedTotal: 100m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        w.AddSignal(line.Id);
+        var service = w.Service();
+        w.Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_signal"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("dataverse"));
+
+        var result = await service.DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)]), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Unavailable);
+        NothingWritten(w);
+    }
 }

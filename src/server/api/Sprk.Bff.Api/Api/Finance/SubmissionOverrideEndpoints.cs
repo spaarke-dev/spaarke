@@ -17,7 +17,10 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// Dataverse table privilege <see cref="EbillingOverridePrivilege.PrivilegeName"/>, which the SERVICE asks on every call
 /// (<see cref="SubmissionOverrideService.OverrideAsync"/>): a filter's denial is the generic
 /// <c>sdap.access.deny.insufficient_privilege</c>, and the acceptance criterion is a stable <c>ebilling.override.not_permitted</c> that also
-/// covers a privilege probe that faults. Return needs only the rights on the submission (D-73).</para>
+/// covers a privilege probe that faults. Return needs only the rights on the submission (D-73). Both decisions resolve the open Signals on
+/// the invoice and its lines (D-122), closed by the app-identity writer, so when there are any the service also asks, as the caller, for
+/// AppendTo on the invoice's core record and Write on each Signal's subject: 403 <c>ebilling.blocked.not_authorized</c> without them, nothing
+/// written.</para>
 /// <para><b>Inputs.</b> The submission id is the route; the only body field is <c>reason</c>. The decider is the authenticated caller, and the
 /// invoice, the findings and the decision id are all derived server-side; none comes from the request.</para>
 /// <para><b>Responses.</b> 200 with <see cref="BlockedDecisionResponse"/> (a repeat is 200 with <c>alreadyDecided</c> and writes nothing); refusals

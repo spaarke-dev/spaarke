@@ -7,11 +7,13 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance;
@@ -39,6 +41,8 @@ public sealed record LineDecisionLine(Guid LineId, decimal? ApprovedAmount = nul
 /// <param name="DecisionId">The client's decision id: a retry of the same request carries the same id and records nothing twice (FR-30).</param>
 /// <param name="Bulk">The request came through the multi-line or Accept all Clean route: each Accepted line then writes the "Accepted in bulk"
 /// correction rows (D-64). The single-line route writes none.</param>
+/// <param name="CallerBearerToken">The caller's own token, from the request: the rights to close the lines' Signals (AppendTo on the core
+/// record, Write on each line) are asked of Dataverse AS THE CALLER with it. Null answers every rights question "no".</param>
 public sealed record LineDecisionCommand(
     Guid InvoiceId,
     Guid DecisionId,
@@ -46,7 +50,8 @@ public sealed record LineDecisionCommand(
     string? Reason,
     IReadOnlyList<LineDecisionLine> Lines,
     Guid DeciderSystemUserId,
-    bool Bulk);
+    bool Bulk,
+    string? CallerBearerToken = null);
 
 /// <summary>Outcome class of a decision attempt. The endpoint maps each to one HTTP status and one stable code.</summary>
 public enum LineDecisionStatus
@@ -68,6 +73,10 @@ public enum LineDecisionStatus
     /// <summary>The lines were changed but a later step failed; <see cref="LineDecisionResult.CommittedLineIds"/> names them. Retrying the same decision id
     /// through the multi-line route completes it (every step is idempotent).</summary>
     Incomplete,
+
+    /// <summary>The decision closes Signals and the caller lacks AppendTo on the core record or Write on a decided line (FR-51, the commit
+    /// route's rule); NOTHING was changed.</summary>
+    Forbidden,
 }
 
 /// <summary>Stable ProblemDetails codes (ADR-019). Callers branch on these, never on a message.</summary>
@@ -91,6 +100,7 @@ public static class LineDecisionCodes
     public const string Unavailable = "ebilling.decision.unavailable";
     public const string Incomplete = "ebilling.decision.incomplete";
     public const string DeciderUnresolved = "ebilling.decider.unresolved";
+    public const string NotAuthorized = "ebilling.decision.not_authorized";
 }
 
 /// <summary>A decided line as the caller needs it to update the screen without a second read.</summary>
@@ -129,6 +139,13 @@ public sealed record LineDecisionResult(
 /// <para><b>Identity.</b> The decider is the caller's <c>systemuserid</c> from the authenticated principal. The linked contact is looked up by the
 /// recorder. Lines are written by the application (D-90: the caller's role cannot write <c>sprk_billingevent</c>); the endpoint filter has already
 /// proven Write on the invoice as the caller (D-77).</para>
+/// <para><b>Signals (D-122, the human-decision close agreed with ontology-r1).</b> Each line's decision resolves every Open or Acknowledged
+/// Signal whose subject is that line, of every policy. The set is read BEFORE the record and stored WITH it (<c>ResolvedSignalIds</c>, and the
+/// read time and policy codes in the facts); a retry finds the recorded set (<see cref="BillingDecisionRecorder.FindStoredResolvedSetAsync"/>)
+/// and closes exactly it, never a fresh read. When a decision closes any Signal, the caller must hold AppendTo on the core record and Write
+/// on each decided line that has one, asked as the caller (<see cref="HumanDecisionSignalClose.AuthorizeAsync"/>, the commit route's rule);
+/// otherwise 403 and nothing is written. After each line's record, its Signals are closed as Acted by the app-identity writer naming the
+/// decider; a failed close only warns.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="InvoiceTotalsService"/> (totals only),
 /// <see cref="BillingDecisionRecorder"/> (the record only), <see cref="InvoiceSubmissionPersister"/> (creates lines); nothing changes a line's decision.
 /// Extension: those owners stay single-purpose (ADR-002 one owner per invariant); this service orchestrates them in the one order that keeps I-1 and
@@ -178,6 +195,8 @@ public sealed class InvoiceLineDecisionService
     private readonly BillingDecisionRecorder _recorder;
     private readonly IIdempotencyService _locks;
     private readonly IRecordOwnershipResolver _ownership;
+    private readonly CallerRecordAccessProbe _probe;
+    private readonly HumanDecisionSignalClose.CloseActed _closeActed;
     private readonly ILogger<InvoiceLineDecisionService> _logger;
     private readonly TimeProvider _time;
 
@@ -187,6 +206,25 @@ public sealed class InvoiceLineDecisionService
         BillingDecisionRecorder recorder,
         IIdempotencyService locks,
         IRecordOwnershipResolver ownership,
+        SignalWriter signals,
+        CallerRecordAccessProbe probe,
+        ILogger<InvoiceLineDecisionService> logger)
+        : this(
+            entities, totals, recorder, locks, ownership, probe,
+            (signals ?? throw new ArgumentNullException(nameof(signals))).CloseActedByDecisionAsync,
+            logger)
+    {
+    }
+
+    /// <summary>The seam the unit tests use: the ontology-owned writer is concrete, so its close is passed as its call (049's pattern).</summary>
+    internal InvoiceLineDecisionService(
+        IGenericEntityService entities,
+        IInvoiceTotalsService totals,
+        BillingDecisionRecorder recorder,
+        IIdempotencyService locks,
+        IRecordOwnershipResolver ownership,
+        CallerRecordAccessProbe probe,
+        HumanDecisionSignalClose.CloseActed closeActed,
         ILogger<InvoiceLineDecisionService> logger,
         TimeProvider? time = null)
     {
@@ -195,14 +233,17 @@ public sealed class InvoiceLineDecisionService
         _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
         _locks = locks ?? throw new ArgumentNullException(nameof(locks));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _probe = probe ?? throw new ArgumentNullException(nameof(probe));
+        _closeActed = closeActed ?? throw new ArgumentNullException(nameof(closeActed));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _time = time ?? TimeProvider.System;
     }
 
     /// <summary>Accept all Clean: accepts every Clean Fee and Expense line of the invoice at its billed amount, as one bulk decision (D-64).</summary>
-    public Task<LineDecisionResult> AcceptCleanAsync(Guid invoiceId, Guid decisionId, Guid deciderSystemUserId, CancellationToken ct) =>
+    public Task<LineDecisionResult> AcceptCleanAsync(
+        Guid invoiceId, Guid decisionId, Guid deciderSystemUserId, CancellationToken ct, string? callerBearerToken = null) =>
         RunAsync(
-            new LineDecisionCommand(invoiceId, decisionId, LineDecisionAction.Accept, null, [], deciderSystemUserId, Bulk: true),
+            new LineDecisionCommand(invoiceId, decisionId, LineDecisionAction.Accept, null, [], deciderSystemUserId, Bulk: true, callerBearerToken),
             acceptClean: true,
             ct);
 
@@ -448,9 +489,22 @@ public sealed class InvoiceLineDecisionService
             return new LineDecisionResult(LineDecisionStatus.TotalsRefused, LineDecisionCodes.TotalsRefused, dryRun.Refusal.Code);
         }
 
+        // ── D-122: the Signals each line's decision resolves: the set stored with its record (a retry), else read now. ──
+        var signalSets = await ResolveSignalSetsAsync(command, proposals, ct).ConfigureAwait(false);
+        if (signalSets.Failure is { } setFailure)
+        {
+            return setFailure;
+        }
+
+        // ── FR-51, before any write: closing Signals (app identity, no impersonation) needs the caller's rights, asked as the caller. ──
+        if (await AuthorizeCloseAsync(command, invoice, signalSets.ByLine, ct).ConfigureAwait(false) is { } denied)
+        {
+            return denied;
+        }
+
         // ── The recorder's no-I/O refusals, before our first write (074 obligation: refuse before you change anything). ──
         var decidedOn = _time.GetUtcNow();
-        var decisions = proposals.Select(p => BuildDecision(command, p, decidedOn)).ToList();
+        var decisions = proposals.Select(p => BuildDecision(command, p, decidedOn, signalSets.ByLine[p.Line.Id])).ToList();
         try
         {
             foreach (var decision in decisions)
@@ -539,6 +593,10 @@ public sealed class InvoiceLineDecisionService
                 var recorded = await _recorder.RecordAsync(decisions[i], ct).ConfigureAwait(false);
                 decided.Add(new DecidedLineDto(
                     proposals[i].Line.Id, proposals[i].Status.ToString(), proposals[i].Approved, proposals[i].Reason, decidedOn, recorded.AlreadyRecorded));
+
+                // ── 5. The line's Signals, closed as Acted by its record (a retry: AlreadyClosedByThisRecord). A failure only warns. ──
+                await HumanDecisionSignalClose.CloseSetAsync(
+                    _closeActed, signalSets.ByLine[proposals[i].Line.Id], recorded.RecordId, command.DeciderSystemUserId, _logger, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -601,7 +659,8 @@ public sealed class InvoiceLineDecisionService
         [InvoiceReviewReadService.LineReviewedOn] = decidedOnUtc,
     };
 
-    private BillingDecision BuildDecision(LineDecisionCommand command, Proposal p, DateTimeOffset decidedOn)
+    private BillingDecision BuildDecision(
+        LineDecisionCommand command, Proposal p, DateTimeOffset decidedOn, InvoiceSubmissionAfterSteps.ResolvedSignalSet signals)
     {
         // Values are built the same way on every attempt (same keys, decimals normalised by the hash): 074 K-5.
         IReadOnlyDictionary<string, object?>? values = p.Status == InvoiceLineStatus.Reduced
@@ -621,6 +680,11 @@ public sealed class InvoiceLineDecisionService
             ["approvedAmount"] = p.Approved,
             ["bulk"] = command.Bulk,
         };
+        if (signals.SetReadAtUtc != DateTime.MinValue)
+        {
+            // D-122: what the close needs beside the ids (the record's ResolvedSignalIds): when the set was read and each policy code.
+            facts[DecisionRecordWriter.BillingResolvedSetFact] = SetFact(signals);
+        }
 
         return new BillingDecision(
             command.DecisionId,
@@ -631,7 +695,110 @@ public sealed class InvoiceLineDecisionService
             p.Outcome,
             Reason: p.Reason,
             Values: values,
+            ResolvedSignalIds: signals.Signals.Count > 0 ? signals.Signals.Select(s => s.Id).ToList() : null,
             DecidedOn: decidedOn);
+    }
+
+    /// <summary>The stored set as a fact (<see cref="DecisionRecordWriter.BillingResolvedSetFact"/>): ids, read time and policy codes only.</summary>
+    internal static Dictionary<string, object?> SetFact(InvoiceSubmissionAfterSteps.ResolvedSignalSet set) => new(StringComparer.Ordinal)
+    {
+        ["setReadAtUtc"] = set.SetReadAtUtc.ToString("O", CultureInfo.InvariantCulture),
+        ["signals"] = set.Signals
+            .Select(s => new Dictionary<string, object?>(StringComparer.Ordinal) { ["id"] = s.Id.ToString("D"), ["policyCode"] = s.PolicyCode })
+            .ToList(),
+    };
+
+    private sealed record SignalSets(Dictionary<Guid, InvoiceSubmissionAfterSteps.ResolvedSignalSet> ByLine, LineDecisionResult? Failure);
+
+    /// <summary>
+    /// D-122 per decided line. A line whose decision is already recorded under this decision id keeps the set stored with that record (a
+    /// stored set wins: never re-read or widened, so a Signal raised after the first attempt stays open). Every other line's set is read now,
+    /// in ONE query over those lines, with the clock read before it. Nothing is written; a refusal here changes nothing.
+    /// </summary>
+    private async Task<SignalSets> ResolveSignalSetsAsync(LineDecisionCommand command, IReadOnlyList<Proposal> proposals, CancellationToken ct)
+    {
+        var byLine = new Dictionary<Guid, InvoiceSubmissionAfterSteps.ResolvedSignalSet>(proposals.Count);
+        var fresh = new List<Guid>();
+        try
+        {
+            foreach (var p in proposals)
+            {
+                if (await _recorder.FindStoredResolvedSetAsync(p.Action, p.Line.Id, command.DecisionId, ct).ConfigureAwait(false) is { } stored)
+                {
+                    byLine[p.Line.Id] = new InvoiceSubmissionAfterSteps.ResolvedSignalSet(
+                        stored.SetReadAtUtc ?? DateTime.MinValue,
+                        stored.Signals.Select(s => new InvoiceSubmissionAfterSteps.ResolvedSignal(s.SignalId, s.PolicyCode)).ToList());
+                }
+                else
+                {
+                    fresh.Add(p.Line.Id);
+                }
+            }
+        }
+        catch (DecisionRecordRefusedException ex)
+        {
+            _logger.LogWarning("Line decision on invoice {InvoiceId}: the stored Signal set could not be read ({Reason}); nothing changed.", command.InvoiceId, ex.Reason);
+            return new SignalSets(byLine, ex.Reason == DecisionRecordRefusalReason.ReviewInvalid
+                ? new LineDecisionResult(LineDecisionStatus.InvalidRequest, LineDecisionCodes.DecisionInvalid, ex.Reason)
+                : new LineDecisionResult(LineDecisionStatus.Unavailable, LineDecisionCodes.Unavailable, "The decision could not be checked; nothing was changed. Try again."));
+        }
+
+        if (fresh.Count > 0)
+        {
+            var setReadAt = _time.GetUtcNow().UtcDateTime;
+            IReadOnlyList<(InvoiceSubmissionAfterSteps.ResolvedSignal Signal, string SubjectEntity, Guid SubjectId)> open;
+            try
+            {
+                open = await InvoiceSubmissionAfterSteps.ReadOpenSignalsAsync(_entities, invoiceId: null, fresh, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return new SignalSets(byLine, ReadFailed(command, ex));
+            }
+
+            foreach (var line in fresh)
+            {
+                // Ordered by id so the record's hash is stable.
+                byLine[line] = new InvoiceSubmissionAfterSteps.ResolvedSignalSet(
+                    setReadAt,
+                    open.Where(s => s.SubjectId == line).Select(s => s.Signal).DistinctBy(s => s.Id).OrderBy(s => s.Id).ToList());
+            }
+        }
+
+        return new SignalSets(byLine, null);
+    }
+
+    /// <summary>
+    /// FR-51 when the decision closes at least one Signal: AppendTo on the invoice's core record and Write on every decided line that has a
+    /// Signal (each Signal's subject is its line), asked as the caller. Null when allowed or there is nothing to close.
+    /// </summary>
+    private async Task<LineDecisionResult?> AuthorizeCloseAsync(
+        LineDecisionCommand command, Entity invoice, IReadOnlyDictionary<Guid, InvoiceSubmissionAfterSteps.ResolvedSignalSet> sets, CancellationToken ct)
+    {
+        var subjects = sets.Where(s => s.Value.Signals.Count > 0).Select(s => (InvoiceReviewReadService.LineEntity, s.Key)).ToList();
+        if (subjects.Count == 0)
+        {
+            return null;
+        }
+
+        if (CoreOf(invoice) is not { } core)
+        {
+            return new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The invoice names no single core record.");
+        }
+
+        var refusal = await HumanDecisionSignalClose.AuthorizeAsync(
+            _entities, _probe, command.CallerBearerToken, new DecisionCoreRecord(core.Entity, core.Id), subjects, _logger, ct).ConfigureAwait(false);
+        switch (refusal)
+        {
+            case DecisionCallerRefusal.None:
+                return null;
+            case DecisionCallerRefusal.Unavailable:
+                return new LineDecisionResult(LineDecisionStatus.Unavailable, LineDecisionCodes.Unavailable, "The decision could not be checked; nothing was changed. Try again.");
+            default:
+                _logger.LogWarning("Line decision on invoice {InvoiceId}: the caller may not close its Signals ({Refusal}); nothing changed.", command.InvoiceId, refusal);
+                return new LineDecisionResult(LineDecisionStatus.Forbidden, LineDecisionCodes.NotAuthorized,
+                    "You do not have permission to record a decision on these lines.");
+        }
     }
 
     private sealed record CorrectionBuild(List<Entity> Rows, LineDecisionResult? Failure);
@@ -688,7 +855,8 @@ public sealed class InvoiceLineDecisionService
         return new CorrectionBuild(rows, null);
     }
 
-    private static (string Entity, Guid Id)? CoreOf(Entity invoice)
+    /// <summary>The invoice's one core record (matter, project, else work assignment); null when it names none.</summary>
+    internal static (string Entity, Guid Id)? CoreOf(Entity invoice)
     {
         foreach (var (column, entity) in new[] { ("sprk_matter", "sprk_matter"), ("sprk_project", "sprk_project"), ("sprk_regardingworkassignment", "sprk_workassignment") })
         {

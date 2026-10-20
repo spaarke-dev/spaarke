@@ -19,6 +19,9 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Nothing is trusted from the body.</b> The invoice is the route's; each line id is checked against that invoice's own lines (uniform
 /// 404) before anything is written; the decider is the caller's <c>systemuserid</c>, resolved from the caller's own token (074 obligation 2);
 /// no request field sets a total or a status (I-1, ADR-002). The decision id is the client's and only makes a retry idempotent.</para>
+/// <para><b>Signals.</b> A decision closes the Open and Acknowledged Signals on its lines (D-122) through the app-identity writer, so the
+/// service first asks, AS THE CALLER with the caller's own token, for AppendTo on the core record and Write on each such line; a missing right is
+/// 403 <c>ebilling.decision.not_authorized</c> and nothing is written.</para>
 /// <para><b>Status codes.</b> 200 applied; 400 invalid (<c>errorCode</c> says which rule); 401; 403; 404 uniform (invoice or line absent or
 /// unreadable); 409 (not In Review, line Pending or not decidable, totals refused, another decision in progress, a line changed); 503
 /// <c>ebilling.disabled</c> or a transient failure; 503 <c>ebilling.decision.incomplete</c> when the lines were written but a later step did not
@@ -138,7 +141,7 @@ public static class InvoiceLineReviewEndpoints
         var result = await service.DecideAsync(
             new LineDecisionCommand(
                 invoiceId, body.DecisionId, action, body.Reason,
-                [new LineDecisionLine(lineId, body.ApprovedAmount)], decider, Bulk: false),
+                [new LineDecisionLine(lineId, body.ApprovedAmount)], decider, Bulk: false, TokenHelper.ExtractBearerTokenOrNull(httpContext)),
             ct);
         return ToResult(result, httpContext, body.DecisionId);
     }
@@ -169,7 +172,7 @@ public static class InvoiceLineReviewEndpoints
         var result = await service.DecideAsync(
             new LineDecisionCommand(
                 invoiceId, body.DecisionId, action, body.Reason,
-                body.Lines.Select(l => new LineDecisionLine(l.LineId, l.ApprovedAmount)).ToList(), decider, Bulk: true),
+                body.Lines.Select(l => new LineDecisionLine(l.LineId, l.ApprovedAmount)).ToList(), decider, Bulk: true, TokenHelper.ExtractBearerTokenOrNull(httpContext)),
             ct);
         return ToResult(result, httpContext, body.DecisionId);
     }
@@ -187,7 +190,7 @@ public static class InvoiceLineReviewEndpoints
             return DeciderUnresolved(httpContext);
         }
 
-        var result = await service.AcceptCleanAsync(invoiceId, body.DecisionId, decider, ct);
+        var result = await service.AcceptCleanAsync(invoiceId, body.DecisionId, decider, ct, TokenHelper.ExtractBearerTokenOrNull(httpContext));
         return ToResult(result, httpContext, body.DecisionId);
     }
 
@@ -213,6 +216,7 @@ public static class InvoiceLineReviewEndpoints
         LineDecisionStatus.NotInReview or LineDecisionStatus.LineNotDecidable or LineDecisionStatus.TotalsRefused
             or LineDecisionStatus.Busy or LineDecisionStatus.Changed => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
         LineDecisionStatus.OwnerUnresolved => Refused(StatusCodes.Status500InternalServerError, result.Code, result.Detail),
+        LineDecisionStatus.Forbidden => Refused(StatusCodes.Status403Forbidden, result.Code, result.Detail),
         LineDecisionStatus.Incomplete => Results.Problem(
             statusCode: StatusCodes.Status503ServiceUnavailable,
             detail: result.Detail,
