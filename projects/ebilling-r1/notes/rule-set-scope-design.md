@@ -139,7 +139,7 @@ for each subject s:
 | TimeIncrement | Replace | Owner (time increment). |
 | DailyHoursCap | Replace | Owner (daily hours cap). |
 | NonBillableActivity | **Additive** | Owner (checklist of codes). |
-| ExpenseRule | Replace | **ebilling's call.** The owner lists "expense caps" among the limits. The body also carries `nonReimbursableCodes`, so a specific ExpenseRule replaces the general code list as well. To keep the general codes, the specific rule must restate them; the publish notice names the codes it drops. Rejected: Additive (the general $500 cap would still fire against a matter's $1,000 cap, so a limit could never be raised); splitting the type in two (a new `sprk_ruletype` option, schema and handler on the ontology-shared store, out of proportion). |
+| ExpenseRule | **Split** | **Owner (D-172 round 3).** Per-category caps replace: for each category, the highest-ranked version that caps it applies, and an uncapped category falls through. The non-reimbursable checklist adds: the union of every in-force version's `nonReimbursableCodes`. Precedence and the handler treat the two parts separately. The rule type is not split (no new `sprk_ruletype` option), and no codes are dropped. |
 | InvoiceAge | Replace | Owner (invoice age). |
 | CoreRecordWindow | Replace | **ebilling's call.** `graceDays` is a numeric limit. |
 | Duplicate | Replace | **ebilling's call.** `matchFields` defines what counts as a duplicate for that record: one configuration, not a list of independent items. Additive would let the loosest definition always fire, so a record could never narrow it. |
@@ -180,7 +180,7 @@ Firm F. Matter M is in business unit "Litigation". Project P is filed directly u
 | DailyHoursCap | Replace | FIRM | **FIRM** | PRJ-other is not on the chain |
 | NonBillableActivity | Additive | CD, CD-Lit | **CD and CD-Lit** | Both lists apply (L100 and L120). CD-Lit is eligible because P's business unit is Litigation (5.2) |
 | RequiredData | Additive | CD, MAT | **CD and MAT** | Task code and PO number are both required |
-| ExpenseRule | Replace | CD | **CD** | Not covered more specifically: falls through |
+| ExpenseRule | Split | CD | **CD** | Not covered more specifically: caps and codes both come from CD |
 
 **Invoice from F on W1** (chain W1 0, P 1; M is **not** on the chain): ApprovedRate → **PRJ** (MAT is not eligible); TimeIncrement → **CD** (F+M is on M); RequiredData → **CD only**; InvoiceAge, DailyHoursCap → FIRM; NonBillableActivity → CD and CD-Lit, **only if** W1's own business unit is Litigation (5.2 matches the invoice's own record).
 
@@ -308,7 +308,7 @@ Without the `sprk_policy` → `sprk_ruleset` edge, a billing policy has no linea
 - **Record picker:** a **type** choice (Matter / Project / Work assignment) and a `LookupField`, reusing the read-only `Xrm.WebApi` adapter pattern of `services/firmLookup.ts`. Search goes through a new page-local `searchCoreRecordsAsLookup(type, q)` (`services/coreRecordLookup.ts`, beside `firmLookup.ts`) modelled on `searchOrganizationsAsLookup` (`Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts:736`). `PolymorphicPicker` is **not** recommended: it delegates to `Xrm.Utility.lookupObjects`, a host dialog, which gives no testable inline search. The rate card has **no UI** (078 notes: "admins call the routes"); its scope is set by the import.
 - **Business-unit multi-select:** "Applies to all business units" (checkbox, default on). When it is off, a `TagPicker` of business units searched through `Xrm.WebApi` (`businessunits`, excluding the Secure Record business unit by name, `SecureRecord:BusinessUnitName`). Publish shows the existing notice plus "Applies only to: Litigation, Corporate".
 - **List columns** (`RuleSetListView.tsx`): *Name*, *Applies to* (for example "Client default", "Firm: Smith LLP", "Matter: M-1001", "Smith LLP on Matter: M-1001"), *Business units* ("All" or the names), *Status*, *Visible to firms*, *Rules*. Record names come from the summary: the service returns `coreRecord {type, id, name}`, so the page makes no N+1 lookups. A set whose record was deleted shows "Record deleted: applies to nothing".
-- **Publish notices** (computed by RuleSetService and returned on the rule set detail as `publishNotices`, task 084): same-level ties of a Replace type (3.3); for a record-level set, per rule, "Replaces the general <type> rule" or "Adds to the general <type> rule" from `IsAdditive`; for ExpenseRule, the general non-reimbursable codes it drops; for ApprovedTimekeeper, "repeats the general timekeeper check".
+- **Publish notices** (computed by RuleSetService and returned on the rule set detail as `publishNotices`, task 084): same-level ties of a Replace type (3.3); for a record-level set, per rule, "Replaces the general <type> rule" or "Adds to the general <type> rule" from `IsAdditive`; for ExpenseRule, "Replaces the general caps for the categories it caps; adds to the general non-reimbursable codes"; for ApprovedTimekeeper, "repeats the general timekeeper check".
 - **Inheritance hint** on the record picker: "Applies to this record's invoices and to records filed directly under it."
 
 ## 8. Tests
@@ -394,3 +394,15 @@ Not blocking:
 **Gate:** no 080–084 POMLs until the owner answers Q7, because the answer changes 082's shape. *(Met: Q7 answered in D-172.)*
 
 ### uac-r2: review queued (§5.2/Q1, §5.1/Q11, Q10, §3.1). Facts received meanwhile are folded into Q10 and DEF-027.
+
+### owner, 2026-10-20 (D-172 round 3, via ontology-r1)
+
+The four rule-type calls are settled:
+- (a) **ExpenseRule is split**: caps replace per category, the non-reimbursable checklist adds (tables above; 082's constraints and acceptance criteria).
+- (b) CoreRecordWindow replaces.
+- (c) Duplicate replaces.
+- (d) AiObservation is additive.
+
+ontology-r1 reviewed the revision from its summary and has no objection. Two conditions:
+- **Rate-card backfill (080 / 085):** the list of cards marked Firm goes to the owner before 085 reaches any environment. If `sprk_ratecard` has audit history, use it to find cards whose core lookup was cleared, and mark those CoreRecord rather than Firm.
+- **D-120 and rule sets:** if uac-r2 does not take the D-120 rule-set delete or retire, track it as a deferred issue.
