@@ -270,9 +270,10 @@ public sealed class ContactIdentityBinder
     // ── Workforce token plane ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Resolves a workforce caller with no systemuser (Type 2). A MEMBER (<c>acct = 0</c>) of a configured customer
-    /// tenant may be email-bound on first sign-in, or have a contact created keyed by the oid; everyone else resolves
-    /// only through an existing oid binding.
+    /// Resolves a workforce caller with no systemuser (Type 2). Only a MEMBER (<c>acct = 0</c>) of a configured customer
+    /// tenant resolves: through its existing oid binding, else by an email bind on first sign-in, else a contact created
+    /// keyed by the oid. Everyone else is refused with its member-test deny code before any store call — on every
+    /// sign-in, so an existing oid binding never admits a caller who fails the member test today (#2128 round 1).
     /// </summary>
     /// <remarks>
     /// #2128 (owner 2026-10-20, option 1) retires the FR-15 guest auto-create. A customer-tenant guest — the member test's
@@ -281,7 +282,7 @@ public sealed class ContactIdentityBinder
     /// <see cref="WorkforceMembershipTest.DenyGuestUseHomeSignin"/> BEFORE any read: no contact is created, none is
     /// email-bound, and a contact already bound to the guest's Spaarke-tenant oid is not resolved either. Under ADR-028 A9
     /// customer staff sign in at their home directory and register there; that is the one door, and one contact shape.
-    /// A guest whose home tenant is not listed is unchanged (its member-test deny, or an existing oid binding).
+    /// A guest whose home tenant is not listed gets its member-test deny, with or without an existing oid binding.
     /// </remarks>
     /// <param name="stampTenantId">
     /// The stamp's own tenant id (<c>AzureAd:TenantId</c>), never a token value. REQUIRED — there is deliberately no
@@ -319,6 +320,16 @@ public sealed class ContactIdentityBinder
             claims.Email,
             membership == WorkforceMembership.Member ? BindingEligibility.EmailBindAndCreate : BindingEligibility.None,
             WorkforceMembershipTest.DenyCodeFor(membership));
+
+        // #2128 round 1: the member test gates EVERY sign-in on this plane, not only the first. A stored binding does not
+        // outlive it — a guest whose home tenant is not listed, or a member whose tenant was since removed from the
+        // customer list, is refused with its member-test code before the oid lookup (no store call).
+        if (membership != WorkforceMembership.Member)
+        {
+            var notMember = ContactBindingResult.Denied(WorkforceMembershipTest.DenyCodeFor(membership)!);
+            Log(request, notMember, $"{membership}; refused before the oid lookup (#2128)");
+            return notMember;
+        }
 
         var details = new NewContactDetails(
             claims.GivenName,

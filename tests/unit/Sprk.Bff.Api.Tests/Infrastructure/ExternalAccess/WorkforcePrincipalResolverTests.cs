@@ -982,7 +982,9 @@ public class WorkforcePrincipalResolverTests
             var validator = new WorkforceIdentityOptionsValidator(config, log);
 
             log.Entries.Should().ContainSingle(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning)
-                .Which.Message.Should().Contain("FR-15 registered-guest admission disabled");
+                .Which.Message.Should().Contain("not workforce_guest_use_home_signin")
+                .And.Contain("FR-15 guest admission is retired")
+                .And.NotContain("admission disabled", "FR-15 guest admission is retired, not switchable (#2128)");
             validator.Validate(null, new WorkforceIdentityOptions()).Succeeded
                 .Should().BeTrue("a missing stamp tenant must never fail startup");
         }

@@ -834,10 +834,13 @@ stamp as **B2B guests in Spaarke's tenant**, authenticating at home.
 
 It is checked in two places:
 
-1. **Every request to the customer's BFF** (`WorkforceMembershipTest`). A Model 1 guest is a member only when
-   `acct = 1` **and** `tid` = the stamp tenant **and** the home tenant parsed from `idp` ∈ `CustomerTenantIds`
-   (R3 FR-15). A guest from any other home tenant is denied (`sdap.access.deny.workforce_tenant_not_customer`).
-   A direct member of the listed tenant (`tid` ∈ list, `acct = 0`) is the Model 2 / dev path.
+1. **Every request to the customer's BFF** on the Workforce token plane (`WorkforceMembershipTest`, on every
+   sign-in, before any contact lookup — an existing binding does not override it). Only a direct member of a listed
+   tenant (`tid` ∈ list, `acct = 0`) passes: the Model 2 / dev path. A guest is never admitted here (ADR-028 A9):
+   customer workforce users sign in at their home directory and self-register (2. below). A Spaarke-tenant B2B guest
+   whose home tenant (from `idp`) is listed is refused `sdap.access.deny.workforce_guest_use_home_signin` (#2128
+   retired the R3 FR-15 guest admission); a guest from any other home tenant is denied
+   (`sdap.access.deny.workforce_tenant_not_customer`).
 2. **Workforce self-registration** (R3 FR-14, task 060). The person signs in at home first; the service admits them
    only if that home `tid` ∈ the customer's list **and** `acct = 0` (a member there, not someone else's guest),
    and only then invites them into Spaarke's tenant and the customer's `sprk-{customerId}-users` group.
@@ -858,10 +861,11 @@ az webapp config appsettings set --resource-group <rg> --name <app-service-name>
 ```
 
 **The member test also needs the `acct` claim** (§7.3): a member is a user token (`CallerIdentity`, never an
-app-only token) whose `tid` is listed here AND whose `acct` claim is `0` — or, on Model 1, the registered-guest
-branch above (`acct = 1`, `tid` = stamp tenant, `idp` home tenant listed here). A token with no `acct` claim fails
-closed (`sdap.access.deny.workforce_acct_claim_missing`) — membership is never inferred from an email domain or
-a `#EXT#` UPN.
+app-only token) whose `tid` is listed here AND whose `acct` claim is `0`. A Model 1 B2B guest (`acct = 1`,
+`tid` = stamp tenant) is never a member: one whose `idp` home tenant is listed here is refused
+`sdap.access.deny.workforce_guest_use_home_signin` and signs in at their home directory instead (ADR-028 A9). A token
+with no `acct` claim fails closed (`sdap.access.deny.workforce_acct_claim_missing`) — membership is never inferred
+from an email domain or a `#EXT#` UPN.
 
 **The identity-link reconciliation job** (`identity-link-reconciliation`, every 5 minutes) links every licensed
 user to their contact. It runs **report-only** until `IdentityLink__Reconciliation__WritesEnabled=true` — absent,

@@ -105,6 +105,60 @@ public class ContactIdentityBinderWorkforceGuestTests
     }
 
     [Fact]
+    public async Task AnUnlistedTenantGuestAlreadyBoundOnTheWorkforcePlane_IsRefused_WithNoStoreCall()
+    {
+        // #2128 round 1: a stored binding does not outlive the member test. Before, the oid lookup resolved it.
+        var bound = _store.AddContact(ContactA, email: GuestEmail, oid: GuestOid.ToString("D"),
+            plane: IdentityPlaneMarker.Workforce);
+
+        var result = await Binder(_store).ResolveWorkforceCallerAsync(
+            Guest(UnlistedTenant), GuestOid, Stamp, CancellationToken.None);
+
+        result.Should().Be(new ContactBindingResult(null, WorkforceMembershipTest.DenyForeignTenant, BindingAction.Deny));
+        bound.Oid.Should().Be(GuestOid.ToString("D"), "the row is left unchanged");
+        _store.Reads.Should().BeEmpty("the oid lookup never runs");
+        _store.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AMemberAlreadyBoundWhoseTenantWasSinceDelisted_IsRefused_WithNoStoreCall(bool listStillHasOthers)
+    {
+        // The member bound while its tenant was listed; an operator has since removed it (or emptied the list).
+        var oid = Guid.NewGuid();
+        var store = new Mock<IContactIdentityStore>();
+        store.Setup(s => s.FindContactsByOidAsync(oid, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("the oid lookup must not run for a non-member"));
+        var tenants = listStillHasOthers ? Tenants(UnlistedTenant) : Tenants();
+        var binder = new ContactIdentityBinder(
+            store.Object, tenants, new FakeTimeProvider(Now), new BindingLogCapture<ContactIdentityBinder>());
+
+        var result = await binder.ResolveWorkforceCallerAsync(
+            WorkforceUser(oid, CustomerTenant, acct: "0", email: GuestEmail), oid, Stamp, CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyCode.Should().Be(listStillHasOthers
+            ? WorkforceMembershipTest.DenyForeignTenant
+            : WorkforceMembershipTest.DenyTenantListEmpty);
+        store.Invocations.Should().BeEmpty("the refusal comes before every store call");
+    }
+
+    [Fact]
+    public async Task AMemberAlreadyBoundOnTheWorkforcePlane_StillResolvesByOid()
+    {
+        // Must-not-fire pin for #2128 round 1: an acct = 0 member of a listed tenant keeps resolving through its binding.
+        var oid = Guid.NewGuid();
+        _store.AddContact(ContactA, email: GuestEmail, oid: oid.ToString("D"), plane: IdentityPlaneMarker.Workforce);
+
+        var result = await Binder(_store).ResolveWorkforceCallerAsync(
+            WorkforceUser(oid, CustomerTenant, acct: "0", email: GuestEmail), oid, Stamp, CancellationToken.None);
+
+        result.Should().Be(ContactBindingResult.Resolved(ContactA, BindingAction.ResolveByOid));
+        _store.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task AMemberWithNoContact_StillGetsOneCreated()
     {
         var oid = Guid.NewGuid();

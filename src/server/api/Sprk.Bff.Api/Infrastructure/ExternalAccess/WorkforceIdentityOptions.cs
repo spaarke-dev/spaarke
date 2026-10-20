@@ -70,13 +70,14 @@ public sealed class WorkforceIdentityOptionsValidator : IValidateOptions<Workfor
         if (!IsUsableStampTenant(configuration[WorkforcePrincipalResolver.StampTenantConfigKey]))
         {
             logger.LogWarning(
-                "[WF-AUTH] {Key} is not a non-zero GUID — FR-15 registered-guest admission disabled " +
-                "(every acct=1 workforce caller will be denied on the guest branch)",
+                "[WF-AUTH] {Key} is not a non-zero GUID — a customer-tenant B2B guest gets its plain member-test deny, " +
+                "not workforce_guest_use_home_signin (FR-15 guest admission is retired: every acct=1 workforce caller " +
+                "is denied either way)",
                 WorkforcePrincipalResolver.StampTenantConfigKey);
         }
     }
 
-    /// <summary>True when the stamp tenant is a non-zero GUID — the precondition of the FR-15 guest branch.</summary>
+    /// <summary>True when the stamp tenant is a non-zero GUID — the precondition of the FR-15 conjunction (refused since #2128).</summary>
     internal static bool IsUsableStampTenant(string? stampTenantId)
         => Guid.TryParse(stampTenantId?.Trim(), out var stamp) && stamp != Guid.Empty;
 

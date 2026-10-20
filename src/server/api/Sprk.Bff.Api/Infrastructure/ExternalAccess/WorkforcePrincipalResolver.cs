@@ -22,8 +22,9 @@
 //                               active, unbound match) or create a contact keyed by the oid. A customer-tenant guest
 //                               (R3 FR-15: acct = 1, tid = AzureAd:TenantId, idp home tenant on the customer list) is
 //                               refused workforce_guest_use_home_signin since #2128 — nothing created, bound or
-//                               resolved. Everyone else resolves only through an existing oid binding. Collisions
-//                               are refused AND flagged.
+//                               resolved. Everyone else fails the member test and is refused with its deny code
+//                               before the oid lookup, on every sign-in — an existing binding never outlives the
+//                               member test (#2128 round 1). Collisions are refused AND flagged.
 //   (c) neither                : explicit DENY with the binding decision's own deny code — never a silent fallback
 //                               to an unscoped/anonymous principal.
 //   (H) home principal         : external-access-platform-r3 task 046 (ADR-028 A9). An identity authenticated by the
@@ -293,7 +294,7 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
 
         if (binding.IsResolved)
         {
-            // An acct = 1 caller (an unlisted guest resolving through an existing oid binding) logs its parsed home tenant.
+            // Only a member (acct = 0) resolves here since #2128 round 1, so the home tenant logs "n/a"; kept for the log shape.
             _logger.LogInformation(
                 "[WF-AUTH] Resolved workforce caller oid={CallerOid} to contact-only principal {ContactId} via {Action} " +
                 "(homeTenant: {HomeTenant})",
