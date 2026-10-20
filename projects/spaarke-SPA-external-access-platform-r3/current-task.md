@@ -11,7 +11,7 @@
 |-------|-------|
 | **Task** | 070 (dev SPA + Teams package), owner "070-071-072 yes proceed" 2026-10-20. Also open: 074 (A9 live checks, partial), 002 (grid columns, owner question). |
 | **Step** | 070: SPA live (master `28274e04e`); dev Teams package built (run `39489551799`, artifact `teams-app-package`, manifest id `23610794…` v1.2.0). **Next:** owner uploads the package in Teams admin center, then the smoke table in `notes/task-070-deploy-record.md`; then 071. |
-| **Status** | **Dev BFF = `c3ec5d6e5`** (master incl. UAC #2138/#2133; 18:12Z; rollback `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T180912Z` = 21184ecd4; record `notes/task-078-notes.md`). **Dev SPA = `28274e04e`** (run 39468172374; rollback tag `external-spa-dev-rollback-1908696a8`). |
+| **Status** | **Dev BFF = `0b976628e`** (master incl. UAC #2122; 20:37Z, owner "yes deploy"; rollback `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T203441Z` = c3ec5d6e5; record `notes/task-078-notes.md`). **Dev SPA = `28274e04e`** (run 39468172374; rollback tag `external-spa-dev-rollback-1908696a8`). |
 | **Next Action** | Reply to UAC on #2126 D7 with the code-mapper facts (3a–c: writers of `sprk_relatedcommunication`, the internal-only flag, gaps). Then the owner's 070 package upload and the 074 checks. |
 
 ### Uncommitted files

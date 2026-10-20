@@ -259,3 +259,14 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
 - **Deploy:** `scripts/Deploy-BffApi.ps1` from a detached worktree `C:\wtbffc` at `c3ec5d6e5`. Package 37.47 MB; 4 critical files SHA-256 verified.
 - **Read-back** (18:12:51Z): ProductVersion `1.0.0+c3ec5d6e56f0074cf238b84bccf202cb1c0c84b7`; `/healthz` 200; `/healthz/dataverse` 200; `/api/me` anonymous 401.
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T180912Z` (= `21184ecd4`).
+
+## Dev redeploy from master 0b976628e (2026-10-20, owner "yes deploy"; requested by UAC for #2121)
+
+- **Candidate:** master `0b976628e` = the live `c3ec5d6e5` + UAC #2122 (#2121: Secure suppresses a systemuser's lookup-derived membership on the SPA/Teams plane). #2122 CI was green, with nothing failing or pending. The ebilling content check matched the live build.
+- **Coordination:** OK from ontology, provisioning, field-mapping, word-add-in and spe-admin. ebilling did not answer; per the owner's 2026-10-16 rule a session that does not answer does not block, and its content was unchanged.
+- **Pre-checks:** the live DLL read `c3ec5d6e5`, which is an ancestor of the candidate; healthz 200.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261020T203441Z` (222 files, DLL `c3ec5d6e5`).
+- **Deploy:** `scripts/Deploy-BffApi.ps1` from a detached worktree `C:\wtbffd`. Package 37.48 MB; 4 critical files SHA-256 verified.
+- **Read-back** (20:37:26Z): ProductVersion `1.0.0+0b976628e48b0082c6235a40e9e3508603f5cd81`; `/healthz` and `/healthz/dataverse` 200; `/api/me` anonymous 401.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T203441Z` (= `c3ec5d6e5`).
+
