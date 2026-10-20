@@ -200,6 +200,15 @@ public static class OperationAccessPolicy
         // (the "analysis.attach" reasoning). A separate key so deny logs name the operation.
         ["finance.submit_invoice"] = AccessRights.Read | AccessRights.AppendTo,
 
+        // "ebilling.invoice.decide" — Write on the INVOICE named by the route (sprk_invoices, route invoiceId) of the Invoice Review
+        // line-decision routes: POST /api/finance/invoices/{invoiceId}/lines/{lineId}/decision, .../lines/decisions and
+        // .../lines/accept-clean (ebilling-r1 task 100, FR-31, D-77: any user with Write on the invoice decides its lines, not only the
+        // eligible approvers). Deciding a line changes the invoice's lines and totals, which is a Write on the invoice (the
+        // "finance.confirm" reasoning); a Read-only viewer cannot decide. Tasks 101-104 (corrections, adjustments, approval, reject /
+        // return) reuse this one key for their invoice-level writes. A separate key from "finance.confirm" (which names a DOCUMENT) so a
+        // deny log names the act.
+        ["ebilling.invoice.decide"] = AccessRights.Write,
+
         // "analysis.attach" — Read AND AppendTo on each PARENT record a NEW app-created sprk_analysis will point
         // at: the document and the regarding matter/project of POST /api/ai/analysis/promote (body, or the
         // session's own document). Added by unified-access-control-r2 task 162 (G5, owner rounds 3b / 7 item 3 /

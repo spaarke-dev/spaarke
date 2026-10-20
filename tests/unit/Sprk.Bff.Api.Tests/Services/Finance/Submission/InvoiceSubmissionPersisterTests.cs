@@ -640,6 +640,35 @@ public class InvoiceSubmissionPersisterTests
         hidden.RootElement.GetProperty("findings")[0].GetProperty("detailWithheld").GetBoolean().Should().BeTrue();
     }
 
+    [Fact(DisplayName = "100: a finding's suggested adjustment is stored for the review read model; a withheld group stores none")]
+    public async Task FindingsJson_StoresTheSuggestedAdjustment_ExceptForAWithheldGroup()
+    {
+        var harness = new ProcessorHarness { Rules = [Version("BILL-AI", RuleType.AiObservation)] };
+        harness.Coding.Observations = [new InvoiceLineObservation { Type = InvoiceLineObservationType.BlockBilling, Confidence = 0.99m, QuotedText = "x" }];
+        var outcome = await harness.RunAsync();
+        var suggested = outcome with
+        {
+            Evaluation = outcome.Evaluation! with
+            {
+                Findings = [.. outcome.Evaluation.Findings.Select(f => f with { SuggestedAdjustment = new BillingSuggestedAdjustment(BillingAdjustmentKind.Reduce, 120.50m) })],
+            },
+        };
+        var withheld = suggested with
+        {
+            Evaluation = suggested.Evaluation! with { Findings = [.. suggested.Evaluation.Findings.Select(f => f with { DetailWithheld = true })] },
+        };
+
+        using var visible = JsonDocument.Parse(InvoiceSubmissionPersister.BuildFindingsJson(suggested, InvoiceId));
+        using var hidden = JsonDocument.Parse(InvoiceSubmissionPersister.BuildFindingsJson(withheld, InvoiceId));
+        using var none = JsonDocument.Parse(InvoiceSubmissionPersister.BuildFindingsJson(outcome, InvoiceId));
+
+        var entry = visible.RootElement.GetProperty("findings")[0].GetProperty("suggestedAdjustment");
+        entry.GetProperty("kind").GetString().Should().Be("Reduce");
+        entry.GetProperty("amount").GetDecimal().Should().Be(120.50m);
+        hidden.RootElement.GetProperty("findings")[0].TryGetProperty("suggestedAdjustment", out _).Should().BeFalse("D-112: a withheld group stores no detail");
+        none.RootElement.GetProperty("findings")[0].TryGetProperty("suggestedAdjustment", out _).Should().BeFalse("must-not-fire: a rule that suggests nothing stores nothing");
+    }
+
     // ── part D: the stored Signal plan ──
 
     [Fact(DisplayName = "049 D: the findings JSON stores the Signal plan (merged request, sentence, fingerprint, 073's decision) on the persisted row ids")]

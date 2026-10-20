@@ -894,6 +894,18 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                     ["confidence"] = v.Confidence,
                     ["belowReliabilityThreshold"] = v.BelowReliabilityThreshold,
                 }).ToArray());
+
+                // Task 100 (the Invoice Review read model, FR-31): the adjustment the rule suggests, for the reviewer's "apply suggestion"
+                // click. An additive member of the stored copy (schema 1 readers ignore it); a reviewer decision applies it, never a handler.
+                // Left out of a scrubbed group with the rest of the detail (D-112), and when the rule suggests none.
+                if (f.SuggestedAdjustment is { } suggestion)
+                {
+                    entry["suggestedAdjustment"] = new JsonObject
+                    {
+                        ["kind"] = suggestion.Kind.ToString(),
+                        ["amount"] = suggestion.Amount,
+                    };
+                }
             }
 
             findingsJson.Add(entry);

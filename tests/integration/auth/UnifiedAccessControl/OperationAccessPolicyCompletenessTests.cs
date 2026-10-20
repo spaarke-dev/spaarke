@@ -154,6 +154,7 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("finance.attach_invoice")] // task 130: Operation = "…" initialiser in FinanceEndpoints' resolvers
     [InlineData("finance.link_invoice")] // task 130 (owner G5): Operation = "…" initialiser, confirm's document check
     [InlineData("finance.submit_invoice")] // ebilling-r1 task 044: Operation = "…" initialiser in InvoiceSubmissionEndpoints' resolver
+    [InlineData("ebilling.invoice.decide")] // ebilling-r1 task 100: literal in AddFinanceAuthorizationFilter("…") (InvoiceLineReviewEndpoints' decide routes)
     [InlineData("event.attach_regarding")] // task 159: literal in AddRecordRouteAccessAuthorizationFilter("…") (EventEndpoints POST /)
     [InlineData("entity.associate_document")]
     [InlineData("memory.pin_matter")] // task 166: HasRequiredRights(rights, PinMatterOperation) const indirection
@@ -248,6 +249,7 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("finance.attach_invoice", AccessRights.AppendTo)] // task 130
     [InlineData("finance.link_invoice", AccessRights.Write | AccessRights.Append)] // task 130, owner G5: the document HOLDS the lookup
     [InlineData("finance.submit_invoice", AccessRights.Read | AccessRights.AppendTo)] // ebilling-r1 task 044: rows are attached TO the core record
+    [InlineData("ebilling.invoice.decide", AccessRights.Write)] // ebilling-r1 task 100, D-77: deciding a line is a Write on its invoice
     [InlineData("event.attach_regarding", AccessRights.AppendTo)] // task 159: the regarding record is attached TO
     [InlineData("entity.associate_document", AccessRights.AppendTo)]
     [InlineData("memory.pin_matter", AccessRights.AppendTo)] // task 166: a matter pin ATTACHES content to the matter
@@ -275,6 +277,7 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("finance.attach_invoice")] // task 130
     [InlineData("finance.link_invoice")] // task 130, owner G5
     [InlineData("finance.submit_invoice")] // ebilling-r1 task 044
+    [InlineData("ebilling.invoice.decide")] // ebilling-r1 task 100
     [InlineData("event.attach_regarding")] // task 159
     [InlineData("entity.associate_document")]
     [InlineData("memory.pin_matter")] // task 166
