@@ -2335,6 +2335,82 @@ public class RecordOwnershipResolverTests
         MessageOwnerOf(directory, messageId).Should().Be(ChildTeam);
     }
 
+    // ---- #2143 round 4 ----
+
+    /// <summary>
+    /// #2143 round 4: a message regarding the secure matter, held in the Secure Record business unit by the Secure team before
+    /// the change (in <paramref name="threadId"/> when given), re-filed by this call onto an ordinary project too — it stays
+    /// under the secure matter, so it resolves to the Secure team and no F3 question is asked.
+    /// </summary>
+    private static (FakeDirectory Directory, Guid MessageId, RecordReparent Request) HeldMessageAlsoFiledOnAnOrdinaryProject(
+        Guid? threadId = null)
+    {
+        var (directory, messageId) = MessageWorld(OtherSecureMatterId, SecureBu, SecureNamedTeam, threadId);
+        directory.WithRecord("sprk_project", OrdinaryProjectId, ChildBu, owningTeam: ChildTeam);
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_communication",
+            RecordId = messageId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", OrdinaryProjectId),
+            },
+        };
+        return (directory, messageId, request);
+    }
+
+    /// <summary>The F3-checked unsecure flow: the secure matter the message regards becomes an ordinary one.</summary>
+    private static void UnsecureTheMessagesMatter(FakeDirectory directory) =>
+        directory.WithRecord("sprk_matter", OtherSecureMatterId, ChildBu, isSecure: false, owningTeam: ChildTeam);
+
+    [Fact]
+    public async Task Reparent_WhenAThreadJoinLandsOnARowHeldSecureBeforeTheChangeWhoseSecureParentIsUnsecured_TheBeforeUnitExemptionIsNotTaken()
+    {
+        // Must-fire (round 4, the guard's before-unit arm): the message was held in the Secure Record business unit before the
+        // change. Before this call's owner write, its secure matter is un-secured AND another writer W joins it to a thread
+        // regarding another secure matter (W's inherited parent, never this call's). The filing is this call's own (only the
+        // regarding columns decide here) and the owner the fresh parents give is ordinary — but the thread changed since this
+        // call's read, so being held there before the change does not cover the secure record W's join made it inherit: no
+        // ordinary owner is written, it stays the Secure team's, and the call throws.
+        var (directory, messageId, request) = HeldMessageAlsoFiledOnAnOrdinaryProject();
+
+        var act = () => Build(directory).ReparentAsync(
+            request,
+            Applies(directory, request, () =>
+            {
+                UnsecureTheMessagesMatter(directory);
+                directory.Write("sprk_communication", messageId, new()
+                {
+                    ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", SecureThreadId),
+                });
+            }),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnsettledException>())
+            .WithMessage("*would take it out of the Secure Record business unit on a filing this re-file did not make*");
+        directory.ConditionalWrites.Should().NotContain(write => write.Fields.ContainsKey("ownerid"),
+            "no ordinary owner is ever sent over the secure thread join");
+        directory.Assignments.Should().BeEmpty();
+        MessageOwnerOf(directory, messageId).Should().Be(SecureNamedTeam, "held, never exposed");
+    }
+
+    [Fact]
+    public async Task Reparent_WhenARowHeldSecureBeforeTheChangeHasItsSecureParentUnsecured_AndItsThreadIsUnchanged_TheOrdinaryOwnerIsWritten()
+    {
+        // Must-NOT-fire control (round 4): the same re-file and un-secure, but the message sits in an ordinary thread at every
+        // read and nobody joins it anywhere. Its lineage-only lookup is unchanged, so the before-unit exemption still applies:
+        // the ordinary owner its parents now give is written.
+        var (directory, messageId, request) = HeldMessageAlsoFiledOnAnOrdinaryProject(threadId: OrdinaryThreadId);
+
+        var resolution = await Build(directory).ReparentAsync(
+            request,
+            Applies(directory, request, () => UnsecureTheMessagesMatter(directory)),
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam);
+        MessageOwnerOf(directory, messageId).Should().Be(ChildTeam);
+    }
+
     [Fact]
     public async Task Reparent_WhenAPermittedMoveOutsParentsAreChangedByAnotherWriter_ARowHeldInTheSecureUnitIsNotGivenAnOrdinaryOwner()
     {

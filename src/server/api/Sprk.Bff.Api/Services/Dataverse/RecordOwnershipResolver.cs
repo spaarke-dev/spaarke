@@ -1959,8 +1959,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// unit AFTER this call read it is still the move out its own F3 check permitted). Round 3 (F1): the F3 exemption is not
     /// taken when a lineage-only lookup (a message's thread) changed since the read before the change, other than by this
     /// call's own change: the F3 check covered the secure roots of the parents this call left, not a secure record another
-    /// writer's join made the row inherit. An ambiguous Secure Record business unit, or a row whose owning business unit did
-    /// not come back, counts as held there (fail closed); no Secure Record business unit at all answers <c>false</c>.
+    /// writer's join made the row inherit. Round 4: the same holds for the before-unit arm — a row held there before the
+    /// change whose secure parent was un-secured is not exempted when another writer joined it to a secure thread meanwhile,
+    /// so the lineage check guards the whole exemption. An ambiguous Secure Record business unit, or a row whose owning
+    /// business unit did not come back, counts as held there (fail closed); no Secure Record business unit at all answers
+    /// <c>false</c>.
     /// </summary>
     private async Task<bool> WouldLeaveSecureBusinessUnitAsync(
         RowOwnership state, bool parentsAsResolved, RowBeforeChange before, CancellationToken ct)
@@ -1973,8 +1976,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         if (state.OwningBusinessUnit is { } held && held != secureBuId)
             return false;
         return !(parentsAsResolved
-            && (before.OwningBusinessUnit == secureBuId
-                || (before.PermittedToLeaveSecure && SameLineage(state.LineageLookups, before.LineageLookups))));
+            && SameLineage(state.LineageLookups, before.LineageLookups)
+            && (before.OwningBusinessUnit == secureBuId || before.PermittedToLeaveSecure));
     }
 
     /// <summary>The team that owns the row now (<c>owningteam</c>), or <c>null</c> when a user owns it.</summary>
