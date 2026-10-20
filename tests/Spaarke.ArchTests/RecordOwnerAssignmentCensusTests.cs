@@ -126,17 +126,25 @@ public class RecordOwnerAssignmentCensusTests
     /// <summary>The one waiver text for RuleSetService's sprk_policy and sprk_policyversion creates (ebilling-r1).</summary>
     private const string RuleSetServicePolicyWaiver =
         "ebilling-r1 RuleSetService (Billing-domain rules; the first version at CreateDraftRuleAsync and the edit-path version at EditAsync "
-        + "included). Same reasoning as #2084's authoring SavePolicyAsync waiver: a billing rule hangs off sprk_ruleset, and RuleSetService "
-        + "never writes sprk_policy.sprk_matter, so it can never be filed under a Secure matter; its owner is resolved through "
+        + "included). Billing rules have no matter scope YET; the rule-set scope model is under owner review (2026-10-20, ontology-r1 "
+        + "leads). This waiver ends when that review decides a scope level; the creates must then be routed. Open owner decision: "
+        + "scope model under owner review 2026-10-20 (#2129). "
+        + "When a billing rule gains a matter/project/work-assignment scope, this waiver ends: the policy and policy-version creates must be "
+        + "routed (owner via IRecordOwnershipResolver WITH the scope parent), and SecureChildLineage / FilingParentOf must gain any new "
+        + "filing lookups on sprk_policy (today only sprk_matter). Otherwise a rule scoped under a Secure record lands outside isolation. "
+        + "Today a billing rule hangs off sprk_ruleset and RuleSetService never writes "
+        + "sprk_policy.sprk_matter, so it cannot be filed under a Secure matter; its owner is resolved through "
         + "IRecordOwnershipResolver.ResolveOwnerAsync with NO parents (the caller's team) and a refusal writes nothing. "
         + "Condition (1): RuleSetService never writes sprk_matter on sprk_policy, on create or update (RuleSetServiceNoMatterScopeGuardTests "
-        + "and RuleSetServiceOwnerTests.NoWrittenPolicyOrVersionRowCarriesAMatter fail the build otherwise); if a billing rule ever gains a "
+        + "and RuleSetServiceOwnerTests.NoWrittenPolicyOrVersionRowCarriesAMatter_OnCreateOrUpdate fail the build otherwise); if a billing rule ever gains a "
         + "matter scope, this waiver ends and the creates must be routed. "
         + "Condition (2): both creates, the first version and the edit-path version, resolve the owner the same way "
         + "(RuleSetServiceOwnerTests pins the identical no-parent context and the ApplyTo). "
         + "Condition (3): it covers only Billing-domain rows written by RuleSetService; Ontology-domain policies stay under the authoring "
         + "entries. "
-        + "Agreed: ontology-r1 2026-10-20; uac-r2 sign-off pending.";
+        + "Known limit: a matter set on a Billing policy outside the BFF (form edit) is not seen here; the next edit-path version is "
+        + "re-owned by SecureChildReconciliationJob. "
+        + "Agreed as Pending: ontology-r1 2026-10-20; uac-r2 re-check pending.";
 
     private static readonly IReadOnlyList<CensusEntry> Census = new[]
     {
@@ -257,13 +265,12 @@ public class RecordOwnerAssignmentCensusTests
             "An Office job-tracking row (status and progress), authorized by its sprk_initiatedby creator lookup and "
             + "read app-only; not a child of any root in live metadata.",
             WaiverKind.Permanent),
-        // ebilling-r1 (waiver agreed with spaarke-ontology-platform-r1 2026-10-20): the billing rule's policy and its versions. The census
-        // keys on (file, table), so the one waiver is two entries with one text: sprk_policy (1 seen site: CreateDraftRuleAsync's policy) and
-        // sprk_policyversion (1 seen site: CreateDraftRuleAsync's first version). The edit-path version in RuleSetService.EditAsync is
-        // created with a caller-chosen id (VersionIdFor), a shape this scanner does not count (MAINTENANCE PROCEDURE item 4); the waiver
-        // covers it all the same, and RuleSetServiceNoMatterScopeGuardTests pins condition (1) in source.
-        new CensusEntry("RuleSetService.cs", "sprk_policy", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
-        new CensusEntry("RuleSetService.cs", "sprk_policyversion", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
+        // ebilling-r1 (waiver agreed with spaarke-ontology-platform-r1 2026-10-20; PENDING the owner's rule-set scope model review,
+        // because matter/project/work-assignment-level billing rules are planned): the billing rule's policy and its versions. The census
+        // keys on (file, table), so the one waiver is two entries with one text: sprk_policy (1 site: CreateDraftRuleAsync's policy) and
+        // sprk_policyversion (2 sites: CreateDraftRuleAsync's first version and EditAsync's edit-path version, created with the caller-chosen id VersionIdFor).
+        new CensusEntry("RuleSetService.cs", "sprk_policy", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Pending),
+        new CensusEntry("RuleSetService.cs", "sprk_policyversion", 2, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Pending),
         // WorkAssignmentEndpoints.cs's sprk_workassignment create is gone: task 166 deleted the caller-less route (S-76,
         // owner round 10 item 1), so its Pending waiver went with it (batch-4 integration).
 
@@ -2170,6 +2177,30 @@ public class RecordOwnerAssignmentCensusTests
         Assert.DoesNotContain(problems, p => p.Contains("Seeded.cs:12", StringComparison.Ordinal));
     }
 
+    [Fact(DisplayName = "uac-r2 F3: negative control — a row given a computed (call) id and handed to a create is a create; an update is not")]
+    public void Detector_NegativeControl_ComputedIdCreates()
+    {
+        // RuleSetService's edit-path version: `new Entity(VersionEntity, VersionIdFor(policyId, number))` handed to CreateAsync.
+        // The id was matched as an identifier only, so a call id was not counted although census item 4 says it is.
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Computed",
+            "{",
+            "    private const string VersionEntity = \"sprk_policyversion\";",
+            "    private async Task A(Guid policyId, int number) { var row = new Entity(VersionEntity, IdFor(policyId, number)); row[\"sprk_name\"] = \"x\"; await _s.CreateAsync(row, ct); }",
+            "    private async Task B(Guid policyId, int number) { await _s.CreateAsync(new Entity(VersionEntity, IdFor(policyId, number)), ct); }",
+            "    private async Task C(Guid policyId, int number) { var row = new Entity(VersionEntity, IdFor(policyId, number)); await _s.UpdateAsync(row, ct); }",
+            "    private async Task D(Guid policyId, int number) { var row = new Entity(VersionEntity, IdFor(policyId, number)); Log(row); }",
+            "}",
+        });
+        var files = new Dictionary<string, string> { ["Computed.cs"] = code };
+
+        var sites = ScanSites(files);
+
+        // A (through a variable) and B (inline) are creates; the update C and the row that is only logged (D) are not.
+        Assert.Equal(new[] { 4, 5 }, sites[("Computed.cs", "sprk_policyversion")].OrderBy(l => l));
+    }
+
     [Fact(DisplayName = "Task 146 b2: negative control — Add(...) and initializer owner writes are found; a list of column names is not")]
     public void OwnerWriteDetector_NegativeControl_AddAndInitializerForms()
     {
@@ -2954,9 +2985,10 @@ public class RecordOwnerAssignmentCensusTests
 
     /// <summary>A two-argument construction — a create (or upsert target) when the id is fresh, or when the row is handed
     /// to a create. b2-r2: the id may be a member access (<c>request.RecordId</c>, <c>anchor!.Id</c>), so such a row
-    /// handed to a create is seen too.</summary>
+    /// handed to a create is seen too. F3 (uac-r2 review): the id may also be a call (<c>VersionIdFor(policyId, number)</c>, one level
+    /// of parentheses), so a row with a computed id handed to a create is counted.</summary>
     private static readonly Regex FreshEntityCreate = new(
-        @"new\s+(?:Microsoft\.Xrm\.Sdk\.)?(?:DataverseEntity|Entity)\s*\(\s*(?:""(?<lit>[a-z_]+)""|(?<id>[A-Za-z_][\w\.]*))\s*,\s*(?<rid>Guid\.NewGuid\(\)|[A-Za-z_][\w\.!]*)\s*\)",
+        @"new\s+(?:Microsoft\.Xrm\.Sdk\.)?(?:DataverseEntity|Entity)\s*\(\s*(?:""(?<lit>[a-z_]+)""|(?<id>[A-Za-z_][\w\.]*))\s*,\s*(?<rid>Guid\.NewGuid\(\)|[A-Za-z_][\w\.!]*(?:\([^()]*\))?)\s*\)",
         RegexOptions.Compiled);
 
     /// <summary>True when <paramref name="id"/> is <c>Guid.NewGuid()</c>, or a variable the same member assigns from

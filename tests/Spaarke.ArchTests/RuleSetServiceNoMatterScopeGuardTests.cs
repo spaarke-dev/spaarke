@@ -15,7 +15,7 @@ namespace Spaarke.ArchTests;
 /// matter-named identifier (<c>matterId</c>, <c>MatterRef</c>, ...): any write of the lookup needs one of them, whether as a literal or
 /// through a const. <b>Controls.</b> A planted write (a literal, a const-held column, a lookup built from a matter id) is caught; the
 /// real file's rule-set, policy and version writes are not. The behavioural twin is
-/// <c>RuleSetServiceOwnerTests.NoWrittenPolicyOrVersionRowCarriesAMatter</c> in the unit suite.
+/// <c>RuleSetServiceOwnerTests.NoWrittenPolicyOrVersionRowCarriesAMatter_OnCreateOrUpdate</c> in the unit suite.
 /// </remarks>
 public sealed class RuleSetServiceNoMatterScopeGuardTests
 {
@@ -33,6 +33,7 @@ public sealed class RuleSetServiceNoMatterScopeGuardTests
             .ToList();
     }
 
+    // Remove this guard only together with the routing change that ends the Pending census waiver for RuleSetService.
     [Fact(DisplayName = "ebilling-r1: RuleSetService never writes a matter onto sprk_policy or sprk_policyversion (waiver condition 1)")]
     public void RuleSetServiceNeverWritesAMatter()
     {

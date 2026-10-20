@@ -19,6 +19,7 @@ public sealed class RuleSetServiceOwnerTests
 {
     private static readonly Guid CallerOid = Guid.NewGuid();
     private static readonly Guid SourceId = Guid.NewGuid();
+    private static readonly DateOnly Effective = new(2026, 11, 1);
 
     /// <summary>A team the resolver answers, distinct from the harness default so a version cannot pass by taking a constant.</summary>
     private static readonly Guid AnswerTeam = Guid.NewGuid();
@@ -120,6 +121,7 @@ public sealed class RuleSetServiceOwnerTests
 
     // ── Condition (1): no matter is ever written onto a policy or a version ─────────────────────
 
+    // Remove this test only together with the routing change that ends the Pending census waiver for RuleSetService.
     [Fact]
     public async Task NoWrittenPolicyOrVersionRowCarriesAMatter_OnCreateOrUpdate()
     {
@@ -135,6 +137,8 @@ public sealed class RuleSetServiceOwnerTests
         var (draft, _) = h.Rule(draftSet, code: "BILL-B", state: ProposalState.Proposed);
         await h.Service().EditAsync(draftSet, draft, Edit("Changed in place"), default); // updates a version
         await h.Service().DecideAsync(draftSet, draft, accept: true, h.WorkingToken(draft), default); // updates a version
+        var published = await h.Service().PublishAsync(draftSet, Effective, default); // the publish path: pointer and scope writes
+        published.Kind.Should().Be(RuleSetOutcomeKind.Done, "the publish must really run, or its writes are not under this check");
 
         h.Writes.Should().Contain(w => w.Kind == Write.Create && w.Entity == "sprk_policy");
         h.Writes.Should().Contain(w => w.Kind == Write.Create && w.Entity == "sprk_policyversion");
