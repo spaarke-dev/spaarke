@@ -47,7 +47,9 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <b>ISS-010 quick fix (external-access r3 task 078)</b>: on the RECORD path, an EXTERNAL caller (systemuser flagged
 /// <c>sprk_isexternal</c>, or unresolvable — fail closed) is refused any communication-family record but a
 /// <c>sprk_communication</c>, before any Dataverse request; a <c>sprk_communication</c> record they may not see under the
-/// task 065 rule answers exactly like a missing one. Table list and schema paths carry no row content and are unchanged.
+/// task 065 rule, or a <c>sprk_document</c> whose related communication they may not see, answers with the same code and
+/// message as a missing one (a guarded not-found is normalised to that answer). Table list and schema paths carry no
+/// row content and are unchanged.
 /// See <see cref="ExternalCallerCommunicationGuard"/>. Internal callers are unchanged.
 /// </para>
 /// </remarks>
@@ -343,15 +345,22 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
             return Error(tool, $"'{recordIdRaw}' is not a valid record GUID.", ToolErrorCodes.ValidationFailed, startedAt);
         }
 
-        // ISS-010 (task 078): externality is decided ONLY for a communication-family record, so every other request is
-        // byte-identical. An external caller is refused any family table but sprk_communication BEFORE any Dataverse
-        // request (the metadata GET included).
+        // ISS-010 (task 078): externality is decided ONLY for a communication-family or sprk_document record, so every
+        // other request is byte-identical. An external caller is refused any family table but sprk_communication BEFORE
+        // any Dataverse request (the metadata GET included); a sprk_document is checked by its related communication
+        // (review round 1, F1).
         var guardCommunication = false;
-        if (ExternalCallerCommunicationGuard.IsCommunicationFamily(logicalName) &&
+        var guardDocument = false;
+        if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(logicalName) ||
+             ExternalCallerCommunicationGuard.IsDocumentTable(logicalName)) &&
             await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
                 _httpContextAccessor, _callerResolver, _identityResolver, ct).ConfigureAwait(false))
         {
-            if (!ExternalCallerCommunicationGuard.IsCommunicationTable(logicalName))
+            if (ExternalCallerCommunicationGuard.IsDocumentTable(logicalName))
+            {
+                guardDocument = true;
+            }
+            else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(logicalName))
             {
                 _logger.LogInformation(
                     "[dataverse.describe] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason}",
@@ -359,7 +368,10 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
                 return Error(tool, ExternalCallerCommunicationGuard.RefusalMessage,
                     DataverseUserClientErrorCodes.AccessDenied, startedAt);
             }
-            guardCommunication = true;
+            else
+            {
+                guardCommunication = true;
+            }
         }
 
         // Resolve the entity-set name from metadata (logical name ≠ OData collection name).
@@ -380,26 +392,46 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         var recordResponse = await _dataverse.GetAsync($"{entitySetName}({recordId:D})", ct).ConfigureAwait(false);
         if (!recordResponse.IsSuccess)
         {
+            // ISS-010 review K4: on a guarded path a real not-found answers with the SAME code and message as a hidden
+            // record below, so the answer never tells an external caller that a hidden record exists.
+            if ((guardCommunication || guardDocument) &&
+                recordResponse.ErrorCode == DataverseUserClientErrorCodes.NotFound)
+            {
+                return RecordNotVisible(tool, startedAt);
+            }
             return MapClientError(tool, recordResponse, startedAt);
         }
 
         // ISS-010 (task 078): the task 065 rule on the one record — flag explicitly false AND a thread that reads Open
-        // now. A hidden record answers exactly like one the user client cannot find; a thread read fault throws (no data).
-        if (guardCommunication)
+        // now; for a document, the same rule on its related communication (none: visible). A hidden record answers with
+        // the same code and message as a guarded not-found above; a read fault throws (no data).
+        if (guardCommunication || guardDocument)
         {
             var record = recordResponse.Body!.Value;
-            var threadId = ExternalCallerCommunicationGuard.ThreadIdOf(record);
-            var visible = ExternalCallerCommunicationGuard.IsExplicitlyShareable(record) && threadId != Guid.Empty &&
-                (await CommunicationOpenThreadGate.ReadOpenThreadIdsAsync(
-                    new[] { threadId }, ExternalCallerCommunicationGuard.ThreadQueryOver(_dataverse), ct).ConfigureAwait(false))
-                .Contains(threadId);
+            bool visible;
+            if (guardCommunication)
+            {
+                var threadId = ExternalCallerCommunicationGuard.ThreadIdOf(record);
+                visible = ExternalCallerCommunicationGuard.IsExplicitlyShareable(record) && threadId != Guid.Empty &&
+                    (await CommunicationOpenThreadGate.ReadOpenThreadIdsAsync(
+                        new[] { threadId }, ExternalCallerCommunicationGuard.ThreadQueryOver(_dataverse), ct).ConfigureAwait(false))
+                    .Contains(threadId);
+            }
+            else
+            {
+                var relatedCommunicationId = ExternalCallerCommunicationGuard.RelatedCommunicationIdOf(record);
+                visible = relatedCommunicationId == Guid.Empty ||
+                    (await ExternalCallerCommunicationGuard.ReadVisibleCommunicationIdsAsync(
+                        _dataverse, new[] { relatedCommunicationId }, ct).ConfigureAwait(false))
+                    .Contains(relatedCommunicationId);
+            }
+
             if (!visible)
             {
                 _logger.LogInformation(
                     "[dataverse.describe] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason}",
                     logicalName, "record_hidden");
-                return Error(tool, "The record was not found or is not visible to the calling user.",
-                    DataverseUserClientErrorCodes.NotFound, startedAt);
+                return RecordNotVisible(tool, startedAt);
             }
         }
 
@@ -458,6 +490,10 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
 
     private ToolResult Error(AnalysisTool tool, string message, string code, DateTimeOffset startedAt) =>
         ToolResult.Error(HandlerId, tool.Id, tool.Name, message, code, Timed(startedAt));
+
+    /// <summary>ISS-010 review K4: the one answer for a hidden record and for a guarded not-found.</summary>
+    private ToolResult RecordNotVisible(AnalysisTool tool, DateTimeOffset startedAt) =>
+        Error(tool, ExternalCallerCommunicationGuard.RecordNotVisibleMessage, DataverseUserClientErrorCodes.NotFound, startedAt);
 
     private static ToolExecutionMetadata Timed(DateTimeOffset startedAt) =>
         new() { StartedAt = startedAt, CompletedAt = DateTimeOffset.UtcNow };

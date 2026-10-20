@@ -498,6 +498,205 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
         AssertTelemetryRespectsAdr015(sensitiveQuery, "Internal-only strategy for Contoso");
     }
 
+    // ── ISS-010 review round 1 ────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("sprk_emailartifact")]
+    [InlineData("sprk_attachmentartifact")]
+    [InlineData("sprk_emailreviewlog")]
+    [InlineData("sprk_affinity")]
+    public async Task ExecuteChatAsync_ExternalCallerContentTableOutsidePrefix_FilterRemovedAndHitsDropped(string table)
+    {
+        AsExternalCaller();
+        var contentHit = Guid.NewGuid();
+        var bodies = CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson($$"""
+            {
+              "value": [
+                { "entityname": "sprk_matter", "objectid": "{{MatterHit:D}}" },
+                { "entityname": "{{table}}", "objectid": "{{contentHit:D}}", "highlights": { "sprk_bodypreview": ["Internal-only body"] } }
+              ]
+            }
+            """)));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: $$"""{"query":"contoso", "scope":"{{table}},sprk_matter"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        using var doc = JsonDocument.Parse(bodies.Single());
+        doc.RootElement.GetProperty("entities").GetString().Should().Be("[\"sprk_matter\"]");
+        ResultEntities(result).Should().Equal("sprk_matter");
+        result.Warnings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerScopeNamesOnlyContentTable_NoSearchCall()
+    {
+        AsExternalCaller();
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso", "scope":"sprk_emailartifact"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("count").GetInt32().Should().Be(0);
+        _dataverse.Verify(d => d.PostAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalityReadThrows_ErrorWithNoData()
+    {
+        // Review F2: a sprk_communication hit triggers the lazy externality check; its fault is an error with no data.
+        _identityResolver
+            .Setup(r => r.IsExternalAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(MixedHitsJson)));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        result.Data.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_CallerLookupFailed_ErrorWithNoData()
+    {
+        _callerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Unresolved(ExternalCallerCommunicationGuard.LookupFailedReason));
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(MixedHitsJson)));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse(because: "a lookup fault decides nothing — never 'internal'");
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        result.Data.Should().BeNull();
+    }
+
+    // ── sprk_document hits carrying a related communication (review round 1, F1) ──
+
+    private static readonly Guid DocNoComm = Guid.Parse("d0000000-0000-0000-0000-000000000011");
+    private static readonly Guid DocShared = Guid.Parse("d0000000-0000-0000-0000-000000000012");
+    private static readonly Guid DocInternal = Guid.Parse("d0000000-0000-0000-0000-000000000013");
+    private static readonly Guid DocNotReturned = Guid.Parse("d0000000-0000-0000-0000-000000000014");
+    private static readonly Guid DocUnreadableComm = Guid.Parse("d0000000-0000-0000-0000-000000000015");
+    private static readonly Guid CommShared = Guid.Parse("c1000000-0000-0000-0000-000000000012");
+    private static readonly Guid CommInternal = Guid.Parse("c1000000-0000-0000-0000-000000000013");
+    private static readonly Guid CommUnreadable = Guid.Parse("c1000000-0000-0000-0000-000000000015");
+    private static readonly Guid ThreadOpen = Guid.Parse("71000000-0000-0000-0000-000000000011");
+
+    private static string DocumentHitsJson => $$"""
+        {
+          "value": [
+            { "entityname": "sprk_matter", "objectid": "{{MatterHit:D}}" },
+            { "entityname": "sprk_document", "objectid": "{{DocNoComm:D}}" },
+            { "entityname": "sprk_document", "objectid": "{{DocShared:D}}" },
+            { "entityname": "sprk_document", "objectid": "{{DocInternal:D}}", "highlights": { "sprk_filesummary": ["Internal-only summary"] } },
+            { "entityname": "sprk_document", "objectid": "{{DocNotReturned:D}}" },
+            { "entityname": "sprk_document", "objectid": "{{DocUnreadableComm:D}}" }
+          ]
+        }
+        """;
+
+    private List<string> CaptureGets(string prefix, string json)
+    {
+        var captured = new List<string>();
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith(prefix)), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((p, _) => captured.Add(p))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(json)));
+        return captured;
+    }
+
+    private void SetupDocumentVisibilityReads(out List<string> documentReads, out List<string> communicationReads)
+    {
+        // DocNotReturned is absent from the document read (fail closed); CommUnreadable is absent from the
+        // communication read (unreadable or deleted).
+        documentReads = CaptureGets("sprk_documents?", $$"""
+            {
+              "value": [
+                { "sprk_documentid": "{{DocNoComm:D}}", "_sprk_relatedcommunication_value": null },
+                { "sprk_documentid": "{{DocShared:D}}", "_sprk_relatedcommunication_value": "{{CommShared:D}}" },
+                { "sprk_documentid": "{{DocInternal:D}}", "_sprk_relatedcommunication_value": "{{CommInternal:D}}" },
+                { "sprk_documentid": "{{DocUnreadableComm:D}}", "_sprk_relatedcommunication_value": "{{CommUnreadable:D}}" }
+              ]
+            }
+            """);
+        communicationReads = CaptureGets("sprk_communications?", $$"""
+            {
+              "value": [
+                { "sprk_communicationid": "{{CommShared:D}}", "sprk_isinternalonly": false, "_sprk_communicationthread_value": "{{ThreadOpen:D}}" },
+                { "sprk_communicationid": "{{CommInternal:D}}", "sprk_isinternalonly": true, "_sprk_communicationthread_value": "{{ThreadOpen:D}}" }
+              ]
+            }
+            """);
+        CaptureGets("sprk_communicationthreads?", $$"""
+            { "value": [ { "sprk_communicationthreadid": "{{ThreadOpen:D}}", "sprk_privacystate": 100000000 } ] }
+            """);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerDocumentHits_DropsDocumentsWhoseRelatedCommunicationFailsRule()
+    {
+        AsExternalCaller();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(DocumentHitsJson)));
+        SetupDocumentVisibilityReads(out var documentReads, out var communicationReads);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        documentReads.Should().ContainSingle().Which.Should().Be(
+            "sprk_documents?$select=sprk_documentid,_sprk_relatedcommunication_value" +
+            $"&$filter=sprk_documentid eq {DocNoComm:D} or sprk_documentid eq {DocShared:D} or sprk_documentid eq {DocInternal:D} or " +
+            $"sprk_documentid eq {DocNotReturned:D} or sprk_documentid eq {DocUnreadableComm:D}&$top=5",
+            because: "ONE batched read of the document hits' related communication");
+        communicationReads.Should().ContainSingle();
+        result.Data!.Value.GetProperty("results").EnumerateArray()
+            .Select(r => r.GetProperty("recordId").GetString())
+            .Should().Equal(new[] { MatterHit.ToString("D"), DocNoComm.ToString("D"), DocShared.ToString("D") },
+                because: "internal-only, unreadable and unconfirmed related communications hide the document; others are unchanged");
+        result.Data!.Value.GetProperty("count").GetInt32().Should().Be(3, because: "the count is the post-filter count");
+        result.Warnings.Should().BeEmpty(because: "nothing tells the model that hits were dropped");
+        CapturedLogMessages.Should().Contain(m =>
+            m.FormattedMessage.Contains(ExternalCallerCommunicationGuard.LogEvent) &&
+            m.FormattedMessage.Contains("entity=sprk_document") &&
+            m.FormattedMessage.Contains("reason=related_communication_hidden"));
+        AssertTelemetryRespectsAdr015("Internal-only summary");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerDocumentRelatedReadFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(DocumentHitsJson)));
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_documents?")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "Server error."));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        result.Data.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_InternalCallerDocumentHits_UnchangedAndNoExtraRead()
+    {
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson(DocumentHitsJson)));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("count").GetInt32().Should().Be(6);
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "an internal caller's search makes no extra Dataverse read");
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════
     // shared plumbing
     // ═════════════════════════════════════════════════════════════════════════════

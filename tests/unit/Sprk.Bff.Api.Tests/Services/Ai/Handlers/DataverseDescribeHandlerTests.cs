@@ -374,8 +374,211 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.NotFound,
-            because: "a record the caller may not see answers exactly like one the user client cannot find");
+            because: "a hidden record answers with the not-found code a guarded missing record gets");
+        result.ErrorMessage.Should().Be(ExternalCallerCommunicationGuard.RecordNotVisibleMessage,
+            because: "and with the same message (ExecuteChatAsync_ExternalCallerMissingRecord_AnswersExactlyLikeHiddenRecord pins the pair)");
         result.Data.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerMissingRecord_AnswersExactlyLikeHiddenRecord()
+    {
+        // Review K4: the answer must not tell an external caller that a hidden record exists.
+        AsExternalCaller();
+        SetupCommunicationRecord("true", $"\"{ThreadId:D}\"");
+        SetupThreadPrivacy(100000000);
+        var hidden = await DescribeCommunicationAsync();
+
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communications(")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound,
+                $"Entity 'sprk_communication' With Id = {CommunicationId:D} Does Not Exist"));
+        var missing = await DescribeCommunicationAsync();
+
+        hidden.Success.Should().BeFalse();
+        missing.Success.Should().BeFalse();
+        missing.ErrorCode.Should().Be(hidden.ErrorCode);
+        missing.ErrorMessage.Should().Be(hidden.ErrorMessage,
+            because: "a guarded not-found and a hidden record carry one message, not Dataverse's own 404 text");
+        missing.Data.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("sprk_emailartifact")]
+    [InlineData("sprk_attachmentartifact")]
+    [InlineData("sprk_emailreviewlog")]
+    [InlineData("sprk_affinity")]
+    public async Task ExecuteChatAsync_ExternalCallerContentTableOutsidePrefix_RefusedWithNoDataverseCall(string table)
+    {
+        AsExternalCaller();
+
+        var result = await CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: $$"""{"path":"tables/{{table}}/records/{{Guid.NewGuid():D}}"}"""),
+            BuildDescribeTool(), CancellationToken.None);
+
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        result.Data.Should().BeNull();
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalityReadThrows_ErrorWithNoData()
+    {
+        // Review F2: a failing externality read is an error with no data, never "internal".
+        _identityResolver
+            .Setup(r => r.IsExternalAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
+        SetupCommunicationRecord("true", "null");
+
+        var result = await DescribeCommunicationAsync();
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        result.Data.Should().BeNull();
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_CallerLookupFailed_ErrorWithNoData()
+    {
+        _callerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Unresolved(ExternalCallerCommunicationGuard.LookupFailedReason));
+        SetupCommunicationRecord("true", "null");
+
+        var result = await DescribeCommunicationAsync();
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        result.Data.Should().BeNull();
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── sprk_document records carrying a related communication (review round 1, F1) ──
+
+    private static readonly Guid DocumentId = Guid.Parse("d0000000-0000-0000-0000-0000000000d1");
+    private static readonly Guid RelatedCommunicationId = Guid.Parse("c1000000-0000-0000-0000-0000000000d1");
+
+    private List<string> SetupDocumentRecord(string relatedCommunicationJson)
+    {
+        var requests = new List<string>();
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_document')")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((p, _) => requests.Add(p))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "EntitySetName": "sprk_documents", "PrimaryIdAttribute": "sprk_documentid" }""")));
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_documents(")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((p, _) => requests.Add(p))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""
+                {
+                  "sprk_documentid": "{{DocumentId:D}}",
+                  "sprk_documentname": "RE: Strategy.eml",
+                  "sprk_filesummary": "Summary text",
+                  "_sprk_relatedcommunication_value": {{relatedCommunicationJson}}
+                }
+                """)));
+        return requests;
+    }
+
+    private List<string> SetupRelatedCommunication(string isInternalOnlyJson, string threadValueJson)
+    {
+        var requests = new List<string>();
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communications?")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((p, _) => requests.Add(p))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(isInternalOnlyJson == "absent"
+                ? """{ "value": [] }"""
+                : $$"""
+                  { "value": [ { "sprk_communicationid": "{{RelatedCommunicationId:D}}", "sprk_isinternalonly": {{isInternalOnlyJson}}, "_sprk_communicationthread_value": {{threadValueJson}} } ] }
+                  """)));
+        return requests;
+    }
+
+    private Task<ToolResult> DescribeDocumentAsync() =>
+        CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: $$"""{"path":"tables/sprk_document/records/{{DocumentId:D}}"}"""),
+            BuildDescribeTool(), CancellationToken.None);
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerDocumentWithNoRelatedCommunication_ReturnsRecordWithNoExtraRead()
+    {
+        AsExternalCaller();
+        var requests = SetupDocumentRecord("null");
+
+        var result = await DescribeDocumentAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        requests.Should().HaveCount(2);
+        _dataverse.Verify(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communication")), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerDocumentWithShareableRelatedCommunication_ReturnsRecord()
+    {
+        AsExternalCaller();
+        SetupDocumentRecord($"\"{RelatedCommunicationId:D}\"");
+        var communicationReads = SetupRelatedCommunication("false", $"\"{ThreadId:D}\"");
+        SetupThreadPrivacy(100000000);
+
+        var result = await DescribeDocumentAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("fields").GetProperty("sprk_filesummary").GetString().Should().Be("Summary text");
+        communicationReads.Should().ContainSingle().Which.Should().Be(
+            "sprk_communications?$select=sprk_communicationid,sprk_isinternalonly,_sprk_communicationthread_value" +
+            $"&$filter=sprk_communicationid eq {RelatedCommunicationId:D}&$top=1");
+    }
+
+    [Theory]
+    [InlineData("true", true, 100000000)]    // related communication internal-only
+    [InlineData("null", true, 100000000)]    // flag unset
+    [InlineData("false", true, 100000001)]   // Private thread
+    [InlineData("false", false, 100000000)]  // no thread
+    [InlineData("absent", false, 100000000)] // related communication unreadable or missing
+    public async Task ExecuteChatAsync_ExternalCallerDocumentHiddenByRelatedCommunication_AnswersLikeNotFound(
+        string isInternalOnlyJson, bool hasThread, int privacyState)
+    {
+        AsExternalCaller();
+        SetupDocumentRecord($"\"{RelatedCommunicationId:D}\"");
+        SetupRelatedCommunication(isInternalOnlyJson, hasThread ? $"\"{ThreadId:D}\"" : "null");
+        SetupThreadPrivacy(privacyState);
+
+        var result = await DescribeDocumentAsync();
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.NotFound);
+        result.ErrorMessage.Should().Be(ExternalCallerCommunicationGuard.RecordNotVisibleMessage);
+        result.Data.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerDocumentRelatedReadFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        SetupDocumentRecord($"\"{RelatedCommunicationId:D}\"");
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communications?")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "Server error."));
+
+        var result = await DescribeDocumentAsync();
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        result.Data.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_InternalCallerDocumentWithInternalOnlyRelatedCommunication_UnchangedAndNoExtraRead()
+    {
+        var requests = SetupDocumentRecord($"\"{RelatedCommunicationId:D}\"");
+
+        var result = await DescribeDocumentAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        requests.Should().Equal(
+            "EntityDefinitions(LogicalName='sprk_document')?$select=EntitySetName,PrimaryIdAttribute",
+            $"sprk_documents({DocumentId:D})");
+        _dataverse.Verify(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communication")), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

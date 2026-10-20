@@ -18,18 +18,23 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 /// when <see cref="CommunicationInternalOnlyFloor.InternalOnlyField"/> is <c>false</c> (true or unset hides) AND its
 /// thread lookup (<see cref="CommunicationOpenThreadGate.MessageThreadLookupValue"/>) is set AND that thread reads Open
 /// now (<see cref="CommunicationOpenThreadGate.ReadOpenThreadIdsAsync"/>). Every other communication-family table (logical
-/// name starting <see cref="FamilyPrefix"/>: threads, attachments, participants, accounts, rules, channel refs) is refused
-/// outright for an external caller.</para>
-/// <para><b>Who is external.</b> Decided only when the request touches the communication family, so internal and
-/// non-communication requests are byte-identical. The request principal → <see cref="ICallerSystemUserResolver"/> →
-/// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/>. An unresolved caller is EXTERNAL (fail closed).</para>
+/// name starting <see cref="FamilyPrefix"/>: threads, attachments, participants, accounts, rules, channel refs) and every
+/// table in <see cref="RefusedContentTables"/> (email or message content copied OUTSIDE the prefix) is refused outright
+/// for an external caller. A <c>sprk_document</c> whose <see cref="RelatedCommunicationLookupValue"/> points at a
+/// communication the caller may not see is hidden (row-filtered; a document with no related communication is
+/// unaffected).</para>
+/// <para><b>Who is external.</b> Decided only when the request touches the communication family or <c>sprk_document</c>,
+/// so other requests are byte-identical. The request principal → <see cref="ICallerSystemUserResolver"/> →
+/// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/>. A caller with no principal, no oid or no active systemuser
+/// is EXTERNAL (fail closed); a caller whose lookup FAILED (a swallowed Dataverse or cache fault) makes the tool call fail
+/// with no data, never "internal".</para>
 /// <para><b>Logs (ADR-015).</b> Callers log the entity and a reason code only; this class logs nothing.</para>
 /// <para><b>Component Justification (CLAUDE.md §11):</b> (1) Existing — the row rule lives in
 /// <see cref="CommunicationInternalOnlyFloor"/> / <see cref="CommunicationOpenThreadGate"/> and caller externality in
 /// <see cref="ICallerSystemUserResolver"/> + <see cref="ISystemUserIdentityResolver"/>; all are reused as they are, no
 /// name is redefined. (2) Extension — those read the communication services' own query seams; the generic tools hold only
 /// an <see cref="IDataverseUserClient"/> and build OData from model SQL, so the family predicate, the query clause and
-/// the user-client thread delegate the three handlers share sit here beside the other <c>dataverse.*</c> helpers.
+/// the user-client reads the three handlers share sit here beside the other <c>dataverse.*</c> helpers.
 /// (3) Cost of doing nothing — a licensed user flagged external reads internal-only email and message bodies through the
 /// assistant (ISS-010), which the owner decided must not happen.</para>
 /// </remarks>
@@ -41,25 +46,93 @@ internal static class ExternalCallerCommunicationGuard
     /// <summary>The one family table an external caller may read (row-filtered).</summary>
     internal const string CommunicationTable = "sprk_communication";
 
+    /// <summary>The communication entity set (the batched visibility read of a document's related communications).</summary>
+    internal const string CommunicationSet = "sprk_communications";
+
+    /// <summary>The communication primary key.</summary>
+    internal const string CommunicationPkField = "sprk_communicationid";
+
+    /// <summary>
+    /// The communication → thread single-valued navigation property (solution XML
+    /// <c>Other/Relationships/sprk_CommunicationThread.xml</c>, relationship
+    /// <c>sprk_communication_CommunicationThread_sprk_communicationthread</c>, referencing role). Puts the Open-thread
+    /// half of the rule into the query (review K1).
+    /// </summary>
+    internal const string ThreadNavigationProperty = "sprk_CommunicationThread";
+
+    /// <summary>The document table: row-filtered by its related communication, never refused.</summary>
+    internal const string DocumentTable = "sprk_document";
+
+    /// <summary>The document entity set.</summary>
+    internal const string DocumentSet = "sprk_documents";
+
+    /// <summary>The document primary key.</summary>
+    internal const string DocumentPkField = "sprk_documentid";
+
+    /// <summary>The document → communication lookup, as it reads in an OData row (the archived .eml and its attachments).</summary>
+    internal const string RelatedCommunicationLookupValue = "_sprk_relatedcommunication_value";
+
+    /// <summary>Ids per batched read: one OR filter over this many ids keeps the GET URL well inside the limit.</summary>
+    internal const int ChunkSize = CommunicationOpenThreadGate.ChunkSize;
+
+    /// <summary>
+    /// <see cref="CallerSystemUserResolution.UnresolvedReason"/> for a lookup fault the resolver swallowed (pinned by a
+    /// test against the real <see cref="CallerSystemUserResolver"/>).
+    /// </summary>
+    internal const string LookupFailedReason = "lookup-failed";
+
+    /// <summary>
+    /// Tables OUTSIDE <see cref="FamilyPrefix"/> that hold copies of email or message content and carry no link this guard
+    /// filters on, so they are refused like the family (review round 1, F1): <c>sprk_emailartifact</c> (Outlook add-in
+    /// save: body preview, sender, recipients — <c>UploadFinalizationWorker</c>), <c>sprk_attachmentartifact</c> (that
+    /// save's attachment file names), <c>sprk_emailreviewlog</c> (AI suggestions and source refs derived from the email —
+    /// <c>CommunicationEnrichmentService</c>) and <c>sprk_affinity</c> (sender addresses, subject keywords and participant
+    /// sets learned from filed email — <c>AffinityStore</c>).
+    /// </summary>
+    internal static readonly IReadOnlySet<string> RefusedContentTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_emailartifact",
+        "sprk_attachmentartifact",
+        "sprk_emailreviewlog",
+        "sprk_affinity",
+    };
+
     /// <summary>Log event name for every guard decision (entity + reason code only, ADR-015).</summary>
     internal const string LogEvent = "sdap.ai.tool.external_communication_guard";
 
-    /// <summary>The model-actionable refusal for a family table other than <see cref="CommunicationTable"/>.</summary>
+    /// <summary>The model-actionable refusal for a guarded table other than <see cref="CommunicationTable"/>.</summary>
     internal const string RefusalMessage =
         "This table is not available to the calling user through the assistant. Communications (emails and messages) " +
         "can be read from the sprk_communication table only.";
 
-    /// <summary>True when <paramref name="logicalName"/> is in the communication family.</summary>
+    /// <summary>The model-facing answer for a hidden record AND for a record the user client cannot find (review K4).</summary>
+    internal const string RecordNotVisibleMessage = "The record was not found or is not visible to the calling user.";
+
+    /// <summary>
+    /// True when <paramref name="logicalName"/> is in the communication family: the <see cref="FamilyPrefix"/> or one of
+    /// the <see cref="RefusedContentTables"/>. The ONE predicate all three handlers use. <c>sprk_document</c> is not in it
+    /// (it is row-filtered, see <see cref="IsDocumentTable"/>).
+    /// </summary>
     internal static bool IsCommunicationFamily(string? logicalName) =>
-        logicalName is not null && logicalName.StartsWith(FamilyPrefix, StringComparison.OrdinalIgnoreCase);
+        logicalName is not null &&
+        (logicalName.StartsWith(FamilyPrefix, StringComparison.OrdinalIgnoreCase) || RefusedContentTables.Contains(logicalName));
 
     /// <summary>True for the <c>sprk_communication</c> table itself.</summary>
     internal static bool IsCommunicationTable(string? logicalName) =>
         string.Equals(logicalName, CommunicationTable, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>The query-side half of the rule: flag explicitly false and a thread set.</summary>
+    /// <summary>True for the <c>sprk_document</c> table (row-filtered by its related communication).</summary>
+    internal static bool IsDocumentTable(string? logicalName) =>
+        string.Equals(logicalName, DocumentTable, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The query-side rule: flag explicitly false, a thread set, and that thread's privacy explicitly Open (through
+    /// <see cref="ThreadNavigationProperty"/>, review K1, so TOP counts only rows the caller may see). The Open-thread half
+    /// is still re-checked after the read (<see cref="CommunicationOpenThreadGate.ReadOpenThreadIdsAsync"/>).
+    /// </summary>
     internal static string FilterClause =>
-        $"{CommunicationInternalOnlyFloor.InternalOnlyField} eq false and {CommunicationOpenThreadGate.MessageThreadLookupValue} ne null";
+        $"{CommunicationInternalOnlyFloor.InternalOnlyField} eq false and {CommunicationOpenThreadGate.MessageThreadLookupValue} ne null" +
+        $" and {ThreadNavigationProperty}/{CommunicationOpenThreadGate.OpenOnlyThreadFilterClause}";
 
     /// <summary>
     /// The model's filter ANDed with <see cref="FilterClause"/>. The model's whole predicate is parenthesised so an OR in
@@ -70,8 +143,9 @@ internal static class ExternalCallerCommunicationGuard
 
     /// <summary>
     /// True when the request's caller is external: flagged <c>sprk_isexternal</c>, or not resolvable to an active
-    /// systemuser (no principal, no oid, no row, lookup failed). A failing externality read throws (fail closed: the
-    /// caller's tool call fails with no data).
+    /// systemuser (no principal, no oid, no matching active row). A lookup that FAILED (<see cref="LookupFailedReason"/>: a
+    /// Dataverse or cache fault the resolver swallowed) THROWS, as does a failing externality read, so the caller's tool
+    /// call fails with no data — a transient fault never decides who the caller is.
     /// </summary>
     internal static async Task<bool> IsExternalCallerAsync(
         IHttpContextAccessor httpContextAccessor,
@@ -81,6 +155,12 @@ internal static class ExternalCallerCommunicationGuard
     {
         var principal = httpContextAccessor.HttpContext?.User;
         var resolution = await callerResolver.ResolveAsync(principal, ct).ConfigureAwait(false);
+        if (!resolution.IsResolved && string.Equals(resolution.UnresolvedReason, LookupFailedReason, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The caller's systemuser lookup failed; externality cannot be decided (fail closed: no data).");
+        }
+
         if (!resolution.IsResolved || !Guid.TryParse(resolution.SystemUserId, out var systemUserId))
         {
             return true;
@@ -94,32 +174,71 @@ internal static class ExternalCallerCommunicationGuard
     /// user client. A failed read THROWS, so a fault becomes the tool's error result with no rows — never "show it".
     /// </summary>
     internal static CommunicationOpenThreadGate.ThreadRowQuery ThreadQueryOver(IDataverseUserClient dataverse) =>
-        async (odata, ct) =>
+        (odata, ct) => ReadRowsAsync(dataverse, $"{CommunicationOpenThreadGate.ThreadSet}?{odata}", "communication thread privacy", ct);
+
+    /// <summary>
+    /// The subset of <paramref name="communicationIds"/> an EXTERNAL caller may see under the task 065 rule (flag
+    /// explicitly false, a thread set, that thread explicitly Open). One batched read of the communications over the
+    /// caller's own user client (chunks of <see cref="ChunkSize"/>), then one batched thread-privacy read. An id that does
+    /// not come back is not in the set (hidden, fail closed); a failed read THROWS (the tool call fails with no data).
+    /// </summary>
+    internal static async Task<HashSet<Guid>> ReadVisibleCommunicationIdsAsync(
+        IDataverseUserClient dataverse, IEnumerable<Guid> communicationIds, CancellationToken ct)
+    {
+        var distinct = communicationIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        var threadOf = new Dictionary<Guid, Guid>();
+        foreach (var chunk in distinct.Chunk(ChunkSize))
         {
-            var response = await dataverse.GetAsync($"{CommunicationOpenThreadGate.ThreadSet}?{odata}", ct).ConfigureAwait(false);
-            if (!response.IsSuccess)
+            var filter = string.Join(" or ", chunk.Select(id => $"{CommunicationPkField} eq {id:D}"));
+            var rows = await ReadRowsAsync(dataverse,
+                $"{CommunicationSet}?$select={CommunicationPkField},{CommunicationInternalOnlyFloor.InternalOnlyField}," +
+                $"{CommunicationOpenThreadGate.MessageThreadLookupValue}&$filter={filter}&$top={chunk.Length}",
+                "related communication visibility", ct).ConfigureAwait(false);
+            foreach (var row in rows)
             {
-                throw new InvalidOperationException(
-                    $"The communication thread privacy read failed ({response.ErrorCode}); the rows stay hidden (fail closed).");
+                if (GuidOf(row, CommunicationPkField) is not { } id || !chunk.Contains(id)) continue;
+                if (!(row.TryGetValue(CommunicationInternalOnlyFloor.InternalOnlyField, out var flag) && flag.ValueKind == JsonValueKind.False))
+                    continue;
+                if (GuidOf(row, CommunicationOpenThreadGate.MessageThreadLookupValue) is not { } threadId) continue;
+                threadOf[id] = threadId;
             }
+        }
 
-            var rows = new List<Dictionary<string, JsonElement>>();
-            if (response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
+        if (threadOf.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+
+        var openThreads = await CommunicationOpenThreadGate.ReadOpenThreadIdsAsync(
+            threadOf.Values, ThreadQueryOver(dataverse), ct).ConfigureAwait(false);
+        return threadOf.Where(kv => openThreads.Contains(kv.Value)).Select(kv => kv.Key).ToHashSet();
+    }
+
+    /// <summary>
+    /// The related communication id of each of <paramref name="documentIds"/> (search_data: hits carry no columns). A
+    /// document with no related communication maps to <see cref="Guid.Empty"/>; a document that does not come back is
+    /// absent from the map (the caller hides it, fail closed). A failed read THROWS.
+    /// </summary>
+    internal static async Task<Dictionary<Guid, Guid>> ReadRelatedCommunicationIdsAsync(
+        IDataverseUserClient dataverse, IEnumerable<Guid> documentIds, CancellationToken ct)
+    {
+        var distinct = documentIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        var related = new Dictionary<Guid, Guid>();
+        foreach (var chunk in distinct.Chunk(ChunkSize))
+        {
+            var filter = string.Join(" or ", chunk.Select(id => $"{DocumentPkField} eq {id:D}"));
+            var rows = await ReadRowsAsync(dataverse,
+                $"{DocumentSet}?$select={DocumentPkField},{RelatedCommunicationLookupValue}&$filter={filter}&$top={chunk.Length}",
+                "document related communication", ct).ConfigureAwait(false);
+            foreach (var row in rows)
             {
-                foreach (var record in value.EnumerateArray())
-                {
-                    if (record.ValueKind != JsonValueKind.Object) continue;
-                    var row = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var property in record.EnumerateObject())
-                    {
-                        row[property.Name] = property.Value.Clone();
-                    }
-                    rows.Add(row);
-                }
+                if (GuidOf(row, DocumentPkField) is not { } id || !chunk.Contains(id)) continue;
+                related[id] = GuidOf(row, RelatedCommunicationLookupValue) ?? Guid.Empty;
             }
+        }
 
-            return rows;
-        };
+        return related;
+    }
 
     /// <summary>The thread id of one OData communication row (raw <c>_sprk_communicationthread_value</c>), or empty.</summary>
     internal static Guid ThreadIdOf(JsonElement record) =>
@@ -128,7 +247,47 @@ internal static class ExternalCallerCommunicationGuard
             ? id
             : Guid.Empty;
 
+    /// <summary>The related communication id of one OData document row (raw <c>_sprk_relatedcommunication_value</c>), or empty.</summary>
+    internal static Guid RelatedCommunicationIdOf(JsonElement record) =>
+        record.TryGetProperty(RelatedCommunicationLookupValue, out var v)
+        && v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var id)
+            ? id
+            : Guid.Empty;
+
     /// <summary>True only when the row's <c>sprk_isinternalonly</c> reads explicitly <c>false</c>.</summary>
     internal static bool IsExplicitlyShareable(JsonElement record) =>
         record.TryGetProperty(CommunicationInternalOnlyFloor.InternalOnlyField, out var v) && v.ValueKind == JsonValueKind.False;
+
+    private static async Task<IReadOnlyList<Dictionary<string, JsonElement>>> ReadRowsAsync(
+        IDataverseUserClient dataverse, string path, string what, CancellationToken ct)
+    {
+        var response = await dataverse.GetAsync(path, ct).ConfigureAwait(false);
+        if (!response.IsSuccess)
+        {
+            throw new InvalidOperationException(
+                $"The {what} read failed ({response.ErrorCode}); the rows stay hidden (fail closed).");
+        }
+
+        var rows = new List<Dictionary<string, JsonElement>>();
+        if (response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var record in value.EnumerateArray())
+            {
+                if (record.ValueKind != JsonValueKind.Object) continue;
+                var row = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+                foreach (var property in record.EnumerateObject())
+                {
+                    row[property.Name] = property.Value.Clone();
+                }
+                rows.Add(row);
+            }
+        }
+
+        return rows;
+    }
+
+    private static Guid? GuidOf(Dictionary<string, JsonElement> row, string key) =>
+        row.TryGetValue(key, out var v) && v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var g) && g != Guid.Empty
+            ? g
+            : null;
 }

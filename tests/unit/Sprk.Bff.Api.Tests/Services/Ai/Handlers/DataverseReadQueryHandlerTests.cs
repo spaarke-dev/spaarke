@@ -449,7 +449,12 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
     // ISS-010 (external-access r3 task 078) — external callers and communications
     // ═════════════════════════════════════════════════════════════════════════════
 
-    private const string GuardClause = "sprk_isinternalonly eq false and _sprk_communicationthread_value ne null";
+    // Review K1: the Open-thread half rides in the query through the thread navigation property (solution XML
+    // sprk_CommunicationThread.xml; Open = 100000000 in the sprk_privacystate option set).
+    private const string GuardClause =
+        "sprk_isinternalonly eq false and _sprk_communicationthread_value ne null and sprk_CommunicationThread/sprk_privacystate eq 100000000";
+    // Review K4: the thread and flag columns are both selected (and stripped) so both are re-checked after the read.
+    private const string GuardedSelect = "sprk_communicationid,sprk_subject,_sprk_communicationthread_value,sprk_isinternalonly";
     private const string OpenState = "100000000";
     private const string PrivateState = "100000001";
 
@@ -502,7 +507,7 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
 
         result.Success.Should().BeTrue(result.ErrorMessage);
         captured.Should().ContainSingle().Which.Should().Be(
-            "sprk_communications?$select=sprk_communicationid,sprk_subject,_sprk_communicationthread_value" +
+            $"sprk_communications?$select={GuardedSelect}" +
             "&$filter=" + Uri.EscapeDataString($"(sprk_subject eq 'a' or sprk_subject eq 'b') and {GuardClause}") +
             "&$top=50",
             because: "the model's whole predicate is parenthesised and ANDed with flag-false + thread-set, so an OR cannot widen it");
@@ -522,9 +527,9 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         var captured = CaptureCommunicationQueries($$"""
             {
               "value": [
-                { "sprk_communicationid": "{{openRow:D}}", "sprk_subject": "Shared update", "_sprk_communicationthread_value": "{{openThread:D}}" },
-                { "sprk_communicationid": "{{privateRow:D}}", "sprk_subject": "Private thread item", "_sprk_communicationthread_value": "{{privateThread:D}}" },
-                { "sprk_communicationid": "{{noThreadRow:D}}", "sprk_subject": "No thread item", "_sprk_communicationthread_value": null }
+                { "sprk_communicationid": "{{openRow:D}}", "sprk_subject": "Shared update", "_sprk_communicationthread_value": "{{openThread:D}}", "sprk_isinternalonly": false },
+                { "sprk_communicationid": "{{privateRow:D}}", "sprk_subject": "Private thread item", "_sprk_communicationthread_value": "{{privateThread:D}}", "sprk_isinternalonly": false },
+                { "sprk_communicationid": "{{noThreadRow:D}}", "sprk_subject": "No thread item", "_sprk_communicationthread_value": null, "sprk_isinternalonly": false }
               ]
             }
             """);
@@ -542,7 +547,7 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
 
         result.Success.Should().BeTrue(result.ErrorMessage);
         captured.Should().ContainSingle().Which.Should().Be(
-            "sprk_communications?$select=sprk_communicationid,sprk_subject,_sprk_communicationthread_value" +
+            $"sprk_communications?$select={GuardedSelect}" +
             "&$filter=" + Uri.EscapeDataString(GuardClause) + "&$top=50",
             because: "with no model WHERE the filter is the guard alone — true and null flags never leave Dataverse");
         threadReads.Should().ContainSingle().Which.Should().Be(
@@ -556,6 +561,8 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         row.TryGetProperty("sprk_communicationthread", out _).Should().BeFalse(
             because: "the thread column was selected only for the guard and is not returned to the model");
         row.TryGetProperty("_sprk_communicationthread_value", out _).Should().BeFalse();
+        row.TryGetProperty("sprk_isinternalonly", out _).Should().BeFalse(
+            because: "the flag column was selected only for the guard and is not returned to the model");
         ((IEnumerable<ToolResultCitation>)result.Metadata![ToolResultMetadataKeys.Citations]!)
             .Should().ContainSingle(c => c.ChunkId == $"tables/sprk_communication/records/{openRow:D}");
     }
@@ -678,7 +685,7 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         AsExternalCaller();
         SetupCommunicationMetadata();
         CaptureCommunicationQueries($$"""
-            { "value": [ { "sprk_communicationid": "{{Guid.NewGuid():D}}", "sprk_subject": "{{sensitiveRowValue}}", "_sprk_communicationthread_value": "{{Guid.NewGuid():D}}" } ] }
+            { "value": [ { "sprk_communicationid": "{{Guid.NewGuid():D}}", "sprk_subject": "{{sensitiveRowValue}}", "_sprk_communicationthread_value": "{{Guid.NewGuid():D}}", "sprk_isinternalonly": false } ] }
             """);
         CaptureThreadReads("""{ "value": [] }""");
 
@@ -693,6 +700,311 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
             m.FormattedMessage.Contains("entity=sprk_communication") &&
             m.FormattedMessage.Contains("reason=thread_not_open"));
         AssertTelemetryRespectsAdr015(sensitiveLiteral, sensitiveRowValue);
+    }
+
+    // ── ISS-010 review round 1 ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnCommunication_RowWhoseFlagIsNotFalseHiddenAfterRead()
+    {
+        // Review K4: defence in depth — a row whose flag does not read explicitly false is hidden even if Dataverse
+        // returned it (the query filter is not the only check).
+        AsExternalCaller();
+        SetupCommunicationMetadata();
+        var openThread = Guid.Parse("70000000-0000-0000-0000-000000000011");
+        var shareableRow = Guid.Parse("c0000000-0000-0000-0000-000000000011");
+        var internalRow = Guid.Parse("c0000000-0000-0000-0000-000000000012");
+        var unsetRow = Guid.Parse("c0000000-0000-0000-0000-000000000013");
+        CaptureCommunicationQueries($$"""
+            {
+              "value": [
+                { "sprk_communicationid": "{{shareableRow:D}}", "sprk_subject": "a", "_sprk_communicationthread_value": "{{openThread:D}}", "sprk_isinternalonly": false },
+                { "sprk_communicationid": "{{internalRow:D}}", "sprk_subject": "b", "_sprk_communicationthread_value": "{{openThread:D}}", "sprk_isinternalonly": true },
+                { "sprk_communicationid": "{{unsetRow:D}}", "sprk_subject": "c", "_sprk_communicationthread_value": "{{openThread:D}}", "sprk_isinternalonly": null }
+              ]
+            }
+            """);
+        CaptureThreadReads($$"""
+            { "value": [ { "sprk_communicationthreadid": "{{openThread:D}}", "sprk_privacystate": {{OpenState}} } ] }
+            """);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_subject FROM sprk_communication"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("rows").EnumerateArray()
+            .Select(r => r.GetProperty("sprk_communicationid").GetString())
+            .Should().Equal(shareableRow.ToString("D"));
+    }
+
+    [Theory]
+    [InlineData("sprk_emailartifact")]
+    [InlineData("sprk_attachmentartifact")]
+    [InlineData("sprk_emailreviewlog")]
+    [InlineData("sprk_affinity")]
+    public async Task ExecuteChatAsync_ExternalCallerOnContentTableOutsidePrefix_RefusedWithNoDataverseCall(string table)
+    {
+        AsExternalCaller();
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args($"SELECT sprk_name FROM {table}"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        result.ErrorMessage.Should().Be(ExternalCallerCommunicationGuard.RefusalMessage);
+        result.Data.Should().BeNull();
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "email content copied outside the sprk_communication prefix is refused before any Dataverse request");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalityReadThrows_ErrorWithNoData()
+    {
+        // Review F2: a failing externality read is an error with no data, never "internal".
+        _identityResolver
+            .Setup(r => r.IsExternalAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
+        SetupCommunicationMetadata();
+        CaptureCommunicationQueries("""{ "value": [ { "sprk_communicationid": "c0000000-0000-0000-0000-0000000000ff", "sprk_subject": "x" } ] }""");
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_subject FROM sprk_communication"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Data.Should().BeNull();
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_CallerLookupFailed_ErrorWithNoDataverseRequest()
+    {
+        // Review F2: the resolver's swallowed fault ("lookup-failed") is an error, not "external" and not "internal".
+        _callerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Unresolved(ExternalCallerCommunicationGuard.LookupFailedReason));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_subject FROM sprk_communication"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        result.Data.Should().BeNull();
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_RealResolverLookupFault_ErrorWithNoDataverseRequest()
+    {
+        // Pins the reason string against the real resolver: a Dataverse fault inside the oid → systemuser lookup.
+        _httpContextAccessor.HttpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("oid", Guid.NewGuid().ToString("D")) }, "test"))
+        };
+        _identityResolver
+            .Setup(r => r.ResolveSystemUserIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
+        _callerResolverOverride = new CallerSystemUserResolver(_identityResolver.Object, CreateLogger<CallerSystemUserResolver>());
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_name FROM sprk_communicationthread"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError,
+            because: "a lookup fault is not an external caller (a refusal) — it is an error with no data");
+        result.Data.Should().BeNull();
+        _dataverse.Verify(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── sprk_document rows carrying a related communication (review round 1, F1) ──
+
+    private static readonly Guid DocNoComm = Guid.Parse("d0000000-0000-0000-0000-000000000001");
+    private static readonly Guid DocShared = Guid.Parse("d0000000-0000-0000-0000-000000000002");
+    private static readonly Guid DocInternal = Guid.Parse("d0000000-0000-0000-0000-000000000003");
+    private static readonly Guid DocPrivate = Guid.Parse("d0000000-0000-0000-0000-000000000004");
+    private static readonly Guid DocNoThread = Guid.Parse("d0000000-0000-0000-0000-000000000005");
+    private static readonly Guid DocUnreadable = Guid.Parse("d0000000-0000-0000-0000-000000000006");
+    private static readonly Guid CommShared = Guid.Parse("c1000000-0000-0000-0000-000000000002");
+    private static readonly Guid CommInternal = Guid.Parse("c1000000-0000-0000-0000-000000000003");
+    private static readonly Guid CommPrivate = Guid.Parse("c1000000-0000-0000-0000-000000000004");
+    private static readonly Guid CommNoThread = Guid.Parse("c1000000-0000-0000-0000-000000000005");
+    private static readonly Guid CommUnreadable = Guid.Parse("c1000000-0000-0000-0000-000000000006");
+    private static readonly Guid ThreadOpen = Guid.Parse("71000000-0000-0000-0000-000000000001");
+    private static readonly Guid ThreadPrivate = Guid.Parse("71000000-0000-0000-0000-000000000002");
+
+    private void SetupDocumentMetadata() =>
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_document')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""
+                {
+                  "EntitySetName": "sprk_documents",
+                  "PrimaryIdAttribute": "sprk_documentid",
+                  "Attributes": [
+                    { "LogicalName": "sprk_documentname", "AttributeType": "String" },
+                    { "LogicalName": "sprk_relatedcommunication", "AttributeType": "Lookup" }
+                  ]
+                }
+                """)));
+
+    private List<string> CaptureDocumentQueries(string rowsJson)
+    {
+        var captured = new List<string>();
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_documents?")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((p, _) => captured.Add(p))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(rowsJson)));
+        return captured;
+    }
+
+    private static string DocRow(Guid id, Guid? relatedCommunication) =>
+        $$"""{ "sprk_documentid": "{{id:D}}", "sprk_documentname": "Doc {{id:N}}", "_sprk_relatedcommunication_value": {{(relatedCommunication is { } c ? $"\"{c:D}\"" : "null")}} }""";
+
+    private static string MixedDocumentRowsJson =>
+        "{ \"value\": [ " + string.Join(", ",
+            DocRow(DocNoComm, null), DocRow(DocShared, CommShared), DocRow(DocInternal, CommInternal),
+            DocRow(DocPrivate, CommPrivate), DocRow(DocNoThread, CommNoThread), DocRow(DocUnreadable, CommUnreadable)) + " ] }";
+
+    // CommUnreadable is deliberately absent (the caller cannot read it, or it was deleted).
+    private static string RelatedCommunicationsJson => $$"""
+        {
+          "value": [
+            { "sprk_communicationid": "{{CommShared:D}}", "sprk_isinternalonly": false, "_sprk_communicationthread_value": "{{ThreadOpen:D}}" },
+            { "sprk_communicationid": "{{CommInternal:D}}", "sprk_isinternalonly": true, "_sprk_communicationthread_value": "{{ThreadOpen:D}}" },
+            { "sprk_communicationid": "{{CommPrivate:D}}", "sprk_isinternalonly": false, "_sprk_communicationthread_value": "{{ThreadPrivate:D}}" },
+            { "sprk_communicationid": "{{CommNoThread:D}}", "sprk_isinternalonly": false, "_sprk_communicationthread_value": null }
+          ]
+        }
+        """;
+
+    private static string RelatedThreadsJson => $$"""
+        {
+          "value": [
+            { "sprk_communicationthreadid": "{{ThreadOpen:D}}", "sprk_privacystate": {{OpenState}} },
+            { "sprk_communicationthreadid": "{{ThreadPrivate:D}}", "sprk_privacystate": {{PrivateState}} }
+          ]
+        }
+        """;
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnDocument_HidesDocumentsWhoseRelatedCommunicationFailsRule()
+    {
+        AsExternalCaller();
+        SetupDocumentMetadata();
+        var documentQueries = CaptureDocumentQueries(MixedDocumentRowsJson);
+        var communicationReads = CaptureCommunicationQueries(RelatedCommunicationsJson);
+        var threadReads = CaptureThreadReads(RelatedThreadsJson);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_documentname FROM sprk_document"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        documentQueries.Should().ContainSingle().Which.Should().Be(
+            "sprk_documents?$select=sprk_documentid,sprk_documentname,_sprk_relatedcommunication_value&$top=50",
+            because: "the related-communication lookup is selected for the guard");
+        communicationReads.Should().ContainSingle().Which.Should().Be(
+            "sprk_communications?$select=sprk_communicationid,sprk_isinternalonly,_sprk_communicationthread_value" +
+            $"&$filter=sprk_communicationid eq {CommShared:D} or sprk_communicationid eq {CommInternal:D} or " +
+            $"sprk_communicationid eq {CommPrivate:D} or sprk_communicationid eq {CommNoThread:D} or " +
+            $"sprk_communicationid eq {CommUnreadable:D}&$top=5",
+            because: "ONE batched read of the related communications through the caller's own user client");
+        threadReads.Should().ContainSingle().Which.Should().Be(
+            "sprk_communicationthreads?$select=sprk_communicationthreadid,sprk_privacystate" +
+            $"&$filter=sprk_communicationthreadid eq {ThreadOpen:D} or sprk_communicationthreadid eq {ThreadPrivate:D}&$top=2");
+
+        var data = result.Data!.Value;
+        data.GetProperty("rows").EnumerateArray()
+            .Select(r => r.GetProperty("sprk_documentid").GetString())
+            .Should().Equal(new[] { DocNoComm.ToString("D"), DocShared.ToString("D") },
+                because: "a document with no related communication is unaffected; internal-only, Private-thread, " +
+                         "no-thread and unreadable related communications all hide the document");
+        data.GetProperty("rowCount").GetInt32().Should().Be(2);
+        foreach (var row in data.GetProperty("rows").EnumerateArray())
+        {
+            row.TryGetProperty("sprk_relatedcommunication", out _).Should().BeFalse(
+                because: "the lookup was selected only for the guard and is not returned to the model");
+            row.TryGetProperty("_sprk_relatedcommunication_value", out _).Should().BeFalse();
+        }
+        ((IEnumerable<ToolResultCitation>)result.Metadata![ToolResultMetadataKeys.Citations]!)
+            .Select(c => c.ChunkId).Should().Equal(
+                $"tables/sprk_document/records/{DocNoComm:D}", $"tables/sprk_document/records/{DocShared:D}");
+        CapturedLogMessages.Should().Contain(m =>
+            m.FormattedMessage.Contains(ExternalCallerCommunicationGuard.LogEvent) &&
+            m.FormattedMessage.Contains("entity=sprk_document") &&
+            m.FormattedMessage.Contains("reason=related_communication_hidden"));
+        AssertTelemetryRespectsAdr015($"Doc {DocInternal:N}");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnDocumentWithNoRelatedCommunication_VisibleAndNoExtraRead()
+    {
+        AsExternalCaller();
+        SetupDocumentMetadata();
+        CaptureDocumentQueries("{ \"value\": [ " + DocRow(DocNoComm, null) + " ] }");
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_documentname FROM sprk_document"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("rowCount").GetInt32().Should().Be(1);
+        _dataverse.Verify(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communications?")), It.IsAny<CancellationToken>()), Times.Never);
+        _dataverse.Verify(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communicationthreads?")), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnDocumentSelectingTheLookup_KeptAndNotDuplicated()
+    {
+        AsExternalCaller();
+        SetupDocumentMetadata();
+        var documentQueries = CaptureDocumentQueries("{ \"value\": [ " + DocRow(DocShared, CommShared) + " ] }");
+        CaptureCommunicationQueries(RelatedCommunicationsJson);
+        CaptureThreadReads(RelatedThreadsJson);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_documentname, sprk_relatedcommunication FROM sprk_document"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        documentQueries.Should().ContainSingle().Which.Should().Be(
+            "sprk_documents?$select=sprk_documentid,sprk_documentname,_sprk_relatedcommunication_value&$top=50");
+        result.Data!.Value.GetProperty("rows").EnumerateArray().Single()
+            .GetProperty("sprk_relatedcommunication").GetString().Should().Be(CommShared.ToString("D"),
+                because: "a column the model asked for is never stripped");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnDocumentRelatedCommunicationReadFails_ErrorWithNoData()
+    {
+        AsExternalCaller();
+        SetupDocumentMetadata();
+        CaptureDocumentQueries("{ \"value\": [ " + DocRow(DocShared, CommShared) + " ] }");
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communications?")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "Server error."));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_documentname FROM sprk_document"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse(because: "a related-communication fault can never turn into 'show it'");
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        result.Data.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_InternalCallerOnDocument_RequestUrlUnchangedAndNoExtraRead()
+    {
+        SetupDocumentMetadata();
+        var documentQueries = CaptureDocumentQueries("{ \"value\": [ " + DocRow(DocInternal, CommInternal) + " ] }");
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args(
+            "SELECT sprk_documentname FROM sprk_document WHERE sprk_documentname = 'a' OR sprk_documentname = 'b'"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        documentQueries.Should().ContainSingle().Which.Should().Be(
+            "sprk_documents?$select=sprk_documentid,sprk_documentname" +
+            "&$filter=" + Uri.EscapeDataString("sprk_documentname eq 'a' or sprk_documentname eq 'b'") + "&$top=50",
+            because: "an internal caller's query is byte-identical to the pre-ISS-010 translation");
+        result.Data!.Value.GetProperty("rowCount").GetInt32().Should().Be(1,
+            because: "an internal caller sees a document whose related communication is internal-only");
+        _dataverse.Verify(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communications?")), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
