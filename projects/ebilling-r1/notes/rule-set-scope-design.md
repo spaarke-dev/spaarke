@@ -291,3 +291,24 @@ A follow-up for Q8 (rate-card inheritance), if the owner agrees, is a separate S
 
 - **Rate card core lookups use RemoveLink** (`Deploy-EbillingTimekeeperRateCardSchema.ps1:431-436`, which passes no `-DeleteBehavior`; the module default at `EbillingSchema.psm1:337` is `RemoveLink`). A matter deleted outside uac-r2's delete path would clear the card's lookup and turn a matter card into a **firm-wide** card. This is unverified live. The main session should check `RelationshipDefinitions(SchemaName='sprk_matter_ratecard_matter')` and file it if it is confirmed.
 - **Rate card authorization checks Read, not AppendTo**, on its core record (Q12).
+
+## 12. Review record
+
+### ontology-r1, 2026-10-20 (on 71d28f319): Q14 agreed, with conditions binding on 081 / 082
+
+1. Census Waived/Pending → Routed and the narrower guard ("no `sprk_matter` ever written on a policy or version row") land in the same change. `NoWrittenPolicyOrVersionRowCarriesAMatter` stays as it is.
+   - **Twin guard, in 081:** `OntologyAdminAuthoringService` never writes `sprk_ruleset`, so a policy can never carry both `sprk_matter` and `sprk_ruleset` (secure-if-any over two unrelated roots).
+   - The guard is ontology-owned code: we write it, ontology-r1 reviews it.
+2. The `sprk_policy` → `sprk_ruleset` lineage edge goes in, with `sprk_ruleset` in `OwnershipParentEntities`.
+   - `SecureFamilyConsistencyTests` and a `SecureChildReconciler` test cover the three-hop path (version → policy → ruleset → core) end to end, both secure and unsecure, not only each edge.
+3. `CitationLookups` is unchanged. Signals and Decision Records cite the policy and are owned by the invoice's core record. The ontology readers read no `sprk_ruleset` column, so no ontology-side change is needed.
+4. `CoreRecordChain` sits in `Services/Signals/Billing/`, next to `BillingFactLoader`. ontology-r1 does the owner review; uac-r2 reviews its reuse of their static maps.
+
+Not blocking:
+- The §5.2 interim "unknown home BU" finding goes through BILL-SYSTEM-SUBMISSION or another defined reason, never a free-text Signal.
+- §3.3: ties apply, with a publish warning.
+- §3.1: an unreadable chain fails closed.
+
+**Gate:** no 080–084 POMLs until the owner answers Q7, because the answer changes 082's shape.
+
+### uac-r2: review queued (§5.2/Q1, §5.1/Q11, Q10, §3.1). Facts received meanwhile are folded into Q10 and DEF-027.
