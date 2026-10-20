@@ -187,6 +187,26 @@ describe('/me refusals are not defaulted to a stand-in user', () => {
   );
 
   it.each([502, 503, 500])(
+    'the browser workforce HOME plane + a %s falls back to the WORKFORCE defaults (not the CIAM ones)',
+    async status => {
+      const { msalAuth } = await load();
+      msalAuth.setWorkforceHomePlaneActive(true);
+      nextStatus = status;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { fetchMeEntitlements } = await import('../src/api/me-client');
+      const me = await fetchMeEntitlements(false); // a browser: teamsHost is false
+      warn.mockRestore();
+      expect(me).toEqual({
+        displayName: '',
+        email: '',
+        plane: 'workforce',
+        entitlements: ['legal-front-door', 'policy-library'],
+      });
+    },
+    SLOW
+  );
+
+  it.each([502, 503, 500])(
     'a %s (server failure) falls back to the plane defaults',
     async status => {
       await load();

@@ -653,6 +653,14 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
     internal const string MatterEntity = "sprk_matter";
     internal const string WorkAssignmentEntity = "sprk_workassignment";
 
+    /// <summary>
+    /// The ProblemDetails detail for <see cref="WorkforceMembershipTest.DenyGuestUseHomeSignin"/> (#2128). It names no
+    /// tenant, id or address, and reads the same inside Teams, where the person cannot pick another account in place.
+    /// </summary>
+    internal const string GuestUseHomeSignInDetail =
+        "You're signed in as a guest of the Spaarke directory. Sign in with your own organization's work account instead: "
+        + "open the portal in a browser and choose your work or school account.";
+
     private readonly IWorkforcePrincipalResolver _resolver;
     private readonly IAccessibleRecordSetService _accessibleSet;
     private readonly ILogger<WorkforcePrincipalStrategy> _logger;
@@ -711,6 +719,14 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                             ["familyName"] = prefill.FamilyName,
                             ["email"] = prefill.Email,
                         }));
+
+                case WorkforceDenyReason.PrincipalNotResolved
+                    when resolution.DenyCode == WorkforceMembershipTest.DenyGuestUseHomeSignin:
+                    // #2128: the customer-tenant guest is told where to sign in instead. Same shape as the CIAM plane's
+                    // contact_not_invited (ProblemDetailsHelper.Forbidden with a detail).
+                    _logger.LogWarning("[WF-AUTH] Denying request: {DenyCode}", resolution.DenyCode);
+                    return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(
+                        WorkforceMembershipTest.DenyGuestUseHomeSignin, GuestUseHomeSignInDetail));
 
                 case WorkforceDenyReason.PrincipalNotResolved:
                 default:

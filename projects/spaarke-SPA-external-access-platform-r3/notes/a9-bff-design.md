@@ -169,7 +169,7 @@ Fallback: if the registration POST sees that the token email matches an **enable
 Order:
 1. **Schema (§4, §5)** on dev: the solution import or the column scripts. Rollback: remove the columns and the option value (unused until code ships).
 2. **New multitenant SPA client** in the Spaarke tenant:
-   - SPA redirect `https://green-dune-0c4f1221e.7.azurestaticapps.net/` (and localhost);
+   - SPA redirects `https://green-dune-0c4f1221e.7.azurestaticapps.net/`, its `/auth-callback.html` (the silent retry and the Teams popup) and `brk-multihub://green-dune-0c4f1221e.7.azurestaticapps.net` (Teams NAA), and the localhost equivalents (corrected by task 076);
    - `requestedAccessTokenVersion` = 2 on the dev BFF app `1e40baad`;
    - `signInAudience` `AzureADMultipleOrgs` on `1e40baad`;
    - `knownClientApplications` = the new client.
@@ -233,7 +233,7 @@ Other task changes:
   - The Teams strategy uses the multitenant client through NAA (`createNestablePublicClientApplication`), with authority = the Teams context's `tid`, which Teams provides, so there is no discovery step.
   - Registration and linking are as in the browser. The silent link inside Teams uses NAA against the Spaarke tenant, which is undocumented; fall back to the popup.
 - **App registration:** add the `brk-multihub://{SPA origin}` redirect to the multitenant client (one line; dev in task 059, provisioning for production).
-- **Teams package:** `deploy-teams-app.yml` / task 043 already builds it; the manifest gains the client and domain. Each customer's Teams admin approves the app once. That approval is needed for any Teams use anyway.
+- **Teams package:** `deploy-teams-app.yml` / task 043 already builds it. As built (task 076): the manifest names **no** client (a manifest names one only through `webApplicationInfo`, which A8/A9 forbid); the multitenant client id is in the SPA bundle (`VITE_WORKFORCE_HOME_MSAL_CLIENT_ID`), and the SPA domain is in `validDomains`, checked by CI. Each customer's Teams admin approves the app once. That approval is needed for any Teams use anyway.
 - **Live test:** task 071 (desktop, web, mobile). Microsoft documents multitenant NAA as generally available in Teams. **Teams mobile specifics are unverified**, so that is the main risk.
 - **One decision it forces:**
   - A9 currently keeps **licensed users** in Teams on A8: NAA with the Spaarke-tenant authority, a cross-tenant guest token that is **undocumented**.
