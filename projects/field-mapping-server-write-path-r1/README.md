@@ -1,6 +1,6 @@
 # Field Mapping → Server-Side Write Path (R1)
 
-> **Portfolio**: [Project #1164](https://github.com/spaarke-dev/spaarke/issues/1164) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+> **Portfolio**: [Project #1164](https://github.com/spaarke-dev/spaarke/issues/1164) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Epic [#535](https://github.com/spaarke-dev/spaarke/issues/535) · label `field-mapping-server-write-path-r1` — _registered 2026-10-04; board fields set 2026-10-19 (43 tasks planned)_
 
 **Status**: Initialized 2026-10-19 (`/project-pipeline`). No implementation yet.
 **Branch**: `work/field-mapping-server-write-path-r1` · **Worktree**: `c:/code_files/spaarke-wt-field-mapping-server-write-path-r1`

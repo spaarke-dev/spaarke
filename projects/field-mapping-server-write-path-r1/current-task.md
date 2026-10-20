@@ -1,39 +1,39 @@
 # Current Task — field-mapping-server-write-path-r1
 
 > **Last updated**: 2026-10-19
-> **Phase**: Pipeline in progress (`/project-pipeline`, user approved "y"). Task: none yet. Status: planning.
+> **Phase**: Project initialized (`/project-pipeline` Steps 0–4.2 complete). Task: none started.
 
 ## State
 
-- Pre-flight passed 2026-10-19. Master merged into the branch (0 behind), pushed; main repo master synced; BFF
-  build 0 errors.
-- Step 0.5: 15 work branches hold unmerged commits (ebilling-r1 340, UAC-r2 111, …). Warning only.
-- Step 1 + 1.7: spec valid. ADR-008 path A tension accepted (concrete rationale).
-- Step 1.5: open-PR overlaps:
-  - UAC-r2 #2110 (`OwnedChildWrite.cs`, `ChildRecordEndpoints.cs`, `CommunicationService.cs`, `RefileWriter` guard,
-    write-path doc);
-  - #2078 (route-auth guards);
-  - #2104 (`CreateProjectWizard` closure files);
-  - #1501 (`CreateAnalysisWizardWidget`, `ChildRecordEndpoints`);
-  - #1911 (write-path doc).
+- Artifacts: README, plan.md, CLAUDE.md, notes/decisions.md, tasks/TASK-INDEX.md and 43 task POMLs (validator clean).
+  Committed and pushed in `366759553`.
+- `projects/INDEX.md` has the project's row (BFF=Y; root CLAUDE.md=Y via task 062).
+- GitHub: issue #1164 under Epic #535 on Board #2. Status Active, Type Project, Project Type Mixed, Task Count 43,
+  Tasks Planned 43. Label `field-mapping-server-write-path-r1` created.
+- Target Date: not set (Step 4.5, waiting on the owner).
 
-  All recorded in CLAUDE.md §4.
-- Step 2 done:
-  - README.md (rewritten), plan.md, CLAUDE.md and notes/decisions.md created;
-  - `projects/INDEX.md` row added;
-  - hot-path BFF overlaps with UAC-r2, ontology-r1, SPA-r3, word-add-in-r1 and compose (warning).
-- Step 3 in progress:
-  - tasks/001 (exemplar) and tasks/TASK-INDEX.md (43 tasks) written;
-  - 4 sub-agents are generating the other 42 POMLs from the scratchpad manifest
-    (`.../scratchpad/task-manifest.md`).
+## Planning findings to carry into execution (written into the POMLs as escalation triggers)
+
+- 004: the profile query selects `sprk_capabilitymod…` but the rule query selects `sprk_compatibilitymode`. Check the
+  deployed name with Dataverse `describe` before editing.
+- 005: the profile entity already reads `SyncMode`; the rule `$select` / entity do not.
+- 018: `OfficeEndpoints.GetQuickCreateDefaultsAsync` uses the Office service's `ResolveDefaultAssigneeAsync`, which
+  needs a new home before the deletion. Invoice quick-create bypasses the Office core today.
+- 030: Office document save is create-then-update; the association moves into the create.
+- 032: invoice create uses a client-generated GUID (lost-response cleanup), so the service may need an optional row id.
+- 033: `SignalWriter` / `DecisionRecordWriter` use a restricted ontology writer identity. Escalate if the service would
+  widen privileges.
+- 034: communications use `CreateCommunicationRaceProofAsync` (unique-key dedupe). Decide on a service create option
+  or a named exception.
+- 017: `DecisionRouteCores.CreateChildAsync` calls `ChildRecordEndpoints.CreateAsync`, so decisions inherit the service
+  through the route.
+- Wizards: Event, To Do, Invoice, Report Card and Work Assignment already create via the BFF adapter. Only Matter and
+  Project go through Xrm (task 020 route extension). The document wizards have no `applyFieldMappings`; they use a
+  client cascade.
 
 ## Exact next action
 
-1. When the 4 generator agents finish: run `pwsh scripts/Validate-TaskPoml.ps1 projects/field-mapping-server-write-path-r1/tasks`;
-   fix FAILs; spot-check 013, 021, 052.
-2. Step 4: commit + push on the existing branch `work/field-mapping-server-write-path-r1` (no new feature/ branch).
-3. Step 4.2: README has the Portfolio pointer (#1164) → `/devops-project-sync`; `gh label create
-   field-mapping-server-write-path-r1 --force`; `python scripts/ai-cost/backfill-tasks-planned.py
-   field-mapping-server-write-path-r1 --apply`; check that the Epic parent and board fields are set.
-4. Step 4.5: ask for the Target Date.
-5. Stop before Step 5: ask the user to start 001 + 006 + 010. W2 code waits on 010 (UAC-r2 sign-off).
+1. The owner sets a Target Date (or skips it).
+2. Start wave 1 in parallel through task-execute: **001** (engine), **006** (EntityMaps), **010** (W2 coordination
+   gate).
+3. W2 code (011+) waits until 010 records UAC-r2 sign-off.
