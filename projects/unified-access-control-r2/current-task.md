@@ -33,7 +33,7 @@
 - #2104 → d301c0675 deployed, gate PASS. #2110 → 2b07480ab merged, NOT deployed (R3 next deploy, then gate: thread join → step once; same parent → no step).
 - #2102 gate PASS (ontology `rule_held_secure` smoke; probe deleted). SRO Policy Reads applied.
 - Filed: #2111, #2112, #2114, #2115, #2116, #2117, #2119, #2120, #2121.
-- Live dev BFF: `1.0.0+00aba6d99`; rollback 283466d40.
+- Live dev BFF: `1.0.0+21184ecd4` (R3, 2026-10-20 16:35Z; includes #2110 + R3 078); rollback 00aba6d99.
 
 ## Open PRs (UAC)
 | PR | Issue | Worktree / branch | State |
@@ -45,6 +45,7 @@
 - Gate blocked on R3 059 stages E/F (A9 SPA). The owner signs in as Tracy at her HOME directory, not as the guest.
 
 ## Queue (start when an agent slot frees; max 4 running)
+0. **#2110 live gate NOW UNBLOCKED.** Dev BFF is `1.0.0+21184ecd4` (live 16:35Z 2026-10-20; rollback snapshot `deploy/rollback/wwwroot-20261020T163210Z` = 00aba6d99). Gate: thread join → after-re-file step once; same-parent re-file → no step. Then close #2110 on PASS.
 1. **#2128 option (1)**: retire FR-15 guest auto-create in `ContactIdentityBinder.ResolveWorkforceCallerAsync` (acct=1 + customer idp). Deny 403 on /me, reasonCode `sdap.access.deny.workforce_guest_use_home_signin`, ProblemDetails shaped like contact_not_invited (reasonCode + detail). The detail must work from Teams too ("open the portal in a browser; sign in with your organization's work account"), with no tenant ids or emails. Count the existing Workforce-plane app-owned guest contacts on dev first (read-only); R3 relies on none. Send R3 the final code and detail (R3 adds deniedDetailOf + test, then an owner-gated SPA deploy).
 2. **ebilling rule-set scope design review**: `projects/ebilling-r1/notes/rule-set-scope-design.md` @ 71d28f319 (work/ebilling-r1), §5.2/Q1 (sprk_homebusinessunit), §5.1/Q11 (ruleset joins the secure family), Q10 (delete with a record-scoped set), §3.1 (FilingParentOf chain).
 3. **ebilling 050a (D-134) secure re-file review**: diff `0a47a82d0~1..4266b5789` (code eb04455c9; ask for the pushed sha), notes `projects/ebilling-r1/notes/050a-confirm-redirect.md`. Points: existing-doc ownership/firm/read proof, doc already filed elsewhere, concurrent confirms, Refused leaving a doc half-moved. Review the post-fix head after ebilling's own Opus review.
