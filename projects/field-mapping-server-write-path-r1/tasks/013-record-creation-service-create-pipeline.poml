@@ -123,6 +123,7 @@
     <criterion testable="true">Negative: a caller-check exception or an unresolved lookup refuses the create (no create call is issued) and a payload naming a blocked column is refused before any Dataverse write; "does not exist" and "cannot see" return the identical status and body.</criterion>
     <criterion testable="true">Step 12 post-create failures are logged and do not throw: the create result is still returned.</criterion>
     <criterion testable="true">BFF build 0 errors; SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests, RouteAuthorizationGuardTests and the Office quick-create contract tests pass unchanged; publish-size delta, CVE result and the /conflict-check result recorded in the task notes.</criterion>
+    <criterion testable="true">From UAC-r2's 011 review (K2, 2026-10-20): the OwnedChildWrite / CallerWriteAuthorization mutual `using static` cannot silently rebind. Either qualify every cross-class call (and drop the using-static) or add an ArchTest asserting the two types share no member names, with must-fire and must-not-fire controls.</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-06, FR-07, FR-12; NFR-01, NFR-03, NFR-04, NFR-05, NFR-06. Task 014 wires mapping into step 3 and merged-payload authorization; 015 swaps owner and search-index steps; 016 adds Repair mode; 017/018 re-point callers. The adversarial review for the whole W2 diff is task 019 (security: twice).</notes>

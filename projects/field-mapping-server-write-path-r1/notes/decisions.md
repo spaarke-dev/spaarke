@@ -58,3 +58,16 @@ follows.
 - **Task 006 live delete approved.** Dev attribute maps for `sprk_ai_search_index` and its name companion are
   removed (evidence: task-006-notes.md).
 - **Task 011 may start** (it is still `parallel-safe=false`, opus/xhigh).
+
+## 2026-10-20 — UAC-r2 review of task 011: no objection (condition d satisfied for 011)
+
+- Range c4a2a7b81..5120bf358 was reviewed independently by UAC-r2. Conditions (a) and (b) are met.
+- UAC accepts the 4 qualifier-only assertion lines in BusinessOwnedAppendTo.cs as "unedited". The D-66 guard
+  extension is verified to fire.
+- Non-blocking notes:
+  - **K2:** the no-shared-member-names guarantee is only a comment. Task 013 now must qualify the calls or add an
+    ArchTest (acceptance criterion added).
+  - **K4:** re-run /conflict-check on rebase. Master moved to 28274e04e.
+- ebilling-r1 edits OwnedChildWrite.cs next to the moved `WhoAmIAsync`, so a visible merge conflict is expected for
+  the second lander. ebilling calls none of the moved helpers.
+- 017 still goes to UAC before merge.

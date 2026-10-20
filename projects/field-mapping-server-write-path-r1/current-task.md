@@ -7,6 +7,9 @@
 
 | Field | Value |
 |---|---|
+| **Done** | 002 ✅, 003 ✅, 011 ✅. Merged and verified green; pushed at 83bf5cfa8 |
+| **Running** | 004→005 agent (`task/fm-004-005`); 012 agent (`task/fm-012`, based on 83bf5cfa8) |
+| **Waiting on** | UAC-r2 verdict on the 011 range c4a2a7b81..5120bf358. Gates the master merge; do NOT rewrite that range |
 | **Task** | Wave 2 running: 002, 003, 004→005, 011 (4 background implementer agents, each in an isolated worktree) |
 | **Status** | in-progress (launched from c4a2a7b81; master 2b07480ab, 0 behind) |
 | **Next Action** | On each agent report:<br>• verify its branch (`task/fm-002`, `task/fm-003`, `task/fm-004-005`, `task/fm-011`);<br>• merge it into `work/field-mapping-server-write-path-r1`;<br>• build and test;<br>• mark the POML and TASK-INDEX;<br>• push.<br>For 011, send the diff range to UAC-r2 for review. For 005, the live `sprk_syncmode` migration needs the owner's OK (dry run only so far). |
