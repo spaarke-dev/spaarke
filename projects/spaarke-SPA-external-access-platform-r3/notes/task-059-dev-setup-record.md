@@ -317,6 +317,35 @@ R3 shows **`spaarke-bff-api-prod` with tenant-wide consent to the DEV BFF app** 
 - The dead `AzureAd__ValidAudiences__0..2` were left as they are (the owner did not ask to delete them).
 - After-notices sent. Rollback: `az webapp config appsettings delete -g rg-spaarke-dev -n spaarke-bff-dev --setting-names ExternalAccess__CustomerBusinessUnitId`.
 
+### Stage E — 2026-10-20 14:48:39Z, owner approval "for 186 you asked for approval to update portal--yes proceed"
+
+- Trigger: UAC's guest test (186) was blocked, because dev was serving the A8 bundle `ebc74b331`.
+- **Read before (R8):** 8 variables. `VITE_BACKENDS` and `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID` were absent, as recorded at R8.
+- **Set:**
+  - `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID` = `5859e812-e5e7-452c-be21-1e5aa7b4d478`.
+  - `VITE_BACKENDS` = one entry:
+    - `customerKey` `default`, `displayName` "Spaarke (dev)";
+    - `bffBaseUrl` `https://spaarke-bff-dev.azurewebsites.net`;
+    - `bffAppId` `1e40baad…`, `ciamBffAppId` `4a4d5126…`;
+    - `homeTenantIds` [`bc3aa7f4…`].
+- **Read after:** 10 variables. Both new values equal what was set, and the backends value parses.
+- Rollback: `gh variable delete VITE_BACKENDS -R spaarke-dev/spaarke --env external-spa-dev`, then the same for `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID`.
+
+### Stage F — 2026-10-20 14:48:58Z, same owner approval
+
+- **Deploy:**
+  - Workflow `deploy-external-spa.yml`, run `39442677693`, ref `work/spaarke-SPA-external-access-platform-r3` at **`1908696a8`** (contains `3723eca0b`, 058 and 075).
+  - Environment dev. Conclusion: success.
+- **Live check** (`green-dune-0c4f1221e.7.azurestaticapps.net`, bundle `/assets/app.js`):
+  - it contains the workforce client `5859e812…`, `registration_required`, the `/registration` route and the DC tenant id;
+  - `/auth-callback.html` returns 200 with the bridge page.
+- Previous live build: `ebc74b331` (A8, deployed 2026-10-18 03:36Z).
+- UAC was told the SHA and the bundle result for 186. The owner's browser checks (CIAM, Dewey Cheatham profile form, licensed-user link) hand over to task 074.
+- **Rollback:**
+  1. `git tag external-spa-dev-rollback-ebc74b331 ebc74b331` and push the tag.
+  2. `gh workflow run deploy-external-spa.yml --ref external-spa-dev-rollback-ebc74b331 -f environment=dev`.
+  3. Then roll back stage E if needed. With `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID` set, the old build ignores it.
+
 ### Side finding (owner-approved App Insights read, 2026-10-19): `IDX10214` and `IDX40001` on dev are log noise, not failures
 
 - App Insights `spe-insights-dev-67e2xz`, last 6 h.
