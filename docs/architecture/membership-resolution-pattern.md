@@ -81,7 +81,7 @@ Both use existing `SystemAdmin` policy (`AuthorizationModule.cs:241`) per Q6 own
 2. **Fetch metadata** on cache miss via `MetadataService.RetrieveEntityRequest` (`EntityFilters.Attributes`).
 3. **Classify** each Lookup attribute:
    - `Targets[]` intersects `IncludedIdentityTables` → **kept** as descriptor
-   - matches `GlobalFieldExclusions` → **ExcludedField** (reason `global-exclusion`), unless per-entity `IncludedFields` force-includes (reason `override`)
+   - matches `GlobalFieldExclusions` → **ExcludedField** (reason `global-exclusion`), unless per-entity `IncludedFields` force-includes (reason `override`) — except the four MUST audit exclusions, which always apply (#2152)
    - matches per-entity `ExcludedFields` → **ExcludedField** (reason `per-entity-exclusion`)
    - target not in identity list → **IgnoredField** (reason `target-table-not-in-identity-list`, carries `Target` name)
 4. **Derive role name** via CamelCase strategy (strip `sprk_` prefix → strip trailing digits → camelCase), OR use `FieldRoleOverrides` verbatim when configured (e.g., both `sprk_assignedlawfirm1` and `sprk_assignedlawfirm2` → role `assignedLawFirm`).
@@ -94,6 +94,9 @@ Both use existing `SystemAdmin` policy (`AuthorizationModule.cs:241`) per Q6 own
 ### Four global field exclusions
 
 `createdby`, `modifiedby`, `createdonbehalfby`, `modifiedonbehalfby` — these are touch-history, not association.
+They always apply (ADR-034 MUST, #2152): `MembershipOptionsDefaults` unions them into any operator
+`GlobalFieldExclusions` list and strips them from per-entity `IncludedFields` (with a Warning), and the same
+exclusion rule filters the related-records back-reference lookup (`DiscoverLookupsTargetingAsync`, `includeRelated`).
 **One exception, on one surface only:** the people-targeting surface admits a HUMAN `createdby` (ADR-034 Amendment
 A3, below). Discovery still excludes it everywhere; the resolver synthesizes it for that surface alone.
 
