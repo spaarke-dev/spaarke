@@ -88,6 +88,7 @@ public class InvoiceSubmissionService
     private readonly SpeFileStore _spe;
     private readonly RecordContainerResolver _containers;
     private readonly IRecordOwnershipResolver _ownership;
+    private readonly ExistingDocumentIsolationCheck _isolation;
     private readonly JobSubmissionService _jobs;
     private readonly IOptionsMonitor<EbillingOptions> _ebilling;
     private readonly ILogger<InvoiceSubmissionService> _logger;
@@ -102,6 +103,7 @@ public class InvoiceSubmissionService
         SpeFileStore spe,
         RecordContainerResolver containers,
         IRecordOwnershipResolver ownership,
+        ExistingDocumentIsolationCheck isolation,
         JobSubmissionService jobs,
         IOptionsMonitor<EbillingOptions> ebilling,
         ILogger<InvoiceSubmissionService> logger)
@@ -115,6 +117,7 @@ public class InvoiceSubmissionService
         _spe = spe ?? throw new ArgumentNullException(nameof(spe));
         _containers = containers ?? throw new ArgumentNullException(nameof(containers));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _isolation = isolation ?? throw new ArgumentNullException(nameof(isolation));
         _jobs = jobs ?? throw new ArgumentNullException(nameof(jobs));
         _ebilling = ebilling ?? throw new ArgumentNullException(nameof(ebilling));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -536,8 +539,28 @@ public class InvoiceSubmissionService
             }
         }
 
-        return null;
+        // 050a review round 3 (uac-r2 F1-a): "unfiled" by the D-140 columns is not "not isolated". The document's isolation decides too,
+        // through every ownership parent it has (a Secure record's thread, an event, an invoice, ...): a secure root other than this
+        // record, or isolation this check cannot place, is refused; a fault is 503. The job decides it again at commit (F1-b).
+        return IsolationRefusal(await _isolation.CheckAsync(documentId, core, ct));
     }
+
+    /// <summary>
+    /// 050a review round 3: the confirm's answer to an <see cref="ExistingDocumentIsolationCheck"/> verdict (null: allowed). The other record
+    /// is never named: the caller was authorized against the confirm's record, not that one.
+    /// </summary>
+    private static InvoiceSubmissionOutcome? IsolationRefusal(ExistingDocumentIsolation isolation) => isolation.Verdict switch
+    {
+        ExistingDocumentIsolationVerdict.Allowed => null,
+        ExistingDocumentIsolationVerdict.Unavailable => InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable,
+            InvoiceSubmissionErrors.CoreRecordUnavailable,
+            "Who may see the document could not be checked right now. Nothing was saved; try again shortly."),
+        ExistingDocumentIsolationVerdict.OtherSecureRoot => InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict,
+            InvoiceSubmissionErrors.DocumentCoreRecordMismatch,
+            "The document belongs to a different, restricted record than the one named, so it cannot be submitted for this record. Nothing was saved."),
+        _ => InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch,
+            "The document is restricted to a record that could not be established, so it cannot be submitted for this record. Nothing was saved."),
+    };
 
     /// <summary>
     /// D-140: the core records <paramref name="document"/> is EFFECTIVELY filed under, each with the column that names it. In order, the first

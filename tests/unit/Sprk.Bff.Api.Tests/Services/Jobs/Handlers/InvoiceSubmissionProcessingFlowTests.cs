@@ -261,6 +261,8 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 ownership.Object,
                 new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance),
                 totals.Object,
+                Sprk.Bff.Api.Tests.Services.Finance.Submission.InvoiceSubmissionServiceTests.IsolationOver(
+                    Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard),
                 NullLogger<InvoiceSubmissionPersister>.Instance);
         }
 

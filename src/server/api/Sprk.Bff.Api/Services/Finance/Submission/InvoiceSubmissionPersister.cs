@@ -161,6 +161,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     private readonly IRecordOwnershipResolver _ownership;
     private readonly IInvoiceLifecycleService _lifecycle;
     private readonly IInvoiceTotalsService _totals;
+    private readonly ExistingDocumentIsolationCheck _isolation;
     private readonly ILogger<InvoiceSubmissionPersister> _logger;
 
     public InvoiceSubmissionPersister(
@@ -169,6 +170,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         IRecordOwnershipResolver ownership,
         IInvoiceLifecycleService lifecycle,
         IInvoiceTotalsService totals,
+        ExistingDocumentIsolationCheck isolation,
         ILogger<InvoiceSubmissionPersister> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -176,6 +178,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
         _totals = totals ?? throw new ArgumentNullException(nameof(totals));
+        _isolation = isolation ?? throw new ArgumentNullException(nameof(isolation));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -264,7 +267,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         Entity? checkedDocument = null;
         if (existingDocument)
         {
-            var (documentRefusal, document) = await CheckExistingDocumentAsync(submissionId, documentId, InvoiceIdFor(submissionId), ct).ConfigureAwait(false);
+            var (documentRefusal, document) = await CheckExistingDocumentAsync(
+                submissionId, documentId, InvoiceIdFor(submissionId), outcome.CoreRecord!, ct).ConfigureAwait(false);
             if (documentRefusal is not null)
             {
                 return documentRefusal;
@@ -452,7 +456,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             // 050a review round 2, item 2(a): the transaction rolled back. For a confirm submission the likely cause is the document guard (a
             // filing, a reject or a delete since the check), so the live row is checked again now: a refusal is answered in this delivery
             // (the submission is Failed, no invoice), anything else is the transaction's own Retry, as for every other fault.
-            if (existingDocument && await RecheckExistingDocumentAsync(submissionId, documentId, invoiceId, ct).ConfigureAwait(false) is { } refusedNow)
+            if (existingDocument && await RecheckExistingDocumentAsync(submissionId, documentId, invoiceId, core, ct).ConfigureAwait(false) is { } refusedNow)
             {
                 return refusedNow;
             }
@@ -510,13 +514,16 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
     /// <summary>
     /// 050a review round 2, item 2(a): after a failed transaction, whether the confirm submission's document now refuses the submission (the
-    /// guard is the likely cause). A refusal, or null: nothing changed that refuses it, or the row could not be read; the caller retries.
+    /// guard is the likely cause). A refusal, or null: nothing changed that refuses it, or the row (or its isolation, review round 3) could
+    /// not be read; the caller retries.
     /// </summary>
-    private async Task<SubmissionPersistResult?> RecheckExistingDocumentAsync(Guid submissionId, Guid documentId, Guid invoiceId, CancellationToken ct)
+    private async Task<SubmissionPersistResult?> RecheckExistingDocumentAsync(
+        Guid submissionId, Guid documentId, Guid invoiceId, InvoiceCoreRecord core, CancellationToken ct)
     {
         try
         {
-            return (await CheckExistingDocumentAsync(submissionId, documentId, invoiceId, ct).ConfigureAwait(false)).Refusal;
+            var refusal = (await CheckExistingDocumentAsync(submissionId, documentId, invoiceId, core, ct).ConfigureAwait(false)).Refusal;
+            return refusal?.Status == SubmissionPersistStatus.Refused ? refusal : null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -528,11 +535,12 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
     /// <summary>
     /// 050a review #1 / #2: a null refusal (with the row read) when the confirm submission's document may be persisted (unlinked, or already
-    /// linked to <paramref name="invoiceId"/>, this submission's own invoice; not rejected); otherwise the refusal, nothing written. A missing
-    /// document is refused too. A read fault propagates (the job retries).
+    /// linked to <paramref name="invoiceId"/>, this submission's own invoice; not rejected; review round 3: not isolated under any secure
+    /// root other than <paramref name="core"/>); otherwise the refusal, nothing written. A missing document is refused too. A read fault of
+    /// the row propagates (the job retries); an isolation that cannot be read is a Retry result.
     /// </summary>
     private async Task<(SubmissionPersistResult? Refusal, Entity? Document)> CheckExistingDocumentAsync(
-        Guid submissionId, Guid documentId, Guid invoiceId, CancellationToken ct)
+        Guid submissionId, Guid documentId, Guid invoiceId, InvoiceCoreRecord core, CancellationToken ct)
     {
         Entity document;
         try
@@ -561,7 +569,23 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             return (Result(SubmissionPersistStatus.Refused, submissionId, DocumentRejectedCode), document);
         }
 
-        return (null, document);
+        // 050a review round 3 (uac-r2 F1-b): the confirm's isolation rule (ExistingDocumentIsolationCheck, F1-a) is decided again at commit,
+        // and again after a rolled-back transaction: a document filed or isolated under another secure record since the confirm is refused
+        // (the submission is Failed, no invoice); one whose isolation cannot be read now is retried, never committed.
+        var isolation = await _isolation.CheckAsync(documentId, core, ct).ConfigureAwait(false);
+        switch (isolation.Verdict)
+        {
+            case ExistingDocumentIsolationVerdict.Allowed:
+                return (null, document);
+            case ExistingDocumentIsolationVerdict.Unavailable:
+                _logger.LogWarning("Invoice submission {SubmissionId}: the isolation of its document {DocumentId} could not be read; nothing persisted, retry",
+                    submissionId, documentId);
+                return (Result(SubmissionPersistStatus.Retry, submissionId, InvoiceDocumentRefile.IsolationUnreadableCode), document);
+            default:
+                _logger.LogWarning("Invoice submission {SubmissionId}: its document {DocumentId} is restricted to another record ({Verdict}); nothing persisted",
+                    submissionId, documentId, isolation.Verdict);
+                return (Result(SubmissionPersistStatus.Refused, submissionId, InvoiceSubmissionErrors.DocumentCoreRecordMismatch), document);
+        }
     }
 
     // ── Resume (the submission already links an invoice) ──

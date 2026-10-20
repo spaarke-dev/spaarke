@@ -1074,6 +1074,90 @@ public class InvoiceSubmissionPersisterTests
         store.Transactions.Should().BeEmpty();
     }
 
+    // ── 050a review round 3 (uac-r2 F1-b): the isolation rule is decided again at commit, and again after a rolled-back transaction ──
+
+    private static readonly Guid SecureMatterS = Guid.Parse("050a0003-0000-4000-8000-0000000000a5");
+
+    /// <summary>The world after the document joined Secure matter S's thread (through its communication, Secure-owned, no regarding column).</summary>
+    private static void IsolateUnderS(Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld world)
+    {
+        var thread = Guid.NewGuid();
+        var communication = Guid.NewGuid();
+        world
+            .SecureRoot("sprk_matter", SecureMatterS)
+            .SecureChild("sprk_communicationthread", thread, ("sprk_regardingmatter", "sprk_matter", SecureMatterS))
+            .SecureChild("sprk_communication", communication, ("sprk_communicationthread", "sprk_communicationthread", thread))
+            .SecureChild("sprk_document", Document, ("sprk_relatedcommunication", "sprk_communication", communication));
+    }
+
+    [Fact(DisplayName = "050a round 3 (uac-r2 F1-b, must fire): a confirm submission whose document became isolated under another Secure record after the confirm is Refused document_core_record_mismatch at commit: no transaction, no invoice")]
+    public async Task ConfirmSubmission_DocumentIsolatedUnderAnotherSecureRecord_IsRefused_NoInvoice()
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store();
+        IsolateUnderS(store.Isolation);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused, "the job marks the submission Failed: no invoice exists");
+        result.ReasonCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        result.InvoiceId.Should().BeNull();
+        store.Transactions.Should().BeEmpty();
+        store.OwnerContexts.Should().BeEmpty();
+        store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Should().BeNull();
+    }
+
+    [Fact(DisplayName = "050a round 3 (uac-r2 F1-b, must fire, the re-check after a rollback): the document is filed under Secure matter S between the check and the commit; the guard rolls the transaction back and the re-check refuses it in the same delivery")]
+    public async Task ConfirmSubmission_FiledUnderASecureRecordBetweenTheCheckAndTheCommit_RollsBack_AndIsRefused()
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store
+        {
+            BeforeTransaction = s =>
+            {
+                IsolateUnderS(s.Isolation); // the filing write moves the document's row version, so the guard faults
+                s.DocumentVersion++;
+            },
+        };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        result.InvoiceId.Should().BeNull();
+        store.Transactions.Should().ContainSingle("the one transaction was sent and rolled back by the guard");
+        store.DocumentReads.Should().HaveCount(2, "the check, then the re-check after the rolled-back transaction");
+        store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Should().BeNull("nothing committed");
+        store.TotalsCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "050a round 3 (uac-r2 F1-b): a document isolation that cannot be read at commit is a Retry (document_isolation_unreadable), nothing committed")]
+    public async Task ConfirmSubmission_IsolationUnreadable_IsRetry_NothingCommitted()
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store();
+        IsolateUnderS(store.Isolation);
+        store.Isolation.FailingQueriesOf("sprk_communication");
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Retry);
+        result.ReasonCode.Should().Be(InvoiceDocumentRefile.IsolationUnreadableCode);
+        store.Transactions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "050a round 3 (must not fire): a confirm submission whose document is isolated EXACTLY under the submission's own Secure matter commits")]
+    public async Task ConfirmSubmission_IsolatedUnderItsOwnSecureMatter_Commits()
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store();
+        store.Isolation
+            .SecureRoot("sprk_matter", Matter)
+            .SecureChild("sprk_document", Document, ("sprk_matter", "sprk_matter", Matter));
+
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+    }
+
     [Fact(DisplayName = "050a review #1: an intake submission's document is not read; the transaction links it as before")]
     public async Task IntakeSubmission_DocumentIsNotRead_AndIsLinkedInTheTransaction()
     {
@@ -1126,6 +1210,13 @@ public class InvoiceSubmissionPersisterTests
 
         /// <summary>050a review round 2, 2(a): the document's <c>versionnumber</c> as Dataverse keeps it (every read answers it).</summary>
         public long DocumentVersion { get; set; } = 7;
+
+        /// <summary>
+        /// 050a review round 3 (uac-r2 F1-b): the isolation facts the persister's existing-document check reads (the REAL synchronizer walk).
+        /// By default a world with a Secure Record owner team and no rows: the document reads as not isolated.
+        /// </summary>
+        public Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld Isolation { get; set; } =
+            Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard();
 
         /// <summary>050a review round 2, 2(a): another writer's slot between the persister's document check and its transaction.</summary>
         public Action<Store>? BeforeTransaction { get; init; }
@@ -1203,6 +1294,7 @@ public class InvoiceSubmissionPersisterTests
                 ownership.Object,
                 new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance),
                 totals.Object,
+                InvoiceSubmissionServiceTests.IsolationOver(() => Isolation),
                 Logger);
         }
 

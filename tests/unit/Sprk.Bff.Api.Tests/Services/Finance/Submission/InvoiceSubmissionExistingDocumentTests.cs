@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Xunit;
 using Harness = Sprk.Bff.Api.Tests.Services.Finance.Submission.InvoiceSubmissionServiceTests.Harness;
 
@@ -577,6 +578,182 @@ public sealed class InvoiceSubmissionExistingDocumentTests
         await spa.Should().ThrowAsync<ArgumentException>();
         await noDocument.Should().ThrowAsync<ArgumentException>();
         ShouldHaveWrittenNothing(h);
+    }
+
+    // ── 050a review round 3 (uac-r2 F1-a): "unfiled" is decided by ISOLATION, through every ownership parent, not by a column list ──
+
+    /// <summary>A Secure matter other than the confirm's (S in the review's scenario).</summary>
+    private static readonly Guid SecureMatterS = Guid.NewGuid();
+
+    /// <summary>
+    /// The review's scenario: a firm replies on Secure matter S's record thread with the invoice PDF. The thread join files the communication
+    /// under S through <c>sprk_communicationthread</c> only (ThreadResolver: ParentChanges = {}, InheritedParents = [the thread's record]), so
+    /// the communication has NO regarding column and D-140 reads the attachment as unfiled; the attachment is Secure-owned. The harness holds
+    /// the D-140 facts, the world the isolation facts, as Dataverse would answer both.
+    /// </summary>
+    private static Harness ThreadJoinedAttachment(Guid secureMatter)
+    {
+        var (h, communication) = EmailAttachment(regardingMatter: null);
+        var thread = Guid.NewGuid();
+        h.Isolation
+            .SecureRoot("sprk_matter", secureMatter)
+            .SecureChild("sprk_communicationthread", thread, ("sprk_regardingmatter", "sprk_matter", secureMatter))
+            .SecureChild("sprk_communication", communication, ("sprk_communicationthread", "sprk_communicationthread", thread))
+            .SecureChild("sprk_document", DocumentId, ("sprk_relatedcommunication", "sprk_communication", communication));
+        return h;
+    }
+
+    [Fact(DisplayName = "050a round 3 (uac-r2 F1-a, must fire): an attachment of a communication that JOINED a Secure matter's thread (no regarding column, Secure-owned) confirmed onto an ordinary matter is 409, nothing written")]
+    public async Task ThreadJoinedCommunication_OnASecureMatter_ConfirmedOntoAnOrdinaryMatter_Is409()
+    {
+        var h = ThreadJoinedAttachment(SecureMatterS);
+        h.Isolation.OrdinaryRoot("sprk_matter", MatterId);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        outcome.Detail.Should().NotContain(SecureMatterS.ToString(), "the other record is never named");
+        ShouldHaveWrittenNothing(h);
+        h.LinkReads.Should().BeEmpty("refused before the intake's checks");
+    }
+
+    [Fact(DisplayName = "050a round 3 (uac-r2 F1-a, must fire): a Secure-owned document linked ONLY through sprk_relatedevent to a Secure matter's event is 409")]
+    public async Task RelatedEventOnly_UnderASecureMatter_Is409()
+    {
+        var h = NewHarness();
+        var secureEvent = Guid.NewGuid();
+        h.ExistingDocument!["sprk_relatedevent"] = new EntityReference("sprk_event", secureEvent);
+        h.Isolation
+            .SecureRoot("sprk_matter", SecureMatterS)
+            .SecureChild("sprk_event", secureEvent, ("sprk_regardingmatter", "sprk_matter", SecureMatterS))
+            .SecureChild("sprk_document", DocumentId, ("sprk_relatedevent", "sprk_event", secureEvent));
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "050a round 3 (uac-r2 F1-a, must fire): a communication regarding a Secure matter's INVOICE (no core-ancestor stamp, no regarding matter) isolates its attachment: 409")]
+    public async Task CommunicationRegardingASecureMattersInvoice_Is409()
+    {
+        var (h, communication) = EmailAttachment(regardingMatter: null);
+        var invoice = Guid.NewGuid();
+        h.Communications[communication]["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoice);
+        h.Isolation
+            .SecureRoot("sprk_matter", SecureMatterS)
+            .SecureChild("sprk_invoice", invoice, ("sprk_matter", "sprk_matter", SecureMatterS))
+            .SecureChild("sprk_communication", communication, ("sprk_regardinginvoice", "sprk_invoice", invoice))
+            .UserOwnedChild("sprk_document", DocumentId, ("sprk_relatedcommunication", "sprk_communication", communication));
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).ErrorCode
+            .Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "050a round 3 (uac-r2 F1-a variant, must fire): a document filed under the confirm's own ordinary matter but isolated through a communication on Secure matter S is 409")]
+    public async Task FiledUnderTheConfirmsMatter_ButIsolatedThroughASecureThread_Is409()
+    {
+        var h = ThreadJoinedAttachment(SecureMatterS);
+        h.ExistingDocument!["sprk_matter"] = new EntityReference("sprk_matter", MatterId); // D-140 resolves to the confirm's matter
+        h.Isolation
+            .OrdinaryRoot("sprk_matter", MatterId)
+            .Set("sprk_document", DocumentId, "sprk_matter", new EntityReference("sprk_matter", MatterId));
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).ErrorCode
+            .Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "050a round 3 (uac-r2 F1-a variant, must fire): a Secure-owned document whose isolation resolves to Secure matter S, confirmed onto ANOTHER Secure matter S2, is 409 (a different root)")]
+    public async Task IsolatedUnderS_ConfirmedOntoAnotherSecureMatterS2_Is409()
+    {
+        var h = ThreadJoinedAttachment(SecureMatterS);
+        h.Isolation.SecureRoot("sprk_matter", MatterId); // the confirm's matter is S2, Secure too
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).ErrorCode
+            .Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "050a round 3 (must fire, stricter than 'among the roots'): a document under BOTH S and the confirm's Secure matter S2 is 409 (its content would reach S2's sharees alone)")]
+    public async Task IsolatedUnderSAndS2_ConfirmedOntoS2_Is409()
+    {
+        var h = ThreadJoinedAttachment(SecureMatterS);
+        h.ExistingDocument!["sprk_matter"] = new EntityReference("sprk_matter", MatterId);
+        h.Isolation
+            .SecureRoot("sprk_matter", MatterId)
+            .Set("sprk_document", DocumentId, "sprk_matter", new EntityReference("sprk_matter", MatterId));
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).ErrorCode
+            .Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+    }
+
+    [Fact(DisplayName = "050a round 3 (must fire, fail closed): a Secure-owned document under NO secure root the walk can find is 409, never 'unfiled'")]
+    public async Task SecureOwnedDocument_UnderNoSecureRoot_Is409()
+    {
+        var h = NewHarness();
+        h.Isolation.SecureChild("sprk_document", DocumentId);
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).ErrorCode
+            .Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "050a round 3 (must fire, fail closed): a document under a root flagged secure but not isolated (undetermined) is 409")]
+    public async Task DocumentUnderAFlaggedNotIsolatedRoot_Is409()
+    {
+        var h = NewHarness();
+        var flagged = Guid.NewGuid();
+        h.Isolation
+            .FlaggedNotIsolatedRoot("sprk_matter", flagged)
+            .UserOwnedChild("sprk_document", DocumentId, ("sprk_relatedmatter", "sprk_matter", flagged));
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).ErrorCode
+            .Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+    }
+
+    [Fact(DisplayName = "050a round 3 (must fire): an isolation read that faults is 503 and nothing is written (never read as 'not isolated')")]
+    public async Task IsolationReadFaults_Is503_AndWritesNothing()
+    {
+        var h = ThreadJoinedAttachment(SecureMatterS);
+        h.Isolation.FailingQueriesOf("sprk_communication");
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "050a round 3 (must not fire): a truly unfiled document that is not isolated (user-owned, no parent) is received")]
+    public async Task TrulyUnfiled_NotIsolated_IsReceived()
+    {
+        var h = NewHarness();
+        h.Isolation.UserOwnedChild("sprk_document", DocumentId);
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+    }
+
+    [Fact(DisplayName = "050a round 3 (must not fire): a Secure-owned document whose isolation resolves EXACTLY to the confirm's Secure matter is received")]
+    public async Task SecureOwned_IsolatedExactlyUnderTheConfirmsMatter_IsReceived()
+    {
+        var h = ThreadJoinedAttachment(MatterId); // the thread is the confirm's own Secure matter's
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+    }
+
+    [Fact(DisplayName = "050a round 3 (must not fire): a document filed under the ORDINARY matter it is confirmed onto, not isolated, is received")]
+    public async Task FiledUnderTheConfirmsOrdinaryMatter_NotIsolated_IsReceived()
+    {
+        var h = NewHarness();
+        h.ExistingDocument!["sprk_matter"] = new EntityReference("sprk_matter", MatterId);
+        h.Isolation
+            .OrdinaryRoot("sprk_matter", MatterId)
+            .OrdinaryChild("sprk_document", DocumentId, ("sprk_matter", "sprk_matter", MatterId));
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
     }
 
     [Fact(DisplayName = "050a: the dedupe ids are deterministic per document and distinct across documents")]

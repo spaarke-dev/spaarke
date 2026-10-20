@@ -22,6 +22,8 @@ using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
@@ -111,6 +113,13 @@ public sealed class InvoiceSubmissionServiceTests
 
         /// <summary>D-140: non-null, a communication read throws this.</summary>
         public Exception? CommunicationReadFailure;
+
+        /// <summary>
+        /// 050a review round 3 (uac-r2 F1-a): the isolation facts the existing-document check reads, through the REAL
+        /// <see cref="Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer"/> walk. By default a world with a Secure Record owner team
+        /// and no rows: every document reads as not isolated.
+        /// </summary>
+        public SecureChildShareWorld Isolation = SecureChildShareWorld.Standard();
 
         private static Exception NotFound() =>
             new System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault>(
@@ -365,7 +374,7 @@ public sealed class InvoiceSubmissionServiceTests
             var containers = new RecordContainerResolver(
                 Mock.Of<ISecurableEntityRegistry>(), Mock.Of<IGenericEntityService>(), NullLogger<RecordContainerResolver>.Instance);
             return new TestableService(this, Allocator.Object, Entities.Object, Documents.Object, RecordTypes.Object, ExternalData.Object,
-                Participations, Spe.Object, containers, Ownership.Object, Jobs.Object, monitor);
+                Participations, Spe.Object, containers, Ownership.Object, IsolationOver(() => Isolation), Jobs.Object, monitor);
         }
 
         private sealed class TestableService(
@@ -379,15 +388,25 @@ public sealed class InvoiceSubmissionServiceTests
             SpeFileStore spe,
             RecordContainerResolver containers,
             IRecordOwnershipResolver ownership,
+            ExistingDocumentIsolationCheck isolation,
             JobSubmissionService jobs,
             IOptionsMonitor<EbillingOptions> ebilling)
-            : InvoiceSubmissionService(allocator, entities, documents, recordTypes, externalData, participations, spe, containers, ownership, jobs, ebilling,
-                NullLogger<InvoiceSubmissionService>.Instance)
+            : InvoiceSubmissionService(allocator, entities, documents, recordTypes, externalData, participations, spe, containers, ownership, isolation,
+                jobs, ebilling, NullLogger<InvoiceSubmissionService>.Instance)
         {
             internal override Task<ContainerDecision> ResolveContainerAsync(InvoiceCoreRecord core, CancellationToken ct) =>
                 Task.FromResult(harness.Container);
         }
     }
+
+    /// <summary>
+    /// 050a review round 3: the REAL <see cref="ExistingDocumentIsolationCheck"/> over the REAL synchronizer, both reading the world
+    /// <paramref name="world"/> answers at query time (its document row, its lineage and its Secure Record owner team).
+    /// </summary>
+    internal static ExistingDocumentIsolationCheck IsolationOver(Func<SecureChildShareWorld> world) =>
+        new(SecureChildShareWorld.EntitiesOver(world).Object,
+            SecureChildShareWorld.SynchronizerOver(world, new FakeRecordShareTable()),
+            NullLogger<ExistingDocumentIsolationCheck>.Instance);
 
     internal static CallerPrincipal Contact() => new()
     {
