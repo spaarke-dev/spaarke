@@ -196,7 +196,7 @@ harness; Dataverse, owner and totals are strict doubles, so any write outside th
 | Status | Meaning | Members |
 |---|---|---|
 | `Committed` | the transaction committed (or an unknown outcome was proved by the link), totals ran | `InvoiceId`, `LineIds` (line index → row id), `ApprovalId`, `Totals` |
-| `Resumed` | the submission already linked an invoice: nothing created, totals re-run | `InvoiceId` (the stored one), `LineIds` (queried: `sprk_linesequence` - 1) |
+| `Resumed` | the submission already linked an invoice: nothing created and (R2, 14c) NO totals; the after-steps' `ResumeAsync` recalculates them | `InvoiceId` (the stored one), `LineIds` (queried: `sprk_linesequence` - 1) |
 | `ReEvaluate` | the submission's core record differs from `outcome.CoreRecord` (072 part L): nothing written | `CurrentSubmission` (pass to the processor) |
 | `Retry` | transient: nothing persisted when `InvoiceId` is null; committed but totals failed when set | `ReasonCode` |
 | `Refused` | will not succeed on retry (core fields incomplete, owner refused, > 1,000 requests, findings JSON over 1,048,576) | `ReasonCode` |
@@ -365,7 +365,7 @@ it from the external submitter's contact. This supersedes the C2 note that `sprk
 - Tests: `InvoiceSubmissionAfterStepsTests` (34), `BillingFindingSignalMapperDecisionTests` (5), and additions to `BillingSystemPolicyTests` and
   `InvoiceSubmissionPersisterTests`.
 
-**Input.** `RunAsync(SubmissionPersistResult, correlationId)` takes Committed, Resumed, or a totals Retry that has an invoice id.
+**Input.** `RunAsync(SubmissionPersistResult, correlationId)` takes Committed, Resumed, or a totals Retry that has an invoice id. (Since R2, 14c, the handler calls it for Committed only; a submission found already linked goes to `ResumeAsync`.)
 - Everything is read from the STORED submission: `sprk_findingsjson`, the link, the channel and the document. Nothing re-runs AI or the
   evaluation.
 - The rule Signals are written from the stored `signalPlan`: the mapper's scrubbed requests, rendered once at commit. The first run and every
@@ -442,7 +442,8 @@ it from the external submitter's contact. This supersedes the C2 note that `sprk
 **What part E must call and register.**
 - Before `PersistAsync`, call `afterSteps.PreflightRejection(outcome)` to refuse before the transaction. A `DecisionRecordRefusedException`
   there means Failed, with its reason.
-- After `PersistAsync` returns Committed, Resumed, or Retry with an invoice id, call `RunAsync(persisted, correlationId)`:
+- After `PersistAsync` returns Committed, call `RunAsync(persisted, correlationId)` (as written; since R2, 14c, Resumed and Retry-with-an-invoice-id
+  call `ResumeAsync(submissionId, correlationId)` instead, so the table below is the Committed case):
 
   | Result | Part E does |
   |---|---|
@@ -571,6 +572,11 @@ classification and the Held presentation (other agents). Part E: call `ResumeAsy
 codes. **Corrected after ontology-r1's re-check (2026-10-19):** `stored_state_mismatch` cannot occur on a legitimate path. The handler
 (72a2cd64d, ~:285-288) sends the persister's Resumed result to `ResumeAsync`, so `RunAsync` is only reached on Committed, where the stored
 JSON and the outcome are the same object. A mismatch therefore means a bug; the handler never calls `RunAsync` with a re-evaluated outcome.
+**Corrected again (review fix R2, 14c):** that was not yet true. The persister's resume path ran the totals, and a totals fault turned the
+Resumed result into a Retry that carries the invoice id, which the handler sent to `RunAsync` with this run's re-evaluated terminal. The
+invariant now holds: the persister's resume path does no totals (it answers Resumed), and the handler sends every outcome in which the
+submission is already linked (Resumed, or Retry with an invoice id) to `ResumeAsync`; `RunAsync` is for Committed only, a run that
+committed in this delivery.
 Marking such a submission Failed would strand an invoice that has no Signals or record, and nothing on the handler path resumes after Failed.
 
 **Known limits (ontology-r1 re-check of 5a04a41fb, no change now).**
@@ -754,7 +760,7 @@ Tests (fail-before: the original source fails 5 of 7; the two permanent cases ar
 | Part | Behaviour |
 |---|---|
 | Plan refusals | `InvoiceSubmissionPersister` passes the text to `BuildSubmissionUpdate`, so it is written in the SAME transaction update as `sprk_findingsjson` (with `signalPlanRefusals`). Nothing refused: the column is not in the update (never written null or empty). |
-| Write refusals | `InvoiceSubmissionAfterSteps.RecordSignalWriteRefusalsAsync` adds the column to the SAME conditional update that stores `signalWriteRefusals`. A resume that adds nothing returns before the update, so nothing is written and nothing is repeated. |
+| Write refusals | `InvoiceSubmissionAfterSteps.RecordSignalWriteRefusalsAsync` adds the column to the SAME update (a plain `UpdateAsync`; findings writes carry no row-version guard) that stores `signalWriteRefusals`. A resume that adds nothing returns before the update, so nothing is written and nothing is repeated. Since R3/R5 (14c) the column is MERGED into its current value, not overwritten. |
 | Text | `AdminAttentionText` (new, internal static; a pure function of the refusals stored in the findings JSON: plan refusals first, then write refusals, each distinct entry once, in stored order). `"{n} Signal(s) could not be created: {code} ({policy} on line|invoice {first 8 characters of the id}), ..."`. Codes and an id prefix only, never an extracted value. At most 500 characters (`InvoiceSubmissionPersister.AdminAttentionMaxLength`): entries that do not fit give way to `, ... (+N more)` with a real ellipsis character, whole entries only. |
 | Clearing | Code never clears it, and never writes it again once the refusals are stored. The administrator clears it after review; a later resume does not bring it back (the idempotent resume writes nothing). |
 | Detail | The full detail stays in `sprk_findingsjson` (`signalPlanRefusals`, `signalWriteRefusals`); the Error and Warning logs are unchanged. |
@@ -960,7 +966,7 @@ The handler writes only Processing, Failed and (RejectedUnreadable only) Rejecte
 - D-125 ("Signals for every finding" qualified): system-policy Signals only when BILL-SYSTEM-SUBMISSION is enabled and Active; covered by part D's `InvoiceSubmissionAfterStepsTests`, not repeated here.
 
 **Open questions.**
-1. A persister `Resumed` result routes to `ResumeAsync`, not `RunAsync` (brief step 4): the terminal derived from this run's outcome could contradict the committed one.
+1. A persister `Resumed` result routes to `ResumeAsync`, not `RunAsync` (brief step 4): the terminal derived from this run's outcome could contradict the committed one. (R2, 14c: so does a Retry that carries an invoice id.)
 2. Closed: `ResumeAsync` is implemented (13a). An exception from it still maps to Failure (Failed on the final delivery without a link; stays Processing with one).
 3. Should a dead-letter replay of a Failed-without-link submission be reprocessable? Today it is a no-op.
 4. Final delivery with an invoice link: stays Processing + Poisoned (so the replay can resume). Confirm.
@@ -994,6 +1000,83 @@ Seven flow tests (criterion 1, criterion 2, criterion 4, criterion 5, the Blocke
 
 Known limit (ontology-r1 re-check of 8098ec9b3, PASS): on the Received-with-link data-fault path, `LeaveLinkedSubmission` leaves the
 status Received, not Processing, so a replay takes the normal path again rather than the resume. Acceptable for a data fault.
+
+### 14c. Review fixes R2, R3, R5, R6 (adversarial review of the 049 change set, 2026-10-20)
+
+**R2 (F1): a persister Resumed result whose totals failed went to `RunAsync`.** Two deliveries can overlap because the processing lock is
+non-atomic and fails open (`IdempotencyService`). Delivery B evaluates, the persister finds A's link and takes `ResumeAsync` -> `WithTotalsAsync`;
+a totals fault made that result a `Retry` that CARRIES the invoice id, and the handler sent every `Retry` with an invoice id to `RunAsync` with
+B's re-evaluated terminal. If B's AI outcome differed from the stored one, the after-steps answered `stored_state_mismatch` (Refused) and the job
+was Poisoned with the submission left Processing. That falsified the invariant 13a states.
+
+| | Before | After |
+|---|---|---|
+| Persister, submission already linked | queries lines, runs the totals; a fault returns `Retry` + invoice id | queries lines and returns `Resumed`; NO totals |
+| Handler, `Retry` with an invoice id | `RunAsync(persisted)` with this run's terminal | `ResumeAsync(submissionId)`, from the stored state |
+| Handler, `Resumed` | `ResumeAsync` | unchanged |
+| Handler, `Committed` | `RunAsync` | unchanged: the only caller of `RunAsync` |
+
+The after-steps' `ResumeAsync` already recalculates the totals (`InvoiceSubmissionAfterSteps.ResumeAsync`, `_totals.RecalculateAsync`; a fault there is
+a totals Retry after the Signals and the record), so no totals work is lost; `ResumeAsync_TotalsFault_RetriesThenCompletes` covers it. A `Retry` with an
+invoice id can now come only from `Committed` + a totals fault (this delivery's own commit), and it also resumes from the stored state, which is
+safe (the stored findings are the ones this run just wrote) and retries the totals once more in the same delivery. `RunAsync` still accepts
+Resumed / Retry as an input (its contract and tests are unchanged); the handler no longer sends them.
+`SubmissionReasonCodes.StoredStateMismatch` and 13a now state the invariant as it is.
+
+**R3 (F2, D-133): a submission left Processing is shown to the administrator.** `LeaveLinkedSubmission` (now `LeaveLinkedSubmissionAsync`),
+the linked branch of `TransientAsync` (the final delivery of a retry) and so every permanent `Refused` from the after-steps
+(`decision_owner_refused`, `decision_subject_unfileable`, `decision_core_unsupported`, `stored_state_mismatch`, ...) call
+`AdminAttentionText.NoteAsync` with a code-only segment:
+`Processing stopped: {code}; the invoice is linked and the submission stays Processing: review it, then resume or correct`.
+Rules: (1) NOT a status write: the 14b rule (a linked submission is never marked Failed by the handler) is unchanged, and the write carries
+only `sprk_adminattention`. (2) MERGE, never overwrite: `NoteAsync` reads the current `sprk_adminattention` and `sprk_findingsjson`, and
+`AdminAttentionText.Merge` replaces only the segment of its own kind: the Signal segment is rebuilt from the stored refusals (the same function the
+persister and `RecordSignalWriteRefusalsAsync` use), the policy segment and the stopped segment are each replaced by their own, any other text
+(an administrator's) is kept. The order is fixed (Signals, system policy, stopped, other text) and joined by ` | `, so the result is a pure
+function of its inputs. (3) Idempotent: the column is written only when the merged text differs from the stored one, so a redelivery with the
+same cause writes nothing; a different code replaces only the stopped segment. (4) Capped at 500 characters
+(`InvoiceSubmissionPersister.AdminAttentionMaxLength`): the policy and stopped segments are short (the code is cut at 80 characters) and stay whole;
+the Signal segment gives way with its `... (+N more)` count (`Build(items, maxLength)`); a final hard cut is the last resort. (5) A fault
+(the read, the parse or the write) is logged at Warning with the exception type only and swallowed; the handler's outcome never changes.
+Not covered on purpose: the flag-off-with-link path (the administrator's own switch, `ebilling_disabled`) sets no text. A Received row that carries a
+link (a data fault) is flagged too, and stays Received (14b known limit).
+
+**R5 (F2, D-133): a misconfigured system policy is no longer silent.** `SystemSignalsAsync` skipped the system Signals with a Warning for
+every unusable state of `BILL-SYSTEM-SUBMISSION`. D-125 accepted that only for a policy an administrator DISABLED. Now `missing`, `ambiguous`,
+`without_a_version_in_force` and `of_another_rule_type` also add the segment
+`System billing policy BILL-SYSTEM-SUBMISSION is {missing | ambiguous (more than one) | without a version in force | of the wrong rule type}: system Signals were not created`
+(same merge, idempotency, cap and swallow rules as R3); `disabled` stays a Warning only. Because the attention write moves the row version, the
+terminal write re-reads it first (`rowVersion = null`), as after the findings writes. `RecordSignalWriteRefusalsAsync` now merges into the
+current value (one extra read, only when it adds a refusal) instead of overwriting, so a later Signal refusal does not erase the policy note.
+
+**R6 (F4): documentation.** D-133 and 13d item 6 said "conditional update"; the write is a plain `UpdateAsync` and now says "the same update".
+13a's invariant, `SubmissionReasonCodes.StoredStateMismatch` and the `IInvoiceSubmissionPersister` / `IInvoiceSubmissionAfterSteps` XML docs state
+the R2 rule. `docs/data-model/sprk_invoicesubmission.md` lists the three sources of `sprk_adminattention`: Signal plan and write refusals, processing
+stopped on a linked submission, system policy misconfigured.
+
+**Tests (fail-before).** Persister: `AlreadyLinked_WithATotalsFault_IsStillResumed_AndNeverRecalculates` (new); `AlreadyLinked_CreatesNothing_ReturnsStoredIds`
+and `TotalsFailure_AfterCommit_RetryResumes_NoSecondInvoice` now assert the resume path runs no totals. Handler (`InvoiceSubmissionProcessingJobHandlerTests`):
+`RetryWithInvoice_ResumesFromTheStoredState` (replaces the test that pinned `RunAsync`), `ResumedWithATotalsFault_ResumesFromStoredState_NoStoredStateMismatch`
+(the real component's answer to a differing terminal is scripted as `stored_state_mismatch`; the resume completes, nothing is flagged),
+`PermanentRecordRefusal_SetsAdminAttention_AndKeepsProcessing` (theory: owner / subject / core), `RunRefused_AfterCommitted_SetsAdminAttention`,
+`LinkedFailAsync_SetsAdminAttention_NotFailed`, `LinkedFinalDelivery_SetsAdminAttention_EarlierDeliveryDoesNot`, `UnlinkedFinalDelivery_IsFailed_WithoutAttention`,
+`StoppedNote_MergesWithTheSignalRefusalAttention`, `StoppedNote_KeepsOtherSegments`, `StoppedNote_IsIdempotentAcrossARedelivery`,
+`AttentionWriteFault_DoesNotChangeTheOutcome`, `AttentionReadFault_DoesNotChangeTheOutcome`, `FlagOff_WithALink_SetsNoAttention` (must not fire);
+`ResumeRefused_WithALink_LeavesProcessing_AndWritesNothing` now asserts no STATUS write and exactly the one attention write. After-steps (`InvoiceSubmissionAfterStepsTests`):
+`SystemPolicyMisconfigured_SetsAdminAttention` (theory: missing, ambiguous, no version in force, wrong type), `SystemPolicyDisabled_SetsNoAdminAttention`,
+`SystemPolicyUsable_OrNoSystemFinding_SetsNoAdminAttention`, `SystemPolicyMisconfigured_AdminAttention_IsIdempotentAcrossARedelivery`,
+`SystemPolicyMisconfigured_MergesWithSignalRefusalAttention` (both orders), `SystemPolicyMisconfigured_AttentionWriteFault_DoesNotChangeTheOutcome`.
+`AdminAttentionTextTests`: the two notes, the merge (own kind replaced, others kept, fixed order, rebuild from findings, admin text, null, cap, determinism).
+The world double gained an `Ambiguous` policy state and an attention-write fault.
+Fail-before (source restored to 6c92df33d behaviour): R2 reverted (the persister file and the handler's Retry/Resumed case) fails 5 of the 493 filtered
+`InvoiceSubmission|AdminAttention` tests (the 3 new R2 tests and the 2 updated persister assertions); `NoteAsync` made a no-op fails 21 (R3 and R5);
+all restored byte-identical, 493 of 493 pass.
+Gates: `dotnet build src/server/api/Sprk.Bff.Api/` 0 warnings / 0 errors; the broad filtered `Sprk.Bff.Api.Tests` run 8,337 passed / 0 failed / 11 skipped;
+`Spaarke.ArchTests` 1,214 passed / 0 failed.
+
+**Known limits.** (1) A stale "Processing stopped" segment stays after a later successful replay completes the submission (code never clears the
+column, D-133); the administrator clears it. (2) The R2 race is closed on the handler path; the lock itself is still non-atomic and fail-open
+(`IdempotencyService`), so two deliveries can still both run the AI read; they can no longer contradict each other's terminal.
 
 ### 15. Review fixes R1 and R4
 
