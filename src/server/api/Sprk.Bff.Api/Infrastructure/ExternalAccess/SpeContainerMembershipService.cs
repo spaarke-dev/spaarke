@@ -90,9 +90,10 @@ public class SpeContainerMembershipService
         ExternalAccessLevel accessLevel,
         CancellationToken ct = default)
     {
+        // #2111: the contact's email is the Graph identity here but never a log field (CODE-QUALITY-RUBRIC D9).
         _logger.LogInformation(
-            "Granting SPE container membership: containerId={ContainerId}, email={Email}, accessLevel={AccessLevel}",
-            containerId, contactEmail, accessLevel);
+            "Granting SPE container membership: containerId={ContainerId}, accessLevel={AccessLevel}",
+            containerId, accessLevel);
 
         // Ownership outside the try: a container this stamp does not own is refused (404 spe_container_not_owned) before Graph (task 227d).
         var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
@@ -126,29 +127,29 @@ public class SpeContainerMembershipService
             if (createdPermission?.Id == null)
             {
                 _logger.LogError(
-                    "Graph API returned null or missing ID when granting membership: containerId={ContainerId}, email={Email}",
-                    containerId, contactEmail);
+                    "Graph API returned null or missing ID when granting membership: containerId={ContainerId}",
+                    containerId);
                 return new SpeContainerMembershipResult(false, null, "Graph API returned null permission after grant.");
             }
 
             _logger.LogInformation(
-                "Successfully granted SPE membership: containerId={ContainerId}, email={Email}, permissionId={PermissionId}",
-                containerId, contactEmail, createdPermission.Id);
+                "Successfully granted SPE membership: containerId={ContainerId}, permissionId={PermissionId}",
+                containerId, createdPermission.Id);
 
             return new SpeContainerMembershipResult(true, createdPermission.Id, null);
         }
         catch (ServiceException ex)
         {
             _logger.LogError(ex,
-                "Graph API error granting SPE membership: containerId={ContainerId}, email={Email}, status={StatusCode}",
-                containerId, contactEmail, ex.ResponseStatusCode);
+                "Graph API error granting SPE membership: containerId={ContainerId}, status={StatusCode}",
+                containerId, ex.ResponseStatusCode);
             return new SpeContainerMembershipResult(false, null, $"Graph API error ({ex.ResponseStatusCode}): {ex.Message}");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Unexpected error granting SPE membership: containerId={ContainerId}, email={Email}",
-                containerId, contactEmail);
+                "Unexpected error granting SPE membership: containerId={ContainerId}",
+                containerId);
             return new SpeContainerMembershipResult(false, null, $"Unexpected error: {ex.Message}");
         }
     }
@@ -1506,12 +1507,16 @@ public sealed record SpeMembershipKey
     public override int GetHashCode() =>
         HashCode.Combine(ObjectId, Email is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Email));
 
-    /// <summary>Log form: the email, the object id, or both.</summary>
+    /// <summary>
+    /// Log form (#2111): the object id, and only WHETHER an email key is present — never the address. This text goes into
+    /// <see cref="SpeContainerMembershipService"/>'s log lines and into the result <c>Error</c> text the revoke and the
+    /// closure log, so it carries no PII (CODE-QUALITY-RUBRIC D9). Callers log the contact id beside it.
+    /// </summary>
     public override string ToString() => (ObjectId, Email) switch
     {
-        ({ } oid, { } email) => $"{email} (oid {oid})",
+        ({ } oid, not null) => $"oid {oid} (email key set)",
         ({ } oid, null) => $"oid {oid}",
-        (null, { } email) => email,
+        (null, not null) => "email key only (no bound oid)",
         _ => "(no key)",
     };
 }

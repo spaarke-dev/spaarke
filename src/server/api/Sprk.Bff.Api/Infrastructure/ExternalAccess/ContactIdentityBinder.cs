@@ -1426,8 +1426,10 @@ public sealed class ContactIdentityBinder
                     user.FirstName,
                     LastNameFor(user.LastName, null, user.InternalEmail),
                     user.InternalEmail);
+                // #2130: the change log names WHICH columns are written, never a person's values. The email and the last
+                // name (which falls back to the email's local part, LastNameFor) are "(set)" / "(none)".
                 changes.Add(new IdentityChange("contact", null, "(no contact)",
-                    $"create contact lastname={details.LastName} emailaddress1={details.Email ?? "(none)"} "
+                    $"create contact lastname={SetOrNone(details.LastName)} emailaddress1={SetOrNone(details.Email)} "
                     + $"sprk_externalobjectid={request.CallerOid:D} sprk_identityplane={IdentityPlaneMarker.Workforce}"));
                 changes.Add(LinkChange(suid, null));
                 if (!applyWrites)
@@ -1751,6 +1753,12 @@ public sealed class ContactIdentityBinder
     private static IdentityChange LinkChange(Guid systemUserId, Guid? contactId)
         => new("systemuser", systemUserId, "sprk_primarycontact=(null)",
             $"sprk_primarycontact={(contactId is { } c ? c.ToString("D") : "(the created contact)")}");
+
+    /// <summary>
+    /// How an <see cref="IdentityChange"/> shows a personal value (#2130): whether one is written, never the value itself.
+    /// The change strings are logged as the job's before-state lines.
+    /// </summary>
+    private static string SetOrNone(string? value) => string.IsNullOrWhiteSpace(value) ? "(none)" : "(set)";
 
     /// <summary>A last name for a created contact: the family name, else the display name, else the email's local part.</summary>
     public static string LastNameFor(string? familyName, string? displayName, string? email)
