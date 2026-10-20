@@ -278,6 +278,12 @@ R3 shows **`spaarke-bff-api-prod` with tenant-wide consent to the DEV BFF app** 
 - **Still open (§5 per-surface check, owner):** fresh-session sign-ins to Console, a PCF, the Office add-in, the Teams/A8 SPA and the Copilot plugin if in use. A guest token's `email` (UAC's question for task 186) is not proved by the member token above.
 - Rollback unchanged (§5): PATCH back from `before-stageB.json` and reset `authenticationBehaviors`; C before B once stage C runs; the BFF stays at a build containing 077 for 90 minutes after.
 
+### Stage C — 2026-10-19, owner approval "yes approve DC admin consent"
+
+- URL given to the owner: `https://login.microsoftonline.com/bc3aa7f4-3ca3-47e6-84e7-fea35f5c245b/adminconsent?client_id=5859e812-e5e7-452c-be21-1e5aa7b4d478`.
+- Pending: the owner accepts as a Dewey Cheatham administrator and reads back Enterprise applications (expect "Spaarke Workforce SPA" and the dev BFF app, each with admin-granted delegated permissions).
+- From here, rolling back stage B first needs this consent removed (§5, §10).
+
 ### Side finding (owner-approved App Insights read, 2026-10-19): `IDX10214` and `IDX40001` on dev are log noise, not failures
 
 - App Insights `spe-insights-dev-67e2xz`, last 6 h.

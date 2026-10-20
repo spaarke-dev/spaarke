@@ -34,10 +34,11 @@
 0. Observation for the owner: `spaarke-bff-api-prod` has tenant-wide consent (`SDAP.Access`) to the DEV BFF app 1e40baad: intended? (059 R3)
 1. (none: the 102b deploy was approved and done)
 2. (none: R3 registered under Epic #2099)
-3. `/upload` has no in-app link (known limit, task 042 notes): add an entry point, or retire the route?
-4. Owner deletes probe message `b38f0ab7-03c7-f111-a05c-0022482913fc` by hand.
-5. Owner test for 067: create a service request; expect an RQST number other than RQST-0001.
-6. ISS-010 #1864 (Internal Only not enforced by Dataverse security for licensed users flagged external): owner/UAC decision.
+3. `/upload` has no in-app link (known limit, task 042 notes): add an entry point, or retire the route? (explained to the owner 2026-10-19; awaiting choice)
+4. Probe message `b38f0ab7-03c7-f111-a05c-0022482913fc` (sprk_communication, body "[R3 probe 038] safe to delete"): owner said "yes can delete" 2026-10-19. The session runs the read-then-delete only on the owner's "go" to the exact commands it showed.
+5. 067: owner reports 2026-10-19 that the number is created automatically (closed).
+6. ISS-010 #1864 (Internal Only not enforced by Dataverse security for licensed users flagged external): explained to the owner 2026-10-19; owner/UAC decision.
+7. 059 stage C approved 2026-10-19: owner opens the consent URL (record §11), then reports the read-after. Browser sign-in checks pending.
 
 ## Standing dependencies and gates
 - **ebilling 015: `sprk_invoicestatus` retirement.** Grid 3ff4102c is on `statuscode` (2026-10-18 03:42Z). The external allow-list admits both columns (transitional). Ebilling's `-Delete` waits until 015 reaches master and R3 deploys a BFF containing it. **From the delete on, every dev BFF candidate must pass a CONTENT check** (not ancestry, because PR #1911 may be squash-merged): `Services/Finance/FinanceBaseValues.cs`, `FinanceRollupService.cs` and `InvoiceReviewService.cs` contain no `sprk_invoicestatus`, and FinanceBaseValues contains `InvoiceStatusCodeColumn`. `20e7b71a1` and the live `ad0e9e1a7` do NOT pass this (FinanceBaseValues 3 refs, InvoiceReviewService 1), so neither is a delete attestation. Afterwards, remove `sprk_invoicestatus` from the ReadableColumns and both test arrays. **Merge note:** keep ebilling's retirement-marker line in the ExternalAccessModule invoice block. **Rollback order:** SPA before BFF; never deploy the SPA after a failed or rolled-back BFF.
