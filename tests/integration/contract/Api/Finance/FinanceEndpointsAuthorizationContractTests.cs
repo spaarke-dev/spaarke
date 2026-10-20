@@ -421,6 +421,23 @@ public class FinanceEndpointsAuthorizationContractTests
         host.VerifyNoServiceWasInvoked();
     }
 
+    [Fact(DisplayName = "050a review #8: confirm asks the matter for finance.submit_invoice (Read AND AppendTo), as the internal submission route does: AppendTo alone is denied")]
+    public async Task Confirm_MatterWithAppendToButNotRead_IsDenied_AsTheSubmissionRouteIs()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.Probe.Hold(CreateInvoicePrivilege);
+        host.Access.Grant(Documents, body.DocumentId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
+        host.Access.Grant(Matters, body.MatterId, AccessRights.AppendTo);
+        host.Access.Grant(VendorOrganizations, body.VendorOrgId, AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Access.Calls.Last().Should().Be(new AccessCall(AccessPath.Record, Matters, body.MatterId, HasToken: true));
+        host.VerifyNoServiceWasInvoked();
+    }
+
     [Fact]
     public async Task Confirm_DocumentWithAppendToButNotAppend_IsDenied_TheOldRightNoLongerSuffices()
     {
@@ -528,6 +545,11 @@ public class FinanceEndpointsAuthorizationContractTests
         { InvoiceReviewFailure.DocumentLinkedToInvoice, HttpStatusCode.Conflict, false },
         { InvoiceReviewFailure.ConfirmStateUnreadable, HttpStatusCode.ServiceUnavailable, false },
         { InvoiceReviewFailure.StatusNotUpdated, HttpStatusCode.InternalServerError, true },
+        // 050a review #2 / #6: a rejected document (before the intake: nothing named; after the create: the submission is named), and a
+        // document deleted after its submission (named).
+        { InvoiceReviewFailure.ReviewDecisionChanged, HttpStatusCode.Conflict, false },
+        { InvoiceReviewFailure.ReviewDecisionChanged, HttpStatusCode.Conflict, true },
+        { InvoiceReviewFailure.DocumentNotFound, HttpStatusCode.NotFound, true },
     };
 
     [Theory]

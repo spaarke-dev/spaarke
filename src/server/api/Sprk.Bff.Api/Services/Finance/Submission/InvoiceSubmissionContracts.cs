@@ -271,6 +271,20 @@ public static class InvoiceSubmissionErrors
     /// <summary>ebilling-r1 task 050a (D-134): the existing document has no stored file (no drive or item pointer), so nothing could be read (422).</summary>
     public const string DocumentHasNoFile = "ebilling.submission.document_has_no_file";
 
+    /// <summary>
+    /// ebilling-r1 050a review #3: the existing document is filed under a core record (its <c>sprk_matter</c>, <c>sprk_project</c> or
+    /// <c>sprk_workassignment</c>) other than the one the confirm names (409). Nothing was written; the other record is never named. An UNFILED
+    /// document (no core lookup) may be confirmed (owner 2026-10-20, D-139).
+    /// </summary>
+    public const string DocumentCoreRecordMismatch = "ebilling.submission.document_core_record_mismatch";
+
+    /// <summary>
+    /// ebilling-r1 050a review #4: the document's confirm submission already ended Failed or Rejected, so the same confirm cannot answer with it
+    /// (409; the detail names the terminal status). Nothing was written. A new attempt after a terminal status is a later feature (owner
+    /// 2026-10-20, D-139: a new submission with a new tracking .n under a generation key).
+    /// </summary>
+    public const string SubmissionAlreadyEnded = "ebilling.submission.submission_already_ended";
+
     public const string StorageNotConfigured = "ebilling.submission.storage_not_configured";
     public const string CoreRecordUnavailable = "ebilling.submission.record_unavailable";
     public const string Failed = "ebilling.submission.failed";

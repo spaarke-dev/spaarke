@@ -235,7 +235,9 @@ public class RecordOwnerAssignmentCensusTests
 
         // ── Task 146 b2 (verifier AC10): create-by-upsert sites the scanner now sees (a PATCH of a fresh id) ─────────
         // ebilling-r1 050a (D-134): the invoice confirm no longer creates sprk_invoice (its create-by-upsert entry is gone); the
-        // submission job's persister is the only invoice creator (UnscannedWriter InvoiceSubmissionPersister.cs below).
+        // submission job creates it (UnscannedWriter InvoiceSubmissionPersister.cs below). No confirm path creates an invoice; other
+        // sprk_invoice creators remain on purpose (task 013: ChildRecordEndpoints CreateTables via OwnedChildWrite, the chat create_record
+        // tool, the decision route).
         new CensusEntry("InvoiceSubmissionService.cs", "sprk_invoicesubmission", 1, Disposition.Routed,
             "ebilling-r1 task 044 (FR-17): the submission row is built here and created by TrackingNumberAllocator with its number "
             + "(D-87). Its owner is ResolveOwnerAsync ForParents over the one core record it is filed against (secure-if-any) and "

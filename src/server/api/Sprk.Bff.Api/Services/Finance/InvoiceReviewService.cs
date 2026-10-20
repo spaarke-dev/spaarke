@@ -16,11 +16,14 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// <remarks>
 /// <para><b>Confirm (ebilling-r1 task 050a, owner decision D-134, refining D-71).</b> Confirm creates NO invoice and queues no
 /// extraction: it submits the document through the one invoice intake, <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>
-/// (the same firm, firm-link, core-record and owner checks as an upload; no upload, no second document; one submission per document), whose
-/// processing job is the only creator of <c>sprk_invoice</c> (ADR-002, D-19) and re-files the document under that invoice with the
-/// secure-record isolation step (<see cref="InvoiceDocumentRefile"/>). The firm invoice number is required (D-91). When the submission is
-/// received, the document is marked ConfirmedInvoice (a conditional write, retried on an unrelated change); a failure there names the
-/// submission, and a retry of the confirm returns the same submission and completes the mark.</para>
+/// (the same firm, firm-link, core-record and owner checks as an upload; no upload, no second document; one submission per document). No
+/// confirm path creates an invoice: the submission's processing job creates it (ADR-002, D-19) and re-files the document under it with the
+/// secure-record isolation step (<see cref="InvoiceDocumentRefile"/>). The firm invoice number is required (D-91). The document's review
+/// decision and version are read BEFORE the intake (a document already rejected is refused, 409
+/// <see cref="InvoiceReviewFailure.ReviewDecisionChanged"/>); when the submission is received, the document is marked ConfirmedInvoice,
+/// conditional on that version (an unrelated change is re-read and retried; a reject that landed in between is 409
+/// <see cref="InvoiceReviewFailure.ReviewDecisionChanged"/> and the job refuses the submission). A failure there names the submission, and a
+/// retry of the confirm returns the same submission and completes the mark.</para>
 /// <para><b>Reject</b> is conditional on the version it read and refuses a document that is linked to an invoice or that has a confirm
 /// submission, so neither decision silently overwrites the other.</para>
 /// Per ADR-013: Extends BFF API (not a separate service).
@@ -35,8 +38,10 @@ public interface IInvoiceReviewService
     /// <param name="correlationId">Correlation ID for distributed tracing.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The intake's outcome: Received with the submission's receipt, or its refusal (never thrown).</returns>
-    /// <exception cref="InvoiceReviewException">The submission was received but the document's review status could not be set
-    /// (<see cref="InvoiceReviewFailure.StatusNotUpdated"/>, naming the submission); a retry completes it.</exception>
+    /// <exception cref="InvoiceReviewException">The document was rejected before or during the confirm
+    /// (<see cref="InvoiceReviewFailure.ReviewDecisionChanged"/>; the submission is named when it exists), it was deleted after its submission
+    /// (<see cref="InvoiceReviewFailure.DocumentNotFound"/>, naming the submission), or the submission was received but the document's review
+    /// status could not be set (<see cref="InvoiceReviewFailure.StatusNotUpdated"/>, naming the submission; a retry completes it).</exception>
     Task<InvoiceSubmissionOutcome> ConfirmInvoiceAsync(
         InvoiceReviewConfirmRequest request,
         string correlationId,
@@ -122,7 +127,10 @@ public record InvoiceReviewRejectResult
 /// <summary>Why a review decision was refused or did not complete. Each value's message says what was saved.</summary>
 public enum InvoiceReviewFailure
 {
-    /// <summary>The document does not exist (deleted after the authorization check). Nothing was written.</summary>
+    /// <summary>
+    /// The document does not exist (deleted after the authorization check). Reject: nothing was written. Confirm (050a review #6): the document
+    /// was deleted after its submission was received; the submission is named, and no retry can complete the mark.
+    /// </summary>
     DocumentNotFound,
 
     /// <summary>Confirm only: the submission was received and queued, but the document's review status was not set. Retry completes it.</summary>
@@ -139,6 +147,13 @@ public enum InvoiceReviewFailure
 
     /// <summary>Reject only: whether the document has a confirm submission could not be read. Nothing was written; transient (503).</summary>
     ConfirmStateUnreadable,
+
+    /// <summary>
+    /// Confirm only (050a review #2): the document is rejected as not an invoice: already when the confirm read it (nothing was saved), or by
+    /// a reject that landed between the confirm's read and its mark (the submission is named; the job refuses it, so no invoice is created).
+    /// The reject stands (409).
+    /// </summary>
+    ReviewDecisionChanged,
 }
 
 /// <summary>
@@ -168,6 +183,7 @@ public sealed class InvoiceReviewException : Exception
         InvoiceReviewFailure.StatusNotUpdated => "sdap.finance.invoice_review.status_not_updated",
         InvoiceReviewFailure.DocumentChangedConcurrently => "sdap.finance.invoice_review.document_changed",
         InvoiceReviewFailure.DocumentLinkedToInvoice => "sdap.finance.invoice_review.document_linked_to_invoice",
+        InvoiceReviewFailure.ReviewDecisionChanged => "sdap.finance.invoice_review.review_decision_changed",
         _ => "sdap.finance.invoice_review.confirm_state_unreadable",
     };
 }
@@ -279,6 +295,20 @@ public class InvoiceReviewService : IInvoiceReviewService
             "VendorOrgId={VendorOrgId}, CorrelationId={CorrelationId}",
             request.DocumentId, request.MatterId, request.VendorOrgId, correlationId);
 
+        // 050a review #2: the review decision and version BEFORE the intake. The mark is conditional on this version, so a reject that lands
+        // between the submission's create and the mark is seen, never overwritten. A document already rejected is not confirmed (nothing saved).
+        // A missing document reads as null: the intake answers it (404 document_not_found).
+        var before = await ReadReviewStateAsync(request.DocumentId, ct);
+        if (before is { Decision.Status: ReviewStatusRejectedNotInvoice })
+        {
+            _logger.LogInformation(
+                "Invoice review confirmation refused: document {DocumentId} is rejected as not an invoice (409). CorrelationId={CorrelationId}",
+                request.DocumentId, correlationId);
+            throw new InvoiceReviewException(
+                InvoiceReviewFailure.ReviewDecisionChanged,
+                "The document has been rejected as not an invoice, so it cannot be confirmed. Nothing was saved; reload the document.");
+        }
+
         // D-134: the one intake, its existing-document entry. The vendor is the submitting firm; the matter the core record. The number is
         // passed as the reviewer typed it (D-91: the intake refuses a missing one; nothing here defaults it).
         var outcome = await _submissions.SubmitExistingDocumentAsync(new InvoiceSubmissionRequest
@@ -301,7 +331,7 @@ public class InvoiceReviewService : IInvoiceReviewService
         }
 
         var receipt = outcome.Receipt!;
-        await MarkDocumentConfirmedAsync(request.DocumentId, request.Notes, receipt.SubmissionId);
+        await MarkDocumentConfirmedAsync(request.DocumentId, request.Notes, receipt.SubmissionId, before);
 
         _logger.LogInformation(
             "Invoice review confirmed. DocumentId={DocumentId}, SubmissionId={SubmissionId}, JobId={JobId}, CorrelationId={CorrelationId}",
@@ -310,39 +340,68 @@ public class InvoiceReviewService : IInvoiceReviewService
     }
 
     /// <summary>
-    /// Marks the document ConfirmedInvoice once its submission is received. Conditional on the version it read (an unrelated write in
-    /// between is retried, <see cref="MaxConditionalWriteAttempts"/> in total). It runs under <see cref="CancellationToken.None"/>: the
-    /// submission is already saved and queued, so a caller that goes away does not leave the mark half-done. Any failure is
-    /// <see cref="InvoiceReviewFailure.StatusNotUpdated"/> naming the submission; a retry of the confirm returns that submission and marks again.
+    /// Marks the document ConfirmedInvoice once its submission is received. The first write is conditional on the version read BEFORE the
+    /// intake (<paramref name="before"/>, 050a review #2). On a newer version the document is read again: a review decision changed to
+    /// RejectedNotInvoice is 409 <see cref="InvoiceReviewFailure.ReviewDecisionChanged"/> naming the submission (the reject stands; the job
+    /// refuses the submission); anything else is an unrelated write and is retried on the new version, <see cref="MaxConditionalWriteAttempts"/>
+    /// in total. It runs under <see cref="CancellationToken.None"/>: the submission is already saved and queued, so a caller that goes away does
+    /// not leave the mark half-done. A deleted document is <see cref="InvoiceReviewFailure.DocumentNotFound"/> naming the submission (review
+    /// #6); any other failure is <see cref="InvoiceReviewFailure.StatusNotUpdated"/> naming the submission, and a retry of the confirm returns
+    /// that submission and marks again.
     /// </summary>
-    private async Task MarkDocumentConfirmedAsync(Guid documentId, string? notes, Guid submissionId)
+    private async Task MarkDocumentConfirmedAsync(Guid documentId, string? notes, Guid submissionId, ReviewState? before)
     {
         var fields = BuildReviewStatusFields(ReviewStatusConfirmedInvoice, notes, DateTime.UtcNow);
         try
         {
+            var state = before ?? await ReadReviewStateAsync(documentId, CancellationToken.None)
+                ?? throw new KeyNotFoundException($"{DocumentEntity} record was not found.");
             for (var attempt = 1; ; attempt++)
             {
-                var document = await _records.RetrieveRecordFieldsAsync(
-                    DocumentEntity, documentId, new[] { VersionNumber }, CancellationToken.None);
-                if (document.Count == 0)
-                {
-                    throw new KeyNotFoundException($"{DocumentEntity} record was not found.");
-                }
-
-                var version = ReadVersion(document, "the confirmation cannot mark it safely");
                 try
                 {
-                    await _records.UpdateRecordFieldsIfUnchangedAsync(DocumentEntity, documentId, fields, version, CancellationToken.None);
-                    _logger.LogDebug("Marked document {DocumentId} ConfirmedInvoice (version {Version})", documentId, version);
+                    await _records.UpdateRecordFieldsIfUnchangedAsync(DocumentEntity, documentId, fields, state.Version, CancellationToken.None);
+                    _logger.LogDebug("Marked document {DocumentId} ConfirmedInvoice (version {Version})", documentId, state.Version);
                     return;
                 }
                 catch (DBConcurrencyException changed) when (attempt < MaxConditionalWriteAttempts)
                 {
+                    var now = await ReadReviewStateAsync(documentId, CancellationToken.None)
+                        ?? throw new KeyNotFoundException($"{DocumentEntity} record was not found.");
+                    if (now.Decision.Status == ReviewStatusRejectedNotInvoice && now.Decision != before?.Decision)
+                    {
+                        _logger.LogWarning(changed,
+                            "Document {DocumentId} was rejected as not an invoice after submission {SubmissionId} was received; the reject " +
+                            "stands (409) and the job refuses the submission", documentId, submissionId);
+                        throw new InvoiceReviewException(
+                            InvoiceReviewFailure.ReviewDecisionChanged,
+                            $"The document was rejected as not an invoice by someone else while it was being confirmed (submission {submissionId}). " +
+                            "The rejection stands: that submission will not create an invoice, and the document was not marked as confirmed.",
+                            submissionId,
+                            changed);
+                    }
+
                     _logger.LogWarning(changed,
                         "Document {DocumentId} changed before its confirmed status was written (attempt {Attempt} of " +
                         "{MaxAttempts}); re-reading it", documentId, attempt, MaxConditionalWriteAttempts);
+                    state = now;
                 }
             }
+        }
+        catch (InvoiceReviewException)
+        {
+            throw;
+        }
+        catch (KeyNotFoundException gone)
+        {
+            _logger.LogWarning(gone, "Document {DocumentId}: submission {SubmissionId} was received but the document no longer exists",
+                documentId, submissionId);
+            throw new InvoiceReviewException(
+                InvoiceReviewFailure.DocumentNotFound,
+                $"The invoice was submitted for processing (submission {submissionId}), but the document no longer exists, so it could not " +
+                "be marked as a confirmed invoice. A retry cannot complete it.",
+                submissionId,
+                gone);
         }
         catch (Exception ex)
         {
@@ -356,6 +415,33 @@ public class InvoiceReviewService : IInvoiceReviewService
                 submissionId,
                 ex);
         }
+    }
+
+    /// <summary>
+    /// The document's review decision (status, reviewed-on stamp and notes: every decision writes all three, so a second reject of an
+    /// already-rejected document is told apart from an unrelated write by its stamp) and the version a conditional write is made on.
+    /// </summary>
+    internal sealed record ReviewState(long Version, ReviewDecision Decision);
+
+    /// <summary>A review decision as <see cref="BuildReviewStatusFields"/> writes it; equal only if no decision was written in between.</summary>
+    internal readonly record struct ReviewDecision(int? Status, DateTime? ReviewedOnUtc, string? Notes);
+
+    /// <summary>The document's <see cref="ReviewState"/>, or null when the document does not exist.</summary>
+    private async Task<ReviewState?> ReadReviewStateAsync(Guid documentId, CancellationToken ct)
+    {
+        var document = await _records.RetrieveRecordFieldsAsync(
+            DocumentEntity, documentId, new[] { VersionNumber, DocInvoiceReviewStatus, DocInvoiceReviewedOn, DocInvoiceReviewNotes }, ct);
+        if (document.Count == 0)
+        {
+            return null;
+        }
+
+        return new ReviewState(
+            ReadVersion(document, "the confirmation cannot mark it safely"),
+            new ReviewDecision(
+                TryReadInt(document, DocInvoiceReviewStatus),
+                TryReadUtc(document, DocInvoiceReviewedOn),
+                document.TryGetValue(DocInvoiceReviewNotes, out var reviewNotes) ? reviewNotes?.ToString() : null));
     }
 
     /// <summary>

@@ -38,7 +38,8 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// </summary>
 /// <remarks>
 /// <para><b>One transaction</b> (FR-20), in this order: the invoice create(s) from 014, one create per line, the approval portion (not for an
-/// automatic rejection), the document's <c>sprk_invoice</c> link, and the submission update (<c>sprk_invoice</c>, the reason code,
+/// automatic rejection), the document's <c>sprk_invoice</c> link (an intake document only: a confirmed EXISTING document, 050a, is checked
+/// on its live row here and linked after the commit by its re-file, <see cref="InvoiceDocumentRefile"/>, the link's one writer), and the submission update (<c>sprk_invoice</c>, the reason code,
 /// <c>sprk_findingsjson</c>). A linked <c>sprk_invoice</c> therefore proves the commit; it is the resume marker. <b>The status is not
 /// written here (D-130 a):</b> the submission stays Processing, and part D writes <see cref="SubmissionPersistResult.TerminalStatus"/> last.
 /// Every created row carries the submitter as <c>sprk_createdbyperson</c> (D-130 3), read from the submission's own stamp, and the invoice
@@ -135,6 +136,15 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     internal const string FindingsTooLargeCode = "ebilling.submission.findings_too_large";
     internal const string OwnerUnresolvedCode = "ebilling.submission.owner_unresolved";
     internal const string SubmitterMissingCode = "ebilling.submission.submitter_missing";
+
+    /// <summary>
+    /// 050a review #2: a confirm submission's document was rejected as not an invoice (<c>sprk_invoicereviewstatus</c> = RejectedNotInvoice)
+    /// before the job persisted it: the reject stands and the submission is Failed with this code, no invoice.
+    /// </summary>
+    internal const string DocumentRejectedCode = "ebilling.submission.document_rejected";
+
+    /// <summary>The document's review decision column (<see cref="InvoiceReviewService.DocInvoiceReviewStatus"/>).</summary>
+    private static readonly string[] ConfirmedDocumentColumns = [DocumentInvoice, InvoiceReviewService.DocInvoiceReviewStatus];
 
     internal const string ApprovalRecordNumber = "sprk_regardingrecordnumber";
 
@@ -236,6 +246,19 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 SubmissionId = submissionId,
                 CurrentSubmission = current,
             };
+        }
+
+        // 050a review #1 / #2: a confirm submission (D-134) points at an EXISTING document that other writers can file or decide while the job
+        // runs. Its live row is checked here, before anything is built or written: linked to an invoice other than the one this submission
+        // creates, or rejected as not an invoice, is a refusal (the submission is Failed, no invoice). The link itself is NOT written by this
+        // transaction for such a document: the re-file (InvoiceDocumentRefile, after the commit) is its one writer, through ReparentAsync, so
+        // the reparent reads the document's TRUE prior parents and its own conditional write catches a filing that lands after this check.
+        var documentId = outcome.Submission!.DocumentId;
+        var existingDocument = InvoiceDocumentRefile.AppliesTo(submissionId, documentId);
+        if (existingDocument
+            && await RefuseExistingDocumentAsync(submissionId, documentId, InvoiceIdFor(submissionId), ct).ConfigureAwait(false) is { } documentRefusal)
+        {
+            return documentRefusal;
         }
 
         // D-130 (3) / D-131: the submitter, recorded at intake on the submission as sprk_createdbyperson (a systemuser: the SPA caller's linked
@@ -346,13 +369,19 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             requests.Add(new CreateRequest { Target = approval });
         }
 
-        requests.Add(new UpdateRequest
+        if (!existingDocument)
         {
-            Target = new Entity(DocumentEntity, outcome.Submission!.DocumentId)
+            // An intake document (created by the intake under the core record): linked here, in the transaction. A confirmed existing
+            // document is linked by its re-file instead (see the check above).
+            requests.Add(new UpdateRequest
             {
-                [DocumentInvoice] = new EntityReference(InvoiceReviewService.InvoiceEntity, invoiceId),
-            },
-        });
+                Target = new Entity(DocumentEntity, documentId)
+                {
+                    [DocumentInvoice] = new EntityReference(InvoiceReviewService.InvoiceEntity, invoiceId),
+                },
+            });
+        }
+
         // D-133: a plan entry left out is a Signal the invoice will never have; mark the submission for the administrator in the same write.
         var adminAttention = planRefusals.Count == 0
             ? null
@@ -419,6 +448,43 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             TerminalStatus = committedTerminal.Status,
             TerminalReasonCode = committedTerminal.ReasonCode,
         }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 050a review #1 / #2: null when the confirm submission's document may be persisted (unlinked, or already linked to
+    /// <paramref name="invoiceId"/>, this submission's own invoice; not rejected); otherwise the refusal, nothing written. A missing document is
+    /// refused too. A read fault propagates (the job retries).
+    /// </summary>
+    private async Task<SubmissionPersistResult?> RefuseExistingDocumentAsync(Guid submissionId, Guid documentId, Guid invoiceId, CancellationToken ct)
+    {
+        Entity document;
+        try
+        {
+            document = await _entities.RetrieveAsync(DocumentEntity, documentId, ConfirmedDocumentColumns, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsRecordNotFound(ex))
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: its document {DocumentId} no longer exists; nothing persisted", submissionId, documentId);
+            return Result(SubmissionPersistStatus.Refused, submissionId, InvoiceSubmissionErrors.DocumentNotFound);
+        }
+
+        if (document.GetAttributeValue<EntityReference>(DocumentInvoice) is { Id: var linked } && linked != Guid.Empty && linked != invoiceId)
+        {
+            // Filed under another invoice since the confirm (e.g. a document PUT): never overwritten, never moved from under it.
+            _logger.LogWarning("Invoice submission {SubmissionId}: its document {DocumentId} is linked to invoice {LinkedId}; nothing persisted",
+                submissionId, documentId, linked);
+            return Result(SubmissionPersistStatus.Refused, submissionId, InvoiceSubmissionErrors.DocumentAlreadyInvoiced);
+        }
+
+        if (document.GetAttributeValue<OptionSetValue>(InvoiceReviewService.DocInvoiceReviewStatus)?.Value == InvoiceReviewService.ReviewStatusRejectedNotInvoice)
+        {
+            // A reject that landed between the confirm's create and its mark (the confirm answered 409): the reject stands.
+            _logger.LogWarning("Invoice submission {SubmissionId}: its document {DocumentId} was rejected as not an invoice; nothing persisted",
+                submissionId, documentId);
+            return Result(SubmissionPersistStatus.Refused, submissionId, DocumentRejectedCode);
+        }
+
+        return null;
     }
 
     // ── Resume (the submission already links an invoice) ──

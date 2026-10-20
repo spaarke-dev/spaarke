@@ -94,6 +94,9 @@ public sealed class InvoiceSubmissionServiceTests
         public bool OtherCoreRecordsExist = true;
         public Entity? Submission;
 
+        /// <summary>050a review #5: non-null, the allocator's create stores this row as <see cref="Submission"/> (what a concurrent creator left).</summary>
+        public Entity? StoredOnCreate;
+
         /// <summary>050a: the <c>sprk_document</c> the existing-document entry reads (null: not found).</summary>
         public Entity? ExistingDocument;
 
@@ -296,6 +299,11 @@ public sealed class InvoiceSubmissionServiceTests
                     }
 
                     ct.ThrowIfCancellationRequested();
+                    if (StoredOnCreate is { } stored)
+                    {
+                        Submission = stored;
+                    }
+
                     return Allocation;
                 });
 

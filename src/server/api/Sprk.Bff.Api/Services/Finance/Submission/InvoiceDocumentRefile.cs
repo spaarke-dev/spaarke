@@ -15,6 +15,10 @@
 // Placement (bff-extensions.md): Services/Finance/Submission, an in-process step of the ADR-004 submission job in the BFF (ADR-052). No
 // endpoint, no package, no AI call. DI: FinanceModule, beside the after-steps that call it.
 
+using System.Data;
+using System.Globalization;
+using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 
@@ -32,7 +36,10 @@ public enum InvoiceDocumentRefileStatus
     /// <summary>Whether the document is isolated could not be read (twice): nothing was written. Transient; the redelivery retries.</summary>
     IsolationUnreadable,
 
-    /// <summary>The ownership resolver refused the re-file (<see cref="InvoiceDocumentRefileResult.ReasonCode"/>): nothing was written.</summary>
+    /// <summary>
+    /// The re-file was refused (<see cref="InvoiceDocumentRefileResult.ReasonCode"/>): by the ownership resolver, or because the document is gone
+    /// or linked to another invoice (<see cref="InvoiceSubmissionErrors.DocumentAlreadyInvoiced"/>, 050a review #1). Nothing was written.
+    /// </summary>
     Refused,
 }
 
@@ -41,19 +48,25 @@ public sealed record InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus Sta
 
 /// <summary>
 /// D-134 (3): when a submission points at an EXISTING document (the review-confirm route,
-/// <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>), linking that document to the invoice the job created files it under
-/// the invoice, so the job re-files it with the same calls confirm made before the redirect (#2095, task 146), in this order:
+/// <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>), the job files that document under the invoice it created. This step is
+/// the ONE writer of the document's <c>sprk_invoice</c> lookup for such a submission (050a review #1, uac-r2's design: the persister's
+/// transaction does not write it), so the reparent reads the document's TRUE prior parents. In this order, each attempt:
 /// <list type="number">
+/// <item>The live row: its link and row version. Gone = <see cref="InvoiceDocumentRefileStatus.Refused"/>; linked to an invoice other than
+/// <c>invoiceId</c> = Refused <see cref="InvoiceSubmissionErrors.DocumentAlreadyInvoiced"/> (never overwritten). Nothing written.</item>
 /// <item><see cref="RefileIsolationRead.BeforeWriteAsync"/>: whether the document is isolated, read BEFORE its owner can move (once more after
 /// a fault). Both reads faulting = <see cref="InvoiceDocumentRefileStatus.IsolationUnreadable"/>, nothing written.</item>
-/// <item><see cref="IRecordOwnershipResolver.ReparentAsync"/> with the invoice as the inherited parent and no column change (the link is
-/// already written by the persister's transaction): the owner is re-derived over every parent the document has, and reassigned (a separate
-/// write, read back) when it differs. A refusal = <see cref="InvoiceDocumentRefileStatus.Refused"/>, nothing written; a fault propagates.</item>
+/// <item><see cref="IRecordOwnershipResolver.ReparentAsync"/> with <c>sprk_invoice</c> set to the invoice (<see cref="ReparentRequestFor"/>):
+/// the resolver reads the row's current parents, re-derives the owner over them plus the invoice, refuses a move out of a Secure record
+/// without F3 (the job acts for nobody, so any such move is refused), and only then writes the link, CONDITIONAL on the row version read
+/// in 1. A version mismatch (a filing that landed in between) is read again and decided again, <see cref="MaxAttempts"/> in total; the
+/// owner is reassigned (a separate write, read back) when it differs. A refusal = Refused, nothing written; a fault propagates.</item>
 /// <item><see cref="SecureChildReconciler.AfterRefileAsync"/>, unless the reparent reports
 /// <see cref="RecordOwnerResolution.ParentsUnchanged"/>: the document's secure-child mirror and the pass over what is filed under it, with
 /// <see cref="CancellationToken.None"/> (the re-file has landed). It never throws.</item>
 /// </list>
-/// Every step is idempotent: a redelivery that finds the document already owned by the resolved team writes no owner and runs the step again.
+/// Every step is idempotent: a redelivery that finds the link already written skips the write, re-derives the owner (the invoice is also
+/// passed as an inherited parent, so the owner is decided even when the link holds) and runs the step after the re-file again.
 /// </summary>
 public sealed class InvoiceDocumentRefile
 {
@@ -66,14 +79,22 @@ public sealed class InvoiceDocumentRefile
     /// <summary>Reason code of a refusal the resolver gave no code for.</summary>
     public const string RefileRefusedCode = "ebilling.submission.document_refile_refused";
 
+    /// <summary>Attempts, in total, of the conditional link write when the document keeps changing under it.</summary>
+    internal const int MaxAttempts = 3;
+
+    private static readonly string[] DocumentColumns = [InvoiceReviewService.DocInvoiceLinkValue, InvoiceReviewService.VersionNumber];
+
     private readonly IRecordOwnershipResolver _ownership;
     private readonly SecureChildReconciler _children;
+    private readonly IFieldMappingDataverseService _records;
     private readonly ILogger<InvoiceDocumentRefile> _logger;
 
-    public InvoiceDocumentRefile(IRecordOwnershipResolver ownership, SecureChildReconciler children, ILogger<InvoiceDocumentRefile> logger)
+    public InvoiceDocumentRefile(
+        IRecordOwnershipResolver ownership, SecureChildReconciler children, IFieldMappingDataverseService records, ILogger<InvoiceDocumentRefile> logger)
     {
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _children = children ?? throw new ArgumentNullException(nameof(children));
+        _records = records ?? throw new ArgumentNullException(nameof(records));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -81,8 +102,25 @@ public sealed class InvoiceDocumentRefile
     public static bool AppliesTo(Guid submissionId, Guid? documentId) =>
         documentId is { } document && document != Guid.Empty && submissionId == InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(document);
 
+    /// <summary>
+    /// The reparent this step sends: <c>sprk_invoice</c> set to the invoice (the change the resolver weighs against the row's current
+    /// parents), the invoice as an inherited parent too (so a redelivery that finds the link already written still re-derives the owner),
+    /// and no caller for a move out of a Secure record (the job acts for nobody: such a move is refused).
+    /// </summary>
+    internal static RecordReparent ReparentRequestFor(Guid documentId, Guid invoiceId) => new()
+    {
+        EntityLogicalName = DocumentEntity,
+        RecordId = documentId,
+        ParentChanges = new Dictionary<string, EntityReference?>
+        {
+            [InvoiceSubmissionPersister.DocumentInvoice] = new EntityReference(InvoiceEntity, invoiceId),
+        },
+        InheritedParents = new[] { new RecordOwnershipParent(InvoiceEntity, invoiceId) },
+    };
+
     /// <summary>Re-files the submission's existing document under <paramref name="invoiceId"/>; see the type's remarks for the order.</summary>
-    /// <exception cref="Exception">A Dataverse fault of the reparent (its owner assignment included) propagates: the caller retries.</exception>
+    /// <exception cref="Exception">A Dataverse fault of a read, the link write or the reparent (its owner assignment included) propagates, as does
+    /// a document that changed on every attempt (<see cref="DBConcurrencyException"/>): the caller retries.</exception>
     public async Task<InvoiceDocumentRefileResult> RefileAsync(Guid submissionId, Guid? documentId, Guid invoiceId, CancellationToken ct)
     {
         if (!AppliesTo(submissionId, documentId))
@@ -91,51 +129,95 @@ public sealed class InvoiceDocumentRefile
         }
 
         var document = documentId!.Value;
-
-        // 1. Isolated before? Read before anything can move the owner; a read that cannot be answered writes nothing (fail closed).
-        var answer = await RefileIsolationRead.BeforeWriteAsync(_children, DocumentEntity, document, ct).ConfigureAwait(false);
-        bool wasIsolated;
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            wasIsolated = await answer().ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Invoice submission {SubmissionId}: document {DocumentId} was not re-filed under invoice {InvoiceId}: whether it is held in a "
-                + "Secure record could not be read (twice). Nothing was written; the job retries.", submissionId, document, invoiceId);
-            return new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.IsolationUnreadable, IsolationUnreadableCode);
-        }
-
-        // 2. The reparent: the invoice is the parent the document now has; its owner is re-derived over all of them and moved when it differs.
-        var reparent = await _ownership.ReparentAsync(
-            new RecordReparent
+            // 1. The live row: never overwrite another invoice's link (050a review #1).
+            var row = await _records.RetrieveRecordFieldsAsync(DocumentEntity, document, DocumentColumns, ct).ConfigureAwait(false);
+            if (row.Count == 0)
             {
-                EntityLogicalName = DocumentEntity,
-                RecordId = document,
-                ParentChanges = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(),
-                InheritedParents = new[] { new RecordOwnershipParent(InvoiceEntity, invoiceId) },
-            },
-            _ => Task.CompletedTask,
-            ct).ConfigureAwait(false);
+                _logger.LogWarning("Invoice submission {SubmissionId}: document {DocumentId} no longer exists; it was not re-filed under invoice {InvoiceId}",
+                    submissionId, document, invoiceId);
+                return new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refused, InvoiceSubmissionErrors.DocumentNotFound);
+            }
 
-        if (reparent.IsRefused)
-        {
-            _logger.LogWarning(
-                "Invoice submission {SubmissionId}: document {DocumentId} could not be re-filed under invoice {InvoiceId} ({Code}); nothing was written",
-                submissionId, document, invoiceId, reparent.RefusalCode);
-            return new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refused, reparent.RefusalCode ?? RefileRefusedCode);
+            var linked = ReadGuid(row, InvoiceReviewService.DocInvoiceLinkValue);
+            if (linked is { } other && other != invoiceId)
+            {
+                _logger.LogWarning(
+                    "Invoice submission {SubmissionId}: document {DocumentId} is linked to invoice {LinkedId}, not {InvoiceId}; it was not re-filed",
+                    submissionId, document, other, invoiceId);
+                return new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refused, InvoiceSubmissionErrors.DocumentAlreadyInvoiced);
+            }
+
+            var version = ReadVersion(row);
+
+            // 2. Isolated before? Read before anything can move the owner; a read that cannot be answered writes nothing (fail closed).
+            var answer = await RefileIsolationRead.BeforeWriteAsync(_children, DocumentEntity, document, ct).ConfigureAwait(false);
+            bool wasIsolated;
+            try
+            {
+                wasIsolated = await answer().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Invoice submission {SubmissionId}: document {DocumentId} was not re-filed under invoice {InvoiceId}: whether it is held in a "
+                    + "Secure record could not be read (twice). Nothing was written; the job retries.", submissionId, document, invoiceId);
+                return new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.IsolationUnreadable, IsolationUnreadableCode);
+            }
+
+            // 3. The reparent: the resolver weighs the link against the row's CURRENT parents, then this step writes it, conditionally.
+            RecordOwnerResolution reparent;
+            try
+            {
+                reparent = await _ownership.ReparentAsync(
+                    ReparentRequestFor(document, invoiceId),
+                    token => linked == invoiceId
+                        ? Task.CompletedTask // a redelivery: the link already holds
+                        : _records.UpdateRecordFieldsIfUnchangedAsync(DocumentEntity, document, new Dictionary<string, object?>
+                        {
+                            [InvoiceReviewService.DocInvoiceLinkBind] = $"/sprk_invoices({invoiceId:D})",
+                        }, version, token),
+                    ct).ConfigureAwait(false);
+            }
+            catch (DBConcurrencyException changed) when (attempt < MaxAttempts)
+            {
+                _logger.LogInformation(changed,
+                    "Invoice submission {SubmissionId}: document {DocumentId} changed before its link was written (attempt {Attempt} of {Max}); "
+                    + "reading it again", submissionId, document, attempt, MaxAttempts);
+                continue;
+            }
+
+            if (reparent.IsRefused)
+            {
+                _logger.LogWarning(
+                    "Invoice submission {SubmissionId}: document {DocumentId} could not be re-filed under invoice {InvoiceId} ({Code}); nothing was written",
+                    submissionId, document, invoiceId, reparent.RefusalCode);
+                return new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refused, reparent.RefusalCode ?? RefileRefusedCode);
+            }
+
+            // 4. The ONE step after a re-file (#2091 / #2095). CancellationToken.None: the re-file has landed. It never throws.
+            if (!reparent.ParentsUnchanged)
+            {
+                await _children.AfterRefileAsync(DocumentEntity, document, () => Task.FromResult(wasIsolated), CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+
+            _logger.LogInformation("Invoice submission {SubmissionId}: document {DocumentId} re-filed under invoice {InvoiceId}",
+                submissionId, document, invoiceId);
+            return new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refiled);
         }
-
-        // 3. The ONE step after a re-file (#2091 / #2095). CancellationToken.None: the re-file has landed. It never throws.
-        if (!reparent.ParentsUnchanged)
-        {
-            await _children.AfterRefileAsync(DocumentEntity, document, () => Task.FromResult(wasIsolated), CancellationToken.None)
-                .ConfigureAwait(false);
-        }
-
-        _logger.LogInformation("Invoice submission {SubmissionId}: document {DocumentId} re-filed under invoice {InvoiceId}",
-            submissionId, document, invoiceId);
-        return new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refiled);
     }
+
+    private static Guid? ReadGuid(Dictionary<string, object?> row, string column) =>
+        row.TryGetValue(column, out var raw) && raw is not null && Guid.TryParse(raw.ToString(), out var value) && value != Guid.Empty
+            ? value
+            : null;
+
+    /// <summary>Every row has a version; without one the link cannot be written conditionally, so nothing is written (the job retries).</summary>
+    private static long ReadVersion(Dictionary<string, object?> row) =>
+        row.TryGetValue(InvoiceReviewService.VersionNumber, out var raw) && raw is not null
+        && long.TryParse(raw.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var version)
+            ? version
+            : throw new InvalidOperationException("The document's versionnumber could not be read, so its invoice link cannot be written safely.");
 }

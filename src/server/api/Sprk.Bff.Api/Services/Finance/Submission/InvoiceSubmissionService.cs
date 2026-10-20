@@ -193,7 +193,19 @@ public class InvoiceSubmissionService
     /// <summary>The processing job id of that submission: deterministic too, so a retry answers with the same job id it was first given.</summary>
     public static Guid ExistingDocumentJobIdFor(Guid documentId) => InvoiceSubmissionPersister.IdOf($"ebilling-confirm-job-{documentId:D}");
 
-    private static readonly string[] ExistingDocumentColumns = ["sprk_invoice", "sprk_graphdriveid", "sprk_graphitemid"];
+    /// <summary>
+    /// The document's core-record lookups (050a review #3): the confirm's core record must be the one the document is filed under, if any. The
+    /// kinds match <see cref="InvoiceCoreRecordKind"/>.
+    /// </summary>
+    private static readonly (string Column, InvoiceCoreRecordKind Kind)[] DocumentCoreColumns =
+    [
+        ("sprk_matter", InvoiceCoreRecordKind.Matter),
+        ("sprk_project", InvoiceCoreRecordKind.Project),
+        ("sprk_workassignment", InvoiceCoreRecordKind.WorkAssignment),
+    ];
+
+    private static readonly string[] ExistingDocumentColumns =
+        ["sprk_invoice", "sprk_graphdriveid", "sprk_graphitemid", .. DocumentCoreColumns.Select(c => c.Column)];
 
     /// <summary>
     /// The existing-document entry (D-134): a reviewer confirms that a document already stored (an email attachment) is an invoice. It runs the
@@ -212,7 +224,9 @@ public class InvoiceSubmissionService
     /// already terminal (FR-20), so a second message for it is harmless; a lost reply or a failed enqueue is completed by the retry.</para>
     /// <para><b>The document</b> must exist (404 <see cref="InvoiceSubmissionErrors.DocumentNotFound"/>), hold a stored file (422
     /// <see cref="InvoiceSubmissionErrors.DocumentHasNoFile"/>) and not already be linked to an invoice (409
-    /// <see cref="InvoiceSubmissionErrors.DocumentAlreadyInvoiced"/>). The caller's rights on it are the route's (ADR-008).</para>
+    /// <see cref="InvoiceSubmissionErrors.DocumentAlreadyInvoiced"/>), and not be filed under another core record (409
+    /// <see cref="InvoiceSubmissionErrors.DocumentCoreRecordMismatch"/>; an unfiled document is allowed, owner 2026-10-20). The caller's rights
+    /// on it are the route's (ADR-008).</para>
     /// </remarks>
     public virtual async Task<InvoiceSubmissionOutcome> SubmitExistingDocumentAsync(InvoiceSubmissionRequest request, CancellationToken ct)
     {
@@ -253,8 +267,8 @@ public class InvoiceSubmissionService
             return await AnswerWithEarlierAsync(request, number, earlier, documentId, jobId, ct);
         }
 
-        // ── 3. The document: present, holding a file, not already an invoice's ──
-        if (await CheckExistingDocumentAsync(documentId, ct) is { } documentRefusal)
+        // ── 3. The document: present, holding a file, not already an invoice's, not filed under another core record ──
+        if (await CheckExistingDocumentAsync(documentId, request.CoreRecord, ct) is { } documentRefusal)
         {
             return documentRefusal;
         }
@@ -323,6 +337,30 @@ public class InvoiceSubmissionService
                 "A tracking number could not be assigned right now, so nothing was saved. Try again shortly.");
         }
 
+        if (allocation.Outcome == TrackingNumberOutcome.AlreadyCreated)
+        {
+            // 050a review #5: a concurrent confirm (or a lost reply) created the row first. The allocator's reconcile compared the firm and the
+            // number only; the row is answered exactly as a retry is (firm, number AND core record, and its terminal state), never taken as ours.
+            InvoiceSubmissionView? concurrent;
+            try
+            {
+                concurrent = await GetAsync(submissionId, write);
+            }
+            catch (SdapProblemException ex)
+            {
+                return InvoiceSubmissionOutcome.Refused(ex.StatusCode, ex.Code, ex.Detail ?? ex.Title);
+            }
+
+            if (concurrent is null)
+            {
+                // Created, then gone before it could be read (a delete outside this path): nothing to answer with; a retry decides again.
+                _logger.LogWarning("Invoice submission {SubmissionId}: already created for document {DocumentId} but no longer readable", submissionId, documentId);
+                return NotQueued();
+            }
+
+            return await AnswerWithEarlierAsync(request, number, concurrent, documentId, jobId, write);
+        }
+
         if (!await TrySubmitJobAsync(jobId, submissionId, request.CorrelationId))
         {
             return NotQueued();
@@ -335,8 +373,10 @@ public class InvoiceSubmissionService
     }
 
     /// <summary>
-    /// A retry: the document's confirm submission exists. The same firm, record and firm invoice number get it back (re-queued while it is
-    /// still Received); anything else is 409 and names nothing about it.
+    /// A retry (or a concurrent create, review #5): the document's confirm submission exists. The same firm, record and firm invoice number get
+    /// it back (re-queued while it is still Received); anything else is 409 and names nothing about it. One that already ended Failed or
+    /// Rejected is 409 <see cref="InvoiceSubmissionErrors.SubmissionAlreadyEnded"/> naming that status, and the caller does not re-mark the
+    /// document (review #4; owner 2026-10-20, D-139: a new attempt after a terminal status is a later feature).
     /// </summary>
     private async Task<InvoiceSubmissionOutcome> AnswerWithEarlierAsync(
         InvoiceSubmissionRequest request, string number, InvoiceSubmissionView earlier, Guid documentId, Guid jobId, CancellationToken ct)
@@ -353,6 +393,15 @@ public class InvoiceSubmissionService
             return DocumentAlreadySubmitted();
         }
 
+        if (earlier.Status is nameof(InvoiceSubmissionStatus.Failed) or nameof(InvoiceSubmissionStatus.Rejected))
+        {
+            _logger.LogInformation("Invoice submission {SubmissionId}: the confirm of document {DocumentId} already ended {Status}; refused (409)",
+                earlier.SubmissionId, documentId, earlier.Status);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.SubmissionAlreadyEnded,
+                $"The document was already submitted as an invoice and that submission ended {earlier.Status}. Nothing was saved; " +
+                "a new attempt for the same document is not available yet.");
+        }
+
         if (earlier.Status == nameof(InvoiceSubmissionStatus.Received))
         {
             ct.ThrowIfCancellationRequested();
@@ -367,8 +416,12 @@ public class InvoiceSubmissionService
         return InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(earlier.SubmissionId, jobId, earlier.TrackingNumber!, documentId));
     }
 
-    /// <summary>Null when the document can be submitted; otherwise the refusal. A read fault is 503 (never "not found").</summary>
-    private async Task<InvoiceSubmissionOutcome?> CheckExistingDocumentAsync(Guid documentId, CancellationToken ct)
+    /// <summary>
+    /// Null when the document can be submitted; otherwise the refusal. A read fault is 503 (never "not found"). A document filed under a core
+    /// record other than <paramref name="core"/> is 409 <see cref="InvoiceSubmissionErrors.DocumentCoreRecordMismatch"/> (review #3); an UNFILED
+    /// document (no core lookup) is allowed (owner 2026-10-20, D-139).
+    /// </summary>
+    private async Task<InvoiceSubmissionOutcome?> CheckExistingDocumentAsync(Guid documentId, InvoiceCoreRecord core, CancellationToken ct)
     {
         Entity? document;
         try
@@ -405,6 +458,20 @@ public class InvoiceSubmissionService
         {
             return InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.DocumentHasNoFile,
                 "The document has no stored file, so it cannot be submitted as an invoice.");
+        }
+
+        foreach (var (column, kind) in DocumentCoreColumns)
+        {
+            if (document.GetAttributeValue<EntityReference>(column) is { Id: var filedUnder } && filedUnder != Guid.Empty
+                && (kind != core.Kind || filedUnder != core.RecordId))
+            {
+                // The other record is never named: the caller was authorized against the confirm's record, not that one.
+                _logger.LogInformation(
+                    "Invoice submission refused: document {DocumentId} is filed under {Column} {FiledUnder}, not {Entity} {RecordId}",
+                    documentId, column, filedUnder, core.EntityLogicalName, core.RecordId);
+                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch,
+                    "The document is filed under a different record than the one named, so it cannot be submitted for this record. Nothing was saved.");
+            }
         }
 
         return null;

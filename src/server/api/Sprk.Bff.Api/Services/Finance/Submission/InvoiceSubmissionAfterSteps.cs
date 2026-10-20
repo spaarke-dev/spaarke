@@ -322,8 +322,9 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, SubmissionReasonCodes.StoredStateMismatch);
         }
 
-        // ── The re-file (050a, D-134 item 3): a confirmed EXISTING document, now linked to the invoice by the persister's transaction, is
-        //    re-filed under it (isolation read → ReparentAsync → AfterRefileAsync; InvoiceDocumentRefile). Before every other after-step, on
+        // ── The re-file (050a, D-134 item 3): a confirmed EXISTING document is linked to the invoice and re-filed under it by this step, the
+        //    link's one writer (live-row check → isolation read → ReparentAsync, whose conditional write sets the link → AfterRefileAsync;
+        //    InvoiceDocumentRefile; 050a review #1). Before every other after-step, on
         //    the first run and on every resume: a Retry or a refusal here leaves the submission Processing and writes no Signal or terminal. ──
         var existingDocumentId = submission.GetAttributeValue<EntityReference>("sprk_document")?.Id;
         InvoiceDocumentRefileResult refiled;

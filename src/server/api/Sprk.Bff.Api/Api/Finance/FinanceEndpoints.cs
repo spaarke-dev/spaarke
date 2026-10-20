@@ -121,8 +121,9 @@ public static class FinanceEndpoints
     ///   <item>Write on the body DocumentId through the document path (its review status is updated);</item>
     ///   <item>Write+Append on that document (<c>finance.link_invoice</c>) — the live schema puts the link on the
     ///   DOCUMENT (<c>sprk_document.sprk_invoice</c>), and the record that holds a lookup needs Append;</item>
-    ///   <item>AppendTo on the matter and on the vendor organization (<c>finance.attach_invoice</c>) — the new
-    ///   invoice's own <c>sprk_matter</c> / <c>sprk_vendororg</c> lookups point at them;</item>
+    ///   <item>Read and AppendTo on the matter (<c>finance.submit_invoice</c>, 050a review #8: the same operation the internal
+    ///   submission route checks on its core record, since confirm now submits through that intake) and AppendTo on the vendor
+    ///   organization (<c>finance.attach_invoice</c>) — the submission's and the new invoice's lookups point at them;</item>
     ///   <item>the caller's Create privilege on <c>sprk_invoice</c> — the invoice is created app-only, so without
     ///   this a user who could never create an invoice would get one by confirming.</item>
     /// </list>
@@ -163,7 +164,7 @@ public static class FinanceEndpoints
                 Path = FinanceCheckPath.Record,
                 EntitySetName = FinanceAuthorizationFilter.MatterEntitySet,
                 RecordId = request.MatterId,
-                Operation = "finance.attach_invoice",
+                Operation = "finance.submit_invoice",
                 Source = "body.matterId",
             },
             new FinanceAuthorizationCheck
@@ -379,7 +380,8 @@ public static class FinanceEndpoints
 
     /// <summary>
     /// Renders an <see cref="InvoiceReviewException"/>: confirm's incomplete mark (the submission was received; it is named, so the
-    /// caller and support can find it, and a retry completes it) and reject's refusals (confirmed document, kept changing, confirm
+    /// caller and support can find it, and a retry completes it), confirm's 409 for a rejected document and 404 for a document deleted
+    /// after its submission (050a review #2 / #6; the submission is named when it exists) and reject's refusals (confirmed document, kept changing, confirm
     /// state unreadable), which name nothing. Every message states what was and was not saved.
     /// </summary>
     internal static IResult ConfirmFailure(InvoiceReviewException ex, string correlationId)
@@ -389,6 +391,7 @@ public static class FinanceEndpoints
             InvoiceReviewFailure.DocumentNotFound => (StatusCodes.Status404NotFound, "Document Not Found"),
             InvoiceReviewFailure.DocumentChangedConcurrently => (StatusCodes.Status409Conflict, "Document Changed"),
             InvoiceReviewFailure.DocumentLinkedToInvoice => (StatusCodes.Status409Conflict, "Document Already Confirmed"),
+            InvoiceReviewFailure.ReviewDecisionChanged => (StatusCodes.Status409Conflict, "Review Decision Changed"),
             InvoiceReviewFailure.ConfirmStateUnreadable => (StatusCodes.Status503ServiceUnavailable, "Invoice Review Temporarily Unavailable"),
             _ => (StatusCodes.Status500InternalServerError, "Invoice Review Incomplete"),
         };

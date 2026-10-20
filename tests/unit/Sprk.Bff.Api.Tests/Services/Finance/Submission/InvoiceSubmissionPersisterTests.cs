@@ -894,6 +894,111 @@ public class InvoiceSubmissionPersisterTests
             Entries.Add((logLevel, formatter(state, exception)));
     }
 
+    // ── 050a review #1 / #2: a confirm submission's EXISTING document is checked on its live row, and never linked by the transaction ──
+
+    /// <summary>The outcome as the job produces it for the confirm submission of <see cref="Document"/> (its id derived from the document).</summary>
+    private static SubmissionEvaluationOutcome AsConfirmSubmission(SubmissionEvaluationOutcome outcome)
+    {
+        var id = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(Document);
+        return outcome with { SubmissionId = id, Submission = outcome.Submission! with { SubmissionId = id } };
+    }
+
+    [Fact(DisplayName = "050a review #1: a confirm submission whose document is unlinked commits WITHOUT the document link (its re-file is the link's one writer)")]
+    public async Task ConfirmSubmission_UnlinkedDocument_CommitsWithoutTheDocumentLink()
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store();
+
+        var result = await store.Build().PersistAsync(outcome, "corr-050a");
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        store.DocumentReads.Should().ContainSingle("the live row is read before anything is built");
+        store.Transactions.Single().Select(Describe).Should().Equal(
+            "Create sprk_invoice", "Create sprk_billingevent", "Create sprk_invoiceapproval", "Update sprk_invoicesubmission");
+    }
+
+    [Fact(DisplayName = "050a review #1: a confirm submission whose document is linked to ANOTHER invoice is Refused document_already_invoiced and nothing is written")]
+    public async Task ConfirmSubmission_DocumentLinkedToAnotherInvoice_IsRefused_NothingWritten()
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store
+        {
+            DocumentRow = new Entity("sprk_document", Document) { ["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid()) },
+        };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused, "the job marks the submission Failed");
+        result.ReasonCode.Should().Be(InvoiceSubmissionErrors.DocumentAlreadyInvoiced).And.Be("ebilling.submission.document_already_invoiced");
+        result.InvoiceId.Should().BeNull();
+        store.Transactions.Should().BeEmpty();
+        store.OwnerContexts.Should().BeEmpty();
+        store.TotalsCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "050a review #1: a confirm submission whose document already links THIS submission's invoice commits (negative control)")]
+    public async Task ConfirmSubmission_DocumentLinkedToItsOwnInvoice_Commits()
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store
+        {
+            DocumentRow = new Entity("sprk_document", Document)
+            {
+                ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceSubmissionPersister.InvoiceIdFor(outcome.SubmissionId)),
+            },
+        };
+
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+    }
+
+    [Fact(DisplayName = "050a review #2: a confirm submission whose document was rejected as not an invoice is Refused document_rejected and nothing is written")]
+    public async Task ConfirmSubmission_DocumentRejected_IsRefused_NothingWritten()
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store
+        {
+            DocumentRow = new Entity("sprk_document", Document)
+            {
+                ["sprk_invoicereviewstatus"] = new OptionSetValue(InvoiceReviewService.ReviewStatusRejectedNotInvoice),
+            },
+        };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(InvoiceSubmissionPersister.DocumentRejectedCode).And.Be("ebilling.submission.document_rejected");
+        store.Transactions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "050a review #1: a confirm submission whose document is gone is Refused document_not_found and nothing is written")]
+    public async Task ConfirmSubmission_DocumentGone_IsRefused_NothingWritten()
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store { DocumentDeleted = true };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(InvoiceSubmissionErrors.DocumentNotFound);
+        store.Transactions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "050a review #1: an intake submission's document is not read; the transaction links it as before")]
+    public async Task IntakeSubmission_DocumentIsNotRead_AndIsLinkedInTheTransaction()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store
+        {
+            DocumentRow = new Entity("sprk_document", Document) { ["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid()) },
+        };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        store.DocumentReads.Should().BeEmpty();
+        store.Transactions.Single().Select(Describe).Should().Contain("Update sprk_document");
+    }
+
     private sealed class Store
     {
         public Entity Submission { get; } = new("sprk_invoicesubmission", InvoiceSubmissionPersisterTests.Submission)
@@ -921,6 +1026,15 @@ public class InvoiceSubmissionPersisterTests
         public Exception? TotalsFault { get; set; }
         public bool SubmissionDeleted { get; init; }
         public RecordOwnerResolution Owner { get; init; } = RecordOwnerResolution.Owned(TeamId);
+
+        /// <summary>050a review #1 / #2: the document's live row as a confirm submission's check reads it (null: unlinked, not rejected).</summary>
+        public Entity? DocumentRow { get; init; }
+
+        /// <summary>050a review #1: the document no longer exists.</summary>
+        public bool DocumentDeleted { get; init; }
+
+        /// <summary>Every read of the document row (columns).</summary>
+        public List<string[]> DocumentReads { get; } = [];
         public ILogger<InvoiceSubmissionPersister> Logger { get; init; } = NullLogger<InvoiceSubmissionPersister>.Instance;
 
         /// <summary>The column set of every submission re-read.</summary>
@@ -934,6 +1048,8 @@ public class InvoiceSubmissionPersisterTests
                 {
                     "sprk_invoicesubmission" when SubmissionDeleted => throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"),
                     "sprk_invoicesubmission" => Capture(columns, Copy(Submission)),
+                    "sprk_document" when DocumentDeleted => throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"),
+                    "sprk_document" => ReadDocument(id, columns),
                     _ => new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = MatterNumber },
                 });
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
@@ -988,6 +1104,12 @@ public class InvoiceSubmissionPersisterTests
                     Submission[column] = value;
                 }
             }
+        }
+
+        private Entity ReadDocument(Guid id, string[] columns)
+        {
+            DocumentReads.Add(columns);
+            return DocumentRow is null ? new Entity("sprk_document", id) : Copy(DocumentRow);
         }
 
         private Entity Capture(string[] columns, Entity row)

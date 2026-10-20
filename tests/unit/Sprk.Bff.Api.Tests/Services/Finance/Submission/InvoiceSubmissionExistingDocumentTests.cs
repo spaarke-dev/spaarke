@@ -47,7 +47,7 @@ public sealed class InvoiceSubmissionExistingDocumentTests
         CorrelationId = "corr-confirm",
     };
 
-    private static Entity Earlier(string status = "Received", string number = "INV-7", Guid? firm = null) => new("sprk_invoicesubmission", SubmissionId)
+    private static Entity Earlier(string status = "Received", string number = "INV-7", Guid? firm = null, Guid? matter = null) => new("sprk_invoicesubmission", SubmissionId)
     {
         [TrackingNumberAllocator.TrackingNumberColumn] = "INV-7.3",
         [TrackingNumberAllocator.FirmInvoiceNumberColumn] = number,
@@ -55,7 +55,7 @@ public sealed class InvoiceSubmissionExistingDocumentTests
         ["sprk_processingstatus"] = new OptionSetValue((int)Enum.Parse<InvoiceSubmissionStatus>(status)),
         ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal),
         ["sprk_document"] = new EntityReference("sprk_document", DocumentId),
-        ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+        ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter ?? MatterId),
     };
 
     private static void ShouldHaveWrittenNothing(Harness h)
@@ -283,12 +283,105 @@ public sealed class InvoiceSubmissionExistingDocumentTests
     {
         var h = NewHarness();
         h.Allocation = TrackingNumberResult.AlreadyCreated("INV-7.2", 2);
+        h.StoredOnCreate = Earlier(status: "Received");
+        h.StoredOnCreate[TrackingNumberAllocator.TrackingNumberColumn] = "INV-7.2";
 
         var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
 
         outcome.Receipt.Should().Be(new InvoiceSubmissionReceipt(SubmissionId, JobId, "INV-7.2", DocumentId));
         h.JobsSent.Should().ContainSingle().Which.JobId.Should().Be(JobId);
         h.Deleted.Should().BeEmpty();
+    }
+
+    // ── 050a review #3: the document's own core record ──
+
+    [Theory(DisplayName = "050a review #3: a document filed under another core record is 409 document_core_record_mismatch and nothing is written")]
+    [InlineData("sprk_matter", "sprk_matter")]
+    [InlineData("sprk_project", "sprk_project")]
+    [InlineData("sprk_workassignment", "sprk_workassignment")]
+    public async Task DocumentFiledUnderAnotherCoreRecord_Is409_AndWritesNothing(string column, string table)
+    {
+        var h = NewHarness();
+        h.ExistingDocument![column] = new EntityReference(table, Guid.NewGuid());
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch).And.Be("ebilling.submission.document_core_record_mismatch");
+        ShouldHaveWrittenNothing(h);
+        h.LinkReads.Should().BeEmpty("refused before the intake's checks");
+    }
+
+    [Fact(DisplayName = "050a review #3: a document filed under the confirm's own matter is received (negative control)")]
+    public async Task DocumentFiledUnderTheSameMatter_IsReceived()
+    {
+        var h = NewHarness();
+        h.ExistingDocument!["sprk_matter"] = new EntityReference("sprk_matter", MatterId);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+    }
+
+    [Fact(DisplayName = "050a review #3 (owner 2026-10-20, D-139): an UNFILED document (no core lookup) may be confirmed")]
+    public async Task UnfiledDocument_IsReceived()
+    {
+        var h = NewHarness();
+        h.ExistingDocument!.Attributes.Keys.Should().NotContain(["sprk_matter", "sprk_project", "sprk_workassignment"]);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        h.Allocations.Should().ContainSingle();
+    }
+
+    // ── 050a review #4: a retry after the submission ended ──
+
+    [Theory(DisplayName = "050a review #4 (owner 2026-10-20, D-139): a retry whose submission ended Failed or Rejected is 409 submission_already_ended naming the status; nothing is written or queued")]
+    [InlineData("Failed")]
+    [InlineData("Rejected")]
+    public async Task Retry_AfterTheSubmissionEnded_Is409_NamingTheStatus(string status)
+    {
+        var h = NewHarness();
+        h.Submission = Earlier(status: status);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.SubmissionAlreadyEnded).And.Be("ebilling.submission.submission_already_ended");
+        outcome.Detail.Should().Contain(status);
+        outcome.Receipt.Should().BeNull("the review service marks the document only on Received");
+        ShouldHaveWrittenNothing(h);
+    }
+
+    // ── 050a review #5: the concurrent-create path compares the core record too ──
+
+    [Fact(DisplayName = "050a review #5: AlreadyCreated by a concurrent confirm for ANOTHER matter is 409 document_already_submitted and queues nothing")]
+    public async Task ConcurrentCreate_AlreadyCreated_ForAnotherMatter_Is409()
+    {
+        var h = NewHarness();
+        h.Allocation = TrackingNumberResult.AlreadyCreated("INV-7.2", 2);
+        h.StoredOnCreate = Earlier(status: "Received", matter: Guid.NewGuid());
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentAlreadySubmitted);
+        h.JobsSent.Should().BeEmpty("the other confirm's submission is not ours to queue");
+        h.Deleted.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "050a review #5: AlreadyCreated whose row already ended Failed is 409 submission_already_ended")]
+    public async Task ConcurrentCreate_AlreadyCreated_AlreadyEnded_Is409()
+    {
+        var h = NewHarness();
+        h.Allocation = TrackingNumberResult.AlreadyCreated("INV-7.2", 2);
+        h.StoredOnCreate = Earlier(status: "Failed");
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.SubmissionAlreadyEnded);
+        h.JobsSent.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "050a: a concurrent confirm with other details (the allocator's reconcile) is 409 and nothing is deleted")]

@@ -24,15 +24,16 @@ namespace Sprk.Bff.Api.Tests.DataMutation.FinanceInvoiceReview;
 /// <para><b>Confirm since 050a (D-134)</b>: confirm creates NO invoice and queues no extraction. It submits the document through
 /// the one invoice intake (<see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>: one Internal submission per
 /// document pointing at it, the processing job queued; no upload, no document create), then marks the document ConfirmedInvoice
-/// (conditional on its version, retried on an unrelated change). The submission job is the only creator of <c>sprk_invoice</c>
-/// (ADR-002) and re-files the document under that invoice (<see cref="InvoiceDocumentRefile"/>, whose isolation tests are the
-/// "#2095" section below — they moved here with the calls from the old confirm). A reject refuses a document that is linked to
-/// an invoice or has a confirm submission.</para>
+/// (conditional on the version read BEFORE the intake: a reject that lands in between is 409 ReviewDecisionChanged, 050a review #2).
+/// No confirm path creates an invoice: the submission job creates it (ADR-002) and files the document under it
+/// (<see cref="InvoiceDocumentRefile"/>, the link's one writer; its tests are the "#2095" section below, over the REAL ownership
+/// resolver and reconciler). A reject refuses a document that is linked to an invoice or has a confirm submission.</para>
 /// <para><b>The live schema</b> (spaarkedev1, read-only metadata, 2026-10-01): the link is <c>sprk_document.sprk_invoice</c>;
 /// the notes column is <c>sprk_invoicereviewnotes</c> (<c>sprk_invoicerejectionnotes</c> does not exist).</para>
 /// <para>Substitution is at the Dataverse service seams (<see cref="IFieldMappingDataverseService"/> as a stateful double; the
 /// intake's own seams through <see cref="InvoiceSubmissionServiceTests.Harness"/>), the ownership resolver and the queue's method
-/// boundary. The re-file runs the REAL <see cref="SecureChildReconciler"/> over an in-memory Dataverse. No HTTP handler is mocked
+/// boundary. The re-file runs the REAL <see cref="RecordOwnershipResolver"/> and <see cref="SecureChildReconciler"/> over an
+/// in-memory Dataverse. No HTTP handler is mocked
 /// (ADR-038). Interleavings are driven by explicit hooks, never by sleeps.</para>
 /// </remarks>
 public class InvoiceReviewWritePathTests
@@ -47,11 +48,10 @@ public class InvoiceReviewWritePathTests
     private readonly RecordingRecords _records = new();
     private readonly IntakeHarness _intake = new();
 
-    // #2095: the REAL reconciler (its real synchronizer and ownership resolver) over an in-memory Dataverse. A document the
+    // #2095 / 050a review #7: the REAL reconciler and the REAL ownership resolver over ONE in-memory Dataverse. A document the
     // world does not hold reads as not isolated.
     private readonly SecureChildShareWorld _world = SecureChildShareWorld.Standard();
     private readonly FakeRecordShareTable _shares = new();
-    private readonly Mock<IRecordOwnershipResolver> _ownership = new(MockBehavior.Strict);
 
     // =========================================================================================
     // Confirm (050a, D-134) — the successful path
@@ -286,6 +286,110 @@ public class InvoiceReviewWritePathTests
     // Confirm vs reject
     // =========================================================================================
 
+    [Fact(DisplayName = "050a review #2: a reject that lands between the confirm's submission create and its mark is NOT overwritten: 409 ReviewDecisionChanged naming the submission")]
+    public async Task Confirm_RejectLandsBetweenTheCreateAndTheMark_Is409_AndTheRejectStands()
+    {
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
+        TheIntakeHolds(request.DocumentId);
+        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
+                It.IsAny<IReadOnlyDictionary<string, object>?>(), It.IsAny<CancellationToken>()))
+            .Returns(async (Guid id, Guid firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
+            {
+                _intake.Allocations.Add((id, firm, number, fields));
+                // The reject read the document before the submission existed (its submission read finds none), and writes now.
+                await Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = request.DocumentId, Notes = "statement" }, "corr-r");
+                return TrackingNumberResult.Created("INV-42.1", 1);
+            });
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-race");
+
+        var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        failure.Failure.Should().Be(InvoiceReviewFailure.ReviewDecisionChanged);
+        failure.ReasonCode.Should().Be("sdap.finance.invoice_review.review_decision_changed");
+        failure.SubmissionId.Should().Be(InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(request.DocumentId));
+        _records.StatusOf(request.DocumentId).Should().Be(Rejected, "the reject stands; the job refuses the submission (document_rejected)");
+        _records.Writes.Select(w => (int)w.Fields["sprk_invoicereviewstatus"]!).Should().Equal(Rejected);
+    }
+
+    [Fact(DisplayName = "050a review #2: a document already rejected is not confirmed: 409 ReviewDecisionChanged, no submission, nothing written")]
+    public async Task Confirm_DocumentAlreadyRejected_Is409_AndNothingIsSubmitted()
+    {
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId, reviewStatus: Rejected);
+        TheIntakeHolds(request.DocumentId);
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-rejected");
+
+        var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        failure.Failure.Should().Be(InvoiceReviewFailure.ReviewDecisionChanged);
+        failure.SubmissionId.Should().BeNull("nothing was submitted");
+        _intake.Allocations.Should().BeEmpty();
+        _intake.JobsSent.Should().BeEmpty();
+        _records.Writes.Should().BeEmpty();
+        _records.StatusOf(request.DocumentId).Should().Be(Rejected);
+    }
+
+    [Fact(DisplayName = "050a review #6: a document deleted after its submission is DocumentNotFound naming the submission, not an endless 500 'retry'")]
+    public async Task Confirm_DocumentDeletedAfterTheSubmission_IsDocumentNotFound_NamingTheSubmission()
+    {
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
+        TheIntakeHolds(request.DocumentId);
+        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
+                It.IsAny<IReadOnlyDictionary<string, object>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, Guid firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
+            {
+                _intake.Allocations.Add((id, firm, number, fields));
+                _records.Remove("sprk_document", request.DocumentId);
+                return TrackingNumberResult.Created("INV-42.1", 1);
+            });
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-gone");
+
+        var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        var submissionId = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(request.DocumentId);
+        failure.Failure.Should().Be(InvoiceReviewFailure.DocumentNotFound);
+        failure.ReasonCode.Should().Be(InvoiceReviewException.DocumentNotFoundReasonCode);
+        failure.SubmissionId.Should().Be(submissionId);
+        failure.Message.Should().Contain(submissionId.ToString()).And.Contain("no longer exists");
+    }
+
+    [Fact(DisplayName = "050a review #4: a retry after the submission ended Failed is 409 submission_already_ended and the document is NOT re-marked")]
+    public async Task Confirm_RetryAfterTheSubmissionFailed_Is409_AndDoesNotMark()
+    {
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
+        TheIntakeHolds(request.DocumentId);
+        TheSubmissionWasStored(new InvoiceSubmissionReceipt(
+            InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(request.DocumentId), Guid.Empty, "INV-42.1", request.DocumentId), request);
+        _intake.Submission!["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Failed);
+
+        var outcome = await Sut().ConfirmInvoiceAsync(request, "corr-ended");
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.SubmissionAlreadyEnded);
+        _records.Writes.Should().BeEmpty("the document is not re-marked");
+        _intake.JobsSent.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "050a review #3 / #7: a retry naming ANOTHER matter is 409 and the document is not re-marked")]
+    public async Task Confirm_RetryWithAnotherMatter_Is409()
+    {
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
+        TheIntakeHolds(request.DocumentId);
+        TheSubmissionWasStored(new InvoiceSubmissionReceipt(
+            InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(request.DocumentId), Guid.Empty, "INV-42.1", request.DocumentId), request);
+        _intake.Submission!["sprk_regardingmatter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+
+        var outcome = await Sut().ConfirmInvoiceAsync(request, "corr-other-matter");
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentAlreadySubmitted);
+        _records.Writes.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "050a: a reject of a document with a confirm submission (not yet linked by the job) is 409 and writes nothing")]
     public async Task Reject_AfterConfirm_BeforeTheJobLinks_Is409_AndWritesNothing()
     {
@@ -345,102 +449,266 @@ public class InvoiceReviewWritePathTests
     }
 
     // =========================================================================================
-    // #2095 / 050a (D-134 item 3) — the job re-files a confirmed document under its invoice: isolation read, then
-    // ReparentAsync, then SecureChildReconciler.AfterRefileAsync (moved here from the old confirm with its calls)
+    // #2095 / 050a (D-134 item 3; review #1 / #7) — the job files a confirmed document under its invoice: live-row check,
+    // isolation read, ReparentAsync (whose conditional write sets the link), then SecureChildReconciler.AfterRefileAsync.
+    // The REAL RecordOwnershipResolver and the REAL reconciler over ONE in-memory Dataverse (SecureChildShareWorld): the
+    // link moves only because the re-file wrote it, and the owner only because the resolver reassigned it.
     // =========================================================================================
 
     private static readonly Guid SecureMatter = Guid.Parse("20950000-0000-4000-8000-000000000001");
     private static readonly Guid OrdinaryMatter = Guid.Parse("20950000-0000-4000-8000-000000000002");
+    private static readonly Guid FlaggedMatter = Guid.Parse("20950000-0000-4000-8000-000000000003");
+    private static readonly Guid SecureInvoice = Guid.Parse("20950000-0000-4000-8000-0000000000f1");
+    private static readonly Guid OrdinaryInvoice = Guid.Parse("20950000-0000-4000-8000-0000000000f2");
+    private static readonly Guid FlaggedInvoice = Guid.Parse("20950000-0000-4000-8000-0000000000f3");
     private static readonly Guid Sharee = Guid.Parse("20950000-0000-4000-8000-0000000000b1");
-    private static readonly Guid InvoiceTeam = Guid.Parse("7e4a0000-0000-4000-8000-000000000130");
 
     /// <summary>Collaborate on the record, as a Manage Access share writes it (Read|Write|Append|AppendTo, no Share).</summary>
     private const int CollaborateMask = 1 | 2 | 4 | 16;
 
-    /// <summary>The re-file of <paramref name="document"/>'s confirm submission under <paramref name="invoice"/>.</summary>
+    /// <summary>Each document's <c>versionnumber</c> (1 until a write moves it), as Dataverse keeps it.</summary>
+    private readonly Dictionary<Guid, long> _versions = new();
+
+    /// <summary>The link writes the re-file sent and Dataverse applied, each with the version it was conditional on.</summary>
+    private readonly List<(Guid Document, Guid Invoice, long ExpectedVersion)> _linkWrites = new();
+
+    /// <summary>Every conditional link write the re-file sent, applied or refused (412).</summary>
+    private int _linkWriteAttempts;
+
+    /// <summary>Runs at the start of each conditional link write, before its version is checked — another writer's slot.</summary>
+    private Action<Guid>? _beforeLinkWrite;
+
+    /// <summary>The world: the two matters, an invoice under each, and a third invoice under a matter flagged but not isolated.</summary>
+    private void Matters()
+    {
+        _world.SecureRoot("sprk_matter", SecureMatter).OrdinaryRoot("sprk_matter", OrdinaryMatter)
+            .FlaggedNotIsolatedRoot("sprk_matter", FlaggedMatter)
+            .SecureChild("sprk_invoice", SecureInvoice, ("sprk_matter", "sprk_matter", SecureMatter))
+            .OrdinaryChild("sprk_invoice", OrdinaryInvoice, ("sprk_matter", "sprk_matter", OrdinaryMatter))
+            .OrdinaryChild("sprk_invoice", FlaggedInvoice, ("sprk_matter", "sprk_matter", FlaggedMatter));
+    }
+
+    private long VersionOf(Guid document) => _versions.TryGetValue(document, out var v) ? v : 1L;
+
+    /// <summary>Another writer files the document under <paramref name="invoice"/> (a document PUT): the lookup moves and the version rises.</summary>
+    private void SomeoneFiles(Guid document, Guid invoice)
+    {
+        _world.Set("sprk_document", document, "sprk_invoice", new EntityReference("sprk_invoice", invoice));
+        _versions[document] = VersionOf(document) + 1;
+    }
+
+    /// <summary>The REAL ownership resolver over the world (its row reads included), as the host registers it.</summary>
+    private RecordOwnershipResolver RealResolver()
+    {
+        var entities = SecureChildShareWorld.EntitiesOver(() => _world);
+        entities
+            .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) => Task.FromResult(_world.Retrieve(table, id, columns)));
+        return new RecordOwnershipResolver(entities.Object, SecureChildShareWorld.Configuration(), NullLogger<RecordOwnershipResolver>.Instance);
+    }
+
+    /// <summary>
+    /// The document reads and the conditional link write over the SAME world rows the resolver reads: the read answers the link and the
+    /// version (an empty dictionary for a missing row, as the Web API service does); the write refuses a stale version (the live 412) and
+    /// otherwise moves the lookup and the version. Strict: any other call fails the test.
+    /// </summary>
+    private Mock<IFieldMappingDataverseService> WorldDocuments()
+    {
+        var records = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        records
+            .Setup(r => r.RetrieveRecordFieldsAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => !_world.Has(table, id)
+                ? new Dictionary<string, object?>()
+                : new Dictionary<string, object?>
+                {
+                    ["_sprk_invoice_value"] = _world.ValueOf<EntityReference>(table, id, "sprk_invoice")?.Id.ToString(),
+                    ["versionnumber"] = VersionOf(id),
+                });
+        records
+            .Setup(r => r.UpdateRecordFieldsIfUnchangedAsync(
+                "sprk_document", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, Dictionary<string, object?> fields, long expected, CancellationToken _) =>
+            {
+                _linkWriteAttempts++;
+                _beforeLinkWrite?.Invoke(id);
+                if (!_world.Has(table, id))
+                {
+                    throw new KeyNotFoundException($"{table} record was not found.");
+                }
+
+                if (VersionOf(id) != expected)
+                {
+                    throw new DBConcurrencyException("412 Precondition Failed");
+                }
+
+                fields.Keys.Should().Equal("sprk_Invoice@odata.bind");
+                var path = (string)fields["sprk_Invoice@odata.bind"]!;
+                path.Should().StartWith("/sprk_invoices(");
+                var invoice = Guid.Parse(path["/sprk_invoices(".Length..^1]);
+                _world.Set(table, id, "sprk_invoice", new EntityReference("sprk_invoice", invoice));
+                _versions[id] = expected + 1;
+                _linkWrites.Add((id, invoice, expected));
+                return Task.CompletedTask;
+            });
+        return records;
+    }
+
+    /// <summary>The re-file of <paramref name="document"/>'s confirm submission under <paramref name="invoice"/>, all real.</summary>
     private Task<InvoiceDocumentRefileResult> Refile(Guid document, Guid invoice, CancellationToken ct = default) =>
-        new InvoiceDocumentRefile(_ownership.Object, SecureChildShareWorld.ReconcilerOver(() => _world, _shares, null!),
+        new InvoiceDocumentRefile(RealResolver(), SecureChildShareWorld.ReconcilerOver(() => _world, _shares, null!), WorldDocuments().Object,
                 NullLogger<InvoiceDocumentRefile>.Instance)
             .RefileAsync(InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(document), document, invoice, ct);
 
-    /// <summary>
-    /// The reparent as Dataverse leaves it: the document's owner moved to the secure team (<paramref name="intoSecure"/>) or the
-    /// ordinary business unit's team, its matter lookup on <paramref name="matter"/> (the invoice's matter). Records each request.
-    /// </summary>
-    private List<RecordReparent> TheReparentMovesTheDocumentTo(Guid document, Guid matter, bool intoSecure, Action? after = null)
-    {
-        var requests = new List<RecordReparent>();
-        _ownership.Setup(o => o.ReparentAsync(
-                It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
-            .Returns(async (RecordReparent request, Func<CancellationToken, Task> apply, CancellationToken token) =>
-            {
-                requests.Add(request);
-                await apply(token);
-                _world.Set("sprk_document", document, "sprk_matter", new EntityReference("sprk_matter", matter));
-                _world.MoveOwner("sprk_document", document, DataversePrincipalRef.Team(
-                    intoSecure ? SecureChildShareWorld.SecureTeam : SecureChildShareWorld.GeneralTeam));
-                after?.Invoke();
-                return RecordOwnerResolution.Owned(InvoiceTeam);
-            });
-        return requests;
-    }
+    private Guid? LinkOf(Guid document) => _world.ValueOf<EntityReference>("sprk_document", document, "sprk_invoice")?.Id;
 
-    [Fact(DisplayName = "050a: the re-file is ONE reparent of the document with the invoice as its inherited parent and no column change (the persister linked it)")]
-    public async Task Refile_IsAReparentUnderTheInvoice_WithNoColumnChange()
+    [Fact(DisplayName = "050a review #1: an unfiled ordinary document re-filed under a Secure matter's invoice: the re-file writes the link (conditional on the version read), the resolver isolates it, and the mirror follows")]
+    public async Task Refile_UnfiledDocument_UnderASecureMattersInvoice_WritesTheLink_IsolatesIt_AndMirrors()
     {
+        Matters();
         var document = Guid.NewGuid();
-        var invoice = Guid.NewGuid();
-        var requests = TheReparentMovesTheDocumentTo(document, OrdinaryMatter, intoSecure: false);
+        _world.OrdinaryChild("sprk_document", document);
+        _shares.Seed("sprk_matter", SecureMatter, DataversePrincipalRef.User(Sharee), CollaborateMask);
 
-        var result = await Refile(document, invoice);
+        var result = await Refile(document, SecureInvoice);
 
         result.Status.Should().Be(InvoiceDocumentRefileStatus.Refiled);
-        var request = requests.Should().ContainSingle().Subject;
-        request.EntityLogicalName.Should().Be("sprk_document");
-        request.RecordId.Should().Be(document);
-        request.ParentChanges.Should().BeEmpty("the link is already written by the persister's transaction");
-        request.InheritedParents.Should().Equal(new RecordOwnershipParent("sprk_invoice", invoice));
-    }
-
-    [Fact(DisplayName = "#2095 / 050a: re-filing a Secure-owned document under an ordinary invoice runs AfterRefileAsync with wasIsolated=true (read BEFORE the reparent)")]
-    public async Task Refile_AnIsolatedDocumentMovedOutOfSecure_RunsAfterRefile_WithWasIsolatedTrue()
-    {
-        var document = Guid.NewGuid();
-        _world.SecureRoot("sprk_matter", SecureMatter).OrdinaryRoot("sprk_matter", OrdinaryMatter)
-            .SecureChild("sprk_document", document, ("sprk_matter", "sprk_matter", SecureMatter));
-        _shares.Seed("sprk_document", document, DataversePrincipalRef.User(Sharee), CollaborateMask);
-        TheReparentMovesTheDocumentTo(document, OrdinaryMatter, intoSecure: false);
-
-        (await Refile(document, Guid.NewGuid())).Status.Should().Be(InvoiceDocumentRefileStatus.Refiled);
-
-        // The mirror comes off only for a row that WAS isolated, and the step reads that BEFORE the write: read after the
-        // reparent the document is ordinary (wasIsolated=false) and its share would stay. So the share going proves the order
-        // (isolation read, then reparent, then AfterRefileAsync) and that the step ran for THIS document with wasIsolated=true.
-        _shares.MaskOf("sprk_document", document, DataversePrincipalRef.User(Sharee)).Should().BeNull(
-            "the secure matter's sharee is taken off a document that left every Secure record (owner round 22)");
-    }
-
-    [Fact(DisplayName = "#2095 / 050a: re-filing an ordinary document under a Secure matter's invoice runs AfterRefileAsync with wasIsolated=false (mirror created)")]
-    public async Task Refile_AnOrdinaryDocumentMovedIntoSecure_RunsAfterRefile_WithWasIsolatedFalse()
-    {
-        var document = Guid.NewGuid();
-        _world.SecureRoot("sprk_matter", SecureMatter).OrdinaryRoot("sprk_matter", OrdinaryMatter)
-            .OrdinaryChild("sprk_document", document, ("sprk_matter", "sprk_matter", OrdinaryMatter));
-        _shares.Seed("sprk_matter", SecureMatter, DataversePrincipalRef.User(Sharee), CollaborateMask);
-        TheReparentMovesTheDocumentTo(document, SecureMatter, intoSecure: true);
-
-        (await Refile(document, Guid.NewGuid())).Status.Should().Be(InvoiceDocumentRefileStatus.Refiled);
-
+        _linkWrites.Should().Equal((document, SecureInvoice, 1L));
+        LinkOf(document).Should().Be(SecureInvoice);
+        _world.OwnerOf("sprk_document", document).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam),
+            "filed under a Secure matter's invoice, the document is isolated by the resolver's reassignment");
         _shares.MaskOf("sprk_document", document, DataversePrincipalRef.User(Sharee)).Should().NotBeNull(
-            "the document moved under a Secure matter is shared with that matter's sharees now, not at the next two-minute pass");
+            "the step after the re-file mirrors the secure matter's sharee onto the document now, not at the next two-minute pass");
     }
 
-    [Fact(DisplayName = "#2095 / 050a: an isolation read that faults twice is IsolationUnreadable: NO reparent and nothing written (the job retries)")]
+    [Fact(DisplayName = "050a review #1: a redelivery that finds the link ALREADY written writes no link and still re-derives the owner through the real resolver")]
+    public async Task Refile_LinkAlreadyWritten_WritesNoLink_AndStillReDerivesTheOwner()
+    {
+        Matters();
+        var document = Guid.NewGuid();
+        _world.OrdinaryChild("sprk_document", document, ("sprk_invoice", "sprk_invoice", SecureInvoice));
+
+        var result = await Refile(document, SecureInvoice);
+
+        result.Status.Should().Be(InvoiceDocumentRefileStatus.Refiled);
+        _linkWriteAttempts.Should().Be(0, "the link already holds");
+        LinkOf(document).Should().Be(SecureInvoice);
+        _world.OwnerOf("sprk_document", document).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam),
+            "an earlier run that wrote the link but died before the owner moved is completed");
+    }
+
+    [Fact(DisplayName = "050a review #1: a document filed under ANOTHER invoice when the job runs is Refused document_already_invoiced: the link and the owner do not move")]
+    public async Task Refile_DocumentFiledUnderAnotherInvoice_IsRefused_NothingMoves()
+    {
+        Matters();
+        var document = Guid.NewGuid();
+        _world.OrdinaryChild("sprk_document", document, ("sprk_invoice", "sprk_invoice", OrdinaryInvoice));
+
+        var result = await Refile(document, SecureInvoice);
+
+        result.Should().Be(new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refused, InvoiceSubmissionErrors.DocumentAlreadyInvoiced));
+        LinkOf(document).Should().Be(OrdinaryInvoice, "another invoice's link is never overwritten");
+        _linkWriteAttempts.Should().Be(0);
+        _world.OwnerWrites.Should().BeEmpty();
+        _world.OwnerOf("sprk_document", document).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam));
+    }
+
+    [Fact(DisplayName = "050a review #1 (the review's scenario): a document filed under invoice X of a SECURE matter is never released: the real resolver refuses the job's reparent without F3, and the re-file refuses before it")]
+    public async Task Refile_DocumentUnderASecureMattersInvoice_IsNeverReleased_TheRealResolverRefusesWithoutF3()
+    {
+        Matters();
+        var document = Guid.NewGuid();
+        _world.SecureChild("sprk_document", document, ("sprk_invoice", "sprk_invoice", SecureInvoice));
+
+        // The reparent exactly as the re-file sends it, against the document's TRUE prior parents (the link is no longer written by the
+        // persister's transaction first): leaving the Secure matter needs F3, and the job acts for nobody.
+        var applied = false;
+        var resolution = await RealResolver().ReparentAsync(
+            InvoiceDocumentRefile.ReparentRequestFor(document, OrdinaryInvoice),
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue("a move out of a Secure record without a caller who holds F3 is refused");
+        applied.Should().BeFalse("a refused re-file writes nothing");
+
+        // And the re-file itself refuses before it asks: the document is another invoice's.
+        var result = await Refile(document, OrdinaryInvoice);
+
+        result.Should().Be(new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refused, InvoiceSubmissionErrors.DocumentAlreadyInvoiced));
+        LinkOf(document).Should().Be(SecureInvoice);
+        _world.OwnerOf("sprk_document", document).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam), "still isolated");
+        _world.OwnerWrites.Should().BeEmpty();
+        _linkWriteAttempts.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "050a review #1: a filing that lands between the re-file's read and its link write fails the conditional write; the document is read again and the re-file refuses")]
+    public async Task Refile_AFilingThatLandsBeforeTheLinkWrite_IsReadAgain_AndRefused()
+    {
+        Matters();
+        var document = Guid.NewGuid();
+        _world.OrdinaryChild("sprk_document", document);
+        var filed = false;
+        _beforeLinkWrite = id =>
+        {
+            if (!filed)
+            {
+                filed = true;
+                SomeoneFiles(id, OrdinaryInvoice); // a document PUT, after the resolver read the row
+            }
+        };
+
+        var result = await Refile(document, SecureInvoice);
+
+        result.Should().Be(new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refused, InvoiceSubmissionErrors.DocumentAlreadyInvoiced));
+        _linkWriteAttempts.Should().Be(1, "the one write was refused (412); the re-read decided again");
+        _linkWrites.Should().BeEmpty();
+        LinkOf(document).Should().Be(OrdinaryInvoice, "the other writer's filing stands");
+        _world.OwnerWrites.Should().BeEmpty("the conditional write failed before any owner assignment");
+    }
+
+    [Fact(DisplayName = "050a review #1: an unrelated write between the read and the link write is retried on the new version; the link lands once")]
+    public async Task Refile_AnUnrelatedWriteBeforeTheLinkWrite_IsRetried()
+    {
+        Matters();
+        var document = Guid.NewGuid();
+        _world.OrdinaryChild("sprk_document", document);
+        _beforeLinkWrite = id =>
+        {
+            if (_linkWriteAttempts == 1)
+            {
+                _versions[id] = VersionOf(id) + 1; // e.g. a profiling status write
+            }
+        };
+
+        (await Refile(document, OrdinaryInvoice)).Status.Should().Be(InvoiceDocumentRefileStatus.Refiled);
+
+        _linkWriteAttempts.Should().Be(2);
+        _linkWrites.Should().Equal((document, OrdinaryInvoice, 2L));
+        LinkOf(document).Should().Be(OrdinaryInvoice);
+    }
+
+    [Fact(DisplayName = "050a: a document the resolver refuses to re-file (filed under a matter flagged secure but not isolated) is Refused with its code: no link, no owner, no mirror step")]
+    public async Task Refile_WhenTheRealResolverRefuses_NothingIsWritten()
+    {
+        Matters();
+        var document = Guid.NewGuid();
+        _world.OrdinaryChild("sprk_document", document, ("sprk_matter", "sprk_matter", FlaggedMatter));
+
+        var result = await Refile(document, FlaggedInvoice);
+
+        result.Status.Should().Be(InvoiceDocumentRefileStatus.Refused);
+        result.ReasonCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
+        _linkWriteAttempts.Should().Be(0);
+        LinkOf(document).Should().BeNull();
+        _world.OwnerWrites.Should().BeEmpty();
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "#2095 / 050a: an isolation read that faults twice is IsolationUnreadable: no link write, no reparent, nothing written (the job retries)")]
     public async Task Refile_WhenTheIsolationReadFaultsTwice_WritesNothing()
     {
+        Matters();
         var document = Guid.NewGuid();
-        _world.SecureRoot("sprk_matter", SecureMatter)
-            .SecureChild("sprk_document", document, ("sprk_matter", "sprk_matter", SecureMatter));
+        _world.SecureChild("sprk_document", document, ("sprk_matter", "sprk_matter", SecureMatter));
         var faults = 0;
         _world.QueryFault = () =>
         {
@@ -449,12 +717,11 @@ public class InvoiceReviewWritePathTests
         };
         _world.FailingQueriesOf("sprk_document");
 
-        var result = await Refile(document, Guid.NewGuid());
+        var result = await Refile(document, SecureInvoice);
 
         result.Should().Be(new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.IsolationUnreadable, InvoiceDocumentRefile.IsolationUnreadableCode));
         faults.Should().Be(2, "the read, then its one retry");
-        _ownership.Verify(o => o.ReparentAsync(
-            It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()), Times.Never);
+        _linkWriteAttempts.Should().Be(0);
         _world.OwnerWrites.Should().BeEmpty();
         _world.StampWrites.Should().BeEmpty();
         _world.AccessRecordWrites.Should().BeEmpty();
@@ -464,85 +731,66 @@ public class InvoiceReviewWritePathTests
         _shares.WriteLog.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "#2095 K1 / 050a: AfterRefileAsync runs with CancellationToken.None - a job cancelled after the reparent still moves the share mirror")]
-    public async Task Refile_CancelledAfterTheReparent_StillRunsAfterRefile()
+    [Fact(DisplayName = "#2095 K1 / 050a: AfterRefileAsync runs with CancellationToken.None - a job cancelled once the link is written still moves the share mirror")]
+    public async Task Refile_CancelledAfterTheLinkWrite_StillRunsAfterRefile()
     {
+        Matters();
         var document = Guid.NewGuid();
-        _world.SecureRoot("sprk_matter", SecureMatter).OrdinaryRoot("sprk_matter", OrdinaryMatter)
-            .SecureChild("sprk_document", document, ("sprk_matter", "sprk_matter", SecureMatter));
-        _shares.Seed("sprk_document", document, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _world.OrdinaryChild("sprk_document", document);
+        _shares.Seed("sprk_matter", SecureMatter, DataversePrincipalRef.User(Sharee), CollaborateMask);
         using var cancel = new CancellationTokenSource();
-        TheReparentMovesTheDocumentTo(document, OrdinaryMatter, intoSecure: false, after: cancel.Cancel);
+        _beforeLinkWrite = _ => cancel.Cancel();
 
-        (await Refile(document, Guid.NewGuid(), cancel.Token)).Status.Should().Be(InvoiceDocumentRefileStatus.Refiled);
+        (await Refile(document, SecureInvoice, cancel.Token)).Status.Should().Be(InvoiceDocumentRefileStatus.Refiled);
 
         cancel.IsCancellationRequested.Should().BeTrue();
-        _shares.MaskOf("sprk_document", document, DataversePrincipalRef.User(Sharee)).Should().BeNull(
+        _shares.MaskOf("sprk_document", document, DataversePrincipalRef.User(Sharee)).Should().NotBeNull(
             "the step after the re-file ran to completion although the job's token was cancelled (CancellationToken.None)");
     }
 
-    [Fact(DisplayName = "#2095 / 050a: a refused reparent is Refused with its code, and AfterRefileAsync does not run")]
-    public async Task Refile_WhenTheReparentIsRefused_DoesNotRunAfterRefile()
+    [Fact(DisplayName = "050a review #1: a document deleted before the job re-files it is Refused document_not_found and nothing is written")]
+    public async Task Refile_DocumentGone_IsRefused()
     {
-        var document = Guid.NewGuid();
-        _world.SecureRoot("sprk_matter", SecureMatter).OrdinaryRoot("sprk_matter", OrdinaryMatter)
-            .SecureChild("sprk_document", document, ("sprk_matter", "sprk_matter", SecureMatter));
-        _shares.Seed("sprk_document", document, DataversePrincipalRef.User(Sharee), CollaborateMask);
-        _ownership.Setup(o => o.ReparentAsync(
-                It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RecordOwnerResolution.Refused("record_owner_test", "refused for the test"));
+        Matters();
 
-        var result = await Refile(document, Guid.NewGuid());
+        var result = await Refile(Guid.NewGuid(), SecureInvoice);
 
-        result.Should().Be(new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refused, "record_owner_test"));
-        _shares.MaskOf("sprk_document", document, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
-            "nothing was re-filed, so the step did not run");
-    }
-
-    [Fact(DisplayName = "050a: a reparent that reports ParentsUnchanged does not run AfterRefileAsync")]
-    public async Task Refile_WhenParentsAreUnchanged_DoesNotRunAfterRefile()
-    {
-        var document = Guid.NewGuid();
-        _world.SecureRoot("sprk_matter", SecureMatter).OrdinaryRoot("sprk_matter", OrdinaryMatter)
-            .SecureChild("sprk_document", document, ("sprk_matter", "sprk_matter", SecureMatter));
-        _shares.Seed("sprk_document", document, DataversePrincipalRef.User(Sharee), CollaborateMask);
-        _ownership.Setup(o => o.ReparentAsync(
-                It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
-            .Returns(async (RecordReparent _, Func<CancellationToken, Task> apply, CancellationToken token) =>
-            {
-                await apply(token);
-                // As if the owner had moved: only ParentsUnchanged keeps the step from running, so the share staying proves it.
-                _world.MoveOwner("sprk_document", document, DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam));
-                return RecordOwnerResolution.Owned(InvoiceTeam) with { ParentsUnchanged = true };
-            });
-
-        (await Refile(document, Guid.NewGuid())).Status.Should().Be(InvoiceDocumentRefileStatus.Refiled);
-
-        _shares.MaskOf("sprk_document", document, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
+        result.Should().Be(new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refused, InvoiceSubmissionErrors.DocumentNotFound));
+        _linkWriteAttempts.Should().Be(0);
     }
 
     [Fact(DisplayName = "050a: a Dataverse fault of the reparent (its owner assignment) propagates; the after-steps turn it into a Retry")]
     public async Task Refile_WhenTheReparentFaults_ItPropagates()
     {
+        Matters();
         var document = Guid.NewGuid();
-        _ownership.Setup(o => o.ReparentAsync(
+        _world.OrdinaryChild("sprk_document", document);
+        var ownership = new Mock<IRecordOwnershipResolver>(MockBehavior.Strict);
+        ownership.Setup(o => o.ReparentAsync(
                 It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("owner assignment failed"));
 
-        var act = () => Refile(document, Guid.NewGuid());
+        var act = () => new InvoiceDocumentRefile(ownership.Object, SecureChildShareWorld.ReconcilerOver(() => _world, _shares, null!),
+                WorldDocuments().Object, NullLogger<InvoiceDocumentRefile>.Instance)
+            .RefileAsync(InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(document), document, SecureInvoice, CancellationToken.None);
 
         await act.Should().ThrowAsync<HttpRequestException>();
+        _linkWriteAttempts.Should().Be(0);
     }
 
     [Fact(DisplayName = "050a: an intake-created document (its submission id is not derived from it) is NotApplicable: nothing is read or written")]
     public async Task Refile_ForAnIntakeDocument_IsNotApplicable()
     {
-        var result = await new InvoiceDocumentRefile(_ownership.Object, SecureChildShareWorld.ReconcilerOver(() => _world, _shares, null!),
-                NullLogger<InvoiceDocumentRefile>.Instance)
+        var ownership = new Mock<IRecordOwnershipResolver>(MockBehavior.Strict);
+        var records = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+
+        var result = await new InvoiceDocumentRefile(ownership.Object, SecureChildShareWorld.ReconcilerOver(() => _world, _shares, null!),
+                records.Object, NullLogger<InvoiceDocumentRefile>.Instance)
             .RefileAsync(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), CancellationToken.None);
 
         result.Status.Should().Be(InvoiceDocumentRefileStatus.NotApplicable);
-        _ownership.VerifyNoOtherCalls();
+        ownership.VerifyNoOtherCalls();
+        records.VerifyNoOtherCalls();
     }
 
     // =========================================================================================
