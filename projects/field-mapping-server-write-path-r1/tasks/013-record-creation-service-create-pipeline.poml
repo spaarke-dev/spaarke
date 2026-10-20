@@ -132,7 +132,8 @@ From task 012 (2026-10-20), OWNER REVIEW items to put to the owner before or dur
 (2) Mapping applies by default to memo, budget, KPI assessment, billing event and communication; confirm.
 (3) The per-path server defaults recorded in the registry; converge or keep.
 (4) #1608: the route refuses the work assignment's container, securitybu and access permission, while the chat create tool allows them; the owner picks one behaviour.
-Registry: Services/RecordCreation/RecordTableRules.cs; the pre-write rule contract is in notes/task-012-notes.md.</notes>
+Registry: Services/RecordCreation/RecordTableRules.cs; the pre-write rule contract is in notes/task-012-notes.md.
+ebilling-r1 review of the 012 recipe (2026-10-20): substance OK. The pre-write rule runner built in 013 must apply corrections (a) EffectiveLookups test/cref, (b) the verbatim NotAvailableToFileUnder text, (c) refusal-object fidelity, from notes/task-012-notes.md. Send 013 to ebilling-r1 before merge.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -7,9 +7,9 @@
 
 | Field | Value |
 |---|---|
-| **HEAD** | `77ef24010e` on `work/field-mapping-server-write-path-r1`, **NOT yet pushed**. It contains the merge of `task/fm-012` (69b3a33047) plus origin/master; 0 behind master |
-| **Running** | (1) Background verify of 77ef24010e: Spaarke.sln build, ArchTests (expect 1155), and the security/field-mapping/RecordTableRules unit filter. (2) The 004→005 implementer agent in an isolated worktree, branch `task/fm-004-005`, base c4a2a7b81 |
-| **Next Action** | When the verify is green:<br>• mark 012 ✅ (POML status + notes line `rework: fix-round-1 task 012`, TASK-INDEX row `FR-11 \| opus / high \| FULL \| W2-A \| 010`);<br>• run `scripts/check-task-status-drift.ps1`;<br>• commit and push.<br>Then add the 012 OWNER-REVIEW items (below) to the 013 POML notes. When the 004/005 agent reports, merge `task/fm-004-005`, verify, and mark 004 and 005. 005's live sprk_syncmode migration needs the owner's OK (dry run only). |
+| **HEAD** | `92e039f5b3` on `work/field-mapping-server-write-path-r1`, pushed. 0 behind master at 77ef24010e. Verified: Spaarke.sln 0/0, ArchTests 1183, suites 1746 |
+| **Running** | The 004→005 implementer agent in an isolated worktree, branch `task/fm-004-005`, base c4a2a7b81 |
+| **Next Action** | When the 004/005 agent reports:<br>• merge `task/fm-004-005` (expect overlap only with master in Spaarke.Dataverse);<br>• verify (sln build, ArchTests, suites);<br>• mark 004 and 005;<br>• push.<br>005's live sprk_syncmode migration needs the owner's OK (dry run only). Then the next candidate is **013** (opus/xhigh; deps 011 ✅ and 012 ✅). |
 
 ## How wave-2 agents are run (lessons)
 

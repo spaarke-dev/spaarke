@@ -301,3 +301,27 @@ SignalRead/SignalSuppression 124 / 124; ArchTests 1155 / 1155.
 - `projects/field-mapping-server-write-path-r1/notes/task-012-notes.md` (this file)
 
 rework: fix-round-1 task 012
+
+## ebilling-r1 review of the reconciliation recipe (2026-10-20): substance OK, three corrections (binding)
+
+Confirmed against InvoiceFamilyCoreRecordGuard on work/ebilling-r1:
+- The six tables match `CoreRecordLookups` (InvoiceFamilyCoreRecordGuard.cs:131-142).
+- Ordering is preserved: WhoAmI → CheckCallerMayCreateAsync → CheckInvoiceFamilyAsync → planSecureCreate →
+  ResolveOwnerAsync → create.
+- The refile half (~:1546) stays in RefileAsync.
+- Every outcome arm keeps its status, code and body, including the chat-tool arms in DataverseCreateRecordHandler
+  (~560-575).
+
+Corrections the reconciliation (and task 013's runner) must apply:
+- **(a)** If `EffectiveLookups` moves, update
+  `tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.InvoiceFamilyGuard.cs:650` in the
+  same commit, or leave a forwarder. Also fix the doc cref to `OwnedChildWrite.CheckInvoiceFamilyAsync` at
+  ChildRecordEndpoints.cs:411.
+- **(b)** `NotAvailableToFileUnder` (private const, OwnedChildWrite.cs:1675, used at :339 and :1552) is shown by the
+  chat tool. The runner's NotFound arm must use that exact text: share the const, or copy it verbatim.
+- **(c)** Rebuilding the refusal as `InvoiceFamilyCoreRecord.Refused(table, code, detail)` loses the decided object's
+  own EntityLogicalName (the OTHER invoice's table for a supersedes refusal, :1780/1795/1801), plus Regarding,
+  RegardingColumn and ResolverFields. No create consumer reads them today. Either carry the original refusal object
+  through, or add a test asserting EntityLogicalName and Reason for a supersedes refusal so the difference is
+  deliberate.
+- `PreWriteRefusal.Refused` throws on a null Reason; every current path sets one, so keep it that way.
