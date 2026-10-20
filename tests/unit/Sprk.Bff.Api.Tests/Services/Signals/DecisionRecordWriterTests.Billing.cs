@@ -72,7 +72,7 @@ public sealed partial class DecisionRecordWriterTests
             ConditionOperator.Like => actual is string text && condition.Values.Single() is string pattern
                 && pattern.StartsWith('%') && pattern.EndsWith('%')
                 && text.Contains(pattern.Trim('%'), StringComparison.Ordinal),
-            ConditionOperator.In => condition.Values.Any(v => Equals(actual, v)),
+            ConditionOperator.In => condition.Values.Any(v => actual is EntityReference reference ? reference.Id.Equals(v) : Equals(actual, v)),
             _ => throw new NotSupportedException($"Billing test harness: {condition.Operator} is not evaluated."),
         };
     }
@@ -1125,7 +1125,8 @@ public sealed partial class DecisionRecordWriterTests
         query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "sprk_actioncode" && c.Operator == ConditionOperator.In);
         query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "sprk_steps" && c.Operator == ConditionOperator.Like
             && ((string)c.Values.Single()).Contains(BillingDecisionKey.IdOf("sprk_billingevent", LineId, BillingDecision).ToString("D"), StringComparison.Ordinal));
-        query.ColumnSet.Columns.Should().BeEquivalentTo(["sprk_actioncode", "sprk_steps", "sprk_factsnapshot"], "ids, read time and codes only, never record text");
+        query.ColumnSet.Columns.Should().BeEquivalentTo(["sprk_actioncode", "sprk_steps", "sprk_factsnapshot", "sprk_confirmedby"],
+            "ids, read time, codes and the decider only, never record text");
         h.Created.Should().BeEmpty("a read writes nothing");
     }
 
@@ -1143,6 +1144,7 @@ public sealed partial class DecisionRecordWriterTests
         stored.SetReadAtUtc.Should().Be(SetReadAt);
         stored.SetReadAtUtc!.Value.Kind.Should().Be(DateTimeKind.Utc);
         stored.Signals.Should().Equal((BillingSignal, "EB-RATE"));
+        stored.ConfirmedByUserId.Should().Be(Reviewer, "the decider as the writer wrote it (sprk_confirmedby), for a repeat's close");
     }
 
     [Fact]
@@ -1230,5 +1232,60 @@ public sealed partial class DecisionRecordWriterTests
         (await h.Writer.Invoking(w => w.FindBillingDecisionResolvedSetAsync(LineSubject, Guid.Empty))
             .Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
         h.Lookups.Should().BeEmpty();
+    }
+
+    // ── K2 (ontology-r1 review of task 100): the stored sets of MANY subjects in ONE query ──
+
+    private static Entity KeyedRecord(Guid lineId, Guid decisionId, Guid? createdBy = null) => new("sprk_decisionrecord", Guid.NewGuid())
+    {
+        ["sprk_regardinginvoiceline"] = new EntityReference("sprk_billingevent", lineId),
+        ["sprk_steps"] = $"{{\"reviewId\":\"{BillingDecisionKey.IdOf("sprk_billingevent", lineId, decisionId):D}\",\"reviewHash\":\"x\",\"resolvedSignalIds\":[]}}",
+        ["sprk_actioncode"] = "accept-line",
+        ["createdby"] = new EntityReference("systemuser", createdBy ?? WriterUser),
+    };
+
+    [Fact]
+    public async Task Billing_StoredSets_ManySubjects_AreOneQuery_WithTheSingleLookupsWriterFilter_AndKeysMatchedInMemory()
+    {
+        var h = BillingHarness();
+        var other = Guid.NewGuid();
+        await h.Writer.WriteBillingDecisionAsync(Billing("accept-line", facts: FactsWithSet()));
+        h.Seeded.Add(KeyedRecord(other, Guid.NewGuid())); // another decision on the other line: not this decision's
+        h.Lookups.Clear();
+
+        var found = await h.Writer.FindBillingDecisionResolvedSetsAsync("sprk_billingevent", [LineId, other], BillingDecision);
+
+        found.Keys.Should().BeEquivalentTo([LineId, other], "every subject is answered");
+        found[LineId]!.SetReadAtUtc.Should().Be(SetReadAt);
+        found[other].Should().BeNull("a record of another decision id is ignored");
+        var query = h.Lookups.Should().ContainSingle(q => q.EntityName == "sprk_decisionrecord").Which;
+        query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "sprk_regardinginvoiceline" && c.Operator == ConditionOperator.In && c.Values.Count == 2);
+        query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "createdby" && Equals(c.Values.Single(), WriterUser));
+        query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "sprk_actioncode" && c.Operator == ConditionOperator.In);
+        h.Created.Should().ContainSingle("a read writes nothing");
+    }
+
+    [Fact]
+    public async Task Billing_StoredSets_TwoRecordsUnderOneSubjectsKey_FailClosed()
+    {
+        var h = BillingHarness();
+        h.Seeded.Add(KeyedRecord(LineId, BillingDecision));
+        h.Seeded.Add(KeyedRecord(LineId, BillingDecision));
+
+        (await h.Writer.Invoking(w => w.FindBillingDecisionResolvedSetsAsync("sprk_billingevent", [LineId], BillingDecision))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+    }
+
+    [Fact]
+    public async Task Billing_StoredSets_ARowAPersonCreated_IsNeverTrusted_AndAFaultIsLookupFailed()
+    {
+        var h = BillingHarness();
+        h.Seeded.Add(KeyedRecord(LineId, BillingDecision, createdBy: Guid.NewGuid()));
+
+        (await h.Writer.FindBillingDecisionResolvedSetsAsync("sprk_billingevent", [LineId], BillingDecision))[LineId].Should().BeNull();
+
+        h.LookupFault = new TimeoutException("dataverse");
+        (await h.Writer.Invoking(w => w.FindBillingDecisionResolvedSetsAsync("sprk_billingevent", [LineId], BillingDecision))
+            .Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.BillingRecordLookupFailed);
     }
 }

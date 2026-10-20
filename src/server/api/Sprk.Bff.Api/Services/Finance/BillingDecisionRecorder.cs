@@ -178,6 +178,16 @@ public sealed class BillingDecisionRecorder
         _writer.FindBillingDecisionResolvedSetAsync(
             new DecisionRecordRef(DecisionRecordWriter.BillingSubjectEntityOf(actionCode) ?? string.Empty, subjectId), decisionId, ct);
 
+    /// <summary>
+    /// <see cref="FindStoredResolvedSetAsync"/> for many subjects of one code under one decision id, in ONE query (task 100's line decisions,
+    /// K2): every id is answered, with its stored set or null. Read only
+    /// (<see cref="DecisionRecordWriter.FindBillingDecisionResolvedSetsAsync"/>).
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException">A subject has more than one record, a stored set cannot be read, or the lookup faulted.</exception>
+    internal Task<IReadOnlyDictionary<Guid, DecisionRecordWriter.BillingStoredResolvedSet?>> FindStoredResolvedSetsAsync(
+        string actionCode, IReadOnlyCollection<Guid> subjectIds, Guid decisionId, CancellationToken ct = default) =>
+        _writer.FindBillingDecisionResolvedSetsAsync(DecisionRecordWriter.BillingSubjectEntityOf(actionCode) ?? string.Empty, subjectIds, decisionId, ct);
+
     /// <summary>Every refusal <see cref="RecordAsync"/> can give without I/O. Reads and writes nothing.</summary>
     /// <exception cref="DecisionRecordRefusedException">The decision as given would be refused.</exception>
     public void Preflight(BillingDecision decision) => _writer.PreflightBillingDecision(ToRequest(decision));
