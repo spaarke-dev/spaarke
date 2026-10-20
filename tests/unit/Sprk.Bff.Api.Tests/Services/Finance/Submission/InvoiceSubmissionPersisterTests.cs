@@ -794,6 +794,37 @@ public class InvoiceSubmissionPersisterTests
         stored.RootElement.GetProperty(InvoiceSubmissionPersister.SignalPlanRefusalsMember).GetArrayLength().Should().Be(1);
     }
 
+    [Fact(DisplayName = "049 D-133: a refused plan entry sets sprk_adminattention in the SAME submission update as the findings, codes only")]
+    public async Task Persist_WithARefusedPlanEntry_SetsAdminAttention_InTheSameUpdate()
+    {
+        var outcome = await OutcomeWithAnOverLongPlanEntryAsync();
+        var store = new Store();
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var update = Target(store.Transactions.Single()[^1]);
+        update.LogicalName.Should().Be("sprk_invoicesubmission");
+        update.GetAttributeValue<string>("sprk_findingsjson").Should().Contain(InvoiceSubmissionPersister.SignalPlanRefusalsMember);
+        update.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention).Should().Be(
+            $"1 Signal could not be created: {SignalWriteRefusal.SentenceTooLong} (BILL-LONG on line {InvoiceSubmissionPersister.LineIdFor(Submission, 0).ToString("D")[..8]})");
+        update.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention).Should().NotContain("xxxx", "codes only, no extracted or authored text");
+    }
+
+    [Fact(DisplayName = "049 D-133: a plan nothing was refused from leaves sprk_adminattention out of the submission update (must-not-fire)")]
+    public async Task Persist_NothingRefused_DoesNotWriteAdminAttention()
+    {
+        var harness = new ProcessorHarness { Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()] };
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20))];
+        var outcome = await harness.RunAsync();
+        var store = new Store();
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        Target(store.Transactions.Single()[^1]).Contains(InvoiceSubmissionPersister.SubmissionAdminAttention).Should().BeFalse("never written null or empty");
+    }
+
     // ── harness ──
 
     private static Entity Target(OrganizationRequest request) => request switch

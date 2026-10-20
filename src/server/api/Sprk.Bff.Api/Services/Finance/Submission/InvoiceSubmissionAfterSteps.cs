@@ -944,9 +944,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     internal const string RequestRefusedCode = "request_refused";
 
     /// <summary>
-    /// Adds <paramref name="refused"/> to <c>sprk_findingsjson</c>'s <see cref="SignalWriteRefusalsMember"/>. Idempotent: an entry already
-    /// stored (same policy, subject and code) is not added again, and nothing is written when every entry is stored. Returns the JSON
-    /// written, or null when nothing was written.
+    /// Adds <paramref name="refused"/> to <c>sprk_findingsjson</c>'s <see cref="SignalWriteRefusalsMember"/> and, in the same update, sets
+    /// <c>sprk_adminattention</c> (D-133, <see cref="AdminAttentionText"/>). Idempotent: an entry already stored (same policy, subject and
+    /// code) is not added again, and nothing is written when every entry is stored. Returns the JSON written, or null when nothing was
+    /// written.
     /// </summary>
     private async Task<string?> RecordSignalWriteRefusalsAsync(Guid submissionId, string findingsJson, IReadOnlyList<SignalWriteRefused> refused, CancellationToken ct)
     {
@@ -978,10 +979,19 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
         root[SignalWriteRefusalsMember] = stored;
         var json = root.ToJsonString();
-        await _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, new Dictionary<string, object>
+        var update = new Dictionary<string, object>
         {
             [InvoiceSubmissionPersister.SubmissionFindingsJson] = json,
-        }, ct).ConfigureAwait(false);
+        };
+
+        // D-133: the same conditional update marks the submission for the administrator. The text is a function of every refusal stored
+        // (the plan's and the writer's), so a resume that adds nothing writes nothing and never repeats it; it is never cleared here.
+        if (AdminAttentionText.FromFindings(root) is { } attention)
+        {
+            update[InvoiceSubmissionPersister.SubmissionAdminAttention] = attention;
+        }
+
+        await _entities.UpdateAsync(FinanceBaseValues.SubmissionEntity, submissionId, update, ct).ConfigureAwait(false);
         return json;
     }
 

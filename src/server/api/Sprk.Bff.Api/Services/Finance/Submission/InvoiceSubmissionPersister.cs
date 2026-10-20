@@ -64,6 +64,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     internal const string SubmissionFindingsJson = "sprk_findingsjson";
     internal const string SubmissionCorrelationId = "sprk_correlationid";
 
+    /// <summary><c>sprk_invoicesubmission.sprk_adminattention</c> ("Needs Admin Attention", D-133; Text, 500): why an administrator should
+    /// review the submission. Set with the refusals (<see cref="AdminAttentionText"/>); never cleared from code.</summary>
+    internal const string SubmissionAdminAttention = "sprk_adminattention";
+
+    /// <summary><c>sprk_invoicesubmission.sprk_adminattention</c> MaxLength (500).</summary>
+    internal const int AdminAttentionMaxLength = 500;
+
     /// <summary><c>sprk_invoicesubmission.sprk_submitter</c> (lookup to contact): the external submitter, set at intake for the SPA channel.</summary>
     internal const string SubmissionSubmitter = "sprk_submitter";
 
@@ -345,7 +352,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 [DocumentInvoice] = new EntityReference(InvoiceReviewService.InvoiceEntity, invoiceId),
             },
         });
-        requests.Add(new UpdateRequest { Target = BuildSubmissionUpdate(outcome, invoiceId, findingsJson) });
+        // D-133: a plan entry left out is a Signal the invoice will never have; mark the submission for the administrator in the same write.
+        var adminAttention = planRefusals.Count == 0
+            ? null
+            : AdminAttentionText.Build(planRefusals.Select(r => new AdminAttentionText.Item(r.PolicyCode, r.SubjectEntity, r.SubjectId.ToString("D"), r.Code)));
+        requests.Add(new UpdateRequest { Target = BuildSubmissionUpdate(outcome, invoiceId, findingsJson, adminAttention) });
 
         if (requests.Count > MaxRequestsPerTransaction)
         {
@@ -680,13 +691,23 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// write <c>sprk_processingstatus</c> (D-130 a): the submission stays Processing until part D's after-commit steps are done, and part D
     /// writes <see cref="SubmissionPersistResult.TerminalStatus"/> as its last step, so Accepted / Rejected means complete.
     /// </summary>
-    internal static Entity BuildSubmissionUpdate(SubmissionEvaluationOutcome outcome, Guid invoiceId, string findingsJson) =>
-        new(FinanceBaseValues.SubmissionEntity, outcome.SubmissionId)
+    internal static Entity BuildSubmissionUpdate(SubmissionEvaluationOutcome outcome, Guid invoiceId, string findingsJson, string? adminAttention = null)
+    {
+        var update = new Entity(FinanceBaseValues.SubmissionEntity, outcome.SubmissionId)
         {
             [SubmissionInvoice] = new EntityReference(InvoiceReviewService.InvoiceEntity, invoiceId),
             [SubmissionReasonCode] = TerminalFor(outcome).ReasonCode,
             [SubmissionFindingsJson] = findingsJson,
         };
+
+        // D-133: only ever set, never written null or empty (the administrator clears it).
+        if (adminAttention is { Length: > 0 })
+        {
+            update[SubmissionAdminAttention] = adminAttention;
+        }
+
+        return update;
+    }
 
     /// <summary>
     /// The terminal <c>sprk_processingstatus</c> and <c>sprk_outcomereasoncode</c> of a persisted outcome (notes 049 section 2, D-130):

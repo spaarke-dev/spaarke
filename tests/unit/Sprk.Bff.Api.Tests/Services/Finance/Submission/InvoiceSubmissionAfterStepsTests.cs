@@ -111,6 +111,8 @@ public class InvoiceSubmissionAfterStepsTests
         public List<Dictionary<string, object>> TerminalWrites { get; } = [];
         public List<Dictionary<string, object>> UnconditionalStatusWrites { get; } = [];
         public List<string> FindingsWrites { get; } = [];
+        /// <summary>Every unconditional submission update (D-133: the Needs Admin Attention column is told from these).</summary>
+        public List<Dictionary<string, object>> SubmissionUpdates { get; } = [];
         public List<QueryExpression> PolicyQueries { get; } = [];
         public List<QueryExpression> VersionQueries { get; } = [];
 
@@ -207,6 +209,7 @@ public class InvoiceSubmissionAfterStepsTests
             Entities.Setup(e => e.UpdateAsync(FinanceBaseValues.SubmissionEntity, Submission, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
                 .Returns((string _, Guid _, Dictionary<string, object> fields, CancellationToken _) =>
                 {
+                    SubmissionUpdates.Add(new Dictionary<string, object>(fields));
                     if (fields.ContainsKey(InvoiceSubmissionPersister.SubmissionStatus))
                     {
                         if (CrashAtTerminal)
@@ -1980,6 +1983,119 @@ public class InvoiceSubmissionAfterStepsTests
         StoredWriteRefusals(world).Should().ContainSingle();
         world.RecordCreates.Should().Be(1);
         world.Status.Should().Be(InvoiceSubmissionStatus.Rejected);
+    }
+
+    // ── D-133: the submission is marked "Needs Admin Attention" with the refusal ──
+
+    private const string AdminAttention = InvoiceSubmissionPersister.SubmissionAdminAttention;
+
+    private static string? StoredAttention(World world) => world.Row.Contains(AdminAttention) ? world.Row.GetAttributeValue<string>(AdminAttention) : null;
+
+    [Fact(DisplayName = "049 D-133: a permanent Signal refusal sets sprk_adminattention in the SAME update that records it, codes only")]
+    public async Task PermanentRefusal_SetsAdminAttention_InTheSameUpdate()
+    {
+        var outcome = await AutoRejected(readNumber: "INV-999");
+        var world = new World(outcome);
+        FailBillAge(world, "skip-owner");
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        var expected = $"1 Signal could not be created: {Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoDefaultOwnerTeam} (BILL-AGE on line {LineId.ToString("D")[..8]})";
+        var update = world.SubmissionUpdates.Where(u => u.ContainsKey(AdminAttention)).Should().ContainSingle().Subject;
+        update[AdminAttention].Should().Be(expected, "the marker is part of the write that records the refusal");
+        ((string)update[InvoiceSubmissionPersister.SubmissionFindingsJson]).Should().Contain(InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember);
+        world.SubmissionUpdates.TakeWhile(u => !u.ContainsKey(AdminAttention)).Should().NotContain(
+            u => u.ContainsKey(InvoiceSubmissionPersister.SubmissionFindingsJson) && ((string)u[InvoiceSubmissionPersister.SubmissionFindingsJson]).Contains(InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember),
+            "no earlier write recorded the refusal without the marker");
+        StoredAttention(world).Should().Be(expected);
+        StoredAttention(world).Should().NotContain("INV-999", "codes and ids only, no extracted value");
+    }
+
+    [Fact(DisplayName = "049 D-133: a resume that finds the refusal stored writes nothing new and leaves the marker as it is (idempotent; an admin's clear stands)")]
+    public async Task PermanentRefusal_AdminAttention_IsIdempotentAcrossAResume()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome) { CrashAtTerminal = true };
+        FailBillAge(world, "escalation");
+
+        var first = () => world.Build().RunAsync(Persisted(outcome), "corr-1");
+        await first.Should().ThrowAsync<Crash>();
+        var text = StoredAttention(world);
+        text.Should().NotBeNull();
+
+        world.Row[AdminAttention] = null; // the administrator reviewed and cleared it
+        world.CrashAtTerminal = false;
+        var resumed = await world.Build().ResumeAsync(Submission, "corr-2");
+
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed, resumed.ReasonCode);
+        world.SubmissionUpdates.Count(u => u.ContainsKey(AdminAttention)).Should().Be(1, "written once, with the refusal; the resume wrote nothing new");
+        StoredAttention(world).Should().BeNull("code never writes the column again after the administrator cleared it");
+    }
+
+    [Fact(DisplayName = "049 D-133: the text covers the plan refusals stored at persist and the write refusals, each once, in one update")]
+    public async Task PermanentRefusal_AdminAttention_CoversPlanAndWriteRefusals()
+    {
+        var outcome = await AutoRejected();
+        var planRefusalId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        var world = new World(outcome, json =>
+        {
+            json[InvoiceSubmissionPersister.SignalPlanRefusalsMember] = new JsonArray(new JsonObject
+            {
+                ["policyCode"] = "BILL-LONG",
+                ["subject"] = new JsonObject { ["entity"] = "sprk_invoice", ["id"] = planRefusalId.ToString("D") },
+                ["code"] = SignalWriteRefusal.SentenceTooLong,
+            });
+            return json;
+        });
+        FailBillAge(world, "escalation");
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        StoredAttention(world).Should().Be(
+            $"2 Signals could not be created: {SignalWriteRefusal.SentenceTooLong} (BILL-LONG on invoice 11111111), "
+            + $"{Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.CoreRecordUnresolved} (BILL-AGE on line {LineId.ToString("D")[..8]})");
+    }
+
+    [Fact(DisplayName = "049 D-133: many refusals are capped at 500 characters and end with the count that did not fit")]
+    public async Task PermanentRefusal_AdminAttention_OverflowIsCappedWithTheCount()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome, json =>
+        {
+            json[InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = new JsonArray(Enumerable.Range(0, 40).Select(i => (JsonNode)new JsonObject
+            {
+                ["policyCode"] = $"BILL-OLD-{i}",
+                ["subject"] = new JsonObject { ["entity"] = "sprk_billingevent", ["id"] = Guid.NewGuid().ToString("D") },
+                ["code"] = "core_record_changed",
+            }).ToArray());
+            return json;
+        });
+        FailBillAge(world, "escalation");
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        var text = StoredAttention(world)!;
+        text.Length.Should().BeLessThanOrEqualTo(InvoiceSubmissionPersister.AdminAttentionMaxLength);
+        text.Should().StartWith("41 Signals could not be created: ").And.MatchRegex(@"… \(\+\d+ more\)$");
+        var kept = text.Split("core_record_changed").Length - 1;
+        text.Should().EndWith($"… (+{41 - kept} more)");
+    }
+
+    [Fact(DisplayName = "049 D-133: a run with no refusal never touches sprk_adminattention (not null, not empty) (must-not-fire)")]
+    public async Task NoRefusal_LeavesAdminAttentionUntouched()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome);
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        world.SubmissionUpdates.Should().NotContain(u => u.ContainsKey(AdminAttention));
+        world.TerminalWrites.Should().NotContain(u => u.ContainsKey(AdminAttention));
+        world.Row.Contains(AdminAttention).Should().BeFalse();
     }
 
     [Fact(DisplayName = "049 F1-3: a permanent refusal on an Accepted-path Signal does not stop the run either (Blocked: indexed, terminal)")]
