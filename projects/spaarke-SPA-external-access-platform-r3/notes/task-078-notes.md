@@ -228,3 +228,24 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
   - BFF hygiene §10: placement stated, +4,812 B, no package, no vulnerable package, tests updated.
   - CLAUDE.md §11 answers are above. **Compliant; no violation, no warning.**
 - **Live:** no change in this task. It ships with the next owner-approved dev BFF deploy, together with the K1 smoke (deploy checklist).
+
+## Dev deploy (2026-10-20, owner approval "yes bff deploy")
+
+- **Candidate** `21184ecd4` = R3 (078 at `c935c70e1`) merged with master `2b07480ab` (UAC #2110).
+  - The previous live `00aba6d99` is an ancestor, and so is 077.
+  - It does not contain ontology 042c (that is on the ontology docs branch, not master) or UAC #2122 (draft).
+- **Coordination:** OK from UAC, ontology, ebilling, provisioning, field-mapping, word-add-in and spe-admin.
+- **Tests:**
+  - ArchTests 1152/1152.
+  - Unit filter (Dataverse, Communication, ExternalAccess, ToolFramework, DiGraph, Workforce, Registration): 6758/6758 passed (3 skipped) on a re-run. The first run had 1 intermittent failure that did not repeat.
+- **Rollback snapshot** (Kudu zip of the live site, reads `00aba6d99`): `deploy/rollback/wwwroot-20261020T163210Z`.
+- **Deploy:** `scripts/Deploy-BffApi.ps1` (direct), 16:32:41–16:35:10Z. Package 37.47 MB; 4 critical files SHA-256 verified; healthz and CORS passed.
+- **Read-back:**
+  - Kudu DLL ProductVersion `1.0.0+21184ecd4789c2124c7d142237ba4dce0d8d5b6e` (16:35:29Z);
+  - `/healthz` 200, `/healthz/dataverse` 200;
+  - `/api/me` anonymous 401, with a v2 token 200.
+- **K1 live smoke (read-only, own token):**
+  - `sprk_communications?$filter=sprk_isinternalonly eq false and _sprk_communicationthread_value ne null and sprk_CommunicationThread/sprk_privacystate eq 100000000&$top=3` → 200, 3 rows, so the navigation clause is valid on live Dataverse.
+  - Private-state control → 200, 0 rows.
+- Ontology smoke passed on the new build.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T163210Z` (= `00aba6d99`, which contains 077).
