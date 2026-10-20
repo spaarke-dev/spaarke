@@ -1683,3 +1683,12 @@ The full record is in `notes/185-invite-code-design.md` §11.
    - Q4 = **no Decision Record** for a delete.
    - Q5: "if its decision records are deleted, then the signal records are deleted". This conflicts with approved D2 (DRs are kept and unlinked), so the owner was asked to confirm whether D2 changes.
 5. **186:** the guest is `tracy.cheatham@…` (home tenant bc3aa7f4). Sign-in failed with AADSTS90072 because the account isn't invited into the Spaarke tenant yet. The owner invites it, or approves UAC sending the B2B invite. **5b approved:** remove and restore Create on the Workforce role's sprk_servicerequest during the gate.
+
+## Round 106 (owner, 2026-10-20)
+
+1. **Secure meaning: KEEP as built.** Named external contacts are allowed on a Secure record; organization, standing and derived access are switched off (FR-22). The owner had understood "Secure = internal only". They asked: "let's make sure that it is not a matter of code or other wiring that is just not working correctly; let's ensure we are doing this as intended". A verification (code audit plus live check) is commissioned.
+2. **036:** "is option C the best technical decision? ... let's ensure we are doing the best long term solution". An independent long-term critique of C versus B is commissioned. 036 stays HELD.
+3. **#2119:** the owner proposes adding the Manage Access PCF to the Document record, wired into the same access management. A feasibility and design check is commissioned.
+4. **SharePoint four:** "don't worry about the Sharepoint settings". DROPPED; no strip.
+5. **Delete Q3: keep** a Secure record's own, now-empty dedicated container.
+6. **Delete Q5:** "if the Decision Record is deleted then also delete the signal that triggered it". A Signal follows the Decision Record that cites it. Applied with approved D2 (DRs are kept): a Signal cited by a kept DR is kept, and all other Signals are deleted. Asked the owner to confirm D2 itself (keep DRs when a matter is deleted).
