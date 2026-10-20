@@ -823,12 +823,13 @@ and the two values coincide — list it anyway; nothing is inferred.
 
 Model 1 puts **Spaarke's side** (the stamp, its BFF app registration, its Dataverse environment) in Spaarke's
 tenant. It does **not** move the customer's people. A customer's employees keep their own company work accounts
-in **their company's own Entra tenant** — the customer's **home tenant** (e.g. Contoso's tenant). They reach the
-stamp as **B2B guests in Spaarke's tenant**, authenticating at home.
+in **their company's own Entra tenant** — the customer's **home tenant** (e.g. Contoso's tenant). They sign in at
+that **home directory** and self-register (ADR-028 A9). A B2B guest account in Spaarke's tenant is refused
+`sdap.access.deny.workforce_guest_use_home_signin` (#2128 retired the R3 FR-15 guest admission).
 
 | Where the home tenant appears | What it is |
 |---|---|
-| The guest's token from the stamp (Spaarke-pinned authority, ADR-028 A8; proven live 2026-10-08) | `tid` = **Spaarke's** tenant, `acct = 1` (guest), `idp` = `https://sts.windows.net/{home tenant id}/` |
+| A B2B guest's token from the stamp (Spaarke-pinned authority, ADR-028 A8; proven live 2026-10-08; refused since #2128 — the `idp` home tenant only selects the deny code) | `tid` = **Spaarke's** tenant, `acct = 1` (guest), `idp` = `https://sts.windows.net/{home tenant id}/` |
 | `WorkforceIdentity__CustomerTenantIds__N` (this setting) | The customer's home tenant id(s): "whose employees count as this customer's workforce" |
 | The Spaarke registry, next to `sprk_securitygroupid` (R3 task 060 for current customers; provisioning intake for new ones) | The same list per customer key, read by the shared workforce self-registration service |
 
