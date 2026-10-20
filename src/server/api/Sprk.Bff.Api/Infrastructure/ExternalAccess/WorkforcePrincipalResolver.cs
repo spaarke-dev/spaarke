@@ -304,7 +304,7 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
 
         // ── (c) explicit deny — the binding decision's own code reaches the ProblemDetails reasonCode ──
         _logger.LogWarning(
-            "[WF-AUTH] Workforce caller oid={CallerOid} matched neither a systemuser nor a bound contact — denying ({DenyCode})",
+            "[WF-AUTH] Workforce caller oid={CallerOid} has no enabled systemuser and was not resolved on the contact-only branch — denying ({DenyCode})",
             callerOid, binding.DenyCode);
         LogGuestCandidateDeny(user, binding.DenyCode ?? DenyPrincipalNotResolved);
         return WorkforcePrincipalResolution.Denied(
