@@ -285,3 +285,58 @@ It includes transition (a) under both a Secure and an ordinary matter, and (b) t
   - Decide "hide everywhere" after Own mode ships.
 - **D5 — Communication:** stays out (round 81; thread-owned shares). Confirm.
 - **D6 — notifications** for shares on these records: same in-app notification as roots. Recommended: yes.
+- **D7 — a document can narrow its partner visibility (#2126 / R3 ISS-015).** **Proposed; awaiting the owner.** See §6.
+
+## 6. D7: internal-only documents (#2126, owner direction 2026-10-20, relayed by R3)
+
+**Owner direction.** When an email is internal-only, every document saved from it (the .eml and its attachments) is internal too. The same holds under Secure records. The owner wants this handled with #2119, not as a separate R3 column.
+
+**Why #2119 alone does not do it.** §1.2: Restricted / Limited is enforced on roots only (I-14); a filed child's value is display only, and partners reach documents through root grants + `ExternalMultiRootRule`. Today only task 078 hides email documents, and only in the AI chat tools (`_sprk_relatedcommunication_value` → the 065 rule).
+
+### 6.1 Rule (amends I-14: a child may narrow, never widen)
+
+A document is visible to an external caller only when **all** of these hold:
+
+1. **Root grants allow it.** Unchanged.
+2. **Its own Access Permission is not Restricted.** The column exists on `sprk_document`; T5 puts `TrackingFieldTrio` on the form. Because visibility is "root AND own", an own value wider than the root has no effect, so no "never widen" validation is needed. T5's negative criterion changes: on a filed document the pill may be set to Restricted.
+3. **It does not come from an internal-only or non-Open communication.** This is derived at read time, never stamped.
+   - The document's communication is `_sprk_relatedcommunication_value`. When that is empty, the parent document's communication (`ParentDocumentLookup`) is used, one hop, then the grandparent's. The walk is bounded at 3 hops; a cycle or a longer chain fails closed.
+   - The communication is visible only if the 065 rule says so (`ExternalCallerCommunicationGuard.ReadVisibleCommunicationIdsAsync`): `sprk_isinternalonly` reads JSON `false`, a thread is set, and `CommunicationOpenThreadGate` confirms the thread is Open. The rule is reused, not copied.
+   - **Fail closed:** an unreadable flag, thread, or parent chain hides the document.
+
+**Why derived and not stamped.** The invariant has one owner: `sprk_communication.sprk_isinternalonly`, whose only update is `CommunicationInternalOnlyFloor.LowerWhenSafeAsync`. No writer has to keep per-document copies in sync. Lowering the flag later makes the documents visible with nothing else written.
+
+### 6.2 One predicate, every external document surface
+
+- **Owner.** UAC owns one predicate in its external read path. The external document routes apply it: list, download, versions, preview, any SPE file route, and the AI chat tools. 078's rule moves onto this predicate, so there is no second copy.
+- **Order.** The wiring follows 036 / PR #2078, which rewrites `ExternalProjectDataEndpoints`. R3 reviews the routes it owns.
+- **Cache.** If a document-set cache is in play, an own Access Permission change and a communication flag change (`LowerWhenSafeAsync`) evict it. Otherwise the read is uncached. The task states which.
+
+### 6.3 Writer gaps (R3's map, master c3ec5d6e5)
+
+Three save paths can produce a document from an internal-only email with no communication link. Today all three are visible to partners and missed by the AI tools.
+
+| Gap | Path | Closed by |
+|---|---|---|
+| 1 | Outlook add-in attachments of a saved email: child documents set only `ParentDocumentLookup` (`UploadFinalizationWorker.cs:1254/:1294`) | §6.1 rule 3's parent hop. No writer change is required. |
+| 2 | Outlook add-in single-attachment save (`SaveContentType.Attachment`): no capture, no communication row, no link (`OfficeService.cs:506`, `OfficeDocumentPersistence.cs:795`) | **Writer rule:** a document saved from an email item that cannot be linked to its communication is created with own Access Permission = Restricted, which fails closed. The user can widen it later only to the root's level (rule 2). Owner: Office. |
+| 3 | The add-in .eml whenever the best-effort canonical link misses (`OfficeDocumentPersistence.cs:790-817`: empty InternetMessageId, a failed lookup, or null services) | The same writer rule as gap 2. Better still, link it to the communication that the add-in capture creates (`EmailUploadCaptureService`, flag true), so the link is never missing. Owner: Office. |
+
+- Not email-related, so out of scope: the generic `POST /api/documents`, partner uploads (`ExternalDataService.cs:666`), the client `DocumentRecordService.ts`, and the AI, RAG and indexing updates.
+- Re-file and set-regarding paths are untraced. They don't change the communication link, and the rule is computed at read time, so no gap is expected. The task confirms this.
+
+### 6.4 Tasks (after the owner accepts D7)
+
+- **T7 — predicate + wiring (UAC, after #2078).**
+  - Must-fire tests, each on list, download, versions, preview and AI tools:
+    - own Restricted;
+    - linked to an internal-only communication;
+    - linked to a communication on a non-Open thread;
+    - an attachment whose parent .eml is linked to an internal-only communication;
+    - an unreadable flag, which is hidden.
+  - Must-not-fire tests:
+    - linked to a visible communication;
+    - no link anywhere in the chain and own Standard, which stays visible as today;
+    - a 4-hop chain, which is hidden (bounded).
+- **T8 — Office writer rule (Office owner; UAC reviews).** Gaps 2 and 3. Each has a must-fire test, including the canonical-link miss, plus a must-not-fire test: a linked save keeps its own default.
+- **ADR / architecture.** Amend I-14 in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` and the concise ADR-034 / auth constraint text: "a child's Access Permission may narrow partner visibility (Restricted hides it); it never widens it." Enforced by: T7's tests.
