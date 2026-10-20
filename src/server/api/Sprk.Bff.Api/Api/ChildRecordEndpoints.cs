@@ -226,7 +226,7 @@ public static class ChildRecordEndpoints
 
         // Ontology task 046 (NFR-10, D-29): a caller who cannot be named in Dataverse is the single 403, before anything about
         // the payload or the records it binds is asked. WhoAmI needs no privilege, so only "no Dataverse identity" fails it.
-        var who = await OwnedChildWrite.WhoAmIAsync(user, ct).ConfigureAwait(false);
+        var who = await CallerWriteAuthorization.WhoAmIAsync(user, ct).ConfigureAwait(false);
         if (who.Failure is { } whoFailure)
         {
             if (IsUnresolvedCaller(whoFailure))
@@ -384,7 +384,7 @@ public static class ChildRecordEndpoints
     /// <summary>
     /// Ontology task 046: the secure-create plan's refusal (task 158 r1), in this route's contract. No AppendTo on a secure
     /// parent named only by the polymorphic pair is the uniform not-found (a typed lookup's is, too — the plan must not tell
-    /// a caller which record is secure; the core (<see cref="OwnedChildWrite.PairTargetAsync"/>, #1612) decides the pair before
+    /// a caller which record is secure; the core (<see cref="CallerWriteAuthorization.PairTargetAsync"/>, #1612) decides the pair before
     /// the plan runs, so this arm is defence in depth); a caller walled off a secure parent is 403; a check that could not be made or a
     /// named team that could not be resolved is 500; a server-only column is 403; anything else (an unreadable parent flag)
     /// is the owner refusal, 409 — never "not secure". The split is <c>RecordCreationService.KindFor</c>'s.
