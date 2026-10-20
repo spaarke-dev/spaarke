@@ -298,6 +298,25 @@ R3 shows **`spaarke-bff-api-prod` with tenant-wide consent to the DEV BFF app** 
   - These 11 are new multi-scheme noise: a Spaarke-tenant **v2** token now passes the WorkforceHome scheme's issuer form and is refused at its tenant check, while the default scheme accepts it. Behaviour is correct; the noise is a candidate for the issuer-based scheme selector noted above.
 - From here, rolling back stage B first needs this consent removed (§5, §10).
 
+### Stage D — 2026-10-20 13:02:01Z, owner approval "yes approved--proceed"
+
+- Re-read just before:
+  - BU1 `cb15f587-baa0-f111-aaac-000d3a99d1d7` = "Spaarke Business Unit 1", enabled, exactly one default team (`cf15f587…`);
+  - `ExternalAccess__CustomerBusinessUnitId` absent;
+  - `CustomerTenantIds` `__0` `a221a95e…` and `__1` `bc3aa7f4…` (unchanged, so only the BU setting was set);
+  - 215 settings saved to scratchpad `before-stageD-settings.json`.
+- Restart notices sent to UAC, ontology and ebilling (the sessions had restarted under new names).
+- `az webapp config appsettings set … --settings ExternalAccess__CustomerBusinessUnitId=<BU1> -o none`: exit 0. Output suppressed, because the command echoes every setting.
+- **Read after:**
+  - 216 settings;
+  - the new key present (`cb15f587…`);
+  - **no existing setting changed or removed** (compared name by name with the snapshot);
+  - `/healthz` 200 by 13:02:14Z;
+  - `/healthz/dataverse` 200;
+  - `/api/me` 200 with a v2 token.
+- The dead `AzureAd__ValidAudiences__0..2` were left as they are (the owner did not ask to delete them).
+- After-notices sent. Rollback: `az webapp config appsettings delete -g rg-spaarke-dev -n spaarke-bff-dev --setting-names ExternalAccess__CustomerBusinessUnitId`.
+
 ### Side finding (owner-approved App Insights read, 2026-10-19): `IDX10214` and `IDX40001` on dev are log noise, not failures
 
 - App Insights `spe-insights-dev-67e2xz`, last 6 h.
