@@ -158,7 +158,7 @@ public class MembershipOptionsTests
     }
 
     [Fact]
-    public void AddMembership_WithOperatorBoundIdentityTables_DoesNotSeedDefaults()
+    public void AddMembership_WithOperatorBoundIdentityTables_DoesNotSeedIdentityTableDefaults()
     {
         // The post-configure seeding is GATED on empty — operator-provided
         // configuration MUST replace the defaults cleanly, not append to them.
@@ -223,7 +223,8 @@ public class MembershipOptionsTests
     [Fact]
     public void PostConfigure_ForceIncludeOfMandatoryExclusion_IsRemovedAndWarns()
     {
-        // Must-fire: a per-entity IncludedFields entry must not re-admit an ADR-034 mandatory exclusion.
+        // Must-fire: a per-entity IncludedFields entry must not re-admit an ADR-034 mandatory exclusion,
+        // whatever its casing or surrounding whitespace (" createdby " compares trimmed, as discovery does).
         var logger = new CapturingLogger();
         var options = new MembershipOptions
         {
@@ -231,7 +232,7 @@ public class MembershipOptionsTests
             {
                 ["sprk_matter"] = new EntityOverride
                 {
-                    IncludedFields = new List<string> { "ModifiedBy", "sprk_reviewer" },
+                    IncludedFields = new List<string> { "ModifiedBy", " createdby ", "sprk_reviewer" },
                 },
             },
         };
@@ -239,8 +240,11 @@ public class MembershipOptionsTests
         new MembershipOptionsDefaults(logger).PostConfigure(null, options);
 
         options.EntityOverrides["sprk_matter"].IncludedFields.Should().Equal("sprk_reviewer");
-        logger.Warnings.Should().ContainSingle()
-            .Which.Should().Contain("ModifiedBy").And.Contain("sprk_matter");
+        logger.Warnings.Should().HaveCount(2);
+        logger.Warnings.Should().ContainSingle(w => w.Contains("ModifiedBy"))
+            .Which.Should().Contain("sprk_matter");
+        logger.Warnings.Should().ContainSingle(w => w.Contains("createdby"))
+            .Which.Should().Contain("sprk_matter");
     }
 
     [Fact]
