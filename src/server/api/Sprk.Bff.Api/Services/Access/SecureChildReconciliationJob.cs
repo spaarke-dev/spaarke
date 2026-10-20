@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Documents;
 
 namespace Sprk.Bff.Api.Services.Access;
@@ -72,6 +73,18 @@ namespace Sprk.Bff.Api.Services.Access;
 /// recent-changes pass (on unless that pass's emergency stop is set). Reported in <c>ResultJson.makeSecureRelocations</c>;
 /// a document still owing a step makes the run unsuccessful. A row that names no file it can resolve is reported
 /// (<c>unresolvable</c>) and never moved or deleted.</para>
+/// <para><b>The re-file pass (#2159, #2151).</b> Then every <c>sprk_document</c> modified since this pass's own watermark — any
+/// owner, so every writer, the BFF and outside it — whose pointer's drive is not among its derived containers is relocated
+/// through the same relocator with purpose <c>Refile</c>: only the row's BFF-bound item, at most
+/// <see cref="MaxRelocationsPerRunConfigKey"/> a run (its own budget), in id order after a per-instance cursor, failed and
+/// deferred rows carried. A re-file never widens: a row still owned by the Secure Record owner team keeps its file in the
+/// secure container while its filing points elsewhere (<c>heldIsolated</c>, released only by an F3 act); an unfiled
+/// document stays in a declared home container (#2151), and one whose file is in no business unit's container and no
+/// declared home is reported (<c>unfiledHomeUnknown</c>) and left. A document the backstop took this run is not
+/// relocated twice. Reported in <c>ResultJson.refileRelocations</c>; a failed or still-owing move makes the run
+/// unsuccessful. Until the pass reaches it, a re-filed document is refused under the strict rule (about two minutes plus
+/// the run). Known limit: its window is per instance and the catch-up does not walk documents, so a move a previous
+/// instance carried is reached again only when the row next changes or by <c>DocumentContainerMigrationJob</c>.</para>
 /// <para><b>The inherited Access Permission (task 173, owner rounds 81/84).</b> Each run also keeps <c>sprk_accesspermission</c>
 /// on To Do, Event, Communication and Document equal to the most restrictive value of the records at the top of their
 /// filing (<see cref="ChildAccessPermissionReconciler"/>): the rows changed since its own watermark and everything filed
@@ -507,6 +520,14 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         // the secure pass has saved its cursor and watermark (verifier K2): a long or cancelled access pass can never make
         // the secure pass redo its work. Its writes follow the recent-changes pass (on unless that pass's emergency stop is
         // set) and are capped per run (MaxAccessPermissionWritesPerRunConfigKey).
+        // #2159: the RE-FILE pass — a document whose filing changed (through the BFF or outside it) has its file moved into
+        // its new derived container, never out of isolation and never from an unknown home. After the backstop (a document
+        // it took is not relocated twice) and after the secure pass has saved its window, like the access pass (K2). Its
+        // writes follow the recent-changes pass.
+        var refile = await RelocateRefiledDocumentsAsync(
+            scope.ServiceProvider, dataverse, recentWrites, startedAt, relocations.Taken, context.RunId, cancellationToken)
+            .ConfigureAwait(false);
+
         var accessPermission = await ReconcileChildAccessPermissionAsync(
             scope.ServiceProvider, dataverse, recentWrites, startedAt, context.RunId, cancellationToken).ConfigureAwait(false);
 
@@ -517,6 +538,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         // missing ancestor.
         var success = incompleteRoots.Count == 0 && recent.Failure is null && recent.Undetermined.Count == 0
                       && relocations.Failure is null && (relocations.Files?.Incomplete ?? 0) == 0
+                      && !refile.Incomplete
                       && accessPermission.Run?.Failure is null && (accessPermission.Run?.Failed ?? 0) == 0;
         int carriedRoots, carriedRows;
         bool catchUpComplete;
@@ -555,6 +577,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 : $"{incompleteRoots.Count} secure record(s) not fully reconciled, {recent.Undetermined.Count} recently " +
                   $"changed related record(s) not placed and {relocations.Files?.Incomplete ?? 0} Make Secure file " +
                   $"relocation(s) still owed{(relocations.Failure is null ? "" : $" ({relocations.Failure})")}" +
+                  (refile.Incomplete
+                      ? $", {refile.Failed.Count + refile.StillOwed.Count} re-filed document file move(s) not finished" +
+                        (refile.Failure is null ? "" : $" ({refile.Failure})")
+                      : "") +
                   (accessPermission.Run is { } ap && (ap.Failure is not null || ap.Failed > 0)
                       ? $", and the inherited Access Permission pass {(ap.Failure ?? $"could not write {ap.Failed} row(s)")}"
                       : "") +
@@ -653,6 +679,41 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     sourceKeptForOtherRecords = relocations.Files?.SourceKeptForOtherRecords ?? 0,
                     passComplete = relocations.PassComplete,
                     failure = relocations.Failure,
+                },
+                // #2159: the re-file pass — documents modified since `since` whose file is not in a derived container,
+                // relocated with purpose Refile. Counts are complete; each list names at most MaxSampledRefileIds ids.
+                refileRelocations = new
+                {
+                    mode = refile.Mode,
+                    since = refile.Since?.UtcDateTime,
+                    listed = refile.Listed,
+                    retriedRows = refile.RetriedRows,
+                    examined = refile.Examined,
+                    inPlace = refile.InPlace,
+                    skippedForMakeSecure = refile.SkippedForMakeSecure,
+                    moved = refile.Moved.Count,
+                    wouldMove = refile.WouldMove.Count,
+                    stillOwed = refile.StillOwed.Count,
+                    heldIsolated = refile.HeldIsolated.Count,
+                    unfiledHomeUnknown = refile.UnfiledHomeUnknown.Count,
+                    sourceUnverified = refile.SourceUnverified.Count,
+                    fileMissing = refile.FileMissing.Count,
+                    undecidable = refile.Undecidable.Count,
+                    failed = refile.Failed.Count,
+                    deferred = refile.Deferred.Count,
+                    capReached = refile.CapReached,
+                    carried = refile.Carried,
+                    movedDocuments = refile.Moved.Take(MaxSampledRefileIds).ToArray(),
+                    wouldMoveDocuments = refile.WouldMove.Take(MaxSampledRefileIds).ToArray(),
+                    stillOwedDocuments = refile.StillOwed.Take(MaxSampledRefileIds).ToArray(),
+                    heldIsolatedDocuments = refile.HeldIsolated.Take(MaxSampledRefileIds).ToArray(),
+                    unfiledHomeUnknownDocuments = refile.UnfiledHomeUnknown.Take(MaxSampledRefileIds).ToArray(),
+                    sourceUnverifiedDocuments = refile.SourceUnverified.Take(MaxSampledRefileIds).ToArray(),
+                    fileMissingDocuments = refile.FileMissing.Take(MaxSampledRefileIds).ToArray(),
+                    undecidableDocuments = refile.Undecidable.Take(MaxSampledRefileIds).ToArray(),
+                    failedDocuments = refile.Failed.Take(MaxSampledRefileIds).ToArray(),
+                    deferredDocuments = refile.Deferred.Take(MaxSampledRefileIds).ToArray(),
+                    failure = refile.Failure,
                 },
                 // Task 173 (owner rounds 81/84): To Do, Event, Communication and Document show the most restrictive Access
                 // Permission of what they are filed under. `changes` lists the rows set (or, report-only, to be set).
@@ -788,7 +849,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
     /// <summary>What the Make Secure file backstop did in one run (round 46 item 2).</summary>
     internal sealed record MakeSecureRelocationRun(
-        string Mode, int LedgerOwing, int Stranded, MakeSecureFilesSummary? Files, bool PassComplete, string? Failure);
+        string Mode, int LedgerOwing, int Stranded, MakeSecureFilesSummary? Files, bool PassComplete, string? Failure)
+    {
+        /// <summary>#2159: the documents this run handed to the relocator — the re-file pass does not relocate them again.</summary>
+        public IReadOnlySet<Guid> Taken { get; init; } = new HashSet<Guid>();
+    }
 
     /// <summary>
     /// Round 46 item 2 — settles the PENDING Make Secure relocations through the ONE <see cref="DocumentContainerRelocator"/>:
@@ -854,7 +919,282 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             "[SECURE-CHILD-RECONCILE] make-secure-relocations mode={Mode} ledgerOwing={LedgerOwing} stranded={Stranded} " +
             "examined={Examined} moved={Moved} incomplete={Incomplete} unresolvable={Unresolvable} passComplete={PassComplete}",
             mode, owing.Count, stranded.Count, files.Examined, files.Moved, files.Incomplete, files.Unresolvable, passComplete);
-        return new MakeSecureRelocationRun(mode, owing.Count, stranded.Count, files, passComplete, null);
+        return new MakeSecureRelocationRun(mode, owing.Count, stranded.Count, files, passComplete, null) { Taken = take.ToHashSet() };
+    }
+
+    /// <summary>What the re-file pass did in one run (#2159). Lists hold document ids (at most <see cref="MaxSampledRefileIds"/> each).</summary>
+    internal sealed record RefileRelocationRun(string Mode)
+    {
+        public DateTimeOffset? Since { get; init; }
+        public int Listed { get; init; }
+        public int RetriedRows { get; init; }
+        public int Examined { get; init; }
+        public int InPlace { get; set; }
+        public int SkippedForMakeSecure { get; init; }
+        public List<Guid> Moved { get; } = new();
+        public List<Guid> WouldMove { get; } = new();
+        public List<Guid> StillOwed { get; } = new();
+        public List<Guid> HeldIsolated { get; } = new();
+        public List<Guid> UnfiledHomeUnknown { get; } = new();
+        public List<Guid> SourceUnverified { get; } = new();
+        public List<Guid> FileMissing { get; } = new();
+        public List<Guid> Undecidable { get; } = new();
+        public List<Guid> Failed { get; } = new();
+        public List<Guid> Deferred { get; } = new();
+        public int Carried { get; set; }
+        public bool CapReached { get; set; }
+        public string? Failure { get; init; }
+
+        /// <summary>Not a finished run: the listing failed, a move failed, or a move still owes a step.</summary>
+        public bool Incomplete => Failure is not null || Failed.Count > 0 || StillOwed.Count > 0;
+    }
+
+    /// <summary>How many document ids each list of the re-file report carries (the counts are complete).</summary>
+    internal const int MaxSampledRefileIds = 50;
+
+    /// <summary>
+    /// #2159 — the RE-FILE pass: every <c>sprk_document</c> modified since this pass's watermark (any owner, the BFF's writes
+    /// and every write outside it), with the rows earlier runs carried, whose pointer's drive is NOT among its derived
+    /// containers (<see cref="RecordContainerResolver.DeriveDocumentContainersAsync"/>) is relocated through the ONE
+    /// <see cref="DocumentContainerRelocator"/> with <see cref="RelocationPurpose.Refile"/>: only the row's BFF-bound item,
+    /// never out of isolation (the relocator asks <see cref="IsOwnedByTeamAsync"/> under its lock), and
+    /// never an unfiled document whose home is unknown. A document the Make Secure backstop handled this run is skipped.
+    /// </summary>
+    /// <remarks>
+    /// <para>At most <see cref="MaxRelocationsPerRunConfigKey"/> relocator calls a run (the backstop's setting, its own budget),
+    /// in id order after a per-instance cursor; the rest are carried. Carried too (at most <see cref="MaxCarriedRows"/>; beyond
+    /// that the watermark stays): a failed move (an unreadable owner, a held lock, a copy fault) and an undecidable
+    /// derivation. Its own watermark, moved only past a listing that completed in a run that wrote — so a fault here never
+    /// holds the secure pass's window (#1378). Every step is keyed on observed state (ADR-036 A1 rule 3): a moved document
+    /// derives in place on the next run. Never throws (cancellation aside).</para>
+    /// <para><b>Known limit.</b> The watermark, cursor and carried rows are per instance. A new instance looks back
+    /// <see cref="InitialRecentChangesLookback"/>; a document re-filed earlier whose move never completed (it was carried by a
+    /// previous instance) is reached again only when the row next changes, or by the operator-run
+    /// <see cref="DocumentContainerMigrationJob"/>. The catch-up does not walk documents: a full walk of every document's
+    /// derivation is not a two-minute net's cost.</para>
+    /// </remarks>
+    private async Task<RefileRelocationRun> RelocateRefiledDocumentsAsync(
+        IServiceProvider services, IGenericEntityService dataverse, bool writes, DateTimeOffset startedAt,
+        IReadOnlySet<Guid> handledByMakeSecure, Guid runId, CancellationToken ct)
+    {
+        var mode = writes ? ModeWrite : ModeReportOnly;
+        var relocator = services.GetService<DocumentContainerRelocator>();
+        var resolver = services.GetService<RecordContainerResolver>();
+        if (relocator is null || resolver is null)
+            return new RefileRelocationRun("unavailable");
+
+        var cap = int.TryParse(_configuration[MaxRelocationsPerRunConfigKey], out var configured) && configured > 0
+            ? configured
+            : DefaultMaxRelocationsPerRun;
+
+        DateTimeOffset since;
+        List<Guid> carried;
+        Guid? after;
+        lock (_cursorGate)
+        {
+            since = _refileWatermark ?? startedAt - InitialRecentChangesLookback;
+            carried = _refilePending.OrderBy(id => id).ToList();
+            after = _refileCursor;
+        }
+
+        Guid? secureTeamId;
+        Dictionary<Guid, string> candidates;
+        int listed;
+        try
+        {
+            // The isolation fact: the Secure Record owner team, read once (ambiguous = nothing is decided, nothing moves).
+            var team = await SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(dataverse, _configuration, ct)
+                .ConfigureAwait(false);
+            if (team.Refusal is { } refusal)
+                return new RefileRelocationRun(mode) { Since = since, Failure = refusal, Carried = carried.Count };
+            secureTeamId = team.TeamId;
+
+            var query = new QueryExpression("sprk_document") { ColumnSet = new ColumnSet("sprk_graphdriveid"), NoLock = true };
+            query.Criteria.AddCondition(ModifiedOnColumn, ConditionOperator.GreaterEqual, since.UtcDateTime);
+            query.Criteria.AddCondition("sprk_graphdriveid", ConditionOperator.NotNull);
+            candidates = new Dictionary<Guid, string>();
+            foreach (var row in await ReadAllAsync(dataverse, query, ct).ConfigureAwait(false))
+                AddCandidate(candidates, row);
+            listed = candidates.Count;
+
+            // The rows earlier runs carried, read again by id whatever their modifiedon; a row gone, or without a file, drops out.
+            var retry = carried.Where(id => !candidates.ContainsKey(id)).ToList();
+            if (retry.Count > 0)
+            {
+                var again = new QueryExpression("sprk_document") { ColumnSet = new ColumnSet("sprk_graphdriveid"), NoLock = true };
+                again.Criteria.AddCondition("sprk_documentid", ConditionOperator.In, retry.Select(id => (object)id).ToArray());
+                foreach (var row in await ReadAllAsync(dataverse, again, ct).ConfigureAwait(false))
+                    AddCandidate(candidates, row);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] refile run={RunId}: the re-filed documents since {Since:o} could not " +
+                "be listed; that window is looked at again next run.", runId, since);
+            return new RefileRelocationRun(mode)
+            {
+                Since = since,
+                Failure = "the re-filed documents could not be listed",
+                Carried = carried.Count,
+            };
+        }
+
+        // In id order, continuing after the last document the previous run reached when it stopped at the cap.
+        var ordered = candidates.Keys.OrderBy(id => id).ToList();
+        if (after is { } a)
+            ordered = ordered.Where(id => id.CompareTo(a) > 0).Concat(ordered.Where(id => id.CompareTo(a) <= 0)).ToList();
+
+        var run = new RefileRelocationRun(mode)
+        {
+            Since = since,
+            Listed = listed,
+            RetriedRows = candidates.Count - listed,
+            Examined = ordered.Count(id => !handledByMakeSecure.Contains(id)),
+            SkippedForMakeSecure = ordered.Count(handledByMakeSecure.Contains),
+        };
+        var carry = new List<Guid>();
+        var inPlace = 0;
+        var calls = 0;
+        Guid? lastCalled = null;
+        foreach (var documentId in ordered)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // The Make Secure backstop already took it this run (its ledger, or its stranded isolated file): not twice.
+            if (handledByMakeSecure.Contains(documentId))
+                continue;
+
+            var derivation = await resolver.DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
+            if (!derivation.Decided)
+            {
+                run.Undecidable.Add(documentId);
+                carry.Add(documentId);
+                continue;
+            }
+
+            if (derivation.Allows(candidates[documentId]))
+            {
+                inPlace++;
+                continue;
+            }
+
+            if (calls >= cap)
+            {
+                run.Deferred.Add(documentId);
+                run.CapReached = true;
+                carry.Add(documentId);
+                continue;
+            }
+
+            calls++;
+            lastCalled = documentId;
+            DocumentRelocationOutcome outcome;
+            try
+            {
+                outcome = await relocator.RelocateIfMisplacedAsync(
+                        documentId, writes, RelocationPurpose.Refile, ct, expectedTargetContainer: null,
+                        isIsolated: (id, token) => IsOwnedByTeamAsync(dataverse, id, secureTeamId, token))
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] refile run={RunId}: document {DocumentId} faulted.", runId, documentId);
+                outcome = new DocumentRelocationOutcome(
+                    documentId, RelocationState.Failed, null, null, null, null, $"faulted ({ex.GetType().Name})");
+            }
+
+            _logger.Log(
+                outcome.State is RelocationState.Failed or RelocationState.Undecidable ? LogLevel.Warning : LogLevel.Information,
+                "[SECURE-CHILD-RECONCILE] refile run={RunId} mode={Mode} document={DocumentId} state={State} " +
+                "from={SourceDrive} to={TargetDrive}: {Detail}",
+                runId, mode, documentId, outcome.State, outcome.SourceDrive, outcome.TargetDrive, outcome.Detail);
+
+            switch (outcome.State)
+            {
+                case RelocationState.Relocated or RelocationState.RelocatedSourceKeptForOtherRecords:
+                    run.Moved.Add(documentId);
+                    break;
+                case RelocationState.RelocationPending:
+                    // Re-pointed; its ledger owes a step, which the Make Secure backstop lists and settles every run.
+                    run.Moved.Add(documentId);
+                    run.StillOwed.Add(documentId);
+                    break;
+                case RelocationState.WouldRelocate:
+                    run.WouldMove.Add(documentId);
+                    break;
+                case RelocationState.InPlace or RelocationState.NoFile:
+                    inPlace++;
+                    break;
+                case RelocationState.HeldIsolated:
+                    run.HeldIsolated.Add(documentId);
+                    break;
+                case RelocationState.UnfiledHomeUnknown:
+                    run.UnfiledHomeUnknown.Add(documentId);
+                    break;
+                case RelocationState.SourceUnverified:
+                    run.SourceUnverified.Add(documentId);
+                    break;
+                case RelocationState.FileMissing:
+                    run.FileMissing.Add(documentId);
+                    break;
+                case RelocationState.Undecidable:
+                    run.Undecidable.Add(documentId);
+                    carry.Add(documentId);
+                    break;
+                default:
+                    run.Failed.Add(documentId);
+                    carry.Add(documentId);
+                    break;
+            }
+        }
+
+        lock (_cursorGate)
+        {
+            var overflow = carry.Count > MaxCarriedRows;
+            if (writes && !overflow)
+                _refileWatermark = startedAt - RecentChangesOverlap;
+            _refilePending.Clear();
+            _refilePending.UnionWith(carry.Take(MaxCarriedRows));
+            _refileCursor = run.CapReached ? lastCalled : null;
+            run.Carried = _refilePending.Count;
+        }
+
+        run.InPlace = inPlace;
+        var result = run;
+        _logger.Log(
+            result.Incomplete ? LogLevel.Warning : LogLevel.Information,
+            "[SECURE-CHILD-RECONCILE] refile-relocations run={RunId} mode={Mode} since={Since:o} listed={Listed} " +
+            "examined={Examined} inPlace={InPlace} moved={Moved} wouldMove={WouldMove} heldIsolated={HeldIsolated} " +
+            "unfiledHomeUnknown={UnfiledHomeUnknown} sourceUnverified={SourceUnverified} undecidable={Undecidable} " +
+            "failed={Failed} deferred={Deferred} carried={Carried}",
+            runId, mode, since, result.Listed, result.Examined, result.InPlace, result.Moved.Count, result.WouldMove.Count,
+            result.HeldIsolated.Count, result.UnfiledHomeUnknown.Count, result.SourceUnverified.Count, result.Undecidable.Count,
+            result.Failed.Count, result.Deferred.Count, result.Carried);
+        return result;
+
+        static void AddCandidate(Dictionary<Guid, string> into, Entity row)
+        {
+            var drive = row.GetAttributeValue<string>("sprk_graphdriveid")?.Trim();
+            if (row.Id != Guid.Empty && !string.IsNullOrEmpty(drive))
+                into[row.Id] = drive;
+        }
+    }
+
+    /// <summary>
+    /// #2159: is the document owned by the Secure Record owner team NOW — the fact the Make Secure backstop's stranded
+    /// listing and the recent-changes listing use (<c>owningteam</c> = that team). No team in this environment = no row
+    /// is isolated. A row that cannot be read throws: the relocator then moves nothing.
+    /// </summary>
+    private static async Task<bool> IsOwnedByTeamAsync(
+        IGenericEntityService dataverse, Guid documentId, Guid? secureTeamId, CancellationToken ct)
+    {
+        if (secureTeamId is not { } teamId)
+            return false;
+        var query = new QueryExpression("sprk_document") { ColumnSet = new ColumnSet("owningteam"), TopCount = 1, NoLock = true };
+        query.Criteria.AddCondition("sprk_documentid", ConditionOperator.Equal, documentId);
+        var row = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault()
+                  ?? throw new InvalidOperationException($"sprk_document {documentId:D} could not be read");
+        return row.GetAttributeValue<EntityReference>("owningteam")?.Id == teamId;
     }
 
     /// <summary>
@@ -1141,6 +1481,12 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
     /// <summary>Round 46 item 2: where the Make Secure file backstop continues (per instance, like the sweep cursor).</summary>
     private Guid? _relocationCursor;
+
+    // #2159: the re-file pass's own window, carried documents and cursor (the same per-instance, in-singleton reasoning as
+    // the cursor; its own watermark so its faults never hold the secure pass's window, #1378).
+    private DateTimeOffset? _refileWatermark;
+    private readonly HashSet<Guid> _refilePending = new();
+    private Guid? _refileCursor;
 
     // Task 147: the recent-changes watermark, with the same per-instance, in-singleton reasoning as the cursor. A restart
     // looks back InitialRecentChangesLookback. A change older than that is reached by the full sweep.

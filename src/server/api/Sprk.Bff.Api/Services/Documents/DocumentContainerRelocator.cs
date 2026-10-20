@@ -27,9 +27,17 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// <item><see cref="RelocateIfMisplacedAsync"/> — moves a file that is NOT in its document's derived container into
 /// it: copy through the BFF identity — REPLAYING the source's version history oldest first, the current content last
 /// (round 45 item 1) — verify (each version's size; the final content's size, and <c>quickXorHash</c> where Graph returns
-/// one), re-point through the SAME pointer-attach path, then settle what the move leaves behind (below). Two callers, one
-/// mechanism (round 26 item 3): task 166's legacy migration (<see cref="DocumentContainerMigrationJob"/>) and the Make
-/// Secure transition (task 150's provisioning lane).</item>
+/// one), re-point through the SAME pointer-attach path, then settle what the move leaves behind (below). One mechanism,
+/// three purposes (<see cref="RelocationPurpose"/>; round 26 item 3, #2159): task 166's legacy migration
+/// (<see cref="DocumentContainerMigrationJob"/>), the Make Secure transition (task 150's provisioning lane, and the
+/// <c>SecureChildReconciliationJob</c> backstop for the moves it left unmade), and the RE-FILE (#2159): a document whose
+/// filing changed — through the BFF or outside it (a model-driven form, an import) — has its file moved into its new
+/// derived container by the <c>SecureChildReconciliationJob</c>'s recent-changes cadence (every 2 minutes, writes on
+/// unless its emergency stop is set). A re-file moves only the row's BFF-bound item, and never widens: a row still owned
+/// by the Secure Record owner team keeps its file in the secure container while its derivation points elsewhere
+/// (<see cref="RelocationState.HeldIsolated"/>), and an unfiled document whose file is in no business unit's container
+/// and no declared home (#2151) is left where it is (<see cref="RelocationState.UnfiledHomeUnknown"/>). Until the pass
+/// reaches it, a re-filed document is refused under the strict rule (up to about two minutes plus the run).</item>
 /// </list>
 /// <para><b>What a move leaves behind, and the relocation ledger</b> (owner round 37, task 166 f1-v1; round 45). Re-pointing
 /// the row is one atomic Dataverse update that ALSO re-keys the row's own columns holding the old drive / item
@@ -613,6 +621,16 @@ public sealed class DocumentContainerRelocator
     /// file the document shows into the record's OWN container whatever its uploader: that move only NARROWS who can
     /// reach the bytes (SPE permissions are additive-only, so leaving them in the shared container is the exposure),
     /// and it applies only when the derived container is that secure one.
+    /// <see cref="RelocationPurpose.Refile"/> (#2159) — the document's filing changed — moves the file into its NEW
+    /// derived container. Its source is verified by the binding: the pointer is the item the BFF bound to the row
+    /// (<c>sprk_graphitemidbound</c>); only a row with no bound copy yet falls back to the legacy check. Two holds come
+    /// first, each reported and nothing moved: <see cref="RelocationState.HeldIsolated"/> — the row is still owned by the
+    /// Secure Record owner team (<paramref name="isIsolated"/>) and the derivation is not a secure record's own container
+    /// (its filing was changed outside the BFF; isolation holds the row, owner round 24 item 2, so its bytes never leave
+    /// the secure container until an F3 act releases it); and <see cref="RelocationState.UnfiledHomeUnknown"/> — the
+    /// document is unfiled and its file is in no business unit's container (a record's own, or another owner's that is
+    /// not a declared home, #2151): it is never pulled into a business unit's container. An owner that cannot be read
+    /// moves nothing (<see cref="RelocationState.Failed"/>).
     /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="expectedTargetContainer">
@@ -621,13 +639,17 @@ public sealed class DocumentContainerRelocator
     /// reported <see cref="RelocationState.Undecidable"/> and nothing moves) — the relocator never puts a file anywhere
     /// the strict rule would refuse.
     /// </param>
+    /// <param name="isIsolated">
+    /// <see cref="RelocationPurpose.Refile"/> only: is the document owned by the Secure Record owner team NOW? Asked under
+    /// the document's lock, after its derivation. Absent, or throwing, = unknown: nothing moves.
+    /// </param>
     public async Task<DocumentRelocationOutcome> RelocateIfMisplacedAsync(
         Guid documentId, bool apply, RelocationPurpose purpose = RelocationPurpose.LegacyMigration, CancellationToken ct = default,
-        string? expectedTargetContainer = null)
+        string? expectedTargetContainer = null, Func<Guid, CancellationToken, Task<bool>>? isIsolated = null)
     {
         if (!apply)
         {
-            return await RelocateCoreAsync(documentId, apply, purpose, expectedTargetContainer, ct).ConfigureAwait(false);
+            return await RelocateCoreAsync(documentId, apply, purpose, expectedTargetContainer, isIsolated, ct).ConfigureAwait(false);
         }
 
         // ONE writer per document at a time: two concurrent relocations (a double-clicked Make Secure, or Make Secure while
@@ -642,7 +664,7 @@ public sealed class DocumentContainerRelocator
 
         try
         {
-            return await RelocateCoreAsync(documentId, apply, purpose, expectedTargetContainer, ct).ConfigureAwait(false);
+            return await RelocateCoreAsync(documentId, apply, purpose, expectedTargetContainer, isIsolated, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -651,7 +673,8 @@ public sealed class DocumentContainerRelocator
     }
 
     private async Task<DocumentRelocationOutcome> RelocateCoreAsync(
-        Guid documentId, bool apply, RelocationPurpose purpose, string? expectedTargetContainer, CancellationToken ct)
+        Guid documentId, bool apply, RelocationPurpose purpose, string? expectedTargetContainer,
+        Func<Guid, CancellationToken, Task<bool>>? isIsolated, CancellationToken ct)
     {
         var row = await ReadRowAsync(documentId, ct).ConfigureAwait(false);
         var sourceDrive = row?.GetAttributeValue<string>(DriveColumn)?.Trim();
@@ -746,8 +769,23 @@ public sealed class DocumentContainerRelocator
         var target = string.IsNullOrWhiteSpace(expectedTargetContainer)
             ? derivation.PrimaryContainer!
             : expectedTargetContainer.Trim();
-        var verified = purpose == RelocationPurpose.MakeSecure && derivation.IsSecure
-            || await _resolver.IsRelocationSourceVerifiedAsync(documentId, sourceDrive, sourceItem, ct).ConfigureAwait(false);
+
+        // #2159: a re-file never widens — not out of isolation, not from an unknown home into a business unit's container.
+        if (purpose == RelocationPurpose.Refile
+            && await RefileHoldAsync(documentId, derivation, sourceDrive, sourceItem, target, isIsolated, ct).ConfigureAwait(false)
+                is { } held)
+        {
+            return held.With(prior);
+        }
+
+        var verified = purpose switch
+        {
+            RelocationPurpose.MakeSecure when derivation.IsSecure => true,
+            // #2159: the row's BFF-bound item (the binding was checked above; a DIFFERING copy never reaches here). A row
+            // with no bound copy yet — the transition before the backfill — is verified by the legacy check, or not at all.
+            RelocationPurpose.Refile when IsBoundItem(row!, sourceItem) => true,
+            _ => false,
+        } || await _resolver.IsRelocationSourceVerifiedAsync(documentId, sourceDrive, sourceItem, ct).ConfigureAwait(false);
         if (!verified)
         {
             return DocumentRelocationOutcome.Of(
@@ -830,6 +868,95 @@ public sealed class DocumentContainerRelocator
             SourceChangedAfterMove = prior.ChangedAfterMove.Concat(outcome.SourceChangedAfterMove).ToList(),
             VersionsTruncated = prior.Truncated.Concat(outcome.VersionsTruncated).ToList(),
         };
+    }
+
+    /// <summary>Is <paramref name="item"/> the item the BFF bound to <paramref name="row"/> (its field-secured copy names it)?</summary>
+    private static bool IsBoundItem(Entity row, string item)
+        => Spaarke.Dataverse.DocumentPointerBinding.Compare(
+               row.GetAttributeValue<string>(Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn), item)
+           == Spaarke.Dataverse.DocumentPointerBinding.BindingState.Bound;
+
+    /// <summary>
+    /// #2159 — why a <see cref="RelocationPurpose.Refile"/> move must NOT run, or <see langword="null"/> when it may. Fail
+    /// closed: anything that cannot be read moves nothing.
+    /// <list type="number">
+    /// <item><b>The widening guard.</b> The derivation is not a secure record's own container and the row is still owned
+    /// by the Secure Record owner team → <see cref="RelocationState.HeldIsolated"/>. A filing edited outside the BFF (a
+    /// model-driven form) leaves the row isolated (owner round 24 item 2) while it derives to a business unit's container;
+    /// its bytes stay in the secure container until an F3 act releases the row. Into a secure container, or between two
+    /// secure containers, is allowed: it narrows access or stays isolated.</item>
+    /// <item><b>An unfiled document's unknown home</b> (#2151). Unfiled, and its file is in no business unit's container
+    /// (a declared home would have derived in place) → <see cref="RelocationState.UnfiledHomeUnknown"/>: where it
+    /// belongs (a record's own container after a re-scope, another owner's) cannot be told, and pulling it into a
+    /// business unit's container could widen a narrower audience.</item>
+    /// </list>
+    /// </summary>
+    private async Task<DocumentRelocationOutcome?> RefileHoldAsync(
+        Guid documentId, DocumentContainerDerivation derivation, string sourceDrive, string sourceItem, string target,
+        Func<Guid, CancellationToken, Task<bool>>? isIsolated, CancellationToken ct)
+    {
+        if (!derivation.IsSecure)
+        {
+            bool isolated;
+            try
+            {
+                if (isIsolated is null)
+                {
+                    throw new InvalidOperationException("a re-file was asked for without an isolation probe");
+                }
+
+                isolated = await isIsolated(documentId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT re-filed: whether it is still isolated could not be read. "
+                    + "Nothing is moved.", documentId);
+                return DocumentRelocationOutcome.Of(documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
+                    "its owner could not be read, so whether it is still isolated is unknown; nothing is moved and a later pass retries");
+            }
+
+            if (isolated)
+            {
+                _logger.LogWarning(
+                    "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT re-filed: it is still owned by the Secure Record owner team "
+                    + "but derives to {Target} ({Reason}); its file stays in {SourceDrive} until an F3 act releases it.",
+                    documentId, target, derivation.Reason, sourceDrive);
+                return DocumentRelocationOutcome.Of(documentId, RelocationState.HeldIsolated, sourceDrive, sourceItem, target, null,
+                    "still owned by the Secure Record owner team while its filing points outside every secure record (an edit "
+                    + "outside the product); its file is not moved out of isolation until an F3 act releases it");
+            }
+        }
+
+        if (derivation.Unfiled)
+        {
+            bool inABusinessUnitContainer;
+            try
+            {
+                inABusinessUnitContainer = await _resolver.IsBusinessUnitContainerAsync(sourceDrive, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT re-filed: whether {SourceDrive} is a business unit's "
+                    + "container could not be read. Nothing is moved.", documentId, sourceDrive);
+                return DocumentRelocationOutcome.Of(documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
+                    "whether its file is in a business unit's container could not be read; nothing is moved and a later pass retries");
+            }
+
+            if (!inABusinessUnitContainer)
+            {
+                _logger.LogWarning(
+                    "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT re-filed: it is unfiled and its file is in {SourceDrive}, "
+                    + "which is no business unit's container and no declared home; it is not pulled into {Target}.",
+                    documentId, sourceDrive, target);
+                return DocumentRelocationOutcome.Of(documentId, RelocationState.UnfiledHomeUnknown, sourceDrive, sourceItem, target,
+                    null, "unfiled, and its file is in no business unit's container and no declared home: where it belongs cannot "
+                          + "be told, so it is left where it is");
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -1785,6 +1912,15 @@ public sealed class DocumentContainerRelocator
                 continue;
             }
 
+            if (purpose == RelocationPurpose.Refile && !derivation.IsSecure)
+            {
+                // #2159: a re-file moves ANOTHER row along only into a secure record's own container (that narrows). Whether
+                // it may leave for any other container — it may still be isolated — is that row's own re-file to decide, so
+                // it keeps the source as its file, settled.
+                keptFor.Add($"sprk_document:{other} (a re-file moves another row along only into a secure container; it keeps the source)");
+                continue;
+            }
+
             // Inside: it belongs where this document's file now is — move it along, with its OWN copy (unique item key).
             var along = await MoveAlongAsync(other, entry, currentDrive, purpose, ct).ConfigureAwait(false);
             summary.MovedAlong.Add(along);
@@ -2089,8 +2225,12 @@ public sealed class DocumentContainerRelocator
                     null, "the source is not in its drive");
             }
 
-            var verified = purpose == RelocationPurpose.MakeSecure && derivation.IsSecure
-                || await _resolver.IsRelocationSourceVerifiedAsync(other, entry.SourceDrive, entry.SourceItem, ct).ConfigureAwait(false);
+            var verified = purpose switch
+            {
+                RelocationPurpose.MakeSecure when derivation.IsSecure => true,
+                RelocationPurpose.Refile when IsBoundItem(row, entry.SourceItem) => true, // #2159: the binding, as on the main path
+                _ => false,
+            } || await _resolver.IsRelocationSourceVerifiedAsync(other, entry.SourceDrive, entry.SourceItem, ct).ConfigureAwait(false);
             if (!verified)
             {
                 return DocumentRelocationOutcome.Of(other, RelocationState.SourceUnverified, entry.SourceDrive, entry.SourceItem,
@@ -2377,6 +2517,12 @@ public enum RelocationPurpose
 
     /// <summary>Task 150's Make Secure transition: the file the document shows moves into the record's own container.</summary>
     MakeSecure,
+
+    /// <summary>
+    /// #2159: the document's filing changed (by any writer), so its file moves into its NEW derived container. Only the
+    /// row's BFF-bound item is moved, and never out of isolation: see <see cref="DocumentContainerRelocator.RelocateIfMisplacedAsync"/>.
+    /// </summary>
+    Refile,
 }
 
 /// <summary>What a relocation found or did.</summary>
@@ -2417,6 +2563,21 @@ public enum RelocationState
 
     /// <summary>A copy, verification or re-point step failed; the row is unchanged.</summary>
     Failed,
+
+    /// <summary>
+    /// #2159 (<see cref="RelocationPurpose.Refile"/>): the row is still owned by the Secure Record owner team, so its file
+    /// is not moved into a container that is not a secure record's own — its filing was changed outside the BFF and
+    /// isolation holds the row (owner round 24 item 2). Only an F3 act (<c>/unsecure-project</c>, a re-parent with F3)
+    /// releases it; the next re-file pass then moves it. Nothing was read beyond the checks or written.
+    /// </summary>
+    HeldIsolated,
+
+    /// <summary>
+    /// #2159 / #2151 (<see cref="RelocationPurpose.Refile"/>): the document is UNFILED and its file is in no business
+    /// unit's container and in no declared home — where it belongs cannot be told (a record's narrower audience must not
+    /// be widened to a whole business unit). Reported and left; nothing was written.
+    /// </summary>
+    UnfiledHomeUnknown,
 }
 
 /// <summary>A source kept because rows of other records still use it (round 37 item 2: <c>SourceKeptForOtherRecords</c>).</summary>

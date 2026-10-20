@@ -219,6 +219,9 @@ internal static class TestRecordContainerResolver
         /// <summary><c>EmailProcessing:DefaultContainerId</c> — an unfiled document's container of last resort (task 166 f1).</summary>
         public string? UnfiledDefaultContainer { get; init; }
 
+        /// <summary>Further configuration the resolver reads (#2151: the declared home containers of unfiled documents).</summary>
+        public Dictionary<string, string?> Settings { get; } = new(StringComparer.Ordinal);
+
         /// <summary>Every app-only UPDATE the built resolver's entity service received (the relocator's re-point).</summary>
         public List<(string Entity, Guid Id, Dictionary<string, object> Fields)> Updates { get; } = new();
 
@@ -478,6 +481,7 @@ internal static class TestRecordContainerResolver
                     [RecordContainerResolver.ItemIdBoundBackfillCompleteKey] = ItemIdBoundBackfillComplete ? "true" : null,
                     [RecordContainerResolver.UnfiledDefaultContainerKey] = UnfiledDefaultContainer,
                 })
+                .AddInMemoryCollection(Settings)
                 .Build();
 
             EntityService = entityService.Object;

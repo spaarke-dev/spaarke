@@ -182,6 +182,13 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    /// <summary>#2159: lets the rows of <see cref="FailingRowReadsOf"/> be read again (a transient fault that has cleared).</summary>
+    public SecureChildShareWorld ClearRowReadFaults()
+    {
+        _failingRowReads.Clear();
+        return this;
+    }
+
     private readonly HashSet<(string Table, Guid Id)> _failingIdListReads = new();
 
     /// <summary>
