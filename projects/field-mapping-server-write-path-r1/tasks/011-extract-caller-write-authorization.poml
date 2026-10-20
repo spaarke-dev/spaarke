@@ -4,7 +4,7 @@
     <title>Extract OwnedChildWrite caller checks into CallerWriteAuthorization (pure move) (FR-08 move part)</title>
     <phase>2 W2 Unified RecordCreationService</phase>
     <gate>010 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-sensitive authorization code (tags security, authorization); modifies .cs in Sprk.Bff.Api; must keep existing security tests green (TEST-MODIFYING guard).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -103,7 +103,9 @@
     <criterion testable="true">BFF build 0 errors; full BFF unit tests pass; the PR description cites ADR-008 path A; publish-size delta and CVE result are recorded in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-08 (move part) and the ADR-008 path A exception. The merged-payload behaviour change (mapped values dropped, caller values refuse) is task 014.</notes>
+  <notes>Spec FR-08 (move part) and the ADR-008 path A exception. The merged-payload behaviour change (mapped values dropped, caller values refuse) is task 014.
+Completed 2026-10-20 (task/fm-011 @ 5120bf358, merged 99489434b). Pure move of 20 members into CallerWriteAuthorization; member, text and IL proof; every security suite has identical counts; census baselines unchanged; D-66 guard extended with must-fire. Publish +640 B cumulative; no CVE. Merged branch (002+003+011): Spaarke.sln 0/0, ArchTests 1152/1152, security+field-mapping suites 1721 pass. **UAC-r2 review (condition d) in progress; it gates the master merge, so do not rewrite c4a2a7b81..5120bf358.** Known limit for 013: the mutual using-static. Details: notes/task-011-notes.md.
+rework: fix-round-1 task 011</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
