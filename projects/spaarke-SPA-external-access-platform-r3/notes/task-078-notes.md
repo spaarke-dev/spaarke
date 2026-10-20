@@ -72,7 +72,7 @@ The whole prefix is treated as the family. No table qualified for the "no conten
 | `dataverse.describe` `tables/{t}/records/{id}` | full-record GET under OBO; `search_data`'s own description sends the model here | **Fixed in scope** (same pattern). |
 | `dataverse.describe` `tables/`, `tables/{t}` | metadata only | Unchanged (no row content). |
 | `email.draft` / summarize-thread (`EmailDraftToolHandler`) | already runs the task 065 visibility read first (round 6 F1) | Already covered. |
-| `spaarke.grid_overview` (`GridOverviewHandler`) | runs a saved `sprk_gridconfiguration` FetchXML by `configId` under OBO. Its published catalog includes **Communications/Messages = `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`** | **NOT covered: a different pattern** (saved FetchXML, not model SQL). An external caller can list that grid's columns for internal-only and Private-thread rows. Needs a FetchXML-side guard or a refusal of communication-target configs for external callers. **To be filed** by the main session. |
+| `spaarke.grid_overview` (`GridOverviewHandler`) | runs a saved `sprk_gridconfiguration` FetchXML by `configId` under OBO. Its published catalog includes **Communications/Messages = `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`** | **NOT covered: a different pattern** (saved FetchXML, not model SQL). An external caller can list that grid's columns for internal-only and Private-thread rows. Needs a FetchXML-side guard or a refusal of communication-target configs for external callers. **Filed: ISS-014 (#2125).** |
 | `dataverse.update_record` | a write, not a read; it returns no row content | Not a read gap. Note: an external user with write privilege could flip `sprk_isinternalonly` on a row they can already read. This is a write-path or Dataverse-security question for the real fix. |
 | `dataverse.create_record` / `delete_record` | writes (create returns only the created row) | No read gap. |
 | `DailyBriefingOverviewHandler`, `SendWorkspaceArtifactHandler` | composed services, not generic Dataverse reads | Not inspected in depth (no generic table path). |
@@ -106,13 +106,14 @@ Every new log line is `[dataverse.<tool>] sdap.ai.tool.external_communication_gu
 
 ### Not run
 
-- Publish-size delta: the main session measures it.
 - The full BFF unit suite was not run; only the filters above.
 - No live change (owner constraint).
 
 ## Placement (CLAUDE.md §10)
 
-An inbound tool guard inside the existing AI chat handlers (`Services/Ai/Handlers`, ADR-013 in-zone), with one internal static helper beside the other `dataverse.*` helpers. No package, no endpoint, no new interface (ADR-010), no setting. The handlers consume the Communication and Identity services, as `EmailDraftToolHandler` already does. Publish-size delta: measured by the main session.
+An inbound tool guard inside the existing AI chat handlers (`Services/Ai/Handlers`, ADR-013 in-zone), with one internal static helper beside the other `dataverse.*` helpers. No package, no endpoint, no new interface (ADR-010), no setting. The handlers consume the Communication and Identity services, as `EmailDraftToolHandler` already does.
+
+**Publish-size delta** (Release publish, Compress-Archive): master `2b07480ab` = 192 files, 39,281,295 B; branch `a33c17652` merged with that master (`0f218f8ce`, local only) = 192 files, 39,286,107 B. **Delta +4,812 B**, no new file. `dotnet list package --vulnerable`: no vulnerable packages. (A first run on a stale non-git folder was discarded.)
 
 ## §11 answers
 
@@ -123,7 +124,7 @@ An inbound tool guard inside the existing AI chat handlers (`Services/Ai/Handler
 ## Known limits
 
 - **The model-driven app and the direct Web API remain open.** The real fix is the owner/UAC Dataverse security decision (ISS-010 stays open for it).
-- **`spaarke.grid_overview` over the Communications/Messages grid is not covered** (inventory above). To be filed.
+- **`spaarke.grid_overview` over the Communications/Messages grid is not covered** (inventory above). Filed as ISS-014 (#2125).
 - **Fewer rows than TOP.** The Open-thread half is a post-filter, because thread privacy lives on another table. A page can return fewer rows than `TOP` while the row-cap warning still keys off the returned count. The flag and thread-set halves ride in the query, so TOP stays honest for them.
 - **search_data counts.** The Search API's own `top` (25) is applied before the drop, so an external caller can see fewer than 25 hits. By design, nothing says so.
 - **Parenthesis safety** rests on the translator. It emits only balanced parentheses: a stray `)` at top level fails with "Unexpected token", so `ApplyFilter`'s wrapping cannot be escaped.

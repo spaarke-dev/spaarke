@@ -327,9 +327,11 @@ Failure mode: an external licensed user with read on a matter's communications r
 - `src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs` (~:997, DELETE route: `CanCallerSeeMessageAsync`; needs Dataverse Write, so it adds no capability)
 - Shared rule: `Services/Communication/CommunicationOpenThreadGate.cs`, `CommunicationThreadReadService.ReadVisibleCommunicationAsync`
 
+**Quick fix done 2026-10-20 (task 078, owner decision the same day).** For an external or unresolved caller, `dataverse.read_query`, `dataverse.search_data` and `dataverse.describe` now apply the task 065 rule: `sprk_communication` rows are filtered, and other family tables are refused or dropped (`notes/task-078-notes.md`). It ships in the next dev BFF deploy. Still open: the model-driven app, the Web API, and `spaarke.grid_overview` (ISS-014).
+
 **Suggested fix**
 
-- Short term: `read_query` refuses `sprk_communication*` tables when `IsExternalAsync` is true.
+- Short term: done (task 078, above).
 - Real fix: decide whether external licensed users get Dataverse read on communications at all (security role or owner-team design), or whether internal-only rows move under a team or BU they cannot read. Owner and UAC decision.
 
 **Estimated effort**: 0.5 day for the `read_query` guard; the Dataverse-security design is unknown.
@@ -564,6 +566,37 @@ Optionally add defence in depth at runtime, independent of app configuration: re
 **Blockers**: none.
 **Related**: ADR-028 A9; R3 tasks 047, 059; customer-provisioning-orchestration-r1 (H3, H13).
 **Owner**: customer-provisioning-orchestration-r1 task 264 (post-T186 follow-up; accepted 2026-10-16). It first checks Learn for Graph beta-only, then H3 sets with get-before-set and a read-back, and H13 verifies both apps.
+
+---
+
+### ISS-014 — `spaarke.grid_overview` lists internal-only and Private-thread communications to callers flagged external
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round (closes with ISS-010's real fix) |
+| **Filed** | 2026-10-20 |
+| **Source** | Task 078 inventory (`notes/task-078-notes.md`, "Chat tools that can read them") |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2125 |
+
+**Description**
+
+`GridOverviewHandler` loads a `sprk_gridconfiguration` by the `configId` the model supplies and runs its saved FetchXML under the caller's OBO token (~:269, ~:356). Dataverse security alone decides the rows, and nothing checks whether the caller is external. Task 078 covered `read_query`, `search_data` and `describe`; this tool uses saved FetchXML, a different pattern.
+
+Failure mode: a licensed user flagged external asks for an overview of the Communications/Messages grid (`e1826c4c-9575-f111-ab0e-7ced8ddc4a05`), or of any configuration targeting `sprk_communication*`. The tool returns that grid's columns for internal-only and Private-thread rows.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GridOverviewHandler.cs`
+- Reuse: `Services/Ai/Handlers/Dataverse/ExternalCallerCommunicationGuard.cs`, `Services/Communication/CommunicationOpenThreadGate.cs`
+
+**Suggested fix**
+
+For an external caller, refuse a configuration whose target entity is in the `sprk_communication` family (simplest). Alternatively, add the flag and thread conditions to the FetchXML and apply the Open-thread post-filter. Internal callers stay unchanged.
+
+**Estimated effort**: half a day, including tests.
+**Blockers**: none.
+**Related**: ISS-010 (#1864), tasks 065 and 078.
 
 ---
 
