@@ -12,9 +12,10 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// The only way to skip the Read probe is to name <see cref="System"/> explicitly; a caller with no token is still a caller,
 /// and the probe denies them (it answers <see cref="AccessRights.None"/> for a missing token). Task 013's principal model
 /// maps onto this: caller principal → <see cref="ForCaller"/>, system principal → <see cref="System"/> (ADR-028: the
-/// managed identity never answers a caller's Read question).
+/// managed identity never answers a caller's Read question). A class, not a record: it carries the caller's token, so it
+/// has no generated <c>ToString</c> or value equality that could print or compare it.
 /// </remarks>
-internal sealed record MappingSourceReader
+internal sealed class MappingSourceReader
 {
     private MappingSourceReader(CallerRecordAccessProbe? probe, string? callerBearerToken)
     {
