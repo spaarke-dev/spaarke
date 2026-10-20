@@ -444,10 +444,11 @@ public class RecordOwnerAssignmentCensusTests
     {
         new OwnerWriteEntry("RecordOwnershipResolver.cs", "ApplyTo", 1, OwnerWriteKind.Resolver,
             "Writes the resolved team onto a row about to be created; refuses to apply a refusal."),
-        new OwnerWriteEntry("RecordOwnershipResolver.cs", "SettleOwnerAsync", 1, OwnerWriteKind.Resolver,
+        new OwnerWriteEntry("RecordOwnershipResolver.cs", "SettleOwnerAsync", 2, OwnerWriteKind.Resolver,
             "The re-file's separate owner assignment (ReparentAsync), read back. #2143: written conditionally at the row "
-            + "version read after the change, from the parents the row holds at that version; re-read on a mismatch "
-            + "(bounded); a refused re-derivation writes none."),
+            + "version read after the change, from the owner its parents give at that version (re-derived every attempt); "
+            + "re-read on a mismatch (bounded); a refused re-derivation writes none. The second write (F1-b): attempts "
+            + "that run out toward the Secure team end in one unconditional write of the Secure team (fail closed)."),
 
         new OwnerWriteEntry("DataverseServiceClientImpl.cs", "CreateDocumentAsync", 1, OwnerWriteKind.Seam,
             "CreateDocumentRequest.OwningTeamId — throws without it."),

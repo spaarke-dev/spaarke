@@ -260,8 +260,7 @@ internal sealed class OwnershipDirectory
             }
             else if (column == "ownerid" && value is EntityReference owner)
             {
-                row["owningteam"] = new EntityReference("team", owner.Id);
-                row["ownerid"] = owner;
+                SetOwner(row, owner);
             }
             else
             {
@@ -312,10 +311,22 @@ internal sealed class OwnershipDirectory
         OnAssign?.Invoke(entity, id, owner.Id);
         if (!_ignoreAssignments && _records.TryGetValue((entity, id), out var row))
         {
-            row["owningteam"] = new EntityReference("team", owner.Id);
-            row["ownerid"] = owner;
+            SetOwner(row, owner);
             Bump(row);
         }
+    }
+
+    /// <summary>
+    /// An owner write as Dataverse applies it: <c>ownerid</c> and <c>owningteam</c> name the team, and <c>owningbusinessunit</c>
+    /// follows to the team's business unit (#2143 — the re-file reads it to tell a row held in the Secure Record business
+    /// unit). A team this directory does not hold leaves the business unit as it was.
+    /// </summary>
+    private void SetOwner(Entity row, EntityReference owner)
+    {
+        row["owningteam"] = new EntityReference("team", owner.Id);
+        row["ownerid"] = owner;
+        if (_teams.FirstOrDefault(t => t.TeamId == owner.Id) is { TeamId: var found } team && found != Guid.Empty)
+            row["owningbusinessunit"] = new EntityReference("businessunit", team.BusinessUnit);
     }
 
     // ── Task 146 b2: the failures a re-file must recover from ───────────────────────────────────────────────────
