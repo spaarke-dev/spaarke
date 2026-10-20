@@ -47,7 +47,7 @@
 4. Wrap-up 090: the 058 docs and the UAT checklist.
 
 ## Peers (state)
-- **R3:** deploys with owner approval. Stage B (1e40baad v2 tokens). 036 flag flip tasked to R3. 186 email-claim result owed to R3.
+- **R3** (pipe `cc-msg-a429112bc6eaf3b995ac0fa16833f543` since 2026-10-20): 059 stage D set `ExternalAccess__CustomerBusinessUnitId` = BU1 cb15f587… (A9 registration contacts land in BU1; 186 gate checks that). Deploys with owner approval. Stage B (1e40baad v2 tokens). 036 flag flip tasked to R3. 186 email-claim result owed to R3.
 - **Ontology:** #2113 OK'd; #2102 smoke PASS.
 - **ebilling:** #1911 (draft) carries the 4 invoice-family SRO Reads.
 - **Field-mapping:** owner accepted condition (c) as FR-08 amendment (filing lookup failing AppendTo → uniform refusal, no create; 014 must-fire on Secure parent + control); W2 proceeds on master, not waiting on ebilling #1911. (a)(b)(d) + ping-before-merge binding. Review 011 diff range when sent.
