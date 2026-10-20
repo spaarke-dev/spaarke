@@ -44,3 +44,11 @@ rework: none task 006
   - a full SpaarkeMaster import would have overwritten other projects' dev components.
 - Beyond-dev environments (spaarke-demo, spaarke-model1-prod, HIPC DEV 2) still carry the map. Each needs a
   separate owner-approved removal before go-live.
+
+## Beyond-dev removal (owner approved all environments, 2026-10-20)
+
+| Environment | Finding | Action |
+|---|---|---|
+| spaarke-demo | `spaarke-demo.crm.dynamics.com` does not resolve (NXDOMAIN); pac cannot connect | None. The environment no longer exists |
+| spaarke-model1-prod | Entity map `10e640b9-…`. `sprk_ai_search_index` (9d3a0db2-…) and its name companion (9e3a0db2-…) are **managed** (`ismanaged=true`), from the managed SpaarkeMaster | No direct delete (managed components cannot be deleted directly). Removed by the next managed SpaarkeMaster release built from master after this branch merges: `scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1` uses `--stage-and-upgrade` for an older managed package, which deletes components absent from the new version. **Verify after that release** (task 053/090) |
+| HIPC DEV 2 | The Web API returns 403 (spaarke.com token, wrong tenant). The pac profile 1 (heliosip.com) token expired with AADSTS9002313, so interactive re-auth is needed | Pending the owner: re-auth (`pac auth create` / `az login --tenant <heliosip>`) or delete in the maker portal. If the map is managed there too, the upgrade path applies |
