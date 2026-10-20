@@ -2,58 +2,67 @@
 
 > **Format:** this file holds the CURRENT state only. Rewrite it at each checkpoint (never prepend), and keep it at or under 10 KB.
 > - **Standing rules:** the project `CLAUDE.md`.
-> - **Decisions:** `notes/session27-owner-decisions-and-research.md`, now at **round 108 (2026-10-20)**.
+> - **Decisions:** `notes/session27-owner-decisions-and-research.md`, now at **round 109 (2026-10-20)**.
 > - **Defer list:** `notes/defer-issues.md`.
-> - **Delete design:** `notes/core-record-delete-design.md`.
+> - **Delete design:** `notes/core-record-delete-design.md` (§11 = ebilling D-137).
 > - **Gates:** `notes/batch7-live-gates-2026-10-17.md`.
 > - **Narrative:** the commit messages.
 
-> **Last Updated**: 2026-10-20 (checkpoint #54).
+> **Last Updated**: 2026-10-20 (checkpoint #55).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Mode** | Final push. Fix-round loop; merge only when BOTH required checks (Router + "Client lint (type-aware ratchet)") are green; deploy via R3. A task closes on merge + deploy + a server-side gate. |
+| **Mode** | Final push. Fix-round loop; merge only when BOTH required checks (Router + "Client lint (type-aware ratchet)") are green; one background merge job at a time; `--squash --match-head-commit`, no `--delete-branch`, after `git merge-tree`. Deploy via R3. A task closes on merge + deploy + a server-side gate. |
 | **Fix bar** | The most technically correct fix; no complexity without value. Every defect found is fixed or filed. |
 | **Agents** | Opus for executors and verifiers. Helper scripts get a unique prefix in a private folder; the scratchpad is shared (memory `agent-scratch-script-names`). |
+| **Dev live** | BFF `1.0.0+c3ec5d6e5` (18:12:51Z; rollback `deploy/rollback/wwwroot-20261020T180912Z` = 21184ecd4, in R3's worktree). SPA from master 28274e04e (has d4ea1b4a8, `workforce_guest_use_home_signin`); rollback tag `external-spa-dev-rollback-1908696a8`. |
 
-## OWNER items outstanding (asked 2026-10-20)
-1. **#1864** — options A (known limit) / **B (recommended: internal-comms role on a synced Internal Users team; email-family privileges out of base roles)** / C (FLS). Awaiting "1864: B/A/C".
-2. **186** — owner signs in as Tracy (home directory, hard reload), submits one intake, says "Tracy done". Then the server gate + remove/restore Create step (approved 5b).
-3. **#2119 D1–D6** — "2119: as recommended" (`notes/2119-manage-access-all-forms-design.md`).
-4. **Census** — a/b/c (Office Add In User Deep read via root team "Spaarke"; Basic User accepted round 5).
-5. **Provisioning** — OK to ask Provisioning to set `ExternalAccess:CustomerBusinessUnitId` automatically? #2139 (member contacts: owner or retire).
-6. **Sign-offs (security/auth):** #2122 (#2121), #2078 (036), #2138 (#2128) — each after its adversarial passes.
+## OWNER items outstanding
+1. **#2122** (#2121 option b): two adversarial passes and the re-check are clean → awaiting **"2122: approved"**, then a green Router, then merge.
+2. **#1864**: "1864: B/A/C" (B recommended).
+3. **186**: the owner signs in as Tracy at her HOME directory (a guest sign-in now gets `workforce_guest_use_home_signin`), submits one intake, and says "Tracy done". Then the server gate and the remove/restore Create step (5b approved).
+4. **#2119 D1–D6**: "2119: as recommended".
+5. **Census**: a/b/c. **Provisioning**: may `CustomerBusinessUnitId` be set automatically? **#2139**: member contacts, owner or retire.
+6. **Q1/Q10** (ebilling rule sets): relayed by ebilling and not yet confirmed by the owner directly → awaiting "Q1/Q10 confirmed".
+7. **Sign-offs still to come**: #2078 (036) and #2143, each after its adversarial passes.
 
 ## In flight (agents; cap 4)
-- **#2122** (#2121 option b, C:/wt2121 @ 4bd4f3225): adversarial review running → fix round → 2nd pass → sign-off → merge → R3 deploy → gate. Also fix the misleading `[NO-ACCESS-ENFORCE] Dataverse read FAILED` Error on faults.
-- **#2133** (#2130 PII logs + census, C:/wt2130): fix round 1 running → re-check → merge.
-- **#2138** (#2128 retire guest auto-create, C:/wt2128): fix round 1 running → 2 adversarial passes (auth) → sign-off → merge → tell R3.
-- **#2110 live gate** on BFF 21184ecd4: agent running (helpers in `.g2110tmp/`, result appended to batch7 gates note, uncommitted). Close #2110 on PASS.
-- **#2078** (036 option C, C:/wt036 @ **cd258fead**, ADR edits applied): NEXT FREE SLOT → 2 adversarial passes (auth) → fix → sign-off → merge → R3 deploy + flag flip → gates (i)–(v) + disabled/unlicensed check → close #1074, #1567. When #2122 merges first, merge master in and keep the #2121 filter on the flag-off path (`!dataverseDecides`, ~:1977/:1988).
+- **#2143 fix** (agent a743a53c95f234ff5, option A): `RecordOwnershipResolver.ReparentAsync`.
+  - SDK conditional update (`IfRowVersionMatches` → `DBConcurrencyException`); re-read the version and parents after `applyChange`, then re-resolve; at most 3 retries; fail closed; compensation is conditional too.
+  - Next: draft PR → 2 adversarial passes (security) → owner sign-off → merge → deploy → gate. Tell ebilling when it lands (050a re-file).
+- **036 / #2078 round 4** (agent a5f1a15baba6d9e6e, C:/wt036): null/unknown → 503, not 403; route-census guard control; K3 doc; K6 token test; #2147/#2148 links.
+  - Next: apply its "Round 4" ADR drafts (`036-adr-edits-owner-a-f.md`) to C:/wt036/.claude/adr in the main session → re-check the fix diff → owner sign-off.
+  - Run the 034 negative canary (NFR-04 merge gate). Merge after #2122: merge master in and keep the #2121 filter on the flag-off `else` path, with per-id rights.
+  - Then R3 deploys and flips the flag → gates (i)–(v) plus the disabled/unlicensed check → close #1074 and #1567.
+- **#2130/#2128 live gates** (agent a19cc19d9ad468d00): it appends "## #2130 / #2128 live gates (2026-10-20)" to the batch7 gates note (uncommitted).
+  - On PASS: commit the note and close #2130, #2131 and #2128.
+  - B3 (a live guest refusal) may be NOT-RUN; the owner can see it by signing in as Tracy's guest.
 
-## Done 2026-10-19/20
-- #2104 → d301c0675 deployed, gate PASS. #2110 → 2b07480ab merged, NOT deployed (R3 next deploy, then gate: thread join → step once; same parent → no step).
-- #2102 gate PASS (ontology `rule_held_secure` smoke; probe deleted). SRO Policy Reads applied.
-- Filed: #2111, #2112, #2114, #2115, #2116, #2117, #2119, #2120, #2121.
-- Live dev BFF: `1.0.0+21184ecd4` (R3, 2026-10-20 16:35Z; includes #2110 + R3 078); rollback 00aba6d99.
+## Done 2026-10-20
+- **#2138** (#2128, guest auto-create retired) merged as 83d360ec8, after owner sign-off in round 109. The dev data step was a no-op: all 3 guest contacts have enabled systemusers.
+- **#2133** (#2130, PII logs and census) merged as c3ec5d6e5 and deployed.
+- **#2110**: gate PASS, closed.
+- Filed: #2142, #2143, #2147, #2148.
+- ADR-034 and ADR-028 036 edits applied in C:/wt036 (cd258fead, c2e8e9b2f8).
+- Delete design §11 (D-137): a record's own rule set is deleted when uncited, otherwise unlinked (86cba5a00).
+- ebilling `sprk_ebillingoverride` pre-notice answered: no UAC collision; not a census-guarded privilege. Asked ebilling for: fail-closed confirmation, the privilege in the 112 export, and a read-back after-notice.
 
-## Task 186 close-out checklist (additions)
-- Verify that the Workforce-role export includes ebilling's prvCreatesprk_InvoiceSubmission (Basic) + prvReadsprk_InvoiceSubmission (Deep). ebilling applies them on dev under the owner approval given in its session, 2026-10-20.
-- Gate blocked on R3 059 stages E/F (A9 SPA). The owner signs in as Tracy at her HOME directory, not as the guest.
-
-## Queue (start when an agent slot frees; max 4 running)
-1. ~~#2128~~ built (#2138). Original brief: **#2128 option (1)**: retire FR-15 guest auto-create in `ContactIdentityBinder.ResolveWorkforceCallerAsync` (acct=1 + customer idp). Deny 403 on /me, reasonCode `sdap.access.deny.workforce_guest_use_home_signin`, ProblemDetails shaped like contact_not_invited (reasonCode + detail). The detail must work from Teams too ("open the portal in a browser; sign in with your organization's work account"), with no tenant ids or emails. Count the existing Workforce-plane app-owned guest contacts on dev first (read-only); R3 relies on none. Send R3 the final code and detail (R3 adds deniedDetailOf + test, then an owner-gated SPA deploy).
-2. **ebilling rule-set scope design review**: `projects/ebilling-r1/notes/rule-set-scope-design.md` @ 71d28f319 (work/ebilling-r1), §5.2/Q1 (sprk_homebusinessunit), §5.1/Q11 (ruleset joins the secure family), Q10 (delete with a record-scoped set), §3.1 (FilingParentOf chain).
-3. **ebilling 050a (D-134) secure re-file review**: diff `0a47a82d0~1..4266b5789` (code eb04455c9; ask for the pushed sha), notes `projects/ebilling-r1/notes/050a-confirm-redirect.md`. Points: existing-doc ownership/firm/read proof, doc already filed elsewhere, concurrent confirms, Refused leaving a doc half-moved. Review the post-fix head after ebilling's own Opus review.
-
-## Next actions
-1. Worktrees to remove when idle: C:/wt099b, C:/wt2103, C:/wt2091b (all merged).
-2. Wrap-up 090: the 058 docs and the UAT checklist.
+## Task 186 close-out checklist
+- Verify that the Workforce-role export includes prvCreatesprk_InvoiceSubmission (Basic) and prvReadsprk_InvoiceSubmission (Deep).
 
 ## Peers (state)
-- **R3** (pipe `cc-msg-a429112bc6eaf3b995ac0fa16833f543` since 2026-10-20): 059 stage D set `ExternalAccess__CustomerBusinessUnitId` = BU1 cb15f587… (A9 registration contacts land in BU1; 186 gate checks that). Deploys with owner approval. Stage B (1e40baad v2 tokens). 036 flag flip tasked to R3. 186 email-claim result owed to R3.
-- **Ontology:** #2113 OK'd; #2102 smoke PASS.
-- **ebilling:** #1911 (draft) carries the 4 invoice-family SRO Reads.
-- **Field-mapping:** owner accepted condition (c) as FR-08 amendment (filing lookup failing AppendTo → uniform refusal, no create; 014 must-fire on Secure parent + control); W2 proceeds on master, not waiting on ebilling #1911. (a)(b)(d) + ping-before-merge binding. Review 011 diff range when sent.
+| Peer | Pipe | State |
+|---|---|---|
+| R3 | `cc-msg-a429112bc6eaf3b995ac0fa16833f543` | Deploys with owner approval. Next: #2122, then 036 + flag flip. 186 email-claim result is owed to R3. |
+| ebilling | `cc-msg-83e4fded6c95d56e40d08aa57052bd98` | Expect: the 050a revision; the D-137 citing lookups; the snapshot-column diff (ProvisionProjectEndpoint, child-create) to review under (a)–(f); the rule-set design revision; the override after-notice. |
+| field-mapping | `cc-msg-8bd2a30b7c3f35dc7941d072ffd53ebb` | 011 OK. Review 017 when sent. |
+| Ontology | `cc-msg-7848627ab2b6296a8e63ee2cbf37cde6` | #2113 OK; #2102 PASS. |
+| Provisioning | `cc-msg-dc6f397f8149c1443ce9df2440ac85fc` | Awaiting the owner's answer on CustomerBusinessUnitId. |
+
+## Next actions
+1. Process agent results as they land (#2143, 036 r4, the gates).
+2. Merge #2122 on "2122: approved" + green checks → R3 deploy → live gate → close #2121.
+3. Worktrees to remove when idle: C:/wt099b, C:/wt2103, C:/wt2091b, C:/wt2130, C:/wt2128 (all merged).
+4. Wrap-up 090: the 058 docs and the UAT checklist.
