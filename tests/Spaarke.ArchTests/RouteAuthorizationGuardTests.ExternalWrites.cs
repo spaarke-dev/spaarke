@@ -24,6 +24,14 @@ namespace Spaarke.ArchTests;
 /// </remarks>
 public partial class RouteAuthorizationGuardTests
 {
+    /// <summary>
+    /// The live route census — every registered route's key and the BFF-relative file that registers it, from the scanner's
+    /// whole-BFF scan (<c>Program.cs</c> and <c>Infrastructure/</c> included). Exposed for
+    /// <c>ExternalPlaneNoOboGuardTests</c>' scope control (task 036 fix round 4, K1).
+    /// </summary>
+    internal static IReadOnlyList<(string Key, string File)> LiveRouteCensus() =>
+        Real.Live.Select(r => (r.Key, r.File)).ToList();
+
     /// <summary>The one Dataverse write confirmation on the external surface.</summary>
     private const string DataverseWriteConfirmation = "WithDataverseRightsAsync";
 

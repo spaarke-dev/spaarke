@@ -15,7 +15,7 @@ namespace Spaarke.ArchTests;
 /// <remarks>
 /// <para><b>Why.</b> ADR-028 A1–A3 (restated by A4, A5, A8 and A9) forbid exchanging the caller's token for a downstream
 /// token on this plane. The plane's write confirmation asks Dataverse app-only, naming the resolved systemuser
-/// (<c>GetPrincipalRightsAppOnlyAsync</c> / <c>PrincipalHoldsPrivilegeAppOnlyAsync</c>, A5's mechanism). The OBO questions
+/// (<c>GetPrincipalRightsAppOnlyOrUnknownAsync</c> / <c>PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync</c>, A5's mechanism). The OBO questions
 /// stay on the probe for the internal routes. Before option C the plane's readers did call the OBO questions for
 /// Spaarke-tenant systemusers (<c>ExternalProjectDataEndpoints.CallerRightsReader</c> / <c>CallerPrivilegeReader</c>),
 /// and every behaviour test still passed — so the rule lives here, where the edit that reintroduces it fails the build
@@ -29,7 +29,11 @@ namespace Spaarke.ArchTests;
 /// files under <c>Api/</c> are followed. A filter or handler bound to the group later is scanned from its first commit,
 /// with no list to update; <see cref="Control_TheDerivation_FindsTheGroupsKnownFilesAndHandlers"/> fails if the derivation
 /// itself stops finding the files bound today, and <see cref="Control_EveryEndpointFilterInExternalAccess_IsScannedOrDeclaredOffThePlane"/>
-/// fails if a filter is added to the folder that the derivation does not reach.</para>
+/// fails if a filter is added to the folder that the derivation does not reach.
+/// <see cref="Control_EveryLiveExternalRoute_IsRegisteredInAScannedFile"/> (fix round 4, K1) closes the other direction:
+/// every live <c>/api/v1/external</c> route in the route census (<c>RouteAuthorizationGuardTests</c>' whole-BFF scan,
+/// <c>Program.cs</c> and <c>Infrastructure/</c> included) must be registered in a scanned file, so a route bound to the
+/// plane in a way the derivation does not anticipate fails the build instead of escaping the scan.</para>
 /// <para><b>Scope, and what it does not prove.</b> A source scan of those files, with line comments stripped
 /// (<see cref="SourceScan"/>); it does not follow calls into services they use (<c>CallerPrincipalResolver</c>,
 /// <c>AccessibleRecordSetService</c>, <c>ExternalDataService</c> …). Today none of those services performs OBO (task 036
@@ -68,8 +72,8 @@ public class ExternalPlaneNoOboGuardTests
         (new Regex(
                 @"\b(GetCallerRightsAsync|GetCallerRightsForRecordsAsync|GetCallerRightsForAuthorizationGateAsync|CallerHoldsPrivilegeAsync|GetCallerSystemUserIdAsync)\b",
                 RegexOptions.CultureInvariant),
-            "a token-taking (OBO) CallerRecordAccessProbe question — use GetPrincipalRightsAppOnlyAsync / "
-            + "PrincipalHoldsPrivilegeAppOnlyAsync with the resolved systemuser (ExternalProjectDataEndpoints.CallerRightsReader)"),
+            "a token-taking (OBO) CallerRecordAccessProbe question — use GetPrincipalRightsAppOnlyOrUnknownAsync / "
+            + "PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync with the resolved systemuser (ExternalProjectDataEndpoints.CallerRightsReader)"),
         (new Regex(@"\b(AcquireTokenOnBehalfOf|CreateOnBehalfOfClientAsync)\b", RegexOptions.CultureInvariant),
             "an on-behalf-of token exchange"),
         (new Regex(@"\b(ForUserAsync|ForUserBetaAsync)\b", RegexOptions.CultureInvariant),
@@ -328,21 +332,98 @@ public class ExternalPlaneNoOboGuardTests
             + "the plane (FiltersOffThePlane, with where it is bound): " + string.Join(", ", unclassified));
     }
 
+    // ── Route census control (fix round 4, K1) ────────────────────────────────────────────────────────
+
+    /// <summary>Whether a route key (<c>VERB /path</c>) is on <c>/api/v1/external</c> itself — never
+    /// <c>/api/v1/external-access</c> or another prefix that merely starts with the same letters.</summary>
+    internal static bool IsPlaneRoute(string routeKey)
+    {
+        var space = routeKey.IndexOf(' ');
+        var path = space < 0 ? routeKey : routeKey[(space + 1)..];
+        return path.Equals(PlaneRoute, StringComparison.OrdinalIgnoreCase)
+               || path.StartsWith(PlaneRoute + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The plane routes of <paramref name="census"/> registered in a file outside <paramref name="scannedBffRelative"/>
+    /// (paths relative to <c>src/server/api/Sprk.Bff.Api/</c>), each as <c>key (file)</c>.
+    /// </summary>
+    internal static IReadOnlyList<string> PlaneRoutesOutsideTheScan(
+        IEnumerable<(string Key, string File)> census, IEnumerable<string> scannedBffRelative)
+    {
+        var scanned = scannedBffRelative.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return census
+            .Where(route => IsPlaneRoute(route.Key) && !scanned.Contains(route.File))
+            .Select(route => $"{route.Key} ({route.File})")
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(r => r, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    [Fact(DisplayName = "Task 036 C guard, census control (K1): every live /api/v1/external route is registered in a scanned file")]
+    public void Control_EveryLiveExternalRoute_IsRegisteredInAScannedFile()
+    {
+        var census = RouteAuthorizationGuardTests.LiveRouteCensus();
+        var planeRoutes = census.Where(route => IsPlaneRoute(route.Key)).ToList();
+
+        // Vacuity: the census sees the plane (dozens of routes today), so an empty intersection cannot pass by accident.
+        Assert.True(planeRoutes.Count >= 20,
+            $"The route census found only {planeRoutes.Count} /api/v1/external routes; the scanner has stopped seeing the plane.");
+
+        var outside = PlaneRoutesOutsideTheScan(census, ScannedFiles().Select(BffRelative));
+        Assert.True(outside.Count == 0,
+            "A live /api/v1/external route is registered in a file the no-OBO guard does not scan. Bind it through the "
+            + "group's mappings so BoundFiles derives it, or widen the derivation:\n  " + string.Join("\n  ", outside));
+    }
+
+    [Fact(DisplayName = "Task 036 C guard, census must-fire control (K1): a plane route registered outside the scanned set is reported")]
+    public void Control_APlaneRouteOutsideTheScannedSet_IsReported()
+    {
+        var census = new[]
+        {
+            ("POST /api/v1/external/things/{id:guid}", "Infrastructure/Things/ThingEndpoints.cs"),
+            ("GET /api/v1/external", "Program.cs"),
+        };
+
+        var outside = PlaneRoutesOutsideTheScan(census, new[] { "Api/ExternalAccess/ExternalProjectDataEndpoints.cs" });
+
+        Assert.Equal(
+            new[]
+            {
+                "GET /api/v1/external (Program.cs)",
+                "POST /api/v1/external/things/{id:guid} (Infrastructure/Things/ThingEndpoints.cs)",
+            },
+            outside);
+    }
+
+    [Fact(DisplayName = "Task 036 C guard, census must-not-fire control (K1): a scanned plane route and an off-plane route are not reported")]
+    public void Control_AScannedPlaneRoute_OrAnOffPlaneRoute_IsNotReported()
+    {
+        var census = new[]
+        {
+            ("POST /api/v1/external/projects/{id:guid}/todos", "Api/ExternalAccess/ExternalProjectDataEndpoints.cs"),
+            ("POST /api/v1/external-access/grant", "Api/ExternalAccess/GrantExternalAccessEndpoint.cs"),
+            ("GET /api/v1/externalthings", "Infrastructure/Things/ThingEndpoints.cs"),
+        };
+
+        Assert.Empty(PlaneRoutesOutsideTheScan(census, new[] { "Api/ExternalAccess/ExternalProjectDataEndpoints.cs" }));
+    }
+
     // ── Rule controls ─────────────────────────────────────────────────────────────────────────────────
 
     private const string Sanctioned = """
-        internal static Func<string, Guid, CancellationToken, Task<AccessRights>> CallerRightsReader(
+        internal static Func<string, Guid, CancellationToken, Task<AccessRights?>> CallerRightsReader(
             CallerRecordAccessProbe probe, HttpContext httpContext)
         {
             var systemUserId = AppOnlyConfirmationPrincipal(GetCallerPrincipal(httpContext));
-            return (entitySet, recordId, ct) => probe.GetPrincipalRightsAppOnlyAsync(systemUserId, entitySet, recordId, ct);
+            return (entitySet, recordId, ct) => probe.GetPrincipalRightsAppOnlyOrUnknownAsync(systemUserId, entitySet, recordId, ct);
         }
 
-        internal static Func<string, CancellationToken, Task<bool>> CallerPrivilegeReader(
+        internal static Func<string, CancellationToken, Task<bool?>> CallerPrivilegeReader(
             CallerRecordAccessProbe probe, HttpContext httpContext)
         {
             var systemUserId = AppOnlyConfirmationPrincipal(GetCallerPrincipal(httpContext));
-            return (privilege, ct) => probe.PrincipalHoldsPrivilegeAppOnlyAsync(systemUserId, privilege, ct);
+            return (privilege, ct) => probe.PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync(systemUserId, privilege, ct);
         }
 
         var stream = await speFileStore.DownloadFileAsync(driveId, itemId, ct);
