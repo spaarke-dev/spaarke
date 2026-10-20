@@ -1377,7 +1377,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 // but one the change moves — set to another row, or cleared while the row holds one — is a change the step
                 // after a re-file must see.
                 var held = current.GetAttributeValue<EntityReference>(column)?.Id ?? Guid.Empty;
-                movesALineageLookup |= (value?.Id ?? Guid.Empty) != held;
+                if ((value?.Id ?? Guid.Empty) != held)
+                {
+                    movesALineageLookup = true;
+                    // #2143 round 7 (F4): put back with the rest of the change when the owner assignment fails — a thread move
+                    // the change makes is part of what the row is filed under (RecordThreadFiling).
+                    Remember(column);
+                }
+
                 continue;
             }
 

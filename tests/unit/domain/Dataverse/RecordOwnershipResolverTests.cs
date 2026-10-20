@@ -1529,6 +1529,36 @@ public class RecordOwnershipResolverTests
     }
 
     [Fact]
+    public async Task Reparent_WhenARegardingChangeAndAThreadMoveAreWrittenAndTheAssignmentFails_BothArePutBack()
+    {
+        // Must-fire (#2143 round 7, F4): one change re-files the message's regarding into a secure matter AND moves it to that
+        // matter's thread, both named in ParentChanges (no AttachColumns). The owner assignment fails, so the change is put
+        // back — the thread move with the regarding, never only the regarding.
+        var (directory, messageId) = MessageWorld(MatterId, ChildBu, ChildTeam, threadId: OrdinaryThreadId);
+        var assignFailure = new InvalidOperationException("missing prvReadsprk_Communication");
+        directory.AssignmentFault = assignFailure;
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_communication",
+            RecordId = messageId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureThreadMatterId),
+                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", SecureThreadId),
+            },
+        };
+
+        var act = () => Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(assignFailure);
+        var row = directory.Row("sprk_communication", messageId);
+        row.GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id.Should().Be(MatterId, "the regarding is put back");
+        row.GetAttributeValue<EntityReference>("sprk_communicationthread")?.Id
+            .Should().Be(OrdinaryThreadId, "the thread move is put back with it");
+        MessageOwnerOf(directory, messageId).Should().Be(ChildTeam);
+    }
+
+    [Fact]
     public async Task Reparent_WhenAnAttachColumnIsALineageOnlyLookupNotNamedInParentChanges_ThrowsArgumentException_BeforeAnyReadOrWrite()
     {
         // Must-fire (#2143 round 5): the lineage overlay reads this call's own lineage-only changes from ParentChanges only, so
