@@ -297,6 +297,55 @@ public partial class SignalWriterTests
         org.UpdateCalls.Should().BeEmpty();
     }
 
+    private static FaultException<OrganizationServiceFault> Fault(int code, string message) =>
+        new(new OrganizationServiceFault { ErrorCode = code, Message = message }, message);
+
+    // R4 (adversarial review F2): a Signal deleted after the Decision Record listed it is not a write failure. The caller
+    // (InvoiceSubmissionAfterSteps) logs one Warning and goes on; the writer must not also log Error and meter signal_close_failed.
+    [Theory(DisplayName = "049 R4: a Signal that no longer exists (ObjectDoesNotExist) is rethrown as it was - no signal_close_failed metric, no Error log")]
+    [InlineData("read")]
+    [InlineData("write")]
+    [InlineData("wrapped")]
+    public async Task AutomatedClose_ASignalThatNoLongerExists_IsRethrownUnmeteredAndNotLoggedAtError(string whereItIsGone)
+    {
+        var scope = Guid.NewGuid();
+        FailureMetricScope.Value = scope;
+        var (listener, reasons) = ListenFailureReasonsScoped(scope);
+        using var _ = listener;
+        var (writer, org, log) = AutomatedCloseRig("Open");
+        var gone = Fault(unchecked((int)0x80040217), "sprk_signal With Id = " + ClosedSignalId + " Does Not Exist");
+        if (whereItIsGone == "write") org.ConditionalUpdateFault = gone;
+        else org.SignalRetrieveFault = whereItIsGone == "wrapped" ? new InvalidOperationException("retrieve failed", gone) : gone;
+
+        var act = () => Close(writer);
+
+        var thrown = await act.Should().ThrowAsync<Exception>();
+        thrown.Which.Should().BeSameAs(whereItIsGone == "write" ? gone : org.SignalRetrieveFault, "the caller recognises it by the same test; nothing is wrapped or replaced");
+        reasons().Should().BeEmpty("a deleted Signal is not a failed close");
+        log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
+        org.UpdateCalls.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "049 R4: any other fault on the read or the write is still logged at Error (WriteRefused), metered as signal_close_failed and rethrown")]
+    [InlineData("read")]
+    [InlineData("write")]
+    public async Task AutomatedClose_AnotherFault_IsStillLoggedAtErrorAndMetered(string where)
+    {
+        var scope = Guid.NewGuid();
+        FailureMetricScope.Value = scope;
+        var (listener, reasons) = ListenFailureReasonsScoped(scope);
+        using var _ = listener;
+        var (writer, org, log) = AutomatedCloseRig("Open");
+        var other = Fault(unchecked((int)0x80040216), "A different Dataverse fault.");   // one off ObjectDoesNotExist
+        if (where == "write") org.ConditionalUpdateFault = other; else org.SignalRetrieveFault = other;
+
+        var act = () => Close(writer);
+
+        await act.Should().ThrowAsync<FaultException<OrganizationServiceFault>>();
+        reasons().Should().Equal(OntologyWriterFailureReason.SignalCloseFailed);
+        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Which.EventId.Id.Should().Be(OntologyWriterEvents.WriteRefused.Id);
+    }
+
     [Fact(DisplayName = "049 D-122: a Signal read without a row version is never written (no unconditional fallback); the refusal is logged, metered as signal_close_failed and thrown")]
     public async Task AutomatedClose_ReadWithoutARowVersion_ThrowsAndWritesNothing()
     {

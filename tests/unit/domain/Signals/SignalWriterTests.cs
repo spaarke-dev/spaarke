@@ -2431,6 +2431,9 @@ public partial class SignalWriterTests
         /// <summary>ebilling-r1 task 049: every conditional update throws this (a Dataverse fault).</summary>
         public Exception? ConditionalUpdateFault { get; set; }
 
+        /// <summary>ebilling-r1 task 049 (R4): every retrieve of a <c>sprk_signal</c> throws this (e.g. ObjectDoesNotExist: the row is gone).</summary>
+        public Exception? SignalRetrieveFault { get; set; }
+
         public bool ThrowDuplicateOnNextCreate { get; set; }
         public bool ThrowAccessDeniedOnNextCreate { get; set; }
         public int CreateCallCount { get; private set; }
@@ -2526,6 +2529,11 @@ public partial class SignalWriterTests
         public Task<Entity> RetrieveAsync(string entityName, Guid id, ColumnSet columnSet, CancellationToken cancellationToken)
         {
             RetrievedColumns.Add((entityName, columnSet.Columns.ToArray()));
+            if (entityName == "sprk_signal" && SignalRetrieveFault is { } retrieveFault)
+            {
+                throw retrieveFault;
+            }
+
             if (entityName == "sprk_signal" && Rows.TryGetValue(id, out var signalRow))
             {
                 if (ThrowOnVerifyRetrieve)

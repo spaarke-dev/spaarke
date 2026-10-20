@@ -1004,8 +1004,9 @@ public sealed partial class SignalWriter
     /// Information line (ids and the policy code only).</para>
     /// <para><b>One write</b>, conditional on the row version just read: status Resolved, resolution Acted, <c>sprk_resolvedon</c> and
     /// <c>sprk_lastevaluated</c> the same instant (D-120), <c>sprk_decisionrecord</c>. A version mismatch re-reads once and decides again; a
-    /// second one is <see cref="SignalAutomatedCloseOutcome.ChangedSinceRead"/>. Any other failure is logged at Error
-    /// (<see cref="OntologyWriterEvents.WriteRefused"/>), metered and rethrown, as <see cref="CloseAsync"/> does.</para>
+    /// second one is <see cref="SignalAutomatedCloseOutcome.ChangedSinceRead"/>. A Signal that no longer exists (ObjectDoesNotExist) is
+    /// rethrown unchanged, logged at Debug only and not metered: the caller treats it as "nothing to close". Any other failure is logged
+    /// at Error (<see cref="OntologyWriterEvents.WriteRefused"/>), metered and rethrown, as <see cref="CloseAsync"/> does.</para>
     /// </summary>
     /// <exception cref="ArgumentException">An id is empty, or <paramref name="setReadAtUtc"/> is not UTC.</exception>
     internal async Task<SignalAutomatedCloseOutcome> CloseActedByAutomatedDecisionAsync(
@@ -1079,6 +1080,16 @@ public sealed partial class SignalWriter
                 }
             }
         }
+        catch (Exception ex) when (IsSignalGone(ex))
+        {
+            // The Signal row no longer exists (deleted after the Decision Record listed it). That is not a write failure: the caller
+            // treats it as "nothing to close" (one Warning, then on), so it is neither logged at Error nor metered as signal_close_failed.
+            // Rethrown unchanged so the caller keeps its behaviour.
+            _logger.LogDebug(
+                "Signal {SignalId} (policy {PolicyCode}) no longer exists; Decision Record {RecordId} has nothing to close. Rethrown for the caller.",
+                signalId, policyCode, decisionRecordId);
+            throw;
+        }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             var reason = IsDataverseAccessDenied(ex) ? OntologyWriterFailureReason.DataverseAccessDenied : OntologyWriterFailureReason.SignalCloseFailed;
@@ -1087,6 +1098,22 @@ public sealed partial class SignalWriter
             OntologyWriterTelemetry.RecordFailure(reason);
             throw;
         }
+    }
+
+    /// <summary>Whether a Dataverse failure means the row does not exist (<c>0x80040217 ObjectDoesNotExist</c>) anywhere in the inner
+    /// chain: the same test the caller applies (<c>InvoiceSubmissionAfterSteps.IsRecordNotFound</c>), so every exception the caller treats
+    /// as "the Signal is gone" is also one this writer does not report as a failure.</summary>
+    private static bool IsSignalGone(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound(e))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
