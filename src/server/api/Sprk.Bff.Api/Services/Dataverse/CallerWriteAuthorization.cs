@@ -20,11 +20,13 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// move part): the same checks in the same order, with the same messages and the same uniform not-found. The "class
 /// remarks" <see cref="CheckCallerMayCreateAsync"/> points to — the four questions "as the user" covers — are
 /// <see cref="OwnedChildWrite"/>'s, beside the G5 create they guard. The answer shapes (<c>Outcome</c>,
-/// <c>RefileOutcome</c>) and the payload readers shared with the create and re-file halves (<c>ServerOwnedColumns</c>,
-/// <c>PairOf</c>, <c>BffManagedPairColumnsOf</c>, <c>PairAgreementColumns</c>, <c>IsPairType</c>,
-/// <c>CheckCallerMayRefileByPairAsync</c>) stay in <see cref="OwnedChildWrite"/>, as does <c>RefileAsync</c>
-/// (unified-access-control-r2's). The two files import each other with <c>using static</c>, so every moved body reads
-/// exactly as it did.</para>
+/// <c>RefileOutcome</c>), the payload readers shared with the create and re-file halves (<c>ServerOwnedColumns</c>,
+/// <c>PairOf</c>, <c>BffManagedPairColumnsOf</c>, <c>PairAgreementColumns</c>, <c>IsPairType</c>) and the re-file
+/// half's own caller checks (<c>CheckCallerMayRefileByPairAsync</c>, <c>CallerMayFileRootUnderSecure</c>) stay in
+/// <see cref="OwnedChildWrite"/>, as does <c>RefileAsync</c> (unified-access-control-r2's). The two files import each
+/// other with <c>using static</c>, so every moved body reads exactly as it did. A member declared in a class wins over
+/// an imported one, so never give a member of either class the name of a member of the other: the calls in that file
+/// would bind to it silently.</para>
 /// <para><b>ADR-008, path A</b> (this project's spec, "ADR Tensions"): route-level authorization stays in endpoint filters;
 /// these checks depend on the request body and also serve non-HTTP callers (chat tools, decision cores), so the write
 /// cores call them. <b>ADR-010:</b> a static class — no DI registration, no interface.</para>
