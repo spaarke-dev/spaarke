@@ -801,6 +801,14 @@ All 11 killed.
    - Ownership was already checked twice before any Signal exists: the submission service and the persister both resolve the owner from the same core record. A writer ownership refusal therefore needs a change or delete race in the seconds between those checks and the write (the core record's parent, team or business unit changed or was removed), so it is rare; it is still surfaced, because the consequence (an invoice with no Signal) is silent otherwise.
    - Nuance: `record_owner_secure_parent_not_isolated` (the ownership skip) and `secure_owner_mismatch` (`OntologyWriterFailureReason.SecureOwnerMismatch`, the writer's escalation) are fixed by the secure-child reconciler, so they are "permanent" only within the job's retry window: the same Signal would be writable after the reconciler runs, but this run no longer waits for it.
 
+#### D-133 live run on dev (2026-10-19, owner-approved)
+
+Before and after notices went to ontology-r1 and uac-r2; both had no objection. uac-r2's condition holds: the view is a plain public savedquery, so it runs under the viewer's own read access.
+
+1. `pwsh scripts/ebilling/Deploy-EbillingSubmissionAttentionSchema.ps1 -WhatIf`, then the same command without `-WhatIf`. Result: CREATED `sprk_invoicesubmission.sprk_adminattention` (String 500) and the public view 'Submissions needing attention' `a371c4e6-32cc-f111-a05b-7c1e520a989f`. Only `sprk_invoicesubmission` was published. Exit 0.
+2. `pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -WhatIf` changed only the `sprk_invoicesubmission` main form; every other form, view and sitemap was unchanged. The live run then rebuilt main form 'Information' `c412f942-875e-45c4-9ea1-cae75a81f1b9`. The publish was entity-scoped (sprk_invoicesubmission; never PublishAllXml), the read-back showed nothing pending, and the script exited 0.
+3. Still to do: the manual step of adding `sprk_invoicesubmission` to the Matter Management app (already a queued owner action, 'add the 7 tables to the apps'). Until then the view is reachable only from the table itself. The SpaarkeMaster export of the column, view and form is also still to do.
+
 ### 13e. Held presentation
 
 Ontology-r1's part D item: a Blocked submission (the rejection rule would reject, but an Internal submission is held for review instead) showed the same Signal as an automatic rejection. Files: `BillingFindingSignalMapper.cs` (the presentation), `InvoiceSubmissionPersister.cs` (passes the outcome; one argument), `BillingRuleCatalogue.cs` (a comment). `InvoiceSubmissionAfterSteps`, `SignalWriter` and `SignalWriterTests*` are unchanged.
