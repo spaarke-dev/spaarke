@@ -25,7 +25,7 @@ response as `"truncated": true`.
 | CIAM contact | `CiamContact` | grants (unchanged) | grants (unchanged). `DataverseConfirmsWrites` is never set — no probe call |
 | Workforce contact (no licence) | `Workforce`, no `SystemUserId` | grants (unchanged) | unchanged — no probe call |
 | Systemuser | `Workforce` + `SystemUserId` | membership walk at `MembershipTermRights` ∪ linked-contact grants | impersonated set at Read ∪ linked-contact grants; writes confirmed by the probe |
-| WorkforceHome-linked systemuser (ADR-028 A9) | `Workforce` (scheme decides first — the WorkforceHome guard in `DeterminePlane` is untouched) | as systemuser | as systemuser for the read set. Its customer-directory token cannot be exchanged, so its writes are confirmed **app-only, naming its systemuser** (decision a, owner 2026-10-18; §12) — chosen from `CallerPrincipal.ResolvedThroughHomeLink`, never as a fallback from OBO |
+| WorkforceHome-linked systemuser (ADR-028 A9) | `Workforce` (scheme decides first — the WorkforceHome guard in `DeterminePlane` is untouched) | as systemuser | as systemuser for the read set. Its customer-directory token cannot be exchanged, so its writes are confirmed **app-only, naming its systemuser** (decision a, owner 2026-10-18; §12), as every systemuser is since option C (§13) — no sign-in marker chooses the path, and OBO is never tried |
 
 `WorkforcePrincipalStrategy` sets `CallerPrincipal.DataverseConfirmsWrites` from `Sources.ImpersonatedRootSet` (any of
 the three root types; the flag is read once per composition, so the three sets agree — if flags ever become per type,
@@ -377,8 +377,8 @@ settled. **(a) and (f) were DECIDED by the owner on 2026-10-18** and are built (
 - **(a) DECIDED (owner, 2026-10-18): option 2, built (§12).** A systemuser resolved through the WorkforceHome stored
   home link is confirmed app-only, naming that systemuser: `RetrievePrincipalAccess` with `Principal =
   systemusers(<id>)` for the row rights, and `RetrieveUserSetOfPrivilegesByNames` on that systemuser for the child
-  Create privilege. The path is chosen from the resolved principal (`CallerPrincipal.ResolvedThroughHomeLink`), never
-  by trying OBO and falling back; OBO callers are unchanged. It fails closed (fault, missing id, unreadable answer),
+  Create privilege. The path was chosen from the resolved principal (`CallerPrincipal.ResolvedThroughHomeLink`, removed
+  in fix round 3 once option C made every systemuser app-only, §14), never by trying OBO and falling back. It fails closed (fault, missing id, unreadable answer),
   is uncached, and drives both the write routes and the lists' `canCreate`. The original analysis follows.
 - *(as escalated)* **WorkforceHome-linked systemusers can't be probed.** The OBO probe cannot exchange a
   customer-directory (A9) token for a Dataverse token in Spaarke's tenant, so under the flag such a user's writes deny
@@ -587,7 +587,7 @@ about 39.2 MB zipped, well under 55 MB.
 
 | # | Item | Before | After |
 |---|---|---|---|
-| C | Write confirmation on `/api/v1/external` | OBO probe (`GetCallerRightsAsync` / `CallerHoldsPrivilegeAsync`) for a Spaarke-tenant systemuser; app-only only for a home-linked one | App-only, naming the resolved systemuser, for **every** systemuser (`ExternalProjectDataEndpoints.CallerRightsReader` / `CallerPrivilegeReader`; `AppOnlyConfirmationPrincipal` = `SystemUserId ?? Guid.Empty`). No OBO on the plane. `CallerPrincipal.ResolvedThroughHomeLink` no longer chooses a path (kept as a record of how the principal was resolved) |
+| C | Write confirmation on `/api/v1/external` | OBO probe (`GetCallerRightsAsync` / `CallerHoldsPrivilegeAsync`) for a Spaarke-tenant systemuser; app-only only for a home-linked one | App-only, naming the resolved systemuser, for **every** systemuser (`ExternalProjectDataEndpoints.CallerRightsReader` / `CallerPrivilegeReader`; `AppOnlyConfirmationPrincipal` = `SystemUserId ?? Guid.Empty`). No OBO on the plane. `CallerPrincipal.ResolvedThroughHomeLink` no longer chooses a path (removed in fix round 3, §14) |
 | F | 404 right after a create | App-only path mapped 404 to None at once | Re-asked on `CallerRecordAccessProbe.NotFoundRetryDelay`'s schedule (400 ms, 1200 ms) through a new optional `reaskOnNotFound` hook on `DataverseWebApiService.RetrievePrincipalRightsOrUnknownAsync`; 403 answered at once |
 | Fault | 403 `0x8004A110` (no `prvActOnBehalfOfAnotherUser`) | Read as "no rights", logged at Information | `RetrievePrincipalRightsOrUnknownAsync` → UNKNOWN → None with its own Warning (`answered a fault, not an access answer`) |
 | K iii | Slow Dataverse | No bound on the app-only calls | 15 s linked timeout (`AppOnlyQuestionTimeout`) on both app-only questions; a timeout answers None / false with a Warning; the caller's own cancellation is rethrown |
@@ -596,3 +596,29 @@ about 39.2 MB zipped, well under 55 MB.
 | K iv | Probe comments | Class summary and constructor warning implied the probe serves `/api/v1/external` | The OBO questions serve internal routes only; the external plane uses the app-only questions |
 
 Tests and mutations: see the PR description for this round. ADR edits: `036-adr-edits-owner-a-f.md` § Option C.
+
+## 14. Fix round 3 (2026-10-20) — before → after
+
+| # | Item | Before | After |
+|---|---|---|---|
+| F3-1 | No-OBO guard scope | `Api/ExternalAccess/External*.cs` only; five OBO names | `External*.cs` plus every file the `MapGroup("/api/v1/external")` mappings bind, derived to closure (`ExternalPlaneNoOboGuardTests.BoundFiles`): today adds `MeEntitlementsEndpoint.cs`, `ContactGrantEndpoints.cs`, `ContactGrantorAuthorizationFilter.cs`, `WorkforceCeilingEndpointFilter.cs`, `WorkforceRoleCeilingGate.cs`, `Api/Filters/CallerPrincipalAuthorizationFilter.cs`. Also bans `ExtractBearerToken*` (every OBO question needs the caller's token) and `ProbeGrantorCeilingAsync` (`GrantExternalAccessEndpoint`, OBO). Controls: derivation finds today's files, does not follow the `/api/v1/external-access` group, picks up a new filter / declaration / handler; a census fails on a filter in `Api/ExternalAccess/` the derivation does not reach and that is not declared off the plane |
+| F3-2 | Dataverse CreateAccess | No test pinned that `SurfaceRightsFromDataverse` ignores CreateAccess | Direct theory plus route cases (to-do create, event create, upload): `Read \| Create` with the child Create privilege held is 403 and writes nothing |
+| K7 | `CallerPrincipal.ResolvedThroughHomeLink` | Set, read by nothing but tests | Removed with its feeder (`WorkforcePrincipal.ResolvedThroughHomeLink`, the `ForSystemUser` parameter, the resolver's argument) and the tests that pinned only it |
+| K3 | #2121 merge (PR #2122) | — | `AccessibleRecordSetServiceTests.Fr20_FlagOn_ASecureIdInDataversesAnswer_IsDecidedByTheImpersonatedAnswerAlone`: flag on, a Secure id in Dataverse's answer stays at Read, the strict membership mock is never called. #2122's Secure lookup-only filter belongs to the flag-off path only (`!dataverseDecides`); this test fails if the merge runs it on the flag-on path |
+| K5 | 403 `0x80040220` on the app-only question | Always "no rights" (Information log) | UNKNOWN (the fault Warning) when the error message names `prvActOnBehalfOfAnotherUser`; otherwise "no rights" as before. Fails closed either way |
+
+**K5 ambiguity (documented, not resolved).** Microsoft documents no error code for an impersonated call whose
+application user lacks `prvActOnBehalfOfAnotherUser`. The repo's `CannotActOnBehalfOfAnotherUser` (`0x8004A110`) comes
+from the web-service error catalog and has not been observed live (`DataverseImpersonation.cs`; researcher note
+`dataverse-impersonation-async-functions-2026-09-14.md`). `0x80040220` is Dataverse's generic missing-privilege code
+("Principal user … is missing prv… privilege"), so it is a plausible answer for that fault too. When its message names
+the privilege, `DataverseWebApiService.RetrievePrincipalRightsOrUnknownAsync` now reads it as UNKNOWN; a `0x80040220`
+whose message does not name it still reads as "no rights". **Live check (task 034 canary):** if every systemuser's
+confirmation logs `[DELEGATION] Rights … : None`, check `prvActOnBehalfOfAnotherUser` on the BFF application user
+before reading it as a roles problem.
+
+**Known limits carried to the PR:**
+- **K4.** An enabled but unlicensed, or Read-access-mode, systemuser under `MSCRMCallerID` impersonation is not pinned
+  by any offline test (Microsoft does not document the answer). Verify in the task 034 canary.
+- **K6.** A child create asks two questions in sequence (the parent's rights, then the child table's Create privilege),
+  each bounded at 15 s, so up to 30 s before a refusal; each list GET asks once per request for its `canCreate`.

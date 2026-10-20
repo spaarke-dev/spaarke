@@ -2210,8 +2210,8 @@ state.
    and their lists' `canCreate` is the same answer. That parity is **not yet proven live** for roles the user holds only
    through a team, or for disabled and unlicensed users: the task 036 live checks (Verify, (vi) and (vii)) cover them.
    A record created seconds earlier that answers "not found" is asked again (twice, within about 1.6 s); a fault, an
-   impersonation failure (`0x8004A110`, logged as a Warning, not as "no rights") or no answer within 15 seconds refuses
-   the write.
+   impersonation failure (`0x8004A110`, or `0x80040220` whose message names `prvActOnBehalfOfAnotherUser`; logged as a
+   Warning, not as "no rights") or no answer within 15 seconds refuses the write.
 4. **Internal users who write in the SPA or Teams hold Spaarke Core User** (or a role with the same privileges). Under
    "on", Dataverse decides writes from the user's own roles, as the model-driven app does. Spaarke Core User grants
    Create, Write and Delete on `sprk_todo`, `sprk_document`, `sprk_event` and `sprk_communication`. **Spaarke Basic User**
@@ -2274,7 +2274,9 @@ App Service restarts the app on a settings change. Cached principals and root se
   refused (if Dataverse answers either with rights, stop: do not turn it on, and report it), and with a user whose only
   role comes through a team, the SPA allows exactly the writes the model-driven app allows.
 - A Warning `[DELEGATION-RPA-UNAVAILABLE] App-only RetrievePrincipalAccess … answered a fault, not an access answer`
-  means the BFF App User lacks `prvActOnBehalfOfAnotherUser` (item 2): every write is refused until it is fixed.
+  means the BFF App User lacks `prvActOnBehalfOfAnotherUser` (item 2): every write is refused until it is fixed. Microsoft
+  documents no error code for that fault, and a bare `0x80040220` can also carry it; so if EVERY systemuser's
+  confirmation logs `[DELEGATION] Rights … : None`, check the privilege before reading it as a roles problem.
 
 **Turn it off (the kill switch):** set `ExternalAccess__ImpersonatedRootSets__Enabled=false`, or delete the setting. The
 next composition uses the membership rules again. The "on" state writes nothing, so there is nothing to undo.

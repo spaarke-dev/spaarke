@@ -164,3 +164,25 @@ That tension predates decision (a); this change does not widen it. Decision (a) 
 - **ADR-028 B2, widened** (line 642): "- **Write confirmation for every core user** (2026-10-18, widened 2026-10-20): a
   licensed core user, Spaarke-tenant or resolved through the stored link, is confirmed for ADR-034 A2 writes app-only,
   impersonating their systemuser ([A5 scope extension](#…)); no token of theirs is exchanged."
+
+## Round 3 (fix round 3, 2026-10-20) — for the main session to apply
+
+> Anchors are the `.claude/adr/` files as applied in `cd258fead`. The full `docs/adr/ADR-034-user-record-membership.md`
+> was updated on the branch in the same round (no `.claude/` write needed for it).
+
+- **ADR-034 A2** (`.claude/adr/ADR-034-user-record-membership.md`, line 93) — the guard now covers the plane's bound
+  filter and handler files and bans the caller-token read (F3-1).
+  Old: `` `ExternalPlaneNoOboGuardTests` (no token-taking probe question in `Api/ExternalAccess/External*.cs`), ``
+  New: `` `ExternalPlaneNoOboGuardTests` (no token-taking probe question, OBO exchange or caller-token read in `Api/ExternalAccess/External*.cs` or in any filter or handler file the `/api/v1/external` mappings bind), ``
+- **ADR-034 A2** (same bullet) — the impersonation fault (K5).
+  Old: `an impersonation fault is UNKNOWN and adds no rights`
+  New: `an impersonation fault (including a 0x80040220 whose message names prvActOnBehalfOfAnotherUser) is UNKNOWN and adds no rights`
+- **ADR-028 A5 scope extension** (`.claude/adr/ADR-028-spaarke-auth-architecture.md`, lines 376–377) — K5.
+  Old: `` a 403 that is not an access answer
+  (e.g. `0x8004A110`) is UNKNOWN and logged as a Warning; ``
+  New: `` a 403 that is not an access answer
+  (e.g. `0x8004A110`, or `0x80040220` whose message names `prvActOnBehalfOfAnotherUser`) is UNKNOWN and logged as a
+  Warning; ``
+- **No edit needed for K7.** No `.claude/adr/` text cites `ResolvedThroughHomeLink` after `cd258fead`; the property is
+  removed. The decision-(a) drafts above (Edits A2, B1) still name it as history and are superseded by the option C
+  section.

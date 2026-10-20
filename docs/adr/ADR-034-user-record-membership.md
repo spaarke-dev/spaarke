@@ -418,10 +418,12 @@ group) while **`ExternalAccess:ImpersonatedRootSets:Enabled` is `true`**:
   ADR-028 A5's trust basis: the id is the one the authenticated identity was resolved to, never client-supplied, and
   Dataverse answers from that user's own roles, teams and shares. The plane's read set (the impersonated read) and its
   write confirmation therefore rest on one mechanism and one resolved id. A 404 is re-asked on the replication-lag
-  schedule (a write right after a create); an impersonation fault (`0x8004A110`) is UNKNOWN, not a denial, and adds no
+  schedule (a write right after a create); an impersonation fault (`0x8004A110`, or `0x80040220` whose message names
+  `prvActOnBehalfOfAnotherUser`) is UNKNOWN, not a denial, and adds no
   rights; each question is bounded at 15 seconds. The same answer drives the user's list `canCreate`, and `/me` says
   `writeAccessPerRecord: true` for every Dataverse-decided user. Enforced by:
-  `tests/Spaarke.ArchTests/ExternalPlaneNoOboGuardTests.cs` (no token-taking probe question on the plane).
+  `tests/Spaarke.ArchTests/ExternalPlaneNoOboGuardTests.cs` (no token-taking probe question, OBO exchange or
+  caller-token read in the plane's handler files or in any filter or handler file its mappings bind).
 - **Exempt — a service request's writes** (upload to it, a message on it, deleting one's own request) keep the
   requester rule in both flag states and are not confirmed (task 036 decision e, accepted by the owner). The requester's
   access is explicit access Dataverse cannot see, like the B-17 contact grants: widening could add nothing, and replacing
