@@ -335,6 +335,156 @@ public sealed class InvoiceSubmissionExistingDocumentTests
         h.Allocations.Should().ContainSingle();
     }
 
+    // ── D-140 (owner 2026-10-20, uac-r2 item 1): the EFFECTIVE core record, through the filing chain ──
+
+    /// <summary>An email attachment as the communication writers create it: ONLY sprk_relatedcommunication, no core lookup of its own.</summary>
+    private static (Harness Harness, Guid Communication) EmailAttachment(Guid? regardingMatter)
+    {
+        var h = NewHarness();
+        var communication = Guid.NewGuid();
+        h.ExistingDocument!["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communication);
+        var row = new Entity("sprk_communication", communication);
+        if (regardingMatter is { } matter)
+        {
+            row["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter);
+        }
+
+        h.Communications[communication] = row;
+        return (h, communication);
+    }
+
+    [Fact(DisplayName = "D-140: an email attachment whose communication is filed under matter A, confirmed onto matter B, is 409 document_core_record_mismatch")]
+    public async Task EmailAttachment_CommunicationUnderAnotherMatter_Is409()
+    {
+        var (h, _) = EmailAttachment(regardingMatter: Guid.NewGuid());
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "D-140: an email attachment whose communication is filed under the confirm's own matter is received")]
+    public async Task EmailAttachment_CommunicationUnderTheSameMatter_IsReceived()
+    {
+        var (h, _) = EmailAttachment(regardingMatter: MatterId);
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+    }
+
+    [Theory(DisplayName = "D-140: an email attachment whose communication is under ANOTHER project or work assignment is 409 too")]
+    [InlineData("sprk_regardingproject", "sprk_project")]
+    [InlineData("sprk_regardingworkassignment", "sprk_workassignment")]
+    public async Task EmailAttachment_CommunicationUnderAnotherCoreRecordKind_Is409(string column, string table)
+    {
+        var (h, communication) = EmailAttachment(regardingMatter: null);
+        h.Communications[communication][column] = new EntityReference(table, Guid.NewGuid());
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).ErrorCode
+            .Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "D-140 / D-139: an email attachment whose communication has no regarding record is unfiled and may be confirmed")]
+    public async Task EmailAttachment_CommunicationWithNoRegarding_IsReceived()
+    {
+        var (h, _) = EmailAttachment(regardingMatter: null);
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+    }
+
+    [Fact(DisplayName = "D-140: the document's OWN core lookup decides before its communication (the communication is not read)")]
+    public async Task OwnCoreLookup_DecidesBeforeTheCommunication()
+    {
+        var (h, _) = EmailAttachment(regardingMatter: Guid.NewGuid());
+        h.ExistingDocument!["sprk_matter"] = new EntityReference("sprk_matter", MatterId);
+        h.CommunicationReadFailure = new InvalidOperationException("the communication must not be read");
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+    }
+
+    [Fact(DisplayName = "D-140: a document filed through the sprk_related* twin (sprk_relatedmatter) under another matter is 409")]
+    public async Task RelatedMatterTwin_UnderAnotherMatter_Is409()
+    {
+        var h = NewHarness();
+        h.ExistingDocument!["sprk_relatedmatter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).ErrorCode
+            .Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+    }
+
+    [Fact(DisplayName = "D-140: a parent-document chain is resolved: an attachment with no link of its own follows its parent's communication (409 for another matter)")]
+    public async Task ParentDocumentChain_IsResolved_ThroughTheParentsCommunication()
+    {
+        var h = NewHarness();
+        var parent = Guid.NewGuid();
+        var communication = Guid.NewGuid();
+        h.ExistingDocument!["sprk_parentdocument"] = new EntityReference("sprk_document", parent);
+        h.OtherDocuments[parent] = new Entity("sprk_document", parent)
+        {
+            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communication),
+        };
+        h.Communications[communication] = new Entity("sprk_communication", communication)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Guid.NewGuid()),
+        };
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).ErrorCode
+            .Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "D-140: a parent-document chain that resolves to the confirm's own matter is received (negative control)")]
+    public async Task ParentDocumentChain_ToTheSameMatter_IsReceived()
+    {
+        var h = NewHarness();
+        var parent = Guid.NewGuid();
+        h.ExistingDocument!["sprk_parentdocument"] = new EntityReference("sprk_document", parent);
+        h.OtherDocuments[parent] = new Entity("sprk_document", parent) { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) };
+
+        (await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+    }
+
+    [Fact(DisplayName = "D-140: a chain longer than the bound (4 documents) or one that loops is refused fail-closed (409), nothing written")]
+    public async Task ParentDocumentChain_PastTheBoundOrLooping_IsRefused()
+    {
+        var deep = NewHarness();
+        var row = deep.ExistingDocument!;
+        for (var i = 0; i < InvoiceSubmissionService.MaxFilingChainDocuments; i++)
+        {
+            var parent = Guid.NewGuid();
+            row["sprk_parentdocument"] = new EntityReference("sprk_document", parent);
+            row = deep.OtherDocuments[parent] = new Entity("sprk_document", parent);
+        }
+
+        row["sprk_matter"] = new EntityReference("sprk_matter", MatterId); // filed, but one document past the bound
+
+        (await deep.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).ErrorCode
+            .Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+        ShouldHaveWrittenNothing(deep);
+
+        var loop = NewHarness();
+        var other = Guid.NewGuid();
+        loop.ExistingDocument!["sprk_parentdocument"] = new EntityReference("sprk_document", other);
+        loop.OtherDocuments[other] = new Entity("sprk_document", other) { ["sprk_parentdocument"] = new EntityReference("sprk_document", DocumentId) };
+
+        (await loop.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None)).ErrorCode
+            .Should().Be(InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+    }
+
+    [Fact(DisplayName = "D-140: a communication that cannot be read is 503 (fail closed), nothing written")]
+    public async Task EmailAttachment_CommunicationUnreadable_Is503()
+    {
+        var (h, _) = EmailAttachment(regardingMatter: MatterId);
+        h.CommunicationReadFailure = new HttpRequestException("dataverse down");
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        ShouldHaveWrittenNothing(h);
+    }
+
     // ── 050a review #4: a retry after the submission ended ──
 
     [Theory(DisplayName = "050a review #4 (owner 2026-10-20, D-139): a retry whose submission ended Failed or Rejected is 409 submission_already_ended naming the status; nothing is written or queued")]

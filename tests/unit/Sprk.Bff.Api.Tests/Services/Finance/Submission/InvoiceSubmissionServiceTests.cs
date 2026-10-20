@@ -103,6 +103,19 @@ public sealed class InvoiceSubmissionServiceTests
         /// <summary>050a: non-null, the existing document's read throws this.</summary>
         public Exception? ExistingDocumentReadFailure;
 
+        /// <summary>D-140: documents of the filing chain other than the confirmed one (its parents), by id.</summary>
+        public readonly Dictionary<Guid, Entity> OtherDocuments = new();
+
+        /// <summary>D-140: the communications a document of the chain links (absent: not found).</summary>
+        public readonly Dictionary<Guid, Entity> Communications = new();
+
+        /// <summary>D-140: non-null, a communication read throws this.</summary>
+        public Exception? CommunicationReadFailure;
+
+        private static Exception NotFound() =>
+            new System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault>(
+                new Microsoft.Xrm.Sdk.OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist");
+
         /// <summary>050a: every read of a submission by id (the existing-document entry's dedupe read).</summary>
         public readonly List<Guid> SubmissionReads = new();
 
@@ -260,7 +273,11 @@ public sealed class InvoiceSubmissionServiceTests
                         ? new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Core record", ["sprk_matternumber"] = "C-1" }
                         : null!,
                     "sprk_invoicesubmission" => ReadSubmission(id),
+                    "sprk_document" when OtherDocuments.TryGetValue(id, out var otherDocument) => otherDocument,
                     "sprk_document" => ExistingDocumentReadFailure is { } documentFailure ? throw documentFailure : ExistingDocument!,
+                    "sprk_communication" => CommunicationReadFailure is { } communicationFailure
+                        ? throw communicationFailure
+                        : Communications.TryGetValue(id, out var communication) ? communication : throw NotFound(),
                     _ => null!,
                 });
             // The SPA document create stamps the uploaded item on the row (sprk_graphitemid): a committed row is found by it.

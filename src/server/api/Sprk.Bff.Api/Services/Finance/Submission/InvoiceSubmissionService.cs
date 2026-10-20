@@ -197,15 +197,44 @@ public class InvoiceSubmissionService
     /// The document's core-record lookups (050a review #3): the confirm's core record must be the one the document is filed under, if any. The
     /// kinds match <see cref="InvoiceCoreRecordKind"/>.
     /// </summary>
+    /// <remarks>Both families (D-140): the unprefixed lookups and their <c>sprk_related*</c> twins are both live filing links on a document
+    /// (<c>DocumentLinkFields.All</c>; <c>SecureChildLineage</c> reads both as parents, and <c>DocumentLinkFieldMap.SupersededBy</c> only
+    /// RECORDS the mapping for a future migration), so a document filed through either one is filed.</remarks>
     private static readonly (string Column, InvoiceCoreRecordKind Kind)[] DocumentCoreColumns =
     [
         ("sprk_matter", InvoiceCoreRecordKind.Matter),
+        ("sprk_relatedmatter", InvoiceCoreRecordKind.Matter),
         ("sprk_project", InvoiceCoreRecordKind.Project),
+        ("sprk_relatedproject", InvoiceCoreRecordKind.Project),
         ("sprk_workassignment", InvoiceCoreRecordKind.WorkAssignment),
+        ("sprk_relatedworkassignment", InvoiceCoreRecordKind.WorkAssignment),
     ];
 
+    /// <summary>D-140: the communication's core-record lookups (the regarding columns <c>CommunicationService</c> files an email under).</summary>
+    private static readonly (string Column, InvoiceCoreRecordKind Kind)[] CommunicationCoreColumns =
+    [
+        ("sprk_regardingmatter", InvoiceCoreRecordKind.Matter),
+        ("sprk_regardingproject", InvoiceCoreRecordKind.Project),
+        ("sprk_regardingworkassignment", InvoiceCoreRecordKind.WorkAssignment),
+    ];
+
+    /// <summary>D-140: a document's link to the communication it came from (every email archive / attachment writer stamps it).</summary>
+    private const string DocumentRelatedCommunication = "sprk_relatedcommunication";
+
+    /// <summary>D-140: a document's link to the document it was extracted from (an attachment's parent).</summary>
+    private const string DocumentParentDocument = "sprk_parentdocument";
+
+    /// <summary>
+    /// D-140: how many documents the filing chain walks, the confirmed one included (it, then at most three parents). A chain that is still
+    /// unresolved past it, or that loops, is refused (fail closed): the record the document is filed under could not be established.
+    /// </summary>
+    internal const int MaxFilingChainDocuments = 4;
+
+    private static readonly string[] FilingChainColumns =
+        [.. DocumentCoreColumns.Select(c => c.Column), DocumentRelatedCommunication, DocumentParentDocument];
+
     private static readonly string[] ExistingDocumentColumns =
-        ["sprk_invoice", "sprk_graphdriveid", "sprk_graphitemid", .. DocumentCoreColumns.Select(c => c.Column)];
+        ["sprk_invoice", "sprk_graphdriveid", "sprk_graphitemid", .. FilingChainColumns];
 
     /// <summary>
     /// The existing-document entry (D-134): a reviewer confirms that a document already stored (an email attachment) is an invoice. It runs the
@@ -418,8 +447,9 @@ public class InvoiceSubmissionService
 
     /// <summary>
     /// Null when the document can be submitted; otherwise the refusal. A read fault is 503 (never "not found"). A document filed under a core
-    /// record other than <paramref name="core"/> is 409 <see cref="InvoiceSubmissionErrors.DocumentCoreRecordMismatch"/> (review #3); an UNFILED
-    /// document (no core lookup) is allowed (owner 2026-10-20, D-139).
+    /// record other than <paramref name="core"/> is 409 <see cref="InvoiceSubmissionErrors.DocumentCoreRecordMismatch"/> (review #3), where
+    /// "filed under" is the EFFECTIVE core record through the filing chain (<see cref="ResolveFilingAsync"/>, D-140: an email attachment
+    /// follows its communication's matter); an UNFILED document (nothing in the chain names a core record) is allowed (owner 2026-10-20, D-139).
     /// </summary>
     private async Task<InvoiceSubmissionOutcome?> CheckExistingDocumentAsync(Guid documentId, InvoiceCoreRecord core, CancellationToken ct)
     {
@@ -460,10 +490,31 @@ public class InvoiceSubmissionService
                 "The document has no stored file, so it cannot be submitted as an invoice.");
         }
 
-        foreach (var (column, kind) in DocumentCoreColumns)
+        // D-140 (owner 2026-10-20, "follow the email's matter"): the document's EFFECTIVE core record, through its filing chain.
+        IReadOnlyList<(string Column, InvoiceCoreRecordKind Kind, Guid Id)>? filed;
+        try
         {
-            if (document.GetAttributeValue<EntityReference>(column) is { Id: var filedUnder } && filedUnder != Guid.Empty
-                && (kind != core.Kind || filedUnder != core.RecordId))
+            filed = await ResolveFilingAsync(documentId, document, ct);
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning(ex, "Invoice submission refused: the filing chain of document {DocumentId} could not be read", documentId);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                "The record the document is filed under could not be read right now. Nothing was saved; try again shortly.");
+        }
+
+        if (filed is null)
+        {
+            _logger.LogWarning(
+                "Invoice submission refused: the filing chain of document {DocumentId} is longer than {Max} documents or loops; its record is unknown",
+                documentId, MaxFilingChainDocuments);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch,
+                "The record the document is filed under could not be established, so it cannot be submitted for this record. Nothing was saved.");
+        }
+
+        foreach (var (column, kind, filedUnder) in filed)
+        {
+            if (kind != core.Kind || filedUnder != core.RecordId)
             {
                 // The other record is never named: the caller was authorized against the confirm's record, not that one.
                 _logger.LogInformation(
@@ -475,6 +526,74 @@ public class InvoiceSubmissionService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// D-140: the core records <paramref name="document"/> is EFFECTIVELY filed under, each with the column that names it. In order, the first
+    /// that names any core record decides: (1) the document's own core lookups (both families, <see cref="DocumentCoreColumns"/>); (2) else its
+    /// communication's (<c>sprk_relatedcommunication</c>) regarding matter / project / work assignment: an email attachment is created with
+    /// only that link, and its isolation follows the communication; (3) else its parent document (<c>sprk_parentdocument</c>), the same way.
+    /// Empty: nothing in the chain is filed (a truly unfiled document, allowed, D-139); a row of the chain that no longer exists files nothing.
+    /// Null: the chain is longer than <see cref="MaxFilingChainDocuments"/> documents or loops, so the record is unknown (the caller refuses).
+    /// A read fault propagates.
+    /// </summary>
+    private async Task<IReadOnlyList<(string Column, InvoiceCoreRecordKind Kind, Guid Id)>?> ResolveFilingAsync(
+        Guid documentId, Entity document, CancellationToken ct)
+    {
+        var visited = new HashSet<Guid> { documentId };
+        var current = document;
+        for (var documents = 1; ; documents++)
+        {
+            var filed = CoreRecordsOf(current, DocumentCoreColumns, DocumentEntity);
+            if (filed.Count == 0
+                && current.GetAttributeValue<EntityReference>(DocumentRelatedCommunication) is { Id: var communicationId } && communicationId != Guid.Empty
+                && await ReadChainRowAsync("sprk_communication", communicationId, CommunicationCoreColumns.Select(c => c.Column).ToArray(), ct) is { } communication)
+            {
+                filed = CoreRecordsOf(communication, CommunicationCoreColumns, "sprk_communication");
+            }
+
+            if (filed.Count > 0)
+            {
+                return filed;
+            }
+
+            if (current.GetAttributeValue<EntityReference>(DocumentParentDocument) is not { Id: var parentId } || parentId == Guid.Empty)
+            {
+                return filed; // the end of the chain, nothing filed: unfiled
+            }
+
+            if (documents >= MaxFilingChainDocuments || !visited.Add(parentId))
+            {
+                return null;
+            }
+
+            if (await ReadChainRowAsync(DocumentEntity, parentId, FilingChainColumns, ct) is not { } parent)
+            {
+                return filed; // the parent is gone: nothing files the document through it
+            }
+
+            current = parent;
+        }
+    }
+
+    private static List<(string Column, InvoiceCoreRecordKind Kind, Guid Id)> CoreRecordsOf(
+        Entity row, (string Column, InvoiceCoreRecordKind Kind)[] columns, string table) =>
+        columns
+            .Select(c => (Column: $"{table}.{c.Column}", c.Kind, Id: row.GetAttributeValue<EntityReference>(c.Column)?.Id ?? Guid.Empty))
+            .Where(c => c.Id != Guid.Empty)
+            .ToList();
+
+    /// <summary>A row of the filing chain, or null when it no longer exists. A read fault propagates.</summary>
+    private async Task<Entity?> ReadChainRowAsync(string table, Guid id, string[] columns, CancellationToken ct)
+    {
+        try
+        {
+            return await _entities.RetrieveAsync(table, id, columns, ct);
+        }
+        catch (Exception ex) when (IsNotFound(ex))
+        {
+            return null;
+        }
     }
 
     /// <summary>Submits the job (ADR-004, the submission id as idempotency key); false when the queue refused it (logged).</summary>
