@@ -349,6 +349,11 @@ Three save paths can produce a document from an internal-only email with no comm
       - an inherited Restricted follows a parent that widens back to Standard;
       - an unreadable own narrowing writes nothing.
   - **T7b. Legacy rows.** Documents saved through the three gap paths before T8 have no communication link. Rule 3 cannot see them, so they stay visible by root grants after T7. T7 needs a backfill that links them where the source email can be identified (through `sprk_communicationattachment`, or the .eml's message id; the Office owner confirms which) and reports the rest. Whether an unidentifiable legacy row becomes Restricted is an owner call, raised with T7.
+    - **How to match (word-add-in-r1, from code, 2026-10-20):**
+      - (1) `.eml` rows (`sprk_isemailarchive = true`): `sprk_document.sprk_emailmessageid` → `sprk_communication.sprk_internetmessageid`. Rows saved before task 121 hold the mailbox-specific Exchange item id rather than the RFC Message-ID (`OfficeEmailEnricher.ResolveStoredMessageId`), so they are unmatchable; the conversation-index + subject + date heuristic is NOT used, because a wrong match would expose. An email whose capture never created a communication has nothing to link to.
+      - (2) Attachment children: not through `sprk_communicationattachment`, which the add-in never writes. Use `sprk_parentdocument` → the parent .eml → (1). The pre-121 caveat applies through `sprk_emailparentid`.
+      - (3) Single attachment saves: no parent id on the row; the only trace is ProcessingJob `sprk_payload` `Attachment.ParentEmailId`. No shipped client is believed to use this path, so a dev count query confirms whether it is zero.
+      - Everything unmatched is listed for the owner's call.
   - **Known limits (agreed with word-add-in-r1):**
     - The reverse path, `CrossPathLink.FindAndLinkArchiveDocumentsAsync`, links a document later and keeps its fallback Restricted, which fails closed. Lifting a fallback Restricted once a link exists needs T7a's own-narrowing record to carry its reason; that is an owner design call, not built now.
     - A byte-identical duplicate save returns the existing canonical document, which may be unlinked or linked to another email. The same bytes are already reachable under the canonical's own rule, so no new exposure.
