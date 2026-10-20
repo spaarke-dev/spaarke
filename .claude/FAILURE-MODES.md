@@ -59,6 +59,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-20: Deleting a worktree deletes through its junctions into another worktree](#g-20-deleting-a-worktree-deletes-through-its-junctions-into-another-worktree)
 - [G-21: In jsdom, a Fluent v9 dialog can be `aria-hidden`, so role queries cannot find its contents](#g-21-in-jsdom-a-fluent-v9-dialog-can-be-aria-hidden-so-role-queries-cannot-find-its-contents)
 - [G-22: `python3` on Windows is the Store alias stub and hangs on stdin scripts](#g-22-python3-on-windows-is-the-store-alias-stub-and-hangs-on-stdin-scripts)
+- [G-23: A narrowed Exchange role entry refuses `-ErrorAction` — and the module calls it a "server side error"](#g-23-a-narrowed-exchange-role-entry-refuses--erroraction--and-the-module-calls-it-a-server-side-error)
 
 ---
 
@@ -1215,6 +1216,41 @@ Agents reach for `python3` from Linux/macOS habit.
 **Rule.** Use `python` (the real interpreter) on this machine, never `python3`. In scripts that must also run on Linux, pick the interpreter at run time and skip any path under `WindowsApps` (see `post-edit-lint.sh`).
 
 **Enforced by:** the PreToolUse hook `scripts/quality/guard-python3-stub.py` (Bash and PowerShell). It denies `python3` in command position only when `python3` resolves into `WindowsApps`, so it does nothing where `python3` is real. It ignores quoted text (including multi-line `-m "..."` / `--body "..."`), heredoc and here-string bodies, comments and arguments. Known limits: misses `python3` inside a quoted `bash -c "..."` string, in a script file, or behind a prefix word with options (`env -i`, `xargs -I{}`). One false-deny shape remains: double quotes nested in `"$(printf "...")"` with `python3` at the start of an inner line. Use a heredoc for such messages. Controls: `scripts/quality/tests/test_guard_python3_stub.py`, run in CI by `agent-guard-tests`. Machine-level fix (optional, per developer): turn off the `python3.exe` App execution alias and add a `python3.exe` copy of `python.exe` next to the real interpreter.
+
+---
+
+### G-23: A narrowed Exchange role entry refuses `-ErrorAction` — and the module calls it a "server side error"
+
+> **Added 2026-10-20** (customer-provisioning-orchestration-r1, T186 L62). **Class**: platform trap. Cost: H14m blocked
+> about four days, two needless owner changes in Exchange.
+
+**What happens.** Exchange Online RBAC checks the PowerShell common parameters (`ErrorAction`, `ErrorVariable`,
+`WarningAction`, `WarningVariable`, `OutVariable`, `OutBuffer`, `Confirm`, `WhatIf`) against the caller's role entry like
+any other parameter. `Set-ManagementRoleEntry '<role>\<cmdlet>' -Parameters a,b,c` REPLACES the entry's list, so a
+narrowed entry drops them. Then `New-Mailbox … -ErrorAction Stop` gets 403 `CmdletAccessDeniedException`. Four things
+hide this:
+- `Get-Command <cmdlet>` in the caller's session lists every parameter, common ones included, whatever the role says.
+- EXO module 3.5.x reports the 403 only as "A server side error has occurred because of which the operation could not
+  be completed. Please try again after some time." — it reads like a Microsoft outage.
+- A `-WhatIf` probe is refused for the same reason, so it "proves" a refusal that the real call may not have.
+- Some parents hold no common parameter for a cmdlet (Security Group Creation and Membership →
+  `Add-DistributionGroupMember`), and Exchange refuses adding them to a child. That call must run with **no** common
+  parameter; the module writes its errors as non-terminating, so read them from the error stream.
+
+**Rule.** When narrowing a role entry, list the common parameters the caller passes; if the parent refuses them, drop
+them from the call. To test whether an app may run a write, run the **exact** call on an address that can never be
+accepted (`…@authz-probe.invalid`) and read the answer: `NotAcceptedDomain` (400) or `ManagementObjectNotFound` (404)
+means authorized, 403 means refused, and nothing is created. On the raw adminapi `InvokeCommand` endpoint, read the
+`X-ExceptionType` header. Never conclude "Microsoft changed enforcement" before ruling this out.
+
+**Enforced by:** the sidecar's PRQ-E-16 probe, `Test-CustomerMailboxWriteAuthorization` in
+`src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/SidecarCore.psm1`, which makes H14m fail before creating
+anything and name the refused write; Pester controls in `Sidecar.Tests.ps1` (join without `-ErrorAction`, stream error =
+failed join, probe of both writes, refused probe → Failure). Prose for hand-written role changes: the role set lives in
+the deployment guide §4.2.1 step 5.
+
+**Evidence**: `projects/customer-provisioning-orchestration-r1/notes/t186-acme-run-log.md` L62 ·
+`projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md` §5 (M4 correction, M8).
 
 ---
 

@@ -215,6 +215,9 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 - Windows `bash` on PATH can be the WSL stub in `%LOCALAPPDATA%\Microsoft\WindowsApps` (not only System32): "no installed distributions". Resolve Git for Windows' bash from `(Get-Command git).Source` → `..\..\bin\bash.exe` (the skill's Step 0.5b does).
 - A PowerShell command containing `"..."` with `$(...)` or `)` inside `-replace`/expressions can fail to parse as a whole (nothing runs). Check `git status` after such a command before assuming a commit happened.
 
+**Exchange RBAC (2026-10-20, T186 L62)**
+- `Set-ManagementRoleEntry -Parameters` REPLACES the list, and Exchange checks the PowerShell common parameters (`-ErrorAction`, `-WhatIf`, …) against it. A narrowed entry needs them listed, and some parents cannot grant them at all. `Get-Command` as the app shows them either way, and the EXO module reports the 403 as "A server side error has occurred". Test a role by running the exact call on an `@authz-probe.invalid` address, never with `-WhatIf` (`.claude/FAILURE-MODES.md` G-23).
+
 ## 7. Key documents
 
 - `spec.md` · `design.md` (§4D tenant isolation, §17 placement + tensions) · `plan.md` · `notes/decisions.md` · `notes/model1-dedicated-remediation-plan.md` · `INCOMING-D12-D13-REMEDIATION.md` (reference) · `COMPONENT-INVENTORY.md`

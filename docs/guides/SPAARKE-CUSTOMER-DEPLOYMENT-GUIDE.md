@@ -506,8 +506,9 @@ legacy and caps at a few hundred policies per tenant). L2 does that through its 
    Worker reads the tenant's initial domain (`contoso.onmicrosoft.com`) there and the sidecar connects with
    `-Organization <initial domain>` — the only value Microsoft documents for app-only sign-in. With the tenant id, Exchange
    connects and reads but refuses every write with "doesn't have write permission to target DC" (2026-10-04).
-5. **Shared-mailbox roles for H14m (task 263) — owner decision D32 (2026-10-10); applied on Spaarke's tenant 2026-10-13** (M1–M5 and M7 passed the same day; RBAC changes
-   take 30 min – 2 h to propagate). Apply exactly this set on any other tenant; nothing wider.
+5. **Shared-mailbox roles for H14m (task 263) — owner decision D32 (2026-10-10); applied on Spaarke's tenant 2026-10-13;
+   common parameters added to the `New-Mailbox` entry 2026-10-20 (T186 L62)** (M1–M5 and M7 passed 2026-10-13; RBAC
+   changes take 30 min – 2 h to propagate). Apply exactly this set on any other tenant; nothing wider.
    H14m creates each customer's shared mailbox and adds it to the customer's scope group. `Spaarke App RBAC Admin` cannot
    (it holds no `New-Mailbox` or `Add-DistributionGroupMember`), and widening it is an owner decision. The narrowest set
    found is two custom roles plus one scope, assigned with `-App` (non-delegating). Run as an Organization Management
@@ -530,9 +531,11 @@ legacy and caps at a few hundred policies per tenant). L2 does that through its 
    sidecar calls it with no common parameter and reads its errors from the error stream. `Get-Command` in the app's
    session lists every parameter either way, so the sidecar's PRQ-E-16 check calls both writes on an address that
    can never be accepted (`…@authz-probe.invalid`): a validation error means authorized, anything else refused, and
-   nothing is created. Then run live checks M1–M7 (`projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md`
+   nothing is created. Then run live checks M1–M8 (`projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md`
    §5). Without these roles H14m fails Resumable (`h14m-mailbox-ensure-failed`, naming PRQ-E-16) **before** creating
-   anything — Exchange Online only loads the cmdlets a caller's roles allow, and the sidecar checks for both first.
+   anything: the sidecar checks both cmdlets with `Get-Command`, then runs the probe above. Never use `-WhatIf` to test
+   these roles by hand: Exchange checks it against the role entry like any other parameter, so a 403 then says nothing
+   about the call itself.
    Not requested: `Remove-Mailbox` / `Remove-DistributionGroupMember` (decommission is manual in r1 — §7.9) and
    `Set-Mailbox`.
 
