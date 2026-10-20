@@ -1692,3 +1692,10 @@ The full record is in `notes/185-invite-code-design.md` §11.
 4. **SharePoint four:** "don't worry about the Sharepoint settings". DROPPED; no strip.
 5. **Delete Q3: keep** a Secure record's own, now-empty dedicated container.
 6. **Delete Q5:** "if the Decision Record is deleted then also delete the signal that triggered it". A Signal follows the Decision Record that cites it. Applied with approved D2 (DRs are kept): a Signal cited by a kept DR is kept, and all other Signals are deleted. Asked the owner to confirm D2 itself (keep DRs when a matter is deleted).
+
+## Round 107 (owner, 2026-10-20)
+
+1. **Delete D2 REVERSED: delete Decision Records with the record.** "if a matter is deleted, then delete decision records (and signals)". When a core record is deleted, its Decision Records are deleted, and so are the Signals that triggered them (Q5 now applies in full: every Signal goes with its DR). This replaces D2 "Decision Records kept" in `core-record-delete-design.md` §4, and the "Audit" row's "the BFF never deletes a DR". Dataverse audit (ON for the DR table) is the surviving trace. Q4 stands: no Decision Record is written for the delete itself. The delete preview must count DRs and Signals under `willDelete`, and the "documents will be removed" warning (round 105 4-3) extends to Decision Records.
+   - *Open for build planning:* does any guard or ArchTest pin "the BFF never deletes a DR" (the append-only invariant)? If so, it is narrowed to "only the core-record delete operation deletes DRs", not removed.
+2. **186:** the owner reports the Tracy guest account is verified. The server-side gate was commissioned (results in `batch7-live-gates-2026-10-17.md`).
+3. The owner asked for details of the #2121 options, the 036 options and #2119 (answered in chat; decisions pending).
