@@ -503,3 +503,60 @@ Not deletable from here: the ACS chat thread, message and service identity liste
 ### Observations (no defect filed)
 - **The Graph HttpClient request logs carry mailbox addresses.** `System.Net.Http.HttpClient.GraphApiClient.LogicalHandler` and `.ClientHandler` log Graph request URIs at Information. Some URIs contain a mailbox address (4 of 466 lines after the deploy). This is framework logging, not a `{Email}` template, so #2134's placeholder ratchet would not catch it. A fix would set `Logging:LogLevel:System.Net.Http.HttpClient.GraphApiClient` to Warning, or redact the URI. Left to the main session to add to #2134 or file separately.
 - **The census has more findings because of #2131, and that is intended.** The three `#`-named interactive users (two `#EXT#` guests) are now reported. They read secure records through team "Spaarke" (Deep, root BU). The designated administrator `1d02f31c…` is no longer mislabelled "a non-administrator human".
+
+## Task 186 live gate (2026-10-20)
+
+**Scope.** This is the server-side gate for task 186: design `186-model1-workforce-design.md` §6 steps 1–7, adapted to the A9 WorkforceHome identity. The token `iss`/`tid` is the customer home tenant, not an `acct=1` guest.
+- **When and where.** Run 20:20–20:40Z against spaarke-bff-dev, spaarkedev1 and App Insights `spe-insights-dev-67e2xz`.
+- **Build.** The BFF is `1.0.0+c3ec5d6e5`. Since 18:00Z there has been one instance (`…b830db`) and one "Application started". The code was read at `c3ec5d6e5`.
+- **Tokens.** Dataverse, App Insights REST and the app-settings read all used the `az` login. No vault was read.
+- **What was printed.** Ids, codes and timestamps only. No token, email, UPN or name was printed. The name check is a boolean comparison done in memory.
+- **No writes.** The approved write step (5b) was **not run** (see below).
+- **Helpers.** The helper scripts lived in a private scratch folder `g186_26e93c2e/` (`g186_*`), which was deleted at the end.
+
+**Verdict.** Sign-in, registration, ownership, entitlements, idempotence, the no-systemuser check and the role privileges all **PASS**. Contact `1d4ab37a…` is **Tracy's registration**.
+- **No intake was submitted.** Check 3 is **NOT-RUN**, and so the 5b remove/restore step is **NOT-RUN**.
+- **The licensed-systemuser leg (6) is NOT-RUN.** No licensed user signed in during the window.
+- **The Workforce role is not in SpaarkeMaster on `origin/master`.** It is excluded by `docs/data-model/package-scope.json` "until UAC task 186 closes", so the export check fails until the role ships.
+
+**Why `1d4ab37a…` is Tracy's.**
+- It is the **only** WorkforceHome (100000002) contact on all of dev.
+- Its home tenant is `bc3aa7f4…`, Tracy's home tenant (the 186 gate earlier today).
+- It was created at 18:31:39Z. That falls inside the only WorkforceHome sign-in session since the deploy (18:30:49–18:36:42Z).
+- Its first name contains "Tracy" (an in-memory boolean; the value was not printed).
+
+### Gate table
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 1 | Contact: plane, binding, tenant list, owner, view | **PASS** (the view is absent: an SPA-r3 gap, see below) | **The contact.** `1d4ab37a-b4cc-f111-a05b-7c1e520a989f`. `sprk_identityplane` 100000002 (WorkforceHome). `sprk_externaltenantid` `bc3aa7f4…`. `sprk_externalobjectidkey` = home oid `0ce8b3f7…`, and the secured `sprk_externalobjectid` equals the key. statecode 0 / statuscode 1. `department` is set. No `parentcustomerid`.<br>**Timestamps.** createdon = modifiedon = 18:31:39Z.<br>**Created by.** `createdby` `8793f4b0…` is an application user (accessmode 4, root BU `06fbf21c`); there is no `createdonbehalfby`.<br>**Tenant list.** `bc3aa7f4…` is `WorkforceIdentity__CustomerTenantIds__1` (2 entries in all).<br>**Owner.** Team `cf15f587…`, the default (`isdefault`) owner team of BU `cb15f587…` "Spaarke Business Unit 1". `ExternalAccess__CustomerBusinessUnitId` matches `cb15f587…`. `owningbusinessunit` `cb15f587…`, **not** Secure Record `d9ec0b6f…`.<br>**View.** Of 27 contact views, none is named like "Workforce", "self-registered", "registered" or "Home". The design's §4b view "Workforce contacts (self-registered)" does not exist. Under A9 it is SPA-r3's, and it is unbuilt; this was already noted in the 186 gate earlier today. |
+| 2 | Sign-in trail: `/me` 403 → registration 201 → `/me` 200 + entitlements | **PASS** | **Requests since the deploy (unsampled).**<br>• Op `10ecef86`, 18:30:49Z: `GET /external/me` **403**. Trace: "[WF-AUTH] Home tid=bc3aa7f4… oid=0ce8b3f7… has no stored link and no WorkforceHome contact (sdap.access.registration_required)", then "Denying request: sdap.access.registration_required". This is the only `/me` 403.<br>• Op `49c02133`, 18:31:38Z: `POST /external/registration` **201**, "[ID-BIND] Registration created contact 1d4ab37a… for tid#5006ACF2 oid#FBB65093 (WorkforceHome)". This is the only registration request.<br>• Op `cc613ed1`, 18:31:40Z: `GET /external/me` **200**, "Resolved home … to WorkforceHome contact 1d4ab37a…", then "Workforce ContactOnly (systemuser=(null), contact=1d4ab37a…)".<br>• Op `fd02fc7c`, 18:31:41Z: `GET /me/entitlements` **200**, "[EXT-ENTITLE] Workforce home principal — roles claim ignored, default modules only", then "[EXT-ENTITLE] Caller 1d4ab37a… (workforce) entitled to 2 module(s)".<br>**Why that means legal-front-door + policy-library.** For a home principal the resolver returns exactly `WorkforceDefaultModules` = `legal-front-door` + `policy-library` (`ModuleEntitlementResolver.cs:61,186-189` @ c3ec5d6e5). The ceiling intersection can only remove modules, so 2 modules means both survived. The log line gives the count, not the codes.<br>**The ceiling was read live.** "[WF-CEILING] Read role … (9deaac9c…): 660 privileges over 244 tables" at 18:31:43Z.<br>**Then.** Record, metadata and fetch calls, and 7 notifications polls, all 200, until 18:36:42Z. |
+| 3 | An intake was accepted | **NOT-RUN: no intake exists** | 0 `POST /api/v1/external/servicerequests` requests since 18:12:51Z (any result).<br>0 `sprk_servicerequest` rows with `_sprk_requestedby_value` = `1d4ab37a…`, and 0 service requests created on dev since 18:00Z.<br>0 `sprk_invoicesubmission` rows created since 18:00Z. No BFF route creates invoice submissions; `invoicesubmission` appears nowhere in `src` on c3ec5d6e5 or on origin/master.<br>The session ended at 18:36:42Z. **The owner signed in and registered but did not submit.**<br>For the re-run: the intake writes `sprk_requestedby` = the contact and `ownerid` = the default team of the contact's BU (`ExternalIntakeEndpoints.cs:223-279`, `ExternalDataService.cs:1080-1088`). `sprk_servicerequest` has no `sprk_createdbycontact`/`sprk_createdbyperson`, so `sprk_requestedby` is its creator stamp (`ExternalDataService.cs` remarks at ~1055). |
+| 4 | Resubmit idempotence | **PASS** (count) | Contacts with `sprk_externalobjectidkey` = home oid → **1** (`1d4ab37a…`), and the same with the secured `sprk_externalobjectid` → 1. There was one registration POST and no second one. The later `/me` calls resolved by oid with no create. A literal double submit was not exercised. |
+| 5 | No systemuser for the identity | **PASS** | `systemusers` with `azureactivedirectoryobjectid` = home oid, any state → **0**. `systemusers` with `_sprk_primarycontact_value` = `1d4ab37a…` → **0**. `systemusers` created on 2026-10-20 → **0**. |
+| 6 | The licensed user still resolves as a systemuser | **NOT-RUN** | Since 18:12:51Z there are 0 `[WF-AUTH] … to systemuser` lines. The `[WF-AUTH]`/`[ID-BIND]` lines are: WorkforceHome contact 13, ContactOnly 11, registration 2, CIAM 11 (contact `394fda9f…` at 20:03Z, a partner, not Tracy), and the known `[ID-LINK-RECON]` binding-column probe 403 ×29. The last systemuser resolution was at 03:38:20Z (1,410 in 14 days). No licensed user signed in during the window. |
+| 7 | Workforce role: invoice-submission privileges, live and in the repo | **Live: PASS. Repo: FAIL (role not in the solution)** | **Live.** Root role `9deaac9c…` (BU `06fbf21c`, unmanaged, `modifiedon` 14:39:33Z) has 6 roles by that name (root + 5 BU copies). `RetrieveRolePrivilegesRole`: **660** privileges (Basic 315, Global 232, Deep 96, Local 17).<br>• `prvCreatesprk_InvoiceSubmission` (`be3c3238…`) = **Basic**.<br>• `prvReadsprk_InvoiceSubmission` (`1a2c034f…`) = **Deep**.<br>• Also: `sprk_servicerequest` Create, Read, AppendTo and Delete at Basic (no Write); `sprk_document` Create Basic and Read Deep.<br>**Repo (`origin/master` 0b976628e).** `src/dataverse/solutions/SpaarkeMaster/Roles/` has 12 role files, none of them the Workforce role, and no role file of that name exists in any ref's history. `invoicesubmission` appears nowhere under `src/dataverse`. `docs/data-model/package-scope.json:128-131` excludes the role "until UAC task 186 closes", so **the export does not include either privilege**. The role has to be exported into SpaarkeMaster as part of the 186 close; that is an owner or provisioning action. |
+
+### The approved write step (5b): NOT-RUN
+
+**It was skipped by rule.** The step requires checks 1–3 to pass, and check 3 has no intake. No privilege was removed or added.
+- **Read-back (unchanged).** `prvCreatesprk_ServiceRequest` (`fd03f48f…`) on root `9deaac9c…` = **Basic**. This is the privilege the intake needs: `POST /servicerequests` declares `WorkforceRoleCeilingGate.SubmitServiceRequest` = (`sprk_servicerequest`, Create) (`ExternalIntakeEndpoints.cs:110-112`, `WorkforceRoleCeilingGate.cs:69-70`).
+- **How the refusal would be shown server-side.**
+  - `WorkforceCeilingEndpointFilter` (`WorkforceCeilingEndpointFilter.cs:147-189`) calls `WorkforceRoleCeilingGate.DenyAsync`. That reads `GetWorkforceRoleCeilingAsync` (`WorkforceRoleCeilingGate.cs:224-241`) and returns 403 `sdap.access.deny.workforce_baseline_privilege_missing`.
+  - The ceiling is the live root role, read through `RetrieveRolePrivilegesRole` (`UserPrivilegeChecker.cs:556-632`). It is cached in `ITenantCache` for `WorkforceCeilingTtl` = 5 min (`UserPrivilegeChecker.cs:85,529-535`), and a fault is never cached.
+  - It is read **only** when a workforce-contact request arrives. So "refused within 5 min" cannot be shown without the contact submitting. A new `[WF-CEILING] Read role … 659 privileges` line would show the reload, but not the refusal.
+- **Re-run plan (owner-driven).**
+  1. The owner submits intake #1 as Tracy → expect 201.
+  2. Record `fd03f48f…` at Basic, then RemovePrivilegeRole.
+  3. At least 5 minutes later, the owner submits intake #2 → expect 403 `workforce_baseline_privilege_missing`.
+  4. AddPrivilegesRole at Basic within 10 minutes of the removal, then read it back.
+
+### Defects
+- None in task 186's BFF scope.
+
+### Gaps (not code defects)
+- **The Workforce role is missing from the SpaarkeMaster solution** (check 7, repo leg). It cannot reach a customer stamp until it is exported. That export is a close-out item for task 186.
+- **The §4b contact view "Workforce contacts (self-registered)" does not exist on dev or in source.** It is SPA-r3's under A9.
+
+### Observations
+- `[WF-AUTH]` lines log the home `tid` and `oid` as full GUIDs. The `[ID-BIND]` registration line hashes the same values (`tid#…`/`oid#…`). These are pseudonymous ids, not email or PII, so nothing is filed. The two lines are inconsistent only.
