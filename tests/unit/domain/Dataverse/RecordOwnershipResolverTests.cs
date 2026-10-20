@@ -6,6 +6,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
 using Xunit;
 using FakeDirectory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
@@ -2409,6 +2410,55 @@ public class RecordOwnershipResolverTests
 
         resolution.OwningTeamId.Should().Be(ChildTeam);
         MessageOwnerOf(directory, messageId).Should().Be(ChildTeam);
+    }
+
+    // ---- #2143 round 5 ----
+
+    /// <summary>
+    /// #2143 round 5: the thread row <see cref="ThreadResolver"/> reads for a join — a record thread anchored to the ordinary
+    /// matter (<see cref="OrdinaryThreadId"/> regarding <see cref="MatterId"/>).
+    /// </summary>
+    private static Mock<IGenericEntityService> OrdinaryRecordThreadRow()
+    {
+        var threads = new Mock<IGenericEntityService>();
+        threads
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", OrdinaryThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_communicationthread", OrdinaryThreadId)
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            });
+        return threads;
+    }
+
+    [Fact]
+    public async Task Reparent_WhenAThreadJoinOfARowHeldSecureMeetsItsSecureParentUnsecured_ItsOwnThreadChangeIsNotAnotherWriters_AndTheOrdinaryOwnerIsWritten()
+    {
+        // Must-NOT-fire (round 5, F1): the message regards the secure matter and is held in the Secure Record business unit. It
+        // joins a record thread anchored to the ordinary matter through the REAL join (ThreadResolver builds the request), and
+        // the secure matter is un-secured while the join is written. The thread lookup the join writes is this call's OWN
+        // change, never another writer's: the before-unit exemption applies, the ordinary owner the parents now give is
+        // written, and the join neither throws nor is put back (which would leave a sent message unthreaded).
+        var (directory, messageId) = MessageWorld(OtherSecureMatterId, SecureBu, SecureNamedTeam);
+        var joinedThread = new EntityReference("sprk_communicationthread", OrdinaryThreadId);
+
+        await ThreadResolver.AssignToThreadReconcilingOwnerAsync(
+            OrdinaryRecordThreadRow().Object, Build(directory), messageId, OrdinaryThreadId,
+            _ =>
+            {
+                directory.Write("sprk_communication", messageId, new()
+                {
+                    [ThreadResolver.ThreadLookupOnCommunication] = joinedThread,
+                });
+                UnsecureTheMessagesMatter(directory);
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        directory.Assignments.Should().Equal(new[] { ("sprk_communication", messageId, ChildTeam) },
+            "the ordinary owner the un-secured filing gives, and nothing else");
+        MessageOwnerOf(directory, messageId).Should().Be(ChildTeam);
+        directory.Row("sprk_communication", messageId).GetAttributeValue<EntityReference>("sprk_communicationthread")
+            .Should().Be(joinedThread, "the join stands: the message is not left unthreaded");
     }
 
     [Fact]

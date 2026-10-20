@@ -473,7 +473,13 @@ public sealed class ThreadResolver : IThreadResolver
             {
                 EntityLogicalName = "sprk_communication",
                 RecordId = communicationId,
-                ParentChanges = new Dictionary<string, EntityReference?>(),
+                // #2143 round 5 (F1): the thread lookup this join writes, WITH the row it writes, so the resolver reads it as
+                // this call's own change and not another writer's (its lineage overlay). A lineage-only lookup decides no owner
+                // and names nothing to put back; the put-back still comes from AttachColumns.
+                ParentChanges = new Dictionary<string, EntityReference?>
+                {
+                    [ThreadLookupOnCommunication] = new EntityReference("sprk_communicationthread", threadId),
+                },
                 InheritedParents = new[] { filedUnder },
                 // Task 146 b2: the column the JOIN writes — put back if the owner assignment that must follow it fails, so
                 // the message is never left in a secure record's thread while owned elsewhere.

@@ -1414,7 +1414,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // is the SDK's own copy of the row, so the change cannot alter it in production; capturing it here keeps "before"
         // true by construction rather than by that property of the client.
         // #2143 round 3 (F1): with the lineage-only lookups this change itself moves applied, so only ANOTHER writer's move
-        // of one reads as a change.
+        // of one reads as a change. Round 5 (F1): only ParentChanges carries a value, so a writer that sets a lineage-only
+        // lookup names it there too (a thread join: ThreadResolver), never only in AttachColumns.
         var lineageAfterThisChange = LineageOnlyLookupsOf(request.EntityLogicalName, current);
         foreach (var (column, value) in request.ParentChanges)
         {
