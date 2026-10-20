@@ -11,9 +11,12 @@
     prints what it would create, change or write, and writes nothing. The real run needs the owner's approval (D-144, 2026-10-20)
     AND ontology-r1's schema-review PASS of this script and its -WhatIf output. Never run by the agent that wrote it.
 
-    Design: projects/ebilling-r1/notes/rule-set-scope-design.md section 2 (items S1-S4 and S6-S8). S5 (the secure-record role
-    row) and S9 (sprk_createdbyperson) are NOT here: tasks 081 and 086 ship them in one change with the BFF code that the shared
-    guards (SecureFamilyConsistencyTests, ChildRecordCreatorPersonSchemaAgreementTests, the owner census) pin them to.
+    Design: projects/ebilling-r1/notes/rule-set-scope-design.md section 2 (items S1-S4 and S6-S8, plus the S9 COLUMN below). S5
+    (the secure-record role row) and the S9 field SECURITY / guard changes are NOT here: tasks 081 and 086 ship them in one
+    change with the BFF code that the shared guards (SecureFamilyConsistencyTests, ChildRecordCreatorPersonSchemaAgreementTests,
+    the owner census) pin them to. The S9 column itself IS created here (uac-r2 review 2026-10-20, items 081.3 / 086.3): the
+    owning table's schema creates it first, because scripts/Set-ChildRecordCreatorPersonSchema.ps1 never creates it for a
+    $SolutionHomes table (its -Apply reports FAIL); it only secures and verifies.
 
     NO DELETE-RESTRICT ANYWHERE (D-137 / ontology D-172, GitHub #2132): "Deleting a matter must never require first deleting its
     rate cards or rule sets, because the user may lack permission." Every lookup this script creates uses RemoveLink (the module
@@ -45,6 +48,11 @@
           sprk_workassignment, RemoveLink, optional, IsSecured true, writer profile ONLY (NO reader profile: no user reads or
           writes it), on no form and in no view. Relationships sprk_businessunit_matter_securedfrombusinessunit and the two
           like it. Written by task 087, read by task 082. No other business-unit column is added to the core tables (D-141).
+      S9  sprk_createdbyperson ("Created By (Person)") on sprk_ruleset, sprk_ratecard and sprk_ratecardrate ONLY (not on the
+          three core tables): lookup to systemuser, relationship sprk_systemuser_{table}_createdbyperson, RemoveLink, optional,
+          the same shape and description ebilling task 013 gave the invoice family (Deploy-EbillingSubmissionSchema.ps1). Created
+          UNSECURED here, like task 013: scripts/Set-ChildRecordCreatorPersonSchema.ps1 secures it (writer profile) and checks it.
+          If the column already exists on one of the three tables the script reports it and skips it (a different target stops it).
 
     PROFILES. The script reuses the existing profile pair of unified-access-control-r2 (task 133 / 146:
     "Spaarke BFF-Managed Field Readers" on every business unit's default team, "Spaarke BFF-Managed Field Writers" with the BFF
@@ -137,6 +145,10 @@ $CoreLookups = @(
     @{ Column = 'sprk_workassignment'; Schema = 'sprk_WorkAssignment'; Table = 'sprk_workassignment'; Display = 'Work Assignment'; Rel = 'sprk_workassignment_ruleset_workassignment'; CardRel = 'sprk_workassignment_ratecard_workassignment'; SecuredRel = 'sprk_businessunit_workassignment_securedfrombusinessunit' }
 )
 $CoreTables = @($CoreLookups | ForEach-Object { $_.Table })
+
+# S9 (uac-r2 review 2026-10-20, items 081.3 / 086.3): the creator-person lookup, as ebilling task 013 created it on the invoice family.
+$CreatorColumn = 'sprk_createdbyperson'
+$CreatorTables = @('sprk_ruleset', 'sprk_ratecard', 'sprk_ratecardrate')
 
 # S2: the existing options (verified, never changed) and the two inserted.
 # (Generic SortedDictionary[int,string], not [ordered]@{}: an OrderedDictionary's integer indexer is POSITIONAL.)
@@ -582,7 +594,7 @@ try {
         Invoke-RateCardBackfill
     }
     else {
-        foreach ($ref in $RuleSet, $Card, 'sprk_organization', 'businessunit', 'systemuser' + $CoreTables) {
+        foreach ($ref in $RuleSet, $Card, 'sprk_ratecardrate', 'sprk_organization', 'businessunit', 'systemuser' + $CoreTables) {
             if (-not (Get-DvOrNull "EntityDefinitions(LogicalName='$ref')?`$select=LogicalName" -Retries 4)) { throw "$ref does not exist in $EnvironmentUrl." }
         }
 
@@ -619,6 +631,11 @@ try {
                 $rel = Get-DvOrNull "RelationshipDefinitions(SchemaName='$($k.R)')"
                 if ($rel -and -not (Get-Attr $k.T $k.C)) { throw [EscalationException]::new("Relationship $($k.R) already exists ($($rel.RelationshipType)) but $($k.T).$($k.C) does not: the name is taken with another meaning. Owner decision needed; nothing renamed.") }
             }
+        }
+        foreach ($t in $CreatorTables) {
+            $rel = Get-DvOrNull "RelationshipDefinitions(SchemaName='sprk_systemuser_${t}_createdbyperson')"
+            if ($rel -and -not (Get-Attr $t $CreatorColumn)) { throw [EscalationException]::new("Relationship sprk_systemuser_${t}_createdbyperson already exists ($($rel.RelationshipType)) but $t.$CreatorColumn does not: the name is taken with another meaning. Owner decision needed; nothing renamed.") }
+            if (Get-Attr $t $CreatorColumn) { Write-Host "  NOTE: $t.$CreatorColumn ALREADY EXISTS on $EnvironmentUrl - it is verified and skipped, not recreated or changed." -ForegroundColor Yellow }
         }
         if ((Get-DvOrNull "EntityDefinitions(LogicalName='$NnSchema')?`$select=LogicalName") -and -not (Get-ManyToMany $NnSchema)) {
             throw [EscalationException]::new("A table named $NnSchema already exists but it is not the N:N relationship's intersect. Owner decision needed.")
@@ -709,6 +726,16 @@ try {
                 -DeleteBehavior 'RemoveLink'
         }
 
+        # --- 6b. S9 creator-person lookup on the three ebilling configuration tables (uac-r2 review items 081.3 / 086.3) ----------
+        Write-Host "6b. S9 $CreatorColumn on $($CreatorTables -join ', ') (lookup -> systemuser, RemoveLink; created unsecured, as ebilling task 013 did)" -ForegroundColor Cyan
+        foreach ($t in $CreatorTables) {
+            Set-EbEntity $t
+            Add-Lookup -Column $CreatorColumn -SchemaName 'sprk_CreatedByPerson' -RelSchema "sprk_systemuser_${t}_createdbyperson" -Target 'systemuser' -Display 'Created By (Person)' `
+                -Description 'The PERSON who asked for this record. Stamped by the BFF only (field-secured by scripts/Set-ChildRecordCreatorPersonSchema.ps1): createdby is the BFF application user for a record the BFF creates app-only, so this column is what records the person. ebilling-r1 task 013 (secure-record family; unified-access-control-r2 task 146 shape).' `
+                -DeleteBehavior 'RemoveLink'
+        }
+        Write-Host "  NEXT: run scripts/Set-ChildRecordCreatorPersonSchema.ps1 (tasks 081 / 086 add these tables to it) so $CreatorColumn is field-secured (only the BFF may write it)." -ForegroundColor DarkYellow
+
         # --- 7. S7 + S8 field security ------------------------------------------------------------------------------------------
         Write-Host "7. S7 / S8 field security (reader: Read for every user; writer: BFF application user(s) only)" -ForegroundColor Cyan
         New-ProfilesIfNeeded $pre
@@ -728,7 +755,7 @@ try {
     elseif (-not $metaChanged) { Write-Host "  nothing changed - no publish" -ForegroundColor Yellow }
     else {
         Invoke-Dv -Path 'PublishXml' -Method POST -Body @{
-            ParameterXml = "<importexportxml><entities><entity>$RuleSet</entity><entity>$Card</entity><entity>sprk_matter</entity><entity>sprk_project</entity><entity>sprk_workassignment</entity><entity>businessunit</entity></entities></importexportxml>"
+            ParameterXml = "<importexportxml><entities><entity>$RuleSet</entity><entity>$Card</entity><entity>sprk_ratecardrate</entity><entity>sprk_matter</entity><entity>sprk_project</entity><entity>sprk_workassignment</entity><entity>businessunit</entity></entities></importexportxml>"
         } | Out-Null
         Write-Host "  customizations published" -ForegroundColor Green
     }
@@ -759,6 +786,12 @@ try {
                 if ($rel.CascadeConfiguration.Delete -ne 'RemoveLink') { $bad.Add("$($k[0]).$($k[1]) delete behaviour is $($rel.CascadeConfiguration.Delete), expected RemoveLink") }
                 if ($k[2] -ne $rel.SchemaName -and $k[0] -ne $Card) { $bad.Add("$($k[0]).$($k[1]) relationship is named $($rel.SchemaName), expected $($k[2])") }
             }
+        }
+        foreach ($t in $CreatorTables) {
+            $rel = Get-LookupRelationship $t $CreatorColumn
+            if (-not $rel) { $bad.Add("no many-to-one relationship for $t.$CreatorColumn"); continue }
+            Write-Host ("  {0}.{1}: {2}  delete {3}" -f $t, $CreatorColumn, $rel.SchemaName, $rel.CascadeConfiguration.Delete)
+            if ($rel.CascadeConfiguration.Delete -ne 'RemoveLink') { $bad.Add("$t.$CreatorColumn delete behaviour is $($rel.CascadeConfiguration.Delete), expected RemoveLink") }
         }
         $now = Get-ScopeOptions
         Write-Host "  $RuleSet.$ScopeColumn options: $(Format-Options $now)"

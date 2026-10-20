@@ -2,7 +2,7 @@
 
 Status: script written and `-WhatIf` run against dev (2026-10-20). **Nothing was written to Dataverse.** The real run (step 4) is gated on ontology-r1's schema-review PASS (D-144) and is the main session's.
 
-Script: `scripts/ebilling/Deploy-EbillingRuleSetScopeSchema.ps1` (808 lines; README entry added). It builds on `EbillingSchema.psm1`, copies the pre-flight / escalation shape of `Deploy-EbillingTimekeeperRateCardSchema.ps1` and the secure-then-grant (with revert) shape of `Set-EbillingFirmReasonFieldSecurity.ps1`.
+Script: `scripts/ebilling/Deploy-EbillingRuleSetScopeSchema.ps1` (841 lines; README entry added). It builds on `EbillingSchema.psm1`, copies the pre-flight / escalation shape of `Deploy-EbillingTimekeeperRateCardSchema.ps1` and the secure-then-grant (with revert) shape of `Set-EbillingFirmReasonFieldSecurity.ps1`.
 
 ## 1. Collision check on dev (read-only queries)
 
@@ -65,9 +65,11 @@ On dev: **0 rate cards**, so 0 Firm, 0 Core record, 0 left empty. Auditing is OF
 - Ownership / placement: all new components are created with the SpaarkeMaster solution header; the five tables are whole-table components of SpaarkeMaster, and matter / project / workassignment also of SpaarkeCore. SpaarkeMaster source is not edited here (task 079 syncs it).
 - Dev has no rate cards and no rule sets, so the backfill and the "existing rows" notes are untested on real data.
 
+- **uac-r2 review 2026-10-20 items 081.3 / 086.3 (scope change from the main session):** the script also creates `sprk_createdbyperson` on `sprk_ruleset`, `sprk_ratecard` and `sprk_ratecardrate` (step 6b). This REVERSES the POML negative criterion "no sprk_createdbyperson column was added by this script" for those three tables; it still holds for `sprk_matter`, `sprk_project` and `sprk_workassignment`, whose only new column is the S8 snapshot. Shape copied from ebilling task 013 (`Deploy-EbillingSubmissionSchema.ps1:182-183`, same in the Approval / Correction / ExternalIdentifier scripts): lookup to `systemuser`, schema `sprk_CreatedByPerson`, display "Created By (Person)", RequiredLevel None, RemoveLink, relationship `sprk_systemuser_{table}_createdbyperson` (also what `Set-ChildRecordCreatorPersonSchema.ps1` expects), the same description text. Created UNSECURED like 013; securing it is the creator-person script's job (081 / 086 add the tables). Dev check before writing: the column and the three relationships are absent on all three tables (none exists, so no "already exists" report). `Set-ChildRecordCreatorPersonSchema.ps1` and its Pester test are NOT edited. Publish list gained `sprk_ratecardrate`; verify checks the three relationships read RemoveLink.
+
 ## 5. `-WhatIf` run (dev, exit 0)
 
-Command: `pwsh -NoProfile -File scripts/ebilling/Deploy-EbillingRuleSetScopeSchema.ps1 -WhatIf`
+Command: `pwsh -NoProfile -File scripts/ebilling/Deploy-EbillingRuleSetScopeSchema.ps1 -WhatIf` (re-run after the S9 scope change; created 27, changed 8, skipped 1)
 
 ```text
 
@@ -106,6 +108,11 @@ Profiles   : reader 'Spaarke BFF-Managed Field Readers', writer 'Spaarke BFF-Man
   WOULD CREATE sprk_securedfrombusinessunit (Lookup -> businessunit)
   WOULD CREATE sprk_securedfrombusinessunit (Lookup -> businessunit)
   WOULD CREATE sprk_securedfrombusinessunit (Lookup -> businessunit)
+6b. S9 sprk_createdbyperson on sprk_ruleset, sprk_ratecard, sprk_ratecardrate (lookup -> systemuser, RemoveLink; created unsecured, as ebilling task 013 did)
+  WOULD CREATE sprk_createdbyperson (Lookup -> systemuser)
+  WOULD CREATE sprk_createdbyperson (Lookup -> systemuser)
+  WOULD CREATE sprk_createdbyperson (Lookup -> systemuser)
+  NEXT: run scripts/Set-ChildRecordCreatorPersonSchema.ps1 (tasks 081 / 086 add these tables to it) so sprk_createdbyperson is field-secured (only the BFF may write it).
 7. S7 / S8 field security (reader: Read for every user; writer: BFF application user(s) only)
   WOULD SECURE sprk_ruleset.sprk_scope
   WOULD GRANT Spaarke BFF-Managed Field Readers on sprk_ruleset.sprk_scope (read=4 create=0 update=0)
@@ -135,7 +142,7 @@ Publish
   WhatIf: publish skipped
 
 ================ Summary ================
-created : 24
+created : 27
     + sprk_ruleset.sprk_matter
     + sprk_ruleset.sprk_project
     + sprk_ruleset.sprk_workassignment
@@ -147,6 +154,9 @@ created : 24
     + sprk_matter.sprk_securedfrombusinessunit
     + sprk_project.sprk_securedfrombusinessunit
     + sprk_workassignment.sprk_securedfrombusinessunit
+    + sprk_ruleset.sprk_createdbyperson
+    + sprk_ratecard.sprk_createdbyperson
+    + sprk_ratecardrate.sprk_createdbyperson
     + field permission Spaarke BFF-Managed Field Readers on sprk_ruleset.sprk_scope
     + field permission Spaarke BFF-Managed Field Writers on sprk_ruleset.sprk_scope
     + field permission Spaarke BFF-Managed Field Readers on sprk_ruleset.sprk_firm
