@@ -46,6 +46,7 @@ public class SubmissionOverrideServiceTests
         public static readonly Guid CallerContact = Guid.Parse("10500000-0000-4000-8000-0000000000c2");
         public static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId);
         public const string Token = "caller-token";
+        public static readonly DateTime CreatedOn = new(2026, 10, 20, 8, 0, 0, DateTimeKind.Utc);
 
         public Entity Submission { get; }
         public Entity? Invoice { get; set; }
@@ -82,6 +83,7 @@ public class SubmissionOverrideServiceTests
         public Func<Guid, Exception?> CloseFault { get; set; } = _ => null;
         public Exception? SignalReadFault { get; set; }
         public List<string> SignalQueries { get; } = [];
+        public int FindCalls { get; set; }
 
         /// <summary>The store write's own hook and fault (<see cref="OnUpdate"/> and <see cref="UpdateFault"/> are the decision write's).</summary>
         public Action? OnStore { get; set; }
@@ -129,6 +131,8 @@ public class SubmissionOverrideServiceTests
                 ["sprk_trackingnumber"] = "INV-100.1",
                 ["sprk_firminvoicenumber"] = "INV-100",
                 ["versionnumber"] = 100L,
+                // When the BFF created it (Dataverse-set, never updatable): the lower bound of a stored Signal set's read time (F1-1).
+                ["createdon"] = CreatedOn,
             };
             SetInvoiceStatus(InvoiceLifecycleStatus.InReview);
 
@@ -260,16 +264,29 @@ public class SubmissionOverrideServiceTests
                 },
                 Recorder.Preflight,
                 CloseAsync,
+                (code, invoice, decisionId, ct) =>
+                {
+                    FindCalls++;
+                    return Recorder.FindStoredResolvedSetAsync(code, invoice, decisionId, ct);
+                },
                 Clock);
 
             // The open-Signal read (049's ReadOpenSignalSetAsync): the invoice's lines, then the Signals on the invoice or a line.
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
                 .Returns((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) =>
                 {
-                    SignalQueries.Add(query.EntityName);
+                    // A stored set's check reads its Signals by id (StoredSignalSetCheck): told apart from the open-set read.
+                    SignalQueries.Add(query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_signalid") ? query.EntityName + ":byid" : query.EntityName);
                     if (SignalReadFault is { } fault)
                     {
                         return Task.FromException<EntityCollection>(fault);
+                    }
+
+                    if (query.EntityName == "sprk_signal"
+                        && query.Criteria.Conditions.SingleOrDefault(c => c.AttributeName == "sprk_signalid" && c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.In) is { } byId)
+                    {
+                        // A stored set's Signals read by id (StoredSignalSetCheck), app-only.
+                        return Task.FromResult(new EntityCollection(Signals.Where(s => byId.Values.Contains(s.Id)).Select(s => Copy(s, [.. s.Attributes.Keys])).ToList()));
                     }
 
                     return Task.FromResult(query.EntityName switch
@@ -332,6 +349,7 @@ public class SubmissionOverrideServiceTests
             {
                 ["sprk_dedupekey"] = SignalWriter.BuildDedupeKey(policyCode, subjectTable, subjectId.ToString("D"), 1),
                 ["sprk_signalstatus"] = new OptionSetValue(status),
+                ["sprk_regardingrecordid"] = subjectId.ToString("D"),
                 [lookup] = new EntityReference(subjectTable, subjectId),
             });
             Records.Rows[("sprk_signal", id)] = new Entity("sprk_signal", id)
@@ -440,9 +458,12 @@ public class SubmissionOverrideServiceTests
         public Exception? IdentityFault { get; set; }
         public Guid? CallerSystemUserId { get; set; }
 
-        /// <summary>The caller's rights on a record (entity set, id); every right by default. A missing token holds none.</summary>
-        public Func<string, Guid, Spaarke.Dataverse.AccessRights> Rights { get; set; } =
-            (_, _) => AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo;
+        /// <summary>The caller's rights on a record (entity set, id). By default the REAL roles' (F1-2): Core User and Basic User hold only
+        /// Read on <c>sprk_billingevent</c> (D-90), and Write on the invoice and AppendTo on the core. A missing token holds none.</summary>
+        public Func<string, Guid, Spaarke.Dataverse.AccessRights> Rights { get; set; } = RealReviewerRights;
+
+        public static AccessRights RealReviewerRights(string set, Guid id) =>
+            set == "sprk_billingevents" ? AccessRights.Read : AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo;
 
         public List<(string? Token, string Set, Guid Id)> RightsAsked { get; } = [];
 
@@ -1584,13 +1605,54 @@ public class SubmissionOverrideServiceTests
     [InlineData("return")]
     public async Task Decision_AsksTheCallersRights_AsTheCaller_AppendToOnTheMatter_AndWriteOnEachSubject(string verb)
     {
-        var (w, line, _, _, _, _, _) = await SignalWorldAsync();
+        var (w, _, _, _, _, _, _) = await SignalWorldAsync();
 
-        await Decide(w, verb);
+        var result = await Decide(w, verb);
 
+        result.Kind.Should().Be(BlockedDecisionKind.Decided, "a reviewer with the real roles' rights (Read only on the lines) may decide");
         w.Probe.RightsAsked.Should().BeEquivalentTo(
-            [(World.Token, "sprk_matters", World.Matter), (World.Token, "sprk_invoices", World.InvoiceId), (World.Token, "sprk_billingevents", line)],
-            "the caller's own token, the core once, each distinct subject once");
+            [(World.Token, "sprk_matters", World.Matter), (World.Token, "sprk_invoices", World.InvoiceId)],
+            "the caller's own token, the core once, each distinct subject once; a line subject is asked on its parent invoice (ontology-r1 2026-10-20, D-90)");
+    }
+
+    [Theory(DisplayName = "105 F1-2: a reviewer with exactly the real roles' rights (Read only on sprk_billingevent, Write on the invoice) decides with an open LINE Signal, and it is closed")]
+    [InlineData("override")]
+    [InlineData("return")]
+    public async Task Decision_WithAnOpenLineSignal_AndTheRealRolesRights_Decides(string verb)
+    {
+        var w = await World.CreateAsync();
+        var line = w.AddLine();
+        var onLine = w.AddSignal("sprk_billingevent", line, "EB-RATE");
+        w.Probe.Rights = (set, _) => set switch
+        {
+            "sprk_billingevents" => AccessRights.Read,
+            "sprk_invoices" => AccessRights.Read | AccessRights.Write,
+            "sprk_matters" => AccessRights.Read | AccessRights.AppendTo,
+            _ => AccessRights.None,
+        };
+
+        var result = await Decide(w, verb);
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.ClosedBy.Should().ContainKey(onLine);
+        w.Probe.RightsAsked.Should().NotContain(r => r.Set == "sprk_billingevents", "Write on a line is never asked");
+    }
+
+    [Theory(DisplayName = "105 F1-2: with an open LINE Signal, a caller without Write on the parent invoice is 403 and nothing is written")]
+    [InlineData("override")]
+    [InlineData("return")]
+    public async Task Decision_WithAnOpenLineSignal_WithoutWriteOnTheInvoice_Is403_AndNothingIsWritten(string verb)
+    {
+        var w = await World.CreateAsync();
+        var line = w.AddLine();
+        w.AddSignal("sprk_billingevent", line, "EB-RATE");
+        w.Probe.Rights = (set, _) => set == "sprk_matters" ? AccessRights.Read | AccessRights.AppendTo : AccessRights.Read;
+
+        var result = await Decide(w, verb);
+
+        result.StatusCode.Should().Be(403);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.NotAuthorized);
+        w.AssertNothingWritten();
     }
 
     [Theory]
@@ -1611,9 +1673,8 @@ public class SubmissionOverrideServiceTests
     }
 
     [Theory]
-    [InlineData("override", "sprk_billingevents")]
     [InlineData("override", "sprk_invoices")]
-    [InlineData("return", "sprk_billingevents")]
+    [InlineData("return", "sprk_invoices")]
     public async Task Decision_WithoutWriteOnASignalsSubject_Is403_AndNothingIsWritten(string verb, string deniedSet)
     {
         var (w, _, _, _, _, _, _) = await SignalWorldAsync();
@@ -1753,6 +1814,173 @@ public class SubmissionOverrideServiceTests
         result.StatusCode.Should().Be(409);
         result.ErrorCode.Should().Be(BlockedSubmissionErrors.RecordRefused);
         w.AssertNothingWritten();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // F1-1 (ontology-r1 review): sprk_findingsjson is user-writable, so nothing read back from it is trusted
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>Plants a <c>humanDecisionSignalSet</c> as a user with Write on the submission could: any ids, any read time, no subjects.</summary>
+    private static void PlantSet(World w, Guid decisionId, DateTime readAtUtc, params Guid[] signalIds)
+    {
+        var root = JsonNode.Parse(w.FindingsJson)!.AsObject();
+        root[SubmissionOverrideService.HumanDecisionSetMember] = new JsonObject
+        {
+            ["decisionId"] = decisionId.ToString("D"),
+            ["setReadAtUtc"] = readAtUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+            ["signals"] = new JsonArray(signalIds.Select(id => (JsonNode)new JsonObject { ["id"] = id.ToString("D"), ["policyCode"] = "EB-RATE" }).ToArray()),
+            ["subjects"] = new JsonArray(),
+        };
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString();
+    }
+
+    [Theory(DisplayName = "105 F1-1 (c): a planted set naming a Signal of ANOTHER invoice (or its line) is refused 409 findings_unreadable; nothing is recorded or closed")]
+    [InlineData("sprk_billingevent")]
+    [InlineData("sprk_invoice")]
+    public async Task Return_WithAPlantedSetNamingAForeignSignal_IsRefused_AndClosesNothing(string foreignTable)
+    {
+        var w = await World.CreateAsync();
+        var foreign = w.AddSignal(foreignTable, Guid.NewGuid(), "EB-RATE");
+        PlantSet(w, SubmissionOverrideService.ReturnDecisionIdFor(World.SubmissionId), World.CreatedOn.AddMinutes(5), foreign);
+
+        var result = await w.ReturnAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.FindingsUnreadable);
+        w.ClosedBy.Should().NotContainKey(foreign);
+        w.Closes.Should().BeEmpty();
+        w.RecordCreates.Should().Be(0);
+        w.Updates.Should().BeEmpty();
+        w.Transitions.Should().BeEmpty();
+        w.SetStores.Should().BeEmpty("a refused set is not stored again");
+        w.Probe.RightsAsked.Should().BeEmpty("refused before any rights are asked");
+    }
+
+    [Fact(DisplayName = "105 F1-1: a planted set naming the invoice's OWN Signal is trusted (subjects from the row), its rights asked, and closed")]
+    public async Task Override_WithAStoredSetOfTheInvoicesOwnSignal_UsesTheRowsSubjects()
+    {
+        var w = await World.CreateAsync();
+        var line = w.AddLine();
+        var own = w.AddSignal("sprk_billingevent", line, "EB-RATE");
+        PlantSet(w, SubmissionOverrideService.OverrideDecisionIdFor(World.SubmissionId), World.CreatedOn.AddMinutes(5), own);
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.ClosedBy.Should().ContainKey(own);
+        w.Probe.RightsAsked.Should().Contain((World.Token, "sprk_invoices", World.InvoiceId), "the line's subject, from its ROW, asked on its parent invoice");
+    }
+
+    [Theory(DisplayName = "105 F1-1 (3): a stored read time before the submission was created, or in the future, is refused 409 findings_unreadable")]
+    [InlineData(-1)]
+    [InlineData(+10)]
+    public async Task Override_WithAStoredReadTimeOutOfBounds_IsRefused(int minutes)
+    {
+        var w = await World.CreateAsync();
+        var line = w.AddLine();
+        var own = w.AddSignal("sprk_billingevent", line, "EB-RATE");
+        var readAt = minutes < 0 ? World.CreatedOn.AddMinutes(minutes) : w.Clock.GetUtcNow().UtcDateTime.AddMinutes(minutes);
+        PlantSet(w, SubmissionOverrideService.OverrideDecisionIdFor(World.SubmissionId), readAt, own);
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.FindingsUnreadable);
+        w.Closes.Should().BeEmpty();
+        w.RecordCreates.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "105 F1-1 (2): a repeat takes the record id and the decider from the WRITER-CREATED record, never from an edited stamp")]
+    public async Task Repeat_WithAnEditedStamp_ClosesWithTheWriterCreatedRecordAndItsDecider()
+    {
+        var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
+        w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
+        var first = await w.OverrideAsync();
+        w.CloseFault = _ => null;
+        var root = JsonNode.Parse(w.FindingsJson)!.AsObject();
+        root[SubmissionOverrideService.OverrideMember]!["recordId"] = Guid.NewGuid().ToString("D");
+        root[SubmissionOverrideService.OverrideMember]!["bySystemUserId"] = Guid.NewGuid().ToString("D");
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString();
+
+        var repeat = await w.OverrideAsync();
+
+        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        var reclose = w.Closes.Last(c => c.SignalId == onInvoice);
+        reclose.RecordId.Should().Be(first.RecordId!.Value, "the writer-created record, not the stamp");
+        reclose.DecidedBy.Should().Be(World.Caller, "the record's sprk_confirmedby, not the stamp");
+    }
+
+    [Fact(DisplayName = "105 F1-1 (2): a decided submission with a planted stamp and set but NO writer-created record re-closes nothing")]
+    public async Task Repeat_WithNoWriterCreatedRecord_ClosesNothing()
+    {
+        var w = await World.CreateAsync();
+        var other = w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
+        PlantSet(w, SubmissionOverrideService.OverrideDecisionIdFor(World.SubmissionId), World.CreatedOn.AddMinutes(5), other);
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = SubmissionOverrideService.WithStamp(
+            w.FindingsJson, SubmissionOverrideService.OverrideMember, new BlockedDecisionStamp(Guid.NewGuid(), Guid.NewGuid(), w.Clock.GetUtcNow(), Reason));
+        w.SetSubmission(InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden);
+
+        var repeat = await w.OverrideAsync();
+
+        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        w.Closes.Should().BeEmpty("with no writer-created record the stamp is not trusted");
+    }
+
+    [Fact(DisplayName = "105 F3 (a): a repeat whose caller lacks the rights closes nothing")]
+    public async Task Repeat_WhoseCallerLacksTheRights_ClosesNothing()
+    {
+        var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
+        w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
+        await w.OverrideAsync();
+        w.CloseFault = _ => null;
+        var closes = w.Closes.Count;
+        w.Probe.Rights = (set, _) => set == "sprk_invoices" ? AccessRights.Read : ScriptedProbe.RealReviewerRights(set, Guid.Empty);
+
+        var repeat = await w.OverrideAsync();
+
+        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided, "the repeat's answer is unchanged");
+        w.Closes.Should().HaveCount(closes, "no close is attempted for a caller without Write on the invoice");
+        w.ClosedBy.Should().NotContainKey(onInvoice);
+    }
+
+    [Fact(DisplayName = "105 F3 (b): losing the set-store race to a RETURN is 409 concurrent_change, never AlreadyDecided")]
+    public async Task Override_LosingTheSetStoreRace_ToAReturn_Is409()
+    {
+        var (w, _, _, _, _, _, _) = await SignalWorldAsync();
+        w.OnStore = () =>
+        {
+            w.OnStore = null;
+            w.SetSubmission(InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Returned);
+            w.Submission["versionnumber"] = w.Submission.GetAttributeValue<long>("versionnumber") + 1;
+        };
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Refused);
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.ConcurrentChange);
+        w.RecordCreates.Should().Be(0);
+        w.Closes.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "105 K1: a retry whose record exists uses the record's stored set, even when the findings hold none (a decision in flight across a deploy)")]
+    public async Task Retry_WhenTheRecordExists_UsesTheRecordsSet_NotAFreshRead()
+    {
+        var (w, _, onInvoice, onLine, acknowledged, _, _) = await SignalWorldAsync();
+        w.UpdateFault = new TimeoutException("dataverse");
+        (await w.OverrideAsync()).StatusCode.Should().Be(503);
+        w.UpdateFault = null;
+        var root = JsonNode.Parse(w.FindingsJson)!.AsObject();
+        root.Remove(SubmissionOverrideService.HumanDecisionSetMember);
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString();
+        var raisedLater = w.AddSignal("sprk_invoice", World.InvoiceId, "EB-LATE");
+
+        var retried = await w.OverrideAsync();
+
+        retried.Kind.Should().Be(BlockedDecisionKind.Decided, "the record's set rebuilds the same decision (never DecisionConflict)");
+        w.RecordCreates.Should().Be(1);
+        w.Recorded.Last().ResolvedSignalIds.Should().BeEquivalentTo([onInvoice, onLine, acknowledged]);
+        w.ClosedBy.Should().NotContainKey(raisedLater);
     }
 
     private static string FindFromRepoRoot(params string[] parts)

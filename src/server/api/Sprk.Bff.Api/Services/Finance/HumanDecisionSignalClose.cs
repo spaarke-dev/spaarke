@@ -27,12 +27,20 @@ internal static class HumanDecisionSignalClose
     /// <summary>
     /// FR-51 for a human billing decision that closes Signals: AppendTo on <paramref name="core"/> and Write on every subject, asked as the
     /// caller (<paramref name="callerBearerToken"/>) through the caller-rights probe. Every "could not answer" is a no.
+    /// <para><b>A line subject is asked on its parent invoice</b> (ontology-r1 2026-10-20: line subject → Write on the parent invoice, D-90).
+    /// Core User and Basic User hold only Read on <c>sprk_billingevent</c> (the application writes lines, D-90), so Write on a line would
+    /// refuse every ordinary reviewer; the routes already require Write on the invoice (D-77). Every <c>sprk_billingevent</c> subject is
+    /// asked as (<c>sprk_invoice</c>, <paramref name="invoiceId"/>); AppendTo on the core and Write on any other subject are unchanged. The
+    /// caller PROVES each line is a line of <paramref name="invoiceId"/> before calling (100: the decided lines are read by the invoice; 105:
+    /// row-derived subjects checked against the invoice's lines). <see cref="DecisionCallerRights"/> itself is not changed: the commit route
+    /// still asks Write on every subject as it did.</para>
     /// </summary>
     internal static Task<DecisionCallerRefusal> AuthorizeAsync(
         IGenericEntityService entities,
         CallerRecordAccessProbe probe,
         string? callerBearerToken,
         DecisionCoreRecord? core,
+        Guid invoiceId,
         IEnumerable<(string SubjectEntity, Guid SubjectId)> subjects,
         ILogger logger,
         CancellationToken ct) =>
@@ -41,8 +49,15 @@ internal static class HumanDecisionSignalClose
             logger,
             (set, id, operation, token) => DecisionCallerRights.CallerHoldsAsync(probe, callerBearerToken, set, id, operation, token),
             core,
-            subjects.Select(s => ((string?)s.SubjectEntity, (Guid?)s.SubjectId)),
+            subjects.Select(s => SubjectAskedOf(s, invoiceId)),
             ct);
+
+    /// <summary>The record whose Write a Signal subject needs: a line's is its parent invoice's (ontology-r1 2026-10-20, D-90); any other
+    /// subject's is its own. With no invoice id the line itself is asked (fails closed: an empty id would otherwise ask nothing).</summary>
+    internal static (string? SubjectEntity, Guid? SubjectId) SubjectAskedOf((string SubjectEntity, Guid SubjectId) subject, Guid invoiceId) =>
+        invoiceId != Guid.Empty && string.Equals(subject.SubjectEntity, InvoiceSubmissionPersister.LineEntity, StringComparison.Ordinal)
+            ? (InvoiceReviewService.InvoiceEntity, invoiceId)
+            : (subject.SubjectEntity, subject.SubjectId);
 
     /// <summary>
     /// Closes every Signal of the stored <paramref name="set"/> as Acted by <paramref name="recordId"/>, naming <paramref name="decider"/>.

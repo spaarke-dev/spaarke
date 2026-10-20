@@ -86,7 +86,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     [
         InvoiceSubmissionPersister.SubmissionFindingsJson, InvoiceSubmissionPersister.SubmissionInvoice, "sprk_channel", "sprk_document",
         InvoiceSubmissionPersister.SubmissionCorrelationId, InvoiceSubmissionPersister.SubmissionStatus, RowVersionColumn,
-        InvoiceSubmissionPersister.SubmissionAdminAttention,
+        InvoiceSubmissionPersister.SubmissionAdminAttention, StoredSignalSetCheck.ProcessingStartColumn,
     ];
 
     /// <summary>
@@ -435,9 +435,17 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             var set = stored.ResolvedSet;
             if (set is null)
             {
-                set = await ReadOpenSignalSetAsync(_entities, _time, invoiceId, ct).ConfigureAwait(false);
+                set = await ReadOpenSignalSetAsync(_entities, _time, invoiceId, _logger, ct).ConfigureAwait(false);
                 findingsJson = await StoreResolvedSetAsync(submissionId, findingsJson!, set, ct).ConfigureAwait(false);
                 rowVersion = null; // our own write moved the row version
+            }
+            else if (await StoredSignalSetCheck.CheckAsync(_entities, _time, invoiceId, set,
+                    submission.GetAttributeValue<DateTime?>(StoredSignalSetCheck.ProcessingStartColumn), ct).ConfigureAwait(false) is { Trusted: false } untrusted)
+            {
+                // F1-1 (ontology-r1): the findings column is user-writable, so a stored set is a claim. A Signal off this invoice and its
+                // lines, or a read time outside the submission's life, is never closed by the app identity: refused, permanently.
+                _logger.LogWarning("Invoice submission {SubmissionId}: the stored Signal set cannot be trusted ({Why}); nothing is recorded or closed", submissionId, untrusted.Why);
+                return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, FindingsUnreadableCode) with { SignalsWritten = written };
             }
 
             // (b)
@@ -716,13 +724,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// resolve the same set.
     /// </summary>
     internal static async Task<ResolvedSignalSet> ReadOpenSignalSetAsync(
-        IGenericEntityService entities, TimeProvider time, Guid invoiceId, CancellationToken ct) =>
-        (await ReadOpenSignalSetWithSubjectsAsync(entities, time, invoiceId, ct).ConfigureAwait(false)).Set;
+        IGenericEntityService entities, TimeProvider time, Guid invoiceId, ILogger logger, CancellationToken ct) =>
+        (await ReadOpenSignalSetWithSubjectsAsync(entities, time, invoiceId, logger, ct).ConfigureAwait(false)).Set;
 
     /// <summary><see cref="ReadOpenSignalSetAsync"/> with the distinct subjects (the invoice and the lines) its Signals are on, which a
     /// human decision's caller must be able to Write (105, FR-51).</summary>
     internal static async Task<(ResolvedSignalSet Set, IReadOnlyList<(string Entity, Guid Id)> Subjects)> ReadOpenSignalSetWithSubjectsAsync(
-        IGenericEntityService entities, TimeProvider time, Guid invoiceId, CancellationToken ct)
+        IGenericEntityService entities, TimeProvider time, Guid invoiceId, ILogger logger, CancellationToken ct)
     {
         var setReadAt = time.GetUtcNow().UtcDateTime;
 
@@ -732,7 +740,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         var lineIds = (await entities.RetrieveMultipleAsync(lineQuery, ct).ConfigureAwait(false)).Entities
             .Select(r => r.Id).Where(id => id != Guid.Empty).Distinct().ToList();
 
-        var open = await ReadOpenSignalsAsync(entities, invoiceId, lineIds, ct).ConfigureAwait(false);
+        var open = await ReadOpenSignalsAsync(entities, invoiceId, lineIds, logger, ct).ConfigureAwait(false);
 
         // Ordered by id so the record's hash is stable.
         return (
@@ -744,10 +752,12 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// D-122: every OPEN Signal (Open or Acknowledged), of every policy, whose subject is the invoice (when <paramref name="invoiceId"/> is
     /// given) or one of <paramref name="lineIds"/>, with the subject its dedupe key names; one query, app-only. A row whose dedupe key does not
     /// parse, or names a subject outside those, is skipped (fails closed). Used by <see cref="ReadOpenSignalSetAsync"/> (the invoice and every
-    /// line) and by 100's line decisions (the decided lines only, no invoice). The caller reads its clock BEFORE calling.
+    /// line) and by 100's line decisions (the decided lines only, no invoice). The caller reads its clock BEFORE calling. K3 (ontology-r1):
+    /// the subject is the ROW's (<see cref="StoredSignalSetCheck.RowSubjectOf"/>); an open row whose dedupe-key subject differs from its
+    /// regarding row is skipped with one Warning, so a row whose rights were not asked is never closed.
     /// </summary>
     internal static async Task<IReadOnlyList<(ResolvedSignal Signal, string SubjectEntity, Guid SubjectId)>> ReadOpenSignalsAsync(
-        IGenericEntityService entities, Guid? invoiceId, IReadOnlyCollection<Guid> lineIds, CancellationToken ct)
+        IGenericEntityService entities, Guid? invoiceId, IReadOnlyCollection<Guid> lineIds, ILogger logger, CancellationToken ct)
     {
         if (invoiceId is null && lineIds.Count == 0)
         {
@@ -755,7 +765,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         }
 
         // K2 (notes 13c): a single RetrieveMultiple with no paging, fine below 5,000 Signals per invoice.
-        var query = new QueryExpression(SignalEntity) { ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_signalstatus"), NoLock = true };
+        var query = new QueryExpression(SignalEntity) { ColumnSet = new ColumnSet([.. StoredSignalSetCheck.SubjectColumns, "sprk_signalstatus"]), NoLock = true };
         query.Criteria.FilterOperator = LogicalOperator.Or;
         if (invoiceId is { } invoice)
         {
@@ -778,14 +788,21 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         foreach (var row in rows.Entities)
         {
             if (row.Id == Guid.Empty
-                || !SignalWriter.TryParseDedupeKey(row.GetAttributeValue<string>("sprk_dedupekey"), out var code, out var entity, out var id, out _)
-                || !subjects.Contains((entity, id))
                 || row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value is not (SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged))
             {
                 continue;
             }
 
-            open.Add((new ResolvedSignal(row.Id, code), entity, id));
+            if (StoredSignalSetCheck.RowSubjectOf(row) is not { } subject)
+            {
+                logger.LogWarning("Signal {SignalId}: its dedupe key does not name the subject its regarding row is filed on; it is skipped", row.Id);
+                continue;
+            }
+
+            if (subjects.Contains((subject.Entity, subject.Id)))
+            {
+                open.Add((new ResolvedSignal(row.Id, subject.PolicyCode), subject.Entity, subject.Id));
+            }
         }
 
         return open;

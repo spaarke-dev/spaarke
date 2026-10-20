@@ -195,6 +195,8 @@ public class InvoiceSubmissionAfterStepsTests
                 [InvoiceSubmissionPersister.SubmissionCorrelationId] = "corr-stored",
                 [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Processing),
                 ["versionnumber"] = 100L,
+                // Dataverse-set when the submission was created: a stored set's read time may not precede it (F1-1).
+                ["createdon"] = CreatedOn,
             };
 
             // R7: a read returns only the columns it asks for (as Dataverse does), so a column the code needs must be in its column list.
@@ -410,7 +412,12 @@ public class InvoiceSubmissionAfterStepsTests
 
         private EntityCollection LineRows(QueryExpression q)
         {
-            LineQueries.Add(q);
+            // LineQueries are the open-set reads (all the invoice's lines); a stored set's check (StoredSignalSetCheck, by id) is not one.
+            if (!q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_billingeventid"))
+            {
+                LineQueries.Add(q);
+            }
+
             q.Criteria.Conditions.Should().ContainSingle(c => c.AttributeName == "sprk_invoice" && (Guid)c.Values[0] == InvoiceId);
             return new EntityCollection(Lines.Select(id => new Entity("sprk_billingevent", id)).ToList());
         }
@@ -1589,6 +1596,71 @@ public class InvoiceSubmissionAfterStepsTests
     // ── 13c: D-122 - the automatic rejection resolves every open Signal on the invoice and its lines ──
 
     private static readonly Guid OtherInvoice = Guid.Parse("04900000-0000-4000-8000-0000000000e9");
+
+    /// <summary>The submission's <c>createdon</c>: an hour before the world's clock.</summary>
+    private static readonly DateTime CreatedOn = new(2026, 10, 19, 8, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>A <c>resolvedSignalSet</c> planted in the findings, as a user with Write on the submission could (F1-1).</summary>
+    private static Func<JsonObject, JsonObject> PlantedSet(DateTime readAtUtc, params Guid[] signalIds) => json =>
+    {
+        json[InvoiceSubmissionAfterSteps.ResolvedSetMember] = new InvoiceSubmissionAfterSteps.ResolvedSignalSet(
+            readAtUtc, signalIds.Select(id => new InvoiceSubmissionAfterSteps.ResolvedSignal(id, "BILL-THRESHOLD")).ToList()).ToJson();
+        return json;
+    };
+
+    [Fact(DisplayName = "049 F1-1: a planted resolvedSignalSet naming ANOTHER invoice's Signal is refused (findings_unreadable): nothing recorded, nothing closed")]
+    public async Task AutoRejected_APlantedSetNamingAForeignSignal_IsRefused()
+    {
+        var outcome = await AutoRejected();
+        var foreignId = Guid.NewGuid();
+        var world = new World(outcome, PlantedSet(CreatedOn.AddMinutes(5), foreignId));
+        var foreign = world.Seed(SignalWriter.BuildDedupeKey("BILL-THRESHOLD", "sprk_invoice", OtherInvoice.ToString("D"), 1), SignalWriter.SignalStatusOpen, "[]");
+        world.Signals.Remove(world.Signals.Single(s => s.Value.Id == foreign.Id).Key);
+        foreign.Id = foreignId;
+        world.Signals["foreign"] = foreign;
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
+        result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.FindingsUnreadableCode);
+        world.RecordCreates.Should().Be(0);
+        world.Closes.Should().BeEmpty();
+        StatusOf(foreign).Should().Be(SignalWriter.SignalStatusOpen);
+    }
+
+    [Theory(DisplayName = "049 F1-1: a planted read time before the submission was created, or in the future, is refused (findings_unreadable)")]
+    [InlineData(-1)]
+    [InlineData(+10)]
+    public async Task AutoRejected_APlantedReadTimeOutOfBounds_IsRefused(int minutes)
+    {
+        var outcome = await AutoRejected();
+        var readAt = minutes < 0 ? CreatedOn.AddMinutes(minutes) : new DateTime(2026, 10, 19, 9, 0, 0, DateTimeKind.Utc).AddMinutes(minutes);
+        var world = new World(outcome, PlantedSet(readAt));
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
+        result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.FindingsUnreadableCode);
+        world.RecordCreates.Should().Be(0);
+        world.Closes.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 F1-1: a stored set of the invoice's own Signal, read inside the submission's life, is trusted and closed")]
+    public async Task AutoRejected_AStoredSetOfItsOwnSignal_IsTrusted()
+    {
+        var outcome = await AutoRejected();
+        var ownId = Guid.NewGuid();
+        var world = new World(outcome, PlantedSet(CreatedOn.AddMinutes(5), ownId));
+        var own = world.Seed(InvoiceKey("BILL-THRESHOLD", 1), SignalWriter.SignalStatusOpen, "[]");
+        world.Signals.Remove(world.Signals.Single(s => s.Value.Id == own.Id).Key);
+        own.Id = ownId;
+        world.Signals[InvoiceKey("BILL-THRESHOLD", 1)] = own;
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        world.Closes.Select(c => c.Signal).Should().Equal(ownId);
+    }
 
     private static InvoiceSubmissionAfterSteps.ResolvedSignalSet? StoredSet(World world) =>
         InvoiceSubmissionAfterSteps.StoredFindings.Parse(world.Row.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson))!.ResolvedSet;

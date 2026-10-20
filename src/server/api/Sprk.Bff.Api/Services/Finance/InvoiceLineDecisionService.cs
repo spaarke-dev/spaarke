@@ -143,7 +143,8 @@ public sealed record LineDecisionResult(
 /// Signal whose subject is that line, of every policy. The set is read BEFORE the record and stored WITH it (<c>ResolvedSignalIds</c>, and the
 /// read time and policy codes in the facts); a retry finds the recorded set (<see cref="BillingDecisionRecorder.FindStoredResolvedSetAsync"/>)
 /// and closes exactly it, never a fresh read. When a decision closes any Signal, the caller must hold AppendTo on the core record and Write
-/// on each decided line that has one, asked as the caller (<see cref="HumanDecisionSignalClose.AuthorizeAsync"/>, the commit route's rule);
+/// for each decided line that has one, asked ON THE PARENT INVOICE (ontology-r1 2026-10-20: line subject → Write on the parent invoice,
+/// D-90), as the caller (<see cref="HumanDecisionSignalClose.AuthorizeAsync"/>, the commit route's rule with that one mapping);
 /// otherwise 403 and nothing is written. After each line's record, its Signals are closed as Acted by the app-identity writer naming the
 /// decider; a failed close only warns.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="InvoiceTotalsService"/> (totals only),
@@ -712,8 +713,9 @@ public sealed class InvoiceLineDecisionService
 
     /// <summary>
     /// D-122 per decided line. A line whose decision is already recorded under this decision id keeps the set stored with that record (a
-    /// stored set wins: never re-read or widened, so a Signal raised after the first attempt stays open). Every other line's set is read now,
-    /// in ONE query over those lines, with the clock read before it. Nothing is written; a refusal here changes nothing.
+    /// stored set wins: never re-read or widened, so a Signal raised after the first attempt stays open). The stored sets of ALL the lines
+    /// are found in ONE query (K2, inside the lock: never one lookup per line). Every other line's set is read now, in ONE query over those
+    /// lines, with the clock read before it. Nothing is written; a refusal here changes nothing.
     /// </summary>
     private async Task<SignalSets> ResolveSignalSetsAsync(LineDecisionCommand command, IReadOnlyList<Proposal> proposals, CancellationToken ct)
     {
@@ -721,17 +723,22 @@ public sealed class InvoiceLineDecisionService
         var fresh = new List<Guid>();
         try
         {
-            foreach (var p in proposals)
+            // One action per decision, so one query; grouped all the same, so a mixed list could never pair a line with another code's table.
+            foreach (var group in proposals.GroupBy(p => p.Action, StringComparer.Ordinal))
             {
-                if (await _recorder.FindStoredResolvedSetAsync(p.Action, p.Line.Id, command.DecisionId, ct).ConfigureAwait(false) is { } stored)
+                var found = await _recorder.FindStoredResolvedSetsAsync(group.Key, group.Select(p => p.Line.Id).ToList(), command.DecisionId, ct).ConfigureAwait(false);
+                foreach (var p in group)
                 {
-                    byLine[p.Line.Id] = new InvoiceSubmissionAfterSteps.ResolvedSignalSet(
-                        stored.SetReadAtUtc ?? DateTime.MinValue,
-                        stored.Signals.Select(s => new InvoiceSubmissionAfterSteps.ResolvedSignal(s.SignalId, s.PolicyCode)).ToList());
-                }
-                else
-                {
-                    fresh.Add(p.Line.Id);
+                    if (found.TryGetValue(p.Line.Id, out var stored) && stored is not null)
+                    {
+                        byLine[p.Line.Id] = new InvoiceSubmissionAfterSteps.ResolvedSignalSet(
+                            stored.SetReadAtUtc ?? DateTime.MinValue,
+                            stored.Signals.Select(s => new InvoiceSubmissionAfterSteps.ResolvedSignal(s.SignalId, s.PolicyCode)).ToList());
+                    }
+                    else
+                    {
+                        fresh.Add(p.Line.Id);
+                    }
                 }
             }
         }
@@ -749,7 +756,7 @@ public sealed class InvoiceLineDecisionService
             IReadOnlyList<(InvoiceSubmissionAfterSteps.ResolvedSignal Signal, string SubjectEntity, Guid SubjectId)> open;
             try
             {
-                open = await InvoiceSubmissionAfterSteps.ReadOpenSignalsAsync(_entities, invoiceId: null, fresh, ct).ConfigureAwait(false);
+                open = await InvoiceSubmissionAfterSteps.ReadOpenSignalsAsync(_entities, invoiceId: null, fresh, _logger, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -769,8 +776,10 @@ public sealed class InvoiceLineDecisionService
     }
 
     /// <summary>
-    /// FR-51 when the decision closes at least one Signal: AppendTo on the invoice's core record and Write on every decided line that has a
-    /// Signal (each Signal's subject is its line), asked as the caller. Null when allowed or there is nothing to close.
+    /// FR-51 when the decision closes at least one Signal: AppendTo on the invoice's core record and Write for every decided line that has a
+    /// Signal (each Signal's subject is its line), asked as the caller. A line's Write is asked on its PARENT INVOICE (ontology-r1 2026-10-20:
+    /// line subject → Write on the parent invoice, D-90; <see cref="HumanDecisionSignalClose.AuthorizeAsync"/>): every decided line was read
+    /// by this invoice, so the parent is <see cref="LineDecisionCommand.InvoiceId"/>. Null when allowed or there is nothing to close.
     /// </summary>
     private async Task<LineDecisionResult?> AuthorizeCloseAsync(
         LineDecisionCommand command, Entity invoice, IReadOnlyDictionary<Guid, InvoiceSubmissionAfterSteps.ResolvedSignalSet> sets, CancellationToken ct)
@@ -787,7 +796,7 @@ public sealed class InvoiceLineDecisionService
         }
 
         var refusal = await HumanDecisionSignalClose.AuthorizeAsync(
-            _entities, _probe, command.CallerBearerToken, new DecisionCoreRecord(core.Entity, core.Id), subjects, _logger, ct).ConfigureAwait(false);
+            _entities, _probe, command.CallerBearerToken, new DecisionCoreRecord(core.Entity, core.Id), command.InvoiceId, subjects, _logger, ct).ConfigureAwait(false);
         switch (refusal)
         {
             case DecisionCallerRefusal.None:

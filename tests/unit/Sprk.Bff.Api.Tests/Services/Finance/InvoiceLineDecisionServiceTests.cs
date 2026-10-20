@@ -116,7 +116,12 @@ public sealed class InvoiceLineDecisionServiceTests
         public readonly ListLogger<InvoiceLineDecisionService> Log = new();
         public readonly Mock<CallerRecordAccessProbe> Probe = new(
             new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!) { CallBase = false };
-        public Func<string, Guid, AccessRights> Rights = (_, _) => AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo;
+        /// <summary>The caller's rights, by default the REAL roles' (F1-2): Core User and Basic User hold only Read on <c>sprk_billingevent</c>
+        /// (D-90), Write on the invoice and AppendTo on the core.</summary>
+        public Func<string, Guid, AccessRights> Rights = RealReviewerRights;
+
+        public static AccessRights RealReviewerRights(string set, Guid id) =>
+            set == "sprk_billingevents" ? AccessRights.Read : AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo;
         public Func<Guid, Exception?> CloseFault = _ => null;
 
         public World(decimal billedTotal = 1000m, int status = InvoiceStatusCodes.InReview)
@@ -291,6 +296,7 @@ public sealed class InvoiceLineDecisionServiceTests
             {
                 ["sprk_dedupekey"] = SignalWriter.BuildDedupeKey(policyCode, "sprk_billingevent", lineId.ToString("D"), 1),
                 ["sprk_signalstatus"] = new OptionSetValue(status),
+                ["sprk_regardingrecordid"] = lineId.ToString("D"),
                 [lookup] = new EntityReference("sprk_billingevent", lineId),
             });
             H.Rows[("sprk_signal", id)] = new Entity("sprk_signal", id)
@@ -1023,7 +1029,7 @@ public sealed class InvoiceLineDecisionServiceTests
         (await StoredSet(w, "disallow-line", b.Id, decisionId))!.Signals.Select(s => s.SignalId).Should().Equal(onB);
     }
 
-    [Fact(DisplayName = "100: the caller's rights are asked as the caller: AppendTo on the core record and Write on each decided line that has a Signal")]
+    [Fact(DisplayName = "100: the caller's rights are asked as the caller: AppendTo on the core record and, for a decided line with a Signal, Write on its PARENT INVOICE")]
     public async Task TheRights_AreAskedAsTheCaller_OnTheCoreAndEachLineWithASignal()
     {
         var w = new World(billedTotal: 200m);
@@ -1033,8 +1039,29 @@ public sealed class InvoiceLineDecisionServiceTests
 
         await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(a.Id), new(b.Id)], bulk: true), CancellationToken.None);
 
-        w.RightsAsked.Should().BeEquivalentTo([(CallerToken, "sprk_projects", Core), (CallerToken, "sprk_billingevents", a.Id)],
-            "b carries no Signal, so nothing beyond the route's own authorization is asked about it");
+        w.RightsAsked.Should().BeEquivalentTo([(CallerToken, "sprk_projects", Core), (CallerToken, "sprk_invoices", w.InvoiceId)],
+            "a line subject is asked on its parent invoice (ontology-r1 2026-10-20, D-90); b carries no Signal");
+    }
+
+    [Fact(DisplayName = "100 F1-2: a reviewer with exactly the real roles' rights (Read only on sprk_billingevent, Write on the invoice) decides a line with an open line Signal")]
+    public async Task ARealReviewer_DecidesALine_WithAnOpenLineSignal()
+    {
+        var w = new World(billedTotal: 100m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var signal = w.AddSignal(line.Id);
+        w.Rights = (set, _) => set switch
+        {
+            "sprk_billingevents" => AccessRights.Read,
+            "sprk_invoices" => AccessRights.Read | AccessRights.Write,
+            "sprk_projects" => AccessRights.Read | AccessRights.AppendTo,
+            _ => AccessRights.None,
+        };
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Reduce, [new(line.Id, 60m)], Reason), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        w.ClosedBy.Should().ContainKey(signal);
+        w.RightsAsked.Should().NotContain(r => r.Set == "sprk_billingevents", "Write on a line is never asked");
     }
 
     [Fact(DisplayName = "100: a decision that closes no Signal asks no record rights (the route's authorization stands alone)")]
@@ -1066,7 +1093,7 @@ public sealed class InvoiceLineDecisionServiceTests
         Status(w, line).Should().Be(InvoiceLineStatus.Flagged);
     }
 
-    [Fact(DisplayName = "100: without Write on a decided line that has a Signal the decision is 403 and nothing is written, not even the other lines")]
+    [Fact(DisplayName = "100 F1-2: without Write on the PARENT INVOICE of a decided line that has a Signal the decision is 403 and nothing is written, not even the other lines")]
     public async Task MissingWriteOnASubject_Is403_AndNothingIsWritten()
     {
         var w = new World(billedTotal: 200m);
@@ -1074,9 +1101,9 @@ public sealed class InvoiceLineDecisionServiceTests
         var b = w.AddLine(100m, InvoiceLineStatus.Flagged);
         w.AddSignal(a.Id);
         w.AddSignal(b.Id);
-        w.Rights = (set, id) => set == "sprk_billingevents" && id == b.Id
+        w.Rights = (set, _) => set == "sprk_invoices"
             ? AccessRights.Read | AccessRights.AppendTo
-            : AccessRights.Read | AccessRights.Write | AccessRights.AppendTo;
+            : World.RealReviewerRights(set, Guid.Empty);
 
         var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Disallow, [new(a.Id), new(b.Id)], Reason, bulk: true), CancellationToken.None);
 
@@ -1188,5 +1215,63 @@ public sealed class InvoiceLineDecisionServiceTests
 
         result.Status.Should().Be(LineDecisionStatus.Unavailable);
         NothingWritten(w);
+    }
+
+    [Fact(DisplayName = "100 K2: the stored sets of every decided line are found in ONE query (subject In), not one lookup per line")]
+    public async Task StoredSets_OfEveryLine_AreOneQuery()
+    {
+        var w = new World(billedTotal: 300m);
+        var lines = new[] { w.AddLine(100m, InvoiceLineStatus.Flagged), w.AddLine(100m, InvoiceLineStatus.Flagged), w.AddLine(100m, InvoiceLineStatus.Flagged) };
+        var lineLookup = "sprk_regardinginvoiceline";
+
+        var result = await w.Service().DecideAsync(
+            Command(w, LineDecisionAction.Accept, lines.Select(l => new LineDecisionLine(l.Id)), bulk: true), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        var setLookups = w.H.Lookups.Where(q => q.EntityName == "sprk_decisionrecord"
+            && q.Criteria.Conditions.Any(c => c.AttributeName == lineLookup && c.Operator == ConditionOperator.In)).ToList();
+        setLookups.Should().ContainSingle("one query over all the lines");
+        setLookups[0].Criteria.Conditions.Single(c => c.AttributeName == lineLookup).Values.Should().BeEquivalentTo(lines.Select(l => (object)l.Id));
+    }
+
+    [Fact(DisplayName = "100 K2: two records under one line's key fail closed (decision_invalid) and nothing is written")]
+    public async Task StoredSets_TwoRecordsUnderOneKey_FailClosed()
+    {
+        var w = new World(billedTotal: 100m);
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var decisionId = Guid.NewGuid();
+        for (var i = 0; i < 2; i++)
+        {
+            w.H.Seeded.Add(new Entity("sprk_decisionrecord", Guid.NewGuid())
+            {
+                ["sprk_regardinginvoiceline"] = new EntityReference("sprk_billingevent", line.Id),
+                ["sprk_steps"] = $"{{\"reviewId\":\"{BillingDecisionKey.IdOf("sprk_billingevent", line.Id, decisionId):D}\",\"resolvedSignalIds\":[]}}",
+                ["sprk_actioncode"] = "accept-line",
+                ["createdby"] = new EntityReference("systemuser", DecisionRecordWriterTests.WriterUser),
+            });
+        }
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)], decisionId: decisionId), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.InvalidRequest);
+        result.Code.Should().Be(LineDecisionCodes.DecisionInvalid);
+        NothingWritten(w);
+    }
+
+    [Fact(DisplayName = "100 K3: a Signal whose dedupe-key subject differs from its regarding row is skipped with a warning, never closed")]
+    public async Task ASignalWhoseKeyAndRowDisagree_IsSkipped_AndWarned()
+    {
+        var w = new World(billedTotal: 200m);
+        var a = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var b = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        var mismatched = w.AddSignal(b.Id);
+        // The key names line a; the row is filed on line b.
+        w.Signals.Single(s => s.Id == mismatched)["sprk_dedupekey"] = SignalWriter.BuildDedupeKey("EB-RATE", "sprk_billingevent", a.Id.ToString("D"), 1);
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(a.Id), new(b.Id)], bulk: true), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        w.Closes.Should().BeEmpty("a row whose rights were not asked is never closed");
+        w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains(mismatched.ToString("D"), StringComparison.Ordinal));
     }
 }
