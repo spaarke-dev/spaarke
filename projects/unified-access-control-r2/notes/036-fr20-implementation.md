@@ -615,10 +615,29 @@ from the web-service error catalog and has not been observed live (`DataverseImp
 the privilege, `DataverseWebApiService.RetrievePrincipalRightsOrUnknownAsync` now reads it as UNKNOWN; a `0x80040220`
 whose message does not name it still reads as "no rights". **Live check (task 034 canary):** if every systemuser's
 confirmation logs `[DELEGATION] Rights … : None`, check `prvActOnBehalfOfAnotherUser` on the BFF application user
-before reading it as a roles problem.
+before reading it as a roles problem. **The same reading reaches the JIT sync** (`SpeContainerMembershipSync.cs:420`, via
+`RetrievePrincipalRightsOrUnknownAsync`): a 403 `0x80040220` naming `prvActOnBehalfOfAnotherUser` now KEEPS the JIT
+container grant for that run instead of removing it — task 171's intended direction (only an answer about the holder
+may revoke).
 
 **Known limits carried to the PR:**
 - **K4.** An enabled but unlicensed, or Read-access-mode, systemuser under `MSCRMCallerID` impersonation is not pinned
   by any offline test (Microsoft does not document the answer). Verify in the task 034 canary.
 - **K6.** A child create asks two questions in sequence (the parent's rights, then the child table's Create privilege),
   each bounded at 15 s, so up to 30 s before a refusal; each list GET asks once per request for its `canCreate`.
+
+## 15. Fix round 4 (2026-10-20) — before → after
+
+| # | Item | Before | After |
+|---|---|---|---|
+| F1 | A Dataverse fault on a write confirmation | The probe collapsed a timeout, an UNKNOWN 403 and a 429/5xx (thrown and caught) into `AccessRights.None` / `false`, so the write routes answered **403 "no access"**; delete-own step 2b broke `AuthorizeDeleteOwnAsync`'s own contract ("a read that FAILED is a 503 … never a 403") | The probe exposes `GetPrincipalRightsAppOnlyOrUnknownAsync` (`AccessRights?`) and `PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync` (`bool?`): `null` = no answer (timeout, UNKNOWN 403, throttle/5xx, transport, unreadable body, no app-only client). The old `GetPrincipalRightsAppOnlyAsync` / `PrincipalHoldsPrivilegeAppOnlyAsync` remain as `?? None` / `?? false`. The readers ask the nullable ones; `WithDataverseRightsAsync` returns `ConfirmedRights(Rights, Unanswered)`, and each write gate answers `IsUnavailableFor(needed)` with a **503 that writes nothing**: to-do create, event create, upload, message → `sdap.access.dataverse_unavailable` (new, `ExternalProjectDataEndpoints.DataverseRightsUnavailable`); to-do PATCH → its existing `sdap.access.todo_write_unavailable`; delete-own → its existing `sdap.access.delete_own_unavailable`. A real denial (an answer without the right) stays 403. Lists keep `canCreate: false` (UI affordance only). A secure-roots refusal on an invoice upload stays a 403. Log lines on `null` say "no answer … unavailable, not refused", never "Dataverse does not grant". `.ProducesProblem(503)` added to the to-do / event creates, the three root uploads, the to-do PATCH and the message post |
+| K1 | No-OBO guard scope derivation | Derived from the group's mappings only; a route bound to the plane some other way would escape the scan | `ExternalPlaneNoOboGuardTests.Control_EveryLiveExternalRoute_IsRegisteredInAScannedFile`: every live `/api/v1/external` route in `RouteAuthorizationGuardTests`' route census (whole-BFF scan — `Program.cs` and `Infrastructure/` included) must be registered in a scanned file; vacuity ≥ 20 plane routes; must-fire (a plane route in `Infrastructure/…` and `Program.cs`) and must-not-fire (a scanned plane route, `/api/v1/external-access`, `/api/v1/externalthings`) controls. Passes today: every plane route is in a scanned file |
+| K3 | K5's message match | Substring, case-insensitive | Whole token (`DataverseWebApiService.NamesImpersonationPrivilege`): a longer privilege name that merely contains `prvActOnBehalfOfAnotherUser` is an answer about the user. JIT sync effect documented in §14 |
+| K6 | 404 re-ask and the 15 s bound | Passing the outer `ct` instead of the linked token to `ReaskAfterNotFoundAsync` survived the tests (`TestProbe.DelayAsync` ignored its token) | `TestProbe.DelayAsync` honours its token (and can really wait); `GetPrincipalRightsAppOnly_AReaskThatOutlastsTheBound_IsCutOffByIt` fails when `ct` is passed |
+
+**Known limits carried to the PR:**
+- **K2** (#2147). Each confirmed write asks Dataverse once or twice, each list GET once for its `canCreate`; there is no
+  per-user rate limit on the external data routes.
+- **K4** (#2148). The 5,000-row cap of the impersonated read is flagged on the module data responses but is invisible on
+  `/me` and `/projects`.
+- **SPA mapping of the new 503.** `src/client/external-spa` maps an unknown 503 reason code — see the PR body.

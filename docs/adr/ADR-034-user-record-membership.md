@@ -403,11 +403,11 @@ group) while **`ExternalAccess:ImpersonatedRootSets:Enabled` is `true`**:
 - **Every write is confirmed by Dataverse.** Before any write on that plane — create to-do, upload, create event, edit a
   to-do, post a message, delete own — the route asks Dataverse for the user's rights on the target record: app-only, as
   the BFF application user, naming the user's resolved systemuser and impersonating it (`RetrievePrincipalAccess` with
-  `Principal = systemusers(<id>)`, through `CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync` over
+  `Principal = systemusers(<id>)`, through `CallerRecordAccessProbe.GetPrincipalRightsAppOnlyOrUnknownAsync` over
   `DataverseWebApiService.RetrievePrincipalRightsOrUnknownAsync`; fail closed). A child (to-do, document, event, message)
   is admitted by `AppendTo` on the parent record **AND** the user's own Create privilege on the child table
   (`prvCreatesprk_Todo` / `_Document` / `_Event` / `_Communication`, asked the same way through
-  `CallerRecordAccessProbe.PrincipalHoldsPrivilegeAppOnlyAsync` — `RetrieveUserSetOfPrivilegesByNames` on that
+  `CallerRecordAccessProbe.PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync` — `RetrieveUserSetOfPrivilegesByNames` on that
   systemuser — uncached). The second half matters because the BFF writes the child app-only: Dataverse would otherwise
   never check the user's Create privilege, and a user MDA refuses could create the row here (task 036 fix round 1).
   `Write` admits an edit; `Delete` admits a delete-own, which also still requires the creator stamp.
@@ -419,8 +419,10 @@ group) while **`ExternalAccess:ImpersonatedRootSets:Enabled` is `true`**:
   Dataverse answers from that user's own roles, teams and shares. The plane's read set (the impersonated read) and its
   write confirmation therefore rest on one mechanism and one resolved id. A 404 is re-asked on the replication-lag
   schedule (a write right after a create); an impersonation fault (`0x8004A110`, or `0x80040220` whose message names
-  `prvActOnBehalfOfAnotherUser`) is UNKNOWN, not a denial, and adds no
-  rights; each question is bounded at 15 seconds. The same answer drives the user's list `canCreate`, and `/me` says
+  `prvActOnBehalfOfAnotherUser` as a whole token) is UNKNOWN, not a denial, and adds no
+  rights; each question is bounded at 15 seconds. A write refused only because Dataverse gave no answer (a timeout, a
+  throttle or 5xx, an UNKNOWN 403) is a retry-able 503 that writes nothing (`sdap.access.dataverse_unavailable`, or the
+  to-do PATCH's and delete-own's own 503), never a "no access" 403 (task 036 fix round 4). The same answer drives the user's list `canCreate`, and `/me` says
   `writeAccessPerRecord: true` for every Dataverse-decided user. Enforced by:
   `tests/Spaarke.ArchTests/ExternalPlaneNoOboGuardTests.cs` (no token-taking probe question, OBO exchange or
   caller-token read in the plane's handler files or in any filter or handler file its mappings bind).

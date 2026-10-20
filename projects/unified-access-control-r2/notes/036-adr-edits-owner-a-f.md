@@ -186,3 +186,33 @@ That tension predates decision (a); this change does not widen it. Decision (a) 
 - **No edit needed for K7.** No `.claude/adr/` text cites `ResolvedThroughHomeLink` after `cd258fead`; the property is
   removed. The decision-(a) drafts above (Edits A2, B1) still name it as history and are superseded by the option C
   section.
+
+## Round 4 (fix round 4, 2026-10-20) — for the main session to apply
+
+> Anchors are the `.claude/adr/` files on this branch (after `cd258fead`). The full
+> `docs/adr/ADR-034-user-record-membership.md` was updated on the branch in this round (method names, whole-token match,
+> the 503).
+
+- **ADR-028 A5 scope extension** (`.claude/adr/ADR-028-spaarke-auth-architecture.md`, lines 374–378) — F1 (a fault is
+  not a denial) and K3 (whole-token match; the JIT sync keeps the grant).
+  Old: `` - fail closed: a fault, a missing systemuser id or an unreadable answer adds no rights (both `Spaarke.Dataverse` calls
+  refuse `Guid.Empty`);
+- a 404 is re-asked on `CallerRecordAccessProbe.NotFoundRetryDelay`'s schedule; a 403 that is not an access answer
+  (e.g. `0x8004A110`, or `0x80040220` whose message names `prvActOnBehalfOfAnotherUser`) is UNKNOWN and logged as a
+  Warning; each question is bounded at 15 s; ``
+  New: `` - fail closed, and a fault is not a denial: a missing systemuser id adds no rights (both `Spaarke.Dataverse` calls
+  refuse `Guid.Empty`); a fault, a timeout or an unreadable answer adds no rights either, and a write refused only for
+  that reason is a retry-able 503 that writes nothing, never a "no access" 403;
+- a 404 is re-asked on `CallerRecordAccessProbe.NotFoundRetryDelay`'s schedule; a 403 that is not an access answer
+  (e.g. `0x8004A110`, or `0x80040220` whose message names `prvActOnBehalfOfAnotherUser` as a whole token) is UNKNOWN
+  and logged as a Warning — the same reading keeps a JIT container grant in `SpeContainerMembershipSync` for that run
+  rather than removing it (task 171); each question is bounded at 15 s; ``
+- **ADR-034 A2** (`.claude/adr/ADR-034-user-record-membership.md`, line 93) — the method names and F1.
+  Old: `` (`CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync` / `PrincipalHoldsPrivilegeAppOnlyAsync`, ADR-028 A5's mechanism) ``
+  New: `` (`CallerRecordAccessProbe.GetPrincipalRightsAppOnlyOrUnknownAsync` / `PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync`, ADR-028 A5's mechanism) ``
+  and, in the same bullet,
+  Old: `an impersonation fault (including a 0x80040220 whose message names prvActOnBehalfOfAnotherUser) is UNKNOWN and adds no rights, and each question is bounded at 15 s:`
+  New: `an impersonation fault (including a 0x80040220 whose message names prvActOnBehalfOfAnotherUser as a whole token) is UNKNOWN and adds no rights, each question is bounded at 15 s, and a write refused only because Dataverse gave no answer is a retry-able 503 that writes nothing, never a 403:`
+- **ADR-034 A2 fail-closed bullet** (line 94).
+  Old: `a failed or absent rights answer adds no rights.`
+  New: `a failed or absent rights answer adds no rights (and a write it refuses is a retry-able 503, not a 403).`
