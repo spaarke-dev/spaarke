@@ -402,3 +402,76 @@ So the design's step-1 expectation (`/me` → 403 `registration_required`), and 
 **Observations (no defect filed).**
 - **The SPA and BFF are out of step on dev.** The BFF is A9 (`00aba6d99`); the SPA is A8 (`ebc74b331`). Any B2B guest whose home tenant is on the dev list, signing in through the live SPA today, is created silently on plane Workforce with no owner. That is the documented A8 behaviour ("the A8 create sets no owner"), so it is not filed as a defect. It is the reason the gate's BU1 expectation cannot hold until the SPA is redeployed.
 - **`[ID-LINK-RECON]` decision lines log the systemuser's email in clear text** (Information, every 5 min). This is outside 186 and pre-existing, and is noted only because 186's own logs promise "never the email". No email is reproduced here.
+
+## #2110 live gate (2026-10-20)
+
+**Scope.** Server-side gate for PR #2110 (issue #2091 family, merged as `2b07480ab`). Run 16:52–17:07Z against spaarke-bff-dev, spaarkedev1 and App Insights `spe-insights-dev-67e2xz` (appId `6a76b012…`), as admin only (the default `az` login, systemuser `1d02f31c…`).
+- Tokens: ARM (for the Kudu VFS read), Dataverse, the delegated BFF token `api://1e40baad…/.default` (Azure CLI client), and App Insights REST, all from `az`. No token, secret or UPN was written.
+- One echo to note: the send response's `from` field carried the admin's email, and it reached the local console log once. It was redacted from the log file at once, and the logger then scrubbed emails. It is not reproduced here.
+- No Entra, Key Vault, app-setting, role, team, solution or tenant-config write. No SPE container was touched. The Secure fixture `a9e04977…` was used only as a filing target; `65a3fab2…` was not touched.
+- **External side effect (not Dataverse, cannot be deleted from here).** The respond-into-thread route is the in-app chat send, so it went through ACS (`spaarke-acs-dev`). It created:
+  - one BFF service ACS identity ("chat-scope only");
+  - one chat thread, `19:acsV2_ANECNPzfsjbVrJb1ME_lSE8KChvtqvN-zqA-y2xzB4E1@thread.v2`, with 30-day retention and the admin as its only participant;
+  - one message, `1792515237746`.
+
+  This is the same shape as the admin's routine dev sends of 2026-10-13 to 2026-10-18.
+- Helper scripts were in a private folder `.g2110tmp/` (`g2110_*.py`, `g2110_ai3.kql`), which was deleted at the end.
+
+**Verdict: PASS.** Steps 1, 2 and 4 pass. Step 3 passes for #2110: no new error comes from #2110's code. Two pre-existing defects surfaced during the run; one is already filed (#1638), the other is new and not filed (see Defects).
+
+### Deploy evidence: PASS
+- Kudu VFS `Sprk.Bff.Api.dll`: 19,854,848 B, sha256 `fa15fcf0…`, InformationalVersion **`1.0.0+21184ecd4789c2124c7d142237ba4dce0d8d5b6e`**. `git merge-base --is-ancestor 2b07480ab 21184ecd4` holds.
+- Metadata names present: `PlacedByWriter`, `RefileThreadStep`, `FilingReconcileHost`, `JoinThreadAsync`, `LineageOnlyTargetOf`, `WithLineageLookupsIn`.
+- User strings (UTF-16) present: "no SecureChildReconciler is registered" and "the thread reconcile after its re-file failed".
+- **Telemetry.** `itemCount` was 1 on every request, trace and exception in the 2 h before the run, so no sampling weights were applied. Two whole operations were still missing (see step 2b).
+
+### Gate table
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 1 | Thread join → the after-re-file step runs exactly once | **PASS** | **Route.** The respond-into-thread writer, `CommunicationService.AssignExplicitThreadAsync` → `ThreadResolver.JoinThreadAsync`, reached through `POST /api/communications/send` {Type Message 100000004, `threadId`, no associations}. The capture-path join (`ResolveAndAssignAsync`, an existing thread found by key) is reachable only from inbound mail or an ACS thread key, so it was not run live.<br>**Setup.** `POST /api/communications/threads` {sprk_project, fixture} → **200**. Thread T `1d5d8bcd-a6cc-f111-a05d-0022482913fc` ("UAC-GATE-2110 20261020-165346Z", RecordAnchored, Open) is owned by **Secure Record Owners `6eabc7f9…`**, BU Secure Record, with 0 POA rows. The fixture held no thread and no communication before.<br>**Join** (16:53:54Z, op `3740009a…`): send → **200**, communication C `9e9775d6-a6cc-f111-a05d-0022482913fc`.<br>• It inherited the fixture as its regarding ("Inherited regarding sprk_project:a9e04977… from target thread"), so C was created already owned by the Secure team.<br>• **Order in that one operation:** thread read, then the reparent's owner reads, then the isolation read **before** the write, then the single thread-stamp write `Updated sprk_communication … with 1 fields` (16:53:59.42Z), then the step.<br>• **The step's lines in that operation:**<br>&nbsp;&nbsp;– the mirror: **1** `[SECURE-CHILD-SHARES] grant SystemUser 1d02f31c… on sprk_communication 9e9775d6…` (16:54:04.88Z), and `scope=all status=Completed inScope=1 updated=1 granted=1`;<br>&nbsp;&nbsp;– the pass: **1** `[SECURE-CHILD-RECONCILE] root=sprk_communication 9e9775d6… mode=Apply isolated=True mayRelease=False status=Completed examined=0 … failed=0` (16:54:07.17Z);<br>&nbsp;&nbsp;– the gate Decision Record step: **1** `RetrieveMultiple on sprk_decisionrecord returned 0 records` (16:54:07.29Z), after the pass, as the code orders it.<br>&nbsp;&nbsp;– Then "Stamped explicit thread target … (respond-into-thread)" (16:54:07.29Z).<br>• **Not run:** no thread-reconcile or "Joined existing thread" line, which is `PlacedByWriter`.<br>• **Across all operations to 17:07Z**, C has exactly **1** `root=` line and **1** request-side grant. No other writer ran the step.<br>**Dataverse after.** C is owned by **Secure Record Owners**, BU **Secure Record**, filed under the fixture, with thread = T. Its POA is **1 row, admin, `Read, Write, Append, AppendTo, Share`**, the fixture's own (only) sharee and mask. So the owner and the shares mirror the Secure root.<br>**Gate Decision Record.** When the step ran, C had **0** gate records. The comms-policy then decided DENY (confidence 0.35 < 0.45), and the `GateDecisionRecord` job wrote record `244611df-a6cc-f111-a05d-0022482913fc` at 16:54:12Z. The writer resolved that record **directly to Secure Record Owners** (owning user null), so no re-own was needed, and none happened (0 "re-owned to team" lines). The 16:56:05Z share job mirrored it (admin, the same mask). "Re-owned once" therefore had nothing to act on live: the step's gate query ran once and found 0. |
+| 2a | Same-parent re-file on a communication → no step | **PASS** | `PATCH /api/communications/{C}/filing` {`sprk_RegardingProject` = the fixture C already holds, plus the ADR-024 fields} at 16:57:47Z (op `3e92b92a…`) → **204**, 3.6 s.<br>The op has 187 traces, and **none** is a step line:<br>• 0 `[SECURE-CHILD-RECONCILE]` and 0 `[SECURE-CHILD-SHARES]` lines;<br>• 0 `root=` lines;<br>• 0 gate-record or D-169 lines;<br>• 0 reassign or thread lines.<br>The only Warning is the known "Token on PATCH … appid=04b07795…" diagnostic. After the write, the op reads the descendant tables (to-do, event, analysis, memo, signal, decision record). That is `CoreAncestorRestamper.RestampChildrenOfAsync`, which runs on every write before the `ParentsUnchanged` check (`ChildRecordEndpoints.UpdateAsync`), not the step.<br>**Dataverse.** Owner, BU, filing, thread and POA are unchanged. Only `modifiedon`/`versionnumber` moved (28740650 → 28740675), because the same values were written ("written, but no re-file"). |
+| 2b | Must-fire / must-not-fire pair on `PATCH /api/v1/events/{id}/filing`, the shape #2094 R1 used | **PASS** | **Setup.** Ordinary project P `4733a394-a7cc-f111-a05b-7c1e520a989f` (Web API, admin, BU Spaarke). Event E `d39ffc94-a7cc-f111-a05d-3833c5e9614d` created under P (`POST /api/v1/events` → 201), owned by team "Spaarke", with its log `d59ffc94…`.<br>**Must-fire, in → fixture** (op `8ff0fc31…`, 9.2 s): 204. The op shows `Re-filed sprk_event … owner reassigned to team 6eabc7f9…`, the grant on E and on the log, `reassign: sprk_eventlog … -> team 6eabc7f9…`, and `root=sprk_event … isolated=True changed=1 failed=0`. E and its log ended Secure-owned with the admin mirror. The earlier attempt at 16:59:44Z (op `f9fb2b85…`) showed the same.<br>**Must-not-fire, the same fixture again** (op `5e830866…`, 2.1 s, request retained, 175 traces): 204.<br>• **0** `root=`, `[SECURE-CHILD-*]` or reassign lines; the op holds the one `PATCH /api/data` write.<br>• E's owner, BU, POA and log are unchanged.<br>• **Compare #2094's same rebind on this route** (2026-10-18, before #2110): the step still ran there (`alreadyCorrect=1 changed=0`, shares `unchanged=1`, about 5 s). It no longer runs.<br>**Out → P** (204): E and its log are back to "Spaarke", with POA 0 rows (released).<br>**Telemetry gap.** The first same/out pair (17:00:0x and 17:00:2x) left **no request row and no traces**, although later `/healthz` rows were ingested. That pair was therefore repeated at 17:02:44–17:03:55Z. As #2094 already found, a re-file gate cannot rely on a dev request's telemetry being present. |
+| 3 | App Insights: no new exceptions or Errors tied to these operations | **PASS for #2110** (two pre-existing defects found) | **Windows.** Gate 16:53–17:05:30Z against before 16:41–16:53Z (role `spaarke-bff-dev`); 0 × 5xx in both.<br>**Unchanged noise in both windows:**<br>• `[SECURE-CENSUS] HumanPrincipalReachesSecureBusinessUnit` (84 against 84);<br>• `[ID-LINK-RECON] spaarke-acme … binding column Failed` (2 against 2);<br>• `ODataError "Invalid hostname for this tenancy"` (#1830, 2 against 2).<br>**New in the gate window, none from #2110's code:**<br>(a) `sprk_userentityassociation` alternate-key not found ×10, op-less, at 16:59:27Z after the event create. This is known; #2094's baseline had 833 in 24 h.<br>(b) **#1638 (open):** `CommunicationArrivedProducer` faults reading the thread on `sprk_regardingreportcard` (Warning), so `[FANOUT] … privateOrUnknown=True recipients=0`. 17 in 14 days.<br>(c) **New, NOT FILED:** the OpenAI 400 `Invalid schema for response_format 'Create_Task_From_Email' … Missing 'dueDate'` (OpenAiClient Error and CommunicationCreateTaskAi Warning). 34 in 14 days, so every email or message create-task enrichment fails (see Defects).<br>(d) The share job's 400 race (see Observations).<br>**Telemetry after cleanup:** no exceptions and no Errors at 17:07Z. |
+| 4 | Cleanup | **PASS** | Every row was deleted (204) and read back (404); see the table. **Sweep at 17:06:39Z:** 0 rows created since 16:53:30Z in `sprk_communication`, `sprk_communicationthread`, `sprk_communicationparticipant`, `sprk_communicationchannelref`, `sprk_decisionrecord`, `sprk_signal`, `sprk_todo`, `sprk_memo`, `sprk_emailreviewlog`, `sprk_event`, `sprk_eventlog`, `sprk_project` or `appnotification`. 0 `UAC-GATE-2110*` projects, events, communications or threads. **Fixture `a9e04977…` is unchanged:** `modifiedon` 2026-10-17T03:19:05Z, version 28460469, Secure Record Owners, BU Secure Record, POA admin only with the same mask. |
+
+### Created and deleted (all as admin)
+
+| Row | Id | Delete | Read-back |
+|---|---|---|---|
+| `sprk_decisionrecord` (gate record, comms-policy DENY job) | `244611df-a6cc-f111-a05d-0022482913fc` | 204 | 404 |
+| `sprk_communicationparticipant` (participant index) | `224611df-a6cc-f111-a05d-0022482913fc` | 204 | 404 |
+| `sprk_communication` C (BFF send) | `9e9775d6-a6cc-f111-a05d-0022482913fc` | 204 | 404 |
+| `sprk_communicationthread` T (BFF `/threads`) | `1d5d8bcd-a6cc-f111-a05d-0022482913fc` | 204 | 404 |
+| `sprk_eventlog` (E's create log) | `d59ffc94-a7cc-f111-a05d-3833c5e9614d` | 204 | 404 |
+| `sprk_event` E (BFF `/api/v1/events`) | `d39ffc94-a7cc-f111-a05d-3833c5e9614d` | 204 | 404 |
+| `sprk_project` P (Web API) | `4733a394-a7cc-f111-a05b-7c1e520a989f` | 204 | 404 |
+
+Not deletable from here: the ACS chat thread, message and service identity listed in Scope. They expire under the ACS 30-day retention.
+
+### Defects
+- **New, not filed (outside #2110; ontology / email-intelligence own it):** `infra/dataverse/actions/create-task-from-email.action.json:50`.
+  - The task item's `"required": ["subject", "description", "citation", "reason", "confidence"]` omits `dueDate`, which is declared in `properties` (line 60).
+  - OpenAI strict structured output needs every property to be listed in `required`, so every CREATE-TASK-FROM-EMAIL run returns 400 (34 times since 2026-10-07). `CommunicationCreateTaskAi` logs "completion failed" and creates no candidate.
+  - The fix keeps the "omit when no date" rule: list `dueDate` as required, and keep the prompt's "empty string when no date" (or make it `["string","null"]`). Then re-deploy the Dataverse action row.
+  - Not filed here: the main session decides whether to file it and where.
+- **Known, open: #1638.** `CommunicationArrivedProducer.cs:107` selects `RegardingFieldMap.AllRegardingFields`, which includes `sprk_regardingreportcard`, on `sprk_communicationthread`, so no communication-arrived fan-out is delivered for a threaded message. Seen again here.
+
+### Observations (no defect filed)
+- **The inline step and the two-minute share job raced on a newly created Secure communication.** The 16:54:00Z `secure-child-share-reconciliation` run picked up C, which was created Secure-owned at 16:53:58Z, while the request's step was mirroring it.
+  - The job's own `GrantAccess` for the admin on C got **400** (16:54:04.42Z, Warning).
+  - Its read-back then logged "did not read back as its mirror after the writes", and the run ended `status=Incomplete notUpdated=1` (Warning).
+  - The request's grant (16:54:04.88Z) landed, and the next run (16:56:05Z) completed with C unchanged.
+  - The end state is correct, and the job fails closed and retries as designed.
+  - The same 400 also occurred on 2026-10-06, so the race predates #2110. #2110 makes it reachable from respond-into-thread, which used to run no step.
+  - Cost: one Warning pair per collision.
+- **Same-parent re-files now cost less:** 2.1 s against 9.2 s for a real move on the event route, and 3.6 s on the communication route. In #2094's gate the same no-op ran the full step.
+- **A respond-into-thread send is filed under the thread's record when the message is created** (D1 inheritance). The join therefore re-files a message that is already Secure-owned: `wasIsolated` = true and nothing moves owner. On this path the step only mirrors and checks the gate records. A message carrying its own ordinary association, joined into a Secure thread, would move owner inside the join. That shape was not run live; it is covered offline by `RespondIntoThread_IntoASecureMattersThread_…`.
+
+**Verdicts:**
+- Deploy: PASS.
+- 1 (thread join, step exactly once): PASS.
+- 2a (communication same-parent): PASS.
+- 2b (event route must-fire / must-not-fire): PASS.
+- 3 (App Insights): PASS for #2110, plus one new unfiled pre-existing defect (create-task schema) and #1638 seen again.
+- 4 (cleanup): PASS.
