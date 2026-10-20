@@ -343,3 +343,62 @@ traces | where timestamp > datetime(2026-10-16T06:03:13Z) and cloud_RoleName == 
   - policy `6ee40d2a-34cc-f111-a05b-7c1e520a989f` deleted (204, then 404).
   - No `UAC-2102-GATE*` rows remain.
 - **#2102 (#2084) live gate: PASS.** All steps are complete. #2084 is closed.
+
+## 186 live gate (2026-10-20)
+
+**Scope.** Server-side half of the task 186 dev gate (design `186-model1-workforce-design.md` §6 steps 1–7, read against the A9 code that is deployed). Run 14:06–14:20Z against spaarke-bff-dev (live `1.0.0+00aba6d99`), spaarkedev1, App Insights `spe-insights-dev-67e2xz`, and the Spaarke tenant's directory (Graph read only). Run as admin only (the default `az` login).
+- **The identity under test:** "the Tracy guest", a B2B guest in the Spaarke tenant, object id `918d0e7a…`, home tenant `bc3aa7f4…`.
+- Tokens: Dataverse, Graph (read), and App Insights, all from `az`. No token, email, UPN or invite code was printed or written.
+- **Read-only.** No Dataverse, role, Entra, Key Vault, app-setting or tenant-config write. Step 6's privilege removal was **not** run, because its precondition failed (see below). No vault was read. App settings were read with a name filter only.
+- Helper scripts were in a private folder `.g186tmp/` (`g186_*.py`), which was deleted at the end.
+
+**Verdict: NOT RUN. The Tracy guest has not reached the BFF.** The owner's "is verified" matches the guest's **invitation redemption**, not a sign-in to the SPA. **The deployed SPA cannot run the A9 registration flow at all.**
+
+**What happened, from the server side.**
+- **Directory (Graph).**
+  - The guest was created by invitation at 03:41:41Z and redeemed at 03:42:15Z (`externalUserState` Accepted). It has 0 licences, no group memberships, and is enabled.
+  - Every Spaarke-tenant sign-in by the guest is a My Apps / App Access Panel / My Profile sign-in at 03:42–03:45:33Z (`crossTenantAccessType b2bCollaboration`; one 50140 "Keep me signed in" interrupt, then success). There is **no sign-in to `9f1da340…` (Spaarke Workspace) or to any Spaarke app**, and none at all after 03:45:33Z (re-polled at about 14:18Z).
+- **BFF (App Insights; `requests` is unsampled, `sum(itemCount)` = `count()`).**
+  - 0 `/api/v1/external/*` and 0 `registration` requests since 03:39Z. The last external request was 03:38:20Z, **before the guest existed**.
+  - 0 `[A9-REG]`, `[WF-AUTH]`, `[ID-BIND]`, `registration_required` or WorkforceHome lines since 03:39Z.
+  - Since 03:39Z: 502 requests in all, 0 × 5xx.
+- **The deployed SPA** (`swa-spaarke-external-spa-dev`, environment `default`, last updated 2026-10-18T03:36:36Z) is `deploy-external-spa` run `39094144398`, from `work/spaarke-SPA-external-access-platform-r3` @ **`ebc74b331`**.
+  - The served `/assets/app.js` pins the workforce realm to client `9f1da340…` and tenant `a221a95e…` ("organizations/common are refused (ADR-028 A8)"), with BFF scope `api://1e40baad…/user_impersonation` and BFF `spaarke-bff-dev`.
+  - It contains **no** `registration_required` handling and no `/registration` call.
+  - `ebc74b331` predates `RegistrationPage.tsx` and `WorkforceHomeGate.tsx`, which `00aba6d99` has. So the BFF is A9, but the SPA in front of it is still A8.
+
+**What would happen if the guest signed in through this SPA today (code at `00aba6d99`).** This SPA would get a Spaarke-tenant token (`tid` Spaarke, `acct = 1`, `idp` = `bc3aa7f4`). That token goes to the default scheme, not WorkforceHome, so the A9 path never runs:
+- `WorkforcePrincipalResolver.ResolveAsync` finds no systemuser and takes branch (b).
+- The binder's member test passes: dev's `WorkforceIdentity:CustomerTenantIds` = [`a221a95e…`, `bc3aa7f4…`], so it returns Member → `EmailBindAndCreate` (`ContactIdentityBinder.cs:297`).
+- With no email match it reaches **`CreateByOid` on the first `/me`** (`ContactBindingDecision.cs:830,858`), so the contact is **created silently**, with no `registration_required` and no form.
+- That contact is on plane **Workforce (100000001)**, and its create sets **no owner** (`ContactIdentityStore.cs:780-818`: "Only a WorkforceHome create carries … an owner"). It would therefore be owned by the BFF application user in the root BU "Spaarke", **not BU1**.
+- `POST /registration` would refuse this token with 403 `registration_home_identity_required` (`ExternalRegistrationEndpoints.cs:117-123`).
+
+So the design's step-1 expectation (`/me` → 403 `registration_required`), and the BU1 owner rule, hold only for a WorkforceHome token from an A9 SPA build.
+
+| Step | Result | Evidence |
+|---|---|---|
+| 1. Requests: `/me` 403 `registration_required` → registration 201 → `/me` 200 | **NOT RUN** (no guest traffic) | See above: 0 external requests and 0 registration or resolver lines since 03:39Z, and no Entra sign-in to the SPA client. |
+| 2. One contact keyed to the guest; registration columns; owner BU1; view | **NOT RUN** (no contact). Config ready; the view does not exist. | Contacts: `sprk_externalobjectidkey` = the guest oid → 0; `startswith(…,'918d0e7a')` → 0; the secured `sprk_externalobjectid` → 0; name contains Tracy or Cheatham → 0; plane WorkforceHome (100000002) → 0 on all of dev; created since 2026-10-19T12:00Z → 0.<br>**Owner config (ready).** `ExternalAccess__CustomerBusinessUnitId` = `cb15f587…` ("Spaarke Business Unit 1", parent "Spaarke" `06fbf21c…`). Its default owner team is **`cf15f587…`** ("Spaarke Business Unit 1", `isdefault`, type Owner), the single team that `BuildDefaultOwnerTeamPath` would find. The App Service last restarted at 13:02:08Z, so the setting is live. A WorkforceHome registration would be owned by `cf15f587…`.<br>**View.** No contact `savedquery` named like "Workforce", "registered", "Self" or "Home" on dev. "Workforce contacts (self-registered)" (design §4b) is not in the source at `00aba6d99` either. Under A9 that part is SPA-r3's and is unbuilt; this is a gap, not a defect. |
+| 3. No systemuser for the guest; Ralph Dewey still a systemuser | **PASS** (guest leg: no row; Dewey leg: row read only) | `systemusers` by `azureactivedirectoryobjectid` = the guest oid, any state → **0**; by name Tracy or Cheatham → **0**; created since 2026-10-19T12:00Z → **0**.<br>Ralph Dewey: systemuser `ba65dad3…`, **enabled**, `islicensed` true, access mode Read-Write, BU Spaarke, oid `bc596ecd…`. The BFF logged `[WF-AUTH] Resolved workforce caller … to systemuser ba65dad3…` 410 times in 14 days, the last at 03:38:20Z. |
+| 4. Resubmit creates nothing new | **NOT RUN** | No registration happened. There are 0 contacts for the guest and so no duplicates. |
+| 5. Entitlements `legal-front-door` + `policy-library`; an intake by this contact | **NOT RUN** | No `/me` or `/me/entitlements` request from the guest. `sprk_servicerequests` created since 03:40Z → **0**. |
+| 6. Privilege removal (`prvCreatesprk_ServiceRequest`) and the refusal | **NOT RUN, by rule** (no registered contact and no intake) | The role was read only. "Spaarke Internal Contact User (Workforce)" has root `9deaac9c…` (BU Spaarke, `modifiedon` 2026-10-19T02:37:58Z) and 6 copies. 658 privileges: Basic 314, Global 232, Deep 95, Local 17.<br>On `sprk_servicerequest`: Create **Basic** (`fd03f48f…`), Read Basic, AppendTo Basic, Delete Basic. On `sprk_document`: Create Basic, Read Deep. So the ceiling ask of 2026-10-16 is in place.<br>**Nothing was removed.** For the proposed window, see below. |
+| 7. `email` in the guest token | **UNDETERMINED** (no guest token reached the BFF) | App `1e40baad…` ("SDAP-BFF-SPE-API", `AzureADMultipleOrgs`, `requestedAccessTokenVersion` 2) lists `email`, `preferred_username`, `upn`, `acct`, `given_name` and `family_name` as optional **access-token** claims. Whether Entra emits `email` for a B2B guest, with `removeUnverifiedEmailClaim` true, is still unobserved.<br>The server would show the answer as follows: `POST /registration` 403 `sdap.access.registration_email_missing` with the trace `[A9-REG] Registration refused: the home token carries no usable email claim`, or a 201. Only `email` / `ClaimTypes.Email` count, never `preferred_username` or `upn` (`ExternalRegistrationEndpoints.cs:256-264`). On the A8 path it would instead show as an E1 create with no `emailaddress1`. |
+| App Insights since 13:02Z | **PASS (no new errors)** | Exceptions: only `ODataError "Invalid hostname for this tenancy"` ×15 (#1830). Error traces: `[SECURE-CENSUS] HumanPrincipalReachesSecureBusinessUnit …` ×336, which has run since 2026-10-13 (57,540 lines in 7 days); it is pre-existing and not related to this gate. One `RoutingConsumerTypeHealthCheck FAILED: AI catalog drift` at boot. |
+
+**What the owner and main session need to do before the gate can run.**
+1. **Deploy an A9 SPA build** to `swa-spaarke-external-spa-dev`: `deploy-external-spa` from a commit that has `RegistrationPage.tsx` and `WorkforceHomeGate.tsx` (for example the R3 branch at or after `00aba6d99`, or master once R3 merges). The A9 home sign-in also needs the SPA's multi-tenant workforce-home client variables. That is R3's deploy (SPA-r3 owns registration), not UAC's.
+2. **Then** the owner signs in as the Tracy guest **at the home directory** (the WorkforceHome flow) and registers once. Only then is step 1 meaningful.
+   - Do **not** sign in through the current A8 SPA first. It would silently create a Workforce-plane contact owned by the root BU (above). That would make the guest a resolved A8 contact, and its oid would differ from the home oid the A9 path uses, which muddies the gate.
+3. **Re-run this gate** (steps 1–5 and 7). Step 2 expects `sprk_identityplane` 100000002, `sprk_externaltenantid` `bc3aa7f4…`, `sprk_externalobjectid` and `sprk_externalobjectidkey` = the **home** oid (not `918d0e7a…`), owner team `cf15f587…`, no `parentcustomerid`, and `createdby` the BFF.
+4. **Proposed step-3 refusal window** (owner-driven; UAC holds the privilege change):
+   - (a) The owner, registered, submits intake #1 → expect 201.
+   - (b) UAC records `prvCreatesprk_ServiceRequest` at Basic (`fd03f48f…`) on root `9deaac9c…`, then removes it (RemovePrivilegeRole).
+   - (c) The owner submits intake #2 **at least 5 minutes later**, because `WorkforceCeilingTtl` is 5 min (`UserPrivilegeChecker.cs:85`). Expect 403 `sdap.access.deny.workforce_baseline_privilege_missing`.
+   - (d) UAC restores the privilege at Basic immediately, in a try/finally, and re-reads the role.
+   - The window lasts about 6–8 minutes. Agree a start time with the owner beforehand.
+
+**Observations (no defect filed).**
+- **The SPA and BFF are out of step on dev.** The BFF is A9 (`00aba6d99`); the SPA is A8 (`ebc74b331`). Any B2B guest whose home tenant is on the dev list, signing in through the live SPA today, is created silently on plane Workforce with no owner. That is the documented A8 behaviour ("the A8 create sets no owner"), so it is not filed as a defect. It is the reason the gate's BU1 expectation cannot hold until the SPA is redeployed.
+- **`[ID-LINK-RECON]` decision lines log the systemuser's email in clear text** (Information, every 5 min). This is outside 186 and pre-existing, and is noted only because 186's own logs promise "never the email". No email is reproduced here.
