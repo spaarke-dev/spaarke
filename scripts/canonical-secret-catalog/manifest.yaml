@@ -648,6 +648,18 @@ per_env_settings:
       at POST /api/runs and again by H4b; H13 T7 fails a stamp whose slots do
       not carry exactly this list. Indices the list no longer has are removed.
 
+  - key: 'ExternalAccess__CustomerBusinessUnitId'
+    per_env_source: 'from-h10-output:customer_business_unit_id'
+    iOptionsModule: 'ExternalAccessModule (ExternalAccessOptions)'
+    required: true
+    notes: >-
+      R3 073 / ADR-028 A9 (SPA-external-access-platform-r3). The customer's own Dataverse
+      business unit id (H10's InterStepState.CustomerBusinessUnitId, "D"-format GUID; H4b <- H10 in
+      the DAG), written on BOTH slots. Its DEFAULT team owns every contact the external
+      registration route (POST /api/v1/external/registration) creates. The BFF refuses a value
+      that is not a GUID at startup, and without the setting the registration route answers
+      500 registration_owner_unconfigured and creates nothing, so every stamp needs it.
+
   - key: 'Dataverse__EnvironmentUrl'
     per_env_source: 'from-h5-output:dataverse_env_url'
     iOptionsModule: 'DataverseOptions'

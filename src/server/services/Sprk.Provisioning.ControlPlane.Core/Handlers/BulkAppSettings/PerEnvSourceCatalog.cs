@@ -83,6 +83,9 @@ public static class PerEnvSourceCatalog
         // T227c (G18): the customer's SPE container — a plain setting (EmailProcessing__DefaultContainerId,
         // Communication__ArchiveContainerId). It was a KV secret nothing could write (H8 runs after H4). H4b ← H8.
         Output("from-h8-output:spe_container_id", HandlerIds.H8, nameof(InterStepState.SpeContainerId), r => r.InterStepState.SpeContainerId),
+        // R3 073 / A9: ExternalAccess:CustomerBusinessUnitId — the customer's own business unit (H10's "D"-format GUID); the BFF refuses
+        // a non-GUID at startup and answers registration_owner_unconfigured without it. H4b ← H10 in the DAG.
+        Output("from-h10-output:customer_business_unit_id", HandlerIds.H10, nameof(InterStepState.CustomerBusinessUnitId), r => r.InterStepState.CustomerBusinessUnitId),
         Intake("from-intake-parameter:tenant_id", IntakeParameterCatalog.TenantId),
         Intake("from-intake-parameter:container_type_id", IntakeParameterCatalog.ContainerTypeId),
         // T254: the OPTIONAL monthly OpenAI spend limit (G37) — read by a `required: false` entry, so a run without it

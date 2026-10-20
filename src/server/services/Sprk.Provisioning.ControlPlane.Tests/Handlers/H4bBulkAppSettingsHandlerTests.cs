@@ -90,6 +90,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
     private const string AppServiceName = "sprk-prod-api";
     private const string EnvironmentName = "prod";
     private const string SecretsVer = "manifest-hash-h4b-xyz";
+    private const string CustomerBusinessUnitId = "7c1b2a40-5d6e-4f80-9a1b-2c3d4e5f6a7b";   // R3 073: H10's InterStepState.CustomerBusinessUnitId ("D" GUID)
 
     // T255: the Worker's reserved tenants and the run's customer workforce tenants.
     private const string SpaarkeTenantId = "5a5a5a5a-0000-4000-8000-000000000001";
@@ -178,6 +179,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
             ["customer_id"] = CustomerId,   // T238: the run's own customerId, verbatim
             ["dataverse_env_url"] = "https://acme.crm.dynamics.com/",   // T245b: H5's DataverseEnvUrl
             ["spe_container_id"] = "b!h8-created-customer-container",   // T227c: H8's SpeContainerId
+            ["customer_business_unit_id"] = CustomerBusinessUnitId,   // R3 073: H10's CustomerBusinessUnitId
             ["openai_monthly_limit_usd"] = "500",   // T254: the optional OpenAI spend limit (intake)
         };
         // T255: list sources write {key}__0..__{n-1}.
@@ -257,6 +259,59 @@ public sealed class H4bBulkAppSettingsHandlerTests
 
         result.Should().BeOfType<HandlerResult.Success>();
         writer.LastRequest!.Settings["AiSpendLimit__MonthlyLimitUsd"].Should().Be("500");
+    }
+
+    // ---------- R3 073: ExternalAccess__CustomerBusinessUnitId (H10's customer business unit) ----------
+
+    [Fact]
+    public async Task R3_073_RealManifest_WritesExternalAccessCustomerBusinessUnitId_FromH10()
+    {
+        // The SHIPPED manifest entry (not a hand-built one) drives H4b: the BFF fails startup on a non-GUID and its
+        // registration route answers 500 registration_owner_unconfigured without the setting. The writer applies one
+        // Settings map to production AND staging, so a key in it is on both slots.
+        var entries = await RealCustomerBusinessUnitEntryAsync();
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(BuildRun(), "etag-r3-073"), FakePerEnvManifest.Success(entries),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.LastRequest!.Settings["ExternalAccess__CustomerBusinessUnitId"].Should().Be(CustomerBusinessUnitId);
+        Guid.TryParseExact(writer.LastRequest.Settings["ExternalAccess__CustomerBusinessUnitId"], "D", out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task R3_073_RunWithoutCustomerBusinessUnitId_ResumableFailure_BeforeAnyWrite()
+    {
+        // H10 has not recorded the unit: same behaviour as any other missing required upstream output (AC2).
+        var run = BuildRun();
+        run.InterStepState.CustomerBusinessUnitId = null;
+        var writer = FakeSettingsWriter.Succeeds();
+        var probe = FakeHealthzProbe.Success();
+        var handler = Build(new FakeRepository(run, "etag-r3-073b"),
+            FakePerEnvManifest.Success(await RealCustomerBusinessUnitEntryAsync()), writer, probe, new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
+        failure.Diagnostic.Should().Contain("customer_business_unit_id");
+        failure.Diagnostic.Should().Contain("ExternalAccess__CustomerBusinessUnitId");
+        failure.Diagnostic.Should().Contain("InterStepState.CustomerBusinessUnitId");
+        failure.Diagnostic.Should().Contain("H10 must complete");
+        writer.CallCount.Should().Be(0);
+        probe.CallCount.Should().Be(0);
+    }
+
+    private static async Task<IReadOnlyList<PerEnvSettingEntry>> RealCustomerBusinessUnitEntryAsync()
+    {
+        var read = await new FilePerEnvSettingsManifest(NullLogger<FilePerEnvSettingsManifest>.Instance)
+            .ReadAsync(CancellationToken.None);
+        var entry = ((PerEnvSettingsManifestReadResult.Success)read).Entries
+            .Single(e => e.Key == "ExternalAccess__CustomerBusinessUnitId");
+        return [entry];
     }
 
     // ---------- AC-2 per-env-input missing ----------
@@ -974,6 +1029,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         ["CustomerId"] = CustomerId,
         ["DataverseEnvUrl"] = "https://acme.crm.dynamics.com/",
         ["SpeContainerId"] = "b!h8-created-customer-container",
+        ["CustomerBusinessUnitId"] = CustomerBusinessUnitId,
         ["OpenaiMonthlyLimitUsd"] = "500",
     };
 
@@ -1263,6 +1319,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         s.BffAppRegId = "00000000-aaaa-bbbb-cccc-999999999999";
         s.DataverseEnvUrl = "https://acme.crm.dynamics.com/";   // H5 output (task 245b — Dataverse__ServiceUrl)
         s.SpeContainerId = "b!h8-created-customer-container";   // H8 output (task 227c — EmailProcessing__DefaultContainerId)
+        s.CustomerBusinessUnitId = CustomerBusinessUnitId;   // H10 output (R3 073 — ExternalAccess__CustomerBusinessUnitId)
         return run;
     }
 

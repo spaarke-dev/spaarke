@@ -60,6 +60,9 @@ param(
     [string]$CosmosEndpoint,
 
     [Parameter(Mandatory = $true)]
+    [string]$CustomerBusinessUnitId,
+
+    [Parameter(Mandatory = $true)]
     [string]$CustomerId,
 
     [Parameter(Mandatory = $true)]
@@ -145,6 +148,7 @@ $settings = @(
     "Email__WebhookSecret=$(Format-KvRef 'Email-WebhookSecret')",
     "Email__WebhookSigningKey=$(Format-KvRef 'Email-WebhookSigningKey')",
     "EmailProcessing__DefaultContainerId=$SpeContainerId",
+    "ExternalAccess__CustomerBusinessUnitId=$CustomerBusinessUnitId",
     "Graph__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
     "Graph__Credentials__Order__0=ManagedIdentityFederated",
     "Graph__Credentials__RequireSecretFreeIdentity=true",

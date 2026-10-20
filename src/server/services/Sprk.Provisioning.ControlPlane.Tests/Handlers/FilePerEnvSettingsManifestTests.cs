@@ -256,6 +256,22 @@ public sealed class FilePerEnvSettingsManifestTests
     }
 
     [Fact]
+    public async Task ReadAsync_RealEmbeddedManifest_CustomerBusinessUnitId_IsRequiredAndSourcedFromH10()
+    {
+        // R3 073 / ADR-028 A9: the BFF's registration route answers 500 registration_owner_unconfigured without
+        // ExternalAccess__CustomerBusinessUnitId, so every stamp needs it and H10 (which creates the unit) is its producer.
+        var entries = ((PerEnvSettingsManifestReadResult.Success)await NewManifest().ReadAsync(CancellationToken.None)).Entries;
+
+        var entry = entries.Single(e => e.Key == "ExternalAccess__CustomerBusinessUnitId");
+
+        entry.Required.Should().BeTrue();
+        entry.Indexed.Should().BeFalse();
+        entry.PerEnvSource.Should().Be(PerEnvSettingSource.FromHandlerOutput);
+        entry.ParameterKey.Should().Be("customer_business_unit_id");
+        PerEnvSourceCatalog.BySourceKey["customer_business_unit_id"].ProducerHandlerId.Should().Be("H10");
+    }
+
+    [Fact]
     public async Task ReadAsync_RealEmbeddedManifest_WorkforceTenants_IsARequiredIndexedListFromIntake()
     {
         // T255 (INCOMING-141): H4b writes WorkforceIdentity__CustomerTenantIds__N on both slots from intake
