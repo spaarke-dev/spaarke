@@ -40,6 +40,10 @@
 |---|---|---|---|
 | **#2078** (draft) | #1074, #1567 (036) | C:/wt036 `feat/uac-036-fr20-flag-gated-swap` @ e7a8392bb | Held for owner item 1. Next round: pass-1 K-items + Path C for all systemusers + critique conditions (404 re-ask, fault vs denial, no-OBO ArchTest, CA note) + ADR edits (`notes/036-adr-edits-owner-a-f.md`, B1 widened). |
 
+## Task 186 close-out checklist (additions)
+- Verify that the Workforce-role export includes ebilling's prvCreatesprk_InvoiceSubmission (Basic) + prvReadsprk_InvoiceSubmission (Deep). ebilling applies them on dev under the owner approval given in its session, 2026-10-20.
+- Gate blocked on R3 059 stages E/F (A9 SPA). The owner signs in as Tracy at her HOME directory, not as the guest.
+
 ## Next actions
 1. On the #2121 implementer result: adversarial review (Opus, ×2 for security), fix rounds, then ask owner sign-off.
 2. After R3 deploys #2110: run its server gate.
