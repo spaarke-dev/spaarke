@@ -43,9 +43,13 @@ public sealed class RefileWriterBindShapeTests
     private static readonly Guid TodoUnderCommunication = Guid.Parse("20910003-0000-4000-8000-0000000000d1");
     private static readonly Guid Sharee = Guid.Parse("20910003-0000-4000-8000-0000000000b1");
     private static readonly Guid ConfirmingUser = Guid.Parse("20910003-0000-4000-8000-0000000000e1");
+    private static readonly Guid ThreadA = Guid.Parse("21100003-0000-4000-8000-0000000000a1");
+    private static readonly Guid ThreadB = Guid.Parse("21100003-0000-4000-8000-0000000000a2");
 
     private const int CollaborateMask = 1 | 2 | 4 | 16;
     private const string MatterBind = "sprk_RegardingMatter@odata.bind";
+    private const string ProjectBind = "sprk_RegardingProject@odata.bind";
+    private const string ThreadBind = "sprk_CommunicationThread@odata.bind";
 
     private static readonly DataversePrincipalRef Secure = DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam);
     private static readonly DataversePrincipalRef General = DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam);
@@ -456,6 +460,158 @@ public sealed class RefileWriterBindShapeTests
         AssertMovedIntoSecure();
     }
 
+    // ── #2110 (ontology K3): a message's thread is a LINEAGE parent (not an ownership parent): moving it is a change ─────
+
+    [Fact(DisplayName = "#2110 (ontology K3): the output orchestrator's update re-binding the held matter AND moving the communication's thread runs the step once")]
+    public async Task DataverseUpdateHandler_TheHeldMatterAndAnotherThread_RunsTheStepOnce_2110()
+    {
+        ASecureCommunication(inThread: ThreadA);
+
+        _writesAs = null;
+        await Handler().UpdateAsync(
+            "sprk_communication", Communication,
+            new Dictionary<string, object?> { [MatterBind] = $"/sprk_matters({SecureMatter})", [ThreadBind] = $"/sprk_communicationthreads({ThreadB})" },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        AssertTheThreadMoveRanTheStepOnce();
+    }
+
+    [Fact(DisplayName = "#2110 (ontology K3): the output orchestrator's update re-binding the held matter AND the held thread runs no step")]
+    public async Task DataverseUpdateHandler_TheHeldMatterAndTheHeldThread_RunsNoStep_2110()
+    {
+        ASecureCommunication(inThread: ThreadA);
+
+        _writesAs = null;
+        await Handler().UpdateAsync(
+            "sprk_communication", Communication,
+            new Dictionary<string, object?> { [MatterBind] = $"/sprk_matters({SecureMatter})", [ThreadBind] = $"/sprk_communicationthreads({ThreadA})" },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        AssertNoStepButReStamped();
+    }
+
+    [Fact(DisplayName = "#2110 (ontology K3): an UpdateRecord node re-binding the held matter AND moving the communication's thread runs the step once")]
+    public async Task UpdateRecordActionCore_TheHeldMatterAndAnotherThread_RunsTheStepOnce_2110()
+    {
+        ASecureCommunication(inThread: ThreadA);
+
+        await Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?>
+                {
+                    [MatterBind] = $"/sprk_matters({SecureMatter})", [ThreadBind] = $"/sprk_communicationthreads({ThreadB})",
+                },
+                Lookups: null, ImpersonateSystemUserId: ConfirmingUser),
+            CancellationToken.None);
+
+        AssertTheThreadMoveRanTheStepOnce();
+    }
+
+    [Fact(DisplayName = "#2110 (ontology K3): an UpdateRecord node re-binding the held matter AND the held thread runs no step")]
+    public async Task UpdateRecordActionCore_TheHeldMatterAndTheHeldThread_RunsNoStep_2110()
+    {
+        ASecureCommunication(inThread: ThreadA);
+
+        await Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?>
+                {
+                    [MatterBind] = $"/sprk_matters({SecureMatter})", [ThreadBind] = $"/sprk_communicationthreads({ThreadA})",
+                },
+                Lookups: null, ImpersonateSystemUserId: ConfirmingUser),
+            CancellationToken.None);
+
+        AssertNoStepButReStamped();
+    }
+
+    [Fact(DisplayName = "#2110 (ontology K3): the output orchestrator's update re-binding the held matter AND clearing the held thread runs the step once")]
+    public async Task DataverseUpdateHandler_TheHeldMatterAndTheThreadCleared_RunsTheStepOnce_2110()
+    {
+        ASecureCommunication(inThread: ThreadA);
+
+        _writesAs = null;
+        await Handler().UpdateAsync(
+            "sprk_communication", Communication,
+            new Dictionary<string, object?> { [MatterBind] = $"/sprk_matters({SecureMatter})", [ThreadBind] = null },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        _writes.Should().ContainSingle();
+        _world.ValueOf<EntityReference>("sprk_communication", Communication, "sprk_communicationthread").Should().BeNull();
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<CancellationToken>()), Times.Once,
+            "the held thread was cleared, so the step after a re-file ran once (it reconciles a communication's thread)");
+        _world.OwnerOf("sprk_communication", Communication).Should().Be(Secure, "the thread decides no owner; the secure matter is still held");
+    }
+
+    [Theory(DisplayName = "#2110 (ontology K3): a field-mapping push re-binding the held matter runs the step once only when it also MOVES the thread")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FieldMappingPush_TheHeldMatterAndAThread_RunsTheStepOnlyWhenTheThreadMoves_2110(bool movesTheThread)
+    {
+        ASecureCommunication(inThread: ThreadA);
+        var matterRule = new FieldMappingRuleDto
+        {
+            SourceField = "sprk_mattersource", TargetField = "sprk_regardingmatter",
+            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+        };
+        var threadRule = new FieldMappingRuleDto
+        {
+            SourceField = "sprk_threadsource", TargetField = "sprk_communicationthread",
+            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 2,
+        };
+        var plans = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance)
+        {
+            [matterRule] = new(MatterBind, $"/sprk_matters({SecureMatter})", null),
+            [threadRule] = new(ThreadBind, $"/sprk_communicationthreads({(movesTheThread ? ThreadB : ThreadA)})", null),
+        };
+
+        var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            _write.Object, Restamper(), [matterRule, threadRule],
+            new Dictionary<string, object?> { ["sprk_mattersource"] = Guid.NewGuid(), ["sprk_threadsource"] = Guid.NewGuid() },
+            "sprk_communication", [Communication], ConfirmingUser, NullLogger.Instance, CancellationToken.None,
+            Scopes(), rootFiling: null, lookupBinds: plans);
+
+        errors.Should().BeEmpty();
+        (updated, failed).Should().Be((1, 0));
+        if (movesTheThread)
+            AssertTheThreadMoveRanTheStepOnce();
+        else
+            AssertNoStepButReStamped();
+    }
+
+    // ── #2110 (ontology K1): the same matter with a parent REMOVED is a change ───────────────────────────────────────
+
+    [Fact(DisplayName = "#2110 (ontology K1): the output orchestrator's update re-binding the held matter AND removing the held project runs the step once")]
+    public async Task DataverseUpdateHandler_TheHeldMatterWithTheProjectRemoved_RunsTheStepOnce_2110()
+    {
+        ASecureCommunication(alsoUnderOrdinaryProject: true);
+
+        _writesAs = null;
+        await Handler().UpdateAsync(
+            "sprk_communication", Communication,
+            new Dictionary<string, object?> { [MatterBind] = $"/sprk_matters({SecureMatter})", [ProjectBind] = null },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        _writes.Should().ContainSingle();
+        _world.ValueOf<EntityReference>("sprk_communication", Communication, "sprk_regardingproject").Should().BeNull();
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<CancellationToken>()), Times.Once,
+            "a parent was removed, so the step after a re-file ran once (it reconciles a communication's thread)");
+        _world.OwnerOf("sprk_communication", Communication).Should().Be(Secure, "the secure matter is still held");
+        _world.OwnerOf("sprk_todo", TodoUnderCommunication).Should().Be(Secure);
+    }
+
+    private void AssertTheThreadMoveRanTheStepOnce()
+    {
+        _writes.Should().ContainSingle();
+        _world.ValueOf<EntityReference>("sprk_communication", Communication, "sprk_communicationthread")!.Id.Should().Be(ThreadB);
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<CancellationToken>()), Times.Once,
+            "the thread moved, so the step after a re-file ran once (it reconciles a communication's thread)");
+        _world.OwnerOf("sprk_communication", Communication).Should().Be(Secure, "the thread decides no owner; the secure matter is still held");
+        _world.OwnerOf("sprk_todo", TodoUnderCommunication).Should().Be(Secure);
+        _shares.MaskOf("sprk_communication", Communication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
+    }
+
     private void AssertNoStepButReStamped()
     {
         _writes.Should().ContainSingle();
@@ -481,8 +637,9 @@ public sealed class RefileWriterBindShapeTests
         _shares.Seed("sprk_matter", SecureMatter, DataversePrincipalRef.User(Sharee), CollaborateMask);
     }
 
-    /// <summary>An isolated communication under the secure matter, an isolated to-do under it, both with the sharee's mirror.</summary>
-    private void ASecureCommunication(bool alsoUnderOrdinaryProject = false)
+    /// <summary>An isolated communication under the secure matter, an isolated to-do under it, both with the sharee's mirror —
+    /// and, with <paramref name="inThread"/>, in that thread of the secure matter (#2110; a second one beside it).</summary>
+    private void ASecureCommunication(bool alsoUnderOrdinaryProject = false, Guid? inThread = null)
     {
         var lookups = new List<(string, string, Guid)> { ("sprk_regardingmatter", "sprk_matter", SecureMatter) };
         if (alsoUnderOrdinaryProject)
@@ -496,6 +653,13 @@ public sealed class RefileWriterBindShapeTests
         _shares.Seed("sprk_matter", SecureMatter, DataversePrincipalRef.User(Sharee), CollaborateMask);
         _shares.Seed("sprk_communication", Communication, DataversePrincipalRef.User(Sharee), CollaborateMask);
         _shares.Seed("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        if (inThread is { } thread)
+        {
+            _world
+                .SecureChild("sprk_communicationthread", ThreadA, ("sprk_regardingmatter", "sprk_matter", SecureMatter))
+                .SecureChild("sprk_communicationthread", ThreadB, ("sprk_regardingmatter", "sprk_matter", SecureMatter))
+                .Set("sprk_communication", Communication, "sprk_communicationthread", new EntityReference("sprk_communicationthread", thread));
+        }
     }
 
     private void AssertMovedIntoSecure()
@@ -536,6 +700,7 @@ public sealed class RefileWriterBindShapeTests
             {
                 "sprk_matters" => "sprk_matter",
                 "sprk_projects" => "sprk_project",
+                "sprk_communicationthreads" => "sprk_communicationthread",
                 _ => null,
             };
             if (target is not null)
