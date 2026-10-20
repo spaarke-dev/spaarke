@@ -497,15 +497,16 @@ public sealed record RecordReparent
     public required IReadOnlyDictionary<string, EntityReference?> ParentChanges { get; init; }
 
     /// <summary>
-    /// Parents the row takes on from something it is being ATTACHED to rather than from one of its own columns — a
-    /// message joining a record thread takes on that thread's regarding record (S6: a record thread's messages are
-    /// children of its record). Added to the row's current parents.
+    /// Parents the row takes on from something it is being ATTACHED to rather than from one of its own columns — an invoice
+    /// confirmed onto a matter. Added to the row's current parents. #2143 round 6: a message's record thread is NOT passed
+    /// here — the resolver reads the thread the row sits in, or the one <see cref="ParentChanges"/> names, and adds its filing
+    /// itself (<c>RecordThreadFiling</c>, the one rule the reconciler applies too).
     /// </summary>
     public IReadOnlyList<RecordOwnershipParent> InheritedParents { get; init; } = Array.Empty<RecordOwnershipParent>();
 
     /// <summary>
-    /// Columns the change writes to ATTACH the row to its <see cref="InheritedParents"/> — a message's thread lookup when
-    /// it joins a record thread. They are not parent lookups, so the resolver cannot see them in
+    /// Columns the change writes to ATTACH the row to what it joins — a message's thread lookup when it joins a record
+    /// thread. They are not parent lookups, so the resolver cannot see them in
     /// <see cref="ParentChanges"/>; naming them lets <see cref="IRecordOwnershipResolver.ReparentAsync"/> put them back,
     /// with the parent columns, when the owner assignment that must follow the change fails (task 146 b1).
     /// #2143 round 5: a lineage-only lookup named here (<see cref="LineageOnlyTargetOf"/> — a message's thread) must also be
@@ -1336,9 +1337,25 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // Current parents, keyed by column, overlaid with the change.
         var byColumn = OwnershipParentColumnsOf(current);
 
+        // #2143 round 6: a message also takes its record thread's filing (RecordThreadFiling, the reconciler's rule) — before
+        // the change from the thread it sits in, after it from the thread the change puts it in (the one it names in
+        // ParentChanges, else the same). Read committed; a thread that cannot be read fails the call before anything is written.
+        var threadBefore = await RecordThreadFiling.ParentsAsync(
+            _dataverse, request.EntityLogicalName, RecordThreadFiling.ThreadOf(current), ct).ConfigureAwait(false);
+        var threadAfter = threadBefore;
+        if (RecordThreadFiling.AppliesTo(request.EntityLogicalName)
+            && request.ParentChanges.FirstOrDefault(change =>
+                    string.Equals(change.Key, RecordThreadFiling.ThreadColumn, StringComparison.OrdinalIgnoreCase))
+                is { Key: not null } threadChange
+            && (threadChange.Value?.Id ?? Guid.Empty) != (RecordThreadFiling.ThreadOf(current) ?? Guid.Empty))
+        {
+            threadAfter = await RecordThreadFiling.ParentsAsync(
+                _dataverse, request.EntityLogicalName, threadChange.Value?.Id, ct).ConfigureAwait(false);
+        }
+
         // Every parent the row is filed under BEFORE the change — what a move OUT of a secure root is measured against
         // (owner round 10 item 7, task 146 c1).
-        var filedUnderBefore = byColumn.Values.Distinct().ToArray();
+        var filedUnderBefore = byColumn.Values.Concat(threadBefore).Distinct().ToArray();
 
         // What the row was filed under BEFORE the change, for every column the change moves — so a failed owner
         // assignment after the change can put the row back where its CURRENT owner belongs (CompensateAsync).
@@ -1395,6 +1412,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             Remember(column);
         }
 
+        // #2143 round 6: a change that moves the message to a thread filed under other parents changes what it is filed under.
+        changesAParent |= !threadBefore.ToHashSet().SetEquals(threadAfter);
+
         if (!changesAParent)
         {
             // Nothing the row is filed under changes, so its owner does not either: write the change and decide nothing
@@ -1405,7 +1425,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return unchanged with { ParentsUnchanged = !movesALineageLookup };
         }
 
-        var parents = WithInheritedParents(byColumn.Values, request);
+        var parents = WithInheritedParents(byColumn.Values.Concat(threadAfter), request);
         var resolution = await ResolveReparentOwnerAsync(request, parents, ct).ConfigureAwait(false);
 
         if (resolution.IsRefused)
@@ -1533,12 +1553,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// (<see cref="RecordReparent.LineageOnlyTargetOf"/>: a message's thread), column → row id.
     /// </summary>
     /// <remarks>
-    /// The lineage-only lookups decide no owner here: <see cref="Parents"/> holds the row's own ownership-parent columns plus
-    /// only THIS request's <see cref="RecordReparent.InheritedParents"/>. A writer that joined the row to a secure thread
-    /// passed that thread's secure record as ITS inherited parent, so this call's resolution cannot see it. A changed
-    /// lineage-only lookup is therefore read as "another writer's filing whose reason this call cannot see": neither the
-    /// put-back of this call's Secure write (<see cref="ReleaseOwnSecureWriteAsync"/>) nor the guard's F3 exemption
-    /// (<see cref="WouldLeaveSecureBusinessUnitAsync"/>) is taken over it.
+    /// The lineage-only lookups decide no owner here: <see cref="Parents"/> holds the row's own ownership-parent columns, this
+    /// request's <see cref="RecordReparent.InheritedParents"/> and (#2143 round 6) the filing of the record thread the row sits
+    /// in as of this read (<c>RecordThreadFiling</c>), so a join — already on the row or landing between reads — is a parent the
+    /// settle, the release, K4 and the guard all see. A changed lineage-only lookup stays the cheap first check (round 3):
+    /// neither the put-back of this call's Secure write (<see cref="ReleaseOwnSecureWriteAsync"/>) nor the guard's F3 exemption
+    /// (<see cref="WouldLeaveSecureBusinessUnitAsync"/>) is taken over another writer's move of one.
     /// </remarks>
     private sealed record RowOwnership(
         string? Version, Guid? OwningTeam, Guid? OwningBusinessUnit, IReadOnlyCollection<RecordOwnershipParent> Parents,
@@ -1646,11 +1666,15 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             ?? (row.GetAttributeValue<long?>(VersionNumberColumn) is { } number
                 ? number.ToString(System.Globalization.CultureInfo.InvariantCulture)
                 : null);
+        // #2143 round 6: with its record thread's filing, as the thread reads NOW (RecordThreadFiling) — so a join already on
+        // the row, or one landing between reads, is a parent the settle, the release, K4 and the guard all see.
+        var threadParents = await RecordThreadFiling.ParentsAsync(
+            _dataverse, request.EntityLogicalName, RecordThreadFiling.ThreadOf(row), ct).ConfigureAwait(false);
         return new RowOwnership(
             string.IsNullOrWhiteSpace(version) ? null : version,
             row.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id,
             row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id,
-            WithInheritedParents(OwnershipParentColumnsOf(row).Values, request),
+            WithInheritedParents(OwnershipParentColumnsOf(row).Values.Concat(threadParents), request),
             LineageOnlyLookupsOf(request.EntityLogicalName, row));
     }
 
@@ -1931,8 +1955,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// is then this call's own write, not a hold another writer's guard or the reconcile placed (which only an F3-checked move
     /// may lift, so it is left). Every other case writes nothing: a refused or unchanged answer, another writer's owner, a
     /// lineage-only lookup (a message's thread) that changed between <paramref name="lastRead"/> and <paramref name="fresh"/>
-    /// (round 3, F1: another writer's filing whose secure reason the fresh parents cannot show — a thread join passes the
-    /// thread's secure record as its own inherited parent, never this call's), an ambiguous or absent Secure Record business
+    /// (round 3, F1: another writer's filing; since round 6 the fresh parents include the thread's filing too), an ambiguous or absent Secure Record business
     /// unit, no version, a row changed again (412), or an owner that does not read back. Never writes an owner that disagrees
     /// with the fresh parents. Round 5 (F2): the lineage-only lookups are also compared with the ones the row held before the
     /// change with this call's own changes applied (<paramref name="before"/>): a join that landed before

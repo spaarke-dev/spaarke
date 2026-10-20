@@ -287,6 +287,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
     {
         var heldThread = Guid.Parse("a2110000-0000-4000-8000-0000000000e5");
         var otherThread = Guid.Parse("a2110000-0000-4000-8000-0000000000e6");
+        // #2143 round 6: the resolver reads both threads (RecordThreadFiling); Direct threads, so they file the message under nothing.
+        _world.WithRecord("sprk_communicationthread", heldThread, Directory.ChildBu)
+            .WithRecord("sprk_communicationthread", otherThread, Directory.ChildBu);
         _world.WithRecord("sprk_communication", JoiningMessage, Directory.ChildBu, owningTeam: Directory.ChildTeam, extra: new()
         {
             ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter),
@@ -393,6 +396,14 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         if (regardingProject is { } project)
             _joinedThreadRow["sprk_regardingproject"] = new EntityReference("sprk_project", project);
+
+        // #2143 round 6: the resolver reads the thread a join names (RecordThreadFiling) from its own Dataverse — the same row.
+        var threadColumns = new Dictionary<string, object>();
+        if (regardingMatter is { } threadMatter)
+            threadColumns["sprk_regardingmatter"] = new EntityReference("sprk_matter", threadMatter);
+        if (regardingProject is { } threadProject)
+            threadColumns["sprk_regardingproject"] = new EntityReference("sprk_project", threadProject);
+        _world.WithRecord("sprk_communicationthread", JoinedThread, Directory.ChildBu, extra: threadColumns);
     }
 
     private Entity? _joinedThreadRow;

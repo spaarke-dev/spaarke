@@ -423,7 +423,15 @@ public class SecureChildOwnershipTests
         var previousThread = new EntityReference("sprk_communicationthread", Guid.NewGuid());
         var world = World().WithRecord("sprk_communication", communicationId, Directory.ChildBu, owningTeam: Directory.ChildTeam,
             extra: new() { ["sprk_communicationthread"] = previousThread });
-        world.AssignmentFault = new InvalidOperationException("Read Privilege Check For Owner failed");
+        // #2143 round 6: the resolver reads both threads (RecordThreadFiling) — the Direct one the message leaves, and the secure
+        // record's thread it joins, which files it under that record.
+        world.WithRecord("sprk_communicationthread", previousThread.Id, Directory.ChildBu)
+            .WithRecord("sprk_communicationthread", threadId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+            });
+        var assignFailure = new InvalidOperationException("Read Privilege Check For Owner failed");
+        world.AssignmentFault = assignFailure;
         var threads = new Mock<IGenericEntityService>();
         threads
             .Setup(e => e.RetrieveAsync("sprk_communicationthread", threadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -442,7 +450,8 @@ public class SecureChildOwnershipTests
             },
             CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(assignFailure,
+            "the owner assignment failed (not a thread read)");
         world.Row("sprk_communication", communicationId).GetAttributeValue<EntityReference>("sprk_communicationthread")
             .Should().Be(previousThread, "the JOIN is undone with its failed owner assignment");
     }

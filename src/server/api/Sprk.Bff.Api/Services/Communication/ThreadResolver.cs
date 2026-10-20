@@ -481,7 +481,9 @@ public sealed class ThreadResolver : IThreadResolver
                 {
                     [ThreadLookupOnCommunication] = new EntityReference("sprk_communicationthread", threadId),
                 },
-                InheritedParents = new[] { filedUnder },
+                // #2143 round 6: no InheritedParents — the resolver reads the thread this join names in ParentChanges and files
+                // the message under the thread's own filing (RecordThreadFiling), the ONE source of a message's thread parents.
+                // The anchor read above only gates this reparent, picks the audience and is told to beforeRefileWrite.
                 // Task 146 b2: the column the JOIN writes — put back if the owner assignment that must follow it fails, so
                 // the message is never left in a secure record's thread while owned elsewhere.
                 AttachColumns = new[] { ThreadLookupOnCommunication },
