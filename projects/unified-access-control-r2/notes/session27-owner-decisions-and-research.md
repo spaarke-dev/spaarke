@@ -1708,3 +1708,7 @@ The full record is in `notes/185-invite-code-design.md` §11.
 4. **Round 107 deletion confirmed ("correct").**
 5. **186:** the owner will sign in as Tracy when told. R3 059 E/F made the A9 SPA live (1908696a8).
 6. **#2128: option (1), remove the guest route** (the FR-15 auto-create for customer-tenant B2B guests). Question: how does self-registration put the contact in the correct BU? Answered in chat: `ExternalAccess:CustomerBusinessUnitId` → that BU's default team. A missing value, or the Secure BU, means nothing is created. It is one value per environment.
+
+## Round 109 (2026-10-20)
+
+- **#2138 (#2128, retire the FR-15 guest auto-create): owner "proceed with #2138".** This is the security sign-off after two adversarial passes; the second found no bypass. Merge when Router and Client lint are green. Deploy only after R3's SPA with `d4ea1b4a8` (merged to master as 28274e04e via #2141) is live on dev. At that deploy, run the PR-body data step on the 3 dev guest-bound contacts: clear `sprk_externalobjectid`, `sprk_identityplane` and `sprk_externalobjectidkey`, after checking each email domain.
