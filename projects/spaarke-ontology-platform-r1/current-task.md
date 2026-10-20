@@ -63,5 +63,6 @@
 
 ## Peers (current session names)
 
+- **field-mapping-server-write-path-r1** (`spaarke-wt-field-mapping-server-write-pa-b5`): coordination answered 2026-10-20. Their 017 (DecisionRouteCores create path via ChildRecordEndpoints) has no ontology conflict; their 033 (SignalWriter + DecisionRecordWriter onto RecordCreationService) needs OUR owner review + uac-r2 review, with invariants sent (writer identity, dedupe-key create, ownership resolver, conditional updates excluded, DR append-only/idempotency/hash, no field-mapping injection, telemetry unchanged, §11 cost-of-doing-nothing). Review their 033 design note when sent. #1501 (task 136) told not live; closing it is an owner call.
 uac-r2 `spaarke-wt-unified-access-control-r2-c8`; R3 `spaarke-wt-spa-external-access-platform-75`; ebilling `spaarke-wt-ebilling-r1-99`;
 word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-54`; provisioning `spaarke-wt-customer-provisioning-orchest-bb`.
