@@ -3,7 +3,7 @@
   <metadata>
     <title>ISS-010 quick fix: the generic Dataverse chat tools hide internal-only communications from licensed users flagged external</title>
     <phase>R3 hardening (ISS-010)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags bff-api, security; changes what a chat tool returns to a class of callers</rigor-reason>
     <model-tier>opus</model-tier>
@@ -97,7 +97,7 @@
     <criterion testable="true">Test scope: the contract above plus its edge cases; anything beyond needs a one-line justification in the notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Origin: ISS-010 (#1864), owner decision 2026-10-20 "use the quick fix for now". Two adversarial passes (security). Tell UAC (ISS-010 is shared with unified-access-control-r2) when done.</notes>
+  <notes>Completed 2026-10-20 (rework: 1 review round + 1 scoped re-check fix). Also covers dataverse.describe and sprk_document rows linked to a communication, and refuses the email-content tables; see notes/task-078-notes.md. Filed from it: ISS-014 #2125, ISS-015 #2126, ISS-016 #2127. Origin: ISS-010 (#1864), owner decision 2026-10-20 "use the quick fix for now". Two adversarial passes (security). Tell UAC (ISS-010 is shared with unified-access-control-r2) when done.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

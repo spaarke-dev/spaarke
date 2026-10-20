@@ -212,3 +212,19 @@ No F1, no fail-open. Fixed in the main session (this commit):
 Availability note: internal callers on `sprk_document` now resolve externality (two cached lookups). A lookup fault now fails those calls with no data.
 
 Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes, `CommunicationOpenThreadGate`, `CallerSystemUserResolver` and `DiGraphValidation`: **192/192**.
+
+## Quality gates (task-execute Step 9.5)
+
+- **Code review:** covered by two Opus adversarial passes (pass 1 on bypasses, pass 2 on behaviour, DI, tests and inventory) and one scoped Sonnet re-check of the fix diff (CLAUDE.md §8.5: two passes for security). No F-class finding is open.
+- **ADR check** (diff `ef87f6edc~1..27f33f7d3`, src):
+  - ADR-001: no endpoint.
+  - ADR-002: no plugin; security fails closed.
+  - ADR-007: no Graph.
+  - ADR-009: no `IMemoryCache`; the existing distributed-cache resolvers are reused.
+  - ADR-010: no new interface; one internal static helper; `TryAdd` registrations, justified above.
+  - ADR-013: the AI handlers consume Communication and Identity services, the allowed direction.
+  - ADR-015: entity and reason code only, asserted by `AssertTelemetryRespectsAdr015`.
+  - ADR-028: no credential, scheme or OBO change; the principal comes from `HttpContext`.
+  - BFF hygiene §10: placement stated, +4,812 B, no package, no vulnerable package, tests updated.
+  - CLAUDE.md §11 answers are above. **Compliant; no violation, no warning.**
+- **Live:** no change in this task. It ships with the next owner-approved dev BFF deploy, together with the K1 smoke (deploy checklist).
