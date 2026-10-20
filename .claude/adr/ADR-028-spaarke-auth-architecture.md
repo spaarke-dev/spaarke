@@ -371,11 +371,13 @@ id is the one the validated token was resolved to, never client input, and Datav
 teams and shares. Conditions:
 - the only confirmation on the plane, for every systemuser (`ExternalProjectDataEndpoints.AppOnlyConfirmationPrincipal`),
   never a fallback after a token exchange;
-- fail closed: a fault, a missing systemuser id or an unreadable answer adds no rights (both `Spaarke.Dataverse` calls
-  refuse `Guid.Empty`);
+- fail closed, and a fault is not a denial: a missing systemuser id adds no rights (both `Spaarke.Dataverse` calls
+  refuse `Guid.Empty`); a fault, a timeout or an unreadable answer adds no rights either, and a write refused only for
+  that reason is a retry-able 503 that writes nothing, never a "no access" 403;
 - a 404 is re-asked on `CallerRecordAccessProbe.NotFoundRetryDelay`'s schedule; a 403 that is not an access answer
-  (e.g. `0x8004A110`, or `0x80040220` whose message names `prvActOnBehalfOfAnotherUser`) is UNKNOWN and logged as a
-  Warning; each question is bounded at 15 s;
+  (e.g. `0x8004A110`, or `0x80040220` whose message names `prvActOnBehalfOfAnotherUser` as a whole token) is UNKNOWN
+  and logged as a Warning — the same reading keeps a JIT container grant in `SpeContainerMembershipSync` for that run
+  rather than removing it (task 171); each question is bounded at 15 s;
 - uncached, and logged with the path that answered (no tokens, no PII);
 - the same deployment prerequisite as the read (E-2, `prvActOnBehalfOfAnotherUser`).
 
