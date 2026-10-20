@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>InvoiceReviewService invoice create goes through RecordCreationService with the reviewing user as caller (FR-20)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>019 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, finance; the create is part of a compensating create-then-link transaction (data-mutation); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One bounded call-site conversion with an existing reviewed service and existing write-path tests, but the compensation logic must be preserved exactly.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W3-server</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>019</deps>
+    <tags>bff-api, finance, testing</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Convert `InvoiceReviewService.CreateInvoiceRecordAsync` (`Services/Finance/InvoiceReviewService.cs` ~:688) so the invoice create goes through `RecordCreationService` with the reviewing user as the caller principal, so the extracted invoice carries mapping from its Matter. Preserve the create-then-link compensation (`RemoveInvoiceIfCreatedAsync`, `LinkDocumentOrCompensateAsync`) and the existing `InvoiceReviewException` failure codes exactly.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, finance invoice review. Follow ADRs strictly.</role>
+  <goal>An invoice confirmed from the review flow is created by the service (owner = the Matter's record-first team, I-1 stamp, mapping from the Matter if a profile exists), the compensation on a lost response still works, and the existing invoice review tests pass unchanged.</goal>
+
+  <context>
+    <background>spec.md FR-20, FR-06/FR-07. Today the service resolves the owner itself (`_ownership.ResolveOwnerAsync` over the Matter, ~:690), builds the create fields (`BuildInvoiceCreateFields`), stamps the creator person (`invoiceOwner.StampCreatorOn`) and writes with `_records.UpdateRecordFieldsAsync(InvoiceEntity, invoiceId, fields, ct)` using a CLIENT-GENERATED GUID (a PATCH without If-Match is a create/upsert) so that a lost response can be detected and cleaned up by id (`RemoveInvoiceIfCreatedAsync` ~:720). The create is followed by a document re-file/link inside `RefileDocumentUnderInvoiceAsync` (~:412-430). `request.RequestedBy` is the reviewing user. The service must therefore accept an optional caller-supplied row id so the compensation logic keeps working; if the unified service cannot, that is an escalation (below).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs (CreateInvoiceRecordAsync ~:688; BuildInvoiceCreateFields, grep for the symbol; RemoveInvoiceIfCreatedAsync ~:720)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (only if a caller-supplied row id input is missing)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (sprk_invoice entry: protected columns, defaults; add only if absent)</file>
+      <file role="canonical-reference">tests/integration/data-mutation/FinanceInvoiceReview/InvoiceReviewWritePathTests.cs</file>
+      <file role="canonical-reference">tests/integration/data-mutation/FinanceInvoiceReview/ConditionalLinkWriteTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (ResolveOwnerAsync ~:1016)</file>
+      <file role="new">tests/integration/data-mutation/FinanceInvoiceReview/InvoiceCreateThroughServiceTests.cs (invoice created by the service; mapping from Matter; compensation intact)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="019" status="required">W2 service deployed and reviewed.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 (path A, spec ADR Tensions)">Scope: authorization. Route filters on the invoice review confirm endpoint stay unchanged; payload-dependent checks run in `CallerWriteAuthorization` via the service (the Matter AppendTo for the invoice); do not re-implement them in InvoiceReviewService.</constraint>
+    <constraint source="ADR-019">Scope: failures. `InvoiceReviewFailure` codes and the confirm endpoint's responses are unchanged; a service refusal of kind owner-unresolved maps to `InvoiceReviewFailure.OwnerTeamUnresolved` with the existing message; other refusals map to existing codes; an unmapped Kind fails closed to the existing generic create failure.</constraint>
+    <constraint source="ADR-028">Scope: identity. The reviewing user is the caller principal (WhoAmI on the caller token, inside the HTTP request); the create stays app-only. If any confirm path runs without a caller token (a background continuation), use the system principal with `RequestedBy` = the reviewer and record why in the task notes.</constraint>
+    <constraint source="ADR-010">Scope: DI. Inject the already-registered scoped `RecordCreationService` into InvoiceReviewService (or its factory); no new registration. Drop constructor dependencies that become unused (`IRecordOwnershipResolver` use for the create).</constraint>
+    <constraint source="NFR-01 (spec)">Scope: invoice create. Fail closed: an unresolved owner or a refusal creates nothing and writes no link (unchanged "nothing was saved" semantics); a create whose success is unknown must run the existing lost-response cleanup by row id before rethrowing; never treat an ambiguous failure as success or retry the create blindly (NFR-03).</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Placement Justification in the PR; fresh-master publish-size delta per §10.4; `dotnet list package --vulnerable --include-transitive`; no package.</constraint>
+    <constraint source="ADR-038">Scope: tests added or modified. KEEP paths; no Mock&lt;HttpMessageHandler&gt;; no DI-registration tests. InvoiceReviewWritePathTests and ConditionalLinkWriteTests change only to follow a moved dependency, never by weakening an assertion. Cover the stated contract plus the named edge cases only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Invoice review create-then-link flow</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Create payload shapes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-20; read the confirm flow in InvoiceReviewService (create ~:688, refile callback ~:412-430, compensation ~:720); re-grep `BuildInvoiceCreateFields`.</step>
+    <step order="1">Write failing tests first: the invoice is created through the service with the reviewer as caller; the invoice carries Matter-derived mapping (if profiled), owner = Matter's record-first team, I-1 stamp; a lost-response create still triggers `RemoveInvoiceIfCreatedAsync` by id; an unresolved owner throws `OwnerTeamUnresolved` with nothing written.</step>
+    <step order="2">Convert `CreateInvoiceRecordAsync`: pass the user-entered/extracted values and the Matter as the parent (and as the mapping source) to the service; supply the pre-generated invoice id (add an optional row-id input to the service request if missing); delete the private owner resolution and creator stamping.</step>
+    <step order="3">Keep the financial base values and invoice-specific fields (`BuildInvoiceCreateFields`) as the payload; keep protected-column rules in the registry, not the service.</step>
+    <step order="4">Build; run InvoiceReviewWritePathTests, ConditionalLinkWriteTests, FinanceBaseValues tests, SecureChildOwnershipAiToolTests*, RecordOwnerAssignmentCensusTests unchanged; publish-size delta; CVE check.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the unified service cannot create a row with a caller-supplied id (needed for lost-response cleanup) without changing its alternate-key retry contract, STOP and escalate per CLAUDE.md §6 with the two options (optional id input vs lookup-by-alternate-key cleanup).</trigger>
+    <trigger>If the confirm flow runs where no caller token exists, so WhoAmI cannot resolve, STOP and escalate: choose caller vs system principal only with the human's OK, because it changes who is authorized.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep `CreateInvoiceRecordAsync` and `UpdateRecordFieldsAsync(InvoiceEntity` in src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs (~:688, ~:711); existing tests tests/integration/data-mutation/FinanceInvoiceReview/ (InvoiceReviewWritePathTests, ConditionalLinkWriteTests) cover the write order and the link, not mapping from the Matter.</existing>
+    <extension>Yes for production code: the call converts to the existing service; no new production file (an optional row-id input on the existing request type if needed). The only new file is a test class, because the existing write-path suites must pass unchanged.</extension>
+    <cost-of-doing-nothing>Invoices created by extraction skip Matter-to-Invoice field mapping and the search-index default, and keep a private owner path that can drift from the unified standard (spec FR-20 acceptance).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs</output>
+    <output type="test">tests/integration/data-mutation/FinanceInvoiceReview/InvoiceCreateThroughServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`CreateInvoiceRecordAsync` creates the invoice through `RecordCreationService` with the reviewing user as the caller principal; it no longer calls `_ownership.ResolveOwnerAsync` or `_records.UpdateRecordFieldsAsync` to create the row.</criterion>
+    <criterion testable="true">The extracted invoice carries mapping from its Matter (where a profile exists), the Matter's record-first owner team and the I-1 stamp, asserted by a test.</criterion>
+    <criterion testable="true">A create whose response is lost still triggers `RemoveInvoiceIfCreatedAsync` by the pre-generated id and rethrows (test); the document is not linked to a removed invoice.</criterion>
+    <criterion testable="true">Existing `InvoiceReviewFailure` codes and messages, including `OwnerTeamUnresolved` and `CreateFailedInvoiceMayRemain`, are unchanged.</criterion>
+    <criterion testable="true">Negative: an unresolved owner or a service refusal throws the existing failure, creates no invoice and writes no document link.</criterion>
+    <criterion testable="true">Negative: a reviewer who cannot AppendTo the Matter is refused (uniform outcome) and no invoice or link is created.</criterion>
+    <criterion testable="true">BFF build 0 errors; InvoiceReviewWritePathTests, ConditionalLinkWriteTests, SecureChildOwnershipAiToolTests* and RecordOwnerAssignmentCensusTests pass; publish-size delta and CVE result recorded in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-20. Office Invoice quick-create is task 018; the Invoice wizard is task 025. Live check is task 036.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

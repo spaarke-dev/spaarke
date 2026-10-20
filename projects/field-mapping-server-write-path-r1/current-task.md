@@ -1,37 +1,39 @@
 # Current Task — field-mapping-server-write-path-r1
 
 > **Last updated**: 2026-10-19
-> **Phase**: Pre-pipeline. design.md rewritten + spec.md generated; `/project-pipeline` NOT yet run (no tasks exist).
+> **Phase**: Pipeline in progress (`/project-pipeline`, user approved "y"). Task: none yet. Status: planning.
 
 ## State
 
-- **design.md**: rewritten 2026-10-19 after re-verification against master `49279def1`. Owner decisions Q1–Q12 are
-  settled (§7). Committed and pushed as `556d3bb2f`.
-- **notes/design-review-2026-10-19.md**: evidence base (file:line facts) for the spec and tasks. Committed in
-  `556d3bb2f`.
-- **spec.md**: generated 2026-10-19 by `/design-to-spec`. 28 FRs, 8 NFRs, one ADR-008 tension (path A). **Not yet
-  committed.**
-- **Portfolio**: issue #1164 board Status set to Active (was wrongly Completed).
-- **Worktree**: branch `work/field-mapping-server-write-path-r1`, synced with master on 2026-10-18.
+- Pre-flight passed 2026-10-19. Master merged into the branch (0 behind), pushed; main repo master synced; BFF
+  build 0 errors.
+- Step 0.5: 15 work branches hold unmerged commits (ebilling-r1 340, UAC-r2 111, …). Warning only.
+- Step 1 + 1.7: spec valid. ADR-008 path A tension accepted (concrete rationale).
+- Step 1.5: open-PR overlaps:
+  - UAC-r2 #2110 (`OwnedChildWrite.cs`, `ChildRecordEndpoints.cs`, `CommunicationService.cs`, `RefileWriter` guard,
+    write-path doc);
+  - #2078 (route-auth guards);
+  - #2104 (`CreateProjectWizard` closure files);
+  - #1501 (`CreateAnalysisWizardWidget`, `ChildRecordEndpoints`);
+  - #1911 (write-path doc).
 
-## Owner decisions captured during design-to-spec (in spec.md Owner Clarifications)
-
-- A mapped value that fails AppendTo or field security is **skipped with a warning**; the create proceeds.
-- **No backfill**: forward-only. No ownership or mapping fix for rows created before go-live.
-- Rollout: per-wizard cutover (Matter first); rollback is redeploying the previous bundle; no runtime flag.
-- Matter number comes from the platform autonumber (task 076 decision); the wizard stops generating
-  `{typeCode}-{random6}`.
-
-## Open items (spec "Unresolved Questions")
-
-- Repair marker: verify `createdby` ≠ BFF app user (impersonated creates?).
-- Live quick-create flags for Project, Matter and Invoice Line Item.
-- Exception assessment: notification outbox; `DecisionRecordWriter` communication-owner case.
-- UAC-r2 timing for the `OwnedChildWrite` refactor.
+  All recorded in CLAUDE.md §4.
+- Step 2 done:
+  - README.md (rewritten), plan.md, CLAUDE.md and notes/decisions.md created;
+  - `projects/INDEX.md` row added;
+  - hot-path BFF overlaps with UAC-r2, ontology-r1, SPA-r3, word-add-in-r1 and compose (warning).
+- Step 3 in progress:
+  - tasks/001 (exemplar) and tasks/TASK-INDEX.md (43 tasks) written;
+  - 4 sub-agents are generating the other 42 POMLs from the scratchpad manifest
+    (`.../scratchpad/task-manifest.md`).
 
 ## Exact next action
 
-1. The user reviews spec.md (design-to-spec Step 5: y → `/project-pipeline` / edit / done).
-2. Commit spec.md + current-task.md.
-3. If y: run `/project-pipeline projects/field-mapping-server-write-path-r1`. It registers the project in
-   `projects/INDEX.md` with the hot-path declaration (BFF=Y, root-CLAUDE=Y) and creates the tasks.
+1. When the 4 generator agents finish: run `pwsh scripts/Validate-TaskPoml.ps1 projects/field-mapping-server-write-path-r1/tasks`;
+   fix FAILs; spot-check 013, 021, 052.
+2. Step 4: commit + push on the existing branch `work/field-mapping-server-write-path-r1` (no new feature/ branch).
+3. Step 4.2: README has the Portfolio pointer (#1164) → `/devops-project-sync`; `gh label create
+   field-mapping-server-write-path-r1 --force`; `python scripts/ai-cost/backfill-tasks-planned.py
+   field-mapping-server-write-path-r1 --apply`; check that the Epic parent and board fields are set.
+4. Step 4.5: ask for the Target Date.
+5. Stop before Step 5: ask the user to start 001 + 006 + 010. W2 code waits on 010 (UAC-r2 sign-off).

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Deploy the W3 server paths to dev and run the live checks (FR-18, FR-19, FR-20, FR-21)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>030-034 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deploys the BFF to dev and live-verifies write-path invariants; tags include deploy, bff-api; any fix found here modifies Sprk.Bff.Api .cs.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted deploy and scripted live checks with exact expected values; no design judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy gate: single dev environment; the guards (061) and the W6 docs depend on its result.</parallel-reason>
+    <deps>030, 031, 032, 033, 034</deps>
+    <tags>deploy, bff-api</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the BFF containing tasks 030-034 to dev with the `bff-deploy` skill, run the live checks for the Office document save, the typed Event route, the extracted invoice and a generated To Do, check App Insights, and measure publish size against a fresh master build. Stop on any 5xx or owner mismatch.</prompt>
+  <role>SPAARKE platform engineer, BFF deployment and release verification. Follow the bff-deploy skill literally.</role>
+  <goal>The W3 server paths run on dev and each live check shows owner, I-1 stamp, mapping and search-index set at create; no new exception class in App Insights; publish size and CVE results recorded.</goal>
+
+  <context>
+    <background>spec.md FR-18..FR-21, NFR-05, Success Criteria 3 and 5. Live checks create real rows on dev (spaarkedev1, spaarke-bff-dev). Use clearly named test rows (prefix "FMSWP-036") and record their ids. A Matter-to-child mapping profile for the target child must exist on dev; if none exists for a table, create the check against a table that has one and say so in the notes (do not create profiles in this task). Publish-size thresholds (root CLAUDE.md §10): at least +5 MB in one task needs justification; 55 MB total triggers architecture review; 60 MB is a hard stop.</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md (deploy procedure; scripts/Deploy-BffApi.ps1)</file>
+      <file role="canonical-reference">.claude/constraints/bff-extensions.md (publish-size measurement method)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs (document save)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs (typed Event route)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs (invoice extraction)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs (To Do generation)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/decisions.md (record outcomes)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="required">Office to do and document save on the service.</dependency>
+      <dependency task="031" status="required">Typed event and analysis routes on the service.</dependency>
+      <dependency task="032" status="required">Invoice extraction on the service.</dependency>
+      <dependency task="033" status="required">System creators (generation, task, signal, decision) on the service.</dependency>
+      <dependency task="034" status="required">Inbound ingestion on the service.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §5">Scope: live changes. Deploy to dev (spaarke-bff-dev) only. No deployment beyond dev without the explicit OK of the owner. Run `context-handoff` after the deployment.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Measure publish-size delta against a FRESH master build per root CLAUDE.md §10.4 (Compress-Archive, short path, file-count check); run `dotnet list package --vulnerable --include-transitive`; no new HIGH CVE. 55 MB total triggers an architecture review; 60 MB is a hard stop.</constraint>
+    <constraint source="project">Scope: live data. Create only test rows prefixed "FMSWP-036" and record their ids so the owner can delete them. Never edit or delete rows you did not create. No bulk writes. Do not send real email: use the dev inbound test mailbox/utility the repo documents (grep docs/guides/COMMUNICATION-ADMIN-GUIDE.md) or skip the inbound check and record it as not run.</constraint>
+    <constraint source="ADR-028">Scope: identity in checks. Run caller-principal checks as a named dev test user (not as the managed identity); the system-principal checks (generated To Do) run through the existing job trigger. Do not change any role or privilege to make a check pass.</constraint>
+    <constraint source="ADR-038">Scope: tests. No new tests are required by this task; any fix made for a failing live check adds or updates its test at the KEEP path of the area fixed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF deployment and live verification</topic>
+    <files>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+    </files>
+    <patterns>
+      <pattern name="web-api-client" location=".claude/patterns/dataverse/web-api-client.md">Reading rows back to verify owner, stamp and mapping.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; confirm TASK-INDEX shows 030-034 complete; confirm the touched test suites are green on the commit to be deployed.</step>
+    <step order="1">Build a fresh master publish and a branch publish; compute the size delta and file-count difference with the §10.4 method; run `dotnet list package --vulnerable --include-transitive`. Record both in notes/decisions.md. Stop if total is 60 MB or more.</step>
+    <step order="2">Deploy to dev with the bff-deploy skill (scripts/Deploy-BffApi.ps1). Confirm the script's hash-verify and /healthz result; do not trust a success message alone.</step>
+    <step order="3">Live check A (FR-18): save a document from the Office add-in path (or the equivalent dev API call) under a Matter. Read the row back with the Dataverse MCP: association set, owner = Matter's BU default Owner team, I-1 stamp, search-index default, mapped fields (if a profile exists); confirm via App Insights or logs that no separate association update was issued.</step>
+    <step order="4">Live check B (FR-19): create an Event through `POST /api/v1/events` under a Matter; verify owner, stamp, mapping, and that the response shape is unchanged.</step>
+    <step order="5">Live check C (FR-20): confirm one invoice through the invoice review flow for a Matter; verify the invoice carries mapping from its Matter, the Matter's team as owner and the I-1 stamp, and that the document link succeeded.</step>
+    <step order="6">Live check D (FR-21): trigger To Do generation for a Matter-filed source; verify the generated To Do is team-owned (not app-owned), has the stamp and mapping. If an inbound test message can be sent per the repo's documented test path, verify an unfiled communication keeps the creator and a filed one is team-owned; otherwise record "not run" with the reason.</step>
+    <step order="7">Query App Insights for the last 30 minutes after the checks: no 5xx on the touched routes and no new exception type versus the 24 hours before the deploy. Record the query and result.</step>
+    <step order="8">Run `context-handoff` (CLAUDE.md §5). Write the outcome (deploy hash, test row ids, each check's expected vs observed values, size delta, CVE, App Insights result) to projects/field-mapping-server-write-path-r1/notes/decisions.md.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="10">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any 5xx on a touched route, any owner mismatch between surfaces, or any failed live check: STOP, do not continue to the next check, report to the human with the row ids and the observed vs expected values, and propose rollback by redeploying the previous bundle.</trigger>
+    <trigger>If publish size reaches 55 MB total or grows by 5 MB or more in this change set, STOP and escalate (architecture review / justification) per CLAUDE.md §10.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="powershell">Run scripts/Deploy-BffApi.ps1 and publish-size measurement</tool>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="mcp:dataverse">Read rows back on dev to verify owner, stamp, mapping</tool>
+    <tool name="az">App Insights queries</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/decisions.md (deploy, live-check, size and CVE results)</output>
+    <output type="deployment">spaarke-bff-dev running the W3 server-path build, hash-verified</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The BFF is deployed to dev via the bff-deploy skill, the script's hash-verify passed, and /healthz is healthy.</criterion>
+    <criterion testable="true">An Office-saved document under a Matter shows, on read-back, the association, the record-first owner, an I-1 stamp and the search-index default set at create (mapped fields where a profile exists), and no separate association update was issued.</criterion>
+    <criterion testable="true">An Event created through the typed route and an invoice confirmed from the review flow each show the record-first owner, an I-1 stamp and (where a profile exists) mapped fields; a generated To Do is team-owned and stamped.</criterion>
+    <criterion testable="true">Negative: no live-check row is user-owned or app-owned except a registry-named exception (an unfiled inbound communication keeps the creator, if that check was run).</criterion>
+    <criterion testable="true">App Insights shows no 5xx on the touched routes and no new exception type after the deploy; the query and result are in the notes.</criterion>
+    <criterion testable="true">Publish-size delta against a fresh master build, file-count check and the CVE result are recorded; no new HIGH CVE; total below 55 MB or an approved escalation is recorded.</criterion>
+    <criterion testable="true">Build 0 errors and the W3 server test suites (Office contract tests, Event and Analysis contract tests, FinanceInvoiceReview tests, Signals seam tests, Communication seam tests, RecordOwnerAssignmentCensusTests) are green on the deployed commit; every dev test row created is listed by id in the notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-18..FR-21, NFR-05; Success Criteria 3 and 5. Task 061 (census and client guards) and the W6 docs depend on this gate. Wizard live checks belong to tasks 021-029, not here.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

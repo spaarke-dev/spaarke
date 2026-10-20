@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Migrate Create Work Assignment wizard to the server write path (FR-16)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>025 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx in Spaarke.UI.Components; tags include frontend, deploy, testing (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical migration following the 021 reference.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W3-wizards</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wizards migrate one at a time, each live-verified before the next (spec FR-16).</parallel-reason>
+    <deps>025</deps>
+    <tags>frontend, fluent-ui, field-mapping, deploy, testing</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Migrate the Create Work Assignment wizard: remove applyFieldMappings from the work-assignment create, send only user-entered values, keep the create through createRecordViaBffWithWarnings, and move the follow-on Event create (~:669) onto the BFF route too.</prompt>
+  <role>SPAARKE platform developer, React 18 / Fluent UI v9 code pages, Dataverse. Follow ADRs strictly.</role>
+  <goal>workAssignmentService has no applyFieldMappings; the work assignment payload holds only user-entered values; the follow-on Event is created through the BFF route; mapped fields appear on first load; owner = team.</goal>
+
+  <context>
+    <background>spec.md FR-16. workAssignmentService.ts calls applyFieldMappings at ~:472 (comment at ~:470), creates the work assignment via createRecordViaBffWithWarnings at ~:507 (a ROOT created by the route, ontology task 046) and the follow-on sprk_event via this._dataService.createRecord at ~:669. sprk_priority is set at ~:390 and ~:622. Host: src/solutions/CreateWorkAssignmentWizard/src/main.tsx (sprk_createworkassignmentwizard); the in-app host is WorkAssignmentWizardDialog.tsx.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts (applyFieldMappings ~:472 REMOVED; BFF create ~:507; follow-on event create ~:669)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.tsx (in-app host wiring)</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/__tests__/workAssignmentService.payload.test.ts (payload = user-entered values only (work assignment and follow-on event))</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/__tests__/workAssignmentService.cascade.test.ts (adjust only if it asserts the mapping call)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/__tests__/workAssignmentService.followOnAssignee.test.ts (adjust for the follow-on event create path)</file>
+      <file role="modify">src/solutions/CreateWorkAssignmentWizard/src/main.tsx (host; only if it constructs the data service)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts (reference migration (task 021))</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (created by task 012; Work Assignment and Event rows)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="025" status="complete">Invoice migrated and live-verified.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this wizard only. One wizard per task, live-verified on dev before the next starts (spec FR-16). Do not edit another wizard's files or bffChildWriteAdapter.ts beyond what task 020 delivered; if the adapter needs a change, stop and escalate.</constraint>
+    <constraint source="project">Scope: the create payload. The wizard sends ONLY values the user entered or picked (plus the filing/regarding keys the route needs). It must not call applyFieldMappings, read a mapping profile or pre-fill mapped fields; mapping, owner, search-index and I-1 stamp are applied by the server (FR-02, FR-06, FR-09, FR-10).</constraint>
+    <constraint source="ADR-012">Scope: the shared UI library. Edits stay in Spaarke.UI.Components (or the named package) and the wizard's code-page host; no copy of shared logic into the host.</constraint>
+    <constraint source="ADR-021">Scope: any UI touched by this task. Fluent v9 tokens only, no hard-coded colors, dark mode must render correctly.</constraint>
+    <constraint source="project">Scope: deployment. Deploy through the code-page-deploy skill (build with the host's own npm script, never a hand-edited web resource). Rollback is redeploying the previous bundle; no runtime flag is added (spec rollout decision).</constraint>
+    <constraint source="CLAUDE.md §9">Scope: auth. The wizard sends no owner, owning-team or impersonation value; the BFF decides ownership from the caller (FR-09). The route stays authenticated (existing authenticatedFetch).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Create Work Assignment wizard; secure-create plan for roots; BFF child-records adapter</topic>
+    <files>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Lookup bind / option-set value shapes the payload still uses for user-entered fields.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-16 (and FR-16), the create-surface inventory in notes/design-review-2026-10-19.md, CreateWorkAssignmentWizard/workAssignmentService.ts, and the existing tests listed in relevant-files. Re-grep the line numbers cited here before editing (they are approximate).</step>
+    <step order="1">Inventory keys on the work-assignment `entity` and the follow-on event entity (priority at ~:390 and ~:622); classify user-entered vs client default; move defaults to the Work Assignment/Event rows of the task-012 registry or drop; list in task notes.</step>
+    <step order="2">Delete the applyFieldMappings call (~:472) and import (~:38) and the comment at ~:470.</step>
+    <step order="3">Keep createRecordViaBffWithWarnings (~:507); add mappingSource only when the filed-under parent differs from the intended mapping source.</step>
+    <step order="4">Move the follow-on sprk_event create (~:669) onto the BFF route (it resolves through withBffChildWrites because sprk_event is in BFF_CHILD_CREATE_TABLES; verify) so it carries owner, stamp and mapping.</step>
+    <step order="5">Add workAssignmentService.payload.test.ts (both payloads = user-entered keys only); run all CreateWorkAssignmentWizard jest tests.</step>
+    <step order="6">Build library and src/solutions/CreateWorkAssignmentWizard; deploy via code-page-deploy (sprk_createworkassignmentwizard); live check per ui-tests, including filing under a secure Matter (created into isolation).</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the follow-on Event cannot be created on the BFF route without changing the work-assignment completion order, STOP and escalate (ontology-r1 task 046 owns that order).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>workAssignmentService.cascade and followOnAssignee tests cover assignee and cascade behaviour, not the create payload.</existing>
+    <extension>Adding payload assertions to those files would blur their intent; a focused file gives FR-16 a single named proof.</extension>
+    <cost-of-doing-nothing>Without it nothing prevents client defaults or mapped keys re-entering either payload.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Work Assignment wizard renders"><steps><step>Open the Work Assignment wizard code page on dev from its launch command</step><step>Step through to the last step</step></steps><expected>All steps render with no console errors; Fluent v9 styling intact.</expected></test>
+    <test name="Work Assignment create flow"><steps><step>Fill the required fields and click Finish</step></steps><expected>The record is created through POST /api/v1/child-records/{table}; the success state shows the new record; no direct Xrm.WebApi create call for the table. The follow-on Event (if chosen) is also created through the route.</expected></test>
+    <test name="Mapped values visible on first load"><steps><step>Create the record under a parent that has an active field-mapping profile</step><step>Open the new record immediately (first load, no refresh or save)</step></steps><expected>Every field the active Mapping Profile maps from the parent is populated on the new record at first load; no client write filled them.</expected></test>
+    <test name="User value preserved"><steps><step>Type a value into a field the profile also maps</step><step>Finish and open the record</step></steps><expected>The user's own value is stored; the mapped value did not overwrite it (fill-only, FR-02).</expected></test>
+    <test name="ADR-021 dark mode"><steps><step>Switch the host to dark mode (theme toggle or prefers-color-scheme)</step><step>Open the wizard and step through every step</step></steps><expected>No unreadable text, no hard-coded light backgrounds, focus rings visible.</expected></test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/test the code page and shared library</tool><tool name="code-page-deploy">Deploy the wizard web resource to dev</tool><tool name="ui-test">Browser verification on dev</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/__tests__/workAssignmentService.payload.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">workAssignmentService.ts has no applyFieldMappings call or import (grep).</criterion>
+    <criterion testable="true">workAssignmentService.payload.test.ts proves both payloads contain only user-entered values.</criterion>
+    <criterion testable="true">Work assignment and follow-on Event are both created through the BFF route (no direct Xrm create).</criterion>
+    <criterion testable="true">Negative: with a user value and a mapped value for the same field, the user value is stored; a mapped field the user never touched is populated on first load of the new record; the wizard payload contains no key the user did not enter.</criterion>
+    <criterion testable="true">Deployed to dev via code-page-deploy; live check recorded in the task notes (mapped fields present on first load, user values kept, owner = owning team per FR-09); rollback bundle noted.</criterion>
+    <criterion testable="true">`applyFieldMappings` no longer appears in CreateWorkAssignmentWizard/workAssignmentService.ts; jest for the shared library and the host build pass; no existing test outside this wizard changes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16. Work Assignment is a ROOT created by the route (ontology task 046, D-21).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
