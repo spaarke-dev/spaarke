@@ -116,6 +116,8 @@
     <criterion testable="true">Negative: an exception while checking a mapped value drops that value (never writes it); an exception while checking a caller-supplied value refuses the create with no create call issued.</criterion>
     <criterion testable="true">The seeding proof for the merged-payload check is recorded in the task notes (test fails with the check disabled, passes after restore).</criterion>
     <criterion testable="true">BFF build 0 errors; SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests and RouteAuthorizationGuardTests pass unchanged; publish-size delta, CVE result and /conflict-check result recorded in the task notes.</criterion>
+    <criterion testable="true">From task 002 (2026-10-20): the mapping step passes `moneyAttributes` (the target table's Money columns, from attribute metadata) to `CreateTimeFieldMapping.ApplyFillOnly`, so a Default rule into a money column writes a `Money`; test it, then close #2124 (DI-001).</criterion>
+    <criterion testable="true">From task 002 (2026-10-20): `ApplyFillOnly` never writes the regarding pair or resolver fields. Any create whose secure-root filing plan reads a pair that mapping supplied today (Office Project-under-Matter, task 158) gets the pair from the caller or derives it from the filed-under parent BEFORE mapping; SecureRootInheritanceWriterTests.OfficeCreate_* and SecureRootCreateRouteTests.OfficeQuickCreate_* pass unchanged.</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-06 step 3, FR-08, NFR-01. Owner decision 2026-10-19: mapped values that fail AppendTo or field security are skipped with a warning and the create proceeds. Task 015 changes the owner step; do not touch it here.</notes>

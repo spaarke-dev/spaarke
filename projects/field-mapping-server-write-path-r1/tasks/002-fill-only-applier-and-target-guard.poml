@@ -4,7 +4,7 @@
     <title>Fill-only applier + refusal of pair/protected targets (FR-02, FR-05e)</title>
     <phase>1 W1 Canonical engine and configuration</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api; adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -100,7 +100,9 @@
     <criterion testable="true">DI-001 / #2124 fixed: Default into a Money target writes a `Money`; Concat/Template into a non-text, non-lookup target is converted typed or skipped with one warning (never written as a string). Close #2124.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-02 and FR-05(e). Source resolution and Read authorization are task 003; wiring into the unified service is task 014.</notes>
+  <notes>Spec FR-02 and FR-05(e). Source resolution and Read authorization are task 003; wiring into the unified service is task 014.
+Completed 2026-10-20 (task/fm-002, merged b6e0b2440). 37 fill-only + 97 engine cases; publish +875 B (task-branch vs master); no CVE. DI-001: expression targets fixed; Default→Money fixed only when the caller passes moneyAttributes, which task 014 supplies (#2124 stays open until then). Pair guard on ApplyFillOnly only; legacy Apply unchanged (Office secure filing reads the mapped pair; carried to 014/018). Details: notes/task-002-notes.md.
+rework: fix-round-1 task 002</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
