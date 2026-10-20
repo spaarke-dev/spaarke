@@ -938,7 +938,7 @@ Each restamps afterwards, but none refuses any of these:
 **Suggested fix (owner decision, 2026-10-20, ontology D-172 / ebilling D-137)**: option (b) only. Deleting a matter must never require first deleting its rate cards, because the user may lack permission, so **no Restrict: the three relationships stay RemoveLink**.
 - **Explicit scope.** A new `sprk_ratecard.sprk_scope` (Firm / CoreRecord), with a one-time backfill of existing cards, which lists every card it marks Firm so the owner can check it.
 - **Fail-closed resolution.** `RateCardResolver` and the rate query in `InvoiceResolutionService` require the lookup for a CoreRecord card. A card whose record is gone applies to nothing and never widens to firm-wide. An empty scope is not used either.
-- **Q10 cleanup.** The card is deleted with its record, or retired if something that survives the delete cites it. This extends D-120 in uac-r2's delete flow, and task 081 sends the notice. Cards orphaned by a delete outside the BFF are listed in an admin view added by 079.
+- **Q10 cleanup.** *(Superseded by D-146, 2026-10-20: a core-record delete always keeps the card, unlinked, and never deletes or re-owns it; no notice is sent.)* Was: the card is deleted with its record, or retired if something that survives the delete cites it. Cards orphaned by a delete outside the BFF are listed in an admin view added by 079.
 - **Tasks.** **080** adds the column and runs the backfill, after the owner approves the script. **085** changes the resolver, the rate query and the import writer. **079** re-runs the backfill before it deploys the BFF.
 - **Design.** `notes/rule-set-scope-design.md`, S6 and §3.5.
 

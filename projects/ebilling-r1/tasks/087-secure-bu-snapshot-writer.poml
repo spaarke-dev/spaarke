@@ -1,54 +1,66 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="087" project="ebilling-r1">
   <metadata>
-    <title>Secure business-unit snapshot writer: ProvisionProjectEndpoint (Make Secure and inherited provisioning) and the secure child-create path; membership exclusion (D-141)</title>
-    <phase>3 Rules (WP3) — rule-set scope (D-141), wave W3-7b</phase>
-    <gate>080 done (S8 column on dev); uac-r2 reviews the diff before merge</gate>
+    <title>Secure business-unit snapshot writer: one write in ProvisionCoreAsync (Step 4.1b), one parent-snapshot rule in SecureRootInheritance's create plan, a caller-supplied value refused on every core writer; membership exclusion (D-141, uac-r2 round 2 items 087.1-087.7)</title>
+    <phase>3 Rules (WP3) — rule-set scope (D-141), wave W3-8b</phase>
+    <gate>080 done (S8 column on dev); 082 merged (same file, SecureRootInheritance.cs); UAC #2152 merged (the always-applied exclusion set); uac-r2 reviews the diff before merge</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Changes uac-r2's provisioning endpoint (the one writer of the move into Secure) and the secure child-create path, with a new fail-closed refusal on the Make Secure path; security-sensitive and on another project's hot path.</rigor-reason>
+    <rigor-reason>Changes uac-r2's provisioning core (the one writer of the move into Secure), the secure root-create plan used by every create into isolation, and every BFF writer of the three core tables, with a new fail-closed refusal on the Make Secure path; security-sensitive and on another project's hot path.</rigor-reason>
     <model-tier>opus</model-tier>
-    <model-tier-reason>A small diff in the most security-sensitive write path the platform has (ProvisionProjectEndpoint step order, compensation and resume), reviewed by its owning project.</model-tier-reason>
+    <model-tier-reason>A small diff in the most security-sensitive write path the platform has (ProvisionProjectEndpoint step order, creator-share outcomes and resume), reviewed by its owning project.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Edits uac-r2's ProvisionProjectEndpoint.cs and the child-records create path (ChildRecordEndpoints / OwnedChildWrite), which uac-r2 and field-mapping-server-write-path-r1 also change; run /conflict-check and coordinate before the PR. No file overlap with 081-086.</parallel-reason>
-    <deps>080</deps>
+    <parallel-reason>Edits uac-r2's ProvisionProjectEndpoint.cs, SecureRootInheritance.cs (also edited by 082, which merges first), OwnedChildWrite / ChildRecordEndpoints and RecordCreationService, which uac-r2 and field-mapping-server-write-path-r1 also change; run /conflict-check and coordinate before the PR. No file overlap with 081, 083-086.</parallel-reason>
+    <deps>080, 082</deps>
     <tags>bff, api, security, tenant-isolation, testing, coordination</tags>
-    <estimated-effort>1-2 days</estimated-effort>
+    <estimated-effort>2 days</estimated-effort>
   </metadata>
 
-  <prompt>Write the S8 snapshot sprk_securedfrombusinessunit (notes/rule-set-scope-design.md section 5.2, D-141): ProvisionProjectEndpoint writes the record's prior business unit in the same step that moves it into the Secure business unit, before the owner change, and refuses fail closed if that write fails; a record created directly under a Secure parent takes the parent's snapshot, written by the server-side path that creates it into isolation; add the column to MembershipOptions.GlobalFieldExclusions with a test. uac-r2 reviews the diff on ProvisionProjectEndpoint and the child-create path before merge.</prompt>
+  <prompt>Write the S8 snapshot sprk_securedfrombusinessunit (notes/rule-set-scope-design.md section 5.2, D-141, as revised by uac-r2's round 2): ProvisionCoreAsync writes the record's OWN prior business unit in a new Step 4.1b (after EnsureSecureFlagAsync, before Step 4.2), one write read back, failing as a named CreatorShareStep.Failed with no compensation; condition (d), a record created directly under a Secure parent, is implemented ONCE in SecureRootInheritance's create plan and applied by every path that uses it; every BFF writer of the three core tables refuses a caller-supplied value; the column is excluded from membership discovery whatever the bound list holds. uac-r2 reviews the diff before merge.</prompt>
 
-  <role>SPAARKE platform developer. Expert in the uac-r2 provisioning endpoint (steps, resume, compensation), the child-records secure create and the membership discovery options.</role>
+  <role>SPAARKE platform developer. Expert in the uac-r2 provisioning endpoint (steps, resume, creator-share outcomes), the secure root-create plan and the membership discovery options.</role>
 
-  <goal>Every record that enters the Secure Record business unit through the BFF carries the business unit it came from (its own on Make Secure, its parent's when created or provisioned under a Secure parent); a Make Secure whose snapshot write fails moves nothing; no path ever writes the Secure business unit itself as a snapshot; Unsecure never reads or writes the column; membership discovery ignores it; uac-r2 has reviewed and approved the diff.</goal>
+  <goal>Every record that enters the Secure Record business unit through the BFF carries the business unit it came from: its own on every provisioning (Make Secure, inherited provisioning, Step 8, re-file writers, the job), its parent's when created directly under a Secure parent; a provisioning whose snapshot write fails moves nothing; no path ever writes the Secure business unit itself as a snapshot; no caller can set the column; Unsecure never reads or writes it; membership discovery ignores it; S8 exists in an environment before a BFF carrying this code deploys there; uac-r2 has reviewed and approved the diff.</goal>
 
   <context>
-    <background>D-141 and the coordinator's correction (design note sections 1.3, 5.2, 12): the column is ebilling's, uac-r2's conditions (a)-(f) are binding. At 3e11367468: ProvisionProjectEndpoint (Api/ExternalAccess/ProvisionProjectEndpoint.cs:160) — TransitionMakeSecure (:426), Step 4.1 the secure flag as the first write (:2026), Step 4.2 shared-container unlink before the owner move (:2038), Step 4.5 share-first (:2080), Step 5 the owner move, read back (:2125); a resumed run finds the record already owned by the team (:4549-4555); ProvisionInheritedAsync (:632) provisions a project or work assignment FILED UNDER a Secure record through the endpoint's own steps. The work-assignment secure create: ChildRecordEndpoints (Api/ChildRecordEndpoints.cs:48-55: the OwnedChildWrite core with SecureRootFilingGate, completed by CompleteRootCreateAsync). RecordCreationService is at Services/Office/RecordCreationService.cs (Office quick-create of Matter and Project, pre-W2); field-mapping-server-write-path-r1 moves it to Services/RecordCreation/ (their task 013) and moves Matter / Project creates to the child-records route (their 020, 022); uac-r2 named their task 033 (system creators through RecordCreationService). Secure business unit by name: SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync (Services/Access/SecureChildShareSynchronizer.cs:1233). Membership: MembershipOptions.GlobalFieldExclusions seeded from MembershipOptionsDefaults (Services/Ai/Membership/MembershipOptions.cs:265 CanonicalAuditFieldExclusions, :385); no appsettings binds the list.</background>
+    <background>D-141 (owner re-confirmed Q1) and design note sections 1.3, 5.2 and 12 (uac-r2 review rounds 1 and 2): the column is ebilling's; uac-r2's conditions (a)-(f) are binding. Cite symbols, not line numbers (uac-r2 round 2, general). By symbol: ProvisionProjectEndpoint (TransitionMakeSecure; ProvisionInheritedAsync; ProvisionCoreAsync, the shared core every provisioning runs: Step 4.1 EnsureSecureFlagAsync, Step 4.2 shared-container unlink, Step 4.5 share-first, Step 5 the owner move, read back; the CreatorShareStep outcomes and their reason codes; the resume rule that finds a record already owned by the team). Every move into Secure goes through ProvisionCoreAsync: direct Make Secure, inherited provisioning, Make Secure's Step 8 over children, the re-file writers that re-provision, and the provisioning job. The secure root create: SecureRootInheritance.PlanCreateAsync builds a SecureRootCreatePlan (the Secure parents, SecureOwnerTeamId) used by OwnedChildWrite (the child-records route in ChildRecordEndpoints and DataverseCreateRecordHandler) and by RecordCreationService, which can create a core record under a Secure parent. SecureRecordOwnerTeam.IsInSecureBusinessUnit decides "already in the Secure business unit". ChildRecordEndpoints.RootServerOwnedColumns lists root columns no caller may set; NamesSecureFlag is the existing predicate that refuses a caller-supplied secure flag. Membership: MembershipOptions.GlobalFieldExclusions seeded from MembershipOptionsDefaults (CanonicalAuditFieldExclusions) only when the bound list is empty, and ForceInclude can re-include a field; UAC #2152 adds an always-applied exclusion set that holds with a non-empty list and ignores ForceInclude. sprk_securitybu exists on the core tables and cannot be reused: provisioning refuses (409) when it holds any value (design note 5.2).</background>
     <relevant-files>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs (uac-r2)</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs and/or src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs (the secure root create; uac-r2)</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipOptions.cs (MembershipOptionsDefaults: the column in the global exclusion seed)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs (ProvisionCoreAsync, Step 4.1b; uac-r2)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureRootInheritance.cs (PlanCreateAsync, SecureRootCreatePlan; after 082; uac-r2)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs (applies the plan's snapshot; uac-r2)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs (RootServerOwnedColumns gains the column; the predicate beside NamesSecureFlag)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs (or its moved home under Services/RecordCreation/: applies the plan's snapshot; refuses a caller value)</file>
+      <file role="modify">every other BFF writer of sprk_matter, sprk_project or sprk_workassignment found by Grep in step 0 (refuses a caller value through the same predicate)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipOptions.cs (the always-applied exclusion set from #2152)</file>
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipOptionsTests.cs (or MembershipFieldDiscoveryServiceTests.cs)</file>
       <file role="modify">tests/integration/data-mutation/ExternalAccess/ProvisionProjectIdempotencyTests.cs or a new sibling ProvisionSecureBusinessUnitSnapshotTests.cs</file>
-      <file role="modify">tests/integration/data-mutation/ExternalAccess/SecureRootInheritanceWriterTests.ChildRecordRoute.cs (or a sibling) for the child create</file>
-      <file role="read">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs</file>
+      <file role="modify">tests/integration/data-mutation/ExternalAccess/SecureRootInheritanceWriterTests.ChildRecordRoute.cs (or a sibling) for the plan</file>
+      <file role="new">tests/Spaarke.ArchTests/SecureBusinessUnitSnapshotGuardTests.cs (the reader guard and the source-scan guard)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Access/SecureRecordOwnerTeam.cs (IsInSecureBusinessUnit)</file>
       <file role="read">src/server/api/Sprk.Bff.Api/Services/Access/SecureRootFilingGate.cs</file>
     </relevant-files>
     <dependencies>
       <dependency task="080" status="pending">S8 sprk_securedfrombusinessunit on the three core tables (field-secured; BFF writer profile)</dependency>
+      <dependency task="082" status="pending">082 edits SecureRootInheritance.cs (the pair-only NamePairParentAsync); this task edits the same file after it merges.</dependency>
+      <dependency task="UAC #2152" status="pending">MembershipOptions gains an always-applied exclusion set that holds with a non-empty bound list and ignores ForceInclude. Today the seed applies only when the list is empty.</dependency>
     </dependencies>
   </context>
 
   <constraints>
-    <constraint source="D-141, uac-r2 condition a">ProvisionProjectEndpoint stays the ONE writer of the move into Secure; no other code moves a record into the Secure business unit. On a direct Make Secure it writes sprk_securedfrombusinessunit = the record's current owningbusinessunit (read in Step 1) in the same step as the move, BEFORE Step 5's owner change, and if that write fails it refuses, fail closed: the owner is not changed and the endpoint's own compensation for a pre-move failure runs. Place it beside Step 4.1 (the first write); uac-r2 agrees the exact position in review.</constraint>
-    <constraint source="D-141 (never the Secure BU)">The snapshot is NEVER the Secure Record business unit's id. On a resumed run (the record already owned by the Secure team, :4549-4555) or any read where owningbusinessunit is already the Secure business unit, the snapshot is left as it is (empty stays empty; interim B covers it). The Secure business unit is identified through SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync; an ambiguous result refuses the provisioning, as the endpoint already does for an ambiguous business unit (ReasonSecureBuAmbiguous).</constraint>
-    <constraint source="D-141, uac-r2 condition d">A record created directly under a Secure parent takes the PARENT's snapshot, copied by the server-side path that creates or provisions it into isolation: (1) ProvisionProjectEndpoint.ProvisionInheritedAsync (a project or work assignment filed under a Secure record) copies the Secure parent's snapshot, not the record's own prior business unit; (2) the work-assignment secure create through ChildRecordEndpoints (OwnedChildWrite core with SecureRootFilingGate) copies its Secure parent's snapshot in the create. With two Secure parents whose snapshots differ, or a parent with no snapshot, leave it empty (interim B), never pick one. (3) Check whether RecordCreationService (Services/Office/) can create a record under a Secure parent; if it can, it copies the parent's snapshot too; if not, record why.</constraint>
-    <constraint source="uac-r2 conditions b and c">The column is field-secured with no form, no view and no user write path (080): the BFF writes it only on the paths above. Unsecure (UnsecureProjectEndpoint and its job) never reads or writes it. Nothing else reads it except 082's loader, and only while the record is held Secure.</constraint>
-    <constraint source="uac-r2 condition e">Add sprk_securedfrombusinessunit to the global membership exclusion seed (MembershipOptionsDefaults, read by MembershipOptions.GlobalFieldExclusions) so membership discovery never treats it as a membership field, with a test that fails without it.</constraint>
-    <constraint source="uac-r2 condition f">Review gate: uac-r2 reviews and approves the diff touching ProvisionProjectEndpoint and the child-create path BEFORE merge. Without the approval the PR is not merged.</constraint>
-    <constraint source="coordination">Before the PR, tell field-mapping-server-write-path-r1 (their tasks 013, 020, 022, and 033 as uac-r2 named it) that the core-record create into isolation must copy the parent's snapshot, so their moved create paths keep it; record the message and their answer.</constraint>
+    <constraint source="uac-r2 round 2, general">Step 0 merges origin/master into the branch (including uac-r2 #2150 and #2152 once they land) before any edit. Cite symbols, not line numbers.</constraint>
+    <constraint source="D-141, uac-r2 condition a, round 2 item 087.2 (MUST)">ProvisionProjectEndpoint stays the ONE writer of the move into Secure. The snapshot is written in ONE place: ProvisionCoreAsync, as the value of the record's OWN owningbusinessunit (_owningbusinessunit_value, read in Step 1). That one write covers direct Make Secure, inherited provisioning (ProvisionInheritedAsync), Make Secure's Step 8 over children, the re-file writers that re-provision and the provisioning job; no second write site and no parent-snapshot copy on the provisioning path.</constraint>
+    <constraint source="uac-r2 round 2 item 087.3 (MUST)">Position and outcome: a new "Step 4.1b" after EnsureSecureFlagAsync (Step 4.1) and before Step 4.2; one write, read back. When SecureRecordOwnerTeam.IsInSecureBusinessUnit is true for the record (a resumed run, or a record already in the Secure business unit) the step writes nothing and leaves the column as it is. When _owningbusinessunit_value is null the step refuses. A failed write, a failed read-back or a null value ends the run as CreatorShareStep.Failed with a named reason code for the snapshot (uac-r2 agrees the name in review), with NO compensation (nothing after Step 4.1 has run, and the flag is already handled by the existing resume rule). The step runs whether or not the flag was already set: an already-flagged record also gets its snapshot.</constraint>
+    <constraint source="D-141 (never the Secure BU)">The snapshot is NEVER the Secure Record business unit's id: Step 4.1b skips when the record is already in the Secure business unit, and the create plan never copies a value equal to the Secure business unit's id (it treats it as unknown, as 082's loader does).</constraint>
+    <constraint source="D-141, uac-r2 condition d, round 2 item 087.1 (MUST)">A record created directly under a Secure parent takes the PARENT's snapshot, implemented ONCE: SecureRootInheritance.PlanCreateAsync reads the Secure parents' sprk_securedfrombusinessunit in ONE app-only read and puts the result in SecureRootCreatePlan; every path that uses the plan writes it in the create: OwnedChildWrite (the child-records route in ChildRecordEndpoints and DataverseCreateRecordHandler) and RecordCreationService (which can create under a Secure parent). Two or more Secure parents with differing snapshots, or any Secure parent with an empty snapshot, give NO snapshot (interim B), never a pick. No path computes the parent snapshot on its own.</constraint>
+    <constraint source="uac-r2 round 2 item 087.1 (guard)">An ArchTest fails when any code reads SecureRootCreatePlan.SecureOwnerTeamId without also applying the plan's snapshot (the writers listed above), with a must-fire control (a planted reader that ignores the snapshot) and a must-not-fire control.</constraint>
+    <constraint source="uac-r2 round 2 item 087.6 (MUST)">No caller can set the column. Every BFF writer of sprk_matter, sprk_project and sprk_workassignment refuses a request that supplies sprk_securedfrombusinessunit, through ONE predicate placed beside NamesSecureFlag; the column is added to ChildRecordEndpoints.RootServerOwnedColumns. A source-scan ArchTest allows the column name only in the writers above (ProvisionCoreAsync, SecureRootInheritance and the plan's appliers), CoreRecordChain (082's loader) and MembershipOptions, with a must-fire control (a planted mention elsewhere) and a must-not-fire control.</constraint>
+    <constraint source="uac-r2 conditions b and c">The column is field-secured with no form, no view and no user write path (080). Unsecure (UnsecureProjectEndpoint and its job) never reads or writes it. Nothing else reads it except 082's loader, and only while the record is held Secure.</constraint>
+    <constraint source="uac-r2 condition e, round 2 item 087.5 (MUST)">sprk_securedfrombusinessunit is in the always-applied membership exclusion set from UAC #2152, so the exclusion holds when the bound GlobalFieldExclusions list is non-empty and ForceInclude names the column. If #2152 has not merged, STOP (the seed alone is dropped by any bound list).</constraint>
+    <constraint source="uac-r2 round 2 item 087.4 (MUST)">S8 must exist in every environment before a BFF carrying this code deploys there: 079 and the release path check it by metadata read before the BFF deploy. If the column is missing at run time, Step 4.1b fails with its named reason code, and the reason text names sprk_securedfrombusinessunit.</constraint>
+    <constraint source="uac-r2 condition f">Review gate: uac-r2 reviews and approves the diff touching ProvisionProjectEndpoint, SecureRootInheritance, OwnedChildWrite and RecordCreationService BEFORE merge. Without the approval the PR is not merged.</constraint>
+    <constraint source="coordination">Before the PR, tell field-mapping-server-write-path-r1 (their tasks 013, 020, 022, and 033 as uac-r2 named it) that every core-record create into isolation applies SecureRootCreatePlan's snapshot and refuses a caller value, so their moved create paths keep both; record the message and their answer.</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: no new service, endpoint or registration; publish-size delta; no package; no new HIGH CVE.</constraint>
   </constraints>
 
@@ -61,17 +73,18 @@
       <file>docs/adr/ADR-038-testing-strategy.md</file>
     </files>
     <patterns>
-      <pattern name="A provisioning write before the move" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs:2026 (Step 4.1)">The first write of the forward path, read back; a failure stops the run before the move.</pattern>
-      <pattern name="Global membership exclusion" location="src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipOptions.cs:265, :385">Seeded only when the bound list is empty.</pattern>
+      <pattern name="A provisioning write before the move" location="ProvisionProjectEndpoint.ProvisionCoreAsync, Step 4.1 EnsureSecureFlagAsync">The first write of the forward path, read back; a failure stops the run before the move.</pattern>
+      <pattern name="Caller-supplied root column refused" location="ChildRecordEndpoints.RootServerOwnedColumns and NamesSecureFlag">One predicate, every writer.</pattern>
+      <pattern name="Global membership exclusion" location="MembershipOptions.GlobalFieldExclusions, MembershipOptionsDefaults (and #2152's always-applied set)">The always-applied set, not the seed.</pattern>
     </patterns>
   </knowledge>
 
   <steps mode="directional">
-    <step order="0">git merge-base --is-ancestor 3e11367468 HEAD; read notes/080-ruleset-scope-schema.md (S8 live). Read the current ProvisionProjectEndpoint step order and resume rules end to end before editing.</step>
-    <step order="1">Make Secure: write the snapshot before Step 5; fail closed; resume and already-Secure cases leave it alone; tests.</step>
-    <step order="2">ProvisionInheritedAsync: copy the Secure parent's snapshot; two differing parents or none → empty; tests.</step>
-    <step order="3">The work-assignment secure create: copy the parent's snapshot; tests. Check RecordCreationService and record the answer.</step>
-    <step order="4">Membership exclusion and its test.</step>
+    <step order="0">git fetch; git merge origin/master (including #2150 and #2152 when they land); confirm 082 is an ancestor of HEAD; read notes/080-ruleset-scope-schema.md (S8 live). Read ProvisionCoreAsync's step order, outcomes and resume rules end to end before editing. Grep every BFF writer of the three core tables and list them in the notes.</step>
+    <step order="1">Step 4.1b in ProvisionCoreAsync: skip when IsInSecureBusinessUnit, refuse on null, one write read back, CreatorShareStep.Failed with a named reason code and no compensation; tests (Make Secure, inherited, an already-flagged record, a resumed run, write failure, null).</step>
+    <step order="2">SecureRootInheritance.PlanCreateAsync: one app-only snapshot read; SecureRootCreatePlan carries it; OwnedChildWrite and RecordCreationService apply it; the reader guard; tests.</step>
+    <step order="3">The caller-value predicate beside NamesSecureFlag in every core writer; RootServerOwnedColumns; one must-fire test per writer; the source-scan guard with controls.</step>
+    <step order="4">The membership exclusion in #2152's always-applied set and its tests.</step>
     <step order="5">Coordination message to field-mapping-server-write-path-r1; record it.</step>
     <step order="6">dotnet build; dotnet test (unit, integration data-mutation for provisioning and child records, ArchTests); publish-size delta; /conflict-check.</step>
     <step order="7">uac-r2 review of the diff (gate). Record the approval.</step>
@@ -80,16 +93,19 @@
   </steps>
 
   <escalation>
-    <trigger>If the snapshot write cannot be placed before the owner change without reordering uac-r2's existing steps (share-first, container unlink, compensation), STOP and agree the position with uac-r2; do not reorder their steps on your own.</trigger>
+    <trigger>If Step 4.1b cannot be placed after EnsureSecureFlagAsync and before Step 4.2 without reordering uac-r2's existing steps (share-first, container unlink, resume), STOP and agree the position with uac-r2; do not reorder their steps on your own.</trigger>
+    <trigger>If #2152 has not merged, STOP (087.5): the exclusion cannot hold against a bound list.</trigger>
+    <trigger>If 082 has not merged, STOP: both tasks edit SecureRootInheritance.cs.</trigger>
     <trigger>If uac-r2 does not approve the diff, do not merge; report.</trigger>
-    <trigger>If a path is found that moves a record into the Secure business unit outside ProvisionProjectEndpoint and the child-create path (for example a native Assign to the Secure team), do not add a writer there; report it to uac-r2 and the main session (condition a says there is one writer).</trigger>
+    <trigger>If a path is found that moves a record into the Secure business unit outside ProvisionCoreAsync and the create plan (for example a native Assign to the Secure team), do not add a writer there; report it to uac-r2 and the main session (condition a says there is one writer).</trigger>
+    <trigger>If a core-record writer cannot take the caller-value predicate without changing its public contract, STOP and agree the shape with its owning project and uac-r2.</trigger>
     <trigger>If field-mapping-server-write-path-r1 has already moved the core-record create path (their 013 / 020 / 022 merged) before this task runs, STOP and re-plan the write site with them and uac-r2.</trigger>
   </escalation>
 
   <justification>
-    <existing>The only business-unit column on the core tables is owningbusinessunit, rewritten by the move (Step 5). The provisioning endpoint and the secure child create already own the move into Secure; MembershipOptionsDefaults already seeds global exclusions. Grep finds no writer or column that keeps the prior business unit.</existing>
-    <extension>The writes go into the existing provisioning and create paths (no new endpoint or service); the exclusion goes into the existing seed. A separate task from 081 so that 081 stays one secure-family change and this hot-path diff gets its own uac-r2 review.</extension>
-    <cost-of-doing-nothing>The S8 column stays empty, so every Secure record's invoices fall back to interim B forever: business-unit-restricted rule sets never apply to them (D-141 Q1 not delivered).</cost-of-doing-nothing>
+    <existing>The only business-unit columns on the core tables are owningbusinessunit, rewritten by the move (Step 5), and sprk_securitybu, which cannot be reused because provisioning refuses (409) when it holds any value (uac-r2 round 2 item 087.7). ProvisionCoreAsync and the create plan already own the move into Secure; RootServerOwnedColumns and NamesSecureFlag already refuse caller-set root columns; MembershipOptions already excludes fields. Grep finds no writer or column that keeps the prior business unit.</existing>
+    <extension>The writes go into the existing provisioning core and create plan (no new endpoint or service); the refusal joins the existing predicate's place and list; the exclusion goes into #2152's set. A separate task from 081 so that 081 stays one secure-family change and this hot-path diff gets its own uac-r2 review.</extension>
+    <cost-of-doing-nothing>The S8 column stays empty, so every Secure record's invoices fall back to interim B forever: business-unit-restricted rule sets never apply to them (D-141 Q1 not delivered); and without the refusal a caller could set the snapshot and pick which business-unit rule sets apply to a Secure record.</cost-of-doing-nothing>
   </justification>
 
   <tools>
@@ -98,25 +114,27 @@
   </tools>
 
   <outputs>
-    <output type="code">ProvisionProjectEndpoint.cs, ChildRecordEndpoints.cs / OwnedChildWrite.cs, MembershipOptions.cs</output>
+    <output type="code">ProvisionProjectEndpoint.cs, SecureRootInheritance.cs, OwnedChildWrite.cs, ChildRecordEndpoints.cs, RecordCreationService.cs and the other core writers, MembershipOptions.cs</output>
     <output type="test">the test files listed in relevant-files</output>
-    <output type="docs">projects/ebilling-r1/notes/087-secure-bu-snapshot-writer.md (uac-r2 approval, the field-mapping coordination, the RecordCreationService answer)</output>
+    <output type="docs">projects/ebilling-r1/notes/087-secure-bu-snapshot-writer.md (the writer list, uac-r2 approval, the field-mapping coordination)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Make Secure on a matter owned in Litigation writes sprk_securedfrombusinessunit = Litigation before the owner change (call order asserted), and the matter ends owned by the Secure team.</criterion>
-    <criterion testable="true">When the snapshot write fails, Make Secure returns the endpoint's failure, the owner is unchanged, and nothing after the snapshot step ran (negative).</criterion>
-    <criterion testable="true">A resumed Make Secure on a record already owned by the Secure team does not write the snapshot; no test path ever writes the Secure business unit's id into the column (negative).</criterion>
-    <criterion testable="true">ProvisionInheritedAsync on a work assignment filed under a Secure project copies the project's snapshot; with a parent that has none, or two Secure parents with different snapshots, the column stays empty (negative).</criterion>
-    <criterion testable="true">A work assignment created through the child-records route under a Secure matter carries the matter's snapshot; one created under an ordinary matter carries none (negative).</criterion>
-    <criterion testable="true">Unsecure neither reads nor writes the column (negative, Grep of the Unsecure path and a test that a record unsecured keeps its old value untouched).</criterion>
-    <criterion testable="true">Membership discovery excludes sprk_securedfrombusinessunit with the seeded defaults; the test fails when the entry is removed (seeding proof).</criterion>
-    <criterion testable="true">uac-r2's approval of the diff and the field-mapping coordination are recorded before merge; the RecordCreationService answer is recorded.</criterion>
+    <criterion testable="true">Make Secure on a matter owned in Litigation writes sprk_securedfrombusinessunit = Litigation in Step 4.1b, after EnsureSecureFlagAsync and before Step 4.2 (call order asserted), reads it back, and the matter ends owned by the Secure team.</criterion>
+    <criterion testable="true">An already-flagged record (sprk_issecure true, still in Litigation) also gets its snapshot; inherited provisioning of a work assignment owned in Tax writes Tax (its own business unit, not its parent's).</criterion>
+    <criterion testable="true">When the snapshot write or its read-back fails, or _owningbusinessunit_value is null, the run ends as CreatorShareStep.Failed with the named reason code, the owner is unchanged, nothing after Step 4.1b ran and no compensation ran (negative); with the column missing, the reason text names sprk_securedfrombusinessunit.</criterion>
+    <criterion testable="true">A resumed run on a record for which IsInSecureBusinessUnit is true writes nothing to the column; no test path ever writes the Secure business unit's id into the column (negative).</criterion>
+    <criterion testable="true">Create plan: a work assignment created through the child-records route under a Secure matter whose snapshot is Litigation carries Litigation; the same through DataverseCreateRecordHandler and through RecordCreationService carries Litigation; a create under an ordinary matter carries none (negative); two Secure parents with differing snapshots, or a Secure parent with none, carry none (negative); the plan reads the parents' snapshots in exactly one app-only call.</criterion>
+    <criterion testable="true">The reader guard fails on a planted reader of SecureOwnerTeamId that ignores the snapshot and passes on the real appliers (controls recorded).</criterion>
+    <criterion testable="true">Caller values: for each core writer listed in the notes, one test sends sprk_securedfrombusinessunit and gets the refusal with nothing written (must-fire); the source-scan guard fails on a planted mention outside the allowed files and passes on the current tree (controls recorded).</criterion>
+    <criterion testable="true">Unsecure neither reads nor writes the column (negative, the source-scan guard and a test that a record unsecured keeps its old value untouched).</criterion>
+    <criterion testable="true">Membership discovery excludes sprk_securedfrombusinessunit with a non-empty bound GlobalFieldExclusions list and with ForceInclude naming it (negative: never discovered); the test fails when the entry is removed (seeding proof).</criterion>
+    <criterion testable="true">uac-r2's approval of the diff and the field-mapping coordination are recorded before merge.</criterion>
     <criterion testable="true">Publish-size delta recorded; no new service, endpoint, registration or package; no new HIGH CVE; /conflict-check run.</criterion>
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>082 reads the column only while a record is held Secure and treats empty as interim B, so 082 does not wait for this task. 079 deploys it. Two adversarial passes (security, tenant-isolation).</notes>
+  <notes>082 reads the column only while a record is held Secure and treats empty as interim B, so 082 does not wait for this task; this task waits for 082 because both edit SecureRootInheritance.cs. 079 deploys it after checking S8 exists. Two adversarial passes (security, tenant-isolation).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

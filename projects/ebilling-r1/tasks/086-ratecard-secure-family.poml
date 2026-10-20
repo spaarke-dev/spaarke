@@ -1,68 +1,77 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="086" project="ebilling-r1">
   <metadata>
-    <title>Rate card and rate join the secure family; timekeeper rows get their own owner (uac-r2 review item 5)</title>
-    <phase>3 Rules (WP3) — rule-set scope (D-171, D-172, D-141), wave W3-10</phase>
-    <gate>081 and 085 done; owner OK for the live refusal probes and the two -Apply runs on dev</gate>
+    <title>Rate card and rate join the secure family; each row gets its own owner; the rate card workbook is filed under its record (uac-r2 review item 5, round 2 items 086.1-086.8, D-145, D-146)</title>
+    <phase>3 Rules (WP3) — rule-set scope (D-171, D-172, D-141, D-145, D-146), wave W3-10</phase>
+    <gate>081 and 085 done; sprk_createdbyperson on sprk_ratecard and sprk_ratecardrate live on dev (080); UAC T7 merged to master; owner OK for the live refusal probes and the two -Apply runs on dev; uac-r2 reviews every edit to its files</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Record ownership on Secure records (a Secure-scoped import is refused today; a later Secure is never followed), uac-r2's lineage, resolver, role, census and depth-assertion files, and live role and schema writes on dev: tenant-isolation code.</rigor-reason>
+    <rigor-reason>Record ownership on Secure records (a Secure-scoped import is refused today; a later Secure is never followed), uac-r2's lineage, resolver, role, census, depth-assertion and client files, the workbook document's filing and external visibility, and live role and schema writes on dev: tenant-isolation code.</rigor-reason>
     <model-tier>opus</model-tier>
     <model-tier-reason>Security-relevant ownership change across uac-r2-owned files with a binding review, mirroring 081's secure-family change for a second pair of tables.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Edits the same uac-r2 files and shared guards as 081 (SecureChildLineage.cs, RecordOwnershipResolver.cs, config/secure-record-owner-role.json, RecordCreatorPerson.cs, scripts/Set-ChildRecordCreatorPersonSchema.ps1, SecureBuRoleDepthAssertion.cs, RecordOwnerAssignmentCensusTests) and RateCardImportService.cs after 085. Run /conflict-check before the PR.</parallel-reason>
+    <parallel-reason>Edits the same uac-r2 files and shared guards as 081 (SecureChildLineage.cs, RecordOwnershipResolver.cs, config/secure-record-owner-role.json, RecordCreatorPerson.cs, scripts/Set-ChildRecordCreatorPersonSchema.ps1 and its Pester pin, SecureBuRoleDepthAssertion.cs, bffChildWriteAdapter.ts, RecordOwnerAssignmentCensusTests) and RateCardImportService.cs after 085. Run /conflict-check before the PR.</parallel-reason>
     <deps>081, 085</deps>
     <tags>bff, security, tenant-isolation, testing, rules</tags>
-    <estimated-effort>1-2 days</estimated-effort>
+    <estimated-effort>2 days</estimated-effort>
   </metadata>
 
-  <prompt>Put sprk_ratecard and sprk_ratecardrate in the secure family in ONE change, as 081 does for sprk_ruleset (notes/rule-set-scope-design.md section 5.4): lineage entries, sprk_ratecard in OwnershipParentEntities, role rows with live refusal probes applied before the BFF deploy, sprk_createdbyperson on both, census ChildTables / Routed entries / PersonBearingWriters, and the NFR-05 depth check on both. In RateCardImportService, take each row's owner parents from its own lookups (card → core record, rate → card) and give new firm-level timekeeper rows their own owner (no parents), never the matter's.</prompt>
+  <prompt>Put sprk_ratecard and sprk_ratecardrate in the secure family in ONE change, as 081 does for sprk_ruleset (notes/rule-set-scope-design.md section 5.4, revised by uac-r2's round 2): lineage entries, sprk_ratecard in OwnershipParentEntities and in the client OWNERSHIP_CHILD_TABLES list, role rows with live refusal probes applied before the BFF deploy, the creator-person stamp and script entries (secure and verify only; 080 created the column), census ChildTables / Routed entries / PersonBearingWriters, and a separate non-throwing NFR-05 list for both. In RateCardImportService, take each row's owner parents from its own lookups (card → core record, rate → card), resolving once per distinct parent set; give new firm-level timekeeper rows their own no-parent owner, never the matter's; and file the workbook document under the card's core record, Restricted, owned from its own row and stored in the record's container (D-145). Count cards already on Secure records before deploy and reconcile them after. Core-record delete always keeps the card, unlinked (D-146); this task adds no delete code.</prompt>
 
   <role>SPAARKE platform developer. Expert in IRecordOwnershipResolver, SecureChildReconciler, the uac-r2 secure-family guards and the rate card import (078).</role>
 
-  <goal>A rate card import scoped to a Secure matter succeeds, its card and rates owned by the Secure team; making a matter Secure later re-owns its card and rates through the reconciler (and Unsecure moves them back); new timekeeper rows are owned by the caller's business-unit team whatever the card's scope; SecureFamilyConsistencyTests, the census and the creator-person agreement test pass with both tables; the NFR-05 run reports no non-admin role reaching the Secure business unit on either table.</goal>
+  <goal>A rate card import scoped to a Secure matter succeeds, its card and rates owned by the Secure team; making a matter Secure later re-owns its card and rates through the reconciler (and Unsecure moves them back); cards already on Secure records before the deploy are counted and re-owned by one reconcile run after it; new timekeeper rows are owned by the caller's business-unit team whatever the card's scope; a record-scoped card's workbook is filed under its record, Restricted and owned from its own row; SecureFamilyConsistencyTests, SecureChildNewCommandAgreementTests, the census, the Pester pin and the creator-person agreement test pass with both tables; the NFR-05 run reports no non-admin role reaching the Secure business unit on either table, and a missing privilege name never blinds the census.</goal>
 
   <context>
-    <background>Design note section 5.4 and section 12 (uac-r2 review item 5). Decisions: D-120 (a card is deleted with its record), D-137 / ontology D-172 (Q8 direct inheritance is a read rule), D-141. The gap (at 3e11367468): RateCardImportService.ImportAsync (:152) resolves one owner from the core record (:200-211) and applies it to the timekeeper rows (:287), the card (:314) and the rates (:343), and passes it to the workbook document (:237); neither sprk_ratecard nor sprk_ratecardrate is in SecureChildLineage, config/secure-record-owner-role.json or the census (RecordOwnerAssignmentCensusTests has no RateCardImportService entry). Entity sets: sprk_ratecards, sprk_ratecardrates (docs/data-model/sprk_ratecard.md:12, :35). sprk_ratecardrate.sprk_ratecard is parental (cascade assign). Spaarke Basic User and Core User hold prvReadsprk_ratecard and prvReadsprk_ratecardrate at Deep (SpaarkeMaster Roles :523-524, :596-597). The 081 change is the reference for every file touched.</background>
+    <background>Design note sections 5.4 and 12 (uac-r2 review item 5; round 2 items 086.1-086.8). Decisions: D-137 / ontology D-172 (Q8 direct inheritance is a read rule), D-141, D-145 (source documents), D-146 (core-record delete always keeps the card, unlinked; supersedes D-120's "deleted with its record" and D-141 Q10). Cite symbols, not line numbers (uac-r2 round 2, general). The gap, by symbol: RateCardImportService.ImportAsync resolves ONE owner from the core record and applies it to the timekeeper rows, the card and the rates, and passes it to the workbook document; the per-row writes go through its WriteAsync helper; neither sprk_ratecard nor sprk_ratecardrate is in SecureChildLineage, config/secure-record-owner-role.json, OWNERSHIP_CHILD_TABLES or the census (RecordOwnerAssignmentCensusTests has no RateCardImportService entry). Entity sets: sprk_ratecards, sprk_ratecardrates (docs/data-model/sprk_ratecard.md). sprk_ratecardrate.sprk_ratecard is parental (cascade assign). Spaarke Basic User and Core User hold prvReadsprk_ratecard and prvReadsprk_ratecardrate at Deep (SpaarkeMaster Roles). This task calls no ReparentAsync: an import only creates rows; a later Secure or Unsecure moves them through the reconciler. Cards can also be created on the model-driven form, outside the BFF: such a card is owned by its creator until the reconciler re-owns it. UAC T7 (notes/2119-manage-access-all-forms-design.md §6 on work/unified-access-control-r2; owner accepted D7 in UAC round 110): every external document surface hides a document whose own sprk_accesspermission is Restricted. uac-r2's delete design: projects/unified-access-control-r2/notes/core-record-delete-design.md §12 (3fbf650fb): the delete job always unlinks R's own rate card (with its rates) and never deletes or re-owns it. The 081 change is the reference for every file touched.</background>
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/RateCardImportService.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs (uac-r2)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (OwnershipParentEntities only; uac-r2)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordCreatorPerson.cs (StampedChildTables; uac-r2)</file>
-      <file role="modify">scripts/Set-ChildRecordCreatorPersonSchema.ps1 ($Tables and solution map; uac-r2)</file>
+      <file role="modify">scripts/Set-ChildRecordCreatorPersonSchema.ps1 ($Tables and $SolutionHomes: secure and verify only; uac-r2)</file>
+      <file role="modify">tests/scripts/Set-ChildRecordCreatorPersonSchema.Tests.ps1 (the Pester pin, in the same change)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffChildWriteAdapter.ts (OWNERSHIP_CHILD_TABLES gains sprk_ratecard only; uac-r2)</file>
       <file role="modify">config/secure-record-owner-role.json (two rows with probe evidence; uac-r2)</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecureBuRoleDepthAssertion.cs (GuardedPrivileges; uac-r2)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecureBuRoleDepthAssertion.cs (the separate non-throwing list 081 added; GuardedPrivileges unchanged; uac-r2)</file>
       <file role="modify">tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertionTests.cs</file>
       <file role="modify">tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs</file>
       <file role="modify">tests/Spaarke.ArchTests/SecureFamilyConsistencyTests.cs (only if its expectations are literal)</file>
       <file role="modify">tests/unit/domain/Access/SecureChildLineageTests.cs</file>
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RateCardImportServiceTests.cs</file>
       <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Access/SecureChildReconcilerRateCardTests.cs</file>
-      <file role="read">the 081 diff and notes/081-ruleset-scope-service.md (the reference change)</file>
+      <file role="read">the SecureChildNewCommandAgreementTests file (Grep for the class; OWNERSHIP_CHILD_TABLES equals OwnershipParentEntities minus the roots)</file>
+      <file role="read">the 081 diff and notes/081-ruleset-scope-service.md (the reference change, including the source-document filing)</file>
+      <file role="read">projects/unified-access-control-r2/notes/core-record-delete-design.md (§12, 3fbf650fb) and notes/2119-manage-access-all-forms-design.md (§6, T7) on origin/work/unified-access-control-r2</file>
     </relevant-files>
     <dependencies>
-      <dependency task="081" status="pending">The secure-family change for sprk_ruleset (same files; this task follows its shape)</dependency>
+      <dependency task="081" status="pending">The secure-family change for sprk_ruleset (same files; this task follows its shape, including its separate NFR-05 list and the source-document filing)</dependency>
       <dependency task="085" status="pending">RateCardImportService writes sprk_scope (same file)</dependency>
-      <dependency task="uac-r2 #2143" status="pending">RecordOwnershipResolver.ReparentAsync becomes a conditional update on RowVersion: it re-reads, re-resolves, retries at most 3 times, then fails closed. Build on that contract, not on today's unconditional write.</dependency>
+      <dependency task="080" status="pending">sprk_createdbyperson on sprk_ratecard and sprk_ratecardrate, created by the owning schema (a9371df5c1); Set-ChildRecordCreatorPersonSchema.ps1 only secures and verifies it.</dependency>
+      <dependency task="UAC T7" status="pending">The external document predicate hides a document whose own sprk_accesspermission is Restricted from every external document surface. Until T7 ships, a filed workbook on a matter with partner grants is visible to those partners.</dependency>
     </dependencies>
   </context>
 
   <constraints>
-    <constraint source="uac-r2 review item 5, design note 5.4">ONE change carries every part: SecureChildLineage T("sprk_ratecard", "sprk_ratecards", ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment)) and T("sprk_ratecardrate", "sprk_ratecardrates", ("sprk_ratecard", "sprk_ratecard")); "sprk_ratecard" in OwnershipParentEntities (the parent of its rates; sprk_ratecardrate is a lineage child only); role rows for both (kind child, Read, Basic, reason, verbatim probe evidence); both in RecordCreatorPerson.StampedChildTables and Set-ChildRecordCreatorPersonSchema.ps1; census ChildTables, Routed entries for the RateCardImportService card and rate creates, and a PersonBearingWriters entry ("RateCardImportService.cs", "ImportAsync", the admin who imported); GuardedPrivileges for both tables.</constraint>
-    <constraint source="uac-r2 review item 4 (same rule as 081)">Each row's owner parents come from its own lookups through RecordOwnershipContext.ParentsOf(row): the card from its core lookup (none for a Firm card), each rate from its sprk_ratecard. ResolveOwnerAsync(ForParents(..., caller) with { RequestedBy = caller }). A refusal writes nothing (the existing OwnerRefused outcome).</constraint>
+    <constraint source="uac-r2 round 2, general">Step 0 merges origin/master into the branch (including uac-r2 #2150 once it lands) before any edit. Cite symbols, not line numbers. Every edit to a uac-r2 file ships in this task's PR and is reviewed by uac-r2.</constraint>
+    <constraint source="uac-r2 review item 5, round 2 items 086.1-086.3, design note 5.4">ONE change carries every part: SecureChildLineage T("sprk_ratecard", "sprk_ratecards", ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment)) and T("sprk_ratecardrate", "sprk_ratecardrates", ("sprk_ratecard", "sprk_ratecard")); "sprk_ratecard" in OwnershipParentEntities (the parent of its rates; sprk_ratecardrate is a lineage child only); sprk_ratecard (NOT sprk_ratecardrate) in OWNERSHIP_CHILD_TABLES in bffChildWriteAdapter.ts, so SecureChildNewCommandAgreementTests holds; role rows for both (kind child, Read, Basic, reason, verbatim probe evidence); both in RecordCreatorPerson.StampedChildTables and in Set-ChildRecordCreatorPersonSchema.ps1 under $SolutionHomes (the script secures and verifies; 080 created the column), with tests/scripts/Set-ChildRecordCreatorPersonSchema.Tests.ps1 updated in the same change; census ChildTables, Routed entries for the RateCardImportService card and rate creates, and a PersonBearingWriters entry naming the method that writes ("RateCardImportService.cs", "WriteAsync", the admin who imported); the NFR-05 entries for both tables (below).</constraint>
+    <constraint source="uac-r2 round 2 item 086.2 (MUST, as 081.1)">Do NOT append the two tables to SecureBuRoleDepthAssertion.GuardedPrivileges (RequireGuardedPrivilegesResolved throws the census away on a missing name). Add them to the separate, non-throwing list 081 created, graded by clause 1, where an unresolved name becomes a finding naming it.</constraint>
+    <constraint source="uac-r2 review item 4, round 2 item 086.6">Each row's owner parents come from its own lookups through RecordOwnershipContext.ParentsOf(row): the card from its core lookup (none for a Firm card), each rate from its sprk_ratecard. ResolveOwnerAsync(ForParents(..., caller) with { RequestedBy = caller }), resolved ONCE per distinct parent set per import (the card's set once; every rate of one card shares [card], so once), never once per row. A refusal writes nothing (the existing OwnerRefused outcome).</constraint>
     <constraint source="uac-r2 review item 5 (timekeepers)">New sprk_timekeeper rows are firm-level: their owner is a NO-PARENT resolution (the caller's business-unit team, RequestedBy = caller), resolved once per import and never the card's owner, whatever the card's scope. Existing roster rows the import reuses are not touched. sprk_timekeeper does not join the secure family.</constraint>
-    <constraint source="uac-r2 review item 1 (live part, as 081)">Live refusal probes on dev, one per table, before the privileges are added (verbatim 0x80040299 into the evidence); then Set-SecureRecordOwnerRolePrivileges.ps1 -WhatIf / -Apply / -Verify and Set-ChildRecordCreatorPersonSchema.ps1 dry run / -Apply / -Verify, each with the owner's OK. Both MUST be applied before any BFF carrying this code is deployed (079 re-verifies).</constraint>
+    <constraint source="D-145, uac-r2 round 2 item 086.4 (MUST) and its D7 / T7 update">The workbook document (created through the CreateDocumentAsync seam): a Firm or ClientDefault card's workbook stays unlinked in the Procedure Library, owned by the caller's business-unit team with no parent; a Record-scoped card's workbook is FILED under the card's core record through the document's own typed lookup, owned from its OWN row (ResolveOwnerAsync(ForParents(ParentsOf(docRow))) with RequestedBy = caller; never the card's owner handed over), stored in that record's container (RecordContainerResolver), and created with its own sprk_accesspermission = Restricted (option value read live), so UAC T7 hides it from every external document surface. The old behaviour (unlinked, carrying the card's owner) is removed, not kept as a fallback. The census UnscannedWriters gains a row for RateCardImportService as a CreateDocumentAsync seam caller.</constraint>
+    <constraint source="uac-r2 round 2 item 086.5 (SHOULD)">Before the first deploy of a BFF carrying this code to an environment, count the cards (and their rates) already on Secure records there (read-only, recorded in the notes); after the role rows and the BFF are live, run the reconcile once (the SecureChildReconciler sweep or Make Secure's Step 8 path, as uac-r2 names) and record that the count of cards on Secure records not owned by the Secure team is 0.</constraint>
+    <constraint source="uac-r2 round 2 item 086.8 (NOTE)">This task calls no ReparentAsync, so the #2150 conditional-reparent contract does not apply to it; its creates still handle a resolver refusal (nothing written, ProblemDetailsHelper.RecordOwnerRefused, a test pins it). A card created on the form (outside the BFF) under a Secure record is owned by its creator until the reconciler re-owns it: read the reconciler's interval from configuration and state that window in the notes and in design note 5.4.</constraint>
+    <constraint source="uac-r2 review item 1 (live part, as 081), round 2 item 086.7">Live refusal probes on dev, one per table, before the privileges are added (verbatim 0x80040299 into the evidence); then Set-SecureRecordOwnerRolePrivileges.ps1 -WhatIf / -Apply / -Verify and Set-ChildRecordCreatorPersonSchema.ps1 dry run / -Apply / -Verify, each with the owner's OK. Both -Verify runs gate EVERY target environment before a BFF carrying this code deploys there (079 for dev, the release path for any other).</constraint>
     <constraint source="uac-r2 review item 1 (NFR-05)">The depth check covers sprk_ratecard and sprk_ratecardrate for every non-admin role; record the live NFR-05 result on dev.</constraint>
-    <constraint source="D-120, D-141">No delete code and no delete-Restrict: uac-r2's delete job already deletes a card scoped to the record (+ its rates). Q8 is unchanged: a matter's card judges its direct children's invoices app-only; joining the secure family changes who can READ the card, not which invoices it judges.</constraint>
+    <constraint source="D-146, uac-r2 core-record-delete-design.md §12 (3fbf650fb)">No delete code and no delete-Restrict. Core-record delete ALWAYS keeps the record's own card (with its rates), clears its core lookup and never deletes it; the card then applies to nothing (S2). The delete job never re-owns: a card under a Secure matter stays Secure-owned after the unlink, reachable only by the Secure team or an admin; retire or re-scope of such an orphan is a known limit (design note 4.5), not this task's work. Q8 is unchanged: a matter's card judges its direct children's invoices app-only; joining the secure family changes who can READ the card, not which invoices it judges.</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: no new service or registration; publish-size delta; no package; no new HIGH CVE.</constraint>
-    <constraint source="uac-r2 2026-10-20 (#2143)">Every owner write that this task routes through IRecordOwnershipResolver (create and reparent) handles the resolver's fail-closed refusal after its bounded RowVersion retries. Nothing is written, the caller gets the existing ownership-refusal error (never a 500 and never a partial write), and a test pins the refusal path. Re-read RecordOwnershipResolver.cs on origin/master before starting. If #2143 has not merged, STOP and ask the main session.</constraint>
   </constraints>
 
   <knowledge>
     <files>
-      <file>projects/ebilling-r1/notes/rule-set-scope-design.md (sections 3.5, 5.1, 5.4, 12)</file>
+      <file>projects/ebilling-r1/notes/rule-set-scope-design.md (sections 3.5, 4.5, 5.1, 5.4, 12)</file>
       <file>projects/ebilling-r1/tasks/081-ruleset-scope-service-ownership.poml</file>
       <file>docs/data-model/sprk_ratecard.md</file>
       <file>.claude/constraints/provisioning.md</file>
@@ -70,63 +79,70 @@
       <file>docs/adr/ADR-038-testing-strategy.md</file>
     </files>
     <patterns>
-      <pattern name="The secure-family change for one table" location="081's diff (SecureChildLineage, OwnershipParentEntities, role JSON, StampedChildTables, census, GuardedPrivileges)">Copy its shape for two tables.</pattern>
+      <pattern name="The secure-family change for one table" location="081's diff (SecureChildLineage, OwnershipParentEntities, OWNERSHIP_CHILD_TABLES, role JSON, StampedChildTables and the Pester pin, census, the separate NFR-05 list)">Copy its shape for two tables.</pattern>
+      <pattern name="The filed source document" location="081's RuleSetService.CreateAsync change">Same filing, owner, container and Restricted rule for the workbook.</pattern>
       <pattern name="Reconciler test fixture" location="tests/unit/Sprk.Bff.Api.Tests/Services/Access/SecureChildReconcilerGateDecisionRecordTests.cs, TestInfrastructure/SecureChildReconcilerFixtures.cs">Card and rate re-owned on secure and on unsecure.</pattern>
     </patterns>
   </knowledge>
 
   <steps mode="directional">
-    <step order="0">git merge-base --is-ancestor 3e11367468 HEAD; confirm 081 and 085 are merged; read notes/081-ruleset-scope-service.md.</step>
-    <step order="1">RateCardImportService: parents from each row's own lookups; the timekeeper owner as a separate no-parent resolution; tests (Secure-scoped import, Firm import, timekeeper owner under a Secure-scoped import, refusal writes nothing).</step>
-    <step order="2">Secure family in one change: lineage, OwnershipParentEntities, StampedChildTables + script, role rows, census, GuardedPrivileges; SecureChildLineageTests, SecureFamilyConsistencyTests, the reconciler test (card and rates re-owned on secure and unsecure).</step>
-    <step order="3">The workbook document (sprk_document, created unlinked with the card's owner at :237): agree its owner with uac-r2 (escalation); implement only what they agree.</step>
-    <step order="4">With the owner's OK: the probes, both -Apply runs with -Verify, the live NFR-05 run. Notices to uac-r2 before and after.</step>
-    <step order="5">dotnet build; dotnet test (unit, ArchTests, the data-mutation agreement test); publish-size delta; /conflict-check.</step>
-    <step order="6">Review: uac-r2. Record it.</step>
-    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
-    <step order="8">Record deviations in projects/ebilling-r1/notes/086-ratecard-secure-family.md.</step>
+    <step order="0">git fetch; git merge origin/master (including #2150 when it lands); confirm 081, 085 and UAC T7 are ancestors of HEAD (STOP if T7 is missing); confirm sprk_createdbyperson exists on both tables (metadata read); read notes/081-ruleset-scope-service.md.</step>
+    <step order="1">RateCardImportService: parents from each row's own lookups, resolved once per distinct parent set; the timekeeper owner as a separate no-parent resolution; tests (Secure-scoped import, Firm import, timekeeper owner under a Secure-scoped import, resolver call counts, refusal writes nothing).</step>
+    <step order="2">The workbook document (D-145): unlinked for Firm / ClientDefault; filed, own-row owner, record container, Restricted for Record; census UnscannedWriters row; tests.</step>
+    <step order="3">Secure family in one change: lineage, OwnershipParentEntities, OWNERSHIP_CHILD_TABLES (card only), StampedChildTables + script ($SolutionHomes) + Pester pin, role rows, census (ChildTables, Routed, PersonBearingWriters on WriteAsync), the separate NFR-05 list; SecureChildLineageTests, SecureFamilyConsistencyTests, SecureChildNewCommandAgreementTests, the reconciler test (card and rates re-owned on secure and unsecure).</step>
+    <step order="4">Read the reconciler's interval from configuration; record the form-created-card window (086.8).</step>
+    <step order="5">With the owner's OK: the probes, both -Apply runs with -Verify, the pre-deploy count of cards on Secure records, the live NFR-05 run. After 079's deploy: the reconcile run and the zero count. Notices to uac-r2 before and after.</step>
+    <step order="6">dotnet build; dotnet test (unit, ArchTests, the data-mutation agreement test); the Pester pin; the client package test that holds OWNERSHIP_CHILD_TABLES; publish-size delta; /conflict-check.</step>
+    <step order="7">Review: uac-r2. Record it.</step>
+    <step order="8">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="9">Record deviations in projects/ebilling-r1/notes/086-ratecard-secure-family.md.</step>
   </steps>
 
   <escalation>
-    <trigger>If any part of the secure-family change cannot land in the same PR as the others, STOP (a subset fails SecureFamilyConsistencyTests or the census).</trigger>
+    <trigger>If any part of the secure-family change cannot land in the same PR as the others, STOP (a subset fails SecureFamilyConsistencyTests, SecureChildNewCommandAgreementTests or the census).</trigger>
+    <trigger>If UAC T7 has not merged, STOP: a filed workbook on a matter with partner grants would be visible to those partners (D-145).</trigger>
+    <trigger>If sprk_createdbyperson is missing on sprk_ratecard or sprk_ratecardrate, STOP (080 creates it; uac-r2's script never does for a $SolutionHomes table).</trigger>
     <trigger>If a probe's create SUCCEEDS, delete the probe row, record it and STOP; ask uac-r2.</trigger>
     <trigger>If the live NFR-05 run reports a non-admin role whose Read on sprk_ratecard or sprk_ratecardrate reaches the Secure business unit, STOP and raise 🔔 Human Input Required.</trigger>
-    <trigger>The workbook document's owner: if uac-r2 does not agree a rule (the card's owner with a filing link, or a no-parent owner like the timekeepers), leave its current behaviour, record it as a deferred issue with /project-defer-issue-tracking, and report it; do not invent a lookup.</trigger>
+    <trigger>If the post-deploy reconcile leaves any card on a Secure record not owned by the Secure team, STOP and report to uac-r2 and the main session.</trigger>
     <trigger>If routing needs a resolver change beyond adding sprk_ratecard to OwnershipParentEntities, STOP and ask uac-r2.</trigger>
   </escalation>
 
   <justification>
-    <existing>The cards, rates and import exist (017, 078); the secure-family lists and guards exist and already take sprk_ruleset (081); the resolver already routes the card's owner. Grep finds sprk_ratecard in none of SecureChildLineage, the role JSON, StampedChildTables or the census.</existing>
+    <existing>The cards, rates and import exist (017, 078); the secure-family lists and guards exist and already take sprk_ruleset (081), including the separate NFR-05 list and the source-document filing; the resolver already routes the card's owner. Grep finds sprk_ratecard in none of SecureChildLineage, the role JSON, StampedChildTables, OWNERSHIP_CHILD_TABLES or the census.</existing>
     <extension>Only existing lists, guards and the import are extended; no new service, registration, table or endpoint. Two new list entries per guard plus one reconciler test file.</extension>
-    <cost-of-doing-nothing>A rate card import scoped to a Secure matter is refused by Dataverse (0x80040299); a card on a matter made Secure later stays readable outside the wall; and a Secure matter's import hides new firm timekeepers from the firm's ordinary readers.</cost-of-doing-nothing>
+    <cost-of-doing-nothing>A rate card import scoped to a Secure matter is refused by Dataverse (0x80040299); a card on a matter made Secure later stays readable outside the wall; a Secure matter's import hides new firm timekeepers from the firm's ordinary readers; and the workbook of a matter's card sits outside the record and outside the wall.</cost-of-doing-nothing>
   </justification>
 
   <tools>
     <tool name="dotnet">build, test</tool>
-    <tool name="pwsh">Set-SecureRecordOwnerRolePrivileges.ps1, Set-ChildRecordCreatorPersonSchema.ps1 (owner OK)</tool>
-    <tool name="dataverse-mcp">probes (owner OK), role and metadata reads</tool>
+    <tool name="pwsh">Set-SecureRecordOwnerRolePrivileges.ps1, Set-ChildRecordCreatorPersonSchema.ps1 (owner OK); Invoke-Pester for the script pin</tool>
+    <tool name="npm">the Spaarke.UI.Components test that holds OWNERSHIP_CHILD_TABLES</tool>
+    <tool name="dataverse-mcp">probes (owner OK), role and metadata reads, the card counts</tool>
     <tool name="conflict-check">before the PR</tool>
   </tools>
 
   <outputs>
-    <output type="code">RateCardImportService.cs, SecureChildLineage.cs, RecordOwnershipResolver.cs, RecordCreatorPerson.cs, SecureBuRoleDepthAssertion.cs, config/secure-record-owner-role.json, scripts/Set-ChildRecordCreatorPersonSchema.ps1</output>
-    <output type="test">the test files listed in relevant-files</output>
+    <output type="code">RateCardImportService.cs, SecureChildLineage.cs, RecordOwnershipResolver.cs, RecordCreatorPerson.cs, SecureBuRoleDepthAssertion.cs, bffChildWriteAdapter.ts, config/secure-record-owner-role.json, scripts/Set-ChildRecordCreatorPersonSchema.ps1</output>
+    <output type="test">the test files listed in relevant-files, including tests/scripts/Set-ChildRecordCreatorPersonSchema.Tests.ps1</output>
     <output type="docs">projects/ebilling-r1/notes/086-ratecard-secure-family.md</output>
   </outputs>
 
   <acceptance-criteria>
     <criterion testable="true">An import scoped to a Secure matter resolves the Secure team as owner of the card and every rate, and creates them (unit test with the resolver; the live probe shows the role row is what makes Dataverse accept it).</criterion>
-    <criterion testable="true">Owner parents: the card passes exactly [core record] (none for a Firm card); each rate passes exactly [the card] (negative: never [core record]).</criterion>
+    <criterion testable="true">Owner parents: the card passes exactly [core record] (none for a Firm card); each rate's parents == [the card] (negative: never [core record]); an import of one card with N rates calls the resolver exactly once for the card, once for the rates and once for the timekeepers (negative: not N times).</criterion>
     <criterion testable="true">Timekeepers: under a Secure-scoped import a new timekeeper row is owned by the caller's business-unit team (no parents), not the Secure team (negative); a reused roster row is not written.</criterion>
+    <criterion testable="true">Workbook (D-145): a Firm card's workbook has no core lookup, lives in the Procedure Library and is owned by the caller's business-unit team; a Record card's workbook carries exactly the card's core record in its typed lookup, its owner resolution is called with exactly [that record] from the document row (negative: never the card's owner handed over), its file goes to the record's container (negative: never the Procedure Library), and its sprk_accesspermission is Restricted; the census lists RateCardImportService in UnscannedWriters as a seam caller.</criterion>
     <criterion testable="true">The reconciler test re-owns a matter's card and its rates when the matter is made Secure, and moves them back on Unsecure; a Firm card (no lookup) is never reached (negative).</criterion>
-    <criterion testable="true">SecureFamilyConsistencyTests, EveryChildTableTheServerCreatesCarriesTheCreatorPersonColumn, EveryAppCreateWriterThatActsForAPersonNamesThem, EveryRoutedEntryRoutesThroughTheResolver and ChildRecordCreatorPersonSchemaAgreementTests pass with both tables; removing either table from the role JSON fails SecureFamilyConsistencyTests (seeding proof).</criterion>
-    <criterion testable="true">GuardedPrivileges covers both tables; the live NFR-05 run on dev is recorded with no finding on them.</criterion>
-    <criterion testable="true">Notes record both probes' verbatim refusals, the -Apply / -Verify outputs, the owner's OK with dates, and uac-r2's answer on the workbook document.</criterion>
+    <criterion testable="true">SecureFamilyConsistencyTests, SecureChildNewCommandAgreementTests (sprk_ratecard in OWNERSHIP_CHILD_TABLES; negative: sprk_ratecardrate not in it), EveryChildTableTheServerCreatesCarriesTheCreatorPersonColumn, EveryAppCreateWriterThatActsForAPersonNamesThem (the PersonBearingWriters entry names WriteAsync), EveryRoutedEntryRoutesThroughTheResolver, ChildRecordCreatorPersonSchemaAgreementTests and the Pester pin pass with both tables, each a $SolutionHomes table; removing either table from the role JSON fails SecureFamilyConsistencyTests (seeding proof).</criterion>
+    <criterion testable="true">NFR-05: GuardedPrivileges is unchanged; the separate list covers both tables; a census read missing prvReadsprk_ratecardrate still grades and reports exactly one finding naming it (negative: the census is not thrown away); the live NFR-05 run on dev is recorded with no finding on them.</criterion>
+    <criterion testable="true">Notes record both probes' verbatim refusals, the -Apply / -Verify outputs, the owner's OK with dates, the pre-deploy count of cards on Secure records, the post-reconcile zero count, and the form-created-card window with the reconciler interval read from configuration.</criterion>
+    <criterion testable="true">No delete code, no delete-Restrict and no Retire logic is added (negative); the notes record that the delete job keeps and unlinks the card and never re-owns it.</criterion>
     <criterion testable="true">Publish-size delta recorded; no package; no new HIGH CVE; /conflict-check run.</criterion>
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>A task of its own (design note 5.4): 085 is a resolver change that runs beside 083 (p-safe true); this one edits uac-r2's shared files after 081, needs live probes and uac-r2's review, and follows 085 on RateCardImportService.cs. Two adversarial passes (tenant-isolation).</notes>
+  <notes>A task of its own (design note 5.4): 085 is a resolver change that runs beside 083 (p-safe true); this one edits uac-r2's shared files after 081, needs live probes and uac-r2's review, and follows 085 on RateCardImportService.cs. Two adversarial passes (tenant-isolation). D-146: Secure-owned orphan cards after a core-record delete are reachable only by the Secure team or an admin; retire / re-scope of them by billing admins is a known limit, not R1 work.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
