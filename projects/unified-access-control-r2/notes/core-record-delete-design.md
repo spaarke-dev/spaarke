@@ -409,3 +409,12 @@ This replaces §10's "untouched" for a rule set **scoped to R** (its core lookup
 - "Cites" is decided from the live rows that survive the planned delete. A read that **fails** fails the preview (503), never "uncited".
 - The preview lists both cases with counts. Task 1's planner reads the citing lookups from ebilling's schema at build time (see ebilling D-137); no column names are guessed here.
 
+
+### 11.1 Once billing rows join the secure family (ebilling 081/086; review 2026-10-20)
+
+ebilling 081 adds `sprk_ruleset` (and the edge `sprk_policy` → `sprk_ruleset`), and 086 adds `sprk_ratecard` and `sprk_ratecardrate`, to the secure lineage. After that, the §1.2 walk reaches rule sets, their policies and versions, and rate cards and their rates. The planner must not treat them as ordinary lineage children:
+
+- **Own claim.** §1.4's own-claim rule reads `CoreAncestorLookups` + `IntermediateRootColumns`. Neither names a core lookup on `sprk_ruleset` or `sprk_ratecard`. Read as-is, R's own set would show "no own claim" and be deleted, skipping §11's citation check. Task 1 classifies these tables explicitly: `sprk_ruleset` per §11, and `sprk_ratecard` per §10 / D-120 (deleted when scoped 1:1 to R).
+- **Billing policies.** §1.3's `sprk_policy` row ("platform cascade", via matter) describes matter policies only. A billing policy reached through `sprk_ruleset` follows its set's §11 outcome: deleted deepest first with the set, or kept when the set is kept.
+- **Sets not scoped to R.** A firm-scoped or business-unit-scoped set reached through the walk is never deleted (§10).
+- **Tests.** Task 1 adds one must-fire test per case (R's own uncited set is deleted; R's own cited set is unlinked; a firm-scoped set is untouched) and a must-not-fire control: the generic own-claim path never decides a billing row.
