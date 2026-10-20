@@ -250,7 +250,7 @@ Today `AssignAsync` changes the scope or firm of a **Published** set; it refuses
 
 A Published set never reaches this sequence: its scope is locked (Q9, 409).
 
-**Open (reported to the coordinator, 2026-10-20):** D-145 files a record-scoped set's source document under its record, but does not say what a Draft re-scope does to that document (re-file it under the new record and move its file to the new record's container, or unlink it into the Procedure Library on a move to Firm / ClientDefault). 081 stops and agrees the shape with uac-r2 and the main session rather than leave the document under the old record.
+**Answered by the coordinator, 2026-10-20 (applying D-145; no new owner decision):** the source document always lives where its set is scoped. A Draft re-scope to another record re-files the document under the new record, with its owner from its own row and its file moved to the new record's container. A re-scope to Firm or ClientDefault unlinks it into the Procedure Library, owned by the re-scoping caller's business-unit team with no parent; its access stays Restricted. The document is never left under the old record. HOW the file moves between containers (an existing re-file path, or a new one) is agreed with uac-r2 when 081 is built; 081's trigger stops if no existing path does both.
 
 ### 4.4 Routed ownership
 
@@ -448,7 +448,7 @@ Each item names its **must-fire** (MF) and **must-not-fire** (MNF) control.
 | Q13 | owner | Business-unit hierarchy | **Decided (D-172):** exact business unit only. |
 | Q14 | ontology-r1 | Census Waived → Routed; narrower guard; `sprk_policy` → `sprk_ruleset` lineage edge | **Agreed with conditions** (section 12), binding on 081 and 082. |
 | Q15 | owner | Billing Guidelines view (135) and record-scoped sets | **Decided (D-172):** a general view plus a per-record view (section 6). |
-| D-145 | owner | Where a record-scoped set's or card's source document lives | **Decided (D-145):** filed under the record, owned from its own row, in the record's container, own Access Permission Restricted (hidden externally by UAC T7) (1.3, 4.4, 5.4; tasks 081, 086). Open: what a Draft re-scope does to it (4.3). |
+| D-145 | owner | Where a record-scoped set's or card's source document lives | **Decided (D-145):** filed under the record, owned from its own row, in the record's container, own Access Permission Restricted (hidden externally by UAC T7) (1.3, 4.4, 5.4; tasks 081, 086). A Draft re-scope moves it with the set (4.3). |
 | S1 / #2132 | owner | Delete-Restrict on the scope lookups? | **Decided (D-172): no Restrict.** Explicit scope on rule sets (S2) and rate cards (S6); loader and resolver require the lookup; nothing widens. |
 
 ## 10. Tasks (POMLs created 2026-10-20)
@@ -586,6 +586,5 @@ All in 5.2.
 **D-146.** See 4.5: the delete job keeps, unlinks and never re-owns. There is no citation check, so 081's notice to uac-r2 is dropped. The Secure-owned orphan is a known limit, and an unlinked set's route check is on the set row (4.6, point 6).
 
 **Open, reported to the coordinator:**
-- what a Draft re-scope does to a filed source document (4.3);
 - 081's dependency on ontology-r1's creator-person column (S9);
 - the set-row check for unlinked sets (4.6, point 6), added here, not by uac-r2.
