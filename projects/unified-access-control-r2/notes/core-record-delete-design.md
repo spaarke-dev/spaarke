@@ -51,11 +51,11 @@ The planner classifies every row it reaches as Delete, Keep, Block or Unlink. Ta
 
 | Disposition | Tables | Decision |
 |---|---|---|
-| **Delete** | `sprk_document` (+ `sprk_fileversion`, `sprk_emailartifact`, `sprk_attachmentartifact`), `sprk_analysis` (+ `sprk_analysisoutput`, which cascades), `sprk_communication`, `sprk_communicationthread`, `sprk_communicationattachment`, `sprk_communicationparticipant`, `sprk_emailreviewlog`, `sprk_event`, `sprk_eventlog`, `sprk_todo`, `sprk_memo`, `sprk_signal`, `sprk_kpiassessment`, `sprk_reportcard`, `sprk_agreement`, `sprk_communicationrule`, `sprk_ratecard` scoped to R (+ `sprk_ratecardrate`, parental) | inventory §4.1, D8; Signals per round 103; rate cards per D-120 (§10) |
-| **Keep** (RemoveLink unlinks) | `sprk_decisionrecord`, `sprk_externalrecordaccess`, `sprk_assignedaccess`, `sprk_budget` (+ `sprk_budgetbucket`, `sprk_budgetrevision`), `sprk_spendsnapshot`, `sprk_spendsignal` | D2, D4; budgets and spend per D-120 (§10). The operation itself clears the core lookup when the relationship is not RemoveLink. |
+| **Delete** | `sprk_document` (+ `sprk_fileversion`, `sprk_emailartifact`, `sprk_attachmentartifact`), `sprk_analysis` (+ `sprk_analysisoutput`, which cascades), `sprk_communication`, `sprk_communicationthread`, `sprk_communicationattachment`, `sprk_communicationparticipant`, `sprk_emailreviewlog`, `sprk_event`, `sprk_eventlog`, `sprk_todo`, `sprk_memo`, `sprk_signal`, `sprk_kpiassessment`, `sprk_reportcard`, `sprk_agreement`, `sprk_communicationrule`, `sprk_ratecard` scoped to R (+ `sprk_ratecardrate`, parental), R's own `sprk_ruleset` **when nothing that survives cites it** (+ its `sprk_policy` and `sprk_policyversion`, deepest first) | inventory §4.1, D8; Signals per round 103; rate cards per D-120 (§10); rule sets per D-137 (§11) |
+| **Keep** (RemoveLink unlinks) | `sprk_decisionrecord`, `sprk_externalrecordaccess`, `sprk_assignedaccess`, `sprk_budget` (+ `sprk_budgetbucket`, `sprk_budgetrevision`), `sprk_spendsnapshot`, `sprk_spendsignal`, R's own `sprk_ruleset` **when a surviving row cites it** (unlinked; under S2 it then applies to nothing) | D2, D4; budgets and spend per D-120 (§10); rule sets per D-137 (§11). The operation itself clears the core lookup when the relationship is not RemoveLink. |
 | **Block** (the whole delete is refused) | `sprk_invoice`, `sprk_billingevent`, `sprk_invoicesubmission`, `sprk_invoiceapproval`, `sprk_invoicecorrection`, `sprk_externalidentifier` | D3 as settled by ebilling D-120 (§10). Rate cards are now deleted with the record, and budgets (with their buckets and revisions) are kept and unlinked. Neither blocks. |
 | **Platform cascade** (counted, not deleted by the BFF) | `sprk_policy` (matter; `Cascade`, D9) | — |
-| **Hard deny** (never Delete, whatever the walk says) | the four core tables, `contact`, `account`, `systemuser`, `team`, `businessunit`, `sprk_organization`, `email`, every `*_ref` table, `sprk_analysisaction/knowledge/skill/tool`, `sprk_policyversion`, `sprk_ruleset`, `sprk_billingcodeset` | Owner rule; inventory §1.2, §4.3 |
+| **Hard deny** (never Delete, whatever the walk says) | the four core tables, `contact`, `account`, `systemuser`, `team`, `businessunit`, `sprk_organization`, `email`, every `*_ref` table, `sprk_analysisaction/knowledge/skill/tool`, `sprk_policyversion`, `sprk_ruleset`, `sprk_billingcodeset` (the one exception: R's own uncited rule set, §11) | Owner rule; inventory §1.2, §4.3 |
 
 **Rows that name the record by text id, not by lookup** (inventory §2.6). The operation deletes `sprk_navitem` rows whose `sprk_targetid` names R, because they are pointers to the record that would otherwise go dead, and `sprk_noaccessentry` rows for R, because they are the record's own access configuration, like a policy. **Unverified:** the no-access entry's record-key column was not read. Task 2 reads it live before relying on it. `sprk_notificationoutbox` (a delivery log), `sprk_affinity` and `sprk_uploadcontext` are left alone. `sprk_userentityassociation` is already cleaned by the nightly orphan scan (`MembershipReconciliationJob`).
 
@@ -395,3 +395,17 @@ This settles Q6 and replaces the earlier "rate cards and budget revisions block"
 | `sprk_ruleset`, `sprk_policy`/`sprk_policyversion` (firm-scoped here), `sprk_billingcodeset`/`sprk_billingcode`, `sprk_timekeeper`, `sprk_billingexport`, `sprk_ebillingsetting` | none | Untouched. |
 
 **Before relying on any platform cascade:** read the live relationship metadata (`CascadeConfiguration.Delete`) for the `sprk_invoiceapproval` and rate-card core lookups. ebilling's docs do not state them. The delete operation never depends on a cascade it has not verified. The task 1 preview reads these relationships, so it does that check.
+
+## 11. ebilling D-137: a record's own rule set (owner, 2026-10-20, relayed by ebilling-r1)
+
+This replaces §10's "untouched" for a rule set **scoped to R** (its core lookup names R). Firm-scoped and business-unit-scoped sets stay untouched. UAC recommended this rule in its review of `projects/ebilling-r1/notes/rule-set-scope-design.md` @ d42ae3c40f, and the owner chose it.
+
+| Case | Behaviour |
+|---|---|
+| R's own set, and **nothing that survives the delete cites** the set, its policies or its versions | **Deleted**, deepest first: `sprk_policyversion`, then `sprk_policy`, then `sprk_ruleset`. |
+| R's own set, and **a surviving row cites it** (for example Signals or Decision Records on a child record's invoice that cite one of its versions; round 107 deletes only the rows filed under R itself) | **Kept and unlinked**: the core lookup is cleared, so under S2 the set applies to nothing. |
+
+- The delete job writes **no Retire** status. The rule-set lifecycle keeps a single writer (ebilling's `RuleSetService`).
+- "Cites" is decided from the live rows that survive the planned delete. A read that **fails** fails the preview (503), never "uncited".
+- The preview lists both cases with counts. Task 1's planner reads the citing lookups from ebilling's schema at build time (see ebilling D-137); no column names are guessed here.
+
