@@ -37,8 +37,10 @@ public enum InvoiceDocumentRefileStatus
     IsolationUnreadable,
 
     /// <summary>
-    /// The re-file was refused (<see cref="InvoiceDocumentRefileResult.ReasonCode"/>): by the ownership resolver, or because the document is gone
-    /// or linked to another invoice (<see cref="InvoiceSubmissionErrors.DocumentAlreadyInvoiced"/>, 050a review #1). Nothing was written.
+    /// The re-file was refused (<see cref="InvoiceDocumentRefileResult.ReasonCode"/>): by the ownership resolver, or because the document is gone,
+    /// linked to another invoice (<see cref="InvoiceSubmissionErrors.DocumentAlreadyInvoiced"/>, 050a review #1) or rejected as not an invoice
+    /// (<c>document_rejected</c>, review round 2 item 3). Nothing was written. The invoice is committed without its document: the after-steps
+    /// stop and the administrator is told (<see cref="SubmissionAfterStepsResult.DocumentNotFiled"/>).
     /// </summary>
     Refused,
 }
@@ -52,8 +54,9 @@ public sealed record InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus Sta
 /// the ONE writer of the document's <c>sprk_invoice</c> lookup for such a submission (050a review #1, uac-r2's design: the persister's
 /// transaction does not write it), so the reparent reads the document's TRUE prior parents. In this order, each attempt:
 /// <list type="number">
-/// <item>The live row: its link and row version. Gone = <see cref="InvoiceDocumentRefileStatus.Refused"/>; linked to an invoice other than
-/// <c>invoiceId</c> = Refused <see cref="InvoiceSubmissionErrors.DocumentAlreadyInvoiced"/> (never overwritten). Nothing written.</item>
+/// <item>The live row: its link, its review decision and its row version. Gone = <see cref="InvoiceDocumentRefileStatus.Refused"/>; linked
+/// to an invoice other than <c>invoiceId</c> = Refused <see cref="InvoiceSubmissionErrors.DocumentAlreadyInvoiced"/> (never overwritten);
+/// rejected as not an invoice = Refused <c>ebilling.submission.document_rejected</c> (the reject stands). Nothing written.</item>
 /// <item><see cref="RefileIsolationRead.BeforeWriteAsync"/>: whether the document is isolated, read BEFORE its owner can move (once more after
 /// a fault). Both reads faulting = <see cref="InvoiceDocumentRefileStatus.IsolationUnreadable"/>, nothing written.</item>
 /// <item><see cref="IRecordOwnershipResolver.ReparentAsync"/> with <c>sprk_invoice</c> set to the invoice (<see cref="ReparentRequestFor"/>):
@@ -82,7 +85,8 @@ public sealed class InvoiceDocumentRefile
     /// <summary>Attempts, in total, of the conditional link write when the document keeps changing under it.</summary>
     internal const int MaxAttempts = 3;
 
-    private static readonly string[] DocumentColumns = [InvoiceReviewService.DocInvoiceLinkValue, InvoiceReviewService.VersionNumber];
+    private static readonly string[] DocumentColumns =
+        [InvoiceReviewService.DocInvoiceLinkValue, InvoiceReviewService.DocInvoiceReviewStatus, InvoiceReviewService.VersionNumber];
 
     private readonly IRecordOwnershipResolver _ownership;
     private readonly SecureChildReconciler _children;
@@ -149,6 +153,16 @@ public sealed class InvoiceDocumentRefile
                 return new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refused, InvoiceSubmissionErrors.DocumentAlreadyInvoiced);
             }
 
+            // 050a review round 2, item 3: a document rejected as not an invoice is never filed under one (a stalled reject that landed after
+            // the persister's check): the reject stands, and confirm's 409 ("will not create an invoice") is never contradicted by a link.
+            if (ReadInt(row, InvoiceReviewService.DocInvoiceReviewStatus) == InvoiceReviewService.ReviewStatusRejectedNotInvoice)
+            {
+                _logger.LogWarning(
+                    "Invoice submission {SubmissionId}: document {DocumentId} is rejected as not an invoice; it was not re-filed under invoice {InvoiceId}",
+                    submissionId, document, invoiceId);
+                return new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refused, InvoiceSubmissionPersister.DocumentRejectedCode);
+            }
+
             var version = ReadVersion(row);
 
             // 2. Isolated before? Read before anything can move the owner; a read that cannot be answered writes nothing (fail closed).
@@ -208,6 +222,12 @@ public sealed class InvoiceDocumentRefile
             return new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refiled);
         }
     }
+
+    private static int? ReadInt(Dictionary<string, object?> row, string column) =>
+        row.TryGetValue(column, out var raw) && raw is not null
+        && int.TryParse(raw.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
 
     private static Guid? ReadGuid(Dictionary<string, object?> row, string column) =>
         row.TryGetValue(column, out var raw) && raw is not null && Guid.TryParse(raw.ToString(), out var value) && value != Guid.Empty

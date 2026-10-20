@@ -39,7 +39,8 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <remarks>
 /// <para><b>One transaction</b> (FR-20), in this order: the invoice create(s) from 014, one create per line, the approval portion (not for an
 /// automatic rejection), the document's <c>sprk_invoice</c> link (an intake document only: a confirmed EXISTING document, 050a, is checked
-/// on its live row here and linked after the commit by its re-file, <see cref="InvoiceDocumentRefile"/>, the link's one writer), and the submission update (<c>sprk_invoice</c>, the reason code,
+/// on its live row here, guarded in the transaction by an update conditional on the row version read (<see cref="BuildExistingDocumentGuard"/>,
+/// no link), and linked after the commit by its re-file, <see cref="InvoiceDocumentRefile"/>, the link's one writer), and the submission update (<c>sprk_invoice</c>, the reason code,
 /// <c>sprk_findingsjson</c>). A linked <c>sprk_invoice</c> therefore proves the commit; it is the resume marker. <b>The status is not
 /// written here (D-130 a):</b> the submission stays Processing, and part D writes <see cref="SubmissionPersistResult.TerminalStatus"/> last.
 /// Every created row carries the submitter as <c>sprk_createdbyperson</c> (D-130 3), read from the submission's own stamp, and the invoice
@@ -143,8 +144,10 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// </summary>
     internal const string DocumentRejectedCode = "ebilling.submission.document_rejected";
 
-    /// <summary>The document's review decision column (<see cref="InvoiceReviewService.DocInvoiceReviewStatus"/>).</summary>
-    private static readonly string[] ConfirmedDocumentColumns = [DocumentInvoice, InvoiceReviewService.DocInvoiceReviewStatus];
+    /// <summary>The document's link, its review decision column (<see cref="InvoiceReviewService.DocInvoiceReviewStatus"/>) and its row
+    /// version: the transaction's guard on the document (<see cref="BuildExistingDocumentGuard"/>) is conditional on the version read here.</summary>
+    private static readonly string[] ConfirmedDocumentColumns =
+        [DocumentInvoice, InvoiceReviewService.DocInvoiceReviewStatus, InvoiceReviewService.VersionNumber];
 
     internal const string ApprovalRecordNumber = "sprk_regardingrecordnumber";
 
@@ -253,12 +256,21 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         // creates, or rejected as not an invoice, is a refusal (the submission is Failed, no invoice). The link itself is NOT written by this
         // transaction for such a document: the re-file (InvoiceDocumentRefile, after the commit) is its one writer, through ReparentAsync, so
         // the reparent reads the document's TRUE prior parents and its own conditional write catches a filing that lands after this check.
+        // 050a review round 2, item 2(a): the transaction carries a guard on the document, conditional on the row version this check read
+        // (BuildExistingDocumentGuard), so a filing, a reject or a delete that lands between this check and the commit rolls the whole
+        // transaction back instead of committing an invoice whose document the re-file must then refuse.
         var documentId = outcome.Submission!.DocumentId;
         var existingDocument = InvoiceDocumentRefile.AppliesTo(submissionId, documentId);
-        if (existingDocument
-            && await RefuseExistingDocumentAsync(submissionId, documentId, InvoiceIdFor(submissionId), ct).ConfigureAwait(false) is { } documentRefusal)
+        Entity? checkedDocument = null;
+        if (existingDocument)
         {
-            return documentRefusal;
+            var (documentRefusal, document) = await CheckExistingDocumentAsync(submissionId, documentId, InvoiceIdFor(submissionId), ct).ConfigureAwait(false);
+            if (documentRefusal is not null)
+            {
+                return documentRefusal;
+            }
+
+            checkedDocument = document;
         }
 
         // D-130 (3) / D-131: the submitter, recorded at intake on the submission as sprk_createdbyperson (a systemuser: the SPA caller's linked
@@ -381,6 +393,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 },
             });
         }
+        else
+        {
+            // The guard: no link, only the version check (see BuildExistingDocumentGuard).
+            requests.Add(BuildExistingDocumentGuard(checkedDocument!));
+        }
 
         // D-133: a plan entry left out is a Signal the invoice will never have; mark the submission for the administrator in the same write.
         var adminAttention = planRefusals.Count == 0
@@ -431,6 +448,15 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: transaction failed at request {Index} of {Count}; nothing persisted, retry",
                 submissionId, ex.FailedRequestIndex, requests.Count);
+
+            // 050a review round 2, item 2(a): the transaction rolled back. For a confirm submission the likely cause is the document guard (a
+            // filing, a reject or a delete since the check), so the live row is checked again now: a refusal is answered in this delivery
+            // (the submission is Failed, no invoice), anything else is the transaction's own Retry, as for every other fault.
+            if (existingDocument && await RecheckExistingDocumentAsync(submissionId, documentId, invoiceId, ct).ConfigureAwait(false) is { } refusedNow)
+            {
+                return refusedNow;
+            }
+
             return Result(SubmissionPersistStatus.Retry, submissionId, TransactionFailedCode);
         }
 
@@ -451,11 +477,62 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     }
 
     /// <summary>
-    /// 050a review #1 / #2: null when the confirm submission's document may be persisted (unlinked, or already linked to
-    /// <paramref name="invoiceId"/>, this submission's own invoice; not rejected); otherwise the refusal, nothing written. A missing document is
-    /// refused too. A read fault propagates (the job retries).
+    /// 050a review round 2, item 2(a): the transaction's guard on a confirm submission's EXISTING document. An update of the document
+    /// conditional on the row version <see cref="CheckExistingDocumentAsync"/> read (<c>ConcurrencyBehavior.IfRowVersionMatches</c>), so a
+    /// filing, a reject or a delete that landed since the check fails the transaction and NOTHING commits (the persister's
+    /// <see cref="DataverseTransactionException"/> path). It writes NOTHING to <c>sprk_invoice</c>: the re-file stays the link's one writer.
+    /// <para>Its one column is <c>sprk_invoicereviewstatus</c>, written back with the value the check read (null when it read none). The
+    /// version check guarantees the row still holds exactly that value, so the write changes no value. A column is written at all so that
+    /// the request is a real update of the row: Dataverse then evaluates the version condition and moves the row version, so a stalled
+    /// conditional write made against the pre-commit version (a reject that read the row before the confirm's submission existed) is
+    /// refused too. Dataverse does not document how an update that names no column behaves under <c>IfRowVersionMatches</c>, so the guard
+    /// does not rely on one. This column was chosen because the check already reads it (no second read, no race between two reads), it is
+    /// not the link, and the only writers of it (confirm's mark, reject) are themselves conditional on the row version, so a guard that
+    /// moves the version makes them re-read and decide again rather than overwrite.</para>
     /// </summary>
-    private async Task<SubmissionPersistResult?> RefuseExistingDocumentAsync(Guid submissionId, Guid documentId, Guid invoiceId, CancellationToken ct)
+    internal static UpdateRequest BuildExistingDocumentGuard(Entity checkedDocument)
+    {
+        var version = checkedDocument.GetAttributeValue<long?>(InvoiceReviewService.VersionNumber)
+            ?? (long.TryParse(checkedDocument.RowVersion, NumberStyles.Integer, CultureInfo.InvariantCulture, out var rowVersion) ? rowVersion : (long?)null)
+            ?? throw new InvalidOperationException(
+                "The confirmed document's versionnumber could not be read, so the invoice cannot be committed against it safely. Nothing was written.");
+
+        return new UpdateRequest
+        {
+            Target = new Entity(DocumentEntity, checkedDocument.Id)
+            {
+                RowVersion = version.ToString(CultureInfo.InvariantCulture),
+                [InvoiceReviewService.DocInvoiceReviewStatus] = checkedDocument.GetAttributeValue<OptionSetValue>(InvoiceReviewService.DocInvoiceReviewStatus),
+            },
+            ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches,
+        };
+    }
+
+    /// <summary>
+    /// 050a review round 2, item 2(a): after a failed transaction, whether the confirm submission's document now refuses the submission (the
+    /// guard is the likely cause). A refusal, or null: nothing changed that refuses it, or the row could not be read; the caller retries.
+    /// </summary>
+    private async Task<SubmissionPersistResult?> RecheckExistingDocumentAsync(Guid submissionId, Guid documentId, Guid invoiceId, CancellationToken ct)
+    {
+        try
+        {
+            return (await CheckExistingDocumentAsync(submissionId, documentId, invoiceId, ct).ConfigureAwait(false)).Refusal;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: its document {DocumentId} could not be read again after the failed transaction ({Fault}); retry",
+                submissionId, documentId, ex.GetType().Name);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 050a review #1 / #2: a null refusal (with the row read) when the confirm submission's document may be persisted (unlinked, or already
+    /// linked to <paramref name="invoiceId"/>, this submission's own invoice; not rejected); otherwise the refusal, nothing written. A missing
+    /// document is refused too. A read fault propagates (the job retries).
+    /// </summary>
+    private async Task<(SubmissionPersistResult? Refusal, Entity? Document)> CheckExistingDocumentAsync(
+        Guid submissionId, Guid documentId, Guid invoiceId, CancellationToken ct)
     {
         Entity document;
         try
@@ -465,7 +542,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         catch (Exception ex) when (IsRecordNotFound(ex))
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: its document {DocumentId} no longer exists; nothing persisted", submissionId, documentId);
-            return Result(SubmissionPersistStatus.Refused, submissionId, InvoiceSubmissionErrors.DocumentNotFound);
+            return (Result(SubmissionPersistStatus.Refused, submissionId, InvoiceSubmissionErrors.DocumentNotFound), null);
         }
 
         if (document.GetAttributeValue<EntityReference>(DocumentInvoice) is { Id: var linked } && linked != Guid.Empty && linked != invoiceId)
@@ -473,7 +550,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             // Filed under another invoice since the confirm (e.g. a document PUT): never overwritten, never moved from under it.
             _logger.LogWarning("Invoice submission {SubmissionId}: its document {DocumentId} is linked to invoice {LinkedId}; nothing persisted",
                 submissionId, documentId, linked);
-            return Result(SubmissionPersistStatus.Refused, submissionId, InvoiceSubmissionErrors.DocumentAlreadyInvoiced);
+            return (Result(SubmissionPersistStatus.Refused, submissionId, InvoiceSubmissionErrors.DocumentAlreadyInvoiced), document);
         }
 
         if (document.GetAttributeValue<OptionSetValue>(InvoiceReviewService.DocInvoiceReviewStatus)?.Value == InvoiceReviewService.ReviewStatusRejectedNotInvoice)
@@ -481,10 +558,10 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             // A reject that landed between the confirm's create and its mark (the confirm answered 409): the reject stands.
             _logger.LogWarning("Invoice submission {SubmissionId}: its document {DocumentId} was rejected as not an invoice; nothing persisted",
                 submissionId, documentId);
-            return Result(SubmissionPersistStatus.Refused, submissionId, DocumentRejectedCode);
+            return (Result(SubmissionPersistStatus.Refused, submissionId, DocumentRejectedCode), document);
         }
 
-        return null;
+        return (null, document);
     }
 
     // ── Resume (the submission already links an invoice) ──

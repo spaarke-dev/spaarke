@@ -115,8 +115,15 @@ internal static class AdminAttentionText
     /// R3: the segment for a submission whose processing stopped while it links its invoice. Names the reason code only (ADR-015); the
     /// code is cut at <see cref="MaxCodeLength"/> characters.
     /// </summary>
-    internal static string StoppedNote(string? code) =>
-        $"{StoppedPrefix}{CodeOnly(code)}; the invoice is linked and the submission stays Processing: review it, then resume or correct";
+    internal static string StoppedNote(string? code) => StoppedNote(code, documentNotFiled: false);
+
+    /// <summary>
+    /// <see cref="StoppedNote(string?)"/>; with <paramref name="documentNotFiled"/> (050a review round 2, 2(b): the confirmed document's re-file
+    /// was refused) it says that the invoice has NO document filed under it, so an invoice is never left without its document silently.
+    /// </summary>
+    internal static string StoppedNote(string? code, bool documentNotFiled) => documentNotFiled
+        ? $"{StoppedPrefix}{CodeOnly(code)}; the invoice is committed but its document is NOT filed under it and the submission stays Processing: resolve the document, then resume"
+        : $"{StoppedPrefix}{CodeOnly(code)}; the invoice is linked and the submission stays Processing: review it, then resume or correct";
 
     /// <summary>
     /// R5: the segment for a system billing policy that is not usable. <paramref name="state"/> is

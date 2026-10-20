@@ -662,6 +662,8 @@ public class InvoiceSubmissionAfterStepsTests
 
         result.Status.Should().Be(expected);
         result.ReasonCode.Should().Be(code);
+        result.DocumentNotFiled.Should().Be(refile == InvoiceDocumentRefileStatus.Refused,
+            "review round 2, 2(b): a refused re-file is flagged so the administrator is told the invoice has no document; a Retry is not");
         world.Writes.Should().BeEmpty();
         world.RecordCreates.Should().Be(0);
         world.Jobs.Should().BeEmpty();

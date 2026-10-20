@@ -550,6 +550,8 @@ public class FinanceEndpointsAuthorizationContractTests
         { InvoiceReviewFailure.ReviewDecisionChanged, HttpStatusCode.Conflict, false },
         { InvoiceReviewFailure.ReviewDecisionChanged, HttpStatusCode.Conflict, true },
         { InvoiceReviewFailure.DocumentNotFound, HttpStatusCode.NotFound, true },
+        // 050a review round 2, item 5: the confirm's pre-intake read faulted; nothing was saved (503, retry).
+        { InvoiceReviewFailure.ReviewStateUnreadable, HttpStatusCode.ServiceUnavailable, false },
     };
 
     [Theory]

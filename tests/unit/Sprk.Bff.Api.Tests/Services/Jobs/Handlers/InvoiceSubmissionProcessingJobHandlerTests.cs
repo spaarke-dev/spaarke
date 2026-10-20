@@ -729,6 +729,50 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         rig.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(policy + AdminAttentionText.Separator + AdminAttentionText.StoppedNote(DecisionRecordRefusalReason.OwnerRefused));
     }
 
+    [Theory(DisplayName = "050a review round 2, 2(b): a confirmed document's re-file refused after the commit: the submission stays Processing (no status write), the job is Poisoned, the administrator is told the invoice has NO document, and a replay after the cause is resolved completes it")]
+    [InlineData("ebilling.submission.document_already_invoiced")]
+    [InlineData("ebilling.submission.document_not_found")]
+    [InlineData("ebilling.submission.document_rejected")]
+    [InlineData("record_owner_secure_parent_not_isolated")]
+    public async Task RefileRefusedAfterTheCommit_StaysProcessing_TellsTheAdminTheInvoiceHasNoDocument_AndAReplayCompletes(string code)
+    {
+        var rig = new Rig().HappyPath();
+        rig.After.Run = _ => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, code) with { DocumentNotFiled = true });
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned, "no redelivery can change a refused re-file; the message is dead-lettered for a replay");
+        outcome.ErrorMessage.Should().Be(code);
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null)], "never Failed: the invoice is committed");
+        var text = rig.Row.GetAttributeValue<string>(AttentionColumn);
+        text.Should().Be(AdminAttentionText.StoppedNote(code, documentNotFiled: true))
+            .And.StartWith("Processing stopped: " + code)
+            .And.Contain("its document is NOT filed under it", "an invoice is never left without its document silently");
+        text.Length.Should().BeLessThanOrEqualTo(InvoiceSubmissionPersister.AdminAttentionMaxLength);
+
+        // The administrator resolves the document (e.g. unlinks it from the other invoice) and replays the message: the resume re-runs the
+        // re-file first and completes (the after-steps then withdraw the stopped segment, R7).
+        // The replay finds what the commit left: Processing with the invoice linked (and the attention text).
+        var replay = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        replay.Row[AttentionColumn] = text;
+        replay.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Completed));
+        (await replay.Build().ProcessAsync(Job(), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+        replay.After.ResumeCalls.Should().HaveCount(1, "the replay resumes the after-steps, whose first step is the re-file");
+        replay.StatusWrites.Should().BeEmpty("the after-steps write the terminal status, not the handler");
+    }
+
+    [Fact(DisplayName = "050a review round 2, 2(b) (must not fire): an after-steps refusal that is NOT a refused re-file keeps the ordinary stopped note")]
+    public async Task OtherRefusal_KeepsTheOrdinaryStoppedNote()
+    {
+        var rig = new Rig().HappyPath();
+        rig.After.Run = _ => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, "ebilling.submission.signal_plan_missing"));
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        rig.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(AdminAttentionText.StoppedNote("ebilling.submission.signal_plan_missing"))
+            .And.NotContain("NOT filed");
+    }
+
     [Fact(DisplayName = "049 R3: a redelivery that stops for the same reason writes nothing new (idempotent); a different reason replaces only the stopped segment")]
     public async Task StoppedNote_IsIdempotentAcrossARedelivery()
     {

@@ -41,7 +41,8 @@ public interface IInvoiceReviewService
     /// <exception cref="InvoiceReviewException">The document was rejected before or during the confirm
     /// (<see cref="InvoiceReviewFailure.ReviewDecisionChanged"/>; the submission is named when it exists), it was deleted after its submission
     /// (<see cref="InvoiceReviewFailure.DocumentNotFound"/>, naming the submission), or the submission was received but the document's review
-    /// status could not be set (<see cref="InvoiceReviewFailure.StatusNotUpdated"/>, naming the submission; a retry completes it).</exception>
+    /// status could not be set (<see cref="InvoiceReviewFailure.StatusNotUpdated"/>, naming the submission; a retry completes it), or the
+    /// document's review state could not be read before anything was saved (<see cref="InvoiceReviewFailure.ReviewStateUnreadable"/>, 503).</exception>
     Task<InvoiceSubmissionOutcome> ConfirmInvoiceAsync(
         InvoiceReviewConfirmRequest request,
         string correlationId,
@@ -154,6 +155,12 @@ public enum InvoiceReviewFailure
     /// The reject stands (409).
     /// </summary>
     ReviewDecisionChanged,
+
+    /// <summary>
+    /// Confirm only (050a review round 2, item 5): the document's review decision and version, read before the intake, could not be read.
+    /// Nothing was saved; transient (503), retry.
+    /// </summary>
+    ReviewStateUnreadable,
 }
 
 /// <summary>
@@ -184,6 +191,7 @@ public sealed class InvoiceReviewException : Exception
         InvoiceReviewFailure.DocumentChangedConcurrently => "sdap.finance.invoice_review.document_changed",
         InvoiceReviewFailure.DocumentLinkedToInvoice => "sdap.finance.invoice_review.document_linked_to_invoice",
         InvoiceReviewFailure.ReviewDecisionChanged => "sdap.finance.invoice_review.review_decision_changed",
+        InvoiceReviewFailure.ReviewStateUnreadable => "sdap.finance.invoice_review.review_state_unreadable",
         _ => "sdap.finance.invoice_review.confirm_state_unreadable",
     };
 }
@@ -298,7 +306,23 @@ public class InvoiceReviewService : IInvoiceReviewService
         // 050a review #2: the review decision and version BEFORE the intake. The mark is conditional on this version, so a reject that lands
         // between the submission's create and the mark is seen, never overwritten. A document already rejected is not confirmed (nothing saved).
         // A missing document reads as null: the intake answers it (404 document_not_found).
-        var before = await ReadReviewStateAsync(request.DocumentId, ct);
+        ReviewState? before;
+        try
+        {
+            before = await ReadReviewStateAsync(request.DocumentId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // 050a review round 2, item 5: a fault of this read happens before anything is written; transient (503), never a 500.
+            _logger.LogWarning(ex,
+                "Invoice review confirmation refused: the review state of document {DocumentId} could not be read (503). CorrelationId={CorrelationId}",
+                request.DocumentId, correlationId);
+            throw new InvoiceReviewException(
+                InvoiceReviewFailure.ReviewStateUnreadable,
+                "The document's review state could not be read right now. Nothing was saved; retry the confirmation.",
+                inner: ex);
+        }
+
         if (before is { Decision.Status: ReviewStatusRejectedNotInvoice })
         {
             _logger.LogInformation(

@@ -344,7 +344,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             case InvoiceDocumentRefileStatus.IsolationUnreadable:
                 return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, refiled.ReasonCode ?? InvoiceDocumentRefile.IsolationUnreadableCode);
             case InvoiceDocumentRefileStatus.Refused:
-                return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, refiled.ReasonCode ?? InvoiceDocumentRefile.RefileRefusedCode);
+                // Review round 2, 2(b): the invoice is committed and its document is not filed under it. Stopped here (no Signal, record or
+                // terminal), flagged for the handler, which names it in the administrator's attention text.
+                return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, refiled.ReasonCode ?? InvoiceDocumentRefile.RefileRefusedCode)
+                    with { DocumentNotFiled = true };
         }
 
         var rowVersion = RowVersionOf(submission);

@@ -91,6 +91,13 @@ public sealed record SubmissionAfterStepsResult
     /// <summary>A stable code for <see cref="SubmissionAfterStepsStatus.Retry"/> and <see cref="SubmissionAfterStepsStatus.Refused"/>.</summary>
     public string? ReasonCode { get; init; }
 
+    /// <summary>
+    /// 050a review round 2, item 2(b): true when the run stopped because the confirmed document's re-file was refused
+    /// (<see cref="InvoiceDocumentRefileStatus.Refused"/>): the invoice is committed and its document is NOT filed under it. The handler then
+    /// tells the administrator so in <c>sprk_adminattention</c> (<see cref="AdminAttentionText.StoppedNote(string?, bool)"/>), never silently.
+    /// </summary>
+    public bool DocumentNotFiled { get; init; }
+
     /// <summary>The status the submission ends in (only when <see cref="SubmissionAfterStepsStatus.Completed"/>): the terminal status written
     /// now, or the one found when the submission was already terminal (<see cref="AlreadyTerminal"/>).</summary>
     public InvoiceSubmissionStatus? TerminalStatus { get; init; }

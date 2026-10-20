@@ -393,6 +393,7 @@ public static class FinanceEndpoints
             InvoiceReviewFailure.DocumentLinkedToInvoice => (StatusCodes.Status409Conflict, "Document Already Confirmed"),
             InvoiceReviewFailure.ReviewDecisionChanged => (StatusCodes.Status409Conflict, "Review Decision Changed"),
             InvoiceReviewFailure.ConfirmStateUnreadable => (StatusCodes.Status503ServiceUnavailable, "Invoice Review Temporarily Unavailable"),
+            InvoiceReviewFailure.ReviewStateUnreadable => (StatusCodes.Status503ServiceUnavailable, "Invoice Review Temporarily Unavailable"),
             _ => (StatusCodes.Status500InternalServerError, "Invoice Review Incomplete"),
         };
 

@@ -330,6 +330,26 @@ public class InvoiceReviewWritePathTests
         _records.StatusOf(request.DocumentId).Should().Be(Rejected);
     }
 
+    [Fact(DisplayName = "050a review round 2, item 5: a fault of confirm's pre-intake review-state read is ReviewStateUnreadable (503): nothing submitted, nothing written")]
+    public async Task Confirm_ReviewStateReadFaults_IsReviewStateUnreadable_AndNothingIsSubmitted()
+    {
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId);
+        TheIntakeHolds(request.DocumentId);
+        _records.FailRead = new HttpRequestException("Dataverse 503");
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-unreadable");
+
+        var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        failure.Failure.Should().Be(InvoiceReviewFailure.ReviewStateUnreadable);
+        failure.ReasonCode.Should().Be("sdap.finance.invoice_review.review_state_unreadable");
+        failure.Message.Should().Contain("Nothing was saved");
+        failure.SubmissionId.Should().BeNull();
+        _intake.Allocations.Should().BeEmpty();
+        _intake.JobsSent.Should().BeEmpty();
+        _records.Writes.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "050a review #6: a document deleted after its submission is DocumentNotFound naming the submission, not an endless 500 'retry'")]
     public async Task Confirm_DocumentDeletedAfterTheSubmission_IsDocumentNotFound_NamingTheSubmission()
     {
@@ -478,6 +498,27 @@ public class InvoiceReviewWritePathTests
     /// <summary>Runs at the start of each conditional link write, before its version is checked — another writer's slot.</summary>
     private Action<Guid>? _beforeLinkWrite;
 
+    /// <summary>Each document's <c>sprk_invoicereviewstatus</c> (absent: no decision), as the re-file's row read answers it.</summary>
+    private readonly Dictionary<Guid, int> _reviewStatus = new();
+
+    /// <summary>Runs when the real resolver's <c>ReparentAsync</c> has RETURNED (link written, owner moved), before the step after the re-file.</summary>
+    private Action? _afterReparent;
+
+    /// <summary>The real resolver, with <see cref="_afterReparent"/> run once its re-file has landed.</summary>
+    private sealed class AfterReparentHook(IRecordOwnershipResolver inner, Func<Action?> hook) : IRecordOwnershipResolver
+    {
+        public Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct) => inner.ResolveOwningTeamAsync(context, ct);
+
+        public Task<RecordOwnerResolution> ResolveOwnerAsync(RecordOwnershipContext context, CancellationToken ct) => inner.ResolveOwnerAsync(context, ct);
+
+        public async Task<RecordOwnerResolution> ReparentAsync(RecordReparent request, Func<CancellationToken, Task> applyChange, CancellationToken ct)
+        {
+            var resolution = await inner.ReparentAsync(request, applyChange, ct);
+            hook()?.Invoke();
+            return resolution;
+        }
+    }
+
     /// <summary>The world: the two matters, an invoice under each, and a third invoice under a matter flagged but not isolated.</summary>
     private void Matters()
     {
@@ -522,15 +563,20 @@ public class InvoiceReviewWritePathTests
                 : new Dictionary<string, object?>
                 {
                     ["_sprk_invoice_value"] = _world.ValueOf<EntityReference>(table, id, "sprk_invoice")?.Id.ToString(),
+                    // The Web API answers an option set column as its integer value (review round 2, item 3).
+                    ["sprk_invoicereviewstatus"] = _reviewStatus.TryGetValue(id, out var status) ? status : null,
                     ["versionnumber"] = VersionOf(id),
                 });
         records
             .Setup(r => r.UpdateRecordFieldsIfUnchangedAsync(
                 "sprk_document", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .Returns((string table, Guid id, Dictionary<string, object?> fields, long expected, CancellationToken _) =>
+            .Returns((string table, Guid id, Dictionary<string, object?> fields, long expected, CancellationToken token) =>
             {
                 _linkWriteAttempts++;
                 _beforeLinkWrite?.Invoke(id);
+
+                // Review round 2, item 4: the token is honoured as the Web API's HTTP call honours it - a cancelled write is never sent.
+                token.ThrowIfCancellationRequested();
                 if (!_world.Has(table, id))
                 {
                     throw new KeyNotFoundException($"{table} record was not found.");
@@ -555,7 +601,8 @@ public class InvoiceReviewWritePathTests
 
     /// <summary>The re-file of <paramref name="document"/>'s confirm submission under <paramref name="invoice"/>, all real.</summary>
     private Task<InvoiceDocumentRefileResult> Refile(Guid document, Guid invoice, CancellationToken ct = default) =>
-        new InvoiceDocumentRefile(RealResolver(), SecureChildShareWorld.ReconcilerOver(() => _world, _shares, null!), WorldDocuments().Object,
+        new InvoiceDocumentRefile(new AfterReparentHook(RealResolver(), () => _afterReparent),
+                SecureChildShareWorld.ReconcilerOver(() => _world, _shares, null!), WorldDocuments().Object,
                 NullLogger<InvoiceDocumentRefile>.Instance)
             .RefileAsync(InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(document), document, invoice, ct);
 
@@ -731,8 +778,26 @@ public class InvoiceReviewWritePathTests
         _shares.WriteLog.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "#2095 K1 / 050a: AfterRefileAsync runs with CancellationToken.None - a job cancelled once the link is written still moves the share mirror")]
-    public async Task Refile_CancelledAfterTheLinkWrite_StillRunsAfterRefile()
+    [Fact(DisplayName = "#2095 K1 / 050a: AfterRefileAsync runs with CancellationToken.None - a job cancelled once the re-file has LANDED (link written, owner moved) still moves the share mirror")]
+    public async Task Refile_CancelledAfterTheReFileLanded_StillRunsAfterRefile()
+    {
+        Matters();
+        var document = Guid.NewGuid();
+        _world.OrdinaryChild("sprk_document", document);
+        _shares.Seed("sprk_matter", SecureMatter, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        using var cancel = new CancellationTokenSource();
+        _afterReparent = cancel.Cancel; // the link write honours the token; the cancel lands after the resolver returned
+
+        (await Refile(document, SecureInvoice, cancel.Token)).Status.Should().Be(InvoiceDocumentRefileStatus.Refiled);
+
+        cancel.IsCancellationRequested.Should().BeTrue();
+        LinkOf(document).Should().Be(SecureInvoice, "the re-file landed before the cancel");
+        _shares.MaskOf("sprk_document", document, DataversePrincipalRef.User(Sharee)).Should().NotBeNull(
+            "the step after the re-file ran to completion although the job's token was cancelled (CancellationToken.None)");
+    }
+
+    [Fact(DisplayName = "050a review round 2, item 4 (the fake honours the token): a job cancelled BEFORE the link write sends no write: no link, no owner move, no mirror")]
+    public async Task Refile_CancelledBeforeTheLinkWrite_WritesNothing()
     {
         Matters();
         var document = Guid.NewGuid();
@@ -741,11 +806,77 @@ public class InvoiceReviewWritePathTests
         using var cancel = new CancellationTokenSource();
         _beforeLinkWrite = _ => cancel.Cancel();
 
-        (await Refile(document, SecureInvoice, cancel.Token)).Status.Should().Be(InvoiceDocumentRefileStatus.Refiled);
+        var act = () => Refile(document, SecureInvoice, cancel.Token);
 
-        cancel.IsCancellationRequested.Should().BeTrue();
-        _shares.MaskOf("sprk_document", document, DataversePrincipalRef.User(Sharee)).Should().NotBeNull(
-            "the step after the re-file ran to completion although the job's token was cancelled (CancellationToken.None)");
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        _linkWrites.Should().BeEmpty();
+        LinkOf(document).Should().BeNull();
+        _world.OwnerWrites.Should().BeEmpty();
+        _shares.MaskOf("sprk_document", document, DataversePrincipalRef.User(Sharee)).Should().BeNull("the step after the re-file never ran");
+    }
+
+    [Fact(DisplayName = "050a review round 2, item 4: an ALREADY-ISOLATED document (held under a Secure matter) re-filed under that same Secure matter's invoice: the link is written, it stays isolated, and its mirror is kept")]
+    public async Task Refile_AlreadyIsolatedDocument_UnderItsOwnSecureMattersInvoice_StaysIsolated()
+    {
+        Matters();
+        var document = Guid.NewGuid();
+        _world.SecureChild("sprk_document", document, ("sprk_matter", "sprk_matter", SecureMatter));
+        _shares.Seed("sprk_matter", SecureMatter, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _shares.Seed("sprk_document", document, DataversePrincipalRef.User(Sharee), CollaborateMask); // its mirror
+
+        var result = await Refile(document, SecureInvoice);
+
+        result.Status.Should().Be(InvoiceDocumentRefileStatus.Refiled);
+        _linkWrites.Should().Equal((document, SecureInvoice, 1L));
+        _world.OwnerOf("sprk_document", document).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+        _world.OwnerWrites.Should().BeEmpty("the owner did not change");
+        _shares.MaskOf("sprk_document", document, DataversePrincipalRef.User(Sharee)).Should().NotBeNull("still isolated: the mirror stays");
+    }
+
+    [Fact(DisplayName = "050a review round 2, item 4: an isolated document that no Secure record holds any more is never taken out of isolation by the job: the real resolver refuses (no F3 caller), nothing moves, the mirror stays - the only path where the isolation answer would decide anything is unreachable")]
+    public async Task Refile_IsolatedDocumentWithNoSecureParent_IsNeverReleasedByTheJob()
+    {
+        Matters();
+        var document = Guid.NewGuid();
+        _world.SecureChild("sprk_document", document);
+        _shares.Seed("sprk_document", document, DataversePrincipalRef.User(Sharee), CollaborateMask); // the mirror of its old Secure record
+
+        var result = await Refile(document, OrdinaryInvoice);
+
+        result.Status.Should().Be(InvoiceDocumentRefileStatus.Refused, "leaving isolation needs F3, and the job acts for nobody");
+        _linkWriteAttempts.Should().Be(0);
+        LinkOf(document).Should().BeNull();
+        _world.OwnerWrites.Should().BeEmpty();
+        _world.OwnerOf("sprk_document", document).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+        _shares.MaskOf("sprk_document", document, DataversePrincipalRef.User(Sharee)).Should().NotBeNull();
+    }
+
+    [Fact(DisplayName = "050a review round 2, item 3: a document rejected as not an invoice (a stalled reject) is Refused document_rejected: no link, no owner move")]
+    public async Task Refile_RejectedDocument_IsRefused_NothingMoves()
+    {
+        Matters();
+        var document = Guid.NewGuid();
+        _world.OrdinaryChild("sprk_document", document);
+        _reviewStatus[document] = InvoiceReviewService.ReviewStatusRejectedNotInvoice;
+
+        var result = await Refile(document, SecureInvoice);
+
+        result.Should().Be(new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refused, "ebilling.submission.document_rejected"));
+        _linkWriteAttempts.Should().Be(0);
+        LinkOf(document).Should().BeNull();
+        _world.OwnerWrites.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "050a review round 2, item 3 (must not fire): a document marked ConfirmedInvoice is re-filed")]
+    public async Task Refile_ConfirmedDocument_IsRefiled()
+    {
+        Matters();
+        var document = Guid.NewGuid();
+        _world.OrdinaryChild("sprk_document", document);
+        _reviewStatus[document] = InvoiceReviewService.ReviewStatusConfirmedInvoice;
+
+        (await Refile(document, OrdinaryInvoice)).Status.Should().Be(InvoiceDocumentRefileStatus.Refiled);
+        LinkOf(document).Should().Be(OrdinaryInvoice);
     }
 
     [Fact(DisplayName = "050a review #1: a document deleted before the job re-files it is Refused document_not_found and nothing is written")]
@@ -978,6 +1109,9 @@ public class InvoiceReviewWritePathTests
         public Exception? FailDocumentLink { get; set; }
         public Exception? FailDocumentLinkAfterApplying { get; set; }
         public Exception? FailDocumentStatus { get; set; }
+
+        /// <summary>Non-null: every read throws it (a transient Dataverse fault, review round 2 item 5).</summary>
+        public Exception? FailRead { get; set; }
         public Action? OnUpsertApplied { get; set; }
         public Func<Task>? OnUpsertAppliedAsync { get; set; }
 
@@ -1043,6 +1177,11 @@ public class InvoiceReviewWritePathTests
             string entityLogicalName, Guid recordId, string[] fields, CancellationToken ct = default)
         {
             ct.ThrowIfCancellationRequested();
+            if (FailRead is { } readFault)
+            {
+                return Task.FromException<Dictionary<string, object?>>(readFault);
+            }
+
             if (!_rows.TryGetValue((entityLogicalName, recordId), out var row))
             {
                 return Task.FromResult(new Dictionary<string, object?>());

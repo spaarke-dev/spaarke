@@ -41,8 +41,9 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// every other terminal status is the after-steps' to write, last.</para>
 /// <para><b>A submission that links its invoice is never marked Failed by this handler.</b> Failed is terminal and the write is unconditional, so
 /// marking a linked submission Failed would strand an invoice that has no Signals, record or notification, make every replay after a code fix a
-/// no-op, and could overwrite a reviewer's decision made since the read. An after-steps <c>Refused</c> (always a bug: the stored state, the signal
-/// plan or the link does not match) therefore leaves the submission Processing, logs the id and code, and returns Poisoned.</para>
+/// no-op, and could overwrite a reviewer's decision made since the read. An after-steps <c>Refused</c> (the stored state, the signal plan or the
+/// link does not match, a bug; or, for a confirmed document, its re-file was refused after the commit, a real outcome the administrator must
+/// resolve, 050a) therefore leaves the submission Processing, logs the id and code, sets the administrator's attention text and returns Poisoned.</para>
 /// <para><b>Logging (ADR-015).</b> Submission id, invoice id, attempt and reason codes only; never a value read from the invoice.</para>
 /// <para>§11: <i>Existing</i> - <c>InvoiceExtractionJobHandler</c> (payload, document read, pointer-container check, download) and
 /// <c>BillingRuleDraftJobHandler</c> (lock, final-delivery rule); the pipeline components are 049 parts B-D. <i>Extension</i> - the extraction
@@ -337,10 +338,14 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                 return Done(job, stopwatch);
 
             case SubmissionAfterStepsStatus.Refused:
-                // Both callers reach here only with the invoice linked (Committed / Retry-with-invoice / Resumed / a Processing+link resume),
-                // and the refusal means a bug: never Failed (terminal, unconditional write), so the invoice is not stranded and a replay
-                // after the fix resumes it. No status write at all - only the administrator's attention text (R3, D-133).
-                return await LeaveLinkedSubmissionAsync(job, submissionId, result.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct).ConfigureAwait(false);
+                // Both callers reach here only with the invoice linked (Committed / Retry-with-invoice / Resumed / a Processing+link resume).
+                // The refusal is either an inconsistency in the stored state (a bug) or a refused re-file of a confirmed document (050a: the
+                // document was filed elsewhere, rejected or deleted after the commit, or the ownership resolver refused; a real outcome, not a
+                // bug). Either way: never Failed (terminal, unconditional write), so the invoice is not stranded and a replay once the cause
+                // is resolved resumes it. No status write at all - only the administrator's attention text (R3, D-133), which says the
+                // invoice has no document when the re-file was refused (review round 2, 2(b)).
+                return await LeaveLinkedSubmissionAsync(job, submissionId, result.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct,
+                    result.DocumentNotFiled).ConfigureAwait(false);
 
             case SubmissionAfterStepsStatus.Retry:
                 // The submission stays Processing with its invoice link; the redelivery resumes.
@@ -402,12 +407,14 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     /// <c>sprk_adminattention</c> (a code-only "processing stopped" segment merged into the current text; not a status write, idempotent,
     /// and a fault writing it is logged and never changes this outcome).
     /// </summary>
-    private async Task<JobOutcome> LeaveLinkedSubmissionAsync(JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch, CancellationToken ct)
+    private async Task<JobOutcome> LeaveLinkedSubmissionAsync(
+        JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch, CancellationToken ct, bool documentNotFiled = false)
     {
         _logger.LogError(
-            "Invoice submission job {JobId}: submission {SubmissionId} links its invoice and failed permanently ({ReasonCode}); it stays Processing, not Failed - fix the cause, then replay the message",
-            job.JobId, submissionId, reasonCode);
-        await AdminAttentionText.NoteAsync(_entities, submissionId, null, AdminAttentionText.StoppedNote(reasonCode), _logger, ct).ConfigureAwait(false);
+            "Invoice submission job {JobId}: submission {SubmissionId} links its invoice and failed permanently ({ReasonCode}, document not filed: {DocumentNotFiled}); it stays Processing, not Failed - fix the cause, then replay the message",
+            job.JobId, submissionId, reasonCode, documentNotFiled);
+        await AdminAttentionText.NoteAsync(_entities, submissionId, null, AdminAttentionText.StoppedNote(reasonCode, documentNotFiled), _logger, ct)
+            .ConfigureAwait(false);
         return JobOutcome.Poisoned(job.JobId, JobType, reasonCode, job.Attempt, stopwatch.Elapsed);
     }
 

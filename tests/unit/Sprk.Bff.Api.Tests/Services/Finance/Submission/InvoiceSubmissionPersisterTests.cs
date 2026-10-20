@@ -914,7 +914,98 @@ public class InvoiceSubmissionPersisterTests
         result.Status.Should().Be(SubmissionPersistStatus.Committed);
         store.DocumentReads.Should().ContainSingle("the live row is read before anything is built");
         store.Transactions.Single().Select(Describe).Should().Equal(
-            "Create sprk_invoice", "Create sprk_billingevent", "Create sprk_invoiceapproval", "Update sprk_invoicesubmission");
+            "Create sprk_invoice", "Create sprk_billingevent", "Create sprk_invoiceapproval", "Update sprk_document", "Update sprk_invoicesubmission");
+
+        // Review round 2, 2(a): the document's one request is the guard - conditional on the version the check read, and NO link.
+        var guard = store.Transactions.Single().OfType<UpdateRequest>().Single(u => u.Target.LogicalName == "sprk_document");
+        guard.ConcurrencyBehavior.Should().Be(ConcurrencyBehavior.IfRowVersionMatches);
+        guard.Target.RowVersion.Should().Be("7", "the version the check read");
+        guard.Target.Id.Should().Be(Document);
+        guard.Target.Attributes.Keys.Should().Equal(new[] { "sprk_invoicereviewstatus" }, "the guard writes nothing to sprk_invoice");
+        guard.Target["sprk_invoicereviewstatus"].Should().BeNull("written back as read (the document has no decision yet)");
+    }
+
+    [Fact(DisplayName = "050a review round 2, 2(a): the guard writes the review status back exactly as the check read it (a value-preserving write)")]
+    public async Task ConfirmSubmission_Guard_WritesTheReviewStatusBackAsRead()
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store
+        {
+            DocumentRow = new Entity("sprk_document", Document)
+            {
+                ["sprk_invoicereviewstatus"] = new OptionSetValue(InvoiceReviewService.ReviewStatusConfirmedInvoice),
+            },
+            DocumentVersion = 42,
+        };
+
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+
+        var guard = store.Transactions.Single().OfType<UpdateRequest>().Single(u => u.Target.LogicalName == "sprk_document");
+        guard.Target.RowVersion.Should().Be("42");
+        guard.Target.GetAttributeValue<OptionSetValue>("sprk_invoicereviewstatus").Value.Should().Be(InvoiceReviewService.ReviewStatusConfirmedInvoice);
+        guard.Target.Attributes.Should().NotContainKey("sprk_invoice");
+    }
+
+    /// <summary>What another writer does to the document between the persister's check and its transaction.</summary>
+    public static TheoryData<string, string> ChangesBeforeTheCommit => new()
+    {
+        { "filed under another invoice", InvoiceSubmissionErrors.DocumentAlreadyInvoiced },
+        { "rejected as not an invoice", InvoiceSubmissionPersister.DocumentRejectedCode },
+        { "deleted", InvoiceSubmissionErrors.DocumentNotFound },
+    };
+
+    [Theory(DisplayName = "050a review round 2, 2(a): a filing, a reject or a delete between the document check and the commit rolls the transaction back (the guard) and is refused in the same delivery: no invoice committed")]
+    [MemberData(nameof(ChangesBeforeTheCommit))]
+    public async Task ConfirmSubmission_ChangeBetweenTheCheckAndTheCommit_RollsBack_AndIsRefused(string change, string expectedCode)
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store
+        {
+            BeforeTransaction = s =>
+            {
+                switch (change)
+                {
+                    case "filed under another invoice":
+                        s.DocumentRow = new Entity("sprk_document", Document) { ["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid()) };
+                        break;
+                    case "rejected as not an invoice":
+                        s.DocumentRow = new Entity("sprk_document", Document)
+                        {
+                            ["sprk_invoicereviewstatus"] = new OptionSetValue(InvoiceReviewService.ReviewStatusRejectedNotInvoice),
+                        };
+                        break;
+                    default:
+                        s.DocumentDeleted = true;
+                        break;
+                }
+
+                s.DocumentVersion++;
+            },
+        };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused, "the job marks the submission Failed: no invoice exists");
+        result.ReasonCode.Should().Be(expectedCode);
+        result.InvoiceId.Should().BeNull();
+        store.Transactions.Should().ContainSingle("the one transaction was sent and rolled back by the guard");
+        store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Should().BeNull("nothing committed: the submission links no invoice");
+        store.TotalsCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "050a review round 2, 2(a): an unrelated write between the check and the commit rolls the transaction back too; nothing refuses the document, so it is the transaction's Retry")]
+    public async Task ConfirmSubmission_UnrelatedWriteBetweenTheCheckAndTheCommit_IsRetry()
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store { BeforeTransaction = s => s.DocumentVersion++ };
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Retry);
+        result.ReasonCode.Should().Be(InvoiceSubmissionPersister.TransactionFailedCode);
+        result.InvoiceId.Should().BeNull();
+        store.DocumentReads.Should().HaveCount(2, "the check, then the re-check after the rolled-back transaction");
+        store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Should().BeNull();
     }
 
     [Fact(DisplayName = "050a review #1: a confirm submission whose document is linked to ANOTHER invoice is Refused document_already_invoiced and nothing is written")]
@@ -1028,10 +1119,16 @@ public class InvoiceSubmissionPersisterTests
         public RecordOwnerResolution Owner { get; init; } = RecordOwnerResolution.Owned(TeamId);
 
         /// <summary>050a review #1 / #2: the document's live row as a confirm submission's check reads it (null: unlinked, not rejected).</summary>
-        public Entity? DocumentRow { get; init; }
+        public Entity? DocumentRow { get; set; }
 
         /// <summary>050a review #1: the document no longer exists.</summary>
-        public bool DocumentDeleted { get; init; }
+        public bool DocumentDeleted { get; set; }
+
+        /// <summary>050a review round 2, 2(a): the document's <c>versionnumber</c> as Dataverse keeps it (every read answers it).</summary>
+        public long DocumentVersion { get; set; } = 7;
+
+        /// <summary>050a review round 2, 2(a): another writer's slot between the persister's document check and its transaction.</summary>
+        public Action<Store>? BeforeTransaction { get; init; }
 
         /// <summary>Every read of the document row (columns).</summary>
         public List<string[]> DocumentReads { get; } = [];
@@ -1058,6 +1155,21 @@ public class InvoiceSubmissionPersisterTests
                 .Returns((IReadOnlyList<OrganizationRequest> requests, CancellationToken _) =>
                 {
                     Transactions.Add(requests);
+                    BeforeTransaction?.Invoke(this);
+
+                    // Dataverse's optimistic concurrency inside the transaction: a conditional update of the document at a version the row
+                    // no longer has (or of a row that is gone) faults that request, and the whole transaction rolls back (MapTransactionFailure).
+                    for (var index = 0; index < requests.Count; index++)
+                    {
+                        if (requests[index] is UpdateRequest { ConcurrencyBehavior: ConcurrencyBehavior.IfRowVersionMatches } guard
+                            && guard.Target.LogicalName == "sprk_document"
+                            && (DocumentDeleted || guard.Target.RowVersion != DocumentVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+                        {
+                            return Task.FromException(new DataverseTransactionException(
+                                "ConcurrencyVersionMismatch", failedRequestIndex: index, outcomeUnknown: false, null));
+                        }
+                    }
+
                     if (TransactionFault is null || CommitDespiteFault)
                     {
                         Apply(requests);
@@ -1109,7 +1221,9 @@ public class InvoiceSubmissionPersisterTests
         private Entity ReadDocument(Guid id, string[] columns)
         {
             DocumentReads.Add(columns);
-            return DocumentRow is null ? new Entity("sprk_document", id) : Copy(DocumentRow);
+            var row = DocumentRow is null ? new Entity("sprk_document", id) : Copy(DocumentRow);
+            row["versionnumber"] = DocumentVersion;
+            return row;
         }
 
         private Entity Capture(string[] columns, Entity row)
