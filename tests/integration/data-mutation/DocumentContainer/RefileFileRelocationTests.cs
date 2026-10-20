@@ -81,12 +81,23 @@ public class RefileFileRelocationTests
         return row;
     }
 
-    private static Func<Guid, CancellationToken, Task<bool>> Isolated(bool isolated) => (_, _) => Task.FromResult(isolated);
+    /// <summary>The Secure Record owner team of the pointer world (the job world's own, so the two worlds agree).</summary>
+    private static readonly Guid SecureTeam = SecureChildShareWorld.SecureTeam;
+
+    /// <summary>The environment has the Secure Record owner team; the row is owned by it (ISOLATED) or by an ordinary team.</summary>
+    private static void Own(World world, Guid id, bool isolated)
+    {
+        world.SecureOwnerTeam = SecureTeam;
+        world.Rows[("sprk_document", id)]["owningteam"] =
+            new EntityReference("team", isolated ? SecureTeam : SecureChildShareWorld.GeneralTeam);
+    }
 
     private static Task<DocumentRelocationOutcome> RefileAsync(
         T.Rig rig, Guid id, bool isolated, bool apply = true)
-        => rig.Relocator.RelocateIfMisplacedAsync(id, apply, RelocationPurpose.Refile, CancellationToken.None,
-            isIsolated: Isolated(isolated));
+    {
+        Own(rig.World, id, isolated);
+        return rig.Relocator.RelocateIfMisplacedAsync(id, apply, RelocationPurpose.Refile);
+    }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // The relocator, purpose Refile — must fire
@@ -236,31 +247,37 @@ public class RefileFileRelocationTests
         rig.Steps.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "#2159: an owner that cannot be read moves nothing")]
-    public async Task Refile_WhenTheOwnerCannotBeRead_MovesNothing()
+    [Theory(DisplayName = "#2159: an isolation that cannot be read (the Secure Record owner team unreadable) moves nothing, whatever the purpose")]
+    [InlineData(RelocationPurpose.Refile)]
+    [InlineData(RelocationPurpose.MakeSecure)]
+    [InlineData(RelocationPurpose.LegacyMigration)]
+    public async Task AnUnreadableIsolation_MovesNothing(RelocationPurpose purpose)
     {
         var world = Env();
-        world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, T.SecureContainer);
+        world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, T.CustomerBContainer);
+        Own(world, T.DocumentId, isolated: false);
+        world.FaultQueriesOf = "team";
         var rig = new T.Rig(world);
 
-        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.Refile,
-            CancellationToken.None, isIsolated: (_, _) => Task.FromException<bool>(new TimeoutException("Dataverse unavailable")));
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, purpose);
 
-        outcome.State.Should().Be(RelocationState.Failed);
+        outcome.State.Should().Be(RelocationState.Failed, outcome.Detail);
         world.Updates.Should().BeEmpty();
         rig.Steps.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "#2159: a re-file asked for without an isolation probe moves nothing (fail closed)")]
-    public async Task Refile_WithoutAnIsolationProbe_MovesNothing()
+    [Fact(DisplayName = "#2159: two Secure Record owner teams (ambiguous) is an unreadable isolation: nothing moves")]
+    public async Task AnAmbiguousSecureTeam_MovesNothing()
     {
         var world = Env();
-        world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, T.SecureContainer);
+        world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, T.CustomerBContainer);
+        Own(world, T.DocumentId, isolated: false);
         var rig = new T.Rig(world);
+        world.SecondSecureOwnerTeam = Guid.NewGuid();
 
-        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.Refile);
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.LegacyMigration);
 
-        outcome.State.Should().Be(RelocationState.Failed);
+        outcome.State.Should().Be(RelocationState.Failed, outcome.Detail);
         world.Updates.Should().BeEmpty();
     }
 
@@ -390,6 +407,246 @@ public class RefileFileRelocationTests
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // #2159 — the widening guard holds for EVERY purpose (Make Secure's backstop, the legacy migration, a re-file)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid ParentDocument = Guid.Parse("00000000-0000-4000-8000-0000000f0001");
+
+    /// <summary>
+    /// An ISOLATED document whose own filing now points at the plain matter (an edit outside the BFF), its file still in
+    /// the secure container, while its PARENT document is filed under the secure matter — so the legacy source check
+    /// vouches for the file (it "hangs off" the secure record through its parent) although its derivation is not secure.
+    /// </summary>
+    private static World IsolatedInTheSecureContainerViaItsParent()
+    {
+        var world = Env();
+        var parent = Doc(ParentDocument, T.SecureMatter, T.SecureContainer, bound: null);
+        parent["sprk_graphitemid"] = "01PARENTSOWNFILE";
+        world.Rows[("sprk_document", ParentDocument)] = parent;
+        var row = Doc(T.DocumentId, T.PlainMatter, T.SecureContainer);
+        row["sprk_parentdocument"] = new EntityReference("sprk_document", ParentDocument);
+        world.Rows[("sprk_document", T.DocumentId)] = row;
+        Own(world, T.DocumentId, isolated: true);
+        return world;
+    }
+
+    /// <summary>
+    /// The row (created by the BFF) was made secure earlier: its file is the BFF's copy in S — which the legacy source check
+    /// vouches for — and its ledger still owes the shared source's delete.
+    /// </summary>
+    private static void MadeSecureEarlier(World world)
+    {
+        var row = world.Rows[("sprk_document", T.DocumentId)];
+        row["createdby"] = new EntityReference("systemuser", TestRecordContainerResolver.PointerWorldBffUser);
+        row["sprk_graphitemid"] = row[Bound] = T.Rig.CopyItem;
+        row[T.Ledger] = T.LedgerJson(T.CustomerAContainer, Item, witnessSize: 1234, witnessHash: "hash-1234", witnessVersion: "1.0");
+        world.Items[(T.SecureContainer, T.Rig.CopyItem)] = new SpeItemCreator("memo.docx", null, T.BffApplication, 1234, "hash-1234");
+    }
+
+    [Theory(DisplayName = "#2159 widening guard, every purpose: an isolated document never leaves the secure container for a business unit's")]
+    [InlineData(RelocationPurpose.MakeSecure)]
+    [InlineData(RelocationPurpose.LegacyMigration)]
+    [InlineData(RelocationPurpose.Refile)]
+    public async Task EveryPurpose_AnIsolatedDocumentInTheSecureContainer_DerivedOutside_IsHeld(RelocationPurpose purpose)
+    {
+        var world = IsolatedInTheSecureContainerViaItsParent();
+        var rig = new T.Rig(world);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, purpose);
+
+        outcome.State.Should().Be(RelocationState.HeldIsolated, outcome.Detail);
+        rig.DriveOf(T.DocumentId).Should().Be(T.SecureContainer, "its bytes stay in isolation");
+        world.Updates.Should().BeEmpty();
+        rig.Steps.Should().BeEmpty("nothing is downloaded, uploaded or deleted");
+    }
+
+    [Theory(DisplayName = "#2159 widening guard, every purpose: an isolated document in one business unit's container is not moved into another's")]
+    [InlineData(RelocationPurpose.MakeSecure)]
+    [InlineData(RelocationPurpose.LegacyMigration)]
+    [InlineData(RelocationPurpose.Refile)]
+    public async Task EveryPurpose_AnIsolatedDocumentInABusinessUnitContainer_DerivedToAnother_IsHeld(RelocationPurpose purpose)
+    {
+        var world = Env();
+        world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, T.CustomerAContainer);
+        Own(world, T.DocumentId, isolated: true);
+        var rig = new T.Rig(world);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, purpose);
+
+        outcome.State.Should().Be(RelocationState.HeldIsolated, outcome.Detail);
+        rig.DriveOf(T.DocumentId).Should().Be(T.CustomerAContainer);
+        world.Updates.Should().BeEmpty();
+        rig.Steps.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "#2159 widening guard, every purpose: report-only plans no move of an isolated document either")]
+    [InlineData(RelocationPurpose.MakeSecure)]
+    [InlineData(RelocationPurpose.LegacyMigration)]
+    public async Task EveryPurpose_ReportOnly_AnIsolatedDocumentIsHeld_NotPlanned(RelocationPurpose purpose)
+    {
+        var world = IsolatedInTheSecureContainerViaItsParent();
+        var rig = new T.Rig(world);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: false, purpose);
+
+        outcome.State.Should().Be(RelocationState.HeldIsolated, outcome.Detail);
+    }
+
+    [Theory(DisplayName = "#2159 must not fire: an isolated document whose derivation IS secure still moves into its secure container")]
+    [InlineData(RelocationPurpose.MakeSecure)]
+    [InlineData(RelocationPurpose.LegacyMigration)]
+    [InlineData(RelocationPurpose.Refile)]
+    public async Task EveryPurpose_AnIsolatedDocumentDerivedSecure_StillMoves(RelocationPurpose purpose)
+    {
+        var world = Env();
+        world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.SecureMatter, T.CustomerAContainer);
+        Own(world, T.DocumentId, isolated: true);
+        var rig = new T.Rig(world);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, purpose);
+
+        outcome.State.Should().Be(RelocationState.Relocated, outcome.Detail);
+        rig.DriveOf(T.DocumentId).Should().Be(T.SecureContainer, "into the secure record's own container narrows");
+    }
+
+    [Theory(DisplayName = "#2159 must not fire: a document that is NOT isolated still moves between business units' containers")]
+    [InlineData(RelocationPurpose.MakeSecure)]
+    [InlineData(RelocationPurpose.LegacyMigration)]
+    public async Task EveryPurpose_AnOrdinaryDocument_StillMoves(RelocationPurpose purpose)
+    {
+        var world = Env();
+        world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, T.CustomerAContainer);
+        Own(world, T.DocumentId, isolated: false);
+        var rig = new T.Rig(world);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, purpose);
+
+        outcome.State.Should().Be(RelocationState.Relocated, outcome.Detail);
+        rig.DriveOf(T.DocumentId).Should().Be(T.CustomerA1Container);
+    }
+
+    [Theory(DisplayName = "#2159 a settle is not a move: a held document's ledger still deletes a stale source outside the secure container")]
+    [InlineData(RelocationPurpose.MakeSecure)]
+    [InlineData(RelocationPurpose.LegacyMigration)]
+    [InlineData(RelocationPurpose.Refile)]
+    public async Task EveryPurpose_AHeldDocument_StillSettlesItsLedger_AndOnlyNarrows(RelocationPurpose purpose)
+    {
+        var world = IsolatedInTheSecureContainerViaItsParent();
+        MadeSecureEarlier(world);
+        var rig = new T.Rig(world);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, purpose);
+
+        outcome.State.Should().Be(RelocationState.HeldIsolated, outcome.Detail);
+        outcome.Pending.Should().BeEmpty("the ledger settled");
+        rig.Steps.Should().Equal($"delete {T.CustomerAContainer}/{Item}");
+        world.ItemFacts(T.CustomerAContainer, Item).Should().BeNull("the stale shared copy is gone: that narrows");
+        rig.DriveOf(T.DocumentId).Should().Be(T.SecureContainer);
+        rig.ItemOf(T.DocumentId).Should().Be(T.Rig.CopyItem, "the file itself never moves out of isolation");
+        rig.Copies.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "#2159 a settle never widens: another row that is isolated is not moved along out of the source's container")]
+    [InlineData(RelocationPurpose.MakeSecure)]
+    [InlineData(RelocationPurpose.LegacyMigration)]
+    public async Task EveryPurpose_AnIsolatedOtherRow_IsNotMovedAlong(RelocationPurpose purpose)
+    {
+        // An ordinary document moves from customer A's container to A1's; an ISOLATED row naming the same file also derives
+        // to A1. It is not moved along: it keeps the source as its file (settled), and the source is kept for it.
+        var world = Env();
+        world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, T.CustomerAContainer);
+        world.Rows[("sprk_document", T.OtherDocumentId)] = Doc(T.OtherDocumentId, T.PlainMatter, T.CustomerAContainer);
+        Own(world, T.DocumentId, isolated: false);
+        Own(world, T.OtherDocumentId, isolated: true);
+        var rig = new T.Rig(world);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, purpose);
+
+        outcome.State.Should().Be(RelocationState.RelocatedSourceKeptForOtherRecords, outcome.Detail);
+        rig.DriveOf(T.DocumentId).Should().Be(T.CustomerA1Container);
+        rig.DriveOf(T.OtherDocumentId).Should().Be(T.CustomerAContainer, "an isolated row's file is never moved along out");
+        rig.ItemOf(T.OtherDocumentId).Should().Be(Item);
+        outcome.MovedAlong.Should().BeEmpty();
+        world.ItemFacts(T.CustomerAContainer, Item).Should().NotBeNull("kept: the isolated row still uses it");
+    }
+
+    [Fact(DisplayName = "#2159 must not fire: an ordinary other row is still moved along")]
+    public async Task AnOrdinaryOtherRow_IsStillMovedAlong()
+    {
+        var world = Env();
+        world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, T.CustomerAContainer);
+        world.Rows[("sprk_document", T.OtherDocumentId)] = Doc(T.OtherDocumentId, T.PlainMatter, T.CustomerAContainer);
+        Own(world, T.DocumentId, isolated: false);
+        Own(world, T.OtherDocumentId, isolated: false);
+        var rig = new T.Rig(world);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.LegacyMigration);
+
+        outcome.State.Should().Be(RelocationState.Relocated, outcome.Detail);
+        rig.DriveOf(T.OtherDocumentId).Should().Be(T.CustomerA1Container);
+        outcome.MovedAlong.Should().ContainSingle().Which.State.Should().Be(RelocationState.Relocated);
+    }
+
+    [Fact(DisplayName = "#2159: the Make Secure backstop holds an isolated document its LEDGER-OWING listing feeds it (re-filed outside the BFF)")]
+    public async Task TheBackstop_LedgerOwingListing_HoldsAnIsolatedDocument()
+    {
+        var pointer = IsolatedInTheSecureContainerViaItsParent();
+        MadeSecureEarlier(pointer);
+        var rig = new T.Rig(pointer);
+        var world = SecureChildShareWorld.Standard();
+        world.Add("businessunit", T.CustomerA, ("sprk_containerid", T.CustomerAContainer));
+        world.Add("sprk_document", T.DocumentId,
+            ("owningteam", new EntityReference("team", world.OwnerTeam)),
+            ("sprk_graphdriveid", T.SecureContainer),
+            (DocumentContainerRelocator.RelocationLedgerColumn, "{\"v\":1}"));
+        var harness = new JobHarness(world, rig);
+
+        var (_, _, makeSecure) = await harness.RunAsync();
+
+        makeSecure.GetProperty("ledgerOwing").GetInt32().Should().Be(1);
+        makeSecure.GetProperty("stranded").GetInt32().Should().Be(0, "its file is in the secure container, no business unit's");
+        makeSecure.GetProperty("moved").GetInt32().Should().Be(0);
+        makeSecure.GetProperty("counts").GetProperty(nameof(RelocationState.HeldIsolated)).GetInt32().Should().Be(1);
+        rig.DriveOf(T.DocumentId).Should().Be(T.SecureContainer, "the backstop never moves it out of isolation");
+        rig.Copies.Should().BeEmpty();
+        pointer.ItemFacts(T.CustomerAContainer, Item).Should().BeNull("its ledger still settled the stale shared source");
+    }
+
+    [Fact(DisplayName = "#2159: the Make Secure backstop holds an isolated document its STRANDED listing feeds it when it derives outside every secure record")]
+    public async Task TheBackstop_StrandedListing_HoldsAnIsolatedDocumentDerivedOutside()
+    {
+        var pointer = Env();
+        pointer.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, T.CustomerAContainer);
+        Own(pointer, T.DocumentId, isolated: true);
+        var rig = new T.Rig(pointer);
+        var harness = new JobHarness(JobWorld((T.DocumentId, T.CustomerAContainer, true)), rig);
+
+        var (_, _, makeSecure) = await harness.RunAsync();
+
+        makeSecure.GetProperty("stranded").GetInt32().Should().Be(1);
+        makeSecure.GetProperty("moved").GetInt32().Should().Be(0);
+        makeSecure.GetProperty("counts").GetProperty(nameof(RelocationState.HeldIsolated)).GetInt32().Should().Be(1);
+        rig.DriveOf(T.DocumentId).Should().Be(T.CustomerAContainer, "not moved into another business unit's container");
+        pointer.Updates.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "#2151 must not fire: the unfiled-home hold is the re-file's only — the legacy migration still moves an unfiled file out of the archive container")]
+    public async Task TheUnfiledHomeHold_IsTheRefilesOnly_TheLegacyMigrationStillMoves()
+    {
+        var world = Env();
+        world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, null, T.ArchiveContainer);
+        Own(world, T.DocumentId, isolated: false);
+        var rig = new T.Rig(world);
+
+        var legacy = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: false, RelocationPurpose.LegacyMigration);
+        var refile = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: false, RelocationPurpose.Refile);
+
+        legacy.State.Should().Be(RelocationState.WouldRelocate, "task 166 pulls an unfiled archive file into its business unit's container");
+        legacy.TargetDrive.Should().Be(T.CustomerAContainer);
+        refile.State.Should().Be(RelocationState.UnfiledHomeUnknown, "a re-file never pulls it from a container of no business unit");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // The trigger — SecureChildReconciliationJob's re-file pass
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -488,6 +745,7 @@ public class RefileFileRelocationTests
     {
         var pointer = Env();
         pointer.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, T.SecureContainer);
+        Own(pointer, T.DocumentId, isolated: true);
         var rig = new T.Rig(pointer);
         var harness = new JobHarness(JobWorld((T.DocumentId, T.SecureContainer, true)), rig);
 
@@ -535,13 +793,15 @@ public class RefileFileRelocationTests
         refile.GetProperty("deferred").GetInt32().Should().Be(0);
     }
 
-    [Fact(DisplayName = "#2159: an owner read fault moves nothing, fails the run, and the row is carried to the next run")]
-    public async Task TheJob_AnOwnerReadFault_CarriesTheRow()
+    [Fact(DisplayName = "#2159: an isolation read fault moves nothing, fails the run, and the row is carried to the next run")]
+    public async Task TheJob_AnIsolationReadFault_CarriesTheRow()
     {
         var pointer = Env();
         pointer.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, T.PlainMatter, T.SecureContainer);
+        Own(pointer, T.DocumentId, isolated: false);
+        pointer.FaultQueriesOf = "team";
         var rig = new T.Rig(pointer);
-        var world = JobWorld((T.DocumentId, T.SecureContainer, false)).FailingRowReadsOf("sprk_document", T.DocumentId);
+        var world = JobWorld((T.DocumentId, T.SecureContainer, false));
         var harness = new JobHarness(world, rig);
 
         var (first, run1, _) = await harness.RunAsync();
@@ -552,7 +812,7 @@ public class RefileFileRelocationTests
         first.Success.Should().BeFalse();
 
         // The fault clears; the row is no longer in any window (an old modifiedon) — only the carry brings it back.
-        world.ClearRowReadFaults();
+        pointer.FaultQueriesOf = null;
         world.Modified("sprk_document", T.DocumentId, new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
         var (second, run2, _) = await harness.RunAsync();
 

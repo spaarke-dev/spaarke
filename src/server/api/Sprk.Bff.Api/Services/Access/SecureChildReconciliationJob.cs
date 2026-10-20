@@ -72,7 +72,10 @@ namespace Sprk.Bff.Api.Services.Access;
 /// in id order after a per-instance cursor so a row that cannot be finished never starves the others. Its writes follow the
 /// recent-changes pass (on unless that pass's emergency stop is set). Reported in <c>ResultJson.makeSecureRelocations</c>;
 /// a document still owing a step makes the run unsuccessful. A row that names no file it can resolve is reported
-/// (<c>unresolvable</c>) and never moved or deleted.</para>
+/// (<c>unresolvable</c>) and never moved or deleted. Neither listing moves an isolated document whose derivation is not a
+/// secure record's own container (its filing edited outside the BFF): the relocator's widening guard holds it for every
+/// purpose (#2159; <c>counts.HeldIsolated</c>, incomplete until an F3 act releases it or it is re-filed under a secure
+/// record), while any ledger entry it owes is still settled.</para>
 /// <para><b>The re-file pass (#2159, #2151).</b> Then every <c>sprk_document</c> modified since this pass's own watermark — any
 /// owner, so every writer, the BFF and outside it — whose pointer's drive is not among its derived containers is relocated
 /// through the same relocator with purpose <c>Refile</c>: only the row's BFF-bound item, at most
@@ -957,7 +960,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// and every write outside it), with the rows earlier runs carried, whose pointer's drive is NOT among its derived
     /// containers (<see cref="RecordContainerResolver.DeriveDocumentContainersAsync"/>) is relocated through the ONE
     /// <see cref="DocumentContainerRelocator"/> with <see cref="RelocationPurpose.Refile"/>: only the row's BFF-bound item,
-    /// never out of isolation (the relocator asks <see cref="IsOwnedByTeamAsync"/> under its lock), and
+    /// never out of isolation (the relocator's widening guard, which holds for every purpose, the backstop's too), and
     /// never an unfiled document whose home is unknown. A document the Make Secure backstop handled this run is skipped.
     /// </summary>
     /// <remarks>
@@ -997,18 +1000,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             after = _refileCursor;
         }
 
-        Guid? secureTeamId;
         Dictionary<Guid, string> candidates;
         int listed;
         try
         {
-            // The isolation fact: the Secure Record owner team, read once (ambiguous = nothing is decided, nothing moves).
-            var team = await SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(dataverse, _configuration, ct)
-                .ConfigureAwait(false);
-            if (team.Refusal is { } refusal)
-                return new RefileRelocationRun(mode) { Since = since, Failure = refusal, Carried = carried.Count };
-            secureTeamId = team.TeamId;
-
             var query = new QueryExpression("sprk_document") { ColumnSet = new ColumnSet("sprk_graphdriveid"), NoLock = true };
             query.Criteria.AddCondition(ModifiedOnColumn, ConditionOperator.GreaterEqual, since.UtcDateTime);
             query.Criteria.AddCondition("sprk_graphdriveid", ConditionOperator.NotNull);
@@ -1091,9 +1086,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             DocumentRelocationOutcome outcome;
             try
             {
-                outcome = await relocator.RelocateIfMisplacedAsync(
-                        documentId, writes, RelocationPurpose.Refile, ct, expectedTargetContainer: null,
-                        isIsolated: (id, token) => IsOwnedByTeamAsync(dataverse, id, secureTeamId, token))
+                outcome = await relocator.RelocateIfMisplacedAsync(documentId, writes, RelocationPurpose.Refile, ct)
                     .ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -1178,23 +1171,6 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             if (row.Id != Guid.Empty && !string.IsNullOrEmpty(drive))
                 into[row.Id] = drive;
         }
-    }
-
-    /// <summary>
-    /// #2159: is the document owned by the Secure Record owner team NOW — the fact the Make Secure backstop's stranded
-    /// listing and the recent-changes listing use (<c>owningteam</c> = that team). No team in this environment = no row
-    /// is isolated. A row that cannot be read throws: the relocator then moves nothing.
-    /// </summary>
-    private static async Task<bool> IsOwnedByTeamAsync(
-        IGenericEntityService dataverse, Guid documentId, Guid? secureTeamId, CancellationToken ct)
-    {
-        if (secureTeamId is not { } teamId)
-            return false;
-        var query = new QueryExpression("sprk_document") { ColumnSet = new ColumnSet("owningteam"), TopCount = 1, NoLock = true };
-        query.Criteria.AddCondition("sprk_documentid", ConditionOperator.Equal, documentId);
-        var row = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault()
-                  ?? throw new InvalidOperationException($"sprk_document {documentId:D} could not be read");
-        return row.GetAttributeValue<EntityReference>("owningteam")?.Id == teamId;
     }
 
     /// <summary>

@@ -243,6 +243,19 @@ internal static class TestRecordContainerResolver
         /// </summary>
         public string? FaultQueriesOf { get; set; }
 
+        /// <summary>
+        /// #2159: the Secure Record owner team. Set, the Secure Record business unit and this team exist (the name queries
+        /// of <c>SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync</c> find them), and a row whose <c>owningteam</c>
+        /// is it is ISOLATED. Unset (the default), this environment has none and no row is isolated.
+        /// </summary>
+        public Guid? SecureOwnerTeam { get; set; }
+
+        /// <summary>A SECOND team the team query finds (two teams carry the configured name: ambiguous).</summary>
+        public Guid? SecondSecureOwnerTeam { get; set; }
+
+        /// <summary>The Secure Record business unit the name query finds when <see cref="SecureOwnerTeam"/> is set.</summary>
+        public static readonly Guid SecureRecordBusinessUnit = Guid.Parse("5ec0be00-0000-4000-8000-000000002159");
+
         /// <summary>Every RetrieveMultiple query the entity service answered, in order.</summary>
         public List<QueryExpression> Queries { get; } = new();
 
@@ -379,6 +392,26 @@ internal static class TestRecordContainerResolver
                     }
 
                     var collection = new EntityCollection();
+
+                    // #2159: the Secure Record owner team's resolution — the business unit by name, then the team.
+                    if (query.EntityName == "team"
+                        || (query.EntityName == "businessunit" && query.Criteria.Conditions.Any(c => c.AttributeName == "name")))
+                    {
+                        if (SecureOwnerTeam is { } team)
+                        {
+                            collection.Entities.Add(query.EntityName == "team"
+                                ? new Entity("team", team)
+                                : new Entity("businessunit", SecureRecordBusinessUnit));
+                        }
+
+                        if (query.EntityName == "team" && SecondSecureOwnerTeam is { } second)
+                        {
+                            collection.Entities.Add(new Entity("team", second));
+                        }
+
+                        return collection;
+                    }
+
                     if (query.EntityName is "sprk_document" or "sprk_communicationattachment")
                     {
                         // The relocator's and the migration's row queries (task 166 f1 / f1-v1): answered from Rows by the

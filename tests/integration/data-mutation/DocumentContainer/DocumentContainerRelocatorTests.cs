@@ -19,6 +19,7 @@
 
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -264,7 +265,10 @@ public class DocumentContainerRelocatorTests
         public DocumentContainerRelocator NewRelocator(
             Sprk.Bff.Api.Services.Jobs.IIdempotencyService? locks = null, IAccessDataSource? access = null, TimeProvider? time = null)
             => new(Resolver, World.EntityService!, Spe.Object, Indexing, locks ?? Locks, access ?? Access,
-                NullLogger<DocumentContainerRelocator>.Instance, time, Attribution);
+                NullLogger<DocumentContainerRelocator>.Instance, Configuration, time, Attribution);
+
+        /// <summary>The host configuration the relocator reads (#2159: the Secure Record names — the defaults here).</summary>
+        public static IConfiguration Configuration { get; } = new ConfigurationBuilder().Build();
 
         /// <summary>Who an app-only upload was made for (task 171 attach fix) — real, over an in-memory cache.</summary>
         public FaultableAttribution Attribution { get; } = new();
@@ -1744,7 +1748,7 @@ public class DocumentContainerRelocatorTests
         faulty.Setup(a => a.GetUserAccessAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TimeoutException("Dataverse unavailable"));
         var relocator = new DocumentContainerRelocator(rig.Resolver, world.EntityService!, rig.Spe.Object, rig.Indexing, rig.Locks,
-            faulty.Object, NullLogger<DocumentContainerRelocator>.Instance);
+            faulty.Object, NullLogger<DocumentContainerRelocator>.Instance, Rig.Configuration);
 
         var second = await relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
 
