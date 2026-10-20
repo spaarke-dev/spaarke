@@ -332,3 +332,14 @@ traces | where timestamp > datetime(2026-10-16T06:03:13Z) and cloud_RoleName == 
 **Observations (no defect filed).**
 - The fixture container `b!fKbj…` has **0 permissions**, so on dev every Secure revoke of a contact with an email takes the `NoPermissionFound` path. Neither the positive removal path (an oid or email match) nor the marker exclusion (#2105) can be exercised live without a hand-added container permission. Both are covered offline (`SpeRevokeMatcherTests`, `SpePermissionMatcherTests`).
 - `NotAttempted` for a no-key contact is distinct from `NoPermissionFound`, as designed: the container is not read for that contact.
+
+#### Ontology `rule_held_secure` smoke and cleanup (2026-10-20)
+- **The smoke (run by ontology with a v2 token):** first a dry run (200), then `POST /authoring/policies/6ee40d2a…/versions` with `{Draft, AllMatters:true}`.
+  - Result: **409 `ontology.admin.rule_held_secure`**, correlation 0HNPE4LSGF2VS:00000006.
+  - The version count was 1 before and 1 after, so nothing was written.
+- **Cleanup by UAC:**
+  - pointer cleared (204);
+  - version `70e40d2a-34cc-f111-a05b-7c1e520a989f` deleted (204, then 404 on read-back);
+  - policy `6ee40d2a-34cc-f111-a05b-7c1e520a989f` deleted (204, then 404).
+  - No `UAC-2102-GATE*` rows remain.
+- **#2102 (#2084) live gate: PASS.** All steps are complete. #2084 is closed.
