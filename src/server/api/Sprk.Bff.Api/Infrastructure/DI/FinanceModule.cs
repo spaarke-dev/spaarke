@@ -154,6 +154,11 @@ public static class FinanceModule
         // Callers: 049, 100, 103, 104, 105.
         services.AddSingleton<BillingDecisionRecorder>();
 
+        // Override / Return of a blocked internal submission (ebilling-r1 task 105, FR-19, FR-37, D-24, D-73, D-76). Concrete (ADR-010: no
+        // interface, one implementation). Scoped like its scoped dependencies (IGenericEntityService, IInvoiceLifecycleService). The privilege
+        // check is a static class over the existing CallerRecordAccessProbe, so it adds no registration. Unconditional (flag rule above).
+        services.AddScoped<SubmissionOverrideService>();
+
         // Invoice submission processing (ebilling-r1 task 049 parts B-E, FR-20 / FR-21, D-101; Processing Pipeline steps 1-9). The pipeline is
         // three scoped components behind the seams the handler tests fake, plus the ADR-004 job handler that composes them:
         //   * IInvoiceSubmissionProcessor  - read (043), resolve (046), code (047), evaluate (072), decide (073); writes nothing.

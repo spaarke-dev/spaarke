@@ -208,6 +208,13 @@ public static class OperationAccessPolicy
         // return) reuse this one key for their invoice-level writes. A separate key from "finance.confirm" (which names a DOCUMENT) so a
         // deny log names the act.
         ["ebilling.invoice.decide"] = AccessRights.Write,
+        // "ebilling.submission.decide" — Read AND Write on the SUBMISSION (sprk_invoicesubmissions) named by the route of
+        // POST /api/finance/submissions/{submissionId}/override and /return (ebilling-r1 task 105, FR-19, FR-37, D-24, D-73). Both
+        // decide a blocked internal submission: the application then sets the submission's status and reason code and files a Decision
+        // Record under its invoice, so the caller must be able to change the submission (Write) and see it (Read). D-73: Return needs only
+        // this (no privilege); Override needs this AND the "eBilling Override" table privilege, which the service asks of the caller
+        // separately (EbillingOverridePrivilege). A separate key so deny logs name the act.
+        ["ebilling.submission.decide"] = AccessRights.Read | AccessRights.Write,
 
         // "analysis.attach" — Read AND AppendTo on each PARENT record a NEW app-created sprk_analysis will point
         // at: the document and the regarding matter/project of POST /api/ai/analysis/promote (body, or the

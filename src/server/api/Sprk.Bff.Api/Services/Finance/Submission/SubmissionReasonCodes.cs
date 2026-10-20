@@ -25,6 +25,21 @@ public static class SubmissionReasonCodes
     /// </summary>
     public const string Blocked = "ebilling.submission.blocked";
 
+    // ── Decided by a person (ebilling-r1 task 105; D-24, D-73) ──
+
+    /// <summary>
+    /// A blocked internal submission a person with the eBilling Override privilege accepted (task 105, <c>SubmissionOverrideService</c>). The
+    /// submission is Accepted with this code, so it leaves the held set (<see cref="Blocked"/> no longer matches) and the invoice, already In
+    /// Review, is released to approval. The code is how a repeat override is told from a submission that processing accepted.
+    /// </summary>
+    public const string Overridden = "ebilling.submission.overridden";
+
+    /// <summary>
+    /// A blocked internal submission a person returned to the firm (task 105, D-73). The submission stays Rejected with this code and its
+    /// invoice is Returned to Firm, so it also leaves the held set.
+    /// </summary>
+    public const string Returned = "ebilling.submission.returned";
+
     // ── Failed: no invoice is created ──
 
     /// <summary>ADR-018: <c>Ebilling:Enabled</c> is false.</summary>

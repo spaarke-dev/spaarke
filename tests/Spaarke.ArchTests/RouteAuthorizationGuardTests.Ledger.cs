@@ -379,6 +379,14 @@ public partial class RouteAuthorizationGuardTests
             + "default code set (POST). Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, "
             + "D-76, fail closed): Write on BOTH reference tables for the list, Write on the one table named in the path for the confirm; the "
             + "eBilling kill switch runs after it. Only the confirm route writes a mapping."),
+        new GovernedFile("Api/Finance/SubmissionOverrideEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/submissions/{submissionId}/blocked, /override and /return (ebilling-r1 task 105, FR-19, FR-37, D-24, D-73, D-76) -- read, "
+            + "override and return a blocked internal submission. Each route carries AddFinanceAuthorizationFilter as the caller on the submission "
+            + "named in the path (Read for the read, uniform 404; Read and Write for the two decisions, ebilling.submission.decide); the eBilling kill "
+            + "switch runs after it. The override additionally needs the caller's own Dataverse table privilege on sprk_ebillingoverride, asked of "
+            + "Dataverse as the caller on EVERY call inside SubmissionOverrideService (EbillingOverridePrivilege, fail closed: 403 "
+            + "ebilling.override.not_permitted); Return needs no privilege (D-73). The decider, the invoice, the findings and the decision id are "
+            + "derived server-side, never taken from the request."),
         new GovernedFile("Api/ScorecardCalculatorEndpoints.cs", Scope.RouteLevelGate,
             "matter/project grade recalculation, Read on the parent as the caller (task 130)."),
         new GovernedFile("Api/NavMapEndpoints.cs", Scope.RouteLevelGate,
@@ -983,7 +991,11 @@ public partial class RouteAuthorizationGuardTests
     // Classified by GovernedFiles (RouteLevelGate: AddFinanceAuthorizationFilter, finance.read / ebilling.invoice.decide on the route's invoice);
     // the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms. Parallel tasks that also add a file (050,
     // 105) each bump this by one: reconcile the sum at integration.
-    private const int ExpectedEndpointFileCount = 140;
+    // 140 -> 141 (2026-10-20, ebilling-r1 task 105, integrated after task 100, FR-19 / FR-37). Net +1: Api/Finance/SubmissionOverrideEndpoints.cs ADDED -- GET
+    // /api/finance/submissions/{submissionId}/blocked, POST .../override and POST .../return. Classified by GovernedFiles (RouteLevelGate:
+    // AddFinanceAuthorizationFilter as the caller on the submission; the override's privilege is asked inside the service on every call);
+    // the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 141;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
