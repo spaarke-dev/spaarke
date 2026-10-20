@@ -84,6 +84,19 @@ public static class ExternalMessageEndpoints
         }.ToDictionary(r => r.Segment, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// The workforce ceiling for a message route (unified-access-control-r2 task 186): the root comes from the route's
+    /// <c>{root}</c> value. An unsupported root resolves to nothing, and the handler answers its 404 before any read.
+    /// </summary>
+    internal static Func<EndpointFilterInvocationContext, IReadOnlyList<WorkforceCeilingRequirement>?> MessageCeiling(bool post) =>
+        context => context.HttpContext.Request.RouteValues.TryGetValue("root", out var value)
+                   && value is string segment
+                   && Roots.TryGetValue(segment, out var root)
+            ? post
+                ? WorkforceRoleCeilingGate.PostMessageOn(root.EntityLogicalName)
+                : WorkforceRoleCeilingGate.ReadMessagesOn(root.EntityLogicalName)
+            : null;
+
+    /// <summary>
     /// Registers the message read on the shared external collaboration group. The group's policy and
     /// CallerPrincipalAuthorizationFilter are inherited; this adds the route only.
     /// </summary>
@@ -92,6 +105,7 @@ public static class ExternalMessageEndpoints
         // GET /api/v1/external/{root}/{id}/messages — the record's thread, newest last.
         externalGroup.MapGet("/{root}/{id:guid}/messages", GetMessagesAsync)
             .WithName("GetExternalRecordMessages")
+            .RequireWorkforceCeiling(MessageCeiling(post: false))
             .WithSummary("Read the message thread regarding a record the caller can access")
             .WithDescription(
                 "Returns the messages filed regarding a project, matter, work assignment, invoice or (own) service " +
@@ -106,6 +120,7 @@ public static class ExternalMessageEndpoints
         // POST /api/v1/external/{root}/{id}/messages — post to the record's thread as the caller (task 034, FR-11).
         externalGroup.MapPost("/{root}/{id:guid}/messages", PostMessageAsync)
             .WithName("PostExternalRecordMessage")
+            .RequireWorkforceCeiling(MessageCeiling(post: true))
             .WithSummary("Post a message to the thread of a record the caller can access")
             .WithDescription(
                 "Posts a plain-text message (sprk_body, at most 10,000 characters, no attachments) to the thread of a " +

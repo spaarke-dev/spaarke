@@ -405,6 +405,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     internal SecureChildShareWorld ChildWorld { get; set; } = SecureChildShareWorld.WithoutSecureBusinessUnit();
 
     /// <summary>
+    /// UAC task 099b review round 2: what the child pass asks before it assigns a grant row to a team (every team holds Read on
+    /// the grant table unless a test says otherwise). Read at call time; reset per test.
+    /// </summary>
+    internal Sprk.Bff.Api.Tests.TestInfrastructure.TeamPrivilegeCheckerDouble OwnerPrivileges { get; set; } = new();
+
+    /// <summary>
     /// One recorded POA operation. <c>AccessRightsCsv</c> is null for a revoke. <c>Sequence</c> shares
     /// <see cref="RecordedUpdate"/>'s counter, so a test can order a share against an owner PATCH (task 133).
     /// </summary>
@@ -834,6 +840,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         OnGranted = null;
         Logs.Clear();
         ChildWorld = SecureChildShareWorld.WithoutSecureBusinessUnit();
+        OwnerPrivileges = new();
         _childWorldMirrorsRoots = false;
     }
 
@@ -883,7 +890,9 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             services.AddScoped(sp => SecureChildShareWorld.ReconcilerOver(
                 () => ChildWorld, recordShare, sp.GetRequiredService<DataverseWebApiClient>(),
                 // Batch-4 integration, 148 × 132: the child owner-change eviction, through the host's hook as in production.
-                accessCacheInvalidator: sp.GetService<Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator>()));
+                accessCacheInvalidator: sp.GetService<Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator>(),
+                // UAC task 099b review round 2: read when the request scope builds the reconciler, after the test set it.
+                ownerPrivileges: OwnerPrivileges));
 
             // Round 26 item 3 (batch-4 integration): the Make Secure file relocator — the test's, when it supplies one.
             services.RemoveAll<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>();

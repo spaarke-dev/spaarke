@@ -537,7 +537,9 @@ public static class ChildRecordEndpoints
         if (outcome.Written || mapped.Item!.Columns.Contains(InheritedAccessPermission.Column, StringComparer.OrdinalIgnoreCase))
             await restamper.RefreshInheritedAccessPermissionAsync(entity, id, CancellationToken.None).ConfigureAwait(false);
 
-        if (outcome.Written)
+        // #2091: not when the reparent moved none of the row's parents (ParentsUnchanged — a re-bind onto the record a column
+        // already holds): written, but no re-file.
+        if (outcome.Written && !outcome.ParentsUnchanged)
         {
             // After the re-file, inline (task 147; round 36): the row's own mirror (moved under a secure record → shared with
             // its sharees now; moved OUT → its mirror goes now, only from a row that WAS isolated — its owning team, read as

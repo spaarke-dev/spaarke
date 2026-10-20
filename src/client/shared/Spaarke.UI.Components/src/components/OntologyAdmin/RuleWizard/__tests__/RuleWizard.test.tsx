@@ -24,11 +24,12 @@ import {
   REASON_DRY_RUN_REQUIRED,
   REASON_DUPLICATE_ACTION,
   REASON_POLICY_CODE_TAKEN,
+  REASON_SCOPE_SUBJECT_MISMATCH,
 } from '../authoringService';
 import type { OntologyAuthoringService } from '../authoringService';
 import { RuleWizard } from '../RuleWizard';
 import type { RuleWizardResult } from '../RuleWizard';
-import type { NewVersionMode, RuleWizardMode } from '../ruleWizardTypes';
+import type { MatterPicker, NewVersionMode, RuleWizardMode } from '../ruleWizardTypes';
 import { catalog, dryRunResult, failure, makeAuthoringService, published, saved, validation } from './fixtures';
 
 jest.setTimeout(120000);
@@ -58,16 +59,23 @@ const versionMode: NewVersionMode = {
   priority: 500,
   countsTowardSuppression: true,
   quietWindowDays: 30,
-  scope: { tenant: 'tenant-1', matter: null },
+  scope: { tenant: 'tenant-1', matter: null, matterId: null },
 };
 
-function setup(over: { service?: OntologyAuthoringService; mode?: RuleWizardMode; theme?: typeof webLightTheme } = {}) {
+function setup(
+  over: {
+    service?: OntologyAuthoringService;
+    mode?: RuleWizardMode;
+    theme?: typeof webLightTheme;
+    matterPicker?: MatterPicker;
+  } = {}
+) {
   const service = (over.service ?? makeAuthoringService()) as jest.Mocked<OntologyAuthoringService>;
   const onClose = jest.fn<void, [RuleWizardResult | null]>();
   const mode = over.mode ?? { kind: 'new' };
   render(
     <FluentProvider theme={over.theme ?? webLightTheme}>
-      <RuleWizard service={service} mode={mode} onClose={onClose} />
+      <RuleWizard service={service} mode={mode} onClose={onClose} matterPicker={over.matterPicker} />
     </FluentProvider>
   );
   return { service, onClose };
@@ -186,7 +194,7 @@ describe('RuleWizard - the condition is built only from the catalog', () => {
     await next('rule-wizard-condition');
   });
 
-  it('offers the catalog\'s rule types, tables, columns, operators, date forms and joins - and no free-text JSON entry', async () => {
+  it("offers the catalog's rule types, tables, columns, operators, date forms and joins - and no free-text JSON entry", async () => {
     expect(optionValues('rule-wizard-rule-type')).toEqual(['Existence', 'Threshold']);
     expect(optionValues('rule-wizard-subject')).toEqual(['', 'zz_widget', 'zz_gadget']);
 
@@ -217,7 +225,7 @@ describe('RuleWizard - the condition is built only from the catalog', () => {
     expect(screen.queryByLabelText(/json/i)).toBeNull();
   });
 
-  it('offers a Threshold only the tables that have a measure, and only that table\'s measures', () => {
+  it("offers a Threshold only the tables that have a measure, and only that table's measures", () => {
     change('rule-wizard-rule-type', 'Threshold');
     expect(optionValues('rule-wizard-subject')).toEqual(['', 'zz_widget']);
     change('rule-wizard-subject', 'zz_widget');
@@ -227,7 +235,7 @@ describe('RuleWizard - the condition is built only from the catalog', () => {
     expect(byId('rule-wizard-threshold-range')).toHaveTextContent('0 to 250');
   });
 
-  it('stops adding related-record tests at the catalog\'s limit, and offers each column once per filter', () => {
+  it("stops adding related-record tests at the catalog's limit, and offers each column once per filter", () => {
     change('rule-wizard-subject', 'zz_widget');
     click('rule-wizard-add-clause');
     click('rule-wizard-add-clause');
@@ -245,11 +253,9 @@ describe('RuleWizard - the condition is built only from the catalog', () => {
     change('rule-wizard-clause-0-related', 'zz_mail');
     change('rule-wizard-clause-0-row-0-field', 'zz_triage');
 
-    expect(Array.from((byId('rule-wizard-clause-0-row-0-category') as HTMLSelectElement).options).map(o => o.textContent)).toEqual([
-      'Choose a category',
-      'Cheese',
-      'Biscuits (off)',
-    ]);
+    expect(
+      Array.from((byId('rule-wizard-clause-0-row-0-category') as HTMLSelectElement).options).map(o => o.textContent)
+    ).toEqual(['Choose a category', 'Cheese', 'Biscuits (off)']);
     change('rule-wizard-clause-0-row-0-category', 'cat-aaa');
 
     const preview = byId('rule-wizard-body-preview').textContent as string;
@@ -306,7 +312,7 @@ describe('RuleWizard - the condition is built only from the catalog', () => {
 // ---- refusals -------------------------------------------------------------------------------------------------------------------
 
 describe('RuleWizard - a refusal is shown at the field and the step it concerns', () => {
-  it('validate (200): the BFF\'s message appears on the Condition step and holds the wizard; an edit clears it', async () => {
+  it("validate (200): the BFF's message appears on the Condition step and holds the wizard; an edit clears it", async () => {
     const validate = jest.fn(async () => ({
       ok: true as const,
       data: validation({
@@ -333,7 +339,12 @@ describe('RuleWizard - a refusal is shown at the field and the step it concerns'
   it('validate (200): a reason code with no listed message still puts its own message on its field', async () => {
     const validate = jest.fn(async () => ({
       ok: true as const,
-      data: validation({ valid: false, errors: [], reasonCode: REASON_COLUMN_NOT_AUTHORABLE, templateEligibleFields: [] }),
+      data: validation({
+        valid: false,
+        errors: [],
+        reasonCode: REASON_COLUMN_NOT_AUTHORABLE,
+        templateEligibleFields: [],
+      }),
     }));
     setup({ service: makeAuthoringService({ validate }) });
     await fillBasics();
@@ -373,7 +384,9 @@ describe('RuleWizard - a refusal is shown at the field and the step it concerns'
   });
 
   it('a validate call that fails is shown, and the wizard does not move on', async () => {
-    const validate = jest.fn(async () => failure({ status: 503, message: 'The rule service could not be reached. Try again.' }));
+    const validate = jest.fn(async () =>
+      failure({ status: 503, message: 'The rule service could not be reached. Try again.' })
+    );
     setup({ service: makeAuthoringService({ validate }) });
     await fillBasics();
     await next('rule-wizard-condition');
@@ -436,7 +449,7 @@ describe('RuleWizard - actions come from the lane catalog', () => {
     await next('rule-wizard-actions');
   }
 
-  it('lists the lane\'s codes once each, with the catalog\'s excludes, and the lane\'s dismissal reasons for information', async () => {
+  it("lists the lane's codes once each, with the catalog's excludes, and the lane's dismissal reasons for information", async () => {
     setup();
     await toActions();
 
@@ -467,7 +480,9 @@ describe('RuleWizard - actions come from the lane catalog', () => {
     click('rule-wizard-next');
     await find('rule-wizard-scope');
 
-    const plan = JSON.parse(service.validate.mock.calls[service.validate.mock.calls.length - 1][0].draft.decisionPlan) as {
+    const plan = JSON.parse(
+      service.validate.mock.calls[service.validate.mock.calls.length - 1][0].draft.decisionPlan
+    ) as {
       actions: string[];
       nextSteps: string[];
     };
@@ -505,7 +520,7 @@ describe('RuleWizard - actions come from the lane catalog', () => {
 // ---- scope and noise ----------------------------------------------------------------------------------------------------------------
 
 describe('RuleWizard - scope and noise', () => {
-  it('offers the quiet window for the Decide lane only, with the catalog\'s default and limit, and checks the number', async () => {
+  it("offers the quiet window for the Decide lane only, with the catalog's default and limit, and checks the number", async () => {
     setup();
     await fillBasics();
     await next('rule-wizard-condition');
@@ -543,7 +558,13 @@ describe('RuleWizard - a new rule', () => {
 
     expect(service.savePolicy).toHaveBeenCalledTimes(1);
     const sent = service.savePolicy.mock.calls[0][0];
-    expect(sent).toMatchObject({ policyCode: 'POL-ZZ', name: 'Zed rule', lane: 'Decide', shortName: null, priority: null });
+    expect(sent).toMatchObject({
+      policyCode: 'POL-ZZ',
+      name: 'Zed rule',
+      lane: 'Decide',
+      shortName: null,
+      priority: null,
+    });
     expect(JSON.parse(sent.draft.ruleBody)).toEqual({
       type: 'Existence',
       subject: 'zz_widget',
@@ -565,7 +586,8 @@ describe('RuleWizard - a new rule', () => {
   });
 
   it('refuses a save the BFF refuses (400): the message is on the field, the banner leads to its step, and nothing is closed', async () => {
-    const message = 'Each code may appear once, in actions or in next steps, never twice in one list and never in both.';
+    const message =
+      'Each code may appear once, in actions or in next steps, never twice in one list and never in both.';
     const savePolicy = jest.fn(async () =>
       failure({
         status: 400,
@@ -623,8 +645,9 @@ describe('RuleWizard - a new rule', () => {
     expect(savePolicy).toHaveBeenCalledTimes(1);
   });
 
-  it('shows a refused save (400) once: in the banner, not again as the shell\'s own error', async () => {
-    const message = 'Each code may appear once, in actions or in next steps, never twice in one list and never in both.';
+  it("shows a refused save (400) once: in the banner, not again as the shell's own error", async () => {
+    const message =
+      'Each code may appear once, in actions or in next steps, never twice in one list and never in both.';
     const savePolicy = jest.fn(async () =>
       failure({ status: 400, reasonCode: REASON_DUPLICATE_ACTION, fieldErrors: { decisionPlan: [message] }, message })
     );
@@ -641,7 +664,7 @@ describe('RuleWizard - a new rule', () => {
     expect(occurrencesOf(message)).toBe(1);
   });
 
-  it('shows a refusal that has no field once: the shell\'s error bar carries it, with no banner', async () => {
+  it("shows a refusal that has no field once: the shell's error bar carries it, with no banner", async () => {
     const message = 'Dataverse refused this for your account. Nothing was changed.';
     const savePolicy = jest.fn(async () => failure({ status: 403, message }));
     setup({ service: makeAuthoringService({ savePolicy }) });
@@ -676,7 +699,12 @@ describe('RuleWizard - a new rule', () => {
 
   it('hands the host the policy a failed save left Off, when the BFF named one', async () => {
     const savePolicy = jest.fn(async () =>
-      failure({ status: 503, outcomeUnknown: true, policyId: 'policy-half', message: 'The rule was created Off but not finished.' })
+      failure({
+        status: 503,
+        outcomeUnknown: true,
+        policyId: 'policy-half',
+        message: 'The rule was created Off but not finished.',
+      })
     );
     const { onClose } = setup({ service: makeAuthoringService({ savePolicy }) });
     await toTestAsNewRule();
@@ -893,14 +921,12 @@ describe('RuleWizard - a new version', () => {
     return { ...set, confirm, dialog: confirm.closest('[role="alertdialog"]') as HTMLElement };
   }
 
-  it('says on the confirmation that a scoped rule\'s counts are worked out without its scope', async () => {
-    const { confirm } = await toPublishConfirmation(versionMode);
-    expect(confirm).toHaveTextContent("These counts are worked out without the rule's scope, so once it is published they may be lower.");
-  });
-
-  it('does not say so for a rule with no scope', async () => {
-    const { confirm } = await toPublishConfirmation({ ...versionMode, scope: { tenant: null, matter: null } });
+  it("no longer says a scoped rule's counts are worked out without its scope: the test runs within it (task 102b, DI-112)", async () => {
+    const scoped: NewVersionMode = { ...versionMode, scope: { tenant: null, matter: 'Matter Nine', matterId: 'm-9' } };
+    const { confirm } = await toPublishConfirmation(scoped);
+    expect(confirm).toHaveTextContent('3 open items');
     expect(confirm).not.toHaveTextContent('without the rule');
+    expect(confirm).not.toHaveTextContent('may be lower');
   });
 
   it('marks the test stale when the BFF no longer holds its proof (409 dry_run_required), and says it must be run again', async () => {
@@ -938,7 +964,10 @@ describe('RuleWizard - a new version', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Publish', hidden: true }));
     const confirm = await find('rule-wizard-publish-confirm');
     fireEvent.click(
-      within(confirm.closest('[role="alertdialog"]') as HTMLElement).getByRole('button', { name: 'Publish', hidden: true })
+      within(confirm.closest('[role="alertdialog"]') as HTMLElement).getByRole('button', {
+        name: 'Publish',
+        hidden: true,
+      })
     );
 
     await find('rule-wizard-problems');
@@ -994,5 +1023,270 @@ describe('RuleWizard - theme', () => {
   it('renders under the dark theme (a smoke check; the real dark-mode check needs a browser)', async () => {
     setup({ theme: webDarkTheme });
     expect(await find('rule-wizard-basics')).toBeInTheDocument();
+  });
+});
+
+// ---- the matter scope (task 102b; D-165, DI-62, DI-112) ----------------------------------------------------------------------------
+
+describe('RuleWizard - matter scope', () => {
+  const MATTERS = [
+    { id: 'm-1', name: 'Matter One' },
+    { id: 'm-2', name: 'Matter Two' },
+  ];
+  /** The host's picker: an invented subject (the wizard names no table, D-149) and a search the test can read. */
+  const makePicker = () => ({ subject: 'zz_widget', search: jest.fn(async (_query: string) => MATTERS) });
+
+  /** New rule about `subject`, through to the Scope and noise step. */
+  async function toScopeAsNewRule(subject = 'zz_widget') {
+    await fillBasics();
+    await next('rule-wizard-condition');
+    if (subject === 'zz_widget') {
+      await fillCondition();
+    } else {
+      change('rule-wizard-subject', subject);
+    }
+    await next('rule-wizard-wording');
+    fillWording();
+    await next('rule-wizard-actions');
+    change('rule-wizard-code-frobnicate-role', 'action');
+    await next('rule-wizard-scope');
+  }
+
+  const matterInput = () => screen.getByRole('textbox', { name: 'Limit to one matter', hidden: true });
+
+  async function pickMatter(name: string) {
+    fireEvent.change(matterInput(), { target: { value: name.split(' ')[1] } });
+    fireEvent.click(await screen.findByRole('option', { name, hidden: true }, WAIT));
+    await waitFor(() => expect(byId('rule-wizard-scope-value')).toHaveTextContent(`Applies to: ${name}`), WAIT);
+  }
+
+  it("offers the shared matter picker only for a rule about the picker's subject, with All matters by default", async () => {
+    setup({ matterPicker: makePicker() });
+    await toScopeAsNewRule('zz_widget');
+
+    expect(byId('rule-wizard-matter-picker')).toBeInTheDocument();
+    expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: All matters');
+    expect(byId('rule-wizard-scope')).toHaveTextContent('Leave it empty and the rule applies to all matters.');
+  });
+
+  it('does not offer it for a rule about anything else (must-not-fire)', async () => {
+    setup({ matterPicker: makePicker() });
+    await toScopeAsNewRule('zz_gadget');
+
+    expect(maybe('rule-wizard-matter-picker')).toBeNull();
+    expect(byId('rule-wizard-scope-not-offered')).toHaveTextContent(
+      'A matter limit is offered only for a rule about matters.'
+    );
+    expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: All matters');
+  });
+
+  it('offers no picker when the host has no matter search', async () => {
+    setup();
+    await toScopeAsNewRule('zz_widget');
+
+    expect(maybe('rule-wizard-matter-picker')).toBeNull();
+    expect(byId('rule-wizard-scope-no-picker')).toBeInTheDocument();
+  });
+
+  it('searches through the host, and sends ONLY the chosen id to validate, the test and the save', async () => {
+    const matterPicker = makePicker();
+    const { service } = setup({ matterPicker });
+    await toScopeAsNewRule();
+
+    await pickMatter('Matter Two');
+    expect(matterPicker.search).toHaveBeenCalledWith('Two');
+    await next('rule-wizard-test');
+    await runTest();
+    click('rule-wizard-next');
+    await find('rule-wizard-save');
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule', hidden: true }));
+    await find('rule-wizard-saved');
+
+    const scopeValidate = service.validate.mock.calls[service.validate.mock.calls.length - 1][0];
+    expect(scopeValidate.matterId).toBe('m-2');
+    expect('allMatters' in scopeValidate).toBe(false);
+    expect(service.dryRun.mock.calls[0][0].matterId).toBe('m-2');
+    const save = service.savePolicy.mock.calls[0][0];
+    expect(save.matterId).toBe('m-2');
+    for (const request of [scopeValidate, service.dryRun.mock.calls[0][0], save]) {
+      expect(JSON.stringify(request)).not.toContain('Matter Two');
+      expect(JSON.stringify(request)).not.toContain('tenant');
+    }
+  });
+
+  it('sends no matter for all matters, and says allMatters on validate and the test (fix rounds 1 and 2)', async () => {
+    const { service } = setup({ matterPicker: makePicker() });
+    await toScopeAsNewRule();
+    await next('rule-wizard-test');
+    await runTest();
+
+    expect('matterId' in service.dryRun.mock.calls[0][0]).toBe(false);
+    expect(service.dryRun.mock.calls[0][0].allMatters).toBe(true);
+    expect(service.validate.mock.calls.length).toBeGreaterThan(0);
+    for (const [request] of service.validate.mock.calls) {
+      expect('matterId' in request).toBe(false);
+      expect(request.allMatters).toBe(true); // fix round 2 (K2): validate says the intent like the test and the publish
+    }
+  });
+
+  it('a test run within one matter is not current after the matter changes', async () => {
+    setup({ matterPicker: makePicker() });
+    await toScopeAsNewRule();
+    await pickMatter('Matter One');
+    await next('rule-wizard-test');
+    await runTest();
+    click('rule-wizard-back');
+    await find('rule-wizard-scope');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Limit to one matter', hidden: true }));
+    await pickMatter('Matter Two');
+    await next('rule-wizard-test');
+
+    expect(maybe('rule-wizard-test-result')).toBeNull();
+    expect(byId('rule-wizard-next')).toBeDisabled();
+  });
+
+  const scopedVersion: NewVersionMode = {
+    ...versionMode,
+    scope: { tenant: null, matter: 'Matter Nine', matterId: 'm-9' },
+  };
+
+  async function toScopeAsNewVersion() {
+    await find('rule-wizard-basics');
+    await next('rule-wizard-condition');
+    await fillCondition();
+    await next('rule-wizard-wording');
+    await next('rule-wizard-actions');
+    await next('rule-wizard-scope');
+  }
+
+  /** Publishes from the Scope and noise step; answers what the confirmation said about the scope (null: nothing). */
+  async function publishFromScope(): Promise<string | null> {
+    await next('rule-wizard-test');
+    await runTest();
+    click('rule-wizard-next');
+    await find('rule-wizard-save');
+    fireEvent.click(screen.getByRole('button', { name: 'Publish', hidden: true }));
+    const confirm = await find('rule-wizard-publish-confirm');
+    const scopeChange = maybe('rule-wizard-publish-scope-change')?.textContent?.trim() ?? null;
+    fireEvent.click(
+      within(confirm.closest('[role="alertdialog"]') as HTMLElement).getByRole('button', {
+        name: 'Publish',
+        hidden: true,
+      })
+    );
+    await find('rule-wizard-published');
+    return scopeChange;
+  }
+
+  it('a new version shows the scope in force, starts with it and publishes it unchanged', async () => {
+    const { service } = setup({ mode: scopedVersion, matterPicker: makePicker() });
+    await toScopeAsNewVersion();
+
+    expect(byId('rule-wizard-scope-facts')).toHaveTextContent('In force now');
+    expect(byId('rule-wizard-scope-facts')).toHaveTextContent('Matter Nine');
+    expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: Matter Nine');
+    const scopeChange = await publishFromScope();
+
+    expect(service.dryRun.mock.calls[0][0].matterId).toBe('m-9');
+    expect(service.publishVersion.mock.calls[0][1].matterId).toBe('m-9');
+    expect('allMatters' in service.publishVersion.mock.calls[0][1]).toBe(false);
+    expect(scopeChange).toBeNull();
+  });
+
+  it('a new version can change the scope to all matters: the test and the publish say allMatters, and the confirmation says so', async () => {
+    const { service } = setup({ mode: scopedVersion, matterPicker: makePicker() });
+    await toScopeAsNewVersion();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Limit to one matter', hidden: true }));
+    expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: All matters');
+    expect(byId('rule-wizard-scope-facts')).toHaveTextContent('Matter Nine'); // the scope in force until the version is published
+    const scopeChange = await publishFromScope();
+
+    expect('matterId' in service.dryRun.mock.calls[0][0]).toBe(false);
+    expect('matterId' in service.publishVersion.mock.calls[0][1]).toBe(false);
+    // Fix round 1 (F4): "All matters" is said explicitly; a publish with no scope intent is refused by the BFF.
+    expect(service.dryRun.mock.calls[0][0].allMatters).toBe(true);
+    expect(service.publishVersion.mock.calls[0][1].allMatters).toBe(true);
+    expect(scopeChange).toBe('This changes the rule from Matter Nine to all matters.');
+  });
+
+  it('the confirmation names the scope the test read as stored, and an unscoped rule kept unscoped says nothing (fix round 1, F4)', async () => {
+    // The test read a stored scope (Matter Seven) other than the one the page showed: the sentence is about what the publish changes.
+    const dryRun = jest.fn(async () => ({
+      ok: true as const,
+      data: dryRunResult({ storedMatterId: 'm-7', storedMatterName: 'Matter Seven' }),
+    }));
+    setup({ service: makeAuthoringService({ dryRun }), mode: scopedVersion, matterPicker: makePicker() });
+    await toScopeAsNewVersion();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Limit to one matter', hidden: true }));
+    await pickMatter('Matter One');
+
+    expect(await publishFromScope()).toBe('This changes the rule from Matter Seven to Matter One.');
+  });
+
+  it('an unscoped rule published for all matters states no scope change and still says allMatters (fix round 1, F4)', async () => {
+    const { service } = setup({ mode: versionMode, matterPicker: makePicker() });
+    await toScopeAsNewVersion();
+
+    expect(await publishFromScope()).toBeNull();
+    expect(service.publishVersion.mock.calls[0][1].allMatters).toBe(true);
+  });
+
+  it('a new version can change the scope to another matter', async () => {
+    const { service } = setup({ mode: scopedVersion, matterPicker: makePicker() });
+    await toScopeAsNewVersion();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Limit to one matter', hidden: true }));
+    await pickMatter('Matter One');
+    const scopeChange = await publishFromScope();
+
+    expect(service.dryRun.mock.calls[0][0].matterId).toBe('m-1');
+    expect(service.publishVersion.mock.calls[0][1].matterId).toBe('m-1');
+    expect(scopeChange).toBe('This changes the rule from Matter Nine to Matter One.');
+  });
+
+  it('places scope_subject_mismatch on the scope field, and the limit can be removed there', async () => {
+    const service = makeAuthoringService({
+      validate: jest.fn(async (request: { matterId?: string }) => ({
+        ok: true as const,
+        data:
+          request.matterId === undefined
+            ? validation()
+            : validation({ valid: false, reasonCode: REASON_SCOPE_SUBJECT_MISMATCH, errors: [] }),
+      })),
+    });
+    setup({ service, mode: scopedVersion, matterPicker: makePicker() });
+    await find('rule-wizard-basics');
+    await next('rule-wizard-condition');
+    change('rule-wizard-subject', 'zz_gadget');
+    // Condition, Wording and Actions ask validate with the limit still set: the refusal is not theirs, so they can be left.
+    await next('rule-wizard-wording');
+    await next('rule-wizard-actions');
+    await next('rule-wizard-scope');
+
+    expect(maybe('rule-wizard-matter-picker')).toBeNull();
+    click('rule-wizard-next'); // leaving Scope asks validate, which refuses the limit on this step's field
+    expect(await find('field-error-matterId')).toHaveTextContent(
+      'A matter limit is allowed only on a rule about matters.'
+    );
+    expect(byId('rule-wizard-scope')).toBeInTheDocument();
+
+    click('rule-wizard-scope-clear');
+    expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: All matters');
+    expect(maybe('field-error-matterId')).toBeNull();
+    await next('rule-wizard-test');
+  });
+
+  it('shows a dry-run refusal of the matter on the Scope and noise step', async () => {
+    const service = makeAuthoringService({
+      dryRun: jest.fn(async () => failure({ fieldErrors: { matterId: ['The matter was not found.'] } })),
+    });
+    setup({ service, mode: scopedVersion, matterPicker: makePicker() });
+    await toTestAsNewVersion();
+    click('rule-wizard-run-test');
+
+    expect(await find('rule-wizard-problem-matterId')).toHaveTextContent('Scope and noise');
+    expect(byId('rule-wizard-problems')).toHaveTextContent('The matter was not found.');
   });
 });

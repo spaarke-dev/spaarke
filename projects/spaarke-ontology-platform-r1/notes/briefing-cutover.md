@@ -170,6 +170,13 @@ Run the commands in section 1 (`-WhatIf` first). Tell word-add-in (Console chang
   pinned (`WorkspacePane.tsx` default-install effect; `ManageWorkspacesPane.tsx` treats the first pinned workspace as the default). The Briefing tab stays open beside it.
 - A person's own default (BFF step 1) still wins for that person.
 
+### 6.2a Switch run (2026-10-17, main session)
+
+- Owner approval 2026-10-17 ("that's fine", D-164). The §6.1 checks were not run first; the owner approved the switch with them moved to 105 UAT.
+- Notices sent before and after to word-add-in, R3 and uac-r2 (uac-r2: no objection).
+- 14:38Z: `-WhatIf` printed exactly two writes (Worklist = True, Daily Briefing = False); the run PATCHED both and printed
+  "VERIFIED: the only system default is 'Worklist' (202bcde0-13c9-f111-a05c-0022482913fc)".
+
 ### 6.3 After the switch
 
 The POML's UI tests have nothing to click until the default changes: Workspace opens on the Worklist with the narrative; Decide above Do with seeded overdue tasks and a decision;

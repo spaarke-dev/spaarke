@@ -33,7 +33,7 @@ It builds on task 101 ([`101-ontology-admin-authoring.md`](101-ontology-admin-au
 6. **Where it is enforced.** Only in `ValidateForAuthoring`, outside the evaluator (approved by the coordinator). `ValidateForSave`, `TryPrepareForEvaluation` and `RuleBodyDescriber` are unchanged. A version written outside the BFF still evaluates as before; the evaluator shows its answers to no one.
 7. **The allow-list check runs before the template check.** `templateEligibleFields` is returned whenever the body compiled, even when the template or the allow-list refused it. It lists only fields whose every read is allow-listed.
 
-## Residual oracle (open: owner decision on the signed ADR-028 tension, D-151(c))
+## Residual oracle (accepted: the owner re-signed the ADR-028 tension at this scope, D-161)
 
 The dry run evaluates as the evaluator, which reads org-wide; only the rows it shows are filtered by the caller. The allow-list
 limits which columns a body may name. It does not stop an `exists` or `notExists` filter on an **allow-listed column of a

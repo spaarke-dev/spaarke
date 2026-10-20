@@ -402,27 +402,31 @@ public class RevokeGrantOverlapAndOwnContainerTests
             var mock = new Mock<SpeContainerMembershipService>(
                 TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
 
-            mock.Setup(s => s.RevokeMembershipAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string containerId, string email, CancellationToken _) =>
+            mock.Setup(s => s.RevokeMembershipAsync(
+                    It.IsAny<string>(), It.IsAny<SpeMembershipKey>(), It.IsAny<DataverseWebApiClient>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, SpeMembershipKey key, DataverseWebApiClient _, CancellationToken _) =>
                 {
                     Containers.Add(containerId);
-                    Emails.Add(email);
+                    Emails.Add(key.Email ?? string.Empty);
                     return new SpeContainerMembershipResult(true, "permission-166r1", null);
                 });
 
             mock.Setup(s => s.RemoveMembershipsAsync(
-                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string containerId, IReadOnlyCollection<string> emails, CancellationToken _) =>
+                    It.IsAny<string>(), It.IsAny<IReadOnlyCollection<SpeMembershipKey>>(), It.IsAny<DataverseWebApiClient>(),
+                    It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, IReadOnlyCollection<SpeMembershipKey> keys, DataverseWebApiClient _,
+                    bool _, CancellationToken _) =>
                 {
-                    var results = new Dictionary<string, SpeContainerMembershipResult>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var email in emails)
+                    var results = new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>();
+                    foreach (var key in keys)
                     {
                         Containers.Add(containerId);
-                        Emails.Add(email);
-                        results[email] = new SpeContainerMembershipResult(true, "permission-166r1", null);
+                        Emails.Add(key.Email ?? string.Empty);
+                        results[key] = new SpeContainerMembershipResult(true, "permission-166r1", null);
                     }
 
-                    return (IReadOnlyDictionary<string, SpeContainerMembershipResult>)results;
+                    return new SpeMembershipRemoval(results, SpeContainerContactPermissionState.ContactPermissionRemains);
                 });
 
             return mock;
