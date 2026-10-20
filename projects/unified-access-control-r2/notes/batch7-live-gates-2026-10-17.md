@@ -274,6 +274,34 @@ traces | where timestamp > datetime(2026-10-16T06:03:13Z) and cloud_RoleName == 
 - App Insights: PASS.
 - Step 5 cleanup: PASS.
 
+### Secure-matter steps (2026-10-20)
+
+**Scope.** These are the steps blocked above. Run 03:12–03:16Z on 2026-10-20 against the same environment: BFF live `1.0.0+00aba6d99`, which contains 947d98e31. Run as admin only (default `az` login; Dataverse token and the delegated BFF token). No token or secret was printed or written. No Key Vault, role, team, Entra, app-setting, solution or SPE write. `65a3fab2…` and the fixture `a9e04977…` were not touched.
+- **The Secure matter** is PAT-908068 `5d46df87-e762-f111-ab0c-000d3a4d8152`, made Secure by the owner. It was only read: `sprk_issecure` true, owner Secure Record Owners `6eabc7f9…`. Before and after, it reads `modifiedon` 2026-10-20T02:30:45Z and `versionnumber` 28602427. Its document, grants and shares were not touched.
+- Scripts and log: session scratchpad `gate2102/` (`g2102s_lib.py`, `g2102s_pre.py`, `g2102s_s1.py`, `g2102s_s2.py`, `g2102s_s4.py`, `g2102s_chk.py`, `g2102s_poll.py`, `g2102s_ai.py`, `g2102s_ids.json`, `g2102s_log.txt`, `g2102s_svc947.cs.txt`).
+
+| Step | Result | Evidence |
+|---|---|---|
+| 1. Lineage into Secure via the reconciler | **PASS** | **Probe.** Policy `6ee40d2a-34cc-f111-a05b-7c1e520a989f` (`UAC-2102-GATE-SECURE-20261020-031303Z`, Ontology domain, Off, subject Matter), with `sprk_matter` = the Secure matter. Version v1 `70e40d2a-34cc-f111-a05b-7c1e520a989f`, with the current-version pointer set (204). Both rows were created 03:13:05Z, owned by admin `1d02f31c…`, BU Spaarke.<br>**Re-own.** The 03:14:03Z recent-changes run (`run=65ba3972…`, `mode=Apply`) found `root=sprk_matter:5d46df87…: a related record changed`. It then logged `reassign: sprk_policy 6ee40d2a… owner systemusers(1d02f31c…) -> team 6eabc7f9…` at 03:14:10Z and `reassign: sprk_policyversion 70e40d2a… -> team 6eabc7f9…` at 03:14:11Z. It also granted the creator a share on both rows (`[SECURE-CHILD-SHARES] grant SystemUser 1d02f31c…`).<br>**Owners.** Read at 03:14:38Z and again at 03:15:48Z: both rows are owned by **Secure Record Owners `6eabc7f9…`**, BU Secure Record, modified by `mi-bff-api-dev`. That is about 65 s after create, on the first sweep. |
+| 2. 400 `scope_matter_secured` | **PASS** (the 400 comes from the scope check; the `CheckVersionOwnerAsync` 400 branch is not reachable through the API) | **Code (947d98e31, `OntologyAdminAuthoringService.cs`).** `PublishVersionAsync` runs `CheckScopeAsync` (L1117) before the dry-run proof and before `CheckVersionOwnerAsync` (L1173). `CheckScopeAsync` reads the requested matter as the caller and refuses a Secure, Restricted or unreadable matter with 400 `scope_matter_secured` (L1753–1756). The 400 in `CheckVersionOwnerAsync` (L1288–1300: rule not held, a matter was requested, and no different stored matter) therefore fires only when the requested matter turns Secure between those two reads. That is a race, and a single request cannot produce it without changing the matter. A request naming an already-Secure matter gets the same code from the scope check.<br>**Live.** A SEPARATE probe, policy `33db2139-34cc-f111-a05d-3833c5e9614d` (`UAC-2102-GATE-S2-20261020-031328Z`, no matter, Off) with v1 `3ad11e35-34cc-f111-a05d-0022482913fc` and the pointer set. Once, `POST /api/v1/ontology/admin/authoring/policies/33db2139…/versions` {draft, `matterId` = Secure matter, no dry run} → **400** `reasonCode ontology.admin.scope_matter_secured`, `errors.matterId` "A rule cannot be limited to a Secure or Restricted matter…", detail "Nothing was written."<br>**Nothing written.** The policy was unchanged before and after: `sprk_matter` null, the same pointer, `modifiedon` and `versionnumber`. The versions were unchanged: only v1, `inforceto` null, the same `modifiedon`. The Secure matter was unchanged. App Insights shows no "Ontology authoring" trace in the window, so neither `CheckVersionOwnerAsync` log line fired. That confirms the scope check answered. The probe was then deleted (see below). |
+| 3. Do not publish against the step-1 probe | **Done** | No BFF call was made against `6ee40d2a…`. The only ontology request in the window is the step-2 400. |
+| App Insights 03:12–03:18Z | **PASS** | `0x80040299` / "Read Privilege Check For Owner failed": **0 rows**. Reconciler failed or error rows (any, and any naming `sprk_policy`): **0**. Requests: no 5xx; the ontology route had one request, a 400 (step 2). Exceptions: only `ODataError "Invalid hostname for this tenancy"` ×1 (#1830). The BFF Warning "Token on POST … appid=04b07795…" was logged again, as before (diagnostic). |
+| 4. Cleanup | **PASS** | Step-2 probe: signals citing it 0. Pointer `$ref` DELETE 204. v1 `3ad11e35…` 204 then 404; policy `33db2139…` 204 then 404. Sweep: the only `UAC-2102-GATE*` rows left are the HELD step-1 pair. |
+
+**Created and deleted (as admin)**
+
+| Row | Id | Delete | Read-back |
+|---|---|---|---|
+| `sprk_policyversion` v1 (step-2 probe) | `3ad11e35-34cc-f111-a05d-0022482913fc` | 204 | 404 |
+| `sprk_policy` `UAC-2102-GATE-S2-20261020-031328Z` | `33db2139-34cc-f111-a05d-3833c5e9614d` | 204 | 404 |
+
+**HELD for ontology smoke; main session deletes:**
+- `sprk_policy` `6ee40d2a-34cc-f111-a05b-7c1e520a989f` (`UAC-2102-GATE-SECURE-20261020-031303Z`, `sprk_matter` = `5d46df87…`, Off). Owned by `6eabc7f9…`; the current-version pointer is set to the version below.
+- `sprk_policyversion` v1 `70e40d2a-34cc-f111-a05b-7c1e520a989f`, owned by `6eabc7f9…`.
+- To delete them: clear the pointer (`sprk_CurrentVersion/$ref`), then delete the version, then the policy. The reconciler's creator shares go with the rows.
+
+**Verdicts:** Step 1 Secure lineage PASS. Step 2 400 `scope_matter_secured` PASS, but only via `CheckScopeAsync`; the `CheckVersionOwnerAsync` 400 branch is a race and is not reachable through the API (offline coverage only). Step 3 held. App Insights PASS. Cleanup PASS. No defect.
+
 ## #2104 live gate (2026-10-19)
 
 **Scope.** Server-side gate for PR #2104 (issues #2103 and #2105, master `d301c0675`). Run 21:15–21:21Z against spaarke-bff-dev and spaarkedev1, as admin only (the default `az` login).
