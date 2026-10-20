@@ -1036,22 +1036,22 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     /// </summary>
     private static CallerPrincipal SystemUserHolding(
         ExternalDataService.TodoRootKind kind, Guid rootId, AccessRights rights, bool dataverseDecides) => new()
-    {
-        Plane = CallerPrincipalPlane.Workforce,
-        ContactId = Guid.Parse("99999999-9999-9999-9999-999999999999"),
-        SystemUserId = Fr20SystemUser,
-        Email = "staff@customer.test",
-        ProjectAccess = kind == ExternalDataService.TodoRootKind.Project
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = Guid.Parse("99999999-9999-9999-9999-999999999999"),
+            SystemUserId = Fr20SystemUser,
+            Email = "staff@customer.test",
+            ProjectAccess = kind == ExternalDataService.TodoRootKind.Project
             ? new[] { new CallerProjectAccess { ProjectId = rootId, Rights = rights } }
             : Array.Empty<CallerProjectAccess>(),
-        MatterAccess = kind == ExternalDataService.TodoRootKind.Matter
+            MatterAccess = kind == ExternalDataService.TodoRootKind.Matter
             ? new Dictionary<Guid, AccessRights> { [rootId] = rights }
             : new Dictionary<Guid, AccessRights>(),
-        WorkAssignmentAccess = kind == ExternalDataService.TodoRootKind.WorkAssignment
+            WorkAssignmentAccess = kind == ExternalDataService.TodoRootKind.WorkAssignment
             ? new Dictionary<Guid, AccessRights> { [rootId] = rights }
             : new Dictionary<Guid, AccessRights>(),
-        DataverseConfirmsWrites = dataverseDecides,
-    };
+            DataverseConfirmsWrites = dataverseDecides,
+        };
 
     [Theory(DisplayName = "Task 036: flag ON, Dataverse grants Read only on the root — to-do create is 403 and nothing is written")]
     [MemberData(nameof(InScopeRoots))]
@@ -1110,6 +1110,36 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "MDA would refuse a user without prvCreatesprk_Todo");
         _fixture.Data.CreateCallCount.Should().Be(0);
         _fixture.Probe.AppOnlyPrivilegeCalls.Should().Equal(new[] { (Fr20SystemUser, TodoCreatePrivilege) });
+    }
+
+    // Task 036 fix round 3 (F3-2): Dataverse's own CreateAccess on an existing record speaks of the caller's create
+    // privilege on the record's TABLE, not of attaching to this record (SurfaceRightsFromDataverse's remarks). It must never
+    // be read as "may add a child": only AppendTo is.
+    [Theory(DisplayName = "Task 036 F3-2: Dataverse's CreateAccess is not AppendTo — the surface's Create comes from AppendTo only")]
+    [InlineData(AccessRights.Read | AccessRights.Create, AccessRights.Read)]
+    [InlineData(AccessRights.Create, AccessRights.None)]
+    [InlineData(AccessRights.Read | AccessRights.Write | AccessRights.Create | AccessRights.Append | AccessRights.Share, AccessRights.Read | AccessRights.Write)]
+    [InlineData(AccessRights.Read | AccessRights.AppendTo, AccessRights.Read | AccessRights.Create)]
+    public void Fr20_SurfaceRights_DataverseCreateAccess_IsNotMayAddAChild(AccessRights dataverse, AccessRights expected)
+        => Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.SurfaceRightsFromDataverse(dataverse)
+            .Should().Be(expected);
+
+    [Theory(DisplayName = "Task 036 F3-2: flag ON, Dataverse grants Read | Create (no AppendTo) and prvCreatesprk_Todo is held — to-do create is 403 and nothing is written")]
+    [MemberData(nameof(InScopeRoots))]
+    public async Task Fr20_CreateTodo_DataverseCreateAccessWithoutAppendTo_Is403_AndWritesNothing(
+        string segment, ExternalDataService.TodoRootKind kind, Guid rootId)
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(kind, rootId, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, EntitySetOf(kind), rootId, AccessRights.Read | AccessRights.Create)
+            .HoldsAppOnly(Fr20SystemUser, TodoCreatePrivilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "CreateAccess on the root is the table's create privilege, not leave to attach a to-do to it");
+        _fixture.Data.CreateCallCount.Should().Be(0);
     }
 
     [Fact(DisplayName = "Task 036 F1 (NFR-01): flag ON, a privilege read that FAILS denies the to-do create")]
@@ -1287,6 +1317,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     [InlineData(AccessRights.Read | AccessRights.Write, true, HttpStatusCode.Forbidden, 0)]
     [InlineData(AccessRights.Read | AccessRights.AppendTo, true, HttpStatusCode.Created, 1)]
     [InlineData(AccessRights.Read | AccessRights.Write | AccessRights.AppendTo, false, HttpStatusCode.Forbidden, 0)]
+    // F3-2: Dataverse's CreateAccess with the event Create privilege held, but no AppendTo — refused.
+    [InlineData(AccessRights.Read | AccessRights.Create, true, HttpStatusCode.Forbidden, 0)]
     public async Task Fr20_CreateEvent_IsConfirmedOnTheProject(
         AccessRights dataverse, bool holdsCreate, HttpStatusCode expected, int creates)
     {

@@ -218,6 +218,24 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         _fixture.Probe.AppOnlyPrivilegeCalls.Should().Equal(new[] { (CallerUser, DocumentCreatePrivilege) });
     }
 
+    // Task 036 fix round 3 (F3-2): Dataverse's CreateAccess on the parent is the table's create privilege, not leave to
+    // attach to this record. With the document Create privilege held and no AppendTo, the upload is refused.
+    [Theory]
+    [MemberData(nameof(RootParents))]
+    public async Task Fr20_Upload_DataverseCreateAccessWithoutAppendTo_Is403_AndWritesNothing(string segment)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.Create)
+            .HoldsAppOnly(CallerUser, DocumentCreatePrivilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden, "CreateAccess is not AppendTo");
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.Documents.Should().BeEmpty();
+    }
+
     [Theory]
     [MemberData(nameof(RootParents))]
     public async Task Fr20_Upload_APrivilegeReadThatFaults_Is403_AndWritesNothing(string segment)
