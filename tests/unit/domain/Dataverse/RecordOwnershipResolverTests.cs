@@ -3470,7 +3470,7 @@ public class RecordOwnershipResolverTests
     {
         // Must-fire (#2143 round 7, F1): the re-file takes S out of the message's own regarding; its thread T still files it under
         // S, but the thread follows the filing after the write, so the move out of S is THIS re-file's. A caller without Full
-        // Access on S is refused here â€” before round 7 the thread hid S and no F3 was asked.
+        // Access on S is refused here — before round 7 the thread hid S and no F3 was asked.
         var (directory, messageId) = MessageInItsSecureRecordsThread();
         var asked = new List<Guid>();
         var request = MoveMessageTo(messageId, MatterId, CallerHolding(Collaborate, asked: asked));
