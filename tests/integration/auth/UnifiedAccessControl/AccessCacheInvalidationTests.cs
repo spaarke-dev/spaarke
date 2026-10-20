@@ -93,11 +93,12 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
                 $"pattern '{pattern}' must reach a key a production reader wrote — a pattern that matches nothing evicts nothing");
         }
 
-        userKeys.Should().HaveCount(2 * (1 + 2 + 2), "precondition: identity + two membership + two root-set entries, in each of two tenants");
+        userKeys.Should().HaveCount(2 * (1 + 2 + 2 + 1),
+            "precondition: identity + two membership + two root-set entries + one Secure lookup-only rights answer, in each of two tenants");
         await world.Keyspace.Invalidator().InvalidateUserAccessAsync(UserU, "test", CancellationToken.None);
 
         world.Keyspace.Keys.Should().BeEquivalentTo(before.Except(userKeys),
-            "exactly the user's identity, membership and root-set entries go — under BOTH tenants; the neighbour's stay");
+            "exactly the user's identity, membership, root-set and rights entries go — under BOTH tenants; the neighbour's stay");
     }
 
     [Fact]
@@ -112,14 +113,18 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
         await world.WarmSnapshotAsync(OidV, "sprk_projects", record, TenantB);
         await world.WarmSnapshotAsync(OidU, "sprk_projects", otherRecord, TenantA); // another record
         await world.WarmSnapshotAsync(OidU, "sprk_matters", record, TenantA);       // another entity set, same id
+        await world.WarmSecureLookupRightsAsync(UserU, AccessCacheWorld.ProjectEntity, otherRecord, TenantA); // another record
+        await world.WarmSecureLookupRightsAsync(UserU, AccessCacheWorld.MatterEntity, record, TenantA);       // another set, same id
         var before = world.Keyspace.Keys.ToHashSet();
 
         var expectedGone = before.Where(k =>
                 (k.Contains($":{MembershipResolverService.CacheResource}:", StringComparison.Ordinal) && k.Contains(":sprk_project:", StringComparison.Ordinal))
                 || (k.Contains($":{ImpersonatedRootSetSource.CacheResource}:", StringComparison.Ordinal) && k.Contains(":sprk_project:", StringComparison.Ordinal))
-                || (k.Contains($":{CachedAccessDataSource.RecordAccessResource}:sprk_projects:", StringComparison.Ordinal) && k.Contains(record.ToString("D"), StringComparison.Ordinal)))
+                || (k.Contains($":{CachedAccessDataSource.RecordAccessResource}:sprk_projects:", StringComparison.Ordinal) && k.Contains(record.ToString("D"), StringComparison.Ordinal))
+                || IsRightsEntry(k, "sprk_projects", record))
             .ToHashSet();
-        expectedGone.Should().HaveCount(2 + 2 + 2, "precondition: each user's project membership + root set, and two snapshots of the record");
+        expectedGone.Should().HaveCount(2 + 2 + 2 + 2,
+            "precondition: each user's project membership + root set, two snapshots of the record, and each user's rights answer for it");
 
         foreach (var pattern in MembershipCacheInvalidator.RecordOwnerChangePatterns(
                      InMemoryRedisKeyspace.InstanceName, "sprk_project", "sprk_projects", record))
@@ -132,7 +137,8 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
             "sprk_project", "sprk_projects", record, "test", CancellationToken.None);
 
         world.Keyspace.Keys.Should().BeEquivalentTo(before.Except(expectedGone),
-            "matter entries, identity entries, the other record's snapshot and the matter-set snapshot of the same id all stay");
+            "matter entries, identity entries, the other record's snapshot and rights answer, and the matter-set snapshot and " +
+            "rights answer of the same id all stay");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -316,6 +322,11 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
 
     // ── harness ─────────────────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>A key holding some user's Secure lookup-only rights answer for <paramref name="record"/> in <paramref name="entitySet"/>.</summary>
+    private static bool IsRightsEntry(string key, string entitySet, Guid record) =>
+        key.Contains($":{AccessibleRecordSetService.SecureLookupRightsCacheResource}:", StringComparison.Ordinal)
+        && key.Contains($":{entitySet}:{record:D}:", StringComparison.Ordinal);
+
     private static Task RunAsync(RegistrationDataverseService service, string write, string? targetDataverseUrl) => write switch
     {
         "team-add" => service.AddUserToTeamAsync(RegistrationDataverse.TeamName, UserU, CancellationToken.None, targetDataverseUrl),
@@ -379,12 +390,24 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
 
         private readonly Mock<IDataverseService> _dataverse = new();
         private readonly Mock<IMembershipFieldDiscoveryService> _discovery = new();
+        private readonly Mock<NoAccessEnforcementStore> _rights = new(
+            new HttpClient(), null!, null!, NullLogger<NoAccessEnforcementStore>.Instance);
+        private readonly System.Collections.Concurrent.ConcurrentQueue<(Guid User, Guid Record)> _rightsQuestions = new();
         private int _membershipQueries;
         private int _rootSetReads;
         private int _snapshotReads;
 
         public AccessCacheWorld()
         {
+            // The No Access store's named-principal read (its internal virtual seam), answering every question RightsAnswer.
+            _rights
+                .Setup(r => r.GetPrincipalRightsAsync(
+                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>(), It.IsAny<LogLevel>()))
+                .Returns((Guid user, string _, Guid record, CancellationToken _, LogLevel _) =>
+                {
+                    _rightsQuestions.Enqueue((user, record));
+                    return Task.FromResult(RightsAnswer);
+                });
             _dataverse
                 .Setup(d => d.RetrieveAsync("systemuser", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) => new Entity("systemuser", id)
@@ -433,6 +456,12 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
 
         public int MembershipQueries => Volatile.Read(ref _membershipQueries);
 
+        /// <summary>What Dataverse answers every Secure lookup-only rights question (#2121 option (b)); Read unless a test changes it.</summary>
+        public AccessRights RightsAnswer { get; set; } = AccessRights.Read;
+
+        /// <summary>How many times Dataverse was asked about <paramref name="record"/> for <paramref name="user"/> — a cache miss.</summary>
+        public int RightsQuestions(Guid user, Guid record) => _rightsQuestions.Count(q => q.User == user && q.Record == record);
+
         public int RootSetReads => Volatile.Read(ref _rootSetReads);
 
         /// <summary>Calls that reached the inner (Dataverse) access source — a cache miss or an uncached read.</summary>
@@ -441,13 +470,7 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
         /// <summary>The four production readers, as a request in <paramref name="tenant"/> sees them.</summary>
         public ReaderSet Readers(string tenant)
         {
-            var accessor = new FixedHttpContextAccessor
-            {
-                HttpContext = new DefaultHttpContext
-                {
-                    User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("tid", tenant) }, "test")),
-                },
-            };
+            var accessor = RequestIn(tenant);
             var cache = Keyspace.TenantCache();
             var identity = new IdentityNormalizationService(
                 _dataverse.Object, cache, Array.Empty<IIdentityOrganizationResolver>(),
@@ -471,8 +494,31 @@ public sealed partial class AccessCacheInvalidationTests : IClassFixture<Provisi
             var matters = await readers.Membership.ResolveAsync(user, MatterEntity, AuthorizationOptions, CancellationToken.None);
             await readers.RootSets.GetAsync(user, ProjectEntity);
             await readers.RootSets.GetAsync(user, MatterEntity);
+            await WarmSecureLookupRightsAsync(user, ProjectEntity, Project, tenant);
             return (projects.Ids, matters.Ids);
         }
+
+        /// <summary>
+        /// Composes <paramref name="entityType"/> for <paramref name="user"/> in <paramref name="tenant"/> through the
+        /// PRODUCTION composer, for which <paramref name="record"/> is a Secure record the user reaches only through a lookup
+        /// (#2121 round 2, F4). A miss asks Dataverse and caches its answer in the key space; a hit asks nothing.
+        /// </summary>
+        public Task<AccessibleRecordSet> WarmSecureLookupRightsAsync(Guid user, string entityType, Guid record, string tenant)
+            => Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetServiceTests
+                .SecureLookupOnlyComposer(entityType, new[] { record }, _rights.Object, Keyspace.TenantCache(), RequestIn(tenant))
+                .ComposeAsync(
+                    Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetServiceTests.SystemUserPrincipalFor(user),
+                    entityType,
+                    CancellationToken.None);
+
+        /// <summary>A request in <paramref name="tenant"/>: the <c>tid</c> claim every reader's cache key is namespaced by.</summary>
+        private static FixedHttpContextAccessor RequestIn(string tenant) => new()
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("tid", tenant) }, "test")),
+            },
+        };
 
         /// <summary>Caches one record-access snapshot through the production decorator.</summary>
         public Task WarmSnapshotAsync(string oid, string entitySet, Guid recordId, string tenant)

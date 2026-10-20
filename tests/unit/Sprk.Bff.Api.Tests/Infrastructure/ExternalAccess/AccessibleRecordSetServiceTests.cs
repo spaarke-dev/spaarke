@@ -1474,10 +1474,11 @@ public class AccessibleRecordSetServiceTests
     public async Task ComposeAsync_BuiltByTheProductionModule_AsksTheModulesStore_AndCachesItsAnswer()
     {
         // #2121 round 1 (F3): the store and the rights cache are OPTIONAL constructor parameters, so pin that the PRODUCTION
-        // registration (ExternalAccessModule.AddExternalAccess) supplies the store, by behaviour: the composer the module
-        // registers asks the module's own typed-HttpClient store (only its transport is a stub), keeps the Secure id at
-        // Read, and the second composition is answered from the container's cache. If the module stopped registering the
-        // store, the composer would get none and drop the id (and the handler would see no request).
+        // registration (ExternalAccessModule.AddExternalAccess) supplies the store, by behaviour only (ADR-038 B3: no
+        // service-descriptor assertion): the composer the module registers asks the module's own typed-HttpClient store
+        // (only its transport is a stub), keeps the Secure id at Read, and the second composition is answered from the
+        // container's cache. If the module stopped registering the store, the container would build the composer with its
+        // default (no store), which drops the id and sends no request.
         var secure = MemberRecordA;
         var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
         var participations = (FakeParticipationService)NoParticipations();
@@ -1490,8 +1491,6 @@ public class AccessibleRecordSetServiceTests
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
             .Build());
         Sprk.Bff.Api.Infrastructure.DI.ExternalAccessModule.AddExternalAccess(services);
-        services.Should().Contain(d => d.ServiceType == typeof(NoAccessEnforcementStore),
-            "the module registers the store the composer asks");
 
         // The composer's upstream readers, substituted at their module boundary (registered after the module, so these win).
         services.AddSingleton(membership.Object);
@@ -1613,6 +1612,272 @@ public class AccessibleRecordSetServiceTests
         dataverse.Verify(r => r.GetPrincipalRightsAsync(otherUser, "sprk_matters", secure, It.IsAny<CancellationToken>(), It.IsAny<LogLevel>()),
             Times.Once, "user B is asked about themselves");
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // #2121 round 2 (F3) — the bounded concurrency, the cache-fault fallback and the tenant namespace, each proved.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_ManySecureLookupOnlyIds_AtMostTheConcurrencyCapAreAskedAtOnce()
+    {
+        // F3a: every call is held open until released. With the gate, exactly MaxConcurrentRecordLookups start and the
+        // rest wait; without it (or with a wider one) more start in the grace period and the high-water mark exceeds it.
+        var cap = CallerRecordAccessProbe.MaxConcurrentRecordLookups;
+        var ids = Enumerable.Range(1, cap * 3).Select(i => Guid.Parse($"d0000000-0000-0000-0000-{i:D12}")).ToArray();
+        var membership = MembershipWith(MatterEntity, membershipIds: ids, ownershipIds: Array.Empty<Guid>());
+        var participations = (FakeParticipationService)NoParticipations();
+        foreach (var id in ids)
+        {
+            participations.Flags[id] = SecureOnly;
+        }
+
+        var sync = new object();
+        var inFlight = 0;
+        var highWater = 0;
+        var capReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dataverse = NewDataverseStore();
+        dataverse
+            .Setup(r => r.GetPrincipalRightsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>(), It.IsAny<LogLevel>()))
+            .Returns(async (Guid _, string _, Guid _, CancellationToken token, LogLevel _) =>
+            {
+                lock (sync)
+                {
+                    inFlight++;
+                    highWater = Math.Max(highWater, inFlight);
+                    if (inFlight >= cap)
+                    {
+                        capReached.TrySetResult();
+                    }
+                }
+
+                try
+                {
+                    await release.Task.WaitAsync(token);
+                }
+                finally
+                {
+                    lock (sync)
+                    {
+                        inFlight--;
+                    }
+                }
+
+                return AccessRights.Read;
+            });
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), principalRights: dataverse.Object);
+        var compose = sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+        try
+        {
+            var started = await Task.WhenAny(capReached.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+            started.Should().BeSameAs(capReached.Task, "precondition: the cap's worth of calls started");
+            await Task.Delay(TimeSpan.FromMilliseconds(300)); // room for a call past the cap to start, were the gate absent or wider
+            lock (sync)
+            {
+                highWater.Should().Be(cap, $"at most {cap} rights calls are in flight at once (NFR-02)");
+            }
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+
+        var set = await compose;
+        set.RecordIds.Should().BeEquivalentTo(ids, "every waiting id is asked once a slot frees, and Dataverse grants Read");
+        highWater.Should().Be(cap);
+    }
+
+    /// <summary>Where the rights cache faults, and with what: an ordinary error, or a cancellation the cache raised itself.</summary>
+    public static TheoryData<string, string> RightsCacheFaultCases()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var where in new[] { "read", "write", "both" })
+        {
+            data.Add(where, "error");
+            data.Add(where, "own-cancellation");
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(RightsCacheFaultCases))]
+    public async Task ComposeAsync_SystemUser_TheRightsCacheFaults_AsksDataverseLive_KeepsTheGrantedIdsAtRead_AndWarnsOnce(
+        string where, string kind)
+    {
+        // F3b + K2: a cache fault falls back to the live Dataverse question and Dataverse's Read stands. An
+        // OperationCanceledException the cache raised ITSELF (an inner Redis timeout; the caller's token is not cancelled)
+        // is a cache fault too, not a Dataverse timeout. The faults are logged ONCE for the composition, not once per id.
+        var ids = new[] { MemberRecordA, MemberRecordB, Guid.Parse("a0000000-0000-0000-0000-000000000003") };
+        var membership = MembershipWith(MatterEntity, membershipIds: ids, ownershipIds: Array.Empty<Guid>());
+        var participations = (FakeParticipationService)NoParticipations();
+        foreach (var id in ids)
+        {
+            participations.Flags[id] = SecureOnly;
+        }
+
+        var dataverse = NewDataverseStore();
+        dataverse
+            .Setup(r => r.GetPrincipalRightsAsync(SystemUserId, "sprk_matters", It.IsAny<Guid>(), It.IsAny<CancellationToken>(), It.IsAny<LogLevel>()))
+            .ReturnsAsync(AccessRights.Read);
+        var cache = new FaultingRightsCache(
+            faultReads: where != "write",
+            faultWrites: where != "read",
+            fault: kind == "error"
+                ? () => new InvalidOperationException("rights cache unavailable (test double)")
+                : () => new OperationCanceledException("inner cache timeout (test double)"));
+        var log = new CapturingLogger();
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), principalRights: dataverse.Object,
+            logger: log, rightsCache: cache);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        cache.Faults.Should().Be(where == "both" ? 2 * ids.Length : ids.Length, "precondition: the cache faulted for every id");
+        foreach (var id in ids)
+        {
+            set.RightsFor(id).Should().Be(AccessRights.Read, $"a cache {where} fault ({kind}) never drops an id Dataverse grants");
+            dataverse.Verify(r => r.GetPrincipalRightsAsync(SystemUserId, "sprk_matters", id, It.IsAny<CancellationToken>(), It.IsAny<LogLevel>()),
+                Times.Once, "the id was asked of Dataverse live");
+        }
+
+        log.Entries.Where(e => e.Level >= LogLevel.Warning).Should().ContainSingle(
+                "one Warning for the composition's cache faults, not one per id")
+            .Which.Message.Should().Contain("rights cache faulted").And.Contain($"{(where == "both" ? 2 * ids.Length : ids.Length)} time(s)");
+        log.Entries.Should().NotContain(e => e.Message.Contains("FAULTED"), "a cache fault is not a Dataverse fault");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_TwoTenants_SameUserSetAndRecord_DoNotShareACachedAnswer()
+    {
+        // F3c: the cache key carries the REQUEST's tenant (its tid claim, ImpersonatedRootSetSource.CacheTenantFor). One
+        // shared cache; Dataverse answers the first question Read and every later one nothing. Tenant B must be asked
+        // itself and must not be served tenant A's Read; each tenant's own entry then answers its next composition.
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[secure] = SecureOnly;
+        var dataverse = NewDataverseStore();
+        dataverse
+            .SetupSequence(r => r.GetPrincipalRightsAsync(SystemUserId, "sprk_matters", secure, It.IsAny<CancellationToken>(), It.IsAny<LogLevel>()))
+            .ReturnsAsync(AccessRights.Read)
+            .ReturnsAsync(AccessRights.None)
+            .ReturnsAsync(AccessRights.None);
+        var cache = new Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache();
+        const string tenantA = "2121a000-aaaa-4aaa-8aaa-00000000000a";
+        const string tenantB = "2121b000-bbbb-4bbb-8bbb-00000000000b";
+
+        var sutA = CreateSut(membership.Object, participations, NeverStanding(), principalRights: dataverse.Object,
+            rightsCache: cache, httpContextAccessor: TenantRequest(tenantA));
+        var sutB = CreateSut(membership.Object, participations, NeverStanding(), principalRights: dataverse.Object,
+            rightsCache: cache, httpContextAccessor: TenantRequest(tenantB));
+
+        (await sutA.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None))
+            .RightsFor(secure).Should().Be(AccessRights.Read, "precondition: Dataverse grants tenant A's question");
+        (await sutB.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None))
+            .Rights.Should().NotContainKey(secure, "tenant A's cached Read must never answer tenant B's request");
+        dataverse.Verify(r => r.GetPrincipalRightsAsync(SystemUserId, "sprk_matters", secure, It.IsAny<CancellationToken>(), It.IsAny<LogLevel>()),
+            Times.Exactly(2), "tenant B is asked itself");
+
+        (await sutA.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None))
+            .RightsFor(secure).Should().Be(AccessRights.Read, "tenant A's own entry answers its next composition");
+        (await sutB.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None))
+            .Rights.Should().NotContainKey(secure, "tenant B's own entry answers its next composition");
+        dataverse.Verify(r => r.GetPrincipalRightsAsync(SystemUserId, "sprk_matters", secure, It.IsAny<CancellationToken>(), It.IsAny<LogLevel>()),
+            Times.Exactly(2), "both later compositions were answered from their own tenant's entry");
+    }
+
+    /// <summary>
+    /// A request in <paramref name="tenant"/>: its user carries the <c>tid</c> claim the cache key's namespace reads. A fixed
+    /// accessor, not the framework's <c>HttpContextAccessor</c>, whose context lives in one shared <c>AsyncLocal</c> (two
+    /// of them in one test would both see the last context set).
+    /// </summary>
+    private static Microsoft.AspNetCore.Http.IHttpContextAccessor TenantRequest(string tenant) => new FixedRequest
+    {
+        HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                new[] { new System.Security.Claims.Claim("tid", tenant) }, "test")),
+        },
+    };
+
+    private sealed class FixedRequest : Microsoft.AspNetCore.Http.IHttpContextAccessor
+    {
+        public Microsoft.AspNetCore.Http.HttpContext? HttpContext { get; set; }
+    }
+
+    /// <summary>A rights cache whose reads and/or writes fault with <paramref name="fault"/>; otherwise it holds nothing.</summary>
+    private sealed class FaultingRightsCache(bool faultReads, bool faultWrites, Func<Exception> fault)
+        : Sprk.Bff.Api.Infrastructure.Cache.ITenantCache
+    {
+        private int _faults;
+
+        public int Faults => Volatile.Read(ref _faults);
+
+        public Task<T?> GetAsync<T>(string tenantId, string resource, string id, int version,
+            string cacheInstance = "default", CancellationToken ct = default)
+            => faultReads ? Fail<T?>() : Task.FromResult<T?>(default);
+
+        public Task SetAsync<T>(string tenantId, string resource, string id, int version, T value, TimeSpan? ttl = null,
+            string cacheInstance = "default", CancellationToken ct = default)
+            => faultWrites ? Fail<object?>() : Task.CompletedTask;
+
+        public Task RemoveAsync(string tenantId, string resource, string id, int version,
+            string cacheInstance = "default", CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task<T> GetOrCreateAsync<T>(string tenantId, string resource, string id, int version,
+            Func<CancellationToken, Task<T>> factory, TimeSpan? ttl = null, string cacheInstance = "default",
+            CancellationToken ct = default)
+            => throw new NotSupportedException("The composer does not use GetOrCreateAsync.");
+
+        private Task<TResult> Fail<TResult>()
+        {
+            Interlocked.Increment(ref _faults);
+            return Task.FromException<TResult>(fault());
+        }
+    }
+
+    /// <summary>
+    /// For the central eviction tests (<c>AccessCacheInvalidationTests</c>, #2121 round 2, F4): the PRODUCTION composer,
+    /// for which every id in <paramref name="secureLookupOnlyIds"/> is a Secure <paramref name="entityType"/> record any
+    /// systemuser reaches only through a lookup column. Each composition therefore asks <paramref name="store"/> about
+    /// each id through <paramref name="cache"/>, in the tenant <paramref name="request"/> carries.
+    /// </summary>
+    internal static AccessibleRecordSetService SecureLookupOnlyComposer(
+        string entityType,
+        IReadOnlyCollection<Guid> secureLookupOnlyIds,
+        NoAccessEnforcementStore store,
+        Sprk.Bff.Api.Infrastructure.Cache.ITenantCache cache,
+        Microsoft.AspNetCore.Http.IHttpContextAccessor request)
+    {
+        var ids = secureLookupOnlyIds.ToArray();
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(It.IsAny<Guid>(), entityType, MainMembershipWalk, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(entityType, ids));
+        membership
+            .Setup(m => m.ResolveAsync(It.IsAny<Guid>(), entityType, OwnershipMembershipWalk, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(entityType));
+        var participations = (FakeParticipationService)NoParticipations();
+        foreach (var id in ids)
+        {
+            participations.Flags[id] = SecureOnly;
+        }
+
+        return CreateSut(membership.Object, participations, NeverStanding(), principalRights: store, rightsCache: cache,
+            httpContextAccessor: request);
+    }
+
+    /// <summary>A systemuser principal for <paramref name="systemUserId"/> (no linked contact grants are read).</summary>
+    internal static WorkforcePrincipal SystemUserPrincipalFor(Guid systemUserId) => new()
+    {
+        Kind = WorkforcePrincipalKind.SystemUser,
+        SystemUserId = systemUserId,
+        ContactId = ContactId,
+        Oid = systemUserId.ToString("D"),
+        TenantId = Tenant,
+    };
 
     // ─────────────────────────────────────────────────────────────────────
     // #2121 round 1 (F2) — the store logs a non-success at Error by default (the enforcer); the composer, which logs every
@@ -2859,13 +3124,15 @@ public class AccessibleRecordSetServiceTests
         Microsoft.Extensions.Logging.ILogger<AccessibleRecordSetService>? logger = null,
         Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? systemUsers = null,
         Sprk.Bff.Api.Infrastructure.Cache.ITenantCache? rightsCache = null,
-        TimeSpan? rightsBudget = null)
+        TimeSpan? rightsBudget = null,
+        Microsoft.AspNetCore.Http.IHttpContextAccessor? httpContextAccessor = null)
         => new(membership, participations, standing, noAccessList ?? NeverDeniesReader(),
                identityStore ?? UnlinkedIdentityStore(), systemUsers ?? InternalSystemUsers(),
                filing ?? Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
                logger ?? NullLogger<AccessibleRecordSetService>.Instance,
                principalRights ?? DataverseGrantsNothing().Object,
-               rightsCache)
+               rightsCache,
+               httpContextAccessor)
         {
             SecureLookupRightsBudget = rightsBudget ?? AccessibleRecordSetService.DefaultSecureLookupRightsBudget,
         };

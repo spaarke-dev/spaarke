@@ -913,7 +913,38 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// subject-discrimination MUST), the entity set and the record.
     /// </summary>
     internal static string SecureLookupRightsCacheId(Guid systemUserId, string entitySet, Guid recordId)
-        => $"{systemUserId:D}:{entitySet}:{recordId:D}";
+        => SecureLookupRightsCacheId(systemUserId.ToString("D"), entitySet, recordId.ToString("D"));
+
+    /// <summary>
+    /// The composition behind <see cref="SecureLookupRightsCacheId(Guid, string, Guid)"/>, over segments, so the central
+    /// eviction patterns (<c>MembershipCacheInvalidator</c>, task 132; #2121 round 2, F4) are built by the same code with
+    /// the Redis glob <c>*</c> for the segments they do not fix, and cannot drift from the key a composition wrote.
+    /// </summary>
+    internal static string SecureLookupRightsCacheId(string systemUserSegment, string entitySetSegment, string recordSegment)
+        => $"{systemUserSegment}:{entitySetSegment}:{recordSegment}";
+
+    /// <summary>
+    /// The entity set, in the spelling a <see cref="SecureLookupRightsCacheResource"/> key carries, when
+    /// <paramref name="entitySetName"/> is one this cache can hold: a secure root's
+    /// (<see cref="Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor"/>, the set
+    /// <see cref="ConfirmSecureLookupOnlyAsync"/> asks about). For the central eviction (#2121 round 2, F4), whose callers
+    /// pass a set in any casing: a pattern for a set no entry carries would scan the key space for nothing. False otherwise.
+    /// </summary>
+    internal static bool TryGetSecureLookupRightsSet(string? entitySetName, out string entitySet)
+    {
+        foreach (var type in Enum.GetValues<ExternalGrantRootType>())
+        {
+            var set = ExternalGrantRoot.BindFor(type).EntitySet;
+            if (string.Equals(set, entitySetName?.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                entitySet = set;
+                return true;
+            }
+        }
+
+        entitySet = string.Empty;
+        return false;
+    }
 
     /// <summary>
     /// Of the systemuser's lookup-only Secure membership ids (<see cref="SecureLookupOnlyMembershipAsync"/>), the ones
@@ -946,7 +977,9 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// <see cref="ImpersonatedRootSetSource"/> caches its Dataverse answer. What is cached is Dataverse's data (the reported
     /// rights); the keep-at-Read decision is made again from it on every composition. A 404 or a fault is NEVER cached:
     /// the next composition asks again. A cache fault falls through to a live question (fail open on the cache, never on
-    /// the answer).</para>
+    /// the answer), logged once per composition. A share, owner or user-access write the BFF makes evicts the affected
+    /// answers through the central task-132 eviction (<c>MembershipCacheInvalidator</c>; #2121 round 2, F4), so the TTL
+    /// is only the backstop.</para>
     /// </remarks>
     private async Task<IReadOnlySet<Guid>> ConfirmSecureLookupOnlyAsync(
         Guid systemUserId, string entityType, IReadOnlySet<Guid> lookupOnly, CancellationToken ct)
@@ -994,10 +1027,21 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         budget.CancelAfter(SecureLookupRightsBudget);
         using var gate = new SemaphoreSlim(CallerRecordAccessProbe.MaxConcurrentRecordLookups);
+        var cacheFaults = new RightsCacheFaults();
 
         var answers = await Task.WhenAll(asked.Select(id =>
-                AskSecureLookupAsync(systemUserId, entityType, entitySet, id, gate, budget.Token, ct)))
+                AskSecureLookupAsync(systemUserId, entityType, entitySet, id, gate, cacheFaults, budget.Token, ct)))
             .ConfigureAwait(false);
+
+        if (cacheFaults.Count > 0)
+        {
+            // ONE Warning per composition, not one per id (#2121 round 2, K2): a cache outage would otherwise log up to
+            // MaxSecureLookupRightsChecks entries for each root type of every request.
+            _logger.LogWarning(cacheFaults.First,
+                "[WF-AUTHZ] The rights cache faulted {Count} time(s) for systemuser {SystemUserId} on Secure {EntityType}; " +
+                "each affected id was asked of Dataverse live (#2121).",
+                cacheFaults.Count, systemUserId, entityType);
+        }
 
         var confirmed = new HashSet<Guid>();
         for (var i = 0; i < asked.Count; i++)
@@ -1022,14 +1066,14 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
     /// <summary>One id's question for <see cref="ConfirmSecureLookupOnlyAsync"/>; never throws except for the caller's cancellation.</summary>
     private async Task<SecureLookupAnswer> AskSecureLookupAsync(
-        Guid systemUserId, string entityType, string entitySet, Guid id, SemaphoreSlim gate,
+        Guid systemUserId, string entityType, string entitySet, Guid id, SemaphoreSlim gate, RightsCacheFaults cacheFaults,
         CancellationToken budget, CancellationToken ct)
     {
         var tenantId = ImpersonatedRootSetSource.CacheTenantFor(_httpContextAccessor?.HttpContext?.User);
         var cacheId = SecureLookupRightsCacheId(systemUserId, entitySet, id);
         try
         {
-            if (await TryGetCachedRightsAsync(tenantId, cacheId, budget).ConfigureAwait(false) is { } cached)
+            if (await TryGetCachedRightsAsync(tenantId, cacheId, cacheFaults, budget).ConfigureAwait(false) is { } cached)
             {
                 return ClassifyRights(systemUserId, entityType, id, cached);
             }
@@ -1053,7 +1097,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 .GetPrincipalRightsAsync(systemUserId, entitySet, id, budget, LogLevel.Debug).ConfigureAwait(false);
 
             // Only an answer Dataverse GAVE is cached (Read or not); a 404 and a fault leave through the catches below.
-            await TrySetCachedRightsAsync(tenantId, cacheId, rights, ct).ConfigureAwait(false);
+            await TrySetCachedRightsAsync(tenantId, cacheId, rights, cacheFaults, ct).ConfigureAwait(false);
             return ClassifyRights(systemUserId, entityType, id, rights);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -1094,10 +1138,13 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     }
 
     // ── Rights cache: fail open on the CACHE, never on the ANSWER (ImpersonatedRootSetSource's contract) ─────────────
-    // A cache fault degrades to a live Dataverse question. A cancellation is rethrown: the caller's propagates, and the
-    // budget's is the id's timeout (AskSecureLookupAsync's catches).
+    // A cache fault degrades to a live Dataverse question and is counted, so the composition logs it ONCE (K2). Only a
+    // cancellation of the token passed is rethrown: the caller's propagates, and the budget's is the id's timeout
+    // (AskSecureLookupAsync's catches). A cancellation the cache raised itself (an inner timeout, the token NOT cancelled)
+    // is a cache fault like any other (#2121 round 2, K2): read as a Dataverse timeout, it would drop the id.
 
-    private async Task<AccessRights?> TryGetCachedRightsAsync(string tenantId, string cacheId, CancellationToken ct)
+    private async Task<AccessRights?> TryGetCachedRightsAsync(
+        string tenantId, string cacheId, RightsCacheFaults faults, CancellationToken ct)
     {
         if (_rightsCache is null)
         {
@@ -1110,19 +1157,19 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 tenantId, SecureLookupRightsCacheResource, cacheId, SecureLookupRightsCacheVersion, ct: ct).ConfigureAwait(false);
             return cached is null ? null : (AccessRights)cached.Rights;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex,
-                "[WF-AUTHZ] Rights cache read failed for {CacheId}; asking Dataverse live (#2121).", cacheId);
+            faults.Record(ex);
             return null;
         }
     }
 
-    private async Task TrySetCachedRightsAsync(string tenantId, string cacheId, AccessRights rights, CancellationToken ct)
+    private async Task TrySetCachedRightsAsync(
+        string tenantId, string cacheId, AccessRights rights, RightsCacheFaults faults, CancellationToken ct)
     {
         if (_rightsCache is null)
         {
@@ -1135,14 +1182,33 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 tenantId, SecureLookupRightsCacheResource, cacheId, SecureLookupRightsCacheVersion,
                 new CachedPrincipalRights((int)rights), ExternalParticipationService.CacheTtl, ct: ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex,
-                "[WF-AUTHZ] Rights cache write failed for {CacheId}; the live answer stands (#2121).", cacheId);
+            faults.Record(ex);
+        }
+    }
+
+    /// <summary>
+    /// The rights-cache faults of one <see cref="ConfirmSecureLookupOnlyAsync"/> (#2121 round 2, K2): counted across its
+    /// concurrent ids and logged once, with the first fault, after they all answer.
+    /// </summary>
+    private sealed class RightsCacheFaults
+    {
+        private int _count;
+        private Exception? _first;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public Exception? First => Volatile.Read(ref _first);
+
+        public void Record(Exception ex)
+        {
+            Interlocked.CompareExchange(ref _first, ex, null);
+            Interlocked.Increment(ref _count);
         }
     }
 
