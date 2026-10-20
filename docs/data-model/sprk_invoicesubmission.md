@@ -1,7 +1,7 @@
 # sprk_invoicesubmission (Invoice Submission)
 
 > **Project**: ebilling-r1, task 020 (FR-10, FR-05, FR-17, FR-20, D-37)
-> **Last Updated**: 2026-10-15
+> **Last Updated**: 2026-10-19
 > **Script**: `scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1` (idempotent, additive; a second run changes nothing)
 > **Solution**: `SpaarkeMaster` (unmanaged, in dev). Solution source, forms and views are synced by task 029.
 
@@ -25,8 +25,17 @@ User-owned, entity set `sprk_invoicesubmissions`, primary name `sprk_name` (text
 | `sprk_ponumber` | Text (100) | PO number as entered at submission (FR-18). |
 | `sprk_receivedon` | Date and time (user local) | When the submission was received. |
 | `sprk_correlationid` | Text (100) | Correlation id, same shape as on `sprk_invoice`. |
+| `sprk_adminattention` | Text (500), optional | Needs Admin Attention (D-133, task 049). Why this submission needs an administrator's review; empty when nothing does. The BFF sets it, server-side only, when a billing Signal the submission should have could not be created: a plan entry the Signal writer would refuse (`InvoiceSubmissionPersister`, same transaction update as `sprk_findingsjson`) or a permanent write refusal (`InvoiceSubmissionAfterSteps`, same update that records `signalWriteRefusals`). Codes only, never an extracted value, e.g. `2 Signals could not be created: record_owner_no_default_team (BILL-RATE on line 1a2b3c4d), core_record_changed (...)`; over 500 characters it ends with `... (+N more)`. The full detail stays in `sprk_findingsjson`. Code never clears it; an administrator clears it after review. Created by `scripts/ebilling/Deploy-EbillingSubmissionAttentionSchema.ps1` (idempotent; not yet run on dev, owner's OK; 053 adds it to SpaarkeMaster). Logical name constant: `InvoiceSubmissionPersister.SubmissionAdminAttention`. |
 
 The table's system `statecode` / `statuscode` keep the defaults (Active 1 / Inactive 2); the pipeline state is `sprk_processingstatus`.
+
+## Views
+
+| View | Filter | Columns | Sort | Created by |
+|---|---|---|---|---|
+| Submissions needing attention (public, D-133) | `sprk_adminattention` is not empty **or** `sprk_processingstatus` = Failed (100000004) | `sprk_name`, `sprk_trackingnumber`, `sprk_vendororg`, `sprk_processingstatus`, `sprk_outcomereasoncode`, `sprk_adminattention`, `sprk_receivedon`, `modifiedon` | Modified on, newest first | `scripts/ebilling/Deploy-EbillingSubmissionAttentionSchema.ps1` (with the column) |
+
+The customer administrator opens it in the Matter Management app to review submissions whose Signal could not be created and submissions that failed, and clears `sprk_adminattention` once reviewed. The main form and the Active view (`Deploy-EbillingFormsViews.ps1`) are separate.
 
 ## Lookups
 
