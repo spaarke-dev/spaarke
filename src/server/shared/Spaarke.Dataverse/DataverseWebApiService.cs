@@ -1767,18 +1767,45 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// (<see cref="AccessCheckDeniedErrorCode"/>, <see cref="NoReadAccessErrorCode"/>); any other 403 code, or a 403 whose
     /// body cannot be read, is <see langword="null"/>. Any other failure (throttling, a 5xx) throws, as in
     /// <see cref="RetrievePrincipalRightsAsync"/>.</para>
+    /// <para><b>Re-asking a 404</b> (unified-access-control-r2 task 036, option C). A 404 is also how Dataverse answers for a
+    /// record created seconds earlier that has not replicated yet. A caller that confirms a write right after a create
+    /// passes <paramref name="reaskOnNotFound"/>: after each 404 it is called with the number of attempts made so far, waits
+    /// as its own schedule says and returns <see langword="true"/> to ask again, or <see langword="false"/> to accept the
+    /// 404 as <see cref="AccessRights.None"/>. Only a 404 is re-asked; a 403 is answered at once. Without it (the default),
+    /// a 404 is <see cref="AccessRights.None"/> at once, as before. The schedule lives with the caller, so this layer holds
+    /// no timing policy.</para>
     /// </remarks>
     public async Task<AccessRights?> RetrievePrincipalRightsOrUnknownAsync(
         Guid principalSystemUserId,
         string entitySetName,
         Guid recordId,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Func<int, CancellationToken, Task<bool>>? reaskOnNotFound = null)
     {
-        using var response = await SendRetrievePrincipalAccessAsync(principalSystemUserId, entitySetName, recordId, ct);
+        for (var attempt = 1; ; attempt++)
+        {
+            using var response = await SendRetrievePrincipalAccessAsync(principalSystemUserId, entitySetName, recordId, ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                if (reaskOnNotFound is not null && await reaskOnNotFound(attempt, ct).ConfigureAwait(false))
+                    continue;
 
-        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            return AccessRights.None;
+                return AccessRights.None;
+            }
 
+            return await ReadPrincipalAccessOrUnknownAsync(response, principalSystemUserId, entitySetName, recordId, ct)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="RetrievePrincipalRightsOrUnknownAsync"/>'s reading of an answer that is not a 404: a 403 is "no rights"
+    /// only for <see cref="AccessDeniedErrorCodes"/> and UNKNOWN (<see langword="null"/>) otherwise; anything else is
+    /// <see cref="ReadPrincipalAccessAnswerAsync"/>'s.
+    /// </summary>
+    private async Task<AccessRights?> ReadPrincipalAccessOrUnknownAsync(
+        HttpResponseMessage response, Guid principalSystemUserId, string entitySetName, Guid recordId, CancellationToken ct)
+    {
         if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
         {
             var code = await TryReadErrorCodeAsync(response, ct).ConfigureAwait(false);
