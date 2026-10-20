@@ -1926,6 +1926,15 @@ pwsh scripts/ebilling/Deploy-EbillingRolePrivileges.ps1 -WhatIf
 pwsh scripts/ebilling/Deploy-EbillingRolePrivileges.ps1
 ```
 
+### `ebilling/Deploy-EbillingRuleSetScopeSchema.ps1`
+
+Creates the rule-set and rate-card scope schema for `ebilling-r1` task 080 (design note `projects/ebilling-r1/notes/rule-set-scope-design.md` S1-S4, S6-S8). On `sprk_ruleset`: the `sprk_matter`, `sprk_project` and `sprk_workassignment` lookups, the `Record` and `Firm record` options on `sprk_scope`, the `sprk_allbusinessunits` two-option (default Yes) and the `sprk_ruleset_businessunit` N:N to `businessunit`. On `sprk_ratecard`: the `sprk_scope` picklist (Firm / Core record), then a **backfill** of existing cards (one core lookup -> Core record, none -> Firm; a card with two lookups, or an inactive one, is left empty and listed; never overwrites a set value). On `sprk_matter`, `sprk_project` and `sprk_workassignment`: the `sprk_securedfrombusinessunit` lookup (D-141). No lookup uses delete-Restrict (D-172); every one is RemoveLink, and the script stops with exit 2 if an existing core lookup is not. It field-secures `sprk_ruleset.sprk_scope`, `sprk_firm` and the three new lookups (reader: Read for every user; writer: the BFF application users only) and the three snapshot columns (writer only, no reader), reusing the existing "Spaarke BFF-Managed Field Readers / Writers" pair without changing any profile's members (`-CreateProfiles` makes an ebilling-owned pair instead). Idempotent check-then-create, entity-scoped publish, SpaarkeMaster header. Escalates (exit 2) when a planned name or option value is already taken with another meaning. **Needs ontology-r1's schema-review PASS before a real run (D-144).** `-WhatIf` reads everything, writes nothing and lists every item it would create, change or skip; `-BackfillOnly` and `-SkipBackfill` run one half.
+
+```powershell
+pwsh scripts/ebilling/Deploy-EbillingRuleSetScopeSchema.ps1 -WhatIf
+pwsh scripts/ebilling/Deploy-EbillingRuleSetScopeSchema.ps1
+```
+
 ### `content-understanding/Deploy-Analyzers.ps1`
 
 Deploys Azure AI Content Understanding analyzers from `infrastructure/content-understanding/*.json` (GA API 2025-11-01, Entra token, no keys). Creates a missing analyzer, does nothing when the deployed one matches, and refuses to overwrite a differing one unless `-Replace` is passed. Analyzer ids allow only letters, digits, `.` and `_` (`sprk_invoice_v1`). Supports `-WhatIf`.
