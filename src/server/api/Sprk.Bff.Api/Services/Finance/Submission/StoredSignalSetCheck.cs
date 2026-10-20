@@ -12,7 +12,8 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// is a CLAIM: its Signal ids, read time and subjects are never taken as they stand. Each Signal is read app-only and its subject is taken
 /// from the ROW (the subject lookup that repeats the pair id, <see cref="SignalWriter.SubjectEntityOf"/>, the commit route's rule), and the
 /// row's dedupe key must name the same subject. Every subject must be the invoice itself or one of ITS lines. The read time must lie inside
-/// the submission's life: not before it was created, not after now plus <see cref="FutureSkew"/>.
+/// the submission's life: not before it was created, not after now, each allowing <see cref="FutureSkew"/>. Each Signal's claimed policy
+/// code must be its row's.
 /// </summary>
 /// <remarks>
 /// <para>Used by 049's automatic rejection (<c>resolvedSignalSet</c>, resumed from the findings) and 105's override and return
@@ -27,7 +28,8 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// </remarks>
 internal static class StoredSignalSetCheck
 {
-    /// <summary>How far a stored read time may be ahead of this server's clock (servers' clocks differ by seconds; a minute is generous).</summary>
+    /// <summary>How far a stored read time may be ahead of this server's clock, or behind the submission's Dataverse-set <c>createdon</c>
+    /// (servers' clocks differ by seconds; a minute is generous).</summary>
     internal static readonly TimeSpan FutureSkew = TimeSpan.FromMinutes(1);
 
     /// <summary>The submission column that bounds a stored read time from below: <c>createdon</c>, set by Dataverse when the BFF creates the
@@ -83,7 +85,9 @@ internal static class StoredSignalSetCheck
         }
 
         var startedUtc = started.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(started, DateTimeKind.Utc) : started.ToUniversalTime();
-        if (set.SetReadAtUtc < startedUtc)
+        // K1 (ontology-r1 round 2): createdon is Dataverse's clock and the read time this server's, so the lower bound allows the same skew
+        // as the upper one; without it a server running behind Dataverse would refuse its own set, and a 049 resume, permanently.
+        if (set.SetReadAtUtc < startedUtc - FutureSkew)
         {
             return Result.No("read_before_processing");
         }
@@ -104,6 +108,7 @@ internal static class StoredSignalSetCheck
         IGenericEntityService entities, Guid invoiceId, InvoiceSubmissionAfterSteps.ResolvedSignalSet set, CancellationToken ct)
     {
         var ids = set.Signals.Select(s => s.Id).Distinct().ToList();
+        var claimed = set.Signals.ToLookup(s => s.Id, s => s.PolicyCode);
         if (ids.Count == 0)
         {
             return new Result(true, null, []);
@@ -121,7 +126,10 @@ internal static class StoredSignalSetCheck
                 continue;
             }
 
-            if (RowSubjectOf(row) is not { } subject)
+            // F1-b (ontology-r1 round 2): the policy code the set claims must be the ROW's. The claimed code is what the close and the
+            // record's resolvedSignalSet fact carry, so a planted code would otherwise reach the append-only record.
+            if (RowSubjectOf(row) is not { } subject
+                || claimed[row.Id].Any(code => !string.Equals(code, subject.PolicyCode, StringComparison.Ordinal)))
             {
                 return Result.No("subject_unreadable");
             }

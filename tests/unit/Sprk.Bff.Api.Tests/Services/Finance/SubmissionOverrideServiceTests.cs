@@ -1821,14 +1821,18 @@ public class SubmissionOverrideServiceTests
     // ═════════════════════════════════════════════════════════════════════════════════════════════════
 
     /// <summary>Plants a <c>humanDecisionSignalSet</c> as a user with Write on the submission could: any ids, any read time, no subjects.</summary>
-    private static void PlantSet(World w, Guid decisionId, DateTime readAtUtc, params Guid[] signalIds)
+    private static void PlantSet(World w, Guid decisionId, DateTime readAtUtc, params Guid[] signalIds) =>
+        PlantSetClaiming(w, decisionId, readAtUtc, "EB-RATE", signalIds);
+
+    /// <summary><see cref="PlantSet"/>, every Signal claimed under <paramref name="policyCode"/>.</summary>
+    private static void PlantSetClaiming(World w, Guid decisionId, DateTime readAtUtc, string policyCode, params Guid[] signalIds)
     {
         var root = JsonNode.Parse(w.FindingsJson)!.AsObject();
         root[SubmissionOverrideService.HumanDecisionSetMember] = new JsonObject
         {
             ["decisionId"] = decisionId.ToString("D"),
             ["setReadAtUtc"] = readAtUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
-            ["signals"] = new JsonArray(signalIds.Select(id => (JsonNode)new JsonObject { ["id"] = id.ToString("D"), ["policyCode"] = "EB-RATE" }).ToArray()),
+            ["signals"] = new JsonArray(signalIds.Select(id => (JsonNode)new JsonObject { ["id"] = id.ToString("D"), ["policyCode"] = policyCode }).ToArray()),
             ["subjects"] = new JsonArray(),
         };
         w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString();
@@ -1871,8 +1875,8 @@ public class SubmissionOverrideServiceTests
         w.Probe.RightsAsked.Should().Contain((World.Token, "sprk_invoices", World.InvoiceId), "the line's subject, from its ROW, asked on its parent invoice");
     }
 
-    [Theory(DisplayName = "105 F1-1 (3): a stored read time before the submission was created, or in the future, is refused 409 findings_unreadable")]
-    [InlineData(-1)]
+    [Theory(DisplayName = "105 F1-1 (3): a stored read time before the submission was created (beyond the skew), or in the future, is refused 409 findings_unreadable")]
+    [InlineData(-2)]
     [InlineData(+10)]
     public async Task Override_WithAStoredReadTimeOutOfBounds_IsRefused(int minutes)
     {
@@ -1981,6 +1985,146 @@ public class SubmissionOverrideServiceTests
         w.RecordCreates.Should().Be(1);
         w.Recorded.Last().ResolvedSignalIds.Should().BeEquivalentTo([onInvoice, onLine, acknowledged]);
         w.ClosedBy.Should().NotContainKey(raisedLater);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // ontology-r1 round 2: F1-a (a planted sprk_invoice), F1-b (a planted policy code), K1 (createdon skew), K3 (no decider)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid PlantedInvoice = Guid.Parse("10500000-0000-4000-8000-0000000000f1");
+
+    /// <summary>
+    /// F1-a: what a Core User with Write on the submission could do: point its user-writable <c>sprk_invoice</c> at ANOTHER invoice B (In
+    /// Review, filed under the same matter, readable and movable) and make the findings name B too. B is not the invoice the persister
+    /// created for the submission (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>).
+    /// </summary>
+    private static void PointAtPlantedInvoice(World w)
+    {
+        var invoiceB = new Entity("sprk_invoice", PlantedInvoice)
+        {
+            ["statuscode"] = new OptionSetValue(InvoiceStatusCodes.StatusCodeOf(InvoiceLifecycleStatus.InReview)),
+            ["sprk_matter"] = new EntityReference("sprk_matter", World.Matter),
+        };
+        w.Entities.Setup(e => e.RetrieveAsync("sprk_invoice", PlantedInvoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, Guid _, string[] columns, CancellationToken _) => Task.FromResult(World.Copy(invoiceB, columns)));
+        w.Lifecycle.Setup(l => l.TransitionAsync(PlantedInvoice, It.IsAny<InvoiceLifecycleStatus>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid _, InvoiceLifecycleStatus target, CancellationToken _) =>
+            {
+                w.Order.Add("transition");
+                w.Transitions.Add(target);
+                return Task.FromResult(InvoiceTransitionResult.Moved(InvoiceLifecycleStatus.InReview, target));
+            });
+        w.Records.Rows[("sprk_invoice", PlantedInvoice)] = new Entity("sprk_invoice", PlantedInvoice) { ["sprk_matter"] = new EntityReference("sprk_matter", World.Matter) };
+
+        var root = JsonNode.Parse(w.FindingsJson)!.AsObject();
+        root["invoiceId"] = PlantedInvoice.ToString("D");
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString();
+        w.Submission[InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference("sprk_invoice", PlantedInvoice);
+    }
+
+    [Theory(DisplayName = "105 F1-a: a submission whose sprk_invoice was pointed at ANOTHER invoice (no open Signal there) is 409 invoice_not_held; nothing is recorded under it or moved")]
+    [InlineData("override")]
+    [InlineData("return")]
+    public async Task Decision_OfASubmissionLinkingAnInvoiceItDidNotCreate_IsRefused_AndNothingIsWritten(string verb)
+    {
+        var w = await World.CreateAsync();
+        PointAtPlantedInvoice(w);
+
+        var result = await Decide(w, verb);
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.InvoiceNotHeld);
+        w.RecordCreates.Should().Be(0, "no Decision Record under the planted invoice");
+        w.Recorded.Should().BeEmpty();
+        w.Transitions.Should().BeEmpty("the planted invoice is not moved to Returned to Firm");
+        w.Updates.Should().BeEmpty();
+        w.SetStores.Should().BeEmpty();
+        w.Order.Should().BeEmpty("refused before the lock, any read of the planted invoice or any write");
+        IsHeld(w.Submission).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "105 F1-a: a repeat of a decided submission whose sprk_invoice was pointed at ANOTHER invoice re-closes nothing, even when a record under that invoice lists its Signal")]
+    public async Task Repeat_OfASubmissionLinkingAnInvoiceItDidNotCreate_ClosesNothing()
+    {
+        var w = await World.CreateAsync();
+        PointAtPlantedInvoice(w);
+        var onB = w.AddSignal("sprk_invoice", PlantedInvoice, "EB-AGE");
+
+        // A writer-created record of this submission's override under B, listing B's Signal (what the decide path wrote before F1-a).
+        var stored = InvoiceSubmissionAfterSteps.StoredFindings.Parse(w.FindingsJson)!;
+        var set = new InvoiceSubmissionAfterSteps.ResolvedSignalSet(FirstReadAt, [new InvoiceSubmissionAfterSteps.ResolvedSignal(onB, "EB-AGE")]);
+        await w.Recorder.RecordAsync(SubmissionOverrideService.BuildDecision(
+            SubmissionOverrideService.Verb.Override, stored, World.SubmissionId, PlantedInvoice, World.Caller, Reason, set), CancellationToken.None);
+        w.RecordCreates.Should().Be(1, "the fixture: a writer-created record under B exists");
+        w.SetSubmission(InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden);
+
+        var repeat = await w.OverrideAsync();
+
+        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided, "the repeat's answer is unchanged");
+        w.Closes.Should().BeEmpty("only the invoice the submission created is ever re-closed");
+        w.ClosedBy.Should().NotContainKey(onB);
+        w.FindCalls.Should().Be(0, "the record is not even looked up under a planted invoice");
+    }
+
+    [Fact(DisplayName = "105 F1-b: a stored set naming the invoice's own Signal under ANOTHER policy code (claimed EB-AGE, the row EB-RATE) is refused 409 findings_unreadable; nothing is recorded or closed")]
+    public async Task Override_WithAStoredSetClaimingAnotherPolicyCode_IsRefused()
+    {
+        var w = await World.CreateAsync();
+        var line = w.AddLine();
+        var own = w.AddSignal("sprk_billingevent", line, "EB-RATE");
+        PlantSetClaiming(w, SubmissionOverrideService.OverrideDecisionIdFor(World.SubmissionId), World.CreatedOn.AddMinutes(5), "EB-AGE", own);
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.FindingsUnreadable);
+        w.Closes.Should().BeEmpty();
+        w.Recorded.Should().BeEmpty("the claimed code never reaches the record's resolvedSignalSet fact");
+        w.RecordCreates.Should().Be(0);
+        w.Probe.RightsAsked.Should().BeEmpty("refused before any rights are asked");
+    }
+
+    [Theory(DisplayName = "105 K1: a stored read time up to the skew BEFORE createdon (Dataverse's clock) is trusted; past the skew it is refused")]
+    [InlineData(-30, true)]
+    [InlineData(-60, true)]
+    [InlineData(-61, false)]
+    public async Task Override_WithAStoredReadTimeJustBeforeCreatedOn_IsTrustedWithinTheSkew(int seconds, bool trusted)
+    {
+        var w = await World.CreateAsync();
+        var line = w.AddLine();
+        var own = w.AddSignal("sprk_billingevent", line, "EB-RATE");
+        PlantSet(w, SubmissionOverrideService.OverrideDecisionIdFor(World.SubmissionId), World.CreatedOn.AddSeconds(seconds), own);
+
+        var result = await w.OverrideAsync();
+
+        if (trusted)
+        {
+            result.Kind.Should().Be(BlockedDecisionKind.Decided, "the BFF's clock may run behind Dataverse's by up to the skew");
+            w.ClosedBy.Should().ContainKey(own);
+        }
+        else
+        {
+            result.ErrorCode.Should().Be(BlockedSubmissionErrors.FindingsUnreadable);
+            w.Closes.Should().BeEmpty();
+        }
+    }
+
+    [Fact(DisplayName = "105 K3: a repeat whose writer-created record names no decider (sprk_confirmedby) re-closes nothing and warns")]
+    public async Task Repeat_WhoseRecordNamesNoDecider_ClosesNothing_AndWarns()
+    {
+        var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
+        w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
+        var first = await w.OverrideAsync();
+        w.CloseFault = _ => null;
+        w.Records.Created.Single(e => e.LogicalName == "sprk_decisionrecord").Attributes.Remove("sprk_confirmedby");
+        var closes = w.Closes.Count;
+
+        var repeat = await w.OverrideAsync();
+
+        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        w.Closes.Should().HaveCount(closes, "no close in no one's name");
+        w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("names no decider", StringComparison.Ordinal)
+            && e.Message.Contains(first.RecordId!.Value.ToString("D"), StringComparison.Ordinal));
     }
 
     private static string FindFromRepoRoot(params string[] parts)

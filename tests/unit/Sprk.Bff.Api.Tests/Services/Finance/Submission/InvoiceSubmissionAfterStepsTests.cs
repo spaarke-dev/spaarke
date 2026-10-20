@@ -1628,8 +1628,8 @@ public class InvoiceSubmissionAfterStepsTests
         StatusOf(foreign).Should().Be(SignalWriter.SignalStatusOpen);
     }
 
-    [Theory(DisplayName = "049 F1-1: a planted read time before the submission was created, or in the future, is refused (findings_unreadable)")]
-    [InlineData(-1)]
+    [Theory(DisplayName = "049 F1-1: a planted read time before the submission was created (beyond the skew), or in the future, is refused (findings_unreadable)")]
+    [InlineData(-2)]
     [InlineData(+10)]
     public async Task AutoRejected_APlantedReadTimeOutOfBounds_IsRefused(int minutes)
     {
@@ -1660,6 +1660,60 @@ public class InvoiceSubmissionAfterStepsTests
 
         result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
         world.Closes.Select(c => c.Signal).Should().Equal(ownId);
+    }
+
+    /// <summary>A Signal of the invoice's own, seeded under <paramref name="rowPolicyCode"/> and given <paramref name="id"/> (the id a planted
+    /// set names).</summary>
+    private static Entity SeedOwnInvoiceSignal(World world, Guid id, string rowPolicyCode)
+    {
+        var own = world.Seed(InvoiceKey(rowPolicyCode, 1), SignalWriter.SignalStatusOpen, "[]");
+        world.Signals.Remove(world.Signals.Single(s => s.Value.Id == own.Id).Key);
+        own.Id = id;
+        world.Signals[InvoiceKey(rowPolicyCode, 1)] = own;
+        return own;
+    }
+
+    [Fact(DisplayName = "049 F1-b (ontology-r1 round 2): a stored set naming the invoice's own Signal under ANOTHER policy code than its row's is refused (findings_unreadable): nothing recorded, nothing closed")]
+    public async Task AutoRejected_AStoredSetClaimingAnotherPolicyCode_IsRefused()
+    {
+        var outcome = await AutoRejected();
+        var ownId = Guid.NewGuid();
+        var world = new World(outcome, PlantedSet(CreatedOn.AddMinutes(5), ownId)); // claims BILL-THRESHOLD
+        var own = SeedOwnInvoiceSignal(world, ownId, "BILL-RATE");
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
+        result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.FindingsUnreadableCode);
+        world.RecordCreates.Should().Be(0, "the claimed code never reaches the record's resolvedSignalSet fact");
+        world.Closes.Should().BeEmpty();
+        StatusOf(own).Should().Be(SignalWriter.SignalStatusOpen);
+    }
+
+    [Theory(DisplayName = "049 K1 (ontology-r1 round 2): a stored read time up to the skew BEFORE createdon (Dataverse's clock) is trusted on resume; past it, refused")]
+    [InlineData(-30, true)]
+    [InlineData(-60, true)]
+    [InlineData(-61, false)]
+    public async Task AutoRejected_AStoredReadTimeJustBeforeCreatedOn_IsTrustedWithinTheSkew(int seconds, bool trusted)
+    {
+        var outcome = await AutoRejected();
+        var ownId = Guid.NewGuid();
+        var world = new World(outcome, PlantedSet(CreatedOn.AddSeconds(seconds), ownId));
+        SeedOwnInvoiceSignal(world, ownId, "BILL-THRESHOLD");
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        if (trusted)
+        {
+            result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+            world.Closes.Select(c => c.Signal).Should().Equal(ownId);
+        }
+        else
+        {
+            result.Status.Should().Be(SubmissionAfterStepsStatus.Refused);
+            result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.FindingsUnreadableCode);
+            world.Closes.Should().BeEmpty();
+        }
     }
 
     private static InvoiceSubmissionAfterSteps.ResolvedSignalSet? StoredSet(World world) =>

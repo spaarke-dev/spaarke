@@ -560,6 +560,16 @@ public sealed class SubmissionOverrideService
                 "The submission has no invoice to release or return.");
         }
 
+        if (invoiceId != InvoiceSubmissionPersister.InvoiceIdFor(submissionId))
+        {
+            // F1-a (ontology-r1 round 2): sprk_invoice is user-writable, but the persister only ever links the invoice derived from the
+            // submission id (049 requires the same). Any other invoice is a planted link: deciding it would record and move an invoice the
+            // caller may hold no Write on.
+            _logger.LogWarning("Submission {SubmissionId} links invoice {InvoiceId}, not the invoice it created; it cannot be decided", submissionId, invoiceId);
+            return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.InvoiceNotHeld,
+                "The submission's invoice is not the one it created, so there is nothing to release or return.");
+        }
+
         // ── 4. One decision at a time per invoice (074 K-4). ──
         var key = LockKey(invoiceId);
         var owner = Guid.NewGuid().ToString("N");
@@ -1130,8 +1140,10 @@ public sealed class SubmissionOverrideService
     private async Task RecloseAsync(Verb verb, Entity row, string? token, CancellationToken ct)
     {
         var submissionId = row.Id;
-        if (row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id is not { } invoiceId || invoiceId == Guid.Empty)
+        if (row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id is not { } invoiceId || invoiceId == Guid.Empty
+            || invoiceId != InvoiceSubmissionPersister.InvoiceIdFor(submissionId))
         {
+            // F1-a: only the invoice the submission created (sprk_invoice is user-writable); any other link closes nothing.
             return;
         }
 
@@ -1147,8 +1159,16 @@ public sealed class SubmissionOverrideService
                 return;
             }
 
-            if (recorded.Signals.Count == 0 || recorded.ConfirmedByUserId is not { } by)
+            if (recorded.Signals.Count == 0)
             {
+                return;
+            }
+
+            if (recorded.ConfirmedByUserId is not { } by)
+            {
+                // K3: a human decision's record always names its decider, so this one cannot be re-closed in anyone's name.
+                _logger.LogWarning("Submission {SubmissionId}: Decision Record {RecordId} of its {Verb} names no decider; its {Count} Signals are not re-closed",
+                    submissionId, recorded.RecordId, verb, recorded.Signals.Count);
                 return;
             }
 
