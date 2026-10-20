@@ -1391,6 +1391,20 @@ public class SubmissionOverrideServiceTests
     }
 
     [Fact]
+    public async Task Get_OfASubmissionLinkingAnInvoiceItDidNotCreate_CannotOverrideOrReturn_AndNeverAsksThePrivilege()
+    {
+        var w = await World.CreateAsync();
+        PointAtPlantedInvoice(w);
+
+        var view = await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None);
+
+        view!.State.Should().Be("Blocked");
+        view.CanOverride.Should().BeFalse("the POST refuses a planted link with InvoiceNotHeld");
+        view.CanReturn.Should().BeFalse();
+        w.Probe.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Get_AfterAnOverride_MarksTheBlockingFindingsOverridden_WithoutRemovingThem()
     {
         var w = await World.CreateAsync();

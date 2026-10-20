@@ -435,7 +435,8 @@ public sealed class SubmissionOverrideService
 
         var canOverride = false;
         var canReturn = false;
-        if (disposition == Disposition.Blocked && invoiceId is { } held)
+        // F1-a: a planted sprk_invoice (not the one the submission created) is refused by Override and Return, so neither is offered.
+        if (disposition == Disposition.Blocked && invoiceId is { } held && held == InvoiceSubmissionPersister.InvoiceIdFor(submissionId))
         {
             InvoiceLifecycleStatus? invoiceStatus;
             try
