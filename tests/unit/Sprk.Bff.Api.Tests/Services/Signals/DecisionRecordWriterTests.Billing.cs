@@ -1265,6 +1265,31 @@ public sealed partial class DecisionRecordWriterTests
         h.Created.Should().ContainSingle("a read writes nothing");
     }
 
+    [Fact(DisplayName = "K2 (ontology-r1 round 2): the many-subject lookup reads the SECOND page (MoreRecords + paging cookie), and a record found only there is answered")]
+    public async Task Billing_StoredSets_ARecordOnTheSecondPage_IsFound_ThroughThePagingCookie()
+    {
+        var h = BillingHarness();
+        var other = Guid.NewGuid();
+        var firstPage = KeyedRecord(other, Guid.NewGuid()); // another decision's: ignored
+        var secondPage = KeyedRecord(LineId, BillingDecision);
+        var pages = new List<(int PageNumber, string? Cookie)>();
+        h.Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_decisionrecord"), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression query, CancellationToken _) =>
+            {
+                pages.Add((query.PageInfo.PageNumber, query.PageInfo.PagingCookie));
+                return Task.FromResult(query.PageInfo.PageNumber == 1
+                    ? new EntityCollection([firstPage]) { MoreRecords = true, PagingCookie = "<cookie page=\"1\" />" }
+                    : new EntityCollection([secondPage]) { MoreRecords = false });
+            });
+
+        var found = await h.Writer.FindBillingDecisionResolvedSetsAsync("sprk_billingevent", [LineId, other], BillingDecision);
+
+        pages.Should().Equal([(1, null), (2, "<cookie page=\"1\" />")], "page two is asked with page one's cookie, and the loop stops when MoreRecords is false");
+        found[LineId].Should().NotBeNull("the record on the second page is this decision's");
+        found[LineId]!.RecordId.Should().Be(secondPage.Id);
+        found[other].Should().BeNull();
+    }
+
     [Fact]
     public async Task Billing_StoredSets_TwoRecordsUnderOneSubjectsKey_FailClosed()
     {
