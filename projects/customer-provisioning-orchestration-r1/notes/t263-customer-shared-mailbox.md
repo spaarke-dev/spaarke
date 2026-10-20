@@ -155,11 +155,11 @@ Get-ManagementRoleEntry '*\Add-DistributionGroupMember' -Parameters BypassSecuri
 
 # 1. Create role: New-Mailbox, shared parameter set only
 New-ManagementRole -Name 'Spaarke Shared Mailbox Create' -Parent 'Mail Recipient Creation' -EnabledCmdlets New-Mailbox
-Set-ManagementRoleEntry 'Spaarke Shared Mailbox Create\New-Mailbox' -Parameters Shared,Name,Alias,DisplayName,PrimarySmtpAddress
+Set-ManagementRoleEntry 'Spaarke Shared Mailbox Create\New-Mailbox' -Parameters Shared,Name,Alias,DisplayName,PrimarySmtpAddress,ErrorAction,ErrorVariable,WarningAction,WarningVariable,OutVariable,OutBuffer,Confirm,WhatIf   # common parameters: T186 L62
 
 # 2. Membership role: Add-DistributionGroupMember only
 New-ManagementRole -Name 'Spaarke Scope Group Membership' -Parent 'Security Group Creation and Membership' -EnabledCmdlets Add-DistributionGroupMember
-Set-ManagementRoleEntry 'Spaarke Scope Group Membership\Add-DistributionGroupMember' -Parameters Identity,Member,BypassSecurityGroupManagerCheck
+Set-ManagementRoleEntry 'Spaarke Scope Group Membership\Add-DistributionGroupMember' -Parameters Identity,Member,BypassSecurityGroupManagerCheck,ErrorAction,ErrorVariable,WarningAction,WarningVariable,OutVariable,OutBuffer,Confirm,WhatIf   # common parameters: T186 L62
 
 # 3. Scope: only the customers' scope groups
 New-ManagementScope -Name 'Spaarke Customer Scope Groups' -RecipientRestrictionFilter "RecipientTypeDetails -eq 'MailUniversalSecurityGroup' -and Name -like 'Spaarke-AppAccess-*'"
