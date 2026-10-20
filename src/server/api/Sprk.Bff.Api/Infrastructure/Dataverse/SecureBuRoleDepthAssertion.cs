@@ -297,6 +297,15 @@ public static class SecureBuRoleDepthAssertion
                 continue; // A deliberate per-identity administrator. The accepted exception.
             }
 
+            if (!administrative && HoldsAnAdministrativeRoleThatReachesDirectly(census, grant, secureBu))
+            {
+                // #2131: the same identity holds an allow-listed administrative role BY DIRECT ASSIGNMENT, and that role
+                // already reaches the secure BU on this privilege: the accepted per-identity exception. This grant confers
+                // nothing it does not already hold, and reporting it labelled a designated administrator "a
+                // non-administrator human". A team-held administrative role is not a designation, so it exempts nothing.
+                continue;
+            }
+
             if (administrative && HoldsTheSameRoleDirectly(census, grant))
             {
                 // The identity is independently a designated administrator; the team path confers
@@ -312,7 +321,7 @@ public static class SecureBuRoleDepthAssertion
                 // it silently promotes every current AND future member.
                 yield return new SecureBuFinding(
                     SecureBuVerdict.AdministrativeRoleHeldByTeam,
-                    $"'{grant.PrincipalName}' ({grant.PrincipalDomainName ?? "no domain"}) reaches the "
+                    $"systemuser {grant.PrincipalId} reaches the "
                         + $"secure business unit '{secureBu.Name}' through the ALLOW-LISTED administrative "
                         + $"role '{grant.RoleName}' ({grant.PrivilegeName} @ {grant.Depth}, anchored at BU "
                         + $"{grant.AnchorBusinessUnitId}) — but holds it via team '{grant.HeldViaTeam}', "
@@ -326,8 +335,8 @@ public static class SecureBuRoleDepthAssertion
 
             yield return new SecureBuFinding(
                 SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit,
-                $"SECURE PROJECTS ARE NOT ISOLATED: '{grant.PrincipalName}' "
-                    + $"({grant.PrincipalDomainName ?? "no domain"}) — a non-administrator human — holds "
+                $"SECURE PROJECTS ARE NOT ISOLATED: systemuser {grant.PrincipalId} "
+                    + "— a non-administrator human — holds "
                     + $"'{grant.RoleName}' granting {grant.PrivilegeName} at {grant.Depth} depth anchored "
                     + $"at business unit {grant.AnchorBusinessUnitId}"
                     + (grant.HeldViaTeam is null ? string.Empty : $" (via team '{grant.HeldViaTeam}')")
@@ -340,17 +349,39 @@ public static class SecureBuRoleDepthAssertion
 
     /// <summary>
     /// Whether the same principal also holds the same role by DIRECT assignment — i.e. whether the
-    /// team-conferred copy is redundant. Identity is matched on domain name where present, because a
-    /// display name is not unique (dev has three enabled <c>Ralph Schroeder</c> identities).
+    /// team-conferred copy is redundant. Identity is matched by <see cref="SamePrincipal"/>.
     /// </summary>
     private static bool HoldsTheSameRoleDirectly(SecureBuRoleDepthCensus census, EffectiveGrant grant) =>
         census.Grants.Any(other =>
             other.HeldViaTeam is null
             && string.Equals(other.RoleName, grant.RoleName, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(
-                other.PrincipalDomainName ?? other.PrincipalName,
-                grant.PrincipalDomainName ?? grant.PrincipalName,
-                StringComparison.OrdinalIgnoreCase));
+            && SamePrincipal(other, grant));
+
+    /// <summary>
+    /// #2131: whether the same principal holds an ALLOW-LISTED administrative role by DIRECT assignment whose grant of the
+    /// same privilege itself reaches the secure BU, so a non-administrative grant adds no reach the accepted exception does
+    /// not already cover. An administrative role held only through a team never counts (it is itself a finding), and
+    /// neither does a direct one that does not reach: the holder's other reach is then covered by no exception.
+    /// </summary>
+    private static bool HoldsAnAdministrativeRoleThatReachesDirectly(
+        SecureBuRoleDepthCensus census, EffectiveGrant grant, BusinessUnitNode secureBu) =>
+        census.Grants.Any(other =>
+            other.HeldViaTeam is null
+            && AdministrativeRoleAllowList.Contains(other.RoleName, StringComparer.OrdinalIgnoreCase)
+            && string.Equals(other.PrivilegeName, grant.PrivilegeName, StringComparison.Ordinal)
+            && Reaches(other.Depth, other.AnchorBusinessUnitId, secureBu.Id, census.BusinessUnits)
+            && SamePrincipal(other, grant));
+
+    /// <summary>
+    /// Whether two grants belong to the same identity. Matched on domain name where present, because a display name is not
+    /// unique (dev has three enabled <c>Ralph Schroeder</c> identities). For matching only: neither name is ever put into
+    /// a finding message (#2130: messages are logged and returned, so principals are named by systemuser id).
+    /// </summary>
+    private static bool SamePrincipal(EffectiveGrant a, EffectiveGrant b) =>
+        string.Equals(
+            a.PrincipalDomainName ?? a.PrincipalName,
+            b.PrincipalDomainName ?? b.PrincipalName,
+            StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Clause 4 (task 144) — the no-user business unit. Every record owned by ANY team in the secure BU has that BU as
@@ -502,15 +533,19 @@ public static class SecureBuRoleDepthAssertion
 public static class SecureBuRoleDepthCensusBuilder
 {
     /// <summary>
-    /// A human principal: a real, enabled, interactive person. Everything else — application users,
-    /// Microsoft platform accounts (<c>#</c>-prefixed), support and non-interactive access modes,
-    /// disabled users — is the documented Global-read exception for clause 1 (design §5.2). Clauses 2 and 4 count
-    /// EVERY principal regardless.
+    /// A human principal: a real, enabled, interactive person. Everything else — application users (the Microsoft
+    /// platform accounts are application users), support and non-interactive access modes, disabled users — is the
+    /// documented Global-read exception for clause 1 (design §5.2). Clauses 2 and 4 count EVERY principal regardless.
     /// </summary>
-    public static bool IsHumanPrincipal(bool hasApplicationId, bool isDisabled, string fullName, int accessMode) =>
+    /// <remarks>
+    /// #2131: the display name is NOT part of the test. A <c>#</c>-prefixed full name used to exempt the user, but a
+    /// platform account is already marked by its application id or its access mode, and an interactive person can carry
+    /// such a name (dev had three enabled, licensed, access-mode-0 users skipped that way, two of them <c>#EXT#</c>
+    /// guests, all of them reading secure records).
+    /// </remarks>
+    public static bool IsHumanPrincipal(bool hasApplicationId, bool isDisabled, int accessMode) =>
         !hasApplicationId
         && !isDisabled
-        && !fullName.StartsWith('#')
         && accessMode is not 3 and not 4; // 3 = Support User, 4 = Non-interactive.
 
     /// <summary>Builds the census from directory rows.</summary>
@@ -591,7 +626,7 @@ public static class SecureBuRoleDepthCensusBuilder
         var ownerRoleHolders = new List<SecureOwnerRoleHolder>();
         foreach (var user in users.Where(u => u.RoleIds.Any(ownerRoleCopyIds.Contains)))
         {
-            ownerRoleHolders.Add(new SecureOwnerRoleHolder($"user '{user.Name}' ({user.DomainName ?? "no domain"})", IsSecureOwnerTeam: false));
+            ownerRoleHolders.Add(new SecureOwnerRoleHolder($"systemuser {user.Id}", IsSecureOwnerTeam: false));
         }
 
         foreach (var team in teams.Where(t => t.RoleIds.Any(ownerRoleCopyIds.Contains)))
@@ -713,8 +748,9 @@ public static class SecureBuRoleDepthCensusBuilder
             return $"systemuser {userId} (not in the user census)";
         }
 
+        // #2130: by id only. A person's display name and domain name (UPN) never enter a finding message.
         var kind = user.IsHuman ? "human" : "non-human/disabled";
-        return $"{user.Name} ({user.DomainName ?? "no domain"}; {kind})";
+        return $"systemuser {user.Id} ({kind})";
     }
 
     private static void AddGrants(
@@ -743,6 +779,7 @@ public static class SecureBuRoleDepthCensusBuilder
                 privilege,
                 depth,
                 anchorOverride ?? role.BusinessUnitId,
+                principal.Id,
                 principal.Name,
                 principal.DomainName,
                 principal.IsHuman,
@@ -790,8 +827,9 @@ public sealed record BusinessUnitNode(Guid Id, string Name, Guid? ParentId);
 /// <param name="PrivilegeName">One of <see cref="SecureBuRoleDepthAssertion.GuardedPrivileges"/>.</param>
 /// <param name="Depth">The depth the ROOT role grants; child copies inherit it.</param>
 /// <param name="AnchorBusinessUnitId">The BU the depth is evaluated from — see <c>Reaches</c>.</param>
-/// <param name="PrincipalName">Display name, for the log.</param>
-/// <param name="PrincipalDomainName">UPN, for the log.</param>
+/// <param name="PrincipalId">The systemuser id: how a finding names the principal (#2130).</param>
+/// <param name="PrincipalName">Display name, for identity matching only; never put into a finding message.</param>
+/// <param name="PrincipalDomainName">UPN, for identity matching only; never put into a finding message (#2130).</param>
 /// <param name="PrincipalIsHuman">False for application users, disabled users and platform accounts.</param>
 /// <param name="HeldViaTeam">Team name when held through a team; null for direct user assignment.</param>
 public sealed record EffectiveGrant(
@@ -799,13 +837,14 @@ public sealed record EffectiveGrant(
     string PrivilegeName,
     PrivilegeDepth Depth,
     Guid AnchorBusinessUnitId,
+    Guid PrincipalId,
     string PrincipalName,
     string? PrincipalDomainName,
     bool PrincipalIsHuman,
     string? HeldViaTeam);
 
 /// <summary>A principal holding <see cref="SecureBuRoleDepthAssertion.SecureOwnerRoleName"/>.</summary>
-/// <param name="PrincipalName">Who holds it, for the log.</param>
+/// <param name="PrincipalName">Who holds it, for the log: a team by name, a user by systemuser id only (#2130).</param>
 /// <param name="IsSecureOwnerTeam">True only for the NAMED secure owner team (task 144) — never the default team.</param>
 public sealed record SecureOwnerRoleHolder(string PrincipalName, bool IsSecureOwnerTeam);
 

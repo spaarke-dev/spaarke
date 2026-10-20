@@ -118,7 +118,6 @@ public static class SecureRecordIsolationCensus
                 var isHuman = SecureBuRoleDepthCensusBuilder.IsHumanPrincipal(
                     hasApplicationId: OptionalGuid(row, "applicationid") is { } appId && appId != Guid.Empty,
                     isDisabled: row.GetAttributeValue<bool>("isdisabled"),
-                    fullName: name,
                     accessMode: row.GetAttributeValue<OptionSetValue>("accessmode")?.Value ?? 0);
 
                 return new CensusUser(
