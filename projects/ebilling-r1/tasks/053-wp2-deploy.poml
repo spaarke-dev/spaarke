@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Shared dev environment (BFF App Service, Dataverse, external SPA) and serial edits of SpaarkeMaster solution source.</parallel-reason>
-    <deps>042, 043, 044, 045, 046, 047, 048, 049, 050, 051, 054</deps>
+    <deps>042, 043, 044, 045, 046, 047, 048, 049, 050a, 050b, 051, 054</deps>
     <tags>deploy, bff, external-spa</tags>
     <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
@@ -43,7 +43,7 @@
       <dependency task="048" status="required">Code-set proposal routes.</dependency>
       <dependency task="054" status="required">invoice-codeset-match Action and Binding (code-set matching review step, D-93).</dependency>
       <dependency task="049" status="required">Processing job.</dependency>
-      <dependency task="050" status="required">Legacy path retired (appsettings no longer carries InvoiceExtractionPlaybookId).</dependency>
+      <dependency task="050b" status="required">Legacy path retired (appsettings no longer carries InvoiceExtractionPlaybookId).</dependency>
       <dependency task="051" status="required">SPA submission UI.</dependency>
     </dependencies>
   </context>
@@ -80,7 +80,7 @@
     <step order="1">Preconditions: every dependency shows ✅ in TASK-INDEX.md; dotnet build and dotnet test green on work/ebilling-r1; record the commit SHA; measure the BFF publish size against a fresh master build.</step>
     <step order="2">Actions: run scripts/Deploy-ActionMirrors.ps1 -Filter invoice-classify -DryRun, then live; repeat for invoice-line-code and invoice-codeset-match (each after its Ensure-ActionRow.ps1). Verify the three rows with a Dataverse read query.</step>
     <step order="3">Bindings: run scripts/dataverse/Seed-PlaybookConsumers.ps1 -DryRun, then live, then -DiffOnly (expect no difference). Verify the invoice-classify, invoice-line-code and invoice-codeset-match rows.</step>
-    <step order="4">App settings on spaarke-bff-dev (az webapp config appsettings set, staging slot if slot deploy is used): Ebilling__Enabled=true; ContentUnderstanding__Endpoint, ContentUnderstanding__ApiVersion=2025-11-01, ContentUnderstanding__AnalyzerId (from 003 / 004 notes); Finance__ProcedureLibraryContainerId and Finance__EbillingOutputContainerId (from 028 notes). Remove Finance__InvoiceExtractionPlaybookId if present (050). Record names and values (none are secret).</step>
+    <step order="4">App settings on spaarke-bff-dev (az webapp config appsettings set, staging slot if slot deploy is used): Ebilling__Enabled=true; ContentUnderstanding__Endpoint, ContentUnderstanding__ApiVersion=2025-11-01, ContentUnderstanding__AnalyzerId (from 003 / 004 notes); Finance__ProcedureLibraryContainerId and Finance__EbillingOutputContainerId (from 028 notes). Remove Finance__InvoiceExtractionPlaybookId if present (050b). Record names and values (none are secret).</step>
     <step order="5">BINDING, before the BFF (task 026 fix-round-1): read metadata on the target environment and confirm sprk_signal.sprk_regardinginvoiceline and sprk_decisionrecord.sprk_regardinginvoiceline exist, then run scripts/ebilling/Set-EbillingFirmReasonFieldSecurity.ps1 -OntologyWriterApplicationId (dev: 69040982-612e-469e-a85f-26d5172367c5): write run, then -Verify, and expect exit 0 from -Verify (on a fresh environment -Verify passes only after the write run; on spaarkedev1 the write run reports every item OK and writes nothing). -Verify's (p2) check must show the reader profile "Spaarke BFF-Managed Field Readers" on EVERY business unit's default team: a business unit created later without a re-run reads the firm reason as null (task 026 fix-round-2, ontology-r1 K1). If a column is missing, STOP: the BFF from task 026 on fails every Signal and Decision Record read with a 400 until the SpaarkeMaster schema is in (on spaarkedev1 run scripts/ebilling/Deploy-EbillingSignalLineSubjectSchema.ps1; elsewhere the SpaarkeMaster import comes first). Record the result.</step>
     <step order="6">BFF: run scripts/Deploy-BffApi.ps1 -Environment dev -UseSlotDeploy; confirm hash verification and swap; GET /healthz is Healthy, including the consumer-type reconciliation and the Content Understanding check.</step>
     <step order="7">Route smoke: for every 044 and 048 route call once unauthenticated (expect 401) and once authenticated with the expected status (external routes as a CIAM firm user, internal as an internal user, confirm as an admin; a non-admin confirm expects 403). Record status codes.</step>
