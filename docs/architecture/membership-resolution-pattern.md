@@ -77,7 +77,7 @@ Both use existing `SystemAdmin` policy (`AuthorizationModule.cs:241`) per Q6 own
 
 ### Algorithm (5 steps; see `MembershipFieldDiscoveryService.cs:12-23` header comment)
 
-1. **Cache lookup** — Redis key `membership:discovery:{entityType}` (`CacheKeyPrefix` at line 69), TTL `MembershipOptions.MetadataCacheTtlMinutes` (default 60 min, ADR-009).
+1. **Cache lookup** — Redis key `tenant:{tenantId}:membership-discovery:{entityType}:v{CacheVersion}` (`CacheResource` / `CacheVersion` in `MembershipFieldDiscoveryService`), TTL `MembershipOptions.MetadataCacheTtlMinutes` (default 60 min, ADR-009).
 2. **Fetch metadata** on cache miss via `MetadataService.RetrieveEntityRequest` (`EntityFilters.Attributes`).
 3. **Classify** each Lookup attribute:
    - `Targets[]` intersects `IncludedIdentityTables` → **kept** as descriptor
@@ -244,7 +244,7 @@ IMembershipResolverService.ResolveAsync(systemUserId, entityType, options, ct)
     ▼ Cache MISS:
     ├─→ IMembershipFieldDiscoveryService.DiscoverAsync(entityType)
     │     │ MembershipFieldDiscoveryService.cs:59
-    │     │ Cache key: membership:discovery:{entityType}  (60-min TTL)
+    │     │ Cache key: tenant:{tid}:membership-discovery:{entityType}:v{N}  (60-min TTL)
     │     │ On miss: MetadataService.RetrieveEntityRequest → classify Lookups
     │     ▼
     │   IReadOnlyList<MembershipDescriptor>

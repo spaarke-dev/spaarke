@@ -62,7 +62,7 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
 {
     /// <summary>
     /// Cache resource label (per ITenantCache contract). On-wire key becomes
-    /// <c>tenant:{tenantId}:membership-discovery:{entityType}:v1</c>.
+    /// <c>tenant:{tenantId}:membership-discovery:{entityType}:v{CacheVersion}</c>.
     /// </summary>
     /// <remarks>
     /// Phase 2 invalidation (FR-2P2.8): admin <c>refresh-metadata</c> endpoint
