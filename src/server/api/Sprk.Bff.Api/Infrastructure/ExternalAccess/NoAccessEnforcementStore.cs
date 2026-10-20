@@ -349,6 +349,9 @@ public class NoAccessEnforcementStore
     /// The rights <paramref name="systemUserId"/> holds on the record, as Dataverse's <c>RetrievePrincipalAccess</c>
     /// reports them — evaluated for THAT principal (the function is bound to it), read with the app token.
     /// </summary>
+    /// <remarks>Also read by <see cref="AccessibleRecordSetService"/> for a systemuser's lookup-only Secure records (#2121
+    /// option (b)), so the named-principal call stays implemented once. It throws on a non-success with the status in
+    /// <see cref="HttpRequestException.StatusCode"/>; that caller tells a 404 from a fault by it.</remarks>
     internal virtual async Task<AccessRights> GetPrincipalRightsAsync(
         Guid systemUserId, string entitySet, Guid recordId, CancellationToken ct)
     {

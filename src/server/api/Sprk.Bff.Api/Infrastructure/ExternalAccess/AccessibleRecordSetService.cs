@@ -795,7 +795,9 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
     /// <summary>
     /// The systemuser plane's membership ids that Secure suppresses (#2121, FR-22): the effectively Secure ids the
-    /// main walk reached ONLY through a registry lookup column, never through ownership.
+    /// main walk reached ONLY through a registry lookup column, never through ownership. They lose
+    /// <see cref="MembershipTermRights"/>; <see cref="ConfirmSecureLookupOnlyAsync"/> then keeps, at Read only, the ones
+    /// Dataverse says the user can read (option (b)).
     /// </summary>
     /// <remarks>
     /// <para>The main walk returns one flat id set and does not say which descriptor matched an id (its <c>ByRole</c> map
@@ -855,6 +857,198 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         }
 
         return lookupOnly;
+    }
+
+    /// <summary>
+    /// The rights a lookup-only Secure id carries when Dataverse confirms the systemuser can Read it (#2121 option (b)):
+    /// exactly <see cref="AccessRights.Read"/>, never <see cref="MembershipTermRights"/>.
+    /// </summary>
+    /// <remarks>
+    /// The same rule as task 036's flag-on own term (round 59): "MembershipTermRights must never reach a Dataverse-term
+    /// record" — the set confers Read; every write is confirmed against Dataverse at its own route.
+    /// </remarks>
+    internal const AccessRights DataverseConfirmedTermRights = AccessRights.Read;
+
+    /// <summary>
+    /// Most lookup-only Secure ids one composition asks Dataverse about (#2121 option (b), NFR-02). Normally a handful; any
+    /// beyond this are dropped with a Warning and never asked (fail closed).
+    /// </summary>
+    internal const int MaxSecureLookupRightsChecks = 50;
+
+    /// <summary>
+    /// The whole-batch budget for <see cref="ConfirmSecureLookupOnlyAsync"/>: the 15 s every app-only Dataverse client in
+    /// this module is given (ExternalAccessModule), so a slow Dataverse cannot hang the request. An id still unanswered
+    /// when it runs out is dropped with a Warning.
+    /// </summary>
+    internal static readonly TimeSpan SecureLookupRightsBudget = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// Of the systemuser's lookup-only Secure membership ids (<see cref="SecureLookupOnlyMembershipAsync"/>), the ones
+    /// Dataverse says that user can READ: <c>RetrievePrincipalAccess</c> bound to the user and read with the APP token, no
+    /// OBO and no <c>MSCRMCallerID</c> header. #2121 option (b), owner-approved 2026-10-20.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>One implementation (CLAUDE.md §11).</b> The call is the No Access enforcer's own
+    /// <see cref="NoAccessEnforcementStore.GetPrincipalRightsAsync"/> (task 143), reused, not copied: it throws on any
+    /// non-success with the status in <see cref="HttpRequestException.StatusCode"/>, so a 404 and a fault are told apart
+    /// here. Not <c>DataverseWebApiService.RetrievePrincipalRightsAsync</c>: that one also impersonates (needs
+    /// <c>prvActOnBehalfOfAnotherUser</c>) and maps every 403/404 to "no rights", hiding a fault. It is the same app-only
+    /// named-principal question as the ADR-028 A5 mechanism and task 036 option C; 036 consolidates the systemuser plane on
+    /// one Dataverse-answer mechanism.</para>
+    /// <para><b>Why.</b> This plane does not read Dataverse shares (K1). Without this check, dropping lookup-only Secure ids
+    /// also dropped an internal user's legitimate share-held access (the ADR-034 A4 flow: lookup, suggested share,
+    /// confirmed share). Dataverse's own answer covers shares, roles, teams and business unit, so a kept id is one the
+    /// model-driven app also opens.</para>
+    /// <para><b>Fails closed, per id (ADR-003).</b> Kept only on an answer that carries <see cref="AccessRights.Read"/>. No
+    /// Read: dropped (a denial, Debug). 404: dropped (the record is gone, Information). Any other fault (a non-2xx, a
+    /// timeout, an impersonation or privilege error): dropped with a Warning naming the id, entity type and status. One id's
+    /// fault never throws the composition; only the CALLER's cancellation propagates.</para>
+    /// <para><b>Bounded (NFR-02).</b> Only lookup-only Secure ids are asked; at most <see cref="MaxSecureLookupRightsChecks"/>
+    /// (the rest dropped, never asked), <see cref="CallerRecordAccessProbe.MaxConcurrentRecordLookups"/> at once, inside
+    /// <see cref="SecureLookupRightsBudget"/> for the batch.</para>
+    /// </remarks>
+    private async Task<IReadOnlySet<Guid>> ConfirmSecureLookupOnlyAsync(
+        Guid systemUserId, string entityType, IReadOnlySet<Guid> lookupOnly, CancellationToken ct)
+    {
+        if (lookupOnly.Count == 0)
+        {
+            return EmptyDeniedSet;
+        }
+
+        if (_principalRights is null)
+        {
+            _logger.LogWarning(
+                "[WF-AUTHZ] No principal-rights reader is wired: {Count} lookup-only Secure {EntityType} record(s) for systemuser " +
+                "{SystemUserId} cannot be confirmed against Dataverse and stay dropped (fail closed, #2121).",
+                lookupOnly.Count, entityType, systemUserId);
+            return EmptyDeniedSet;
+        }
+
+        string entitySet;
+        try
+        {
+            entitySet = Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(entityType);
+        }
+        catch (ArgumentException)
+        {
+            _logger.LogWarning(
+                "[WF-AUTHZ] {EntityType} has no secure-root entity set: {Count} lookup-only Secure record(s) for systemuser " +
+                "{SystemUserId} cannot be confirmed against Dataverse and stay dropped (fail closed, #2121).",
+                entityType, lookupOnly.Count, systemUserId);
+            return EmptyDeniedSet;
+        }
+
+        // Deterministic order, so the same ids are asked (and the same ones dropped over the ceiling) on every composition.
+        var ordered = lookupOnly.OrderBy(id => id).ToList();
+        var asked = ordered.Take(MaxSecureLookupRightsChecks).ToList();
+        var overCap = ordered.Count - asked.Count;
+        if (overCap > 0)
+        {
+            _logger.LogWarning(
+                "[WF-AUTHZ] Systemuser {SystemUserId} has {Count} lookup-only Secure {EntityType} record(s), over the ceiling of " +
+                "{Max}: the {OverCap} past it are dropped without a Dataverse check (fail closed, NFR-02, #2121).",
+                systemUserId, ordered.Count, entityType, MaxSecureLookupRightsChecks, overCap);
+        }
+
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(SecureLookupRightsBudget);
+        using var gate = new SemaphoreSlim(CallerRecordAccessProbe.MaxConcurrentRecordLookups);
+
+        var answers = await Task.WhenAll(asked.Select(id =>
+                AskSecureLookupAsync(systemUserId, entityType, entitySet, id, gate, budget.Token, ct)))
+            .ConfigureAwait(false);
+
+        var confirmed = new HashSet<Guid>();
+        for (var i = 0; i < asked.Count; i++)
+        {
+            if (answers[i] == SecureLookupAnswer.Read)
+            {
+                confirmed.Add(asked[i]);
+            }
+        }
+
+        _logger.LogInformation(
+            "[WF-AUTHZ] Systemuser {SystemUserId}: Dataverse confirmed Read on {Confirmed} of {Asked} lookup-only Secure " +
+            "{EntityType} record(s) (denied {Denied}, gone {Gone}, faulted {Faulted}, over the ceiling {OverCap}); a confirmed " +
+            "record carries Read only (#2121 option (b)).",
+            systemUserId, confirmed.Count, asked.Count, entityType,
+            answers.Count(a => a == SecureLookupAnswer.Denied),
+            answers.Count(a => a == SecureLookupAnswer.Gone),
+            answers.Count(a => a == SecureLookupAnswer.Fault),
+            overCap);
+        return confirmed;
+    }
+
+    /// <summary>One id's question for <see cref="ConfirmSecureLookupOnlyAsync"/>; never throws except for the caller's cancellation.</summary>
+    private async Task<SecureLookupAnswer> AskSecureLookupAsync(
+        Guid systemUserId, string entityType, string entitySet, Guid id, SemaphoreSlim gate,
+        CancellationToken budget, CancellationToken ct)
+    {
+        try
+        {
+            await gate.WaitAsync(budget).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "[WF-AUTHZ] Dataverse rights check FAULTED for systemuser {SystemUserId} on Secure {EntityType} {RecordId} " +
+                "(status: {Status}): dropped (fail closed, #2121).",
+                systemUserId, entityType, id, "timeout");
+            return SecureLookupAnswer.Fault;
+        }
+
+        try
+        {
+            var rights = await _principalRights!
+                .GetPrincipalRightsAsync(systemUserId, entitySet, id, budget).ConfigureAwait(false);
+            if (rights.HasFlag(AccessRights.Read))
+            {
+                return SecureLookupAnswer.Read;
+            }
+
+            _logger.LogDebug(
+                "[WF-AUTHZ] Dataverse denies systemuser {SystemUserId} Read on Secure {EntityType} {RecordId} ({Rights}): " +
+                "dropped (#2121).",
+                systemUserId, entityType, id, rights);
+            return SecureLookupAnswer.Denied;
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation(
+                "[WF-AUTHZ] Secure {EntityType} {RecordId} answered 404 to the rights check for systemuser {SystemUserId}: " +
+                "the record is gone; dropped (#2121).",
+                entityType, id, systemUserId);
+            return SecureLookupAnswer.Gone;
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[WF-AUTHZ] Dataverse rights check FAULTED for systemuser {SystemUserId} on Secure {EntityType} {RecordId} " +
+                "(status: {Status}): dropped (fail closed, #2121).",
+                systemUserId, entityType, id, FaultStatus(ex));
+            return SecureLookupAnswer.Fault;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>The status a rights-check fault is logged with: the HTTP status code, "timeout", or the exception type.</summary>
+    private static string FaultStatus(Exception ex) => ex switch
+    {
+        HttpRequestException { StatusCode: { } status } => ((int)status).ToString(System.Globalization.CultureInfo.InvariantCulture),
+        OperationCanceledException or TimeoutException => "timeout",
+        _ => ex.GetType().Name,
+    };
+
+    /// <summary>One lookup-only Secure id's Dataverse answer (<see cref="ConfirmSecureLookupOnlyAsync"/>).</summary>
+    private enum SecureLookupAnswer
+    {
+        Read,
+        Denied,
+        Gone,
+        Fault,
     }
 
     /// <summary>
@@ -1524,6 +1718,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private readonly ISystemUserIdentityResolver _systemUsers;
     private readonly IGenericEntityService _dataverse;
     private readonly ILogger<AccessibleRecordSetService> _logger;
+    private readonly NoAccessEnforcementStore? _principalRights;
 
     /// <param name="membership">ADR-034 membership.</param>
     /// <param name="participations">Grants, flags, organization reads.</param>
@@ -1538,6 +1733,11 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// under, secure or not (owner round 82), for the systemuser-plane veto — through <see cref="SecureRootInheritance.ReadSecureParentsOfManyAsync"/>, the ONE
     /// parent walk the write-time guard and the enforcer use (registered unconditionally, GraphModule).</param>
     /// <param name="logger">Logger.</param>
+    /// <param name="principalRights">#2121 option (b): Dataverse's app-only answer about the systemuser, asked only for its
+    /// lookup-only Secure membership ids (<see cref="ConfirmSecureLookupOnlyAsync"/>), through the No Access store's
+    /// named-principal read. The store is registered unconditionally (ExternalAccessModule's typed HttpClient), so DI always
+    /// supplies it. Optional so the existing direct constructions keep compiling; WITHOUT it nothing is confirmed and every
+    /// lookup-only Secure id stays dropped (fail closed, logged as a Warning).</param>
     public AccessibleRecordSetService(
         IMembershipResolverService membership,
         ExternalParticipationService participations,
@@ -1546,7 +1746,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         IContactIdentityStore identityStore,
         ISystemUserIdentityResolver systemUsers,
         IGenericEntityService dataverse,
-        ILogger<AccessibleRecordSetService> logger)
+        ILogger<AccessibleRecordSetService> logger,
+        NoAccessEnforcementStore? principalRights = null)
     {
         ArgumentNullException.ThrowIfNull(membership);
         ArgumentNullException.ThrowIfNull(participations);
@@ -1564,6 +1765,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         _systemUsers = systemUsers;
         _dataverse = dataverse;
         _logger = logger;
+        _principalRights = principalRights;
     }
 
     /// <inheritdoc />
@@ -2022,14 +2224,19 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         //     Secure BU blocks them in the model-driven app, so on an effectively Secure record (folded flags,
         //     IsSecure — not IsDirectOnly) this match is suppressed here, as the contact plane's membership walk is.
         //     An id matched both ways keeps its membership.
-        // This plane does NOT read Dataverse shares (K1; the impersonated Dataverse answer is task 036). So a Secure
-        // record that a user can reach only through a share plus an Assigned lookup is dropped here until 036, even
-        // though the model-driven app opens it for them.
+        // This plane does NOT read Dataverse shares (K1). So, before a lookup-only Secure id is dropped, Dataverse is
+        // asked app-only whether THIS user can read it (#2121 option (b), owner-approved 2026-10-20): a user who holds a
+        // share (or any other Dataverse access) keeps it, at Read only (DataverseConfirmedTermRights; task 036's round-59
+        // rule). Anything else (no Read, 404, a fault, over the ceiling) stays dropped. The confirmed ids are part of this
+        // term, so they are the systemuser's own access for the Restricted survivor below, exactly as 036's Dataverse term.
         var secureLookupOnly = await SecureLookupOnlyMembershipAsync(systemUserId, entityType, walk.Ids, flags, ct)
             .ConfigureAwait(false);
+        var dataverseConfirmed = await ConfirmSecureLookupOnlyAsync(systemUserId, entityType, secureLookupOnly, ct)
+            .ConfigureAwait(false);
         var membershipTerm = walk.Ids
-            .Where(id => !secureLookupOnly.Contains(id))
-            .Select(id => KeyValuePair.Create(id, MembershipTermRights))
+            .Where(id => !secureLookupOnly.Contains(id) || dataverseConfirmed.Contains(id))
+            .Select(id => KeyValuePair.Create(
+                id, secureLookupOnly.Contains(id) ? DataverseConfirmedTermRights : MembershipTermRights))
             .ToList();
         AccumulateTerm(composed, membershipTerm);
 

@@ -17,6 +17,7 @@
 
 using System.Net.Http;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;   // AccessRights — task 032 rights-fidelity assertions
@@ -1131,6 +1132,387 @@ public class AccessibleRecordSetServiceTests
             Times.Exactly(2), "the second page added nothing new, which is what capped the walk");
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // #2121 option (b) (owner-approved 2026-10-20) — before a lookup-only Secure id is dropped, Dataverse is asked
+    // app-only, bound to THIS systemuser (the No Access store's RetrievePrincipalAccess read), whether the user can
+    // read it. Kept at exactly Read when it can (a share, a role, a team); dropped on anything else.
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The No Access store with its wire read substituted (its <c>internal virtual</c> reads are the test seam, the
+    /// <c>FakeEnforcementStore</c> convention; no transport double). Loose, so an un-setup read answers None.
+    /// </summary>
+    private static Mock<NoAccessEnforcementStore> NewDataverseStore() =>
+        new(new HttpClient(), null!, null!, NullLogger<NoAccessEnforcementStore>.Instance);
+
+    /// <summary>A Dataverse that answers "no rights" for every record (the default the SUT is built with).</summary>
+    private static Mock<NoAccessEnforcementStore> DataverseGrantsNothing()
+    {
+        var reader = NewDataverseStore();
+        reader
+            .Setup(r => r.GetPrincipalRightsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.None);
+        return reader;
+    }
+
+    /// <summary>A Dataverse that answers <paramref name="rights"/> for <paramref name="recordId"/> (and "no rights" elsewhere).</summary>
+    private static Mock<NoAccessEnforcementStore> DataverseAnswers(Guid recordId, AccessRights rights)
+    {
+        var reader = DataverseGrantsNothing();
+        reader
+            .Setup(r => r.GetPrincipalRightsAsync(SystemUserId, "sprk_matters", recordId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(rights);
+        return reader;
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_SecureLookupOnlyRecord_DataverseGrantsRead_IsKeptAtExactlyRead()
+    {
+        // Must fire (option (b)): the user's linked contact is the Assigned Attorney and the user holds a Dataverse share,
+        // so RetrievePrincipalAccess answers Read|Write. The record is kept, at EXACTLY Read — never MembershipTermRights
+        // and never the wider Dataverse answer (task 036's round-59 rule for a Dataverse-term record).
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[secure] = SecureOnly;
+        var dataverse = DataverseAnswers(secure, AccessRights.Read | AccessRights.Write);
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), principalRights: dataverse.Object);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().ContainKey(secure, "Dataverse says this user can read the Secure record (K1 not widened)");
+        set.RightsFor(secure).Should().Be(AccessRights.Read, "a Dataverse-confirmed record carries Read only");
+        dataverse.Verify(r => r.GetPrincipalRightsAsync(SystemUserId, "sprk_matters", secure, It.IsAny<CancellationToken>()),
+            Times.Once, "the question is bound to THIS systemuser and the record's entity set");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_SecureLookupOnlyRecord_DataverseGrantsNothing_IsNotInTheSet()
+    {
+        // Must not fire: Dataverse answers no rights (no share; the Secure BU blocks the user) → dropped.
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[secure] = SecureOnly;
+        var dataverse = DataverseAnswers(secure, AccessRights.None);
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), principalRights: dataverse.Object);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(secure, "no Dataverse Read, so the lookup-derived membership stays suppressed");
+        dataverse.Verify(r => r.GetPrincipalRightsAsync(SystemUserId, "sprk_matters", secure, It.IsAny<CancellationToken>()),
+            Times.Once, "the drop follows Dataverse's answer, not a skipped question");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_SecureLookupOnlyRecord_DataverseGrantsOnlyWrite_IsNotInTheSet()
+    {
+        // Must not fire: an answer without Read is not a Read grant (a check of "any rights" would keep it).
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[secure] = SecureOnly;
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(),
+            principalRights: DataverseAnswers(secure, AccessRights.Write).Object);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(secure);
+    }
+
+    public static TheoryData<string> DataverseFaults => new() { "500", "timeout", "403" };
+
+    [Theory]
+    [MemberData(nameof(DataverseFaults))]
+    public async Task ComposeAsync_SystemUser_DataverseFaultsForOneSecureLookupOnlyId_DropsOnlyThatId_LogsAWarning_NeverThrows(
+        string fault)
+    {
+        // Fail closed per id (ADR-003): Dataverse faults for `faulted` (a 500, a timeout, or a 403 privilege /
+        // impersonation error); `granted` is answered Read, `open` is non-secure. The composition does not throw, the
+        // faulted id is dropped with a Warning naming it, and the other two are unaffected.
+        var faulted = MemberRecordA;
+        var granted = MemberRecordB;
+        var open = Guid.Parse("a0000000-0000-0000-0000-000000000003");
+        var membership = MembershipWith(
+            MatterEntity, membershipIds: new[] { faulted, granted, open }, ownershipIds: Array.Empty<Guid>());
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[faulted] = participations.Flags[granted] = SecureOnly;
+
+        var dataverse = DataverseAnswers(granted, AccessRights.Read);
+        Exception error = fault switch
+        {
+            "500" => new HttpRequestException("Dataverse read failed: 500", null, System.Net.HttpStatusCode.InternalServerError),
+            "403" => new HttpRequestException("Dataverse read failed: 403", null, System.Net.HttpStatusCode.Forbidden),
+            _ => new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout"),
+        };
+        dataverse
+            .Setup(r => r.GetPrincipalRightsAsync(SystemUserId, "sprk_matters", faulted, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(error);
+        var log = new CapturingLogger();
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), principalRights: dataverse.Object, logger: log);
+        var act = () => sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        var set = (await act.Should().NotThrowAsync("one id's fault must never deny the whole composition")).Subject;
+        set.Rights.Should().NotContainKey(faulted, "a fault is never read as a grant");
+        set.RightsFor(granted).Should().Be(AccessRights.Read, "the other Secure id's answer stands");
+        set.RightsFor(open).Should().Be(AccessibleRecordSetService.MembershipTermRights, "a non-secure id is untouched");
+        var expectedStatus = fault == "timeout" ? "timeout" : fault;
+        log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+                                          && e.Message.Contains("FAULTED") && e.Message.Contains(faulted.ToString())
+                                          && e.Message.Contains(MatterEntity) && e.Message.Contains($"status: {expectedStatus}"),
+            "a fault is logged as a Warning with the id, entity type and status, distinct from a denial");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_CallerCancels_DuringTheRightsCheck_Propagates()
+    {
+        // Only the CALLER's cancellation propagates (it is not a per-id fault to swallow).
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[secure] = SecureOnly;
+        using var caller = new CancellationTokenSource();
+        var dataverse = NewDataverseStore();
+        dataverse
+            .Setup(r => r.GetPrincipalRightsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(async (Guid _, string _, Guid _, CancellationToken token) =>
+            {
+                caller.Cancel();
+                token.ThrowIfCancellationRequested();
+                await Task.Yield();
+                return AccessRights.Read;
+            });
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), principalRights: dataverse.Object);
+        var act = () => sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, caller.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_SecureLookupOnlyRecord_Dataverse404_IsNotInTheSet()
+    {
+        // 404: the record is gone → dropped (Information, not a Warning — it is not a fault).
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[secure] = SecureOnly;
+        var dataverse = DataverseGrantsNothing();
+        dataverse
+            .Setup(r => r.GetPrincipalRightsAsync(SystemUserId, "sprk_matters", secure, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Dataverse read failed: 404", null, System.Net.HttpStatusCode.NotFound));
+        var log = new CapturingLogger();
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), principalRights: dataverse.Object, logger: log);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(secure, "a 404 is never a grant");
+        log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Information
+                                          && e.Message.Contains("404") && e.Message.Contains(secure.ToString()));
+        log.Entries.Should().NotContain(e => e.Level >= Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("FAULTED"),
+            "a gone record is not a Dataverse fault");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_MoreLookupOnlySecureIdsThanTheCeiling_ExcessDroppedAndNeverAsked()
+    {
+        // NFR-02: at most MaxSecureLookupRightsChecks ids are asked. Dataverse would grant Read on every one, so an id is
+        // kept exactly when it was asked; the excess is dropped and the reader is never called for it.
+        var max = AccessibleRecordSetService.MaxSecureLookupRightsChecks;
+        var ids = Enumerable.Range(1, max + 3).Select(i => Guid.Parse($"e0000000-0000-0000-0000-{i:D12}")).ToArray();
+        var membership = MembershipWith(MatterEntity, membershipIds: ids, ownershipIds: Array.Empty<Guid>());
+        var participations = (FakeParticipationService)NoParticipations();
+        foreach (var id in ids)
+        {
+            participations.Flags[id] = SecureOnly;
+        }
+
+        var dataverse = NewDataverseStore();
+        dataverse
+            .Setup(r => r.GetPrincipalRightsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.Read);
+        var log = new CapturingLogger();
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), principalRights: dataverse.Object, logger: log);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        var asked = ids.OrderBy(id => id).Take(max).ToArray();
+        var excess = ids.OrderBy(id => id).Skip(max).ToArray();
+        set.RecordIds.Should().BeEquivalentTo(asked, "exactly the ids under the ceiling were asked and confirmed");
+        foreach (var id in excess)
+        {
+            dataverse.Verify(r => r.GetPrincipalRightsAsync(It.IsAny<Guid>(), It.IsAny<string>(), id, It.IsAny<CancellationToken>()),
+                Times.Never, "an id over the ceiling is dropped without a Dataverse call");
+        }
+
+        dataverse.Verify(r => r.GetPrincipalRightsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(max));
+        log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("ceiling"));
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_OwnershipKeptAndNonSecureIds_NeverAskDataverse()
+    {
+        // NFR-02: only LOOKUP-ONLY Secure ids are asked. An owned Secure id, a non-secure id and a Limited id never reach
+        // the reader — and keep MembershipTermRights. The lookup-only Secure id is the one question.
+        var owned = MemberRecordA;
+        var open = MemberRecordB;
+        var limited = Guid.Parse("a0000000-0000-0000-0000-000000000003");
+        var assignedOnly = Guid.Parse("a0000000-0000-0000-0000-000000000004");
+        var membership = MembershipWith(
+            MatterEntity, membershipIds: new[] { owned, open, limited, assignedOnly }, ownershipIds: new[] { owned });
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[owned] = participations.Flags[assignedOnly] = SecureOnly;
+        participations.Flags[limited] = LimitedOnly;
+        var dataverse = DataverseGrantsNothing();
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), principalRights: dataverse.Object);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.RightsFor(owned).Should().Be(AccessibleRecordSetService.MembershipTermRights);
+        set.RightsFor(open).Should().Be(AccessibleRecordSetService.MembershipTermRights);
+        set.RightsFor(limited).Should().Be(AccessibleRecordSetService.MembershipTermRights);
+        foreach (var id in new[] { owned, open, limited })
+        {
+            dataverse.Verify(r => r.GetPrincipalRightsAsync(It.IsAny<Guid>(), It.IsAny<string>(), id, It.IsAny<CancellationToken>()),
+                Times.Never, "only lookup-only Secure ids are asked");
+        }
+
+        dataverse.Verify(r => r.GetPrincipalRightsAsync(SystemUserId, "sprk_matters", assignedOnly, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_NoSecureCandidate_NeverAsksDataverse()
+    {
+        // NFR-02: an ordinary composition makes no extra call.
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { MemberRecordA }, ownershipIds: Array.Empty<Guid>());
+        var dataverse = DataverseGrantsNothing();
+
+        var sut = CreateSut(membership.Object, NoParticipations(), NeverStanding(), principalRights: dataverse.Object);
+        await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        dataverse.Verify(r => r.GetPrincipalRightsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_SecureRestrictedLookupOnlyRecord_DataverseGrantsRead_SurvivesRestrictedAtRead()
+    {
+        // Secure + Restricted, Dataverse grants Read. SurvivesRestrictedForSystemUserAsync keeps the systemuser's OWN term
+        // ("only system users may have access") and drops only contact-sourced access; a Dataverse-confirmed id is the
+        // user's own Dataverse access (task 036 passes its Dataverse term to the same survivor). So an internal user keeps
+        // it at Read; the linked contact's direct Collaborate grant (contact-sourced) is removed by Restricted and cannot
+        // raise it.
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
+        var participations = new FakeParticipationService(
+            Array.Empty<ExternalParticipation>(),
+            matterGrants: new[]
+            {
+                new ExternalRootGrant
+                {
+                    RecordId = secure,
+                    AccessLevel = ExternalAccessLevel.Collaborate,
+                    DirectAccessLevel = ExternalAccessLevel.Collaborate,
+                },
+            });
+        participations.Flags[secure] = SecureAndRestricted;
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(),
+            principalRights: DataverseAnswers(secure, AccessRights.Read).Object);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().ContainKey(secure, "the user's own Dataverse access is a Restricted survivor");
+        set.RightsFor(secure).Should().Be(AccessRights.Read, "the survivor is the Read-only Dataverse term, not the contact grant");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUserFlaggedExternal_SecureRestrictedLookupOnlyRecord_DataverseGrantsRead_IsNotInTheSet()
+    {
+        // The survivor's own rule still applies (task 114): a systemuser flagged sprk_isexternal keeps nothing on a
+        // Restricted record, Dataverse-confirmed or not.
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[secure] = SecureAndRestricted;
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(),
+            principalRights: DataverseAnswers(secure, AccessRights.Read).Object,
+            systemUsers: InternalSystemUsers(SystemUserId));
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(secure);
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_ComposerBuiltWithoutTheStore_DropsTheLookupOnlySecureId_AndWarns()
+    {
+        // Fail closed when the Dataverse check is absent (a direct construction that passes no store): nothing is
+        // confirmed, the id stays dropped, and the gap is a Warning, not silence.
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[secure] = SecureOnly;
+        var log = new CapturingLogger();
+
+        var sut = new AccessibleRecordSetService(
+            membership.Object, participations, NeverStanding(), NeverDeniesReader(), UnlinkedIdentityStore(),
+            InternalSystemUsers(), NoFilingEntities(), log);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(secure);
+        log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+                                          && e.Message.Contains("No principal-rights reader"));
+    }
+
+    [Fact]
+    public async Task ComposeAsync_ResolvedThroughDependencyInjection_AsksTheRegisteredStore()
+    {
+        // The store is an OPTIONAL constructor parameter. Pin that the container supplies it when it is registered (as
+        // ExternalAccessModule's typed HttpClient registers it), so production never runs the no-store fail-closed path.
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[secure] = SecureOnly;
+        var dataverse = DataverseAnswers(secure, AccessRights.Read);
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(membership.Object);
+        services.AddSingleton<ExternalParticipationService>(participations);
+        services.AddSingleton(NeverStanding());
+        services.AddSingleton(NeverDeniesReader());
+        services.AddSingleton(UnlinkedIdentityStore());
+        services.AddSingleton(InternalSystemUsers());
+        services.AddSingleton(NoFilingEntities());
+        services.AddSingleton(dataverse.Object);
+        services.AddScoped<IAccessibleRecordSetService, AccessibleRecordSetService>();
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var sut = scope.ServiceProvider.GetRequiredService<IAccessibleRecordSetService>();
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.RightsFor(secure).Should().Be(AccessRights.Read, "the container-supplied store answered Read");
+        dataverse.Verify(r => r.GetPrincipalRightsAsync(SystemUserId, "sprk_matters", secure, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<AccessibleRecordSetService>
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Enqueue((logLevel, formatter(state, exception)));
+    }
+
     /// <summary>
     /// A filing world for the composition's ONE filing walk (task 174): each query is answered from <paramref name="rows"/>
     /// by its table and its primary-id condition (Equal or In), projected to the requested columns — the same shape
@@ -2155,11 +2537,15 @@ public class AccessibleRecordSetServiceTests
         ISubjectStandingGrantReader standing,
         INoAccessListReader? noAccessList = null,
         IContactIdentityStore? identityStore = null,
-        IGenericEntityService? filing = null)
+        IGenericEntityService? filing = null,
+        NoAccessEnforcementStore? principalRights = null,
+        Microsoft.Extensions.Logging.ILogger<AccessibleRecordSetService>? logger = null,
+        Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? systemUsers = null)
         => new(membership, participations, standing, noAccessList ?? NeverDeniesReader(),
-               identityStore ?? UnlinkedIdentityStore(), InternalSystemUsers(),
+               identityStore ?? UnlinkedIdentityStore(), systemUsers ?? InternalSystemUsers(),
                filing ?? Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
-               NullLogger<AccessibleRecordSetService>.Instance);
+               logger ?? NullLogger<AccessibleRecordSetService>.Instance,
+               principalRights ?? DataverseGrantsNothing().Object);
 
     /// <summary>
     /// Matches the membership options the composer is now required to pass.
