@@ -517,17 +517,20 @@ legacy and caps at a few hundred policies per tenant). L2 does that through its 
    New-ManagementRole -Name 'Spaarke Shared Mailbox Create' -Parent 'Mail Recipient Creation' -EnabledCmdlets New-Mailbox
    Set-ManagementRoleEntry 'Spaarke Shared Mailbox Create\New-Mailbox' -Parameters Shared,Name,Alias,DisplayName,PrimarySmtpAddress,ErrorAction,ErrorVariable,WarningAction,WarningVariable,OutVariable,OutBuffer,Confirm,WhatIf
    New-ManagementRole -Name 'Spaarke Scope Group Membership' -Parent 'Security Group Creation and Membership' -EnabledCmdlets Add-DistributionGroupMember
-   Set-ManagementRoleEntry 'Spaarke Scope Group Membership\Add-DistributionGroupMember' -Parameters Identity,Member,BypassSecurityGroupManagerCheck,ErrorAction,ErrorVariable,WarningAction,WarningVariable,OutVariable,OutBuffer,Confirm,WhatIf
+   Set-ManagementRoleEntry 'Spaarke Scope Group Membership\Add-DistributionGroupMember' -Parameters Identity,Member,BypassSecurityGroupManagerCheck
    New-ManagementScope -Name 'Spaarke Customer Scope Groups' -RecipientRestrictionFilter "RecipientTypeDetails -eq 'MailUniversalSecurityGroup' -and Name -like 'Spaarke-AppAccess-*'"
    New-ManagementRoleAssignment -Name 'sprk-exoadmin-sharedmbx-create' -App <app id> -Role 'Spaarke Shared Mailbox Create'
    New-ManagementRoleAssignment -Name 'sprk-exoadmin-scopegroup-member' -App <app id> -Role 'Spaarke Scope Group Membership' -CustomResourceScope 'Spaarke Customer Scope Groups'
    ```
-   **Keep the PowerShell common parameters in both entries (T186 L62).** `-Parameters` REPLACES the entry's list, and
-   Exchange checks the common parameters the module forwards like any other: without `ErrorAction`, the sidecar's
-   `New-Mailbox … -ErrorAction Stop` gets 403 `CmdletAccessDeniedException`, which the module reports only as "A server
-   side error has occurred … try again after some time". `Get-Command` in the app's session still lists every
-   parameter, so a client-side check cannot see it, and a `-WhatIf` probe is refused for the same reason. They grant no
-   extra power. Then run live checks M1–M7 (`projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md`
+   **Grant the PowerShell common parameters on the `New-Mailbox` entry (T186 L62).** `-Parameters` REPLACES the entry's
+   list, and Exchange checks the common parameters the module forwards like any other: without `ErrorAction`, the
+   sidecar's `New-Mailbox … -ErrorAction Stop` gets 403 `CmdletAccessDeniedException`, which the module reports only as
+   "A server side error has occurred … try again after some time". The `Add-DistributionGroupMember` entry **cannot**
+   take them — its parent role holds none for that cmdlet (Exchange refuses the `Set-ManagementRoleEntry`) — so the
+   sidecar calls it with no common parameter and reads its errors from the error stream. `Get-Command` in the app's
+   session lists every parameter either way, so the sidecar's PRQ-E-16 check calls both writes on an address that
+   can never be accepted (`…@authz-probe.invalid`): a validation error means authorized, anything else refused, and
+   nothing is created. Then run live checks M1–M7 (`projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md`
    §5). Without these roles H14m fails Resumable (`h14m-mailbox-ensure-failed`, naming PRQ-E-16) **before** creating
    anything — Exchange Online only loads the cmdlets a caller's roles allow, and the sidecar checks for both first.
    Not requested: `Remove-Mailbox` / `Remove-DistributionGroupMember` (decommission is manual in r1 — §7.9) and
