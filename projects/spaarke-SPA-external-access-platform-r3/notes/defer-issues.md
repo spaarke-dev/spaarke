@@ -652,6 +652,7 @@ Two AI paths outside the generic Dataverse tools have no externality check:
 
 - **RAG retrieval.** The archived `.eml` and its attachments are RAG-indexed (`IncomingCommunicationProcessor.cs` ~:1387, ~:1145; `CommunicationEnrichmentService.cs` ~:227). No retrieval path in `Services/Ai` checks internal-only or externality.
 - **Chat archive ingest.** `POST /sessions/{id}/documents/from-document` (`Api/Ai/ChatDocumentEndpoints.cs` ~:219) accepts a `communicationId`. It checks only document read access, then downloads the full `.eml` app-only into the session.
+- **AI analysis rows.** `sprk_analysis` and `sprk_analysisoutput` hold the AI analysis of an archived `.eml`. They have `sprk_documentid` and `sprk_regardingcommunication` lookups, and the generic chat tools still return them. They could be filtered the way task 078 filters `sprk_document`. Found in the 078 fix round, 2026-10-20.
 
 Failure mode: a licensed user flagged external gets internal-only email content through retrieval or by attaching the archive to the chat.
 
