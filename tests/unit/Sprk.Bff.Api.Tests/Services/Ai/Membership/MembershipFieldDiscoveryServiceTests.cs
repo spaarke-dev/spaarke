@@ -466,6 +466,38 @@ public class MembershipFieldDiscoveryServiceTests
         DescriptorFor(result, "ownerid").IdentityType.Should().Be("SystemUser");
     }
 
+    [Fact]
+    public async Task DiscoverAsync_OperatorExclusionAndForceIncludeOfAuditField_AuditLookupsStayExcluded()
+    {
+        // GitHub #2152 / ADR-034 MUST: an operator-configured GlobalFieldExclusions list used to REPLACE
+        // the audit exclusions, and a per-entity IncludedFields entry could re-admit one — either way an
+        // audit lookup to systemuser (who touched the row) became a membership link (over-grant).
+        var lookups = new[]
+        {
+            Lookup("createdby",              "systemuser"),
+            Lookup("modifiedby",             "systemuser"),
+            Lookup("owninguser",             "systemuser"),
+            Lookup("sprk_assignedattorney1", "contact"),
+        };
+        var options = new MembershipOptions
+        {
+            GlobalFieldExclusions = new List<string> { "owninguser" },
+            EntityOverrides = new Dictionary<string, EntityOverride>
+            {
+                [MatterEntity] = new EntityOverride { IncludedFields = new List<string> { "modifiedby" } },
+            },
+        };
+        new MembershipOptionsDefaults().PostConfigure(name: null, options: options);
+
+        var sut = new TestableMembershipFieldDiscoveryService(options, lookups);
+        var result = await sut.DiscoverAsync(MatterEntity, CancellationToken.None);
+
+        result.DiscoveredFields.Select(d => d.Field).Should().BeEquivalentTo(new[] { "sprk_assignedattorney1" });
+        result.ExcludedFields.Should().Contain(e => e.Field == "createdby" && e.Reason == "global-exclusion");
+        result.ExcludedFields.Should().Contain(e => e.Field == "modifiedby" && e.Reason == "global-exclusion");
+        result.ExcludedFields.Should().Contain(e => e.Field == "owninguser" && e.Reason == "global-exclusion");
+    }
+
     // ────────────────────────────────────────────────────────────────────
     // R7 W12 T130 follow-up (2026-06-30) — polymorphic Owner + Customer
     // fallback synthesis. Pins the ProjectLookupAttributeRows contract that

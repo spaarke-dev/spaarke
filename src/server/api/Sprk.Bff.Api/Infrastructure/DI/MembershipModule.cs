@@ -86,7 +86,8 @@ public static class MembershipModule
         // "target-table-not-in-identity-list" and the resolver returns zero
         // results for every user. The post-configure runs AFTER any operator
         // binding, and ONLY seeds when the bound list is empty — operator
-        // config replaces the defaults cleanly. See
+        // config replaces the defaults cleanly — EXCEPT the ADR-034 mandatory
+        // field exclusions, which it always unions in (GitHub #2152). See
         // MembershipOptionsDefaults XML doc for the bug analysis.
         services.AddSingleton<
             Microsoft.Extensions.Options.IPostConfigureOptions<MembershipOptions>,
