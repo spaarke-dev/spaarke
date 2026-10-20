@@ -38,6 +38,7 @@
 5. Close DEF-004 (#1829) as superseded when ebilling 051 merges.
 
 ## Open owner questions
+0. **Proposed task 079 (security stop-gap, #1864):** for external/unresolved callers, `dataverse.update_record` / `create_record` refuse writes to `sprk_isinternalonly` / `sprk_communicationthread` on `sprk_communication` and `sprk_privacystate` on `sprk_communicationthread` (else a writer can flip the flag and then read via 078's tools). UAC agrees; tell UAC before building.
 1. **ISS-015 #2126:** should partners see a document copy of an internal-only email once it is filed to the record? (a) hide (recommended) / (b) keep showing.
 2. **059 finding C-1 (SECURITY):** stage C's combined consent granted the dev BFF app's own Graph APPLICATION permissions in Dewey Cheatham. Proposed: revoke every grant whose client is SDAP-BFF-SPE-API in DC (keep the SP and the Workforce SPA → user_impersonation grant). Record §11 stage C.
 3. Observation: `spaarke-bff-api-prod` has tenant-wide consent (`SDAP.Access`) to the DEV BFF app 1e40baad — intended? (059 R3)
