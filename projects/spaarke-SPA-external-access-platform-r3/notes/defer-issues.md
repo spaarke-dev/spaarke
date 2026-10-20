@@ -634,6 +634,19 @@ Failure mode: a partner on the matter lists and downloads the `.eml` of an inter
 **Blockers**: owner decision.
 **Related**: ISS-010, ISS-014, ISS-016, tasks 065 and 078.
 
+
+**Update 2026-10-20 (owner direction + UAC).** The owner wants this handled with UAC's Manage Access on Documents (#2119), not an R3 column. UAC proposes **#2119 D7**, pending the owner's acceptance (it amends I-14):
+- A child can only narrow partner visibility. A document is hidden from partners when its own Access Permission is Restricted, or when it derives from an internal-only communication.
+- The derivation is computed at read time through `_sprk_relatedcommunication_value` and the 065 rule, and fails closed.
+- One shared predicate in UAC's external read path covers list, download, versions, preview, SPE and the AI tools.
+- Wiring happens after #2078. UAC owns the rule and the predicate; R3 reviews its routes.
+
+**Writer gaps found (R3 code map, master `c3ec5d6e5`).** Three paths save a document from an email without the link, so today's 078 guard and D7's derivation both miss it:
+1. Outlook add-in email-attachment child docs (`UploadFinalizationWorker.cs:1254/1294`: parent-document lookup only).
+2. The add-in single-attachment save (no capture; `OfficeService.cs:506`, `OfficeDocumentPersistence.cs:795`).
+3. The add-in `.eml` when the best-effort canonical link misses (`OfficeDocumentPersistence.cs:790-842`).
+
+Fix owners: Office and Communication. Options: set the link in those writers, and/or have the predicate follow `ParentDocumentLookup`.
 ---
 
 ### ISS-016 — RAG retrieval and chat archive ingest return internal-only email content to callers flagged external
