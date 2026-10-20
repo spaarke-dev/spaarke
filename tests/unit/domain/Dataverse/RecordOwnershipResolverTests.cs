@@ -2462,6 +2462,56 @@ public class RecordOwnershipResolverTests
     }
 
     [Fact]
+    public async Task Reparent_WhenAThreadJoinLandsBeforeTheLastReadAndItsSecureParentIsUnsecuredBeforeTheUnconditionalSecureWrite_TheSecureOwnerIsHeld_AndTheCallDoesNotSucceed()
+    {
+        // Must-fire (round 5, F2): A re-files a message into the secure matter S; every conditional owner write meets a changed
+        // row. Before A's LAST read, W joins the message to a thread regarding another secure matter (W's inherited parent,
+        // never A's); after that read, W's settle writes the Secure team (A's third 412). Then S is un-secured and A writes the
+        // Secure team unconditionally. A's fresh read: its parents give the ordinary owner, its owner is the Secure team (W's,
+        // which reads the same as A's), and its thread is the one A's last read saw — but not the one it held before A's change.
+        // That Secure owner is W's confirmed hold for its secure thread: it is kept, never released to the ordinary team, and A
+        // never answers success over W's join.
+        var (directory, messageId) = MessageWorld(MatterId, ChildBu, ChildTeam);
+        var ownerWrites = 0;
+        directory.BeforeWrite = (world, fields) =>
+        {
+            if (!fields.ContainsKey("ownerid"))
+                return;
+            switch (++ownerWrites)
+            {
+                case 1:
+                    world.Write("sprk_communication", messageId, new() { ["sprk_name"] = "edit 1" });
+                    break;
+                case 2: // W's join, before A's last read
+                    world.Write("sprk_communication", messageId, new()
+                    {
+                        ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", SecureThreadId),
+                    });
+                    break;
+                case 3: // W's settle, after A's last read
+                    world.Write("sprk_communication", messageId, new() { ["ownerid"] = new EntityReference("team", SecureNamedTeam) });
+                    break;
+                case 4: // before A's unconditional Secure write
+                    UnsecureTheMessagesMatter(world);
+                    break;
+            }
+        };
+        var log = new ResolverLog();
+        var request = MoveMessageIntoTheSecureMatter(messageId);
+
+        var act = () => directory.Resolver(logger: log).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnsettledException>("no success over another writer's thread join"))
+            .WithMessage("*moved out from under its secure record by another writer*");
+        ownerWrites.Should().BeGreaterThanOrEqualTo(4, "the interleaving ran to the unconditional Secure write");
+        directory.Assignments.Should().NotContain(("sprk_communication", messageId, ChildTeam),
+            "no ordinary owner over W's secure thread join");
+        MessageOwnerOf(directory, messageId).Should().Be(SecureNamedTeam, "held, never exposed");
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains("No sweep releases it"),
+            "the release held");
+    }
+
+    [Fact]
     public async Task Reparent_WhenAPermittedMoveOutsParentsAreChangedByAnotherWriter_ARowHeldInTheSecureUnitIsNotGivenAnOrdinaryOwner()
     {
         // Must-fire (the guard's conjunction): this call's F3 check permitted the move out of the secure project, and another

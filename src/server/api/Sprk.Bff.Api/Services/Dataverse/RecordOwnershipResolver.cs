@@ -1772,7 +1772,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 request.RecordId,
                 new Dictionary<string, object> { [OwnerColumn] = new EntityReference(TeamEntity, secure.OwningTeamId!.Value) },
                 ct).ConfigureAwait(false);
-            return await ConfirmUnconditionalSecureWriteAsync(request, resolvedFrom, secure, lastState!, ct)
+            return await ConfirmUnconditionalSecureWriteAsync(request, resolvedFrom, secure, before, lastState!, ct)
                 .ConfigureAwait(false);
         }
 
@@ -1826,10 +1826,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// ordinary owner — and the release wrote that owner (<see cref="SecureWriteRelease.Released"/>), filing and owner agree
     /// and the filing is this call's own: the re-file is settled, and the owner it now holds is returned (the steps after a
     /// re-file run as for any settled re-file). Every other case throws as above.
+    /// Round 5 (F2): "this call's own" includes its lineage-only lookups (a message's thread) — the row holds the ones it held
+    /// before the change with this call's own changes applied (<paramref name="before"/>), so another writer's join is never
+    /// answered as this call's settled filing.
     /// </remarks>
     private async Task<RecordOwnerResolution> ConfirmUnconditionalSecureWriteAsync(
         RecordReparent request, IReadOnlyCollection<RecordOwnershipParent> resolvedFrom, RecordOwnerResolution secure,
-        RowOwnership lastRead, CancellationToken ct)
+        RowBeforeChange before, RowOwnership lastRead, CancellationToken ct)
     {
         var fresh = await ReadRowOwnershipAsync(request, ct).ConfigureAwait(false)
             ?? throw new RecordOwnerUnsettledException(
@@ -1843,8 +1846,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return await ConfirmOwnerAsync(request, secure, ct).ConfigureAwait(false);
         }
 
-        var outcome = await ReleaseOwnSecureWriteAsync(request, secure, freshTarget, fresh, lastRead, ct).ConfigureAwait(false);
-        var filingIsOwn = FiledAsResolved(fresh, resolvedFrom);
+        var outcome = await ReleaseOwnSecureWriteAsync(request, secure, freshTarget, fresh, before, lastRead, ct)
+            .ConfigureAwait(false);
+        var filingIsOwn = FiledAsResolved(fresh, resolvedFrom) && SameLineage(before.LineageLookups, fresh.LineageLookups);
         if (outcome == SecureWriteRelease.Released && filingIsOwn)
         {
             _logger.LogInformation(
@@ -1909,11 +1913,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// (round 3, F1: another writer's filing whose secure reason the fresh parents cannot show — a thread join passes the
     /// thread's secure record as its own inherited parent, never this call's), an ambiguous or absent Secure Record business
     /// unit, no version, a row changed again (412), or an owner that does not read back. Never writes an owner that disagrees
-    /// with the fresh parents.
+    /// with the fresh parents. Round 5 (F2): the lineage-only lookups are also compared with the ones the row held before the
+    /// change with this call's own changes applied (<paramref name="before"/>): a join that landed before
+    /// <paramref name="lastRead"/>, whose settle wrote the Secure team after it, leaves the thread the same at both reads, and
+    /// that Secure owner is the joiner's, not this call's.
     /// </summary>
     private async Task<SecureWriteRelease> ReleaseOwnSecureWriteAsync(
         RecordReparent request, RecordOwnerResolution secure, RecordOwnerResolution freshTarget, RowOwnership fresh,
-        RowOwnership lastRead, CancellationToken ct)
+        RowBeforeChange before, RowOwnership lastRead, CancellationToken ct)
     {
         if (!freshTarget.IsOwned || freshTarget.IsSecureOwner)
             return SecureWriteRelease.Held;
@@ -1923,8 +1930,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return SecureWriteRelease.AlreadySettled;
         if (fresh.OwningTeam != secure.OwningTeamId || fresh.Version is not { } version)
             return SecureWriteRelease.Held;
-        if (!SameLineage(lastRead.LineageLookups, fresh.LineageLookups))
+        if (!SameLineage(lastRead.LineageLookups, fresh.LineageLookups)
+            || !SameLineage(before.LineageLookups, fresh.LineageLookups))
+        {
             return SecureWriteRelease.Held;
+        }
 
         var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
         if (secureBu.Ambiguous || secureBu.Id is not { } secureBuId
@@ -2247,10 +2257,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             landed = null;
         }
 
-        if (landed == true && await StillFiledAsResolvedAsync(request, resolvedFrom).ConfigureAwait(false) == false)
+        if (landed == true && await StillFiledAsResolvedAsync(request, resolvedFrom, before).ConfigureAwait(false) == false)
         {
             // #2143: the owner is the resolved team, but the row is no longer filed under the parents it was resolved from —
             // another writer re-filed it. Filing and owner do NOT agree; the filing is left to that writer below.
+            // Round 5 (F2): nor when another writer moved a lineage-only lookup (a thread join) — that writer's Secure owner
+            // reads the same as this call's, and is never answered as this call's settled re-file.
             landed = false;
         }
 
@@ -2280,16 +2292,18 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     }
 
     /// <summary>
-    /// #2143: whether the row is still filed under <paramref name="resolvedFrom"/> — <c>null</c> when it cannot be read (the
-    /// caller keeps its earlier answer). App-only, no cancellation (recovery).
+    /// #2143: whether the row is still filed under <paramref name="resolvedFrom"/> — and (round 5, F2) still holds the
+    /// lineage-only lookups of <paramref name="before"/>, so no other writer joined it elsewhere — <c>null</c> when it cannot
+    /// be read (the caller keeps its earlier answer). App-only, no cancellation (recovery).
     /// </summary>
     private async Task<bool?> StillFiledAsResolvedAsync(
-        RecordReparent request, IReadOnlyCollection<RecordOwnershipParent> resolvedFrom)
+        RecordReparent request, IReadOnlyCollection<RecordOwnershipParent> resolvedFrom, RowBeforeChange before)
     {
         try
         {
             var state = await ReadRowOwnershipAsync(request, CancellationToken.None).ConfigureAwait(false);
-            return state is not null && FiledAsResolved(state, resolvedFrom);
+            return state is not null && FiledAsResolved(state, resolvedFrom)
+                && SameLineage(before.LineageLookups, state.LineageLookups);
         }
         catch (Exception readFailure)
         {
