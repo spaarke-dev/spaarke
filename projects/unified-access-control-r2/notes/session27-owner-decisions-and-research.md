@@ -1660,3 +1660,26 @@ The full record is in `notes/185-invite-code-design.md` §11.
      - `WorkforceIdentity__CustomerTenantIds__1` holds bc3aa7f4;
      - the Workforce role holds the sprk_servicerequest privileges.
    - Still needed: a new, unlicensed guest, invited manually by the owner (dev only, 186 §7 Q5).
+
+## Round 105 (owner, 2026-10-20)
+
+1. **Secure dev matter:** the owner made PAT-908068 Secure (`5d46df87-e762-f111-ab0c-000d3a4d8152`). Owner UAT, PASS:
+   - a CIAM external user was granted access;
+   - the document landed in the Secure Record business unit;
+   - the CIAM user sees the Secure matter in the SPA, and can see, download and open its document.
+   - **Found:** the document's Access Permission shows "Standard". Filed as **#2119** (display copy ignores `sprk_issecure`); fix option (a) or (b) is for the owner.
+   - The #2102 Secure steps are re-running against this matter.
+2. **SharePoint four:** the owner asked what it means. Explained: one is "Sharepoint Document — Read: Organization" on the Tables tab; the other three are on the Miscellaneous tab. **Not yet approved.**
+   - The SRO role needs Read only on tables whose rows the Secure team owns, so it needs none on document types.
+   - The two document-type tables are `sprk_documenttype` (classification) and `sprk_documenttype_ref` (Insights Engine r2's organization-owned taxonomy).
+3. **036: HOLD.** The owner asked: "isn't OBO required for SharePoint Embedded? ... don't change this until this is definitively resolved". A definitive analysis is being written in `notes/036-obo-resolution.md`.
+   - OBO to Graph/SPE (GraphClientFactory, ADR-028 A4) is separate from the Dataverse record-access probe.
+   - The probe is used by more endpoints than first stated, so the earlier framing is to be corrected.
+4. **Delete decisions:**
+   - Q1 = **A** (a Dataverse role holds prvDelete; Core User loses it). The name and depth still need confirming; proposed "Spaarke Record Deleter", Parent:Child business units.
+   - Q2 = **recycle bin**.
+   - Q3: files ARE deleted (secure and non-secure alike, D7), **with a clear message on delete that its documents and files will be removed**. Whether the now-empty dedicated container of a secure record stays is still open.
+   - The owner's corollary was answered: a non-secure record's files are deleted too; the shared container stays.
+   - Q4 = **no Decision Record** for a delete.
+   - Q5: "if its decision records are deleted, then the signal records are deleted". This conflicts with approved D2 (DRs are kept and unlinked), so the owner was asked to confirm whether D2 changes.
+5. **186:** the guest is `tracy.cheatham@…` (home tenant bc3aa7f4). Sign-in failed with AADSTS90072 because the account isn't invited into the Spaarke tenant yet. The owner invites it, or approves UAC sending the B2B invite. **5b approved:** remove and restore Create on the Workforce role's sprk_servicerequest during the gate.
