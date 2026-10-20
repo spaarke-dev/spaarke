@@ -257,25 +257,6 @@ public class CallerPrincipalTests
         MeJson(caller).Should().Contain("\"writeAccessPerRecord\":true");
     }
 
-    [Fact(DisplayName = "Task 036 (a): a WorkforceHome-linked Dataverse-decided systemuser is told writes are per record, so the SPA takes the list's app-only canCreate")]
-    public void Me_HomeLinkedDataverseDecidedSystemUser_SaysWriteAccessIsPerRecord()
-    {
-        var caller = new CallerPrincipal
-        {
-            Plane = CallerPrincipalPlane.Workforce,
-            ContactId = Guid.NewGuid(),
-            SystemUserId = Guid.NewGuid(),
-            Email = "staff@customer.example",
-            ProjectAccess = new[] { new CallerProjectAccess { ProjectId = Guid.NewGuid(), Rights = AccessRights.Read } },
-            DataverseConfirmsWrites = true,
-            ResolvedThroughHomeLink = true,
-        };
-
-        CallMe(caller).WriteAccessPerRecord.Should().BeTrue(
-            "/me asks nothing (D8); the per-record answer is each list's canCreate, which this caller now gets app-only");
-        MeJson(caller).Should().Contain("\"writeAccessPerRecord\":true");
-    }
-
     [Fact]
     public void Me_EveryOtherCaller_OmitsWriteAccessPerRecord_SoTheWireIsUnchanged()
     {
@@ -309,11 +290,13 @@ public class CallerPrincipalTests
             },
             MatterAccess = new Dictionary<Guid, AccessRights>
             {
-                [readableMatter] = AccessRights.Read, [powerlessMatter] = AccessRights.None,
+                [readableMatter] = AccessRights.Read,
+                [powerlessMatter] = AccessRights.None,
             },
             WorkAssignmentAccess = new Dictionary<Guid, AccessRights>
             {
-                [readableWa] = AccessRights.Read, [powerlessWa] = AccessRights.None,
+                [readableWa] = AccessRights.Read,
+                [powerlessWa] = AccessRights.None,
             },
         };
 

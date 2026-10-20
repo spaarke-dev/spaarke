@@ -501,18 +501,6 @@ public sealed class WorkforcePrincipal
     /// </remarks>
     public bool ContactUnreadable { get; init; }
 
-    /// <summary>
-    /// <c>true</c> when this <see cref="WorkforcePrincipalKind.SystemUser"/> principal was resolved from a WorkforceHome
-    /// (ADR-028 A9) sign-in through the stored home link — a customer-directory token, which cannot be exchanged
-    /// On-Behalf-Of for a Dataverse token in Spaarke's tenant. Set only by the resolver's home-link branch; <c>false</c> for
-    /// every Spaarke-tenant systemuser and every contact.
-    /// </summary>
-    /// <remarks>Task 036 owner decision (a), 2026-10-18, widened by option C on 2026-10-20: a Dataverse write confirmation
-    /// on <c>/api/v1/external</c> asks app-only, naming <see cref="SystemUserId"/>
-    /// (<c>CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync</c>, <c>PrincipalHoldsPrivilegeAppOnlyAsync</c>), for
-    /// EVERY systemuser, so this property no longer chooses the path; it records how the principal was resolved.</remarks>
-    public bool ResolvedThroughHomeLink { get; init; }
-
     /// <summary>The workforce AAD object id (<c>oid</c> claim) the caller was resolved by.</summary>
     public required string Oid { get; init; }
 
@@ -574,19 +562,16 @@ public sealed class WorkforcePrincipalResolution
     /// <summary>Constructs a systemuser outcome (systemuserId + derived contactId + token email).
     /// <paramref name="email"/> is display/audit only (see <see cref="WorkforcePrincipal.Email"/>).
     /// <paramref name="contactUnreadable"/>: the derived contact could not be read (task 132 — see
-    /// <see cref="WorkforcePrincipal.ContactUnreadable"/>); ignored when a contact was derived.
-    /// <paramref name="resolvedThroughHomeLink"/>: resolved from a WorkforceHome sign-in through the stored home link
-    /// (<see cref="WorkforcePrincipal.ResolvedThroughHomeLink"/>, task 036 decision (a)).</summary>
+    /// <see cref="WorkforcePrincipal.ContactUnreadable"/>); ignored when a contact was derived.</summary>
     public static WorkforcePrincipalResolution ForSystemUser(
         Guid systemUserId, Guid? derivedContactId, string oid, string tenantId, string? email = null,
-        bool contactUnreadable = false, bool resolvedThroughHomeLink = false)
+        bool contactUnreadable = false)
         => Resolved(new WorkforcePrincipal
         {
             Kind = WorkforcePrincipalKind.SystemUser,
             SystemUserId = systemUserId,
             ContactId = derivedContactId,
             ContactUnreadable = derivedContactId is null && contactUnreadable,
-            ResolvedThroughHomeLink = resolvedThroughHomeLink,
             Oid = oid,
             TenantId = tenantId,
             Email = email ?? string.Empty

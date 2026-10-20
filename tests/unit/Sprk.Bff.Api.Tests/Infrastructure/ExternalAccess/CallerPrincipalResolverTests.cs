@@ -303,43 +303,6 @@ public class CallerPrincipalResolverTests
             "a capped set is carried to the responses that list through it, never dropped (NFR-03)");
     }
 
-    [Theory(DisplayName = "Task 036 (a): the strategy carries the home link from the resolved principal — only a home-linked systemuser is confirmed app-only")]
-    [InlineData("home-linked-systemuser", true)]
-    [InlineData("spaarke-tenant-systemuser", false)]
-    [InlineData("contact", false)]
-    public async Task WorkforceStrategy_CarriesTheHomeLink_FromTheResolvedPrincipal(string kind, bool expected)
-    {
-        var resolver = new Mock<IWorkforcePrincipalResolver>();
-        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(kind == "contact"
-                ? WorkforcePrincipalResolution.ForContact(Guid.NewGuid(), Guid.NewGuid().ToString(), WorkforceTenantId)
-                : WorkforcePrincipalResolution.ForSystemUser(
-                    Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid().ToString(), WorkforceTenantId,
-                    resolvedThroughHomeLink: kind == "home-linked-systemuser"));
-
-        var accessible = new Mock<IAccessibleRecordSetService>();
-        accessible.Setup(s => s.ComposeAsync(It.IsAny<WorkforcePrincipal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((WorkforcePrincipal p, string entity, CancellationToken _) => new AccessibleRecordSet
-            {
-                PrincipalKind = p.Kind,
-                EntityType = entity,
-                Rights = RightsOf(),
-                Sources = new AccessibleRecordSetSources(
-                    SystemUserMembership: false, ContactGrants: false, StandingGrantMembership: false,
-                    ImpersonatedRootSet: p.IsSystemUser),
-            });
-
-        var strategy = new WorkforcePrincipalStrategy(
-            resolver.Object, accessible.Object, Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
-
-        var result = await strategy.ResolveAsync(
-            new DefaultHttpContext { User = Principal(("email", "staff@contoso.com")) }, CancellationToken.None);
-
-        result.IsResolved.Should().BeTrue();
-        result.Principal!.ResolvedThroughHomeLink.Should().Be(expected,
-            "the confirmation path is a property of the resolved principal, never inferred from a failed exchange");
-    }
-
     [Fact]
     public async Task WorkforceStrategy_Contact_ScopesToGrantSet()
     {

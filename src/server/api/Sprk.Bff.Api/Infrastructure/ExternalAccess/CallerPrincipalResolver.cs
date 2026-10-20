@@ -183,18 +183,6 @@ public sealed class CallerPrincipal
     public bool DataverseConfirmsWrites { get; init; }
 
     /// <summary>
-    /// Task 036 owner decision (a), 2026-10-18: <c>true</c> when this workforce systemuser signed in through WorkforceHome
-    /// (ADR-028 A9) and was resolved through the stored home link (<see cref="WorkforcePrincipal.ResolvedThroughHomeLink"/>).
-    /// Its customer-directory token cannot be exchanged for a Dataverse token in Spaarke's tenant. <c>false</c> for every
-    /// other caller.
-    /// <para><b>No longer chooses a path</b> (task 036 option C, owner 2026-10-20): every systemuser's write confirmation
-    /// (<see cref="DataverseConfirmsWrites"/>) is now asked APP-ONLY, naming <see cref="SystemUserId"/>, however they
-    /// signed in (<c>ExternalProjectDataEndpoints.CallerRightsReader</c> / <c>CallerPrivilegeReader</c>). The property
-    /// still records how the principal was resolved.</para>
-    /// </summary>
-    public bool ResolvedThroughHomeLink { get; init; }
-
-    /// <summary>
     /// NFR-03 (task 036): the root entity types (logical names) whose accessible set is KNOWN INCOMPLETE — composition hit
     /// a ceiling with more records available (<see cref="AccessibleRecordSet.Capped"/>, the impersonated read's row cap or
     /// the membership walk's). A response listing records through this scope reports it (the module data fetch's
@@ -786,9 +774,6 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
             DataverseConfirmsWrites = accessibleProjects.Sources.ImpersonatedRootSet
                 || accessibleMatters.Sources.ImpersonatedRootSet
                 || accessibleWorkAssignments.Sources.ImpersonatedRootSet,
-            // Task 036 decision (a): a home-linked systemuser's confirmations run app-only naming its systemuser — a
-            // property of the resolved principal, never inferred from a failed token exchange.
-            ResolvedThroughHomeLink = principal.IsSystemUser && principal.ResolvedThroughHomeLink,
             // NFR-03 (task 036): a set known to be incomplete is carried to the responses that list through it.
             TruncatedRootEntityTypes = new[] { accessibleProjects, accessibleMatters, accessibleWorkAssignments }
                 .Where(set => set.Capped)

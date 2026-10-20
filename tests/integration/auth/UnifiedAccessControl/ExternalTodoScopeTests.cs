@@ -1488,7 +1488,11 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     // app-only too): the OBO questions are never asked on /api/v1/external.
     // =====================================================================
 
-    /// <summary><see cref="SystemUserHolding"/>, resolved through the WorkforceHome home link.</summary>
+    /// <summary>
+    /// <see cref="SystemUserHolding"/>, as a WorkforceHome-linked systemuser reaches the plane. Since option C the resolved
+    /// <see cref="CallerPrincipal"/> carries no sign-in marker (fix round 3 removed the dead <c>ResolvedThroughHomeLink</c>):
+    /// a home-linked systemuser is confirmed exactly as any other, which is what these rows pin.
+    /// </summary>
     private static CallerPrincipal HomeLinkedSystemUserHolding(
         ExternalDataService.TodoRootKind kind, Guid rootId, AccessRights rights, Guid? systemUserId = null)
     {
@@ -1503,7 +1507,6 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
             MatterAccess = principal.MatterAccess,
             WorkAssignmentAccess = principal.WorkAssignmentAccess,
             DataverseConfirmsWrites = true,
-            ResolvedThroughHomeLink = true,
         };
     }
 
@@ -1634,7 +1637,6 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(
             ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
-        _fixture.Principal.ResolvedThroughHomeLink.Should().BeFalse("this caller signed in with a Spaarke-tenant token");
         // The OBO path would also allow, were it (wrongly) asked: only the app-only path may answer.
         _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo).Holds(TodoCreatePrivilege);
         _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo)
