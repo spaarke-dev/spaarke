@@ -3,7 +3,7 @@
   <metadata>
     <title>Rule set and rate card scope schema: core lookups, scope options, all-BU flag, BU N:N, rate card scope and backfill, scope-column field security, Secure business-unit snapshot column</title>
     <phase>3 Rules (WP3) — rule-set scope (D-171, D-172, D-141), wave W3-6</phase>
-    <gate>blocked: owner approval of the final script required before running</gate>
+    <gate>owner approved the 080 schema for dev 2026-10-20 (D-144), on condition that ontology-r1 reviews it first: the real run waits for ontology-r1's PASS on the script and the -WhatIf output</gate>
     <status>not-started</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New idempotent schema script on dev (additive columns, options, one N:N, one new column on the three core tables) plus a data backfill and field security on two existing columns; no BFF code. The backfill writes rows and S7 changes existing columns, so the run is owner-gated.</rigor-reason>
@@ -55,7 +55,7 @@
     <constraint source="uac-r2 review item 8, design note S7">Field-secure sprk_ruleset.sprk_scope, sprk_firm, sprk_matter, sprk_project and sprk_workassignment (IsSecured true), because a model-driven edit of them bypasses the Q9 lock (409 ruleset.scope_locked is the BFF's). Copy the reader / writer profile pair of scripts/Set-ChildRecordCreatorPersonSchema.ps1: Read for every user (reader profile on every business unit's default team), Create / Update for the BFF application user only. Whether the columns join uac-r2's existing pair or an ebilling pair is settled with uac-r2 in the before-notice (step 3). Before securing, list every reader of sprk_scope and sprk_firm (design note section 6 reader table, plus a Grep of src/ and src/dataverse/solutions/SpaarkeMaster for both names) and record it. The read-only form controls are 079's (SpaarkeMaster), not this script's.</constraint>
     <constraint source="D-141 (Q1), design note S8, uac-r2 conditions b and c">New column sprk_securedfrombusinessunit ("Business unit before Secure"), a lookup to businessunit, on sprk_matter, sprk_project and sprk_workassignment; delete behaviour RemoveLink; optional; IsSecured true with a writer profile for the BFF application user only and NO reader profile (no user reads or writes it); on no form and in no view (079 adds none). The column is ebilling's (owner correction: uac-r2 does not build it); its writer is task 087 and its reader task 082. Do NOT add any other business-unit column to the core tables (Proposal A, an always-maintained home-BU lookup, is rejected by D-141).</constraint>
     <constraint source="D-141, uac-r2 review item 1">S5 (config/secure-record-owner-role.json) and S9 (sprk_createdbyperson through scripts/Set-ChildRecordCreatorPersonSchema.ps1) are NOT in this script: their lists are pinned against BFF code by ChildRecordCreatorPersonSchemaAgreementTests, SecureFamilyConsistencyTests and the census, so tasks 081 (rule set, policy, version) and 086 (rate card, rate) ship them in one change with that code.</constraint>
-    <constraint source="project CLAUDE.md section 5, root CLAUDE.md section 6">Owner approval required before running the script for real: show the final script and the -WhatIf output and wait for an explicit OK. Dev only. -WhatIf first.</constraint>
+    <constraint source="D-144, project CLAUDE.md section 5, root CLAUDE.md section 6">The owner approved the 080 schema for dev on 2026-10-20 (D-144), on condition that ontology-r1 reviews it first. Before the real run, ontology-r1 must PASS the final script and the -WhatIf output against existing schema practice (naming, option sets, lookups, ownership, field security, solution placement) and the ontology model. Its findings are fixed and re-checked. The main session asks the owner again if the -WhatIf shows anything the design note does not (a collision, a new item, a change of type or value), or if the review changes the design. Dev only. -WhatIf first.</constraint>
     <constraint source="project CLAUDE.md section 3 (pipeline)">Do NOT edit src/dataverse/solutions/SpaarkeMaster/** (079 syncs it). No forms or views here (079). No plugins, business rules or calculated columns (ADR-002). No file under src/ changes.</constraint>
   </constraints>
 
@@ -77,7 +77,7 @@
     <step order="2">List every reader of sprk_ruleset.sprk_scope and sprk_firm (code, views, forms, flows found by Grep and by a dev read of savedquery / systemform fetchxml naming them); record which run as a user without the reader profile.</step>
     <step order="3">Write the script on EbillingSchema.psm1, copying the reference scripts named in relevant-files. S1, S2, S3, S4, S6 column, S7 field security, S8 column and its writer profile, then the S6 backfill (a separate section with its own -WhatIf output and its list of cards marked Firm, CoreRecord and left empty).</step>
     <step order="4">Notice before: post the planned item list, the step 2 reader list and the -WhatIf output to ontology-r1 and uac-r2 (a comment on #2129 and a message to each session); settle with uac-r2 which field security profiles S7 and S8 use. Record the date and the answer.</step>
-    <step order="5">Owner approval: show the owner the final script and the -WhatIf output, including the backfill list. Wait for an explicit OK; record it with the date in the task notes.</step>
+    <step order="5">ontology-r1 schema review (D-144): send ontology-r1 the final script, the -WhatIf output (including the backfill list) and the design note section 2. Ask it to check the script against existing schema practice and the ontology model. Fix its findings and get its PASS. Record the owner approval (D-144, 2026-10-20) and the PASS, with dates, in the task notes. Go back to the owner only on the conditions of the D-144 constraint.</step>
     <step order="6">Run for real, then run again: the second run reports no created item and writes no row.</step>
     <step order="7">Verify by metadata read: every column, option value, the N:N, the RemoveLink delete behaviour on the three new sprk_ruleset relationships and on the three sprk_securedfrombusinessunit relationships, IsSecured on the five S7 columns and on S8, and the profiles' permissions. Verify by data read: no sprk_ratecard row whose scope was set before the run changed; no core record has sprk_securedfrombusinessunit set (the writer is 087).</step>
     <step order="8">Notice after: send the run result and the backfill list to ontology-r1 and uac-r2.</step>
@@ -87,7 +87,7 @@
   </steps>
 
   <escalation>
-    <trigger>If the owner has not approved the final script, STOP before step 6. Do not run anything except -WhatIf.</trigger>
+    <trigger>If ontology-r1 has not passed the schema review (D-144), or the -WhatIf shows anything the design note does not, STOP before step 6. Do not run anything except -WhatIf.</trigger>
     <trigger>If businessunit reports CanBeInManyToMany = false, STOP and ask the owner to approve option (b) of the design note (an intersect table) as a script change; do not create it on your own.</trigger>
     <trigger>If any planned name or option value exists with another meaning, STOP and present both to the owner; do not rename or renumber.</trigger>
     <trigger>If the backfill finds a card with two or more core lookups, list it and leave it empty; do not choose one.</trigger>
@@ -113,7 +113,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">The task notes record the owner's explicit approval of the final script, with the date, before the real run.</criterion>
+    <criterion testable="true">The task notes record the owner approval (D-144, 2026-10-20) and ontology-r1's schema-review PASS, with its date, before the real run.</criterion>
     <criterion testable="true">A dev metadata read shows the three sprk_ruleset core lookups with relationships named as in S1 and delete behaviour RemoveLink (not Restrict); sprk_scope has exactly ClientDefault 100000000, Firm 100000001, Record 100000002, FirmRecord 100000003; sprk_allbusinessunits defaults to Yes; the N:N sprk_ruleset_businessunit exists.</criterion>
     <criterion testable="true">sprk_ratecard.sprk_scope exists with exactly Firm 100000000 and CoreRecord 100000001 and no default; the three sprk_ratecard core relationships still read RemoveLink.</criterion>
     <criterion testable="true">After the backfill, every card with exactly one core lookup reads CoreRecord, every card with none reads Firm, and any card with two or more is empty and listed in the notes; the notes list every card marked Firm.</criterion>

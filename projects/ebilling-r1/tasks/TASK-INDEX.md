@@ -80,7 +80,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 077 | ✅ [done] | Rule Review code page | STANDARD | sonnet / high | P3-C | 076 |
 | 078 | ✅ [done] | Rate card and timekeeper import and publish | STANDARD | sonnet / high | P2-B | 017, 028, 029 |
 | 079 | 🔲 [open] | Deploy WP3 to dev (includes the rule-set scope schema sync, views and backfill re-run; secure-family -Verify before the BFF) | STANDARD | sonnet / high | none (deploy) | 070, 071, 072, 073, 074, 075, 076, 077, 078, 053, 080, 081, 082, 083, 084, 085, 086, 087 |
-| 080 | 🔲 [open] | Rule set and rate card scope schema: core lookups (RemoveLink), scope options, all-BU flag, BU N:N, rate card scope + backfill, scope-column field security (S7), Secure BU snapshot column (S8) (owner approval before running) | STANDARD | sonnet / high | none (p-safe false: live schema, owner gate) | 019, 017, 029 |
+| 080 | 🔲 [open] | Rule set and rate card scope schema: core lookups (RemoveLink), scope options, all-BU flag, BU N:N, rate card scope + backfill, scope-column field security (S7), Secure BU snapshot column (S8) (owner approved D-144; ontology-r1 schema review PASS before running) | STANDARD | sonnet / high | none (p-safe false: live schema, owner gate) | 019, 017, 029 |
 | 081 | 🔲 [open] | RuleSetService scope validation, scope lock, BU writes, routed ownership; id-keyed route checks; Draft re-scope; sprk_ruleset joins the secure family in one change (lineage, role row, creator person, census, NFR-05); guard + twin guard | FULL | opus / high | none (p-safe false: uac-r2 files, shared census) | 080 |
 | 082 | 🔲 [open] | Rule selection by scope: direct core-record chain, eligibility + BU filter, Replace / Additive precedence, unknown-BU finding | FULL | opus / high | P3-D | 080, 081 |
 | 083 | 🔲 [open] | Firm clause applicability (`GetFirmClauseAsync` + core record); 130-135 POML constraints (Q15) — before 130 | STANDARD | sonnet / high | P3-E | 082 |
@@ -171,7 +171,7 @@ Phase 3
   W3-2 (parallel, 4): 071, 074, 075, 076 — prereq 070                — goal-eligible: NO (074 open owner question F-9)
   W3-3 (parallel, 2): 072, 077
   W3-4 (single):      073
-  W3-6 (single):      080 rule-set scope schema — owner approval of the final script before it runs — goal-eligible: NO (live schema, owner gate)
+  W3-6 (single):      080 rule-set scope schema — owner approved (D-144); ontology-r1 schema review PASS before it runs — goal-eligible: NO (live schema, owner gate)
   W3-7 (single):      081 — prereq 080; p-safe false (uac-r2 files)   — goal-eligible: NO (auth, tenant isolation; owner OK for probes / -Apply)
   W3-7b (single):     087 — prereq 080; p-safe false (uac-r2 hot path; no file overlap with 081, may run beside it after /conflict-check) — goal-eligible: NO (security; uac-r2 review gate)
   W3-8 (single):      082 (P3-D) — prereq 080, 081                    — goal-eligible: NO (tenant isolation)
@@ -223,7 +223,7 @@ joined at 049 by `029 → 070 → 071 → 072 → 073 → 049`, and WP1 `029` ga
 | 103 | F-2 — approve with undecided Clean lines (assumed: allowed, implicitly Accepted in bulk) |
 | 104, 105 | F-7 — non-privileged Return of a blocked internal submission |
 | 162 | Any missed NFR-04 – NFR-06 target needs a recorded owner decision |
-| 080 | Owner approval of the final rule-set / rate-card scope schema script (and its backfill list) before it runs |
+| 080 | Owner approved 2026-10-20 (D-144). Before the run: ontology-r1 schema-review PASS on the final script and -WhatIf (incl. the backfill list); back to the owner only if the -WhatIf or review departs from the design note |
 | 081, 086 | Owner OK for the live refusal probes and the -Apply runs of the secure-owner role script and the creator-person schema script on dev (Q11 closed by the uac-r2 review, design note section 12) |
 | 087 | uac-r2 approves the diff on ProvisionProjectEndpoint and the child-create path before merge (D-141 condition f; Q1 decided by D-141) |
 | 163 | UAT sign-off |

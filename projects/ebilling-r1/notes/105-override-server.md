@@ -149,15 +149,15 @@ The tests are for new code, so "before" is "the guarded behaviour removed". Each
 - Return does not change the approval portion; it stays Pending on the Returned invoice (the invoice is final, Returned to Firm, D-43). Whether 103/104 expect the portion closed is theirs to decide.
 - The stamp stores `bySystemUserId`, not a display name; the review screens resolve the name.
 - A Decision Record can exist while the submission write failed. That is deliberate (record before mutate); the retry finds it. Nothing else reads it as a completed decision, because the stored stamp and the submission code are the state.
-- The deploy script has not been run (parse-checked only). Until it runs in an environment, nobody holds the privilege, so Override is refused for everyone (fails closed) and Return still works.
+- The deploy script ran on dev 2026-10-20 (D-142): Spaarke Core User holds the privilege. In any environment where it has not run, nobody holds it, so Override is refused for everyone (fails closed) and Return still works.
 - `ebilling.reason_required` is spelled in `BlockedSubmissionErrors` as well as in task 104's reject/return errors; if 104 lands a shared constant, one of them should reference the other.
 - The route filter checks Read+Write on the submission for Return. A user who can only see the invoice cannot return it; that matches D-73 ("no privilege") but is stricter than "any user".
 
 ## 8. Open questions for the owner
 
 1. ~~Do you want the blocking Signals themselves re-marked on an override?~~ Answered: yes, closed as Acted by the decision's record, in the shape agreed with ontology-r1 (section 9).
-2. FR-39 notification: Override calls the existing `SubmissionDecidedAsync(Accepted, Internal)` seam so task 132 can notify the approvers. Return sends nothing (the seam has no Returned outcome). Confirm that is the intended split, or add a Returned outcome to the seam in 132.
-3. Who may run `Deploy-EbillingOverridePrivilegeSchema.ps1` and in which environment first (creates a table and a role; idempotent; `-WhatIf` supported).
+2. ~~FR-39 notification for Return?~~ Answered (D-143): the firm is notified. The seam gained `SubmissionDecisionOutcome.Returned`; Return reports it with `ebilling.submission.returned` after the commit, and task 132 sends the ReturnedToFirm notice.
+3. ~~Who may run `Deploy-EbillingOverridePrivilegeSchema.ps1`, and where first?~~ Answered (D-142): applied on dev 2026-10-20 with `-RoleName 'Spaarke Core User'`; Spaarke Core User holds the privilege at Global and no dedicated role exists.
 4. 103 and 104 should adopt `SubmissionOverrideService.LockKey(invoiceId)` for approve/reject/return so all invoice decisions serialise. Confirm they will, or the key should move to a shared helper.
 
 ## 9. Human-decision Signal close (D-122, agreed with ontology-r1)

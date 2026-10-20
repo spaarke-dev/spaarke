@@ -47,6 +47,7 @@
     <constraint source=".claude/skills/bff-deploy/SKILL.md">Deploy the BFF only with scripts/Deploy-BffApi.ps1 and its hash verification; never trust a success message alone.</constraint>
     <constraint source="projects/ebilling-r1/CLAUDE.md:126">SpaarkeMaster edits are additive and limited to navigation entries for the pages deployed here and WP4 Dataverse components; export to a temp folder and copy only those files or hunks; unrelated dev drift is listed in notes, never copied. Import only through Import-SolutionScoped.ps1 (-PlanOnly first).</constraint>
     <constraint source="project">Deploy CreateInvoiceWizard alone with Deploy-WebResourceInline.ps1, not Deploy-WizardCodePages.ps1 (that script deploys every wizard whose local dist exists, which can push stale unrelated builds).</constraint>
+    <constraint source="D-142, uac-r2 2026-10-20">The 105 override carrier is a WP4 Dataverse component: copy into SpaarkeMaster the table sprk_ebillingoverride (Entities/sprk_ebillingoverride) and, in the Spaarke Core User role (Roles), only the prvWritesprk_ebillingoverride privilege at Global (dev applied it 2026-10-20). Before any import, check that the Core User role in source holds it, so an import does not drop it from dev. No dedicated "eBilling Override" role exists.</constraint>
     <constraint source="project">No destructive Dataverse change; -WhatIf first where a script supports it. Never delete owner-created containers or evaluation-set documents.</constraint>
   </constraints>
 
@@ -104,6 +105,7 @@
     <criterion testable="true">One invoice was reviewed and approved in dev end to end with totals matching I-1 and exactly one Decision Record per decision; one invoice was returned to the firm.</criterion>
     <criterion testable="true">NFR-02 p90 under 3 s for page open and context pane, recorded.</criterion>
     <criterion testable="true">108–111 and 052 ui-tests pass in dev, including dark mode.</criterion>
+    <criterion testable="true">SpaarkeMaster source holds the sprk_ebillingoverride table and prvWritesprk_ebillingoverride at Global in the Spaarke Core User role (D-142); a dev read after the import still shows the privilege at Global.</criterion>
     <criterion testable="true">Evidence recorded in notes/112-wp4-deploy.md.</criterion>
   </acceptance-criteria>
 
