@@ -777,6 +777,79 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private static readonly string[] OrganizationIdentityTypeOnly = { "Organization" };
 
     /// <summary>
+    /// Narrows a systemuser-plane membership walk to OWNERSHIP descriptors only (#2121): the platform columns
+    /// <c>ownerid</c> (SystemUser and Team), <c>owningteam</c> (Team) and <c>owningbusinessunit</c> (BusinessUnit).
+    /// </summary>
+    /// <remarks>
+    /// This narrowing selects exactly the ownership descriptors because of how the access-conferring filter
+    /// (<c>MembershipResolverService.FilterToAccessConferringRoles</c>, applied by <c>AccessConferringOnly</c>) works:
+    /// it admits those three platform columns by NAME, and admits a registry "Assigned …" column only when it is
+    /// declared Contact or Organization typed (any other declared type is rejected as malformed). So under
+    /// <c>AccessConferringOnly</c> no registry column can carry one of these identity types, and every descriptor that
+    /// does is ownership. Pinned by <c>ResolveByContactAsync_MalformedRegistryEntry_IsIgnoredAndLogged_NeverWidened</c>
+    /// (a Team-typed entry is rejected) and <c>ResolveAsync_AccessConferringOnly_MakerAuthoredSystemUserLookup_ConfersNothing</c>
+    /// (an unregistered SystemUser lookup confers nothing). If the registry ever
+    /// admits a SystemUser- or Team-typed column, this split must be revisited.
+    /// </remarks>
+    private static readonly string[] OwnershipIdentityTypes = { "SystemUser", "Team", "BusinessUnit" };
+
+    /// <summary>
+    /// The systemuser plane's membership ids that Secure suppresses (#2121, FR-22): the effectively Secure ids the
+    /// main walk reached ONLY through a registry lookup column, never through ownership.
+    /// </summary>
+    /// <remarks>
+    /// <para>The main walk returns one flat id set and does not say which descriptor matched an id (its <c>ByRole</c> map
+    /// attributes a row to every role whose column is merely populated, so it cannot answer this). So the ownership half is
+    /// read with a second walk through the SAME resolver, narrowed to <see cref="OwnershipIdentityTypes"/>. That walk runs
+    /// only when a membership id is effectively Secure (NFR-02); most compositions never make it.</para>
+    /// <para>Fails closed. A Secure id that the ownership walk does not return loses its membership, including when that
+    /// walk is capped. A walk that throws propagates, and the caller denies wholesale, as for the main walk.</para>
+    /// </remarks>
+    private async Task<IReadOnlySet<Guid>> SecureLookupOnlyMembershipAsync(
+        Guid systemUserId,
+        string entityType,
+        IReadOnlyCollection<Guid> membershipIds,
+        IReadOnlyDictionary<Guid, RootRecordFlags> flags,
+        CancellationToken ct)
+    {
+        // The same predicate as the systemuser deny veto's: an unreadable flag row counts as Secure (fail closed).
+        var secure = membershipIds
+            .Where(id => flags.TryGetValue(id, out var f) && (f.IsSecure || f.IsUnreadable))
+            .ToList();
+        if (secure.Count == 0)
+        {
+            return EmptyDeniedSet;
+        }
+
+        var ownership = await WalkMembershipPagesAsync(
+            (options, token) => _membership.ResolveAsync(systemUserId, entityType, options, token),
+            entityType,
+            $"systemuser {systemUserId} (ownership)",
+            ct,
+            accessConferringOnly: true,
+            identityTypes: OwnershipIdentityTypes).ConfigureAwait(false);
+
+        var lookupOnly = secure.Where(id => !ownership.Ids.Contains(id)).ToHashSet();
+        if (lookupOnly.Count > 0)
+        {
+            _logger.LogInformation(
+                "[WF-AUTHZ] Systemuser {SystemUserId}: {Count} Secure {EntityType} record(s) reached only through a registry " +
+                "lookup column keep no membership-term access (FR-22, #2121): {RecordIds}. Ownership-derived membership is kept.",
+                systemUserId, lookupOnly.Count, entityType, string.Join(",", lookupOnly));
+        }
+
+        if (ownership.Capped && lookupOnly.Count > 0)
+        {
+            _logger.LogWarning(
+                "[WF-AUTHZ] The ownership walk for systemuser {SystemUserId} on {EntityType} was capped: a Secure record the user " +
+                "owns past the ceiling loses its membership-term access (fail closed, #2121).",
+                systemUserId, entityType);
+        }
+
+        return lookupOnly;
+    }
+
+    /// <summary>
     /// Reads the subject's organization memberships ONCE per composition, for both the org-expansion term
     /// and the deny-veto subject (task 043; the one read now yields two named sets — task 109).
     /// </summary>
@@ -1925,11 +1998,21 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         var isDirectOnly = DirectOnlyPredicate(flags);
 
         // Term 1 — ADR-034 membership. NOT contact-sourced, so it survives BOTH vetoes: it is the
-        // systemuser's own Dataverse-governed access, which is exactly what Restricted preserves
-        // ("only system users may have access") and what Secure and Limited leave alone (the Secure BU covers
-        // the Dataverse half; the suppression covers the grant half — design §5.1). Task 138: Limited governs
-        // which CONTACT grant types count, never internal access, so this term never consults isDirectOnly.
+        // systemuser's own access, which is exactly what Restricted preserves ("only system users may have
+        // access"). Task 138: Limited governs which CONTACT grant types count, never internal access, so this
+        // term never consults isDirectOnly.
+        //
+        // #2121 (FR-22): Secure DOES act on half of this term. The walk unions two kinds of match:
+        //   - OWNERSHIP (ownerid / owningteam / owningbusinessunit): the user owns the record or is in the owning
+        //     team. That is Dataverse access, which the model-driven app grants too, so it survives Secure.
+        //   - REGISTRY LOOKUP columns ("Assigned …", matched through the linked contact or its organization): derived
+        //     access that Dataverse knows nothing about. The Secure BU blocks this user in the model-driven app, so
+        //     on an effectively Secure record (folded flags, IsSecure — not IsDirectOnly) it is suppressed here, as
+        //     the contact plane's membership walk is. An id matched both ways keeps its membership.
+        var secureLookupOnly = await SecureLookupOnlyMembershipAsync(systemUserId, entityType, walk.Ids, flags, ct)
+            .ConfigureAwait(false);
         var membershipTerm = walk.Ids
+            .Where(id => !secureLookupOnly.Contains(id))
             .Select(id => KeyValuePair.Create(id, MembershipTermRights))
             .ToList();
         AccumulateTerm(composed, membershipTerm);

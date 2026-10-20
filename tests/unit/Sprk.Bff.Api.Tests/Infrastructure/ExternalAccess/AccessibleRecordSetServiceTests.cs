@@ -32,6 +32,7 @@ public class AccessibleRecordSetServiceTests
 {
     private const string ProjectEntity = "sprk_project";
     private const string MatterEntity = "sprk_matter";
+    private const string WorkAssignmentEntity = "sprk_workassignment";
 
     private static readonly Guid SystemUserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid ContactId = Guid.Parse("33333333-3333-3333-3333-333333333333");
@@ -854,6 +855,222 @@ public class AccessibleRecordSetServiceTests
         set.Rights.Should().NotContainKey(GrantedProject, "task 136: absent from the answer, not present with no rights");
         standing.Verify(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
             "the systemuser plane must never consult the standing-grant flag");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // #2121 — Secure suppresses a systemuser's LOOKUP-derived membership (Term 1) on the SPA/Teams plane.
+    // A user whose linked contact is named in a registry "Assigned …" column of a Secure record is denied by
+    // the model-driven app (the Secure BU blocks them); the membership term must not open it here either.
+    // Ownership-derived membership (the user owns it, or is in the owning team) is Dataverse access and stays.
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>The composer's MAIN membership walk: every access-conferring descriptor, no identity-type narrowing.</summary>
+    private static MembershipResolveOptions? MainMembershipWalk =>
+        It.Is<MembershipResolveOptions?>(o =>
+            o != null && o.Limit == AccessibleRecordSetService.MembershipPageSize
+            && o.AccessConferringOnly && o.IdentityTypes == null);
+
+    /// <summary>
+    /// The OWNERSHIP walk (#2121): the same access-conferring walk narrowed to the platform ownership identity types
+    /// (SystemUser / Team / BusinessUnit) and to nothing a registry "Assigned …" column can carry (Contact / Organization).
+    /// </summary>
+    private static MembershipResolveOptions? OwnershipMembershipWalk =>
+        It.Is<MembershipResolveOptions?>(o =>
+            o != null && o.Limit == AccessibleRecordSetService.MembershipPageSize
+            && o.AccessConferringOnly
+            && o.IdentityTypes != null
+            && o.IdentityTypes.Contains("SystemUser", StringComparer.OrdinalIgnoreCase)
+            && o.IdentityTypes.Contains("Team", StringComparer.OrdinalIgnoreCase)
+            && !o.IdentityTypes.Contains("Contact", StringComparer.OrdinalIgnoreCase)
+            && !o.IdentityTypes.Contains("Organization", StringComparer.OrdinalIgnoreCase));
+
+    private static Mock<IMembershipResolverService> MembershipWith(
+        string entityType, Guid[] membershipIds, Guid[] ownershipIds)
+    {
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, entityType, MainMembershipWalk, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(entityType, membershipIds));
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, entityType, OwnershipMembershipWalk, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(entityType, ownershipIds));
+        return membership;
+    }
+
+    private static readonly RootRecordFlags SecureOnly = new(IsSecure: true, IsRestricted: false);
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_SecureRecordReachedOnlyThroughALookupColumn_IsNotInTheSet()
+    {
+        // Must fire (#2121): the user's linked contact is the record's Assigned Attorney; the user owns nothing.
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
+        var participations = NoParticipations();
+        ((FakeParticipationService)participations).Flags[secure] = SecureOnly;
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(secure,
+            "FR-22: on a Secure record derived (lookup-column) membership is suppressed for every principal kind — the "
+            + "model-driven app denies this user, so the SPA/Teams plane must too");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_SecureRecordReachedThroughOwnership_KeepsMembershipRights()
+    {
+        // Must not fire: the user is a member of the owning team. Ownership is Dataverse access, which the
+        // model-driven app grants too, so the membership term keeps it.
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: new[] { secure });
+        var participations = NoParticipations();
+        ((FakeParticipationService)participations).Flags[secure] = SecureOnly;
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.RightsFor(secure).Should().Be(AccessibleRecordSetService.MembershipTermRights,
+            "ownership-derived membership survives Secure");
+        membership.Verify(m => m.ResolveAsync(SystemUserId, MatterEntity, OwnershipMembershipWalk, It.IsAny<CancellationToken>()),
+            Times.Once, "the ownership half is decided by the resolver's own ownership descriptors");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_LimitedNonSecureRecordReachedThroughALookupColumn_KeepsMembership()
+    {
+        // Must not fire: Limited governs which CONTACT grant types count, never internal access (task 138).
+        var limited = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { limited }, ownershipIds: Array.Empty<Guid>());
+        var participations = NoParticipations();
+        ((FakeParticipationService)participations).Flags[limited] = LimitedOnly;
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.RightsFor(limited).Should().Be(AccessibleRecordSetService.MembershipTermRights,
+            "Limited does not touch a systemuser's membership");
+        membership.Verify(m => m.ResolveAsync(SystemUserId, MatterEntity, OwnershipMembershipWalk, It.IsAny<CancellationToken>()),
+            Times.Never, "no Secure candidate, so no extra read (NFR-02)");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_NonSecureRecordReachedThroughALookupColumn_KeepsMembership()
+    {
+        // Must not fire: an ordinary record keeps its lookup-derived membership.
+        var open = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { open }, ownershipIds: Array.Empty<Guid>());
+
+        var sut = CreateSut(membership.Object, NoParticipations(), NeverStanding());
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.RightsFor(open).Should().Be(AccessibleRecordSetService.MembershipTermRights);
+        membership.Verify(m => m.ResolveAsync(SystemUserId, MatterEntity, OwnershipMembershipWalk, It.IsAny<CancellationToken>()),
+            Times.Never, "no Secure candidate, so no extra read (NFR-02)");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_NonSecureChildFiledUnderASecureMatter_ReachedThroughALookupColumn_IsNotInTheSet()
+    {
+        // Must fire on the EFFECTIVE flags (task 174): work assignment W is not flagged secure itself but is filed
+        // under Secure matter M, so it is Secure. Control: sibling W2, filed under an ordinary matter, keeps its
+        // membership — which also proves the filing walk was read as KNOWN (an unknown walk folds to Unreadable,
+        // i.e. secure, and would drop W2 as well).
+        var w = Guid.Parse("a1000000-0000-0000-0000-000000000001");
+        var w2 = Guid.Parse("a1000000-0000-0000-0000-000000000002");
+        var secureMatter = Guid.Parse("a2000000-0000-0000-0000-000000000001");
+        var openMatter = Guid.Parse("a2000000-0000-0000-0000-000000000002");
+
+        var membership = MembershipWith(WorkAssignmentEntity, membershipIds: new[] { w, w2 }, ownershipIds: Array.Empty<Guid>());
+        var participations = NoParticipations();   // W and W2 carry no secure flag of their own
+
+        var filing = FilingWorld(
+            FiledWorkAssignment(w, secureMatter),
+            FiledWorkAssignment(w2, openMatter),
+            MatterRow(secureMatter, isSecure: true),
+            MatterRow(openMatter, isSecure: false));
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), filing: filing);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), WorkAssignmentEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(w,
+            "a child filed under a Secure matter is effectively Secure, so lookup-derived membership is suppressed");
+        set.RightsFor(w2).Should().Be(AccessibleRecordSetService.MembershipTermRights,
+            "control: a child of an ordinary matter keeps its lookup-derived membership");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_SecureRecordsAreFilteredPerId_OwnershipOrBothKeep_LookupOnlyDrops()
+    {
+        // Must not fire for an id reached BOTH ways; per-id, not all-or-nothing. Three Secure records in one composition:
+        //   both  — owned by the user's team AND names the user's contact in an Assigned column → kept;
+        //   owned — ownership only → kept;
+        //   assignedOnly — lookup column only → dropped.
+        var both = MemberRecordA;
+        var owned = MemberRecordB;
+        var assignedOnly = Guid.Parse("a0000000-0000-0000-0000-000000000003");
+        var membership = MembershipWith(
+            MatterEntity,
+            membershipIds: new[] { both, owned, assignedOnly },
+            ownershipIds: new[] { both, owned });
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[both] = participations.Flags[owned] = participations.Flags[assignedOnly] = SecureOnly;
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.RightsFor(both).Should().Be(AccessibleRecordSetService.MembershipTermRights,
+            "an id matched by ownership AND a lookup column keeps its membership");
+        set.RightsFor(owned).Should().Be(AccessibleRecordSetService.MembershipTermRights);
+        set.Rights.Should().NotContainKey(assignedOnly);
+    }
+
+    /// <summary>
+    /// A filing world for the composition's ONE filing walk (task 174): each query is answered from <paramref name="rows"/>
+    /// by its table and its primary-id condition (Equal or In), projected to the requested columns — the same shape
+    /// <c>ExternalRootEventReadTests.FakeDataverse</c> uses.
+    /// </summary>
+    private static IGenericEntityService FilingWorld(params Microsoft.Xrm.Sdk.Entity[] rows)
+    {
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) =>
+            {
+                var ids = query.Criteria.Conditions
+                    .Where(c => string.Equals(c.AttributeName, query.EntityName + "id", StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(c => c.Values.Select(v => (Guid)v))
+                    .ToHashSet();
+                return new Microsoft.Xrm.Sdk.EntityCollection(rows
+                    .Where(r => string.Equals(r.LogicalName, query.EntityName, StringComparison.OrdinalIgnoreCase) && ids.Contains(r.Id))
+                    .Select(r =>
+                    {
+                        if (query.ColumnSet is null || query.ColumnSet.AllColumns) return r;
+                        var projected = new Microsoft.Xrm.Sdk.Entity(r.LogicalName, r.Id);
+                        foreach (var column in query.ColumnSet.Columns)
+                        {
+                            if (r.Attributes.TryGetValue(column, out var value)) projected[column] = value;
+                        }
+                        return projected;
+                    })
+                    .ToList());
+            });
+        return entities.Object;
+    }
+
+    private static Microsoft.Xrm.Sdk.Entity FiledWorkAssignment(Guid id, Guid matterId)
+    {
+        var row = new Microsoft.Xrm.Sdk.Entity(WorkAssignmentEntity, id);
+        row["sprk_regardingmatter"] = new Microsoft.Xrm.Sdk.EntityReference(MatterEntity, matterId);
+        return row;
+    }
+
+    private static Microsoft.Xrm.Sdk.Entity MatterRow(Guid id, bool isSecure)
+    {
+        var row = new Microsoft.Xrm.Sdk.Entity(MatterEntity, id);
+        row["sprk_issecure"] = isSecure;
+        row["sprk_accesspermission"] = new Microsoft.Xrm.Sdk.OptionSetValue(100000000);   // Standard
+        row["sprk_mattername"] = $"matter {id}";
+        return row;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1830,10 +2047,11 @@ public class AccessibleRecordSetServiceTests
         ExternalParticipationService participations,
         ISubjectStandingGrantReader standing,
         INoAccessListReader? noAccessList = null,
-        IContactIdentityStore? identityStore = null)
+        IContactIdentityStore? identityStore = null,
+        IGenericEntityService? filing = null)
         => new(membership, participations, standing, noAccessList ?? NeverDeniesReader(),
                identityStore ?? UnlinkedIdentityStore(), InternalSystemUsers(),
-               Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
+               filing ?? Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities(),
                NullLogger<AccessibleRecordSetService>.Instance);
 
     /// <summary>
