@@ -41,6 +41,9 @@ public class CreateTimeFieldMappingTests
 
     private static readonly IReadOnlySet<string> NoProtectedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+    private static readonly IReadOnlySet<string> MoneyTargetColumn =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { TargetColumn };
+
     // ───────────────────────────── Copy × target field type ─────────────────────────────
 
     [Fact]
@@ -304,16 +307,36 @@ public class CreateTimeFieldMappingTests
         target[TargetColumn].Should().BeOfType<decimal>().Which.Should().Be(12.5m);
     }
 
-    // Pinned current behaviour, reported on task 001: the rule cannot say "Money", so a Default into a money column
-    // writes a plain decimal, not a Money. Dataverse expects Money for a money attribute; no caller is known to map a
-    // Default into one today.
+    // DI-001 / #2124 (fixed on task 002): the rule's "Number" cannot say "Money", so the caller names the currency
+    // columns it knows; a Default into one is written as a Money (the SDK rejects a decimal in a money column).
+    [Theory]
+    [InlineData("1500.25", 1500.25)]
+    [InlineData("1500", 1500)]
+    public void Default_MoneyTarget_WritesAMoney(string literal, double expected)
+    {
+        var (target, warnings) = Run(
+            new[] { DefaultRule(Number, literal) }, source: null, moneyAttributes: MoneyTargetColumn);
+
+        target[TargetColumn].Should().BeOfType<Money>().Which.Value.Should().Be((decimal)expected);
+        warnings.Should().BeEmpty();
+    }
+
     [Fact]
-    public void Default_MoneyTarget_WritesAPlainDecimalNotAMoney()
+    public void Default_MoneyTarget_FromANonNumber_IsSkippedWithOneWarning()
+    {
+        var (target, warnings) = Run(
+            new[] { DefaultRule(Number, "lots") }, source: null, moneyAttributes: MoneyTargetColumn);
+
+        target.Contains(TargetColumn).Should().BeFalse();
+        warnings.Should().ContainSingle().Which.Should().Contain("cannot be written");
+    }
+
+    [Fact]
+    public void Default_NumberTarget_NotNamedAsMoney_StillWritesAPlainDecimal()
     {
         var (target, _) = Run(DefaultRule(Number, "1500.25"));
 
         target[TargetColumn].Should().BeOfType<decimal>().Which.Should().Be(1500.25m);
-        target[TargetColumn].Should().NotBeOfType<Money>();
     }
 
     [Fact]
@@ -458,21 +481,78 @@ public class CreateTimeFieldMappingTests
         warnings.Should().ContainSingle().Which.Should().Contain("cannot set a lookup");
     }
 
-    // Pinned current behaviour, reported on task 001: a Concat/Template into a non-text, non-lookup target writes the
-    // resolved STRING as-is. Unlike Default there is no typed conversion, so a Number/OptionSet/DateTime/Boolean target
-    // receives a string that the SDK would reject at create.
+    // DI-001 / #2124 (fixed on task 002): a Concat/Template into a non-text, non-lookup target converts the resolved
+    // text to the SDK's typed value with the same conventions as a Default literal — never a string.
+    [Theory]
+    [InlineData(Concat)]
+    [InlineData(Template)]
+    public void Expression_NumberTarget_ConvertsTheResolvedTextToAnIntOrDecimal(int mappingType)
+    {
+        var whole = new Entity("sprk_matter") { ["sprk_count"] = 7 };
+        var fractional = new Entity("sprk_matter") { ["sprk_count"] = 12.5m };
+
+        Run(ExpressionRule(mappingType, Number, "{sprk_count}"), whole).Target[TargetColumn]
+            .Should().BeOfType<int>().Which.Should().Be(7);
+        Run(ExpressionRule(mappingType, Number, "{sprk_count}"), fractional).Target[TargetColumn]
+            .Should().BeOfType<decimal>().Which.Should().Be(12.5m);
+    }
+
+    [Fact]
+    public void Expression_MoneyTarget_ConvertsTheResolvedTextToAMoney()
+    {
+        var source = new Entity("sprk_matter") { ["sprk_budget"] = new Money(1500.25m) };
+
+        var (target, warnings) = Run(
+            new[] { ExpressionRule(Template, Number, "{sprk_budget}") }, source, moneyAttributes: MoneyTargetColumn);
+
+        target[TargetColumn].Should().BeOfType<Money>().Which.Value.Should().Be(1500.25m);
+        warnings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Expression_OptionSetTarget_ConvertsTheResolvedTextToAnOptionSetValue()
+    {
+        var source = new Entity("sprk_matter") { ["sprk_code"] = "100000002" };
+
+        var (target, _) = Run(ExpressionRule(Template, OptionSet, "{sprk_code}"), source);
+
+        target[TargetColumn].Should().BeOfType<OptionSetValue>().Which.Value.Should().Be(100000002);
+    }
+
+    [Fact]
+    public void Expression_DateTimeTarget_ConvertsTheResolvedTextToAUtcDateTime()
+    {
+        var source = new Entity("sprk_matter") { ["sprk_due"] = new DateTime(2026, 3, 15, 10, 30, 0, DateTimeKind.Utc) };
+
+        var (target, _) = Run(ExpressionRule(Template, DateTimeType, "{sprk_due}"), source);
+
+        target[TargetColumn].Should().BeOfType<DateTime>().Which.Should().Be(new DateTime(2026, 3, 15, 10, 30, 0, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public void Expression_BooleanTarget_ConvertsTheResolvedTextToABool()
+    {
+        var source = new Entity("sprk_matter") { ["sprk_active"] = true };
+
+        var (target, _) = Run(ExpressionRule(Template, Boolean, "{sprk_active}"), source);
+
+        target[TargetColumn].Should().BeOfType<bool>().Which.Should().BeTrue();
+    }
+
     [Theory]
     [InlineData(Number)]
     [InlineData(OptionSet)]
     [InlineData(DateTimeType)]
     [InlineData(Boolean)]
-    public void Expression_NonTextNonLookupTarget_WritesTheResolvedStringWithoutConversion(int targetFieldType)
+    public void Expression_NonTextNonLookupTarget_WhoseResultDoesNotConvert_IsSkippedWithOneWarningNeverAString(
+        int targetFieldType)
     {
-        var source = new Entity("sprk_matter") { ["sprk_count"] = 7 };
+        var source = new Entity("sprk_matter") { ["sprk_name"] = "Acme" };
 
-        var (target, _) = Run(ExpressionRule(Template, targetFieldType, "{sprk_count}"), source);
+        var (target, warnings) = Run(ExpressionRule(Template, targetFieldType, "{sprk_name} Ltd"), source);
 
-        target[TargetColumn].Should().BeOfType<string>().Which.Should().Be("7");
+        target.Contains(TargetColumn).Should().BeFalse();
+        warnings.Should().ContainSingle().Which.Should().Contain("cannot be written");
     }
 
     [Theory]
@@ -724,12 +804,16 @@ public class CreateTimeFieldMappingTests
     private static (Entity Target, List<string> Warnings) Run(FieldMappingRuleEntity rule) => Run(new[] { rule }, source: null);
 
     private static (Entity Target, List<string> Warnings) Run(
-        IEnumerable<FieldMappingRuleEntity> rules, Entity? source, IReadOnlySet<string>? protectedColumns = null)
+        IEnumerable<FieldMappingRuleEntity> rules,
+        Entity? source,
+        IReadOnlySet<string>? protectedColumns = null,
+        IReadOnlySet<string>? moneyAttributes = null)
     {
         var target = new Entity("sprk_matter");
         var warnings = new List<string>();
 
-        CreateTimeFieldMapping.Apply(rules, target, source, protectedColumns ?? NoProtectedColumns, warnings, NullLogger.Instance);
+        CreateTimeFieldMapping.Apply(
+            rules, target, source, protectedColumns ?? NoProtectedColumns, warnings, NullLogger.Instance, moneyAttributes);
 
         return (target, warnings);
     }
