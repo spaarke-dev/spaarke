@@ -873,10 +873,7 @@ public sealed class SubmissionOverrideService
         _logger.LogInformation("Submission {SubmissionId} {Outcome} by {Decider}; invoice {InvoiceId}, Decision Record {RecordId}, already recorded {AlreadyRecorded}",
             submissionId, verb == Verb.Override ? "overridden" : "returned", decider, invoiceId, recorded.RecordId, recorded.AlreadyRecorded);
 
-        if (verb == Verb.Override)
-        {
-            await NotifyAcceptedAsync(submissionId, invoiceId, ct).ConfigureAwait(false);
-        }
+        await NotifyDecidedAsync(verb, submissionId, invoiceId, ct).ConfigureAwait(false);
 
         return new BlockedDecisionResult
         {
@@ -969,18 +966,22 @@ public sealed class SubmissionOverrideService
         };
     }
 
-    /// <summary>Best effort: tell the notification seam the held submission is now accepted (task 132 notifies the eligible approvers). The decision is already committed.</summary>
-    private async Task NotifyAcceptedAsync(Guid submissionId, Guid invoiceId, CancellationToken ct)
+    /// <summary>
+    /// Best effort: tell the notification seam the held submission was decided. An override is Accepted (task 132 notifies the eligible
+    /// approvers); a return is Returned (task 132 notifies the firm, D-143). The decision is already committed.
+    /// </summary>
+    private async Task NotifyDecidedAsync(Verb verb, Guid submissionId, Guid invoiceId, CancellationToken ct)
     {
+        var notification = verb == Verb.Override
+            ? new SubmissionDecidedNotification(submissionId, SubmissionDecisionOutcome.Accepted, InvoiceSubmissionChannel.Internal, invoiceId, null)
+            : new SubmissionDecidedNotification(submissionId, SubmissionDecisionOutcome.Returned, InvoiceSubmissionChannel.Internal, invoiceId, SubmissionReasonCodes.Returned);
         try
         {
-            await _sink.SubmissionDecidedAsync(
-                new SubmissionDecidedNotification(submissionId, SubmissionDecisionOutcome.Accepted, InvoiceSubmissionChannel.Internal, invoiceId, null), ct)
-                .ConfigureAwait(false);
+            await _sink.SubmissionDecidedAsync(notification, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (!IsCallerCancellation(ex, ct))
         {
-            _logger.LogWarning(ex, "Submission {SubmissionId}: the acceptance notification failed; the override stands", submissionId);
+            _logger.LogWarning(ex, "Submission {SubmissionId}: the {Outcome} notification failed; the decision stands", submissionId, notification.Outcome);
         }
     }
 

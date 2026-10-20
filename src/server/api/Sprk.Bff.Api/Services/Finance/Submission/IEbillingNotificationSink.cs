@@ -8,6 +8,9 @@ public enum SubmissionDecisionOutcome
 
     /// <summary>Processing rejected the submission: the document was not an invoice that could be read, or the rejection rule rejected it.</summary>
     Rejected,
+
+    /// <summary>A reviewer returned a blocked internal submission's invoice to the firm (task 105 Return; D-143: the firm is notified, FR-39 Return to Firm).</summary>
+    Returned,
 }
 
 /// <summary>
@@ -16,10 +19,10 @@ public enum SubmissionDecisionOutcome
 /// late delivery sees current state.
 /// </summary>
 /// <param name="SubmissionId">The decided <c>sprk_invoicesubmission</c>.</param>
-/// <param name="Outcome">Accepted or Rejected. A Failed submission is not a decision and is not reported here.</param>
+/// <param name="Outcome">Accepted, Rejected or Returned. A Failed submission is not a decision and is not reported here.</param>
 /// <param name="Channel">The channel the submission arrived through: who the submitter is (a firm contact on the SPA, an internal user).</param>
 /// <param name="InvoiceId">The invoice the pipeline created; null when none exists (a document that could not be read, D-101).</param>
-/// <param name="ReasonCode">The stable reason code of a rejection (<c>sprk_outcomereasoncode</c>); null for <see cref="SubmissionDecisionOutcome.Accepted"/>.</param>
+/// <param name="ReasonCode">The stable reason code of a rejection or return (<c>sprk_outcomereasoncode</c>); null for <see cref="SubmissionDecisionOutcome.Accepted"/>.</param>
 public sealed record SubmissionDecidedNotification(
     Guid SubmissionId,
     SubmissionDecisionOutcome Outcome,
@@ -39,7 +42,7 @@ public sealed record SubmissionDecidedNotification(
 /// </remarks>
 public interface IEbillingNotificationSink
 {
-    /// <summary>Reports an Accepted or Rejected submission.</summary>
+    /// <summary>Reports an Accepted, Rejected or Returned submission.</summary>
     Task SubmissionDecidedAsync(SubmissionDecidedNotification decision, CancellationToken ct = default);
 }
 

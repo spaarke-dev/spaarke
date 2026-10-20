@@ -1151,8 +1151,9 @@ public class SubmissionOverrideServiceTests
         w.Status.Should().Be(InvoiceSubmissionStatus.Rejected, "a returned submission stays Rejected");
         w.Code.Should().Be(SubmissionReasonCodes.Returned);
         IsHeld(w.Submission).Should().BeFalse();
-        w.Notified.Should().BeEmpty("a return is not an acceptance");
-        w.Order.Should().Equal("lock", "store", "record", "transition", "update", "unlock");
+        w.Notified.Should().ContainSingle("the firm is notified of a return (D-143)").Which.Should().Be(
+            new SubmissionDecidedNotification(World.SubmissionId, SubmissionDecisionOutcome.Returned, InvoiceSubmissionChannel.Internal, World.InvoiceId, SubmissionReasonCodes.Returned));
+        w.Order.Should().Equal("lock", "store", "record", "transition", "update", "notify", "unlock");
     }
 
     [Fact]
@@ -1584,7 +1585,7 @@ public class SubmissionOverrideServiceTests
         w.ClosedBy.Keys.Should().NotContain([resolved, elsewhere], "a resolved Signal and another invoice's are not in the set");
         w.Order.Should().Equal(verb == "override"
             ? ["lock", "store", "record", "close", "close", "close", "update", "notify", "unlock"]
-            : ["lock", "store", "record", "close", "close", "close", "transition", "update", "unlock"],
+            : ["lock", "store", "record", "close", "close", "close", "transition", "update", "notify", "unlock"],
             "the set is stored, then recorded, then closed, then the state changes");
     }
 
