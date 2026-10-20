@@ -269,6 +269,36 @@ public sealed class RefileWriterBindShapeTests
         _writes.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "#2143 r2: a field-mapping push whose re-filed child's owner cannot be settled fails THAT child with a fixed message, never the exception's")]
+    public async Task FieldMappingPush_AnUnsettledOwner_FailsTheChildWithAFixedMessage_AndRunsNoStepAfter()
+    {
+        AnOrdinaryCommunication();
+        var unsettled = new RecordOwnerUnsettledException(
+            "sprk_communication", Communication,
+            $"The owner of sprk_communication {Communication:D} was not settled: held in the Secure Record business unit (#2143).");
+        var ownership = new RecordOwnershipResolverDouble { FaultAfterChange = unsettled };
+        var scopes = new ServiceCollection()
+            .AddSingleton(Restamper())
+            .AddSingleton<IRecordOwnershipResolver>(ownership)
+            .AddSingleton(_threads.Object)
+            .AddSingleton(FullAccessRights())
+            .AddSingleton(EntitySetNameFixtures.Service())
+            .AddScoped(_ => Reconciler())
+            .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true })
+            .GetRequiredService<IServiceScopeFactory>();
+
+        var (updated, failed, _, errors, _) = await Push(MatterBind, $"/sprk_matters({SecureMatter})", scopes);
+
+        (updated, failed).Should().Be((0, 1));
+        var error = errors.Should().ContainSingle().Which;
+        error.RecordId.Should().Be(Communication);
+        error.Error.Should().NotContain(Communication.ToString("D"))
+            .And.NotContain("Secure Record").And.NotContain("#2143").And.NotContain("sprk_communication");
+        error.Error.Should().Contain("Reload it and push again");
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
+            "no step after the re-file runs for a row whose owner was not settled");
+    }
+
     // ── #2091 round 4: the push's move OUT of Secure (F3, as the caller), and a push that moves nothing ─────────────
 
     [Fact(DisplayName = "#2091 r4: a field-mapping push (caller with Full Access) binding a child's matter out of Secure re-owns it, releases the to-do and removes the mirrors")]

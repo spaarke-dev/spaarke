@@ -1181,6 +1181,23 @@ public static class FieldMappingEndpoints
 
                 fieldResults.AddRange(recordFieldResults);
             }
+            catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException)
+            {
+                // #2143 round 2 (K4): a concurrent writer kept the re-filed child's owner from settling. The response names
+                // the row by id only, in a fixed string — never the exception's message (table, id and ownership detail); the
+                // log names the table and the id. No step after the re-file ran for this row.
+                logger.LogWarning(
+                    "Field-mapping push: the re-filed child's owner could not be settled against concurrent writers. "
+                    + "TargetEntity={TargetEntity}, RecordId={RecordId}",
+                    targetEntity, childRecordId);
+
+                failed++;
+                errors.Add(new PushFieldMappingsError
+                {
+                    RecordId = childRecordId,
+                    Error = "Not settled: the record was changed by someone else while this push re-filed it. Reload it and push again.",
+                });
+            }
             catch (Exception ex)
             {
                 logger.LogWarning(ex,
