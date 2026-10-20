@@ -140,9 +140,15 @@ public interface IRecordOwnershipResolver
     /// propagates.</para>
     /// <para>The "already owned" check reads the owner AFTER the change, so an owner another writer set in between is
     /// never mistaken for the resolved one.</para>
+    /// <para><b>Concurrent re-files (#2143).</b> The owner is written CONDITIONALLY, at the row version read after the change,
+    /// from the parents the row holds at that version: a row another writer re-filed in between is re-derived from its
+    /// current parents (a move under a Secure record gets the Secure team), a changed version is read again (bounded), and a
+    /// re-derivation that is refused — or that would take a Secure-held row out of isolation on a filing this call did not
+    /// make — writes no owner. The put-back is conditional too, and never overwrites a newer filing.</para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">The reassignment did not read back as applied (the change was rolled
-    /// back first).</exception>
+    /// back first); or (#2143) the owner could not be settled — the row kept changing under concurrent writers, or its
+    /// current parents resolve to no owner — and no owner that disagrees with its current parents was written.</exception>
     Task<RecordOwnerResolution> ReparentAsync(
         RecordReparent request, Func<CancellationToken, Task> applyChange, CancellationToken ct);
 }
@@ -1214,17 +1220,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(applyChange);
 
-        // The row's current state — every column, because a child's parents are whatever lookups it carries, and a
-        // per-table column list is exactly the guess this task forbids. A reparent is an explicit filing action,
-        // not a hot path, so the wide read is the honest price.
-        var query = new QueryExpression(request.EntityLogicalName)
-        {
-            ColumnSet = new ColumnSet(true),
-            TopCount = 1,
-            NoLock = true,
-        };
-        query.Criteria.AddCondition($"{request.EntityLogicalName}id", ConditionOperator.Equal, request.RecordId);
-        var current = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        var current = await ReadWholeRowAsync(request, ct).ConfigureAwait(false);
 
         if (current is null)
         {
@@ -1234,15 +1230,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
 
         // Current parents, keyed by column, overlaid with the change.
-        var byColumn = new Dictionary<string, RecordOwnershipParent>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (column, value) in current.Attributes)
-        {
-            if (value is EntityReference reference && reference.Id != Guid.Empty
-                && IsOwnershipParent(reference.LogicalName))
-            {
-                byColumn[column] = new RecordOwnershipParent(reference.LogicalName, reference.Id);
-            }
-        }
+        var byColumn = OwnershipParentColumnsOf(current);
 
         // Every parent the row is filed under BEFORE the change — what a move OUT of a secure root is measured against
         // (owner round 10 item 7, task 146 c1).
@@ -1313,19 +1301,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return unchanged with { ParentsUnchanged = !movesALineageLookup };
         }
 
-        var parents = byColumn.Values
-            .Concat(request.InheritedParents.Where(p => p.IsSpecified && IsOwnershipParent(p.EntityLogicalName)))
-            .Distinct()
-            .ToArray();
-        var resolution = await ResolveOwnerAsync(
-            new RecordOwnershipContext
-            {
-                Parents = parents,
-                CallerSystemUserId = request.CallerSystemUserId,
-                CallerObjectId = request.CallerObjectId,
-                WhenUnfiled = request.WhenUnfiled,
-            },
-            ct).ConfigureAwait(false);
+        var parents = WithInheritedParents(byColumn.Values, request);
+        var resolution = await ResolveReparentOwnerAsync(request, parents, ct).ConfigureAwait(false);
 
         if (resolution.IsRefused)
         {
@@ -1356,26 +1333,228 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return resolution; // Unchanged — the row keeps its owner.
         }
 
-        var teamId = resolution.OwningTeamId!.Value;
-
         // Ownership is assigned on its own, not folded into the field update: Dataverse treats an owner change as a
         // distinct operation, and combining them is a documented way to have one of the two quietly not happen
-        // (the ProvisionProjectEndpoint.AssignOwnerToSecureTeamAsync rationale).
+        // (the ProvisionProjectEndpoint.AssignOwnerToSecureTeamAsync rationale). #2143: it is assigned CONDITIONALLY, at the
+        // version read after the change, from the parents the row holds at that version (SettleOwnerAsync).
+        var observed = new AfterChangeObservation();
         try
         {
-            // The owner is read AFTER the change, never taken from the row read before it (task 146 b2): another writer
-            // may have re-owned the row in between — FR-E7 category routing of an unfiled communication is one — and a
-            // stale "already owned" answer would leave the re-filed row with that writer's owner.
-            if (await ReadOwningTeamAsync(request, ct).ConfigureAwait(false) == teamId)
+            return await SettleOwnerAsync(request, parents, resolution, observed, ct).ConfigureAwait(false);
+        }
+        catch (Exception assignFailure)
+        {
+            // The change is already written and the owner may not be: the row would be filed under its NEW parents while
+            // still owned for its OLD ones — for a move under a secure record, readable in an ordinary business unit
+            // (ADR-003 fail-open, task 146 b1/b2 verifier item). Recover first, then surface the failure.
+            if (await RecoverFromFailedAssignmentAsync(request, restore, parents, resolution, observed, assignFailure)
+                    .ConfigureAwait(false))
             {
-                return resolution; // already owned by the resolved team
+                return resolution; // the assignment landed despite the failure report: filing and owner agree
             }
 
-            await _dataverse.UpdateAsync(
-                request.EntityLogicalName,
-                request.RecordId,
-                new Dictionary<string, object> { [OwnerColumn] = new EntityReference(TeamEntity, teamId) },
-                ct).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// #2143: how many times a re-file's owner write is tried against a row that keeps changing — the attempt count of the
+    /// existing 412 pattern (<c>InvoiceReviewService.MaxConditionalWriteAttempts</c>). The compensating put-back uses it too.
+    /// </summary>
+    internal const int MaxOwnerWriteAttempts = 3;
+
+    private const string VersionNumberColumn = "versionnumber";
+
+    /// <summary>
+    /// The row as the first read AFTER the change found it (#2143): the version a compensating put-back is conditioned on,
+    /// and whether the row was still filed under the parents the owner was resolved from — when it was not, another writer
+    /// re-filed it first and a put-back would overwrite that newer filing.
+    /// </summary>
+    private sealed class AfterChangeObservation
+    {
+        public bool Read { get; set; }
+
+        public string? Version { get; set; }
+
+        public bool ParentsAsResolved { get; set; }
+    }
+
+    /// <summary>A row's version, owner and ownership parents, from one read (#2143).</summary>
+    private sealed record RowOwnership(
+        string? Version, Guid? OwningTeam, Guid? OwningBusinessUnit, IReadOnlyCollection<RecordOwnershipParent> Parents);
+
+    /// <summary>
+    /// The row's current state — every column, because a child's parents are whatever lookups it carries, and a per-table
+    /// column list is exactly the guess task 146 forbids. A reparent is an explicit filing action, not a hot path, so the
+    /// wide read is the honest price. <c>null</c> when the row does not exist.
+    /// </summary>
+    private async Task<Entity?> ReadWholeRowAsync(RecordReparent request, CancellationToken ct)
+    {
+        var query = new QueryExpression(request.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(true),
+            TopCount = 1,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition($"{request.EntityLogicalName}id", ConditionOperator.Equal, request.RecordId);
+        return (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+    }
+
+    /// <summary>Every ownership-parent lookup <paramref name="row"/> holds, keyed by column.</summary>
+    private static Dictionary<string, RecordOwnershipParent> OwnershipParentColumnsOf(Entity row)
+    {
+        var byColumn = new Dictionary<string, RecordOwnershipParent>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (column, value) in row.Attributes)
+        {
+            if (value is EntityReference reference && reference.Id != Guid.Empty
+                && IsOwnershipParent(reference.LogicalName))
+            {
+                byColumn[column] = new RecordOwnershipParent(reference.LogicalName, reference.Id);
+            }
+        }
+
+        return byColumn;
+    }
+
+    /// <summary><paramref name="ownParents"/> plus the request's <see cref="RecordReparent.InheritedParents"/>, distinct.</summary>
+    private static RecordOwnershipParent[] WithInheritedParents(
+        IEnumerable<RecordOwnershipParent> ownParents, RecordReparent request) =>
+        ownParents
+            .Concat(request.InheritedParents.Where(p => p.IsSpecified && IsOwnershipParent(p.EntityLogicalName)))
+            .Distinct()
+            .ToArray();
+
+    /// <summary>The owner a re-filed row takes from <paramref name="parents"/>, for the request's caller.</summary>
+    private Task<RecordOwnerResolution> ResolveReparentOwnerAsync(
+        RecordReparent request, IReadOnlyList<RecordOwnershipParent> parents, CancellationToken ct) =>
+        ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                Parents = parents,
+                CallerSystemUserId = request.CallerSystemUserId,
+                CallerObjectId = request.CallerObjectId,
+                WhenUnfiled = request.WhenUnfiled,
+            },
+            ct);
+
+    /// <summary>The row's version, owner and ownership parents in ONE read (#2143); <c>null</c> when it no longer exists.</summary>
+    private async Task<RowOwnership?> ReadRowOwnershipAsync(RecordReparent request, CancellationToken ct)
+    {
+        var row = await ReadWholeRowAsync(request, ct).ConfigureAwait(false);
+        if (row is null)
+            return null;
+
+        var version = row.RowVersion
+            ?? (row.GetAttributeValue<long?>(VersionNumberColumn) is { } number
+                ? number.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : null);
+        return new RowOwnership(
+            string.IsNullOrWhiteSpace(version) ? null : version,
+            row.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id,
+            row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id,
+            WithInheritedParents(OwnershipParentColumnsOf(row).Values, request));
+    }
+
+    /// <summary>
+    /// #2143: makes the re-filed row's owner the team its CURRENT parents resolve to, never one resolved from parents it no
+    /// longer holds. Each attempt reads the row once (version, owner, parents); when its parents are not
+    /// <paramref name="resolvedFrom"/> — another writer re-filed it after the change — the owner is re-derived from the
+    /// parents it holds; when the row is already owned by that team nothing is written; otherwise the owner is written
+    /// CONDITIONALLY at the version read, and a row changed in between (<see cref="System.Data.DBConcurrencyException"/>) is
+    /// read again, up to <see cref="MaxOwnerWriteAttempts"/> attempts.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Fail closed.</b> A re-derivation that is REFUSED writes no owner and throws. A re-derivation that would take a
+    /// row held in the Secure Record business unit out of it is not written by this call — the filing it answers was not
+    /// this call's change, so its F3 check (owner round 10 item 7) never covered it; the row stays over-restricted until
+    /// the writer that made that filing (or the reconcile) settles it, and the attempt counts as unsettled. Attempts that
+    /// run out throw <see cref="InvalidOperationException"/> naming only the row: no owner that disagrees with the row's
+    /// current parents has been written.</para>
+    /// <para>The owner is read AFTER the change, never taken from the row read before it (task 146 b2): another writer
+    /// may have re-owned the row in between, and a stale "already owned" answer would leave the re-filed row with that
+    /// writer's owner. A written owner is read back (task 146).</para>
+    /// </remarks>
+    /// <returns>The resolution the row's owner now matches — <paramref name="resolution"/>, or the re-derived one.</returns>
+    private async Task<RecordOwnerResolution> SettleOwnerAsync(
+        RecordReparent request, IReadOnlyCollection<RecordOwnershipParent> resolvedFrom, RecordOwnerResolution resolution,
+        AfterChangeObservation? observed, CancellationToken ct)
+    {
+        for (var attempt = 1; attempt <= MaxOwnerWriteAttempts; attempt++)
+        {
+            var state = await ReadRowOwnershipAsync(request, ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException(
+                    $"The {request.EntityLogicalName} {request.RecordId:D} being re-filed no longer exists, so its owner could "
+                    + "not be settled (#2143).");
+
+            var parentsAsResolved = state.Parents.Count == resolvedFrom.Count && state.Parents.All(resolvedFrom.Contains);
+            if (observed is { Read: false })
+            {
+                observed.Read = true;
+                observed.Version = state.Version;
+                observed.ParentsAsResolved = parentsAsResolved;
+            }
+
+            var target = resolution;
+            if (!parentsAsResolved)
+            {
+                target = await ResolveReparentOwnerAsync(request, state.Parents.ToArray(), ct).ConfigureAwait(false);
+                _logger.LogWarning(
+                    "Re-file of {Entity} {RecordId}: its parents changed after the change was written (a concurrent writer); "
+                    + "the owner is re-derived from the parents it holds now: {Outcome} {TeamId} (attempt {Attempt}, #2143).",
+                    request.EntityLogicalName, request.RecordId, target.Outcome, target.OwningTeamId, attempt);
+
+                if (target.IsRefused)
+                {
+                    throw new InvalidOperationException(
+                        $"The {request.EntityLogicalName} {request.RecordId:D} was re-filed concurrently under parents that "
+                        + $"resolve to no owner ({target.RefusalCode}); no owner was written (#2143).");
+                }
+
+                if (!target.IsOwned)
+                {
+                    return target; // Unchanged — the row keeps its owner.
+                }
+
+                if (!target.IsSecureOwner && await MayBeHeldInSecureBusinessUnitAsync(state, ct).ConfigureAwait(false))
+                {
+                    _logger.LogWarning(
+                        "Re-file of {Entity} {RecordId}: re-deriving its owner would take it out of the Secure Record business "
+                        + "unit on a filing this re-file did not make, so no owner is written (attempt {Attempt}, #2143).",
+                        request.EntityLogicalName, request.RecordId, attempt);
+                    continue;
+                }
+            }
+
+            var teamId = target.OwningTeamId!.Value;
+            if (state.OwningTeam == teamId)
+            {
+                return target; // already owned by the team its current parents resolve to
+            }
+
+            if (state.Version is not { } version)
+            {
+                throw new InvalidOperationException(
+                    $"The {request.EntityLogicalName} {request.RecordId:D} carries no row version, so its owner cannot be "
+                    + "written conditionally; no owner was written (#2143).");
+            }
+
+            try
+            {
+                await _dataverse.UpdateIfRowVersionMatchesAsync(
+                    request.EntityLogicalName,
+                    request.RecordId,
+                    version,
+                    new Dictionary<string, object> { [OwnerColumn] = new EntityReference(TeamEntity, teamId) },
+                    ct).ConfigureAwait(false);
+            }
+            catch (System.Data.DBConcurrencyException)
+            {
+                _logger.LogInformation(
+                    "Re-file of {Entity} {RecordId}: the row changed between its read and the owner write (attempt {Attempt} "
+                    + "of {MaxAttempts}); reading it again (#2143).",
+                    request.EntityLogicalName, request.RecordId, attempt, MaxOwnerWriteAttempts);
+                continue;
+            }
 
             if (await ReadOwningTeamAsync(request, ct).ConfigureAwait(false) != teamId)
             {
@@ -1383,24 +1562,36 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     $"The owner of {request.EntityLogicalName} {request.RecordId:D} did not read back as team {teamId:D} "
                     + "after the reassignment; the re-filed row may be readable outside its new parent's team (task 146).");
             }
-        }
-        catch (Exception assignFailure)
-        {
-            // The change is already written and the owner may not be: the row would be filed under its NEW parents while
-            // still owned for its OLD ones — for a move under a secure record, readable in an ordinary business unit
-            // (ADR-003 fail-open, task 146 b1/b2 verifier item). Recover first, then surface the failure.
-            if (await RecoverFromFailedAssignmentAsync(request, restore, resolution, assignFailure).ConfigureAwait(false))
-            {
-                return resolution; // the assignment landed despite the failure report: filing and owner agree
-            }
 
-            throw;
+            _logger.LogInformation(
+                "Re-filed {Entity} {RecordId}: owner reassigned to team {TeamId}.",
+                request.EntityLogicalName, request.RecordId, teamId);
+            return target;
         }
 
-        _logger.LogInformation(
-            "Re-filed {Entity} {RecordId}: owner reassigned to team {TeamId}.",
-            request.EntityLogicalName, request.RecordId, teamId);
-        return resolution;
+        _logger.LogError(
+            "Re-file of {Entity} {RecordId}: its owner could not be settled in {MaxAttempts} attempts — the row kept changing "
+            + "under concurrent writers. No owner that disagrees with its current parents was written (#2143).",
+            request.EntityLogicalName, request.RecordId, MaxOwnerWriteAttempts);
+        throw new InvalidOperationException(
+            $"The owner of {request.EntityLogicalName} {request.RecordId:D} could not be settled in {MaxOwnerWriteAttempts} "
+            + "attempts: the row kept changing under concurrent writers. No owner that disagrees with its current parents was "
+            + "written (#2143).");
+    }
+
+    /// <summary>
+    /// Whether <paramref name="state"/>'s row may be held in the Secure Record business unit (#2143). An ambiguous Secure
+    /// Record business unit, or a row whose owning business unit did not come back, answers <c>true</c> (fail closed); no
+    /// Secure Record business unit at all answers <c>false</c>.
+    /// </summary>
+    private async Task<bool> MayBeHeldInSecureBusinessUnitAsync(RowOwnership state, CancellationToken ct)
+    {
+        var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
+        if (secureBu.Ambiguous)
+            return true;
+        if (secureBu.Id is not { } secureBuId)
+            return false;
+        return state.OwningBusinessUnit is not { } held || held == secureBuId;
     }
 
     /// <summary>The team that owns the row now (<c>owningteam</c>), or <c>null</c> when a user owns it.</summary>
@@ -1641,8 +1832,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// A restore that itself fails is logged <see cref="ReparentLeftInconsistent"/>.
     /// </remarks>
     private async Task<bool> RecoverFromFailedAssignmentAsync(
-        RecordReparent request, IReadOnlyDictionary<string, object> restore, RecordOwnerResolution resolution,
-        Exception assignFailure)
+        RecordReparent request, IReadOnlyDictionary<string, object> restore,
+        IReadOnlyCollection<RecordOwnershipParent> resolvedFrom, RecordOwnerResolution resolution,
+        AfterChangeObservation observed, Exception assignFailure)
     {
         var teamId = resolution.OwningTeamId!.Value;
 
@@ -1657,6 +1849,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 "Re-file of {Entity} {RecordId}: after a failed owner assignment its owner could not be read back.",
                 request.EntityLogicalName, request.RecordId);
             landed = null;
+        }
+
+        if (landed == true && await StillFiledAsResolvedAsync(request, resolvedFrom).ConfigureAwait(false) == false)
+        {
+            // #2143: the owner is the resolved team, but the row is no longer filed under the parents it was resolved from —
+            // another writer re-filed it. Filing and owner do NOT agree; the filing is left to that writer below.
+            landed = false;
         }
 
         if (landed == true)
@@ -1679,8 +1878,61 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return false;
         }
 
-        await RestoreFilingAsync(request, restore, teamId, assignFailure, ownerUnknown: landed is null).ConfigureAwait(false);
+        await RestoreFilingAsync(request, restore, resolvedFrom, resolution, observed, assignFailure, ownerUnknown: landed is null)
+            .ConfigureAwait(false);
         return false;
+    }
+
+    /// <summary>
+    /// #2143: whether the row is still filed under <paramref name="resolvedFrom"/> — <c>null</c> when it cannot be read (the
+    /// caller keeps its earlier answer). App-only, no cancellation (recovery).
+    /// </summary>
+    private async Task<bool?> StillFiledAsResolvedAsync(
+        RecordReparent request, IReadOnlyCollection<RecordOwnershipParent> resolvedFrom)
+    {
+        try
+        {
+            var state = await ReadRowOwnershipAsync(request, CancellationToken.None).ConfigureAwait(false);
+            return state is not null
+                && state.Parents.Count == resolvedFrom.Count && state.Parents.All(resolvedFrom.Contains);
+        }
+        catch (Exception readFailure)
+        {
+            _logger.LogWarning(readFailure,
+                "Re-file of {Entity} {RecordId}: after a failed owner assignment its filing could not be read back.",
+                request.EntityLogicalName, request.RecordId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// #2143: after a put-back was NOT applied because a newer writer re-filed the row, checks that the row's owner matches the
+    /// parents it holds now — the same settle loop as the re-file (<see cref="SettleOwnerAsync"/>) — and logs the outcome.
+    /// Never throws (recovery): a check that cannot settle is logged <see cref="ReparentLeftInconsistent"/>.
+    /// </summary>
+    private async Task RecheckOwnerAfterNewerFilingAsync(
+        RecordReparent request, IReadOnlyCollection<RecordOwnershipParent> resolvedFrom, RecordOwnerResolution resolution,
+        Exception assignFailure)
+    {
+        try
+        {
+            var settled = await SettleOwnerAsync(request, resolvedFrom, resolution, observed: null, CancellationToken.None)
+                .ConfigureAwait(false);
+            _logger.LogWarning(
+                assignFailure,
+                "Re-file of {Entity} {RecordId}: its owner assignment failed and a newer writer re-filed the row, so its filing "
+                + "was NOT put back; its owner matches the parents it holds now ({Outcome} {TeamId}) (#2143).",
+                request.EntityLogicalName, request.RecordId, settled.Outcome, settled.OwningTeamId);
+        }
+        catch (Exception recheckFailure)
+        {
+            _logger.LogCritical(
+                ReparentLeftInconsistent, recheckFailure,
+                "Re-file of {Entity} {RecordId} needs checking: its owner assignment failed ({AssignFailure}), a newer writer "
+                + "re-filed the row so its filing was NOT put back, and its owner could not be confirmed against the parents it "
+                + "holds now (#2143).",
+                request.EntityLogicalName, request.RecordId, assignFailure.GetType().Name);
+        }
     }
 
     /// <summary>
@@ -1689,10 +1941,21 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// — so the row's filing matches the owner it still has. Every outcome is a CRITICAL log naming the row; a restore
     /// that itself fails is logged under <see cref="ReparentLeftInconsistent"/> for manual repair. Never throws.
     /// </summary>
+    /// <remarks>
+    /// #2143: the put-back is CONDITIONAL — at the version the first read after the change observed, and only while the row
+    /// is still filed under the parents the owner was resolved from. A row another writer re-filed (its parents differ, or
+    /// its version moved and a fresh read shows different parents) is left to that writer, and its owner is re-checked
+    /// against the parents it holds (<see cref="RecheckOwnerAfterNewerFilingAsync"/>). A version that moved while the
+    /// filing is still ours (an unrelated column written) is read again, up to <see cref="MaxOwnerWriteAttempts"/>
+    /// attempts. Only when the row's version was never read at all — every read after the change failed, so there is no
+    /// sign of a newer writer — is the put-back sent unconditionally, as before #2143 (exposure is the worse failure).
+    /// </remarks>
     private async Task RestoreFilingAsync(
-        RecordReparent request, IReadOnlyDictionary<string, object> restore, Guid teamId, Exception assignFailure,
-        bool ownerUnknown)
+        RecordReparent request, IReadOnlyDictionary<string, object> restore,
+        IReadOnlyCollection<RecordOwnershipParent> resolvedFrom, RecordOwnerResolution resolution,
+        AfterChangeObservation observed, Exception assignFailure, bool ownerUnknown)
     {
+        var teamId = resolution.OwningTeamId!.Value;
         if (restore.Count == 0)
         {
             _logger.LogCritical(
@@ -1707,9 +1970,22 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         try
         {
-            await _dataverse.UpdateAsync(
-                request.EntityLogicalName, request.RecordId, new Dictionary<string, object>(restore),
-                CancellationToken.None).ConfigureAwait(false);
+            var putBack = await PutBackFilingAsync(request, restore, resolvedFrom, observed).ConfigureAwait(false);
+            if (putBack != PutBackOutcome.Applied)
+            {
+                if (putBack == PutBackOutcome.Unsettled)
+                {
+                    _logger.LogCritical(
+                        ReparentLeftInconsistent, assignFailure,
+                        "Re-file of {Entity} {RecordId} needs checking: the owner could not be assigned to team {TeamId}, and "
+                        + "its filing columns ({Columns}) were NOT put back — the row kept changing, or could not be read after "
+                        + "it changed, and a put-back is never sent blind over a newer write (#2143).",
+                        request.EntityLogicalName, request.RecordId, teamId, string.Join(", ", restore.Keys));
+                }
+
+                await RecheckOwnerAfterNewerFilingAsync(request, resolvedFrom, resolution, assignFailure).ConfigureAwait(false);
+                return;
+            }
 
             if (ownerUnknown)
             {
@@ -1740,6 +2016,97 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 + "under its new parents while owned for its old ones (task 146).",
                 request.EntityLogicalName, request.RecordId, teamId, assignFailure.Message, string.Join(", ", restore.Keys));
         }
+    }
+
+    /// <summary>What <see cref="PutBackFilingAsync"/> did (#2143).</summary>
+    private enum PutBackOutcome
+    {
+        /// <summary>The filing columns were written back.</summary>
+        Applied,
+
+        /// <summary>Another writer re-filed the row: nothing was written over its filing.</summary>
+        LeftToNewerWriter,
+
+        /// <summary>The row kept changing, or could not be read after it changed: nothing was written.</summary>
+        Unsettled,
+    }
+
+    /// <summary>
+    /// #2143: writes <paramref name="restore"/> back conditionally — see <see cref="RestoreFilingAsync"/>'s remarks. The first
+    /// attempt uses the version the first read after the change observed; a later one reads the row again. App-only, no
+    /// cancellation (recovery). A failure other than a version mismatch propagates to <see cref="RestoreFilingAsync"/>.
+    /// </summary>
+    private async Task<PutBackOutcome> PutBackFilingAsync(
+        RecordReparent request, IReadOnlyDictionary<string, object> restore,
+        IReadOnlyCollection<RecordOwnershipParent> resolvedFrom, AfterChangeObservation observed)
+    {
+        for (var attempt = 1; attempt <= MaxOwnerWriteAttempts; attempt++)
+        {
+            string? version;
+            bool filedAsResolved;
+            if (attempt == 1 && observed.Read)
+            {
+                version = observed.Version;
+                filedAsResolved = observed.ParentsAsResolved;
+            }
+            else
+            {
+                RowOwnership? state;
+                try
+                {
+                    state = await ReadRowOwnershipAsync(request, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception readFailure)
+                {
+                    _logger.LogWarning(readFailure,
+                        "Re-file of {Entity} {RecordId}: the row could not be read before its filing was put back (#2143).",
+                        request.EntityLogicalName, request.RecordId);
+                    if (attempt > 1)
+                        return PutBackOutcome.Unsettled; // it changed since the change, and cannot be read now
+
+                    // Never read since the change, and not now: no sign of a newer writer. As before #2143.
+                    await _dataverse.UpdateAsync(
+                        request.EntityLogicalName, request.RecordId, new Dictionary<string, object>(restore),
+                        CancellationToken.None).ConfigureAwait(false);
+                    return PutBackOutcome.Applied;
+                }
+
+                version = state?.Version;
+                filedAsResolved = state is not null
+                    && state.Parents.Count == resolvedFrom.Count && state.Parents.All(resolvedFrom.Contains);
+            }
+
+            if (!filedAsResolved)
+            {
+                return PutBackOutcome.LeftToNewerWriter;
+            }
+
+            if (version is null)
+            {
+                // The row is filed as this re-file left it but carries no version to condition on: as before #2143.
+                await _dataverse.UpdateAsync(
+                    request.EntityLogicalName, request.RecordId, new Dictionary<string, object>(restore),
+                    CancellationToken.None).ConfigureAwait(false);
+                return PutBackOutcome.Applied;
+            }
+
+            try
+            {
+                await _dataverse.UpdateIfRowVersionMatchesAsync(
+                    request.EntityLogicalName, request.RecordId, version, new Dictionary<string, object>(restore),
+                    CancellationToken.None).ConfigureAwait(false);
+                return PutBackOutcome.Applied;
+            }
+            catch (System.Data.DBConcurrencyException)
+            {
+                _logger.LogInformation(
+                    "Re-file of {Entity} {RecordId}: the row changed before its filing was put back (attempt {Attempt} of "
+                    + "{MaxAttempts}); reading it again (#2143).",
+                    request.EntityLogicalName, request.RecordId, attempt, MaxOwnerWriteAttempts);
+            }
+        }
+
+        return PutBackOutcome.Unsettled;
     }
 
     /// <summary>

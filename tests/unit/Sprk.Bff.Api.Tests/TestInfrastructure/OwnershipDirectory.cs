@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -14,6 +15,12 @@ namespace Sprk.Bff.Api.Tests.TestInfrastructure;
 /// predicate widens the match and the resolver refuses), honouring <c>TopCount</c>, and recording every owner
 /// assignment a reparent makes.
 /// </summary>
+/// <remarks>
+/// #2143: every row carries a <c>versionnumber</c> that every applied write bumps, and
+/// <see cref="IGenericEntityService.UpdateIfRowVersionMatchesAsync"/> is honoured — a write conditioned on a version the row
+/// no longer has throws <see cref="System.Data.DBConcurrencyException"/> and writes nothing, as Dataverse does.
+/// <see cref="BeforeWrite"/> lands another writer's change between the resolver's read and its write.
+/// </remarks>
 /// <remarks>
 /// Extracted from <c>RecordOwnershipResolverTests</c> (unified-access-control-r2 task 146) so the writer-family
 /// integration tests (<c>SecureChildOwnershipTests</c>) drive the SAME resolver over the SAME directory shape — one
@@ -91,7 +98,7 @@ internal sealed class OwnershipDirectory
     /// The REAL resolver over this directory, with the Secure Record names configured explicitly. A <paramref
     /// name="fault"/> makes every directory read throw it — a Dataverse fault, which must propagate.
     /// </summary>
-    public RecordOwnershipResolver Resolver(Exception? fault = null)
+    public RecordOwnershipResolver Resolver(Exception? fault = null, ILogger<RecordOwnershipResolver>? logger = null)
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entities
@@ -102,7 +109,18 @@ internal sealed class OwnershipDirectory
             .Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns((string entity, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
             {
+                BeforeWrite?.Invoke(this, fields);
                 Update(entity, id, fields);
+                return Task.CompletedTask;
+            });
+        entities
+            .Setup(e => e.UpdateIfRowVersionMatchesAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((string entity, Guid id, string version, Dictionary<string, object> fields, CancellationToken _) =>
+            {
+                BeforeWrite?.Invoke(this, fields);
+                UpdateIfVersion(entity, id, version, fields);
                 return Task.CompletedTask;
             });
         entities
@@ -116,7 +134,7 @@ internal sealed class OwnershipDirectory
             ["SecureRecord:OwnerTeamName"] = SecureOwnerTeamName,
         }).Build();
 
-        return new RecordOwnershipResolver(entities.Object, configuration, NullLogger<RecordOwnershipResolver>.Instance);
+        return new RecordOwnershipResolver(entities.Object, configuration, logger ?? NullLogger<RecordOwnershipResolver>.Instance);
     }
 
     /// <summary>
@@ -147,8 +165,111 @@ internal sealed class OwnershipDirectory
         foreach (var (column, value) in extra ?? new())
             row[column] = value;
 
+        // #2143: a re-seeded row is a NEW version of it (a write), never the old version again.
+        row[VersionColumn] = _records.TryGetValue((entity, id), out var previous) ? VersionOf(previous) + 1 : 1L;
         _records[(entity, id)] = row;
         return this;
+    }
+
+    private const string VersionColumn = "versionnumber";
+
+    private static long VersionOf(Entity row) => row.GetAttributeValue<long?>(VersionColumn) ?? 0L;
+
+    private static void Bump(Entity row) => row[VersionColumn] = VersionOf(row) + 1;
+
+    /// <summary>#2143: the row's current <c>versionnumber</c>.</summary>
+    public long Version(string entity, Guid id) => _records.TryGetValue((entity, id), out var row) ? VersionOf(row) : 0L;
+
+    /// <summary>#2143: every conditional write the resolver sent, in order, with the version it was conditioned on and
+    /// whether it was applied (false: the version had moved, nothing was written).</summary>
+    public List<(string Entity, Guid Id, string Version, Dictionary<string, object> Fields, bool Applied)> ConditionalWrites { get; } = new();
+
+    /// <summary>
+    /// #2143: runs before every write the resolver sends (conditional or not) reaches the row, with the directory and the
+    /// fields about to be written — so a test lands ANOTHER writer's change (<see cref="Write"/>) between the resolver's
+    /// read and its write.
+    /// </summary>
+    public Action<OwnershipDirectory, Dictionary<string, object>>? BeforeWrite { get; set; }
+
+    /// <summary>
+    /// #2143: an <see cref="IGenericEntityService.UpdateIfRowVersionMatchesAsync"/> — applied as <see cref="Update"/> only
+    /// while the row is still at <paramref name="version"/>; otherwise <see cref="System.Data.DBConcurrencyException"/>.
+    /// </summary>
+    public void UpdateIfVersion(string entity, Guid id, string version, Dictionary<string, object> fields)
+    {
+        var current = Version(entity, id).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (!string.Equals(current, version, StringComparison.Ordinal))
+        {
+            ConditionalWrites.Add((entity, id, version, new Dictionary<string, object>(fields), false));
+            throw new System.Data.DBConcurrencyException($"Test: {entity} {id} is at version {current}, not {version}.");
+        }
+
+        ConditionalWrites.Add((entity, id, version, new Dictionary<string, object>(fields), true));
+        Update(entity, id, fields);
+    }
+
+    /// <summary>
+    /// #2143: a writer's field PATCH landing on the row, as Dataverse applies it — its filing lookups only, read the way the
+    /// writers read their own payloads (<see cref="RecordReparent.ParentChangesWithClearsIn{TValue}"/> plus the lineage
+    /// lookups, <see cref="RecordReparent.WithLineageLookupsIn{TValue}"/>): an <see cref="EntityReference"/> or an
+    /// <c>@odata.bind</c> sets a lookup, a null clears a column. The resolver reads the row AFTER the change, so a harness
+    /// that captures the PATCH without landing it would read as a concurrent writer having undone the change. A row this
+    /// directory does not hold is left alone; other columns are not modelled.
+    /// </summary>
+    public void ApplyPatch<TValue>(string entity, Guid id, IEnumerable<KeyValuePair<string, TValue>> fields)
+    {
+        if (!_records.ContainsKey((entity, id)))
+            return;
+
+        var payload = fields.ToList();
+        var changes = RecordReparent.WithLineageLookupsIn(
+            entity, RecordReparent.ParentChangesWithClearsIn(entity, payload), payload);
+        Write(entity, id, changes.ToDictionary(change => change.Key, change => (object?)change.Value));
+    }
+
+    /// <summary>#2143: <see cref="ApplyPatch{TValue}"/> for a Web API PATCH addressed as <c>&lt;entity set&gt;(&lt;id&gt;)</c> with a
+    /// JSON body — the row is found by its id (test ids are unique across tables).</summary>
+    public void ApplyPatch(string relativePath, string jsonBody)
+    {
+        var open = relativePath.LastIndexOf('(');
+        if (open < 0 || !Guid.TryParse(relativePath[(open + 1)..relativePath.LastIndexOf(')')], out var id))
+            return;
+
+        var row = _records.Keys.FirstOrDefault(key => key.Id == id);
+        if (row.Entity is null)
+            return;
+
+        var body = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(jsonBody)
+            ?? new Dictionary<string, System.Text.Json.JsonElement>();
+        ApplyPatch(row.Entity, id, body);
+    }
+
+    /// <summary>
+    /// #2143: a write by ANY writer — the change a test's <c>applyChange</c> makes, or another writer's concurrent re-file or
+    /// re-own: lookups set (a <see cref="DBNull"/> or <c>null</c> clears), <c>ownerid</c> moves <c>owningteam</c>, and the
+    /// version is bumped. Not recorded in <see cref="Assignments"/> or <see cref="FieldUpdates"/> (the resolver's writes).
+    /// </summary>
+    public void Write(string entity, Guid id, Dictionary<string, object?> fields)
+    {
+        var row = _records[(entity, id)];
+        foreach (var (column, value) in fields)
+        {
+            if (value is null or DBNull)
+            {
+                row.Attributes.Remove(column);
+            }
+            else if (column == "ownerid" && value is EntityReference owner)
+            {
+                row["owningteam"] = new EntityReference("team", owner.Id);
+                row["ownerid"] = owner;
+            }
+            else
+            {
+                row[column] = value;
+            }
+        }
+
+        Bump(row);
     }
 
     /// <summary>The three tables that carry <c>sprk_issecure</c> as a security input (project, matter, work assignment).</summary>
@@ -193,6 +314,7 @@ internal sealed class OwnershipDirectory
         {
             row["owningteam"] = new EntityReference("team", owner.Id);
             row["ownerid"] = owner;
+            Bump(row);
         }
     }
 
@@ -243,6 +365,8 @@ internal sealed class OwnershipDirectory
                 else
                     row[column] = value;
             }
+
+            Bump(row);
         }
     }
 

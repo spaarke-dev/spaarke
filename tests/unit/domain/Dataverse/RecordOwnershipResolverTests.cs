@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -921,18 +922,16 @@ public class RecordOwnershipResolverTests
                     ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
                 });
 
-        var resolution = await Build(directory).ReparentAsync(
-            new RecordReparent
-            {
-                EntityLogicalName = "sprk_document",
-                RecordId = documentId,
-                ParentChanges = RecordReparent.ParentChangesWithClearsIn("sprk_document",
-                    new Dictionary<string, object?> { ["sprk_project"] = null, ["sprk_description"] = null }),
-                // Owner round 10 item 7 (task 146 c1): leaving the secure project is an un-secure — a Full Access holder.
-                SecureExitCaller = CallerHolding(FullAccess),
-            },
-            _ => Task.CompletedTask,
-            CancellationToken.None);
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_document",
+            RecordId = documentId,
+            ParentChanges = RecordReparent.ParentChangesWithClearsIn("sprk_document",
+                new Dictionary<string, object?> { ["sprk_project"] = null, ["sprk_description"] = null }),
+            // Owner round 10 item 7 (task 146 c1): leaving the secure project is an un-secure — a Full Access holder.
+            SecureExitCaller = CallerHolding(FullAccess),
+        };
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
 
         resolution.OwningTeamId.Should().Be(ChildTeam);
         directory.Assignments.Should().Equal(("sprk_document", documentId, ChildTeam));
@@ -1174,19 +1173,18 @@ public class RecordOwnershipResolverTests
             .WithRecord("sprk_document", documentId, ChildBu, owningTeam: ChildTeam,
                 extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
         var applied = false;
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_document",
+            RecordId = documentId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_relatedproject"] = new EntityReference("sprk_project", SecureProjectId),
+            },
+        };
 
         var resolution = await Build(directory).ReparentAsync(
-            new RecordReparent
-            {
-                EntityLogicalName = "sprk_document",
-                RecordId = documentId,
-                ParentChanges = new Dictionary<string, EntityReference?>
-                {
-                    ["sprk_relatedproject"] = new EntityReference("sprk_project", SecureProjectId),
-                },
-            },
-            _ => { applied = true; return Task.CompletedTask; },
-            CancellationToken.None);
+            request, Applies(directory, request, () => applied = true), CancellationToken.None);
 
         applied.Should().BeTrue();
         resolution.OwningTeamId.Should().Be(SecureNamedTeam);
@@ -1203,20 +1201,18 @@ public class RecordOwnershipResolverTests
             .WithRecord("sprk_document", documentId, SecureBu, owningTeam: SecureNamedTeam,
                 extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) });
 
-        var resolution = await Build(directory).ReparentAsync(
-            new RecordReparent
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_document",
+            RecordId = documentId,
+            ParentChanges = new Dictionary<string, EntityReference?>
             {
-                EntityLogicalName = "sprk_document",
-                RecordId = documentId,
-                ParentChanges = new Dictionary<string, EntityReference?>
-                {
-                    ["sprk_project"] = null, // cleared
-                    ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
-                },
-                SecureExitCaller = CallerHolding(FullAccess), // owner round 10 item 7: an un-secure needs F3 rights
+                ["sprk_project"] = null, // cleared
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
             },
-            _ => Task.CompletedTask,
-            CancellationToken.None);
+            SecureExitCaller = CallerHolding(FullAccess), // owner round 10 item 7: an un-secure needs F3 rights
+        };
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
 
         resolution.OwningTeamId.Should().Be(ChildTeam);
         directory.Assignments.Should().ContainSingle().Which.Item3.Should().Be(ChildTeam);
@@ -1258,18 +1254,16 @@ public class RecordOwnershipResolverTests
             .WithRecord("sprk_document", documentId, ChildBu, owningTeam: ChildTeam)
             .IgnoringAssignments();
 
-        var act = () => Build(directory).ReparentAsync(
-            new RecordReparent
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_document",
+            RecordId = documentId,
+            ParentChanges = new Dictionary<string, EntityReference?>
             {
-                EntityLogicalName = "sprk_document",
-                RecordId = documentId,
-                ParentChanges = new Dictionary<string, EntityReference?>
-                {
-                    ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId),
-                },
+                ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId),
             },
-            _ => Task.CompletedTask,
-            CancellationToken.None);
+        };
+        var act = () => Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*did not read back*");
     }
@@ -1282,20 +1276,19 @@ public class RecordOwnershipResolverTests
             .WithRecord("sprk_matter", MatterId, ChildBu)
             .WithRecord("sprk_document", documentId, ChildBu, owningTeam: ChildTeam);
 
-        await Build(directory).ReparentAsync(
-            new RecordReparent
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_document",
+            RecordId = documentId,
+            ParentChanges = new Dictionary<string, EntityReference?>
             {
-                EntityLogicalName = "sprk_document",
-                RecordId = documentId,
-                ParentChanges = new Dictionary<string, EntityReference?>
-                {
-                    ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
-                },
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
             },
-            _ => Task.CompletedTask,
-            CancellationToken.None);
+        };
+        await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
 
         directory.Assignments.Should().BeEmpty();
+        directory.ConditionalWrites.Should().BeEmpty("#2143: a row already owned by the resolved team gets no owner write at all");
     }
 
     // ---- Reparent: a failed owner assignment AFTER the change (task 146 b2, verifier RESIDUAL FAIL-OPEN) ----
@@ -1321,6 +1314,20 @@ public class RecordOwnershipResolverTests
                 row.Attributes.Remove(column);
             else
                 row[column] = value;
+            return Task.CompletedTask;
+        };
+
+    /// <summary>
+    /// #2143: the change <paramref name="request"/> describes, written onto the row as Dataverse would (its parent changes; a
+    /// null clears) — the resolver reads the row AFTER the change and settles its owner from the parents it holds then, so an
+    /// applyChange that wrote nothing would read as a concurrent writer having undone the change.
+    /// </summary>
+    private static Func<CancellationToken, Task> Applies(FakeDirectory directory, RecordReparent request, Action? alsoDone = null) =>
+        _ =>
+        {
+            directory.Write(request.EntityLogicalName, request.RecordId,
+                request.ParentChanges.ToDictionary(change => change.Key, change => (object?)change.Value));
+            alsoDone?.Invoke();
             return Task.CompletedTask;
         };
 
@@ -1538,6 +1545,206 @@ public class RecordOwnershipResolverTests
         directory.Row("sprk_document", documentId).GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(ChildTeam);
     }
 
+    // ---- #2143: concurrent re-files — the owner is settled from the parents the row holds AFTER the change ----
+    //
+    // The owner is written conditionally (versionnumber), from the parents the row holds at that version; a refused or
+    // unsettled answer writes no owner; the put-back never overwrites a newer filing. The directory honours the version,
+    // and BeforeWrite lands another writer's change between the resolver's read and its write.
+
+    private static readonly Guid GeneralMatterId = Guid.Parse("21430000-0000-4000-8000-000000000001");
+
+    /// <summary>
+    /// A document filed under an ordinary matter in the general unit (owned by that unit's team), about to move to the child
+    /// unit's matter — an ordinary re-file whose resolved owner is <see cref="ChildTeam"/>. A secure project is seeded for a
+    /// concurrent writer to file it under.
+    /// </summary>
+    private static (FakeDirectory Directory, Guid DocumentId, RecordReparent Request) OrdinaryRefileWorld()
+    {
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_matter", GeneralMatterId, GeneralBu, owningTeam: GeneralTeam)
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_document", documentId, GeneralBu, owningTeam: GeneralTeam,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", GeneralMatterId) });
+        return (directory, documentId, MoveUnder(documentId, "sprk_matter", new EntityReference("sprk_matter", MatterId)));
+    }
+
+    private static Guid? OwnerOf(FakeDirectory directory, Guid documentId) =>
+        directory.Row("sprk_document", documentId).GetAttributeValue<EntityReference>("owningteam")?.Id;
+
+    private static Dictionary<string, object?> FiledUnderSecureProject() =>
+        new() { ["sprk_relatedproject"] = new EntityReference("sprk_project", SecureProjectId) };
+
+    [Fact]
+    public async Task Reparent_WhenAConcurrentFilingUnderASecureRecordLandsBeforeTheOwnerWrite_TheOwnerIsTheSecureTeam()
+    {
+        // Must-fire: another re-file moves the row under a secure project after this change is written and before its owner
+        // is (that writer's own owner write still in flight). The owner comes from the parents the row holds NOW — the Secure
+        // team — never the ordinary team resolved from the parents read before the change.
+        var (directory, documentId, request) = OrdinaryRefileWorld();
+
+        var resolution = await Build(directory).ReparentAsync(
+            request,
+            Applies(directory, request, () => directory.Write("sprk_document", documentId, FiledUnderSecureProject())),
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam);
+        resolution.IsSecureOwner.Should().BeTrue();
+        directory.Assignments.Should().Equal(("sprk_document", documentId, SecureNamedTeam));
+        OwnerOf(directory, documentId).Should().Be(SecureNamedTeam, "filed under the secure project, owned by its team");
+    }
+
+    [Fact]
+    public async Task Reparent_WhenTheRowChangesBetweenItsReadAndTheOwnerWrite_TheWriteIsRefused_AndTheRowIsReadAgain()
+    {
+        // Must-fire: the concurrent filing lands between the resolver's read after the change and its owner write. The write
+        // is conditioned on the version read, so Dataverse refuses it; the row is read again and the owner its CURRENT parents
+        // resolve to is written.
+        var (directory, documentId, request) = OrdinaryRefileWorld();
+        var landed = false;
+        directory.BeforeWrite = (world, fields) =>
+        {
+            if (landed || !fields.ContainsKey("ownerid"))
+                return;
+            landed = true;
+            world.Write("sprk_document", documentId, FiledUnderSecureProject());
+        };
+
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam);
+        OwnerOf(directory, documentId).Should().Be(SecureNamedTeam);
+        directory.ConditionalWrites.Select(w => (((EntityReference)w.Fields["ownerid"]).Id, w.Applied)).Should().Equal(
+            new[] { (ChildTeam, false), (SecureNamedTeam, true) },
+            "the stale owner write is refused; the second is from the parents read again");
+        directory.Assignments.Should().Equal(("sprk_document", documentId, SecureNamedTeam));
+    }
+
+    [Fact]
+    public async Task Reparent_WhenTheRowKeepsChangingUnderEveryOwnerWrite_ThrowsAfterTheBoundedAttempts_WritingNoOwner()
+    {
+        // Must-fire: another writer moves the row in or out of the secure project before every owner write lands. The
+        // attempts are bounded; when they run out the call throws, and no owner was written at all — so none that disagrees
+        // with the parents the row holds.
+        var (directory, documentId, request) = OrdinaryRefileWorld();
+        directory.BeforeWrite = (world, fields) =>
+        {
+            if (!fields.ContainsKey("ownerid"))
+                return;
+            var inSecureProject = world.Row("sprk_document", documentId).Contains("sprk_relatedproject");
+            world.Write("sprk_document", documentId, inSecureProject
+                ? new Dictionary<string, object?> { ["sprk_relatedproject"] = null }
+                : FiledUnderSecureProject());
+        };
+
+        var act = () => Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*could not be settled in 3 attempts*");
+        directory.ConditionalWrites.Where(w => w.Fields.ContainsKey("ownerid")).Should().HaveCountGreaterThanOrEqualTo(3)
+            .And.OnlyContain(w => !w.Applied, "every owner write met a changed row and was refused");
+        directory.Assignments.Should().BeEmpty();
+        OwnerOf(directory, documentId).Should().Be(GeneralTeam, "no owner was written");
+    }
+
+    [Fact]
+    public async Task Reparent_WhenTheOwnerAssignmentFails_AndANewerFilingLandsBeforeThePutBack_TheNewerFilingIsNotOverwritten()
+    {
+        // Must-fire: the put-back is conditioned on the version read after this change. Another writer re-files the row
+        // (under a second secure record, and owns it) after this owner write failed and before the put-back: the put-back is
+        // refused, the row is left to that writer, and its owner is re-checked against the parents it holds.
+        var (directory, documentId) = MoveIntoSecureWorld();
+        directory.WithRecord("sprk_matter", OtherSecureMatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam);
+        var refusal = new InvalidOperationException("Read Privilege Check For Owner failed ... missing prvReadsprk_Document");
+        directory.AssignmentFault = refusal;
+        var secureProject = new EntityReference("sprk_project", SecureProjectId);
+        var otherSecureMatter = new EntityReference("sprk_matter", OtherSecureMatterId);
+        var landed = false;
+        directory.BeforeWrite = (world, fields) =>
+        {
+            if (landed || fields.ContainsKey("ownerid"))
+                return; // only before the put-back
+            landed = true;
+            world.Write("sprk_document", documentId, new()
+            {
+                ["sprk_matter"] = otherSecureMatter,
+                ["ownerid"] = new EntityReference("team", SecureNamedTeam),
+            });
+        };
+
+        var act = () => Build(directory).ReparentAsync(
+            MoveUnder(documentId, "sprk_relatedproject", secureProject),
+            Writes(directory, documentId, "sprk_relatedproject", secureProject),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(refusal);
+        landed.Should().BeTrue("the newer filing landed before the put-back");
+        directory.FieldUpdates.Should().BeEmpty("the put-back is never written over a newer filing");
+        var row = directory.Row("sprk_document", documentId);
+        row.GetAttributeValue<EntityReference>("sprk_matter").Should().Be(otherSecureMatter, "the newer filing stands");
+        row.GetAttributeValue<EntityReference>("sprk_relatedproject").Should().Be(secureProject);
+        OwnerOf(directory, documentId).Should().Be(SecureNamedTeam, "its owner matches the parents it holds");
+    }
+
+    [Fact]
+    public async Task Reparent_WhenAnEditOutsideThisRefileTakesASecureRowOutOfItsSecureRecord_NoOrdinaryOwnerIsWritten()
+    {
+        // Must-fire, fail closed: this re-file ADDS an ordinary matter to a document filed under a secure project (it stays the
+        // Secure team's; no F3 question). Before its owner is settled, an edit this re-file did not make (a form edit — no F3
+        // check) clears the secure project. Re-deriving would answer the ordinary team, an un-secure no F3 check covered, so no
+        // owner is written: the row stays the Secure team's (over-restricted, never exposed) and the call throws.
+        var (directory, documentId) = SecureDocumentWorld();
+        var request = MoveUnder(documentId, "sprk_matter", new EntityReference("sprk_matter", MatterId));
+
+        var act = () => Build(directory).ReparentAsync(
+            request,
+            Applies(directory, request,
+                () => directory.Write("sprk_document", documentId, new() { ["sprk_project"] = null })),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*could not be settled*");
+        directory.ConditionalWrites.Should().BeEmpty("no ordinary owner is ever sent");
+        directory.Assignments.Should().BeEmpty();
+        OwnerOf(directory, documentId).Should().Be(SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task Reparent_OnAnUncontendedRefile_WritesTheOwnerOnce_AtTheVersionReadAfterTheChange_AndLogsAsBefore()
+    {
+        // Must-not-fire: with no concurrent writer the re-file is what it was — one owner write (now conditional, at the version
+        // the change left), the same Information log, and nothing at Warning or above.
+        var (directory, documentId, request) = OrdinaryRefileWorld();
+        var log = new ResolverLog();
+        long versionAfterChange = 0;
+
+        var resolution = await directory.Resolver(logger: log).ReparentAsync(
+            request,
+            Applies(directory, request, () => versionAfterChange = directory.Version("sprk_document", documentId)),
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam);
+        directory.Assignments.Should().Equal(("sprk_document", documentId, ChildTeam));
+        directory.ConditionalWrites.Should().ContainSingle().Which.Should().Match<(string Entity, Guid Id, string Version, Dictionary<string, object> Fields, bool Applied)>(
+            w => w.Applied && w.Version == versionAfterChange.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        log.Entries.Select(e => e.Message).Should().ContainSingle(m => m.Contains("owner reassigned"))
+            .Which.Should().Be($"Re-filed sprk_document {documentId}: owner reassigned to team {ChildTeam}.");
+        log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
+    }
+
+    /// <summary>Captures the resolver's log lines (level and formatted message).</summary>
+    private sealed class ResolverLog : ILogger<RecordOwnershipResolver>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
     // ---- Reparent OUT of a secure root: F3 (owner round 10 item 7, task 146 c1) ----
     //
     // "Moving a CHILD out of a secure root is an un-secure, so F3's limit applies": Full Access on the secure root the
@@ -1615,10 +1822,9 @@ public class RecordOwnershipResolverTests
         var asked = new List<Guid>();
         var applied = false;
 
+        var request = MoveToOrdinaryMatter(documentId, CallerHolding(FullAccess, asked: asked));
         var resolution = await Build(directory).ReparentAsync(
-            MoveToOrdinaryMatter(documentId, CallerHolding(FullAccess, asked: asked)),
-            _ => { applied = true; return Task.CompletedTask; },
-            CancellationToken.None);
+            request, Applies(directory, request, () => applied = true), CancellationToken.None);
 
         resolution.IsRefused.Should().BeFalse(resolution.Reason);
         applied.Should().BeTrue();
@@ -1632,10 +1838,8 @@ public class RecordOwnershipResolverTests
         var (directory, documentId) = SecureDocumentWorld(new() { ["createdby"] = new EntityReference("systemuser", CallerUserId) });
         var asked = new List<Guid>();
 
-        var resolution = await Build(directory).ReparentAsync(
-            MoveToOrdinaryMatter(documentId, CallerHolding(Collaborate, asked: asked)),
-            _ => Task.CompletedTask,
-            CancellationToken.None);
+        var request = MoveToOrdinaryMatter(documentId, CallerHolding(Collaborate, asked: asked));
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
 
         resolution.IsRefused.Should().BeFalse(resolution.Reason);
         asked.Should().BeEmpty("the creator is admitted without a rights probe");
@@ -1652,8 +1856,8 @@ public class RecordOwnershipResolverTests
             ["sprk_createdbyperson"] = new EntityReference("systemuser", CallerUserId),
         });
 
-        var resolution = await Build(directory).ReparentAsync(
-            MoveToOrdinaryMatter(documentId, CallerHolding(Collaborate)), _ => Task.CompletedTask, CancellationToken.None);
+        var request = MoveToOrdinaryMatter(documentId, CallerHolding(Collaborate));
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
 
         resolution.IsRefused.Should().BeFalse(resolution.Reason);
         directory.Assignments.Should().Equal(("sprk_document", documentId, ChildTeam));
@@ -1847,10 +2051,9 @@ public class RecordOwnershipResolverTests
         var (directory, messageId, otherMatterId) = UnidentifiedSecureMessageWorld(createdBy: CallerUserId);
         var applied = false;
 
+        var request = MoveMessageTo(messageId, otherMatterId, CallerHolding(Collaborate));
         var resolution = await Build(directory).ReparentAsync(
-            MoveMessageTo(messageId, otherMatterId, CallerHolding(Collaborate)),
-            _ => { applied = true; return Task.CompletedTask; },
-            CancellationToken.None);
+            request, Applies(directory, request, () => applied = true), CancellationToken.None);
 
         resolution.IsRefused.Should().BeFalse(resolution.Reason);
         applied.Should().BeTrue();

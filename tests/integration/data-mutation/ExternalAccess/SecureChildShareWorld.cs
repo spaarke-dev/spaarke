@@ -414,6 +414,21 @@ internal sealed class SecureChildShareWorld
         MoveOwner(table, id, principal);
     }
 
+    /// <summary>
+    /// #2143: an <see cref="IGenericEntityService.UpdateIfRowVersionMatchesAsync"/> of this world — <see cref="Update"/>'s rules,
+    /// applied only while the row's <c>versionnumber</c> (a column, as the Web API doubles here read it; <see cref="Add"/>
+    /// starts it at 1) is still <paramref name="version"/>, then bumped; otherwise Dataverse's version mismatch
+    /// (<see cref="System.Data.DBConcurrencyException"/>) and nothing is written.
+    /// </summary>
+    public void UpdateIfVersion(string table, Guid id, string version, Dictionary<string, object> fields)
+    {
+        var current = ValueOf<long?>(table, id, "versionnumber")?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (!string.Equals(current, version, StringComparison.Ordinal))
+            throw new System.Data.DBConcurrencyException($"Test: {table} {id} is at version {current}, not {version}.");
+        Update(table, id, fields);
+        Set(table, id, "versionnumber", (ValueOf<long?>(table, id, "versionnumber") ?? 0L) + 1);
+    }
+
     /// <summary>Ontology task 144: every core-ancestor stamp write (<see cref="RestamperOver"/>), in order, as sent.</summary>
     public List<(string Table, Guid Id, Dictionary<string, object> Fields)> StampWrites { get; } = new();
 
@@ -474,6 +489,9 @@ internal sealed class SecureChildShareWorld
         // column as no match), so the user must say "enabled" unless the test marked it disabled.
         if (table == "systemuser" && !row.Attributes.ContainsKey("isdisabled"))
             row["isdisabled"] = false;
+        // #2143: every Dataverse row carries a versionnumber; the re-file's conditional owner write is conditioned on it.
+        if (!row.Attributes.ContainsKey("versionnumber"))
+            row["versionnumber"] = 1L;
         _rows[(table, id)] = row;
         return this;
     }
@@ -524,6 +542,15 @@ internal sealed class SecureChildShareWorld
             .Returns((string table, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
             {
                 current().Update(table, id, fields);
+                return Task.CompletedTask;
+            });
+        entities
+            .Setup(e => e.UpdateIfRowVersionMatchesAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string version, Dictionary<string, object> fields, CancellationToken _) =>
+            {
+                current().UpdateIfVersion(table, id, version, fields);
                 return Task.CompletedTask;
             });
         entities
