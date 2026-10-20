@@ -475,7 +475,8 @@ public sealed class ThreadResolver : IThreadResolver
                 RecordId = communicationId,
                 // #2143 round 5 (F1): the thread lookup this join writes, WITH the row it writes, so the resolver reads it as
                 // this call's own change and not another writer's (its lineage overlay). A lineage-only lookup decides no owner
-                // and names nothing to put back; the put-back still comes from AttachColumns.
+                // and names nothing to put back; the put-back still comes from AttachColumns. Enforced by:
+                // RecordOwnershipResolverTests.Reparent_WhenAnAttachColumnIsALineageOnlyLookupNotNamedInParentChanges_ThrowsArgumentException_BeforeAnyReadOrWrite.
                 ParentChanges = new Dictionary<string, EntityReference?>
                 {
                     [ThreadLookupOnCommunication] = new EntityReference("sprk_communicationthread", threadId),

@@ -154,6 +154,9 @@ public interface IRecordOwnershipResolver
     /// The exception's remarks say which state the row is left in.</exception>
     /// <exception cref="InvalidOperationException">The reassignment did not read back as applied (the change was rolled
     /// back first), or the row carries no version to condition the owner write on.</exception>
+    /// <exception cref="ArgumentException">(#2143 round 5) A <see cref="RecordReparent.AttachColumns"/> entry is a lineage-only
+    /// lookup (<see cref="RecordReparent.LineageOnlyTargetOf"/>) that <see cref="RecordReparent.ParentChanges"/> does not name;
+    /// thrown before anything is read or written.</exception>
     Task<RecordOwnerResolution> ReparentAsync(
         RecordReparent request, Func<CancellationToken, Task> applyChange, CancellationToken ct);
 }
@@ -505,6 +508,8 @@ public sealed record RecordReparent
     /// it joins a record thread. They are not parent lookups, so the resolver cannot see them in
     /// <see cref="ParentChanges"/>; naming them lets <see cref="IRecordOwnershipResolver.ReparentAsync"/> put them back,
     /// with the parent columns, when the owner assignment that must follow the change fails (task 146 b1).
+    /// #2143 round 5: a lineage-only lookup named here (<see cref="LineageOnlyTargetOf"/> — a message's thread) must also be
+    /// named, with the row it writes, in <see cref="ParentChanges"/>, or the reparent throws <see cref="ArgumentException"/>.
     /// </summary>
     public IReadOnlyList<string> AttachColumns { get; init; } = Array.Empty<string>();
 
@@ -1304,6 +1309,21 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(applyChange);
 
+        // #2143 round 5: the lineage overlay below reads this call's own lineage-only changes from ParentChanges, the only
+        // place a value is given. A lineage-only lookup named only in AttachColumns would read as ANOTHER writer's move on
+        // every call, so it is a programming error, refused before anything is read or written.
+        foreach (var column in request.AttachColumns)
+        {
+            if (RecordReparent.LineageOnlyTargetOf(request.EntityLogicalName, column) is not null
+                && !request.ParentChanges.Keys.Any(key => string.Equals(key, column, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new ArgumentException(
+                    $"AttachColumns names the lineage-only lookup '{column}' of {request.EntityLogicalName}, but ParentChanges "
+                    + "does not: name it there with the row the change writes (#2143).",
+                    nameof(request));
+            }
+        }
+
         var current = await ReadWholeRowAsync(request, ct).ConfigureAwait(false);
 
         if (current is null)
@@ -1415,7 +1435,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // true by construction rather than by that property of the client.
         // #2143 round 3 (F1): with the lineage-only lookups this change itself moves applied, so only ANOTHER writer's move
         // of one reads as a change. Round 5 (F1): only ParentChanges carries a value, so a writer that sets a lineage-only
-        // lookup names it there too (a thread join: ThreadResolver), never only in AttachColumns.
+        // lookup names it there too (a thread join: ThreadResolver), never only in AttachColumns (refused at the top of this
+        // method). Enforced by: Reparent_WhenAnAttachColumnIsALineageOnlyLookupNotNamedInParentChanges_ThrowsArgumentException_BeforeAnyReadOrWrite.
         var lineageAfterThisChange = LineageOnlyLookupsOf(request.EntityLogicalName, current);
         foreach (var (column, value) in request.ParentChanges)
         {

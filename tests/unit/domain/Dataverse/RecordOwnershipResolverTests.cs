@@ -1503,7 +1503,8 @@ public class RecordOwnershipResolverTests
             {
                 EntityLogicalName = "sprk_communication",
                 RecordId = communicationId,
-                ParentChanges = new Dictionary<string, EntityReference?>(),
+                // #2143 round 5: the join shape names the thread it writes (ThreadResolver.JoinCoreAsync).
+                ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_communicationthread"] = secureThread },
                 InheritedParents = new[] { new RecordOwnershipParent("sprk_project", SecureProjectId) },
                 AttachColumns = new[] { "sprk_communicationthread" },
                 WhenUnfiled = UnfiledOwnership.KeepCreator,
@@ -1518,6 +1519,78 @@ public class RecordOwnershipResolverTests
         await act.Should().ThrowAsync<InvalidOperationException>();
         directory.Row("sprk_communication", communicationId).GetAttributeValue<EntityReference>("sprk_communicationthread")
             .Should().Be(previousThread, "the message is not left in the secure record's thread while owned elsewhere");
+    }
+
+    [Fact]
+    public async Task Reparent_WhenAnAttachColumnIsALineageOnlyLookupNotNamedInParentChanges_ThrowsArgumentException_BeforeAnyReadOrWrite()
+    {
+        // Must-fire (#2143 round 5): the lineage overlay reads this call's own lineage-only changes from ParentChanges only, so
+        // a thread lookup named only in AttachColumns (the pre-round-5 join shape) would read as another writer's move on every
+        // call. It is a programming error: refused, naming the column, before anything is read, changed or written.
+        var communicationId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_communication", communicationId, ChildBu, owningTeam: ChildTeam);
+        var changed = false;
+
+        var act = () => Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_communication",
+                RecordId = communicationId,
+                ParentChanges = new Dictionary<string, EntityReference?>(),
+                InheritedParents = new[] { new RecordOwnershipParent("sprk_project", SecureProjectId) },
+                AttachColumns = new[] { "sprk_communicationthread" },
+                WhenUnfiled = UnfiledOwnership.KeepCreator,
+            },
+            _ =>
+            {
+                changed = true;
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).WithMessage("*'sprk_communicationthread'*");
+        changed.Should().BeFalse("the change is never applied");
+        directory.QueriedEntities.Should().BeEmpty("nothing is read");
+        directory.Assignments.Should().BeEmpty();
+        directory.FieldUpdates.Should().BeEmpty();
+        directory.ConditionalWrites.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Reparent_WhenAnAttachColumnIsNotALineageLookup_ItNeedsNoParentChangesEntry()
+    {
+        // Must-NOT-fire control for the round-5 argument check: an AttachColumns entry that is no lineage-only lookup (no
+        // production writer names one today; the contract allows it) is not refused — the reparent runs and is put back as
+        // before when the assignment fails.
+        var communicationId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_communication", communicationId, ChildBu, owningTeam: ChildTeam,
+                extra: new() { ["sprk_name"] = "before" });
+        directory.AssignmentFault = new InvalidOperationException("missing prvReadsprk_Communication");
+
+        var act = () => Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_communication",
+                RecordId = communicationId,
+                ParentChanges = new Dictionary<string, EntityReference?>(),
+                InheritedParents = new[] { new RecordOwnershipParent("sprk_project", SecureProjectId) },
+                AttachColumns = new[] { "sprk_name" },
+                WhenUnfiled = UnfiledOwnership.KeepCreator,
+            },
+            _ =>
+            {
+                directory.Row("sprk_communication", communicationId)["sprk_name"] = "after";
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Should().NotBeOfType<ArgumentException>();
+        directory.Row("sprk_communication", communicationId).GetAttributeValue<string>("sprk_name")
+            .Should().Be("before", "the non-lineage attach column is put back with the failed assignment");
     }
 
     [Fact]
