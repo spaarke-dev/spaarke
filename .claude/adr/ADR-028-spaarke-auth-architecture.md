@@ -360,6 +360,27 @@ identity can already do; the effective rights are the overlap of both. The condi
 OBO, user tokens and confidential clients remain forbidden everywhere this extension applies. Evidence:
 `projects/unified-access-control-r2/notes/decisions/function-impersonation-proposal.md`.
 
+### Scope extension (2026-10-18, widened 2026-10-20, owner-accepted): confirming a systemuser's write on /api/v1/external
+
+A licensed core user's SPA/Teams token is never exchanged on `/api/v1/external` (A1–A3), and one resolved through A9's
+stored home link holds a customer-directory token that could not be exchanged anyway. To confirm **every systemuser's**
+write there (ADR-034 A2), the BFF asks Dataverse app-only, impersonating that systemuser: `RetrievePrincipalAccess` with
+`Principal = systemusers(<id>)` on the target record, and `RetrieveUserSetOfPrivilegesByNames` on that systemuser for
+the child table's Create privilege (task 036 decision a, widened by option C). The trust basis is this amendment's: the
+id is the one the validated token was resolved to, never client input, and Dataverse answers from that user's own roles,
+teams and shares. Conditions:
+- the only confirmation on the plane, for every systemuser (`ExternalProjectDataEndpoints.AppOnlyConfirmationPrincipal`),
+  never a fallback after a token exchange;
+- fail closed: a fault, a missing systemuser id or an unreadable answer adds no rights (both `Spaarke.Dataverse` calls
+  refuse `Guid.Empty`);
+- a 404 is re-asked on `CallerRecordAccessProbe.NotFoundRetryDelay`'s schedule; a 403 that is not an access answer
+  (e.g. `0x8004A110`) is UNKNOWN and logged as a Warning; each question is bounded at 15 s;
+- uncached, and logged with the path that answered (no tokens, no PII);
+- the same deployment prerequisite as the read (E-2, `prvActOnBehalfOfAnotherUser`).
+
+No token exchange is added. Enforced by: `tests/Spaarke.ArchTests/ExternalPlaneNoOboGuardTests.cs`. Evidence:
+`projects/unified-access-control-r2/notes/036-fr20-implementation.md` §12.
+
 ### Deployment prerequisites (register E-2 / E-3)
 
 Both are **blocking** — without them the impersonated read cannot work correctly:
@@ -368,6 +389,10 @@ Both are **blocking** — without them the impersonated read cannot work correct
 2. **The BFF app user stays Organization-scoped.** Impersonation returns *the impersonated user's*
    scope, so the app user's own breadth is not a shortcut — but narrowing it breaks the app-only paths
    that legitimately need org breadth.
+3. **Conditional Access targets the BFF API and the SPA client.** On `/api/v1/external` the BFF never exchanges the
+   user's token (A1–A3, and the write confirmation above), so a Conditional Access or sign-in-risk policy that targets
+   only Dataverse, Graph or SharePoint is never evaluated for SPA/Teams users. Such policies MUST target the BFF API app
+   registration and the SPA client, where those users sign in.
 
 ### Alternatives considered (and rejected)
 
@@ -639,6 +664,7 @@ The Office add-in already runs the working shape: one single-tenant Spaarke clie
 
 ### Scope and preserved invariants
 
+- **Write confirmation for every core user** (2026-10-18, widened 2026-10-20): a licensed core user, Spaarke-tenant or resolved through the stored link, is confirmed for ADR-034 A2 writes app-only, impersonating their systemuser ([A5 scope extension](#scope-extension-2026-10-18-widened-2026-10-20-owner-accepted-confirming-a-systemusers-write-on-apiv1external)); no token of theirs is exchanged.
 - **Unchanged:** no OBO on any collaboration plane; app-only Dataverse and SPE; plane selection from validated `iss`/`tid`; A8's `user_impersonation` scope, default Tier-1 modules and CIAM rules; no invite permission on any stamp identity.
 - **Teams** (owner, 2026-10-13: included). Teams uses the documented multitenant NAA pattern under these same rules, with a live sign-in test on desktop, web and mobile before release. The A8 Teams clause (NAA against the Spaarke tenant) no longer applies to the Teams host.
 - **Licensing** (multiplexing, External Users) is a commercial question outside this ADR.
