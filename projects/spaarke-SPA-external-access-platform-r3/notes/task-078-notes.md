@@ -282,3 +282,15 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T233210Z` (= `0b976628e`).
 - **Next (UAC):** a flag-off sanity check and the 034 canary. The flip needs a direct owner yes in this session, with the command shown first.
 
+## UAC 036 flag ON on dev (2026-10-20 23:51Z, owner: "yes can turn on. i ran the command you provided")
+
+- **Preconditions:**
+  - UAC tasks 142 and 143 are in the live build (`d254d7166` is an ancestor of `4f5f22694`, verified here).
+  - The 034 canary passed on `4f5f22694`: impersonated 58 ⊂ app-only 62, strictly fewer, and equal to the role-derived expected set; 2×20/20.
+  - `prvActOnBehalfOfAnotherUser` is Global on both BFF app users (UAC read live).
+  - UAC's flag-off sanity check was clean.
+- **Change** (run by the owner): `az webapp config appsettings set -g rg-spaarke-dev -n spaarke-bff-dev --settings ExternalAccess__ImpersonatedRootSets__Enabled=true`.
+- **Read-back:** the setting = `true`; the site was modified at 23:51:26Z. At 23:52:36Z: ProductVersion `4f5f22694` (unchanged), `/healthz` and `/healthz/dataverse` 200, `/api/me` anonymous 401.
+- **Rollback:** `az webapp config appsettings delete -g rg-spaarke-dev -n spaarke-bff-dev --setting-names ExternalAccess__ImpersonatedRootSets__Enabled`. Never set it to an empty value; that fails startup.
+- **Next:** UAC gates (i)–(v) and the disabled/unlicensed check.
+

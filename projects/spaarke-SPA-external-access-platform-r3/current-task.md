@@ -11,8 +11,8 @@
 |-------|-------|
 | **Task** | 070 (dev SPA + Teams package), owner "070-071-072 yes proceed" 2026-10-20. Also open: 074 (A9 live checks, partial), 002 (grid columns, owner question). |
 | **Step** | 070: SPA live (master `28274e04e`); dev Teams package built (run `39489551799`, artifact `teams-app-package`, manifest id `23610794…` v1.2.0). **Next:** owner uploads the package in Teams admin center, then the smoke table in `notes/task-070-deploy-record.md`; then 071. |
-| **Status** | **Dev BFF = `4f5f22694`** (master incl. UAC #2078, flag ImpersonatedRootSets OFF/absent; 23:34Z, owner "deploy approved"; rollback `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T233210Z` = 0b976628e; record `notes/task-078-notes.md`). **Dev SPA = `28274e04e`** (run 39468172374; rollback tag `external-spa-dev-rollback-1908696a8`). |
-| **Next Action** | Wait for UAC's flag-off sanity check + 034 canary on 4f5f22694. Then the 036 flip ONLY with a direct owner yes (show `az webapp config appsettings set -g rg-spaarke-dev -n spaarke-bff-dev --settings ExternalAccess__ImpersonatedRootSets__Enabled=true` first; rollback = `az webapp config appsettings delete ... --setting-names ExternalAccess__ImpersonatedRootSets__Enabled`; an empty value fails startup). Owner items: 070 package upload, 074 Ralph Dewey link, 002 columns, R4 design revisions. |
+| **Status** | **Dev BFF = `4f5f22694`** (master incl. UAC #2078, flag ImpersonatedRootSets **ON since 23:51Z** (owner ran it; rollback = delete the setting); 23:34Z, owner "deploy approved"; rollback `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T233210Z` = 0b976628e; record `notes/task-078-notes.md`). **Dev SPA = `28274e04e`** (run 39468172374; rollback tag `external-spa-dev-rollback-1908696a8`). |
+| **Next Action** | Wait for UAC's post-flip gates (i)–(v) + disabled/unlicensed check on 4f5f22694 with the 036 flag ON. Owner items: 070 package upload, 074 Ralph Dewey link, 002 columns, R4 design revisions. |
 
 ### Uncommitted files
 - `.claude/agent-memory/researcher/MEMORY.md` (modified) and three untracked researcher files belong to the OWNER. Never commit or discard them. Commit by pathspec only.
@@ -40,7 +40,6 @@
 5. 072 after 002 + 071; 073 blocked on the ACME gate; 090 last.
 
 ## Open owner questions
-- 036 flag flip (after UAC's 034 canary on the 4f5f22694 build): direct owner yes, shown the exact `az webapp config appsettings set ... ExternalAccess__ImpersonatedRootSets__Enabled=true` first; rollback = delete the setting (an empty value fails startup).
 - 002: the owner reviews the live column table (notes/task-002-notes.md "Live capture 2026-10-20") and says what to change per tab.
 - R4: the owner is reviewing the design revisions (prototype audit at R4 `notes/prototype-audit-2026-10-20.md`); then R3 drafts R4 `design.md`.
 - D7: accepted by the owner (round 110, relayed by UAC; the owner's later "ok" on item 2 agrees). word-add-in task 130 does the T8 writer fix; UAC does T7.
