@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-20 19:30Z (owner's 8-item direction; 070 under way; index reconciled)
+> **Last Updated**: 2026-10-20 21:00Z (85% checkpoint; dev BFF 0b976628e live; 4f5f22694 deploy pending owner approval)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -12,7 +12,7 @@
 | **Task** | 070 (dev SPA + Teams package), owner "070-071-072 yes proceed" 2026-10-20. Also open: 074 (A9 live checks, partial), 002 (grid columns, owner question). |
 | **Step** | 070: SPA live (master `28274e04e`); dev Teams package built (run `39489551799`, artifact `teams-app-package`, manifest id `23610794…` v1.2.0). **Next:** owner uploads the package in Teams admin center, then the smoke table in `notes/task-070-deploy-record.md`; then 071. |
 | **Status** | **Dev BFF = `0b976628e`** (master incl. UAC #2122; 20:37Z, owner "yes deploy"; rollback `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T203441Z` = c3ec5d6e5; record `notes/task-078-notes.md`). **Dev SPA = `28274e04e`** (run 39468172374; rollback tag `external-spa-dev-rollback-1908696a8`). |
-| **Next Action** | Reply to UAC on #2126 D7 with the code-mapper facts (3a–c: writers of `sprk_relatedcommunication`, the internal-only flag, gaps). Then the owner's 070 package upload and the 074 checks. |
+| **Next Action** | **Pending owner approval: dev BFF deploy of master `4f5f22694`** (UAC #2078 / task 036, flag `ExternalAccess:ImpersonatedRootSets:Enabled` left OFF; it is absent on dev). Checks done: ancestor of live 0b976628e; #2078 CI green; ebilling content unchanged; diff touches the shared `Spaarke.Dataverse/DataverseWebApiService.cs` (+163). OKs: word-add-in, plus the standing OKs from provisioning and field-mapping; asked ontology, ebilling, spe-admin. On approval: phaseA.ps1 (scratchpad) → worktree `C:\wtbffe` at 4f5f22694 → `Deploy-BffApi.ps1` → readback.ps1 → tell UAC (flag-off sanity + 034 canary), ontology, word-add-in, spe-admin → record in task-078-notes + remove the worktree. **The flag FLIP needs a separate direct owner yes** (owner asked what it is; explained; no answer yet). |
 
 ### Uncommitted files
 - `.claude/agent-memory/researcher/MEMORY.md` (modified) and three untracked researcher files belong to the OWNER. Never commit or discard them. Commit by pathspec only.
@@ -40,8 +40,10 @@
 5. 072 after 002 + 071; 073 blocked on the ACME gate; 090 last.
 
 ## Open owner questions
-- 002 column lists (or "keep current").
-- D7 acceptance (via UAC).
+- 036 flag flip (after UAC's 034 canary on the 4f5f22694 build): direct owner yes, shown the exact `az webapp config appsettings set ... ExternalAccess__ImpersonatedRootSets__Enabled=true` first; rollback = delete the setting (an empty value fails startup).
+- 002: the owner reviews the live column table (notes/task-002-notes.md "Live capture 2026-10-20") and says what to change per tab.
+- R4: the owner is reviewing the design revisions (prototype audit at R4 `notes/prototype-audit-2026-10-20.md`); then R3 drafts R4 `design.md`.
+- D7: accepted by the owner (round 110, relayed by UAC; the owner's later "ok" on item 2 agrees). word-add-in task 130 does the T8 writer fix; UAC does T7.
 - 073: routing choice (build-time VITE_BACKENDS vs T240c directory endpoint), DNS, prod GitHub environment + TEAMS_APP_ID, customer-tenant consent design (no v1 /adminconsent, C-1).
 
 ## Standing dependencies and gates
