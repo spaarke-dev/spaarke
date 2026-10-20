@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// spaarke-ontology-platform-r1 task 043 (the #1634 review; uac-r2's pair rule): a decision's child creates go through the
 /// REAL executors (<see cref="AddTodoExecutor"/>, <see cref="AssignWorkExecutor"/>), the REAL in-process
 /// <see cref="DecisionRouteCores.CreateChildAsync"/>, the REAL <c>ChildRecordEndpoints.CreateAsync</c> and so the REAL
-/// <c>OwnedChildWrite.PairTargetAsync</c> over this harness's caller and resolver. The request is the one the commit route builds:
+/// <c>CallerWriteAuthorization.PairTargetAsync</c> over this harness's caller and resolver. The request is the one the commit route builds:
 /// the core comes from the Signal's server-written <c>sprk_corerecordtype</c> / <c>sprk_corerecordid</c>, so the create sends the
 /// TYPED ADR-024 pair, and a work assignment also binds its typed regarding lookup (uac-r2's pair rule).
 /// </summary>
