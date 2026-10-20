@@ -1733,7 +1733,19 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// Dataverse's error code for an ACCESS-CHECK denial (<c>PrincipalPrivilegeDenied</c> / "SecLib::AccessCheckEx
     /// failed") — the one 403 that is an answer about the principal's rights rather than a fault of the request.
     /// </summary>
+    /// <remarks>
+    /// <b>Ambiguous for an impersonated call</b> (unified-access-control-r2 task 036, fix round 3, K5). It is Dataverse's
+    /// generic missing-privilege code ("Principal user … is missing prv… privilege"), so it is also a plausible answer when
+    /// the CALLING application user lacks <c>prvActOnBehalfOfAnotherUser</c>; Microsoft documents no code for that case
+    /// (the repo's <c>CannotActOnBehalfOfAnotherUser</c>, <c>0x8004A110</c>, is from the error catalog and has not been
+    /// observed live). <see cref="RetrievePrincipalRightsOrUnknownAsync"/> therefore reads this code as UNKNOWN when its
+    /// message names <see cref="ImpersonationPrivilegeName"/>. A <c>0x80040220</c> whose message does not name it still
+    /// reads as "no rights" — it fails closed for a denying caller either way.
+    /// </remarks>
     public const string AccessCheckDeniedErrorCode = "0x80040220";
+
+    /// <summary>The privilege the calling application user needs to impersonate (<c>MSCRMCallerID</c>).</summary>
+    public const string ImpersonationPrivilegeName = "prvActOnBehalfOfAnotherUser";
 
     /// <summary>
     /// Dataverse's error code for "the principal does not have ReadAccess right(s)" on the target record — what an
@@ -1764,8 +1776,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// <para><b>The mapping.</b> 2xx → the rights Dataverse answered (an empty string is an authoritative "none").
     /// 404 → <see cref="AccessRights.None"/> (Dataverse's report of a record the principal cannot read). 403 →
     /// <see cref="AccessRights.None"/> ONLY when the error code is one of <see cref="AccessDeniedErrorCodes"/>
-    /// (<see cref="AccessCheckDeniedErrorCode"/>, <see cref="NoReadAccessErrorCode"/>); any other 403 code, or a 403 whose
-    /// body cannot be read, is <see langword="null"/>. Any other failure (throttling, a 5xx) throws, as in
+    /// (<see cref="AccessCheckDeniedErrorCode"/>, <see cref="NoReadAccessErrorCode"/>) and the message does not name
+    /// <see cref="ImpersonationPrivilegeName"/> (task 036 fix round 3, K5); any other 403 code, a 403 naming that privilege,
+    /// or a 403 whose body cannot be read, is <see langword="null"/>. Any other failure (throttling, a 5xx) throws, as in
     /// <see cref="RetrievePrincipalRightsAsync"/>.</para>
     /// <para><b>Re-asking a 404</b> (unified-access-control-r2 task 036, option C). A 404 is also how Dataverse answers for a
     /// record created seconds earlier that has not replicated yet. A caller that confirms a write right after a create
@@ -1808,8 +1821,12 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     {
         if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
         {
-            var code = await TryReadErrorCodeAsync(response, ct).ConfigureAwait(false);
-            if (code is not null && AccessDeniedErrorCodes.Contains(code.Trim()))
+            var (code, message) = await TryReadErrorAsync(response, ct).ConfigureAwait(false);
+            // K5 (task 036 fix round 3): an access-check code whose message names the impersonation privilege is the
+            // application user's fault, not an answer about the principal (AccessCheckDeniedErrorCode's remarks).
+            var namesImpersonationPrivilege =
+                message?.Contains(ImpersonationPrivilegeName, StringComparison.OrdinalIgnoreCase) == true;
+            if (code is not null && AccessDeniedErrorCodes.Contains(code.Trim()) && !namesImpersonationPrivilege)
                 return AccessRights.None;
 
             _logger.LogWarning(
@@ -1822,25 +1839,29 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         return await ReadPrincipalAccessAnswerAsync(response, principalSystemUserId, entitySetName, recordId, ct);
     }
 
-    /// <summary>The OData <c>error.code</c> of a failed response, or <see langword="null"/> when the body has none.</summary>
-    private static async Task<string?> TryReadErrorCodeAsync(HttpResponseMessage response, CancellationToken ct)
+    /// <summary>
+    /// The OData <c>error.code</c> and <c>error.message</c> of a failed response; each is <see langword="null"/> when the
+    /// body has none.
+    /// </summary>
+    private static async Task<(string? Code, string? Message)> TryReadErrorAsync(HttpResponseMessage response, CancellationToken ct)
     {
         try
         {
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(body))
-                return null;
+                return (null, null);
             using var document = JsonDocument.Parse(body);
-            return document.RootElement.TryGetProperty("error", out var error)
-                   && error.ValueKind == JsonValueKind.Object
-                   && error.TryGetProperty("code", out var code)
-                   && code.ValueKind == JsonValueKind.String
-                ? code.GetString()
-                : null;
+            if (!document.RootElement.TryGetProperty("error", out var error) || error.ValueKind != JsonValueKind.Object)
+                return (null, null);
+
+            static string? StringOf(JsonElement parent, string name) =>
+                parent.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+            return (StringOf(error, "code"), StringOf(error, "message"));
         }
         catch (JsonException)
         {
-            return null;
+            return (null, null);
         }
     }
 
