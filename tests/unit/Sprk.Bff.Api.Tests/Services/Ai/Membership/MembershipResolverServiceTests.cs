@@ -1324,7 +1324,8 @@ public class MembershipResolverServiceTests
     public async Task ResolveAsync_AccessConferringOnly_OwnershipIdentityTypes_EmitOnlyThePlatformOwnershipConditions()
     {
         // #2121 — the contract AccessibleRecordSetService's OWNERSHIP walk relies on: AccessConferringOnly plus
-        // IdentityTypes [SystemUser, Team, BusinessUnit] selects exactly the platform ownership columns. The
+        // IdentityTypes [SystemUser, Team] selects exactly the user/team ownership columns (round 1, K6: not
+        // owningbusinessunit, which on a Secure record is confirmed against Dataverse instead). The
         // registry-listed "Assigned …" columns (Contact- and Organization-typed) are access-conferring too, so only the
         // identity-type narrowing keeps them out — if one leaked in, a Secure record reached through a lookup column
         // would read as owned and keep its membership.
@@ -1358,15 +1359,16 @@ public class MembershipResolverServiceTests
             TestSystemUserId,
             EntityType,
             new MembershipResolveOptions(
-                IdentityTypes: new[] { "SystemUser", "Team", "BusinessUnit" },
+                IdentityTypes: new[] { "SystemUser", "Team" },
                 AccessConferringOnly: true),
             CancellationToken.None);
 
-        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "owner", "owningTeam", "owningBusinessUnit" });
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "owner", "owningTeam" });
         captured.Should().NotBeNull();
         captured!.Query.Should().Contain("attribute='ownerid'");
         captured.Query.Should().Contain("attribute='owningteam'");
-        captured.Query.Should().Contain("attribute='owningbusinessunit'");
+        captured.Query.Should().NotContain("owningbusinessunit",
+            "business-unit ownership is not real ownership on a Secure record (K6): it must not reach the ownership walk");
         captured.Query.Should().NotContain("sprk_assignedattorney1",
             "a Contact-typed registry column must not reach the ownership walk");
         captured.Query.Should().NotContain("sprk_assignedlawfirm1",

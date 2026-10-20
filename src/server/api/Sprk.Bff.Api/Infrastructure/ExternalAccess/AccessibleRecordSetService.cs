@@ -29,6 +29,7 @@
 // AI-internal types.
 
 using Spaarke.Dataverse;               // AccessRights — the rights type (root CLAUDE.md §11: reuse, do not fork)
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Identity;
@@ -777,27 +778,35 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private static readonly string[] OrganizationIdentityTypeOnly = { "Organization" };
 
     /// <summary>
-    /// Narrows a systemuser-plane membership walk to OWNERSHIP descriptors only (#2121): the platform columns
-    /// <c>ownerid</c> (SystemUser and Team), <c>owningteam</c> (Team) and <c>owningbusinessunit</c> (BusinessUnit).
+    /// Narrows a systemuser-plane membership walk to REAL OWNERSHIP descriptors only (#2121): the platform columns
+    /// <c>ownerid</c> (SystemUser and Team) and <c>owningteam</c> (Team) — the user owns the record or is in its owning
+    /// team. <c>owningbusinessunit</c> (BusinessUnit) is deliberately NOT here (#2121 round 1, K6).
     /// </summary>
     /// <remarks>
-    /// This narrowing selects exactly the ownership descriptors because of how the access-conferring filter
+    /// <para>This narrowing selects exactly those descriptors because of how the access-conferring filter
     /// (<c>MembershipResolverService.FilterToAccessConferringRoles</c>, applied by <c>AccessConferringOnly</c>) works:
-    /// it admits those three platform columns by NAME, and admits a registry "Assigned …" column only when it is
+    /// it admits the three platform columns by NAME, and admits a registry "Assigned …" column only when it is
     /// declared Contact or Organization typed (any other declared type is rejected as malformed). So under
     /// <c>AccessConferringOnly</c> no registry column can carry one of these identity types, and every descriptor that
     /// does is ownership. Pinned by <c>ResolveByContactAsync_MalformedRegistryEntry_IsIgnoredAndLogged_NeverWidened</c>
     /// (a Team-typed entry is rejected) and <c>ResolveAsync_AccessConferringOnly_MakerAuthoredSystemUserLookup_ConfersNothing</c>
     /// (an unregistered SystemUser lookup confers nothing). If the registry ever
-    /// admits a SystemUser- or Team-typed column, this split must be revisited.
+    /// admits a SystemUser- or Team-typed column, this split must be revisited.</para>
+    /// <para><b>Why not BusinessUnit (K6).</b> The main walk's <c>owningbusinessunit</c> match (the record's owning business
+    /// unit is the user's — <c>MembershipResolverService.BuildFetchXml</c>, the <c>BusinessUnit</c> branch) assumes a
+    /// business-unit-depth read role and never checks it, so the model-driven app is not guaranteed to grant it. On a
+    /// Secure record that over-granted <see cref="MembershipTermRights"/>. A Secure id reached ONLY that way is therefore
+    /// treated as an unconfirmed reach, like a lookup-only one: Dataverse is asked (<see cref="ConfirmSecureLookupOnlyAsync"/>)
+    /// and it is kept at exactly Read when Dataverse grants Read. A non-Secure business-unit reach is untouched (the main
+    /// walk still matches it).</para>
     /// </remarks>
-    private static readonly string[] OwnershipIdentityTypes = { "SystemUser", "Team", "BusinessUnit" };
+    private static readonly string[] OwnershipIdentityTypes = { "SystemUser", "Team" };
 
     /// <summary>
     /// The systemuser plane's membership ids that Secure suppresses (#2121, FR-22): the effectively Secure ids the
-    /// main walk reached ONLY through a registry lookup column, never through ownership. They lose
-    /// <see cref="MembershipTermRights"/>; <see cref="ConfirmSecureLookupOnlyAsync"/> then keeps, at Read only, the ones
-    /// Dataverse says the user can read (option (b)).
+    /// main walk reached ONLY through a registry lookup column or business-unit ownership (K6), never through the user's
+    /// own or their team's ownership. They lose <see cref="MembershipTermRights"/>; <see cref="ConfirmSecureLookupOnlyAsync"/>
+    /// then keeps, at Read only, the ones Dataverse says the user can read (option (b)).
     /// </summary>
     /// <remarks>
     /// <para>The main walk returns one flat id set and does not say which descriptor matched an id (its <c>ByRole</c> map
@@ -836,7 +845,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         {
             _logger.LogInformation(
                 "[WF-AUTHZ] Systemuser {SystemUserId}: {Count} Secure {EntityType} record(s) reached only through a registry " +
-                "lookup column keep no membership-term access (FR-22, #2121). Ownership-derived membership is kept.",
+                "lookup column or business-unit ownership keep no membership-term access (FR-22, #2121). Membership from " +
+                "the user's own or their team's ownership is kept.",
                 systemUserId, lookupOnly.Count, entityType);
 
             if (_logger.IsEnabled(LogLevel.Debug))
@@ -876,11 +886,34 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     internal const int MaxSecureLookupRightsChecks = 50;
 
     /// <summary>
-    /// The whole-batch budget for <see cref="ConfirmSecureLookupOnlyAsync"/>: the 15 s every app-only Dataverse client in
-    /// this module is given (ExternalAccessModule), so a slow Dataverse cannot hang the request. An id still unanswered
-    /// when it runs out is dropped with a Warning.
+    /// The default whole-batch budget for <see cref="ConfirmSecureLookupOnlyAsync"/>: the 15 s every app-only Dataverse
+    /// client in this module is given (ExternalAccessModule), so a slow Dataverse cannot hang the request. An id still
+    /// unanswered when it runs out is dropped with a Warning.
     /// </summary>
-    internal static readonly TimeSpan SecureLookupRightsBudget = TimeSpan.FromSeconds(15);
+    internal static readonly TimeSpan DefaultSecureLookupRightsBudget = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// The budget in force (#2121 round 1, K1): <see cref="DefaultSecureLookupRightsBudget"/> unless a test sets it (the
+    /// <c>GrantAccessNotifier.SendTimeout</c> convention), so the budget path is provable without a 15 s test.
+    /// </summary>
+    internal TimeSpan SecureLookupRightsBudget { get; init; } = DefaultSecureLookupRightsBudget;
+
+    /// <summary>
+    /// <see cref="ITenantCache"/> resource for one Dataverse rights answer (#2121 round 1, F1). On-wire key
+    /// <c>tenant:{tenantId}:secure-lookup-rights:{systemUserId:D}:{entitySet}:{recordId:D}:v{n}</c>: GUIDs and a set
+    /// name only, no PII.
+    /// </summary>
+    internal const string SecureLookupRightsCacheResource = "secure-lookup-rights";
+
+    /// <summary>Cache schema version per ADR-009. Bump when <see cref="CachedPrincipalRights"/> or the question changes.</summary>
+    internal const int SecureLookupRightsCacheVersion = 1;
+
+    /// <summary>
+    /// The cache id of one answer: the SYSTEMUSER (the subject, so one user's answer never serves another; ADR-009's
+    /// subject-discrimination MUST), the entity set and the record.
+    /// </summary>
+    internal static string SecureLookupRightsCacheId(Guid systemUserId, string entitySet, Guid recordId)
+        => $"{systemUserId:D}:{entitySet}:{recordId:D}";
 
     /// <summary>
     /// Of the systemuser's lookup-only Secure membership ids (<see cref="SecureLookupOnlyMembershipAsync"/>), the ones
@@ -906,6 +939,14 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// <para><b>Bounded (NFR-02).</b> Only lookup-only Secure ids are asked; at most <see cref="MaxSecureLookupRightsChecks"/>
     /// (the rest dropped, never asked), <see cref="CallerRecordAccessProbe.MaxConcurrentRecordLookups"/> at once, inside
     /// <see cref="SecureLookupRightsBudget"/> for the batch.</para>
+    /// <para><b>Cached (#2121 round 1, F1).</b> Every <c>/api/v1/external</c> request composes all three root types, each
+    /// asking up to the ceiling, on the BFF's one app user. So each answer Dataverse GAVE (the rights it reported, Read or
+    /// not) is cached per (systemuser, entity set, record) for the grant cache's TTL
+    /// (<see cref="ExternalParticipationService.CacheTtl"/>, 60 s), through <see cref="ITenantCache"/>, as
+    /// <see cref="ImpersonatedRootSetSource"/> caches its Dataverse answer. What is cached is Dataverse's data (the reported
+    /// rights); the keep-at-Read decision is made again from it on every composition. A 404 or a fault is NEVER cached:
+    /// the next composition asks again. A cache fault falls through to a live question (fail open on the cache, never on
+    /// the answer).</para>
     /// </remarks>
     private async Task<IReadOnlySet<Guid>> ConfirmSecureLookupOnlyAsync(
         Guid systemUserId, string entityType, IReadOnlySet<Guid> lookupOnly, CancellationToken ct)
@@ -984,8 +1025,15 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         Guid systemUserId, string entityType, string entitySet, Guid id, SemaphoreSlim gate,
         CancellationToken budget, CancellationToken ct)
     {
+        var tenantId = ImpersonatedRootSetSource.CacheTenantFor(_httpContextAccessor?.HttpContext?.User);
+        var cacheId = SecureLookupRightsCacheId(systemUserId, entitySet, id);
         try
         {
+            if (await TryGetCachedRightsAsync(tenantId, cacheId, budget).ConfigureAwait(false) is { } cached)
+            {
+                return ClassifyRights(systemUserId, entityType, id, cached);
+            }
+
             await gate.WaitAsync(budget).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -999,18 +1047,14 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         try
         {
+            // Debug: this method logs every outcome itself (a 404 at Information, a fault at Warning), so the store's own
+            // Error for the same non-success would be a second, misleading entry (#2121 round 1, F2).
             var rights = await _principalRights!
-                .GetPrincipalRightsAsync(systemUserId, entitySet, id, budget).ConfigureAwait(false);
-            if (rights.HasFlag(AccessRights.Read))
-            {
-                return SecureLookupAnswer.Read;
-            }
+                .GetPrincipalRightsAsync(systemUserId, entitySet, id, budget, LogLevel.Debug).ConfigureAwait(false);
 
-            _logger.LogDebug(
-                "[WF-AUTHZ] Dataverse denies systemuser {SystemUserId} Read on Secure {EntityType} {RecordId} ({Rights}): " +
-                "dropped (#2121).",
-                systemUserId, entityType, id, rights);
-            return SecureLookupAnswer.Denied;
+            // Only an answer Dataverse GAVE is cached (Read or not); a 404 and a fault leave through the catches below.
+            await TrySetCachedRightsAsync(tenantId, cacheId, rights, ct).ConfigureAwait(false);
+            return ClassifyRights(systemUserId, entityType, id, rights);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -1033,6 +1077,77 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             gate.Release();
         }
     }
+
+    /// <summary>Read when Dataverse's answer carries Read; otherwise a denial (logged at Debug).</summary>
+    private SecureLookupAnswer ClassifyRights(Guid systemUserId, string entityType, Guid id, AccessRights rights)
+    {
+        if (rights.HasFlag(AccessRights.Read))
+        {
+            return SecureLookupAnswer.Read;
+        }
+
+        _logger.LogDebug(
+            "[WF-AUTHZ] Dataverse denies systemuser {SystemUserId} Read on Secure {EntityType} {RecordId} ({Rights}): " +
+            "dropped (#2121).",
+            systemUserId, entityType, id, rights);
+        return SecureLookupAnswer.Denied;
+    }
+
+    // ── Rights cache: fail open on the CACHE, never on the ANSWER (ImpersonatedRootSetSource's contract) ─────────────
+    // A cache fault degrades to a live Dataverse question. A cancellation is rethrown: the caller's propagates, and the
+    // budget's is the id's timeout (AskSecureLookupAsync's catches).
+
+    private async Task<AccessRights?> TryGetCachedRightsAsync(string tenantId, string cacheId, CancellationToken ct)
+    {
+        if (_rightsCache is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var cached = await _rightsCache.GetAsync<CachedPrincipalRights>(
+                tenantId, SecureLookupRightsCacheResource, cacheId, SecureLookupRightsCacheVersion, ct: ct).ConfigureAwait(false);
+            return cached is null ? null : (AccessRights)cached.Rights;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[WF-AUTHZ] Rights cache read failed for {CacheId}; asking Dataverse live (#2121).", cacheId);
+            return null;
+        }
+    }
+
+    private async Task TrySetCachedRightsAsync(string tenantId, string cacheId, AccessRights rights, CancellationToken ct)
+    {
+        if (_rightsCache is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _rightsCache.SetAsync(
+                tenantId, SecureLookupRightsCacheResource, cacheId, SecureLookupRightsCacheVersion,
+                new CachedPrincipalRights((int)rights), ExternalParticipationService.CacheTtl, ct: ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[WF-AUTHZ] Rights cache write failed for {CacheId}; the live answer stands (#2121).", cacheId);
+        }
+    }
+
+    /// <summary>The cached payload: the rights Dataverse reported, as their integer flags (ADR-009: data, not a decision).</summary>
+    internal sealed record CachedPrincipalRights(int Rights);
 
     /// <summary>The status a rights-check fault is logged with: the HTTP status code, "timeout", or the exception type.</summary>
     private static string FaultStatus(Exception ex) => ex switch
@@ -1719,6 +1834,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private readonly IGenericEntityService _dataverse;
     private readonly ILogger<AccessibleRecordSetService> _logger;
     private readonly NoAccessEnforcementStore? _principalRights;
+    private readonly ITenantCache? _rightsCache;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
 
     /// <param name="membership">ADR-034 membership.</param>
     /// <param name="participations">Grants, flags, organization reads.</param>
@@ -1738,6 +1855,11 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// named-principal read. The store is registered unconditionally (ExternalAccessModule's typed HttpClient), so DI always
     /// supplies it. Optional so the existing direct constructions keep compiling; WITHOUT it nothing is confirmed and every
     /// lookup-only Secure id stays dropped (fail closed, logged as a Warning).</param>
+    /// <param name="rightsCache">#2121 round 1 (F1): caches each answer <paramref name="principalRights"/> gave, per
+    /// (systemuser, entity set, record), for the grant cache's TTL. Registered unconditionally (CacheModule). Optional for the
+    /// same reason; without it every composition asks Dataverse again.</param>
+    /// <param name="httpContextAccessor">The caller's tenant claim for the cache key's namespace
+    /// (<see cref="ImpersonatedRootSetSource.CacheTenantFor"/>); the key's isolator is the systemuser id.</param>
     public AccessibleRecordSetService(
         IMembershipResolverService membership,
         ExternalParticipationService participations,
@@ -1747,7 +1869,9 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         ISystemUserIdentityResolver systemUsers,
         IGenericEntityService dataverse,
         ILogger<AccessibleRecordSetService> logger,
-        NoAccessEnforcementStore? principalRights = null)
+        NoAccessEnforcementStore? principalRights = null,
+        ITenantCache? rightsCache = null,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         ArgumentNullException.ThrowIfNull(membership);
         ArgumentNullException.ThrowIfNull(participations);
@@ -1766,6 +1890,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         _dataverse = dataverse;
         _logger = logger;
         _principalRights = principalRights;
+        _rightsCache = rightsCache;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     /// <inheritdoc />
@@ -2213,18 +2339,19 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // term never consults isDirectOnly.
         //
         // #2121 (FR-22): Secure DOES act on half of this term. The walk unions two kinds of match:
-        //   - OWNERSHIP (ownerid / owningteam / owningbusinessunit): the user owns the record, is in the owning team,
-        //     or is in the owning business unit. It survives Secure. The user and team legs are Dataverse ownership,
-        //     which the model-driven app honours as well. The business-unit leg is an approximation that ignores
-        //     security-role depth (a BU-level read right is assumed, never checked), so the model-driven app is not
-        //     guaranteed to grant it. That approximation predates #2121 and stays until the FR-20 impersonated read
-        //     (task 036) replaces it.
+        //   - OWNERSHIP (ownerid / owningteam): the user owns the record or is in the owning team. It survives Secure:
+        //     it is Dataverse ownership, which the model-driven app honours as well.
+        //   - BUSINESS-UNIT ownership (owningbusinessunit): the record's owning BU is the user's. An approximation that
+        //     ignores security-role depth (a BU-level read right is assumed, never checked), so the model-driven app is
+        //     not guaranteed to grant it. On a Secure record it no longer counts as ownership (#2121 round 1, K6): a
+        //     Secure id reached ONLY this way is treated like a lookup-only one below. Elsewhere the approximation
+        //     predates #2121 and stays until the FR-20 impersonated read (task 036) replaces it.
         //   - REGISTRY LOOKUP columns ("Assigned …", matched through the linked contact or its organization): derived
         //     access that Dataverse knows nothing about. When the user holds no Dataverse share on the record, the
         //     Secure BU blocks them in the model-driven app, so on an effectively Secure record (folded flags,
         //     IsSecure — not IsDirectOnly) this match is suppressed here, as the contact plane's membership walk is.
         //     An id matched both ways keeps its membership.
-        // This plane does NOT read Dataverse shares (K1). So, before a lookup-only Secure id is dropped, Dataverse is
+        // This plane does NOT read Dataverse shares (K1). So, before a lookup-only (or BU-only) Secure id is dropped, Dataverse is
         // asked app-only whether THIS user can read it (#2121 option (b), owner-approved 2026-10-20): a user who holds a
         // share (or any other Dataverse access) keeps it, at Read only (DataverseConfirmedTermRights; task 036's round-59
         // rule). Anything else (no Read, 404, a fault, over the ceiling) stays dropped. The confirmed ids are part of this
