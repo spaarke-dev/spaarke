@@ -4,7 +4,7 @@
     <title>Teams package and registration for A9: manifest client and domain, brk-multihub redirect, 043 pipeline</title>
     <phase>4b A9 workforce home sign-in</phase>
     <gate>after 075; the dev redirect is set in 059</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Manifest and pipeline configuration; no application code</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -143,16 +143,16 @@ for NDA (deferred). 5A first-assignment CIAM invite email works (R2). 5B Partner
   provisioned customer, the write lands on that customer's stamp → **gated on 240d** (§4.6), same as C1/C3.
   Buildable + testable on **dev now** (dev BFF serves both planes).
 
-### C7 — Workforce-contact self-registration (join link) — owner decision 2026-10-09 (§4.6 item 7)
+### C7 — Workforce-contact self-registration (profile form at first sign-in) — owner decision 2026-10-09 (§4.6 item 7)
 - **What.**
-  - The customer shares one link (`https://external.spaarke.com/join?customer={key}`).
+  - There is no join link or `/join` page (ADR-028 A9, task 058): the person signs in with their home company account and completes a profile form at first sign-in.
   - A licence-free employee signs in with their **home company account**.
   - Registration is **approved automatically** if their tenant is on the customer's `CustomerTenantIds` list
     and they are a member there (`acct = 0`).
   - They become a B2B guest in Spaarke's tenant (no licence), are added to `sprk-{customerId}-users`, and
     get a contact in the customer's Dataverse bound to the guest `oid`.
-  - They then land in the SPA, signed in through the normal workforce flow (Spaarke-tenant authority).
-- **R3 owns** the join page and the hand-off into the normal sign-in.
+  - They then land in the SPA, signed in with their home company account (the A9 multitenant sign-in), not a Spaarke-tenant authority.
+- **R3 owns** the profile form shown at first sign-in and the silent or popup link for licensed users.
 - **Depends on** a **shared Spaarke registration service** that holds `User.Invite.All` + group write in
   Spaarke's tenant. Recommended: the T240c directory, owned by provisioning; the owner assigns it. The stamp
   writes the contact, reusing the existing contact-binding code.
@@ -249,8 +249,8 @@ execution does not inadvertently regress dev. (Client work may proceed on the cu
    `access_as_user` is retired; the dev app's hand-made Teams/broker pre-authorizations move to
    `user_impersonation`.
 7. **Workforce contacts (licence-free customer staff) self-register** (owner 2026-10-09):
-   - **Link.** The customer shares a join link (`https://external.spaarke.com/join?customer={key}`); any
-     employee can register, and nobody is created in advance.
+   - **Sign-in.** There is no join link: any employee signs in with their company account and completes a
+     profile form at first sign-in, and nobody is created in advance.
    - **Approval: automatic.** The employee's home tenant must be on the customer's `CustomerTenantIds`
      allow-list, and they must be a member there (`acct = 0`). No per-request approval.
    - **Invite: a shared Spaarke service** (recommended: the T240c directory). It invites the B2B guest into

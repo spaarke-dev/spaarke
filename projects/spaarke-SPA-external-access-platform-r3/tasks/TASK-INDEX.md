@@ -43,8 +43,8 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 055 | Notification bell + deep-link record open (FR-08/FR-07 client) | P5 | ✅ [done] | 054, 037, 041 | S/h | FULL | Wave 7 |
 | 056 | Join page (FR-13), flagged until 060 | P5 | ✅ [done] | 003, 041 | O/h | FULL | Wave 8 |
 | 057 | Detail events + to-dos for Matter and Work Assignment (FR-03 client) | P5 | ✅ [done] | 039, 055 | S/h | FULL | Wave 8 |
-| 058 | SPA multitenant sign-in, tid → backend, silent/interactive link, profile form, landing wording | P4b | 🔲 [open] | 047, 048 | S/xh | FULL | A9 Wave 5 |
-| 059 | Dev Entra + settings setup for A9 (live, owner-gated) | P4b | 🔲 [open] | 044 | S/h | STANDARD | A9 Wave 2 (live, alongside 046) |
+| 058 | SPA multitenant sign-in, tid → backend, silent/interactive link, profile form, landing wording | P4b | ✅ [done] 2026-10-19 | 047, 048 | S/xh | FULL | A9 Wave 5 |
+| 059 | Dev Entra + settings setup for A9 (live, owner-gated) | P4b | 🔄 [in progress] stage R done; stage B's v2 switch waits for 077 + deploy | 044, 077 (stage B) | S/h | STANDARD | A9 Wave 2 (live, alongside 046) |
 | 060 | Registration service: owner host decision, then build or R4 hand-off (FR-14) | P6 | 🚫 [cancelled] superseded by ADR-028 A9 (047 + 058) | 003 + owner decision | O/h | FULL | — |
 | 061 | Shared DataGrid shows option-set labels from @formattedValues (check-2 #1) | P5b | ✅ [done] reaches dev with the next SPA deploy | none | S/h | FULL | CHK2 |
 | 062 | Message sender name falls back to createdby (check-2 #4) | P5b | ✅ [done] merged a379d71fa; live check of the createdby expand after the BFF deploy | none | S/h | FULL | CHK2 |
@@ -59,8 +59,10 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 072 | Both-plane E2E on dev, success criteria 1–12 + FR-10 | P7 | 🔲 [open] | 002, 070, 071 | S/h | STANDARD | — (live) |
 | 073 | Production deploy to external.spaarke.com (gated) | P7 | 🔲 [open] | 072 + T240c, T240d, DNS, owner go | S/h | STANDARD | — (blocked until gates) |
 | 074 | A9 live probes on dev | P7 | 🔲 [open] | 058, 059, 075 | S/h | STANDARD | — (live, owner-gated) |
-| 075 | SPA Teams strategy → multitenant NAA (Teams context tid), registration + link in Teams | P4b | 🔲 [open] | 058 | S/h | FULL | A9 Wave 6 |
-| 076 | Teams package + registration for A9 (manifest, brk-multihub, 043 pipeline) | P4b | 🔲 [open] | 075 | S/h | STANDARD | A9 Wave 7 |
+| 075 | SPA Teams strategy → multitenant NAA (Teams context tid), registration + link in Teams | P4b | ✅ [done] 2026-10-19 | 058 | S/h | FULL | A9 Wave 6 |
+| 076 | Teams package + registration for A9 (manifest, brk-multihub, 043 pipeline) | P4b | ✅ [done] 2026-10-19 | 075 | S/h | FULL | A9 Wave 7 |
+| 077 | BFF default scheme accepts the bare app-id audience (v2 tokens) before the 059 v2 switch | P4b | ✅ [done] 2026-10-19 | 045 | O/h | FULL | A9 (from 059 stop S-1; owner 2026-10-19) |
+| 078 | ISS-010 quick fix: read_query / search_data hide internal-only communications from licensed users flagged external | R3 hardening | ✅ | 065 | O/h | FULL | ISS-010 #1864 (owner 2026-10-20) |
 | 090 | Project wrap-up | Wrap-up | 🔲 [open] | all | S/h | FULL | — (serial) |
 
 ## Parallel Execution Plan
