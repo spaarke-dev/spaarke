@@ -156,25 +156,32 @@ public static class FinanceBaseValues
     public const string BlockedReasonCode = SubmissionReasonCodes.Blocked;
 
     /// <summary>
-    /// What makes an In Review invoice HELD (owner decisions D-101, D-102, D-104): some submission linked to it
-    /// (<c>sprk_invoicesubmission.sprk_invoice</c>) has <c>sprk_processingstatus</c> = Rejected AND <c>sprk_outcomereasoncode</c> =
-    /// <see cref="BlockedReasonCode"/> - a blocked internal submission awaiting Override or Return. Override releases the invoice by
-    /// setting the submission to Accepted; Return moves the invoice out of In Review. No column is added to the invoice: the hold is
-    /// the state the Override / Return flow already keeps on the submission. This is the ONE definition; both pending-spend paths
-    /// (the rollup query and the grouped FetchXML) build their exclusion from it.
+    /// What makes an In Review invoice HELD (owner decisions D-101, D-102, D-104, D-130(a)): some submission linked to it
+    /// (<c>sprk_invoicesubmission.sprk_invoice</c>) has <c>sprk_processingstatus</c> IN (Processing, Rejected) AND
+    /// <c>sprk_outcomereasoncode</c> = <see cref="BlockedReasonCode"/> - a blocked internal submission awaiting Override or Return.
+    /// Override releases the invoice by setting the submission to Accepted; Return moves the invoice out of In Review. No column is
+    /// added to the invoice: the hold is the state the Override / Return flow already keeps on the submission. This is the ONE
+    /// definition; both pending-spend paths (the rollup query and the grouped FetchXML) build their exclusion from it.
     /// </summary>
     /// <remarks>
+    /// Why Processing counts as well as Rejected: the persist transaction (D-130(a)) writes the blocked reason code and moves the
+    /// invoice to In Review, but the submission itself stays Processing until the after-steps' final write (and stays there for good
+    /// if that write is poisoned). Only a committed Blocked outcome writes the code, so a Processing submission carrying it is
+    /// already a blocked one, and the invoice must not count as pending spend in that window. Override moves the submission to
+    /// Accepted, which leaves the set.
     /// Counted spend adds NO held predicate: a held invoice is In Review, which D-103 does not count. Only pending spend needs it.
     /// The exclusion is an anti-join written as a LEFT OUTER link with these conditions INSIDE the link plus a null check on the
     /// linked key in the where clause. An invoice can have several linked submissions (resubmissions); a plain join would repeat the
     /// invoice's amount once per linked row, but here a linked row exists only when it is a blocking one, and that invoice is then
-    /// excluded, so no amount is ever counted twice.
+    /// excluded, so no amount is ever counted twice. Every condition is an <c>in</c> over its values (one value for the reason
+    /// code), so both paths spell the set the same way.
     /// </remarks>
-    public static IReadOnlyList<(string Column, object Value)> HeldSubmissionConditions { get; } = new (string, object)[]
-    {
-        (SubmissionStatusColumn, (int)InvoiceSubmissionStatus.Rejected),
-        (SubmissionReasonColumn, BlockedReasonCode),
-    };
+    public static IReadOnlyList<(string Column, IReadOnlyList<object> Values)> HeldSubmissionConditions { get; } =
+        new (string, IReadOnlyList<object>)[]
+        {
+            (SubmissionStatusColumn, new object[] { (int)InvoiceSubmissionStatus.Processing, (int)InvoiceSubmissionStatus.Rejected }),
+            (SubmissionReasonColumn, new object[] { BlockedReasonCode }),
+        };
 
     /// <summary>The alias of the held-submission link in both pending-spend queries.</summary>
     internal const string HeldAlias = "held";
@@ -412,8 +419,8 @@ public static class FinanceBaseValues
                 new XAttribute("link-type", "outer"), new XAttribute("alias", HeldAlias),
                 new XElement("filter", new XAttribute("type", "and"),
                     HeldSubmissionConditions.Select(c => new XElement("condition",
-                        new XAttribute("attribute", c.Column), new XAttribute("operator", "eq"),
-                        new XAttribute("value", Convert.ToString(c.Value, CultureInfo.InvariantCulture)!))))));
+                        new XAttribute("attribute", c.Column), new XAttribute("operator", "in"),
+                        c.Values.Select(v => new XElement("value", Convert.ToString(v, CultureInfo.InvariantCulture)!)))))));
             filter.Add(new XElement("condition",
                 new XAttribute("entityname", HeldAlias), new XAttribute("attribute", SubmissionKeyColumn), new XAttribute("operator", "null")));
         }

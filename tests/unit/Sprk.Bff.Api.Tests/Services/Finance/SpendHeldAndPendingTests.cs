@@ -339,17 +339,49 @@ public class SpendHeldAndPendingTests
         (await LiveCountedSpend(store)).Should().Be(0m);
     }
 
-    [Fact(DisplayName = "D-104 must-not-fire: a submission that is Rejected for another reason, or Accepted/Failed, does not hold its In Review invoice")]
+    [Fact(DisplayName = "D-104 must-not-fire: a submission with no blocked code (or another code), or an Accepted/Failed/Received one, does not hold its In Review invoice")]
     public async Task D104_OnlyABlockedSubmission_HoldsAnInvoice()
     {
         var store = new Store();
         store.Submission(store.Invoice(1m, InvoiceStatusCodes.InReview), InvoiceSubmissionStatus.Rejected, "invoice.read.unreadable");
         store.Submission(store.Invoice(2m, InvoiceStatusCodes.InReview), InvoiceSubmissionStatus.Rejected, null);
         store.Submission(store.Invoice(4m, InvoiceStatusCodes.InReview), InvoiceSubmissionStatus.Accepted, FinanceBaseValues.BlockedReasonCode);
-        store.Submission(store.Invoice(8m, InvoiceStatusCodes.InReview), InvoiceSubmissionStatus.Processing, FinanceBaseValues.BlockedReasonCode);
+        store.Submission(store.Invoice(8m, InvoiceStatusCodes.InReview), InvoiceSubmissionStatus.Processing, null);
+        store.Submission(store.Invoice(16m, InvoiceStatusCodes.InReview), InvoiceSubmissionStatus.Processing, "invoice.read.unreadable");
+        store.Submission(store.Invoice(32m, InvoiceStatusCodes.InReview), InvoiceSubmissionStatus.Failed, FinanceBaseValues.BlockedReasonCode);
+        store.Submission(store.Invoice(64m, InvoiceStatusCodes.InReview), InvoiceSubmissionStatus.Received, FinanceBaseValues.BlockedReasonCode);
 
-        RollupPendingSpend(store).Should().Be(15m);
-        (await LivePendingSpend(store)).Should().Be(15m);
+        RollupPendingSpend(store).Should().Be(127m);
+        (await LivePendingSpend(store)).Should().Be(127m);
+    }
+
+    // D-130(a): the persist transaction writes the blocked code and sets the invoice In Review, but the submission stays Processing
+    // until the after-steps' final write (permanently so when that write is poisoned). The invoice is held for that whole time.
+    [Fact(DisplayName = "D-130(a) must-fire: a Processing submission carrying the blocked code holds its In Review invoice (rollup and live); Rejected still does")]
+    public async Task D130a_AProcessingSubmissionWithTheBlockedCode_HoldsItsInvoice_OnBothPaths()
+    {
+        var store = new Store();
+        store.Submission(store.Invoice(100m, InvoiceStatusCodes.InReview), InvoiceSubmissionStatus.Processing, FinanceBaseValues.BlockedReasonCode);
+        store.Submission(store.Invoice(200m, InvoiceStatusCodes.InReview), InvoiceSubmissionStatus.Rejected, FinanceBaseValues.BlockedReasonCode);
+        store.Invoice(50m, InvoiceStatusCodes.InReview);
+
+        RollupPendingSpend(store).Should().Be(50m);
+        (await LivePendingSpend(store)).Should().Be(50m);
+    }
+
+    [Fact(DisplayName = "D-130(a): a blocked Processing submission releases on Override (Accepted) - the invoice then leaves the held set on both paths")]
+    public async Task D130a_AfterOverride_TheProcessingBlockedInvoice_IsNoLongerHeld()
+    {
+        var store = new Store();
+        var invoice = store.Invoice(100m, InvoiceStatusCodes.InReview);
+        var submission = store.Submission(invoice, InvoiceSubmissionStatus.Processing, FinanceBaseValues.BlockedReasonCode);
+        RollupPendingSpend(store).Should().Be(0m);
+        (await LivePendingSpend(store)).Should().Be(0m);
+
+        submission["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted);
+
+        RollupPendingSpend(store).Should().Be(100m, "Override moved the submission to Accepted: not held, still In Review, so pending");
+        (await LivePendingSpend(store)).Should().Be(100m);
     }
 
     [Fact(DisplayName = "D-104 double-count: an invoice with several linked submissions is counted exactly once when none blocks, and excluded entirely when one blocks")]
@@ -430,17 +462,18 @@ public class SpendHeldAndPendingTests
         FinanceBaseValues.PendingInvoiceStatuses.Should().Equal(InvoiceStatusCodes.InReview);
         FinanceBaseValues.PendingInvoiceStatuses.Intersect(FinanceBaseValues.CountedInvoiceStatuses).Should().BeEmpty();
         FinanceBaseValues.PendingSpendColumn.Should().Be("sprk_pendingspend");
-        FinanceBaseValues.HeldSubmissionConditions.Should().Equal(
-            ("sprk_processingstatus", (object)100000003), ("sprk_outcomereasoncode", "ebilling.submission.blocked"));
-
-        var held = FinanceBaseValues.HeldSubmissionConditions.Select(c => (c.Column, Convert.ToString(c.Value, CultureInfo.InvariantCulture)!)).ToList();
+        var held = FinanceBaseValues.HeldSubmissionConditions
+            .Select(c => (c.Column, string.Join(",", c.Values.Select(v => Convert.ToString(v, CultureInfo.InvariantCulture)!)))).ToList();
+        held.Should().Equal(
+            ("sprk_processingstatus", "100000001,100000003"), ("sprk_outcomereasoncode", "ebilling.submission.blocked"));
 
         var rollup = FinanceRollupService.BuildPendingInvoiceQuery(Matter, "sprk_matter");
         var link = rollup.LinkEntities.Single();
         link.LinkToEntityName.Should().Be("sprk_invoicesubmission");
         link.JoinOperator.Should().Be(JoinOperator.LeftOuter);
         link.EntityAlias.Should().Be("held");
-        link.LinkCriteria.Conditions.Select(c => (c.AttributeName, Convert.ToString(c.Values.Single(), CultureInfo.InvariantCulture)!)).Should().Equal(held);
+        link.LinkCriteria.Conditions.Should().OnlyContain(c => c.Operator == ConditionOperator.In);
+        link.LinkCriteria.Conditions.Select(c => (c.AttributeName, string.Join(",", c.Values.Select(v => Convert.ToString(v, CultureInfo.InvariantCulture)!)))).Should().Equal(held);
         rollup.Criteria.Conditions.Should().Contain(c => c.EntityName == "held" && c.AttributeName == "sprk_invoicesubmissionid" && c.Operator == ConditionOperator.Null);
         rollup.Criteria.Conditions.Single(c => c.AttributeName == "statuscode").Values.Cast<int>().Should().Equal(InvoiceStatusCodes.InReview);
 
@@ -455,7 +488,8 @@ public class SpendHeldAndPendingTests
         var le = fetch.Descendants("link-entity").Single();
         ((string)le.Attribute("name")!, (string)le.Attribute("from")!, (string)le.Attribute("to")!, (string)le.Attribute("link-type")!, (string)le.Attribute("alias")!)
             .Should().Be(("sprk_invoicesubmission", "sprk_invoice", "sprk_invoiceid", "outer", "held"));
-        le.Element("filter")!.Elements("condition").Select(c => ((string)c.Attribute("attribute")!, (string)c.Attribute("value")!)).Should().Equal(held,
+        le.Element("filter")!.Elements("condition").Should().OnlyContain(c => (string)c.Attribute("operator")! == "in");
+        le.Element("filter")!.Elements("condition").Select(c => ((string)c.Attribute("attribute")!, string.Join(",", c.Elements("value").Select(v => v.Value)))).Should().Equal(held,
             "the blocking conditions are INSIDE the link (a where-clause filter would turn the outer join inner)");
         fetch.Element("entity")!.Element("filter")!.Elements("condition").Should().Contain(c =>
             (string?)c.Attribute("entityname") == "held" && (string)c.Attribute("attribute")! == "sprk_invoicesubmissionid" && (string)c.Attribute("operator")! == "null");

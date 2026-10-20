@@ -341,9 +341,9 @@ public class FinanceRollupService
             FinanceBaseValues.SubmissionEntity, FinanceBaseValues.InvoiceKeyColumn, FinanceBaseValues.SubmissionInvoiceLookup, JoinOperator.LeftOuter);
         held.EntityAlias = FinanceBaseValues.HeldAlias;
         held.Columns = new ColumnSet(false);
-        foreach (var (column, value) in FinanceBaseValues.HeldSubmissionConditions)
+        foreach (var (column, values) in FinanceBaseValues.HeldSubmissionConditions)
         {
-            held.LinkCriteria.AddCondition(column, ConditionOperator.Equal, value);
+            held.LinkCriteria.AddCondition(column, ConditionOperator.In, values.ToArray());
         }
 
         query.Criteria.AddCondition(
