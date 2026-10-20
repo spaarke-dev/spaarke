@@ -680,6 +680,27 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         last.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(AdminAttentionText.StoppedNote("ebilling.submission.signal_write_skipped"));
     }
 
+    [Theory(DisplayName = "050a review round 3 (uac-r2 F2): a re-file Retry (isolation unreadable, or the reparent faulted) on every delivery: the final delivery tells the administrator the invoice is committed and its document is NOT filed")]
+    [InlineData("ebilling.submission.document_isolation_unreadable")]
+    [InlineData("ebilling.submission.document_refile_failed")]
+    public async Task RefileRetry_OnEveryDelivery_FinalNoteSaysTheDocumentIsNotFiled(string code)
+    {
+        var deliveries = new[] { Job(), Job(), FinalJob() };
+        var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Retry, code) with { DocumentNotFiled = true });
+
+        var outcomes = new List<JobStatus>();
+        foreach (var delivery in deliveries)
+        {
+            outcomes.Add((await rig.Build().ProcessAsync(delivery, CancellationToken.None)).Status);
+        }
+
+        outcomes.Should().Equal(JobStatus.Failed, JobStatus.Failed, JobStatus.Poisoned);
+        rig.StatusWrites.Should().BeEmpty("never Failed: the invoice is committed");
+        rig.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(AdminAttentionText.StoppedNote(code, documentNotFiled: true))
+            .And.Contain("the invoice is committed but its document is NOT filed under it");
+    }
+
     [Fact(DisplayName = "049 R3: the final delivery with NO link is Failed as before and sets no attention text (the Failed status is the signal)")]
     public async Task UnlinkedFinalDelivery_IsFailed_WithoutAttention()
     {

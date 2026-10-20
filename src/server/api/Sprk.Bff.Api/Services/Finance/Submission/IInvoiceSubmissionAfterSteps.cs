@@ -95,6 +95,8 @@ public sealed record SubmissionAfterStepsResult
     /// 050a review round 2, item 2(b): true when the run stopped because the confirmed document's re-file was refused
     /// (<see cref="InvoiceDocumentRefileStatus.Refused"/>): the invoice is committed and its document is NOT filed under it. The handler then
     /// tells the administrator so in <c>sprk_adminattention</c> (<see cref="AdminAttentionText.StoppedNote(string?, bool)"/>), never silently.
+    /// Review round 3 (uac-r2 F2): also true on the re-file's <see cref="SubmissionAfterStepsStatus.Retry"/> stops (the isolation read faulted,
+    /// or the reparent threw), so a final delivery that runs out of retries says the same.
     /// </summary>
     public bool DocumentNotFiled { get; init; }
 

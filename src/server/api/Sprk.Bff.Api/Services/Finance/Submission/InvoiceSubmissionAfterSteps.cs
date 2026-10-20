@@ -336,13 +336,16 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: re-filing document {DocumentId} under invoice {InvoiceId} failed ({Fault}); retry resumes",
                 submissionId, existingDocumentId, invoiceId, ex.GetType().Name);
-            return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, DocumentRefileFailedCode);
+            // Review round 3 (uac-r2 F2): the invoice is committed and its document is not filed under it yet. Flagged, so that if the
+            // retries run out the administrator is told the document is NOT filed (the handler's final-delivery note).
+            return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, DocumentRefileFailedCode) with { DocumentNotFiled = true };
         }
 
         switch (refiled.Status)
         {
             case InvoiceDocumentRefileStatus.IsolationUnreadable:
-                return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, refiled.ReasonCode ?? InvoiceDocumentRefile.IsolationUnreadableCode);
+                return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, refiled.ReasonCode ?? InvoiceDocumentRefile.IsolationUnreadableCode)
+                    with { DocumentNotFiled = true };
             case InvoiceDocumentRefileStatus.Refused:
                 // Review round 2, 2(b): the invoice is committed and its document is not filed under it. Stopped here (no Signal, record or
                 // terminal), flagged for the handler, which names it in the administrator's attention text.

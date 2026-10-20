@@ -348,8 +348,10 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                     result.DocumentNotFiled).ConfigureAwait(false);
 
             case SubmissionAfterStepsStatus.Retry:
-                // The submission stays Processing with its invoice link; the redelivery resumes.
-                return await TransientAsync(job, submissionId, result.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct).ConfigureAwait(false);
+                // The submission stays Processing with its invoice link; the redelivery resumes. A re-file Retry carries DocumentNotFiled (review
+                // round 3, F2), so the final delivery tells the administrator the document is NOT filed under the invoice.
+                return await TransientAsync(job, submissionId, result.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct,
+                    result.DocumentNotFiled).ConfigureAwait(false);
 
             default:
                 throw new InvalidOperationException($"Unhandled after-steps status {result.Status}.");
@@ -427,9 +429,11 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     /// <summary>
     /// A transient failure: Failure (the broker redelivers) until the final delivery. On the final delivery a submission that committed no
     /// invoice is marked Failed; one that links its invoice stays Processing so a replay of the dead-lettered message resumes it (and its
-    /// <c>sprk_adminattention</c> says so, R3). Either way the job is Poisoned.
+    /// <c>sprk_adminattention</c> says so, R3; with <paramref name="documentNotFiled"/>, that its document is NOT filed under the invoice,
+    /// 050a review round 3, F2). Either way the job is Poisoned.
     /// </summary>
-    private async Task<JobOutcome> TransientAsync(JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch, CancellationToken ct)
+    private async Task<JobOutcome> TransientAsync(
+        JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch, CancellationToken ct, bool documentNotFiled = false)
     {
         if (!job.IsFinalDelivery)
         {
@@ -454,7 +458,8 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                 if (linked && !IsTerminal(status))
                 {
                     // R3 (D-133): it stays Processing for good (the message is dead-lettered), so the administrator is told. Not a status write.
-                    await AdminAttentionText.NoteAsync(_entities, submissionId, null, AdminAttentionText.StoppedNote(reasonCode), _logger, ct).ConfigureAwait(false);
+                    await AdminAttentionText.NoteAsync(_entities, submissionId, null, AdminAttentionText.StoppedNote(reasonCode, documentNotFiled), _logger, ct)
+                        .ConfigureAwait(false);
                 }
             }
             else

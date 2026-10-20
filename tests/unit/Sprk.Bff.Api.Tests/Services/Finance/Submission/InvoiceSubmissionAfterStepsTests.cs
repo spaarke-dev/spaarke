@@ -662,8 +662,9 @@ public class InvoiceSubmissionAfterStepsTests
 
         result.Status.Should().Be(expected);
         result.ReasonCode.Should().Be(code);
-        result.DocumentNotFiled.Should().Be(refile == InvoiceDocumentRefileStatus.Refused,
-            "review round 2, 2(b): a refused re-file is flagged so the administrator is told the invoice has no document; a Retry is not");
+        result.DocumentNotFiled.Should().BeTrue(
+            "review round 2, 2(b) and round 3 (uac-r2 F2): a refused re-file AND a re-file Retry are flagged, so the administrator is told the " +
+            "invoice has no document whether the job stops now or its retries run out");
         world.Writes.Should().BeEmpty();
         world.RecordCreates.Should().Be(0);
         world.Jobs.Should().BeEmpty();
@@ -682,6 +683,7 @@ public class InvoiceSubmissionAfterStepsTests
 
         result.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
         result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.DocumentRefileFailedCode);
+        result.DocumentNotFiled.Should().BeTrue("review round 3 (uac-r2 F2): the document is not filed under the committed invoice");
         world.Jobs.Should().BeEmpty();
         world.TerminalWrites.Should().BeEmpty();
     }
@@ -947,6 +949,7 @@ public class InvoiceSubmissionAfterStepsTests
 
         result.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
         result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.SignalChangedCode);
+        result.DocumentNotFiled.Should().BeFalse("review round 3 (F2), must not fire: a Retry after the re-file is not a document left unfiled");
         world.Writes.Should().BeEmpty();
         world.RecordCreates.Should().Be(0);
         world.TerminalWrites.Should().BeEmpty();
