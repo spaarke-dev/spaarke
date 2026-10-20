@@ -2631,6 +2631,36 @@ public class AccessibleRecordSetServiceTests
         set.RightsFor(RoleDepthRecord).Should().Be(AccessRights.Read);
     }
 
+    /// <summary>
+    /// Task 036 fix round 3 (K3), for the #2121 merge. PR #2122 adds, on Term 1, a Secure lookup-only filter: a second,
+    /// ownership-only membership walk, then an app-only Read confirmation for each Secure id ownership did not return. That
+    /// filter belongs to the FLAG-OFF path only (<c>!dataverseDecides</c>): flag on, Term 1 is Dataverse's own answer, so
+    /// there is no lookup to suppress. This test passes on the 036 branch today and fails if the merge runs the filter on
+    /// the flag-on path — the strict mock throws on the second walk, and a composer with no confirmation store drops the
+    /// Secure id.
+    /// </summary>
+    [Fact(DisplayName = "Task 036 K3 (#2121 merge): flag ON, a Secure id in Dataverse's answer is kept at Read — no Secure lookup-only filter, no membership walk")]
+    public async Task Fr20_FlagOn_ASecureIdInDataversesAnswer_IsDecidedByTheImpersonatedAnswerAlone()
+    {
+        var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.Flags[SharedRecord] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        participations.Flags[RoleDepthRecord] = RootRecordFlags.None;
+        var source = new FakeImpersonatedRootSetSource().Answer(MatterEntity, SharedRecord, RoleDepthRecord);
+        var sut = CreateFr20Sut(membership.Object, participations, source, enabled: true);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().BeEquivalentTo(new Dictionary<Guid, AccessRights>
+        {
+            [SharedRecord] = AccessRights.Read,
+            [RoleDepthRecord] = AccessRights.Read,
+        }, "flag on, Dataverse's impersonated answer decides the Secure record too; nothing re-asks or suppresses it");
+        source.Calls.Should().ContainSingle().Which.Should().Be((SystemUserId, MatterEntity));
+        AssertMembershipNeverConsulted(membership);
+        membership.VerifyNoOtherCalls();
+    }
+
     [Theory(DisplayName = "Task 036 (B-17): a systemuser who is also a granted contact keeps the grant in BOTH flag states")]
     [InlineData(true)]
     [InlineData(false)]
