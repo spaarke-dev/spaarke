@@ -24,12 +24,13 @@
   <goal>A firm sees a record-scoped set's clause only on invoices whose direct chain contains the set's record (and, for FirmRecord, only as that firm); ClientDefault and Firm behaviour is unchanged; the visible-to-firms flag still decides on top; the five downstream POMLs cite the new signature.</goal>
 
   <context>
-    <background>Design note section 6. Decisions: D-66, D-79, D-136 / ontology D-171, D-137 / ontology D-172 (direct association only; Q15 a general view plus a per-record view). Today GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct) (RuleSetService.cs:2013-2063, caller contract :2006-2012) returns None for any scope other than ClientDefault or Firm (:2052-2056). No caller exists yet. Planned callers cite the current signature: tasks/130-firm-findings-projection.poml:55, 131-firm-notice-action.poml:58, 133-adjustment-report-pdf.poml:50, 134-spa-invoice-detail.poml:49, 135-spa-billing-guidelines.poml:53; 135's content rule is at :47 ("client default or assigned to one of the caller's firms").</background>
+    <background>Design note sections 5.2 and 6; uac-r2 review item 8 and D-141 (section 12). Decisions: D-66, D-79, D-136 / ontology D-171, D-137 / ontology D-172 (direct association only; Q15 a general view plus a per-record view), D-141 (interim-B finding internal-only). Today GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct) (RuleSetService.cs:2013-2063, caller contract :2006-2012) returns None for any scope other than ClientDefault or Firm (:2052-2056). No caller exists yet. Planned callers cite the current signature: tasks/130-firm-findings-projection.poml:55, 131-firm-notice-action.poml:58, 133-adjustment-report-pdf.poml:50, 134-spa-invoice-detail.poml:49, 135-spa-billing-guidelines.poml:53; 135's content rule is at :47 ("client default or assigned to one of the caller's firms").</background>
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/RuleSetService.cs (GetFirmClauseAsync and its caller contract)</file>
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RuleSetServiceTests.cs</file>
       <file role="modify">projects/ebilling-r1/tasks/130-firm-findings-projection.poml, 131-firm-notice-action.poml, 133-adjustment-report-pdf.poml, 134-spa-invoice-detail.poml, 135-spa-billing-guidelines.poml (constraints only)</file>
       <file role="read">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/RuleSetApplicability.cs, CoreRecordChain.cs (082)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs (ComposeForCiamContactAsync :86, for 135's constraint)</file>
     </relevant-files>
     <dependencies>
       <dependency task="082" status="pending">RuleSetApplicability and CoreRecordChain</dependency>
@@ -40,8 +41,10 @@
     <constraint source="design note 6, D-172">GetFirmClauseAsync(policyVersionId, invoiceFirmId, invoiceCoreRecord, ct): it builds the chain with 082's CoreRecordChain and decides with RuleSetApplicability.AppliesTo; it never has its own scope switch. The business-unit part of the predicate uses the same home-BU rule as 082. The sprk_visibletofirms flag (D-79) still decides on top.</constraint>
     <constraint source="076 review round 2 item 5 (kept)">invoiceFirmId and invoiceCoreRecord are read server-side from the invoice the finding belongs to, after the route's own firm-membership check; never from the request and never from the SPA identity. Guid.Empty firm or a missing core record: no text for a record-scoped set (ClientDefault / Firm sets unchanged).</constraint>
     <constraint source="fail closed">A chain that cannot be read returns no clause text (a firm-facing read never widens on a fault); it does not throw to the firm.</constraint>
-    <constraint source="D-172 Q15">135: the general Billing Guidelines view lists all-BU ClientDefault and Firm sets only; a per-record view (coreRecordId, a record the CIAM caller holds an external grant on) returns the post-precedence list for that record, including Record, FirmRecord and BU-restricted sets. Without a record the firm sees no record-scoped set.</constraint>
-    <constraint source="project CLAUDE.md">POML edits are constraint lines only (the five cited lines and 135's content rule); do not change those tasks' goals, deps or acceptance criteria beyond the new signature and Q15.</constraint>
+    <constraint source="D-172 Q15">135: the general Billing Guidelines view lists all-BU ClientDefault and Firm sets only; a per-record view (coreRecordId) returns the post-precedence list for that record, including Record, FirmRecord and BU-restricted sets. Without a record the firm sees no record-scoped set.</constraint>
+    <constraint source="uac-r2 review item 8">135's per-record view is gated by UAC's evaluator, IAccessibleRecordSetService.ComposeForCiamContactAsync (Infrastructure/ExternalAccess/AccessibleRecordSetService.cs:86) and its Read answer (AccessibleRecordSet.Contains), NOT by whether a grant row exists: a grant row can exist with no rights (a Secure-suppressed organization grant, a grant with no level). A record the evaluator denies answers the same as a record that does not exist. A set inherited from the record's direct parent is labelled "from the parent record" and never names, links or identifies the parent (the firm may hold no right on it).</constraint>
+    <constraint source="D-141 interim B, condition 1">130, 131, 133, 134 and 135 each gain one constraint line: the interim-B "business unit not known" finding (082's internal-only reason) is never projected, counted or hinted at to a firm, because showing it tells the firm the record is Secure.</constraint>
+    <constraint source="project CLAUDE.md">POML edits are constraint lines only (the five cited lines, 135's content rule and gate, and the internal-only line in each); do not change those tasks' goals, deps or acceptance criteria beyond the new signature, Q15, the evaluator gate and the internal-only rule.</constraint>
   </constraints>
 
   <knowledge>
@@ -57,7 +60,7 @@
   <steps mode="directional">
     <step order="1">Change the signature and the caller contract comment; replace the two-scope switch with RuleSetApplicability.</step>
     <step order="2">Tests (below).</step>
-    <step order="3">Edit the five POML constraint lines to the new signature (invoiceCoreRecord read server-side from the invoice), and 135's content rule to Q15.</step>
+    <step order="3">Edit the five POML constraint lines to the new signature (invoiceCoreRecord read server-side from the invoice), 135's content rule to Q15 with the UAC-evaluator gate and the "from the parent record" label, and add the interim-B internal-only line to each of the five.</step>
     <step order="4">dotnet build and dotnet test.</step>
     <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
     <step order="6">Record deviations in projects/ebilling-r1/notes/083-firm-clause-applicability.md.</step>
@@ -65,7 +68,7 @@
 
   <escalation>
     <trigger>If any of 130, 131, 133, 134 or 135 has already started (not 🔲 in TASK-INDEX.md), STOP and raise it with the main session instead of editing its POML.</trigger>
-    <trigger>Q1 open: the home-BU rule is 082's (interim B until uac-r2 answers Q1); if 082 changed it, follow 082, do not add a second rule.</trigger>
+    <trigger>The home-BU rule is 082's (D-141: owningbusinessunit, or the snapshot while Secure, else interim B); if 082 changed it, follow 082, do not add a second rule.</trigger>
   </escalation>
 
   <tools>
@@ -85,6 +88,7 @@
     <criterion testable="true">ClientDefault and Firm sets behave exactly as before (existing tests unchanged and passing); with the flag off nothing is returned (existing control kept).</criterion>
     <criterion testable="true">A chain read fault returns no clause text.</criterion>
     <criterion testable="true">The five POMLs cite GetFirmClauseAsync(policyVersionId, invoiceFirmId, invoiceCoreRecord, ct) with both values read server-side; 135 states the Q15 general and per-record view rule.</criterion>
+    <criterion testable="true">135's POML states the per-record gate through IAccessibleRecordSetService (not a grant-row existence check), the uniform answer for a denied or missing record, and the "from the parent record" label that never names the parent; each of 130, 131, 133, 134 and 135 states that the interim-B finding is never shown to a firm.</criterion>
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 

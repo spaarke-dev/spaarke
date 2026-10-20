@@ -24,7 +24,7 @@
   <goal>A card whose core record was deleted applies to nothing and never widens to firm-wide; a card with an empty scope is not used; a matter's card applies to invoices on the matter and on records filed directly under it, never further; the nearer card wins; every card the import creates carries its scope.</goal>
 
   <context>
-    <background>Design note sections 2 (S6), 3.5 and 4.5. Decisions: D-137 / ontology D-172 (#2132: no delete-Restrict; explicit scope; resolver requires the lookup; Q8 direct inheritance), D-120 (rate card deleted with its record), DEF-027 (notes/defer-issues.md). Today: RateRow.CardScopes (RateCardResolver.cs:10-31); Applies (:119-145; switch on CardScopes.Count at :133-142, no lookup = firm-wide); Tier (:113-114; core-record card before firm card, timekeeper before classification); Ambiguous on different amounts in the deciding tier. InvoiceResolutionService.ReadRatesAsync (:269-305) and BuildRateQuery (:307-347; firm-wide = all three lookups null, plus cards scoped to the invoice's core record exactly; ScopeColumns :33-38). RateCardImportService card create (:294-313). 080 notes give the live option values and the backfill result.</background>
+    <background>Design note sections 2 (S6), 3.5, 4.5 and 5.4 (the ownership gap, fixed by 086). Decisions: D-137 / ontology D-172 (#2132: no delete-Restrict; explicit scope; resolver requires the lookup; Q8 direct inheritance), D-120 (rate card deleted with its record), DEF-027 (notes/defer-issues.md). Today: RateRow.CardScopes (RateCardResolver.cs:10-31); Applies (:119-145; switch on CardScopes.Count at :133-142, no lookup = firm-wide); Tier (:113-114; core-record card before firm card, timekeeper before classification); Ambiguous on different amounts in the deciding tier. InvoiceResolutionService.ReadRatesAsync (:269-305) and BuildRateQuery (:307-347; firm-wide = all three lookups null, plus cards scoped to the invoice's core record exactly; ScopeColumns :33-38). RateCardImportService card create (:294-313). 080 notes give the live option values and the backfill result.</background>
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Resolution/RateCardResolver.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Resolution/InvoiceResolutionService.cs</file>
@@ -47,6 +47,7 @@
     <constraint source="design note 3.5">BuildRateQuery reads Firm-scoped cards plus CoreRecord cards whose lookup is any chain record (at most three ids), and the resolver re-checks every row. The chain read faults propagate (fail closed, as the loader's contract); the job retries.</constraint>
     <constraint source="design note S6">RateCardImportService sets sprk_scope on create: CoreRecord when request.Core is set, else Firm. The 078 rule "at most one core lookup" is unchanged.</constraint>
     <constraint source="D-172 Q12">Not in this task: the import's AppendTo check on its core record (a separate fix). RateCardImportEndpoints is not changed.</constraint>
+    <constraint source="uac-r2 review item 5, design note 5.4">Not in this task: the rate card's and rate's place in the secure family (lineage, role rows, census, creator person) and the timekeeper owner fix. They are task 086's, which runs after this one on the same RateCardImportService.cs. Do NOT change owner resolution (RateCardImportService.cs:200-211, the ApplyTo calls at :287, :314, :343) here; touch only the scope write on the card. Q8 is a read rule (app-only resolution): it widens which invoices a card judges, never who can read the card.</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: no new service or registration (CoreRecordChain is 082's); publish-size delta; no package; no new HIGH CVE.</constraint>
   </constraints>
 
@@ -96,11 +97,12 @@
     <criterion testable="true">W1's own card beats P's card; P's card beats the firm card; within a tier a timekeeper rate beats a classification rate; two parent cards in the deciding tier with different amounts give Ambiguous.</criterion>
     <criterion testable="true">A chain read fault propagates from the resolution step (no rate resolved on a partial chain).</criterion>
     <criterion testable="true">The import writes sprk_scope CoreRecord for a card created with a core record and Firm otherwise.</criterion>
+    <criterion testable="true">Negative: the diff changes no owner resolution or ApplyTo call in RateCardImportService.cs and no uac-r2 file (lineage, OwnershipParentEntities, role JSON, census).</criterion>
     <criterion testable="true">Seeding proof recorded; publish-size delta recorded; no package; no new HIGH CVE.</criterion>
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Task of its own (not folded into 080 or 082): it changes a different service (Services/Finance/Resolution, 046 / 078 code) with its own tests. The chain is read once in the resolution step and once in the rule loader: one extra single-row read per submission, accepted. Parallel group P3-E with 083: no file overlap.</notes>
+  <notes>uac-r2's review (item 5) found that cards and rates are outside the secure family while their owner is routed from the core record; that fix is task 086, kept out of this task so this one stays p-safe beside 083 and does not edit uac-r2's files (design note 5.4). Task of its own (not folded into 080 or 082): it changes a different service (Services/Finance/Resolution, 046 / 078 code) with its own tests. The chain is read once in the resolution step and once in the rule loader: one extra single-row read per submission, accepted. Parallel group P3-E with 083: no file overlap.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
