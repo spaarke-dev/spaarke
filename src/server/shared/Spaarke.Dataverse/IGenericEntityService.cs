@@ -50,9 +50,12 @@ public interface IGenericEntityService
     /// #2143 (unified-access-control-r2): the re-file's owner assignment and its compensating put-back
     /// (<c>RecordOwnershipResolver.ReparentAsync</c>) must not overwrite a concurrent re-file. Component Justification
     /// (CLAUDE.md §11): (1) Existing — <see cref="IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync"/> is the
-    /// Web API conditional update. (2) Extension — it takes Web API payloads, so it cannot express the SDK lookup sets and
-    /// <see cref="DBNull"/> clears the resolver writes without each table's navigation-property names, which the resolver
-    /// does not have. (3) Cost of doing nothing — an unconditional owner write after a re-file can leave a row filed under a
+    /// Web API conditional update; <c>OntologyWriterDataverseClient.UpdateIfRowVersionMatchesAsync</c> (Sprk.Bff.Api,
+    /// Services/Signals) is an SDK conditional update. (2) Extension — the first takes Web API payloads, so it cannot express
+    /// the SDK lookup sets and <see cref="DBNull"/> clears the resolver writes without each table's navigation-property names,
+    /// which the resolver does not have. The second authenticates as a DIFFERENT identity — the Signal writer's own managed
+    /// identity, deliberately unable to route through this service's credential — which holds no Write on the child tables a
+    /// re-file re-owns; re-owning through it would fail, and granting that identity Write there would break its isolation. (3) Cost of doing nothing — an unconditional owner write after a re-file can leave a row filed under a
     /// secure record but owned in an ordinary business unit (fail-open, #2143), and the put-back can overwrite a newer filing.
     /// </remarks>
     /// <param name="rowVersion">The row's <c>versionnumber</c> (or <see cref="Entity.RowVersion"/>) as read.</param>

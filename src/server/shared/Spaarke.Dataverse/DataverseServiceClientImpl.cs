@@ -2687,19 +2687,26 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// The code the Signals writers already type on (<c>SignalWriter.ConcurrencyVersionMismatch</c>).</summary>
     private const int ConcurrencyVersionMismatchErrorCode = unchecked((int)0x80060882);
 
+    /// <summary><see cref="ConcurrencyVersionMismatchErrorCode"/> as the hex text a fault message carries.</summary>
+    private const string ConcurrencyVersionMismatchErrorText = "0x80060882";
+
     /// <summary>
     /// What <see cref="UpdateIfRowVersionMatchesAsync"/> throws for <paramref name="failure"/>: a
     /// <see cref="System.Data.DBConcurrencyException"/> when Dataverse's <c>ConcurrencyVersionMismatch</c> fault (0x80060882)
     /// is anywhere in the exception chain — nothing was written, the row changed since <paramref name="rowVersion"/> — and
     /// otherwise the <see cref="InvalidOperationException"/> <see cref="UpdateAsync"/> throws for any failure. Typed on the
-    /// fault code, never the (localized) message.
+    /// fault code; K1 (#2143): a link in the chain whose message carries the code's hex text (<c>0x80060882</c>) counts too,
+    /// for a fault the <see cref="ServiceClient"/> surfaces without its typed detail — the precedent
+    /// <c>DecisionCommitService.IsVersionMismatch</c> keeps. The hex code is not localized; the message around it is never
+    /// read.
     /// </summary>
     public static Exception MapConditionalUpdateFailure(string entityLogicalName, Guid id, string rowVersion, Exception failure)
     {
         for (var current = failure; current is not null; current = current.InnerException)
         {
-            if (current is FaultException<OrganizationServiceFault> fault
-                && fault.Detail?.ErrorCode == ConcurrencyVersionMismatchErrorCode)
+            if ((current is FaultException<OrganizationServiceFault> fault
+                    && fault.Detail?.ErrorCode == ConcurrencyVersionMismatchErrorCode)
+                || current.Message?.Contains(ConcurrencyVersionMismatchErrorText, StringComparison.OrdinalIgnoreCase) == true)
             {
                 return new System.Data.DBConcurrencyException(
                     $"{entityLogicalName} {id:D} changed since version {rowVersion} was read; the update was not applied.",

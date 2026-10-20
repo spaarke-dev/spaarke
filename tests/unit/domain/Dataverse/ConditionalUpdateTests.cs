@@ -100,6 +100,30 @@ public class ConditionalUpdateTests
     }
 
     [Fact]
+    public void MapConditionalUpdateFailure_ForAnUntypedFaultCarryingTheVersionMismatchCode_IsADbConcurrencyException()
+    {
+        // K1 (#2143): the ServiceClient can surface a fault without its typed OrganizationServiceFault detail — the code then
+        // appears only as hex text in the message (DecisionCommitService.IsVersionMismatch's precedent). Bare and wrapped.
+        var untyped = new Exception("The version of the existing record doesn't match the RowVersion property provided. "
+            + "ErrorCode: 0x80060882");
+
+        DataverseServiceClientImpl.MapConditionalUpdateFailure(Table, RowId, "7", untyped)
+            .Should().BeOfType<DBConcurrencyException>().Which.InnerException.Should().BeSameAs(untyped);
+        DataverseServiceClientImpl.MapConditionalUpdateFailure(Table, RowId, "7", new InvalidOperationException("outer", untyped))
+            .Should().BeOfType<DBConcurrencyException>();
+    }
+
+    [Fact]
+    public void MapConditionalUpdateFailure_ForAnUntypedFaultCarryingAnotherCode_IsNotAConcurrencyRetry()
+    {
+        // Must-not-fire: the text fallback matches the version-mismatch code only (0x80060883, version not provided, is not it).
+        var other = new Exception("The RowVersion property must be provided. ErrorCode: 0x80060883");
+
+        DataverseServiceClientImpl.MapConditionalUpdateFailure(Table, RowId, "7", other)
+            .Should().BeOfType<InvalidOperationException>();
+    }
+
+    [Fact]
     public void MapConditionalUpdateFailure_ForAnyOtherFault_IsUpdateAsyncsInvalidOperationException_NotAConcurrencyRetry()
     {
         // 0x80060883 (ConcurrencyVersionNotProvided) and a privilege failure are not "the row changed": a caller that re-read
