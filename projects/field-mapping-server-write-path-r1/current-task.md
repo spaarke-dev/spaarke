@@ -1,39 +1,50 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-19
-> **Phase**: Project initialized (`/project-pipeline` Steps 0–4.2 complete). Task: none started.
+> **Last updated**: 2026-10-20
+> **Phase**: Wave 1 complete (001 ✅, 006 ✅, 010 ✅). No task in progress.
+
+## Quick Recovery
+
+| Field | Value |
+|---|---|
+| **Task** | none active |
+| **Status** | between waves |
+| **Next Action** | Start the next wave via task-execute: **002, 003, 004** (W1-B) and **005** (W1-C) in parallel, plus **011** (opus/xhigh, `parallel-safe=false`; it shares no files with W1, so it can run alongside, but alone among W2 tasks) |
 
 ## State
 
-- Artifacts: README, plan.md, CLAUDE.md, notes/decisions.md, tasks/TASK-INDEX.md and 43 task POMLs (validator clean).
-  Committed and pushed in `366759553`.
-- `projects/INDEX.md` has the project's row (BFF=Y; root CLAUDE.md=Y via task 062).
-- GitHub: issue #1164 under Epic #535 on Board #2. Status Active, Type Project, Project Type Mixed, Task Count 43,
-  Tasks Planned 43. Label `field-mapping-server-write-path-r1` created.
-- Target Date: not set (Step 4.5, waiting on the owner).
+- Wave 1 is committed on `work/field-mapping-server-write-path-r1`.
+- **001:** the engine is at `Services/Dataverse/FieldMapping/` with 88 tests in `tests/unit/domain/Dataverse/FieldMapping/`.
+  Two pinned engine defects are filed as #2124 / DI-001, and **task 002 fixes them** (acceptance criterion added).
+- **006:** dev maps removed. **Beyond-dev environments** (spaarke-demo, spaarke-model1-prod, HIPC DEV 2) still carry
+  the map. Each needs an owner-approved removal before go-live (tracked in task-006-notes.md; fold into 053/090).
+- **010:** coordination recorded in [notes/w2-coordination.md](notes/w2-coordination.md). Owner decisions from
+  2026-10-20 are in [notes/decisions.md](notes/decisions.md):
+  - FR-08 amended: a mapped filing lookup refuses;
+  - W2 proceeds on master, not waiting for ebilling #1911.
 
-## Planning findings to carry into execution (written into the POMLs as escalation triggers)
+## Cross-project obligations (binding; see w2-coordination.md)
 
-- 004: the profile query selects `sprk_capabilitymod…` but the rule query selects `sprk_compatibilitymode`. Check the
-  deployed name with Dataverse `describe` before editing.
-- 005: the profile entity already reads `SyncMode`; the rule `$select` / entity do not.
-- 018: `OfficeEndpoints.GetQuickCreateDefaultsAsync` uses the Office service's `ResolveDefaultAssigneeAsync`, which
-  needs a new home before the deletion. Invoice quick-create bypasses the Office core today.
-- 030: Office document save is create-then-update; the association moves into the create.
-- 032: invoice create uses a client-generated GUID (lost-response cleanup), so the service may need an optional row id.
-- 033: `SignalWriter` / `DecisionRecordWriter` use a restricted ontology writer identity. Escalate if the service would
-  widen privileges.
-- 034: communications use `CreateCommunicationRaceProofAsync` (unique-key dedupe). Decide on a service create option
-  or a named exception.
-- 017: `DecisionRouteCores.CreateChildAsync` calls `ChildRecordEndpoints.CreateAsync`, so decisions inherit the service
-  through the route.
-- Wizards: Event, To Do, Invoice, Report Card and Work Assignment already create via the BFF adapter. Only Matter and
-  Project go through Xrm (task 020 route extension). The document wizards have no `applyFieldMappings`; they use a
-  client cascade.
+- **Before every W2–W4 task:** rebase onto master and run `/conflict-check`. Whoever merges second rebases.
+- **UAC-r2:**
+  - reviews the 011 and 017 diffs before merge (send the ranges);
+  - gets a ping before merge on any change to a refusal code, an owner decision or the post-create order;
+  - 011 is a byte-for-byte move with unedited test assertions.
+- **ebilling-r1:**
+  - invoice-family guard: the create half goes to the registry (012), the refile half stays in RefileAsync, one
+    copy only; message ebilling when 012/013 land;
+  - reviews 025, 032 and the registry rule;
+  - single-invoice-creator rule.
+- **ontology-r1:**
+  - 033 needs an ontology-owner design-note review and must keep the invariant list;
+  - no field mapping into Signal or Decision Record rows;
+  - leaving those writers out of the service is a valid outcome.
 
-## Exact next action
+## Planning findings to carry into execution
 
-1. The owner sets a Target Date (or skips it).
-2. Start wave 1 in parallel through task-execute: **001** (engine), **006** (EntityMaps), **010** (W2 coordination
-   gate).
-3. W2 code (011+) waits until 010 records UAC-r2 sign-off.
+- 004: profile `sprk_capabilitymod…` vs rule `sprk_compatibilitymode`. Describe the live column first.
+- 005: rule `$select` lacks `sprk_syncmode`. ebilling adds an `IFieldMappingDataverseService` overload.
+- 018: `ResolveDefaultAssigneeAsync` needs a new home. Invoice quick-create bypasses the Office core.
+- 030: Office document save is create-then-update.
+- 032: client-generated invoice GUID; ebilling fixed-id and transaction constraints.
+- 034: `CreateCommunicationRaceProofAsync`.

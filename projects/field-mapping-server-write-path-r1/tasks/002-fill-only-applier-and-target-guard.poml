@@ -96,7 +96,8 @@
     <criterion testable="true">A regression test named for the Report Card case proves Law Firm 1, Assigned External and Assigned Internal supplied by the caller are not overwritten.</criterion>
     <criterion testable="true">A rule targeting `sprk_regardingrecordid`, `sprk_regardingrecordtype`, a resolver field or a protected column never writes and produces one warning.</criterion>
     <criterion testable="true">Negative: with every candidate column supplied by the caller, the mapped output is empty and no warning is emitted for the supplied columns.</criterion>
-    <criterion testable="true">Task 001's characterization tests still pass unchanged; BFF build 0 errors; publish-size delta and CVE result recorded in the task notes.</criterion>
+    <criterion testable="true">Task 001's characterization tests still pass unchanged, except the two pinned defects of DI-001 / #2124 (`Default_MoneyTarget_WritesAPlainDecimalNotAMoney`, `Expression_NonTextNonLookupTarget_WritesTheResolvedStringWithoutConversion`), which are updated to the fixed behaviour; BFF build 0 errors; publish-size delta and CVE result recorded in the task notes.</criterion>
+    <criterion testable="true">DI-001 / #2124 fixed: Default into a Money target writes a `Money`; Concat/Template into a non-text, non-lookup target is converted typed or skipped with one warning (never written as a string). Close #2124.</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-02 and FR-05(e). Source resolution and Read authorization are task 003; wiring into the unified service is task 014.</notes>

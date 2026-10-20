@@ -4,15 +4,16 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 
-namespace Sprk.Bff.Api.Services.Office;
+namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 
 /// <summary>
 /// The pure half of create-time Field Mapping Framework application: given a profile's rules and the source record
-/// already read, write each rule's value onto the new record's payload. No I/O — <see cref="RecordCreationService"/>
-/// owns the one profile read and the one source read.
+/// already read, write each rule's value onto the new record's payload. No I/O — the calling creation service
+/// (today <see cref="Sprk.Bff.Api.Services.Office.RecordCreationService"/>) owns the one profile read and the one
+/// source read.
 /// </summary>
 /// <remarks>
-/// <para>Extracted from <see cref="RecordCreationService"/> (task 030 Step 9.5 review, CLAUDE.md §11.5): the rule
+/// <para>Extracted from <see cref="Sprk.Bff.Api.Services.Office.RecordCreationService"/> (task 030 Step 9.5 review, CLAUDE.md §11.5): the rule
 /// engine changes when the Field Mapping Framework changes, the creation service changes when an entity's creation
 /// rules change — two reasons to change, so two files. Internal static, not a DI registration (ADR-010), and reusable
 /// as-is by task 031 (Project).</para>

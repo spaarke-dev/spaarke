@@ -39,7 +39,9 @@ Evidence (file:line): `notes/design-review-2026-10-19.md`. Line numbers drift; r
   and never an existence leak (FR-04).
 - MUST run caller checks on the **merged** payload:
   - a caller-supplied value that fails → refuse (uniform 404/403);
-  - a **mapped** value that fails AppendTo or field security → dropped with a warning; the create proceeds.
+  - a **mapped** value that fails AppendTo or field security → dropped with a warning; the create proceeds;
+  - **except a mapped filing lookup** (`SecureChildLineage` / `FilingParentOf`) that fails AppendTo → **refuse**
+    (FR-08 amendment, owner 2026-10-20, UAC-r2 condition c).
 
   (FR-08)
 - MUST resolve the owner record-first via `ResolveOwnerAsync` for roots and children. Never user- or app-owned except

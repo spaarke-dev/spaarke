@@ -4,7 +4,7 @@
     <title>W2 coordination gate: UAC-r2 sign-off, ontology-r1 awareness, conflict-check (NFR-08)</title>
     <phase>2 W2 Unified RecordCreationService</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>No code and no tests; coordination and a written decision only.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -85,7 +85,11 @@
     <criterion testable="true">Negative: no file under src/ or tests/ changed, and no PR comment, merge or close was performed (git status shows only notes/ and TASK-INDEX.md).</criterion>
   </acceptance-criteria>
 
-  <notes>Spec NFR-08 and the "UAC-r2 timing" Unresolved Question. Gate for tasks 011 and 012.</notes>
+  <notes>Spec NFR-08 and the "UAC-r2 timing" Unresolved Question. Gate for tasks 011 and 012.
+Completed 2026-10-19 (MINIMAL). Read-only PR/branch survey plus cross-session answers from UAC-r2, ebilling-r1 and ontology-r1; see notes/w2-coordination.md and the notes/decisions.md 2026-10-19 entry.
+Outcome: UAC-r2 conditional no-objection. Task 011 is HELD on two owner decisions: (1) UAC condition (c), a failed mapped FILING lookup refuses (FR-08 amendment); (2) the W2 order vs ebilling #1911, a new overlap with no merge date.
+No src/ or tests/ change by this task; no PR comment, merge or close.
+rework: none task 010</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

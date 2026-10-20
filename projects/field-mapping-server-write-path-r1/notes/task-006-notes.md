@@ -1,0 +1,46 @@
+# Task 006 notes
+
+Rigor: STANDARD (declared).
+
+## Done
+1. Removed the businessunit -> sprk_matter EntityMap from `src/dataverse/solutions/SpaarkeMaster/Other/EntityMaps.xml`; file is now a valid empty `<EntityMaps />` root. `Customizations.xml` already has an empty EntityMaps element (no second copy).
+2. Pack check: `pac solution pack --packagetype Unmanaged` of SpaarkeMaster succeeded ("Unmanaged Pack complete"); temp zip deleted. Not imported.
+
+## Live (DEV) evidence
+Environment: MCP config `.mcp.json` -> https://spaarkedev1.crm.dynamics.com (SPAARKE DEV 1, the active pac profile).
+
+Before (read_query):
+- entitymap `66550c83-b621-f111-88b5-7ced8d1dc988`, businessunit -> sprk_matter, Unmanaged.
+- attributemaps on it (all Unmanaged):
+  - `68550c83-...` businessunitid -> sprk_securitybu
+  - `6a550c83-...` name -> sprk_securitybuname
+  - `f65e8a70-fd64-f111-ab0c-7ced8ddc4cc6` sprk_ai_search_index -> sprk_ai_search_index  (target of this task)
+  - `f75e8a70-fd64-f111-ab0c-7ced8ddc4cc6` sprk_ai_search_indexname -> sprk_ai_search_indexname (companion name map; NOT in the task scope, flagged)
+
+After: NOT DONE. The live delete was not executed (see deviation).
+
+## Deviation / escalation
+No full solution import (additive; would not delete the map and would overwrite other projects' dev components). Plan was a single attributemap DELETE on dev. The delete was not run: the Dataverse MCP delete_record tool requires explicit user approval, and the instruction came from the coordinating agent, not the user. Awaiting user/main-session confirmation.
+Also note: the live entitymap carries sprk_securitybu / sprk_securitybuname maps that are not in the repo XML (live drift); the XML removal is unrelated to them. The companion `sprk_ai_search_indexname` map should be removed with the index map for the server to be sole owner; decision needed.
+
+## Beyond-dev
+Other environments (spaarke-demo, spaarke-model1-prod, HIPC DEV 2) still carry the map; a separate owner-approved removal is required. Not touched.
+
+rework: none task 006
+
+## Live removal (main session, 2026-10-20, owner-approved)
+
+- The owner explicitly approved deleting both attribute maps on dev (spaarkedev1) in the main session.
+- `delete_record attributemap [f65e8a70-fd64-f111-ab0c-7ced8ddc4cc6, f75e8a70-fd64-f111-ab0c-7ced8ddc4cc6]`:
+  - the first succeeded;
+  - the second returned "Does Not Exist", because Dataverse cascade-deletes a lookup's name-companion map with the
+    lookup map.
+- After-state, `SELECT … FROM attributemap WHERE entitymapid = '66550c83-b621-f111-88b5-7ced8d1dc988'`:
+  - only `businessunitid → sprk_securitybu` (68550c83-…) and `name → sprk_securitybuname` (6a550c83-…) remain;
+  - **no `sprk_ai_search_index` map remains.**
+- The `sprk_securitybu` maps are live-only drift (not in repo XML) and out of this task's scope; left untouched.
+- **Deviation from the prescriptive step 2** (no solution import; a targeted delete instead):
+  - an unmanaged import would not have removed the map;
+  - a full SpaarkeMaster import would have overwritten other projects' dev components.
+- Beyond-dev environments (spaarke-demo, spaarke-model1-prod, HIPC DEV 2) still carry the map. Each needs a
+  separate owner-approved removal before go-live.

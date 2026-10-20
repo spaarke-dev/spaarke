@@ -4,7 +4,7 @@
     <title>Promote CreateTimeFieldMapping to Services/Dataverse/FieldMapping/ as the one canonical engine, with written semantics and tests (FR-01)</title>
     <phase>1 W1 Canonical engine and configuration</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api; adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -94,7 +94,9 @@
     <criterion testable="true">BFF build 0 errors; all existing tests that reference the engine pass unchanged; publish-size delta and CVE result recorded in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-01. No behaviour change. Tasks 002 (fill-only) and 003 (source resolver) build on this location.</notes>
+  <notes>Spec FR-01. No behaviour change. Tasks 002 (fill-only) and 003 (source resolver) build on this location.
+Completed 2026-10-20. Engine moved; 88 characterization cases, which live in tests/unit/domain/Dataverse/FieldMapping/ (KEEP path) after a main-session fix. Publish +314 B; no CVE. Two pinned engine defects filed as #2124 for task 002. Details: notes/task-001-notes.md.
+rework: fix-round-1 task 001</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

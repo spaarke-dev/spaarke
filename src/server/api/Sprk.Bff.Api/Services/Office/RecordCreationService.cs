@@ -18,6 +18,7 @@ using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 // Models.Office declares its own EntityReference (the add-in's association DTO); every reference here is the SDK's.
 using EntityReference = Microsoft.Xrm.Sdk.EntityReference;
 

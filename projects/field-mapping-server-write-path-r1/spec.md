@@ -211,6 +211,11 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
      uniform 404/403).
    - **Mapped values** that fail AppendTo or field security → **dropped with a warning**; the create proceeds (owner
      2026-10-19).
+   - **Exception: filing lookups (amended 2026-10-20, owner, at UAC-r2's request).** A mapped lookup that is a filing
+     lookup for the target table (`SecureChildLineage` / `RecordReparent.FilingParentOf`) and fails AppendTo
+     **refuses**, exactly like a caller-supplied one. Only reference (non-filing) lookups drop with a warning.
+     Otherwise a child copied from a Secure parent would be created unfiled, outside isolation. Pinned by a
+     must-fire test on a Secure parent (task 014).
 
    Acceptance: closes #1614 and #1617. A mapped lookup the caller can't AppendTo is not written and a warning is
    returned. A typed lookup the caller can't AppendTo still refuses. The existing `SecureChildOwnershipAiToolTests*`
@@ -536,7 +541,7 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
 | Q10 Path scope | Bespoke paths | All four groups | FR-18…FR-21 |
 | Q11 External | Portal creates | Out; coordinate | Out of Scope |
 | Q12 Assign | OOB Assign | Hide + repair; privilege removal after an audit | FR-24, FR-28 |
-| Mapped authz | Mapped value fails AppendTo / field security | Skip that value + warn; the create proceeds | FR-08 |
+| Mapped authz | Mapped value fails AppendTo / field security | Skip that value + warn; the create proceeds. A mapped **filing** lookup that fails AppendTo refuses (amended 2026-10-20) | FR-08 |
 | Backfill | Fix pre-go-live rows? | **Neither**: forward-only | FR-25 forward-only; Out of Scope |
 | Rollout | Reversibility | Per-wizard cutover, revert by redeploy; no runtime flag | FR-16 |
 | Matter number | Wizard `{typeCode}-{random6}` vs autonumber | Autonumber (owner decision 2026-10-02, task 076) | FR-16 |

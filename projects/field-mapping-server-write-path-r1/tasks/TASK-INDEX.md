@@ -7,18 +7,18 @@
 
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 001 | [Promote canonical mapping engine](001-promote-canonical-mapping-engine.poml) | FR-01 | sonnet / high | FULL | W1-A | — | 🔲 |
+| 001 | [Promote canonical mapping engine](001-promote-canonical-mapping-engine.poml) | FR-01 | sonnet / high | FULL | W1-A | — | ✅ |
 | 002 | [Fill-only applier + pair/protected target guard](002-fill-only-applier-and-target-guard.poml) | FR-02, FR-05e | sonnet / high | FULL | W1-B | 001 | 🔲 |
 | 003 | [Mapping-source resolver + Read-as-caller probe](003-mapping-source-resolver-and-read-probe.poml) | FR-03, FR-04 | opus / high | FULL | W1-B | 001 | 🔲 |
 | 004 | [Config cleanup: mode column, dormant columns, seeder #1318](004-config-cleanup-mode-column-dormant-seeder.poml) | FR-05a-c | sonnet / high | FULL | W1-B | 001 | 🔲 |
 | 005 | [`sprk_syncmode` read + migration script](005-syncmode-read-and-migration-script.poml) | FR-05d | sonnet / high | FULL | W1-C | 001 | 🔲 |
-| 006 | [Remove OOB businessunit→sprk_matter map](006-remove-oob-businessunit-matter-entitymap.poml) | FR-05f | sonnet / medium | STANDARD | W1-C | — | 🔲 |
+| 006 | [Remove OOB businessunit→sprk_matter map](006-remove-oob-businessunit-matter-entitymap.poml) | FR-05f | sonnet / medium | STANDARD | W1-C | — | ✅ |
 
 ## Phase 2 — W2 Unified `RecordCreationService`
 
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 010 | [W2 coordination gate (UAC-r2, ontology-r1)](010-w2-coordination-gate.poml) | NFR-08 | sonnet / medium | MINIMAL | W2-gate | — | 🔲 |
+| 010 | [W2 coordination gate (UAC-r2, ontology-r1)](010-w2-coordination-gate.poml) | NFR-08 | sonnet / medium | MINIMAL | W2-gate | — | ✅ |
 | 011 | [Extract `CallerWriteAuthorization` (pure move)](011-extract-caller-write-authorization.poml) | FR-08 | opus / xhigh | FULL | none | 010 | 🔲 |
 | 012 | [Per-table rules registry](012-per-table-rules-registry.poml) | FR-11 | opus / high | FULL | W2-A | 010 | 🔲 |
 | 013 | [Service Create mode: principals, pipeline, refusals](013-record-creation-service-create-pipeline.poml) | FR-06, FR-07, FR-12 | opus / xhigh | FULL | none | 011, 012 | 🔲 |

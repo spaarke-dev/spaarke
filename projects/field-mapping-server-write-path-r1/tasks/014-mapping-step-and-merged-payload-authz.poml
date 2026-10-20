@@ -108,6 +108,7 @@
   <acceptance-criteria>
     <criterion testable="true">A mapped lookup the caller cannot AppendTo is NOT written, a warning with a stable code and the column name is returned, and the create succeeds (closes #1617).</criterion>
     <criterion testable="true">A typed (caller-supplied) lookup the caller cannot AppendTo still refuses with the uniform 404/403 outcome; the existing behaviour is unchanged.</criterion>
+    <criterion testable="true">FR-08 amendment (owner 2026-10-20, UAC-r2 condition c): a MAPPED filing lookup (SecureChildLineage / RecordReparent.FilingParentOf for the target table) that the caller cannot AppendTo REFUSES with the uniform outcome and no create call is issued; must-fire test on a Secure parent, plus a must-not-fire control where a mapped non-filing reference lookup is dropped with a warning.</criterion>
     <criterion testable="true">A mapped value that fails field security is dropped with a warning and the create proceeds; a caller-supplied value that fails field security refuses.</criterion>
     <criterion testable="true">A Project created under a non-secure parent is AppendTo checked as the caller on the merged payload (closes #1614).</criterion>
     <criterion testable="true">A caller-supplied value for a mapped column survives create (fill-only, caller wins); an unsupplied mapped column receives the mapped value in the same create request (no follow-up update).</criterion>
