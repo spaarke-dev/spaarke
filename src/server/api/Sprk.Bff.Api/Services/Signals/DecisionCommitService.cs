@@ -292,7 +292,6 @@ public sealed class DecisionCommitService
     private const int ReasonMaxLength = 2000;
     private const int MaxNextSteps = 10;
     private const int MaxAlsoResolve = 25;
-    private const string WriteOperation = "write";
     private const int ConcurrencyVersionMismatch = unchecked((int)0x80060882);
 
     /// <summary>The state of a Signal the commit did not close or link.</summary>

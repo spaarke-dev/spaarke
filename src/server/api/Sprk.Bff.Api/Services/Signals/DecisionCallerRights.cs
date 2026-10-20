@@ -118,7 +118,7 @@ internal static class DecisionCallerRights
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                logger.LogWarning("Decision commit: the entity set of {Table} could not be looked up ({ExceptionType}).", table, ex.GetType().Name);
+                logger.LogWarning("Caller rights: the entity set of {Table} could not be looked up ({ExceptionType}).", table, ex.GetType().Name);
                 return null;
             }
 
