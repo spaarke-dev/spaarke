@@ -25,7 +25,8 @@ default `az` admin login. Nothing was changed. No Key Vault was read.
 
 - **(a) Narrow interim fix.** On the systemuser plane only, drop Term 1's registry-column contributions for ids whose *effective* flags are Secure. Use `IsSecure`, not `IsDirectOnly`, because Limited governs contacts only.
   - Ownership terms are unaffected. On a Secure record they confer nothing anyway: the team is memberless, and the BU has 0 users (live).
-  - This removes only the over-grant. K1 is unchanged.
+  - ~~This removes only the over-grant. K1 is unchanged.~~ **Corrected after review (PR #2122, two adversarial passes):** it also WIDENS K1. A user who holds a Dataverse share on a Secure record and reached it on the SPA/Teams plane only through an Assigned lookup (the normal ADR-034 A4 flow: lookup → suggested share → operator confirms) loses it there; the MDA still opens it. Dev example: project `65a3fab2…`.
+- **(a′) Dataverse check for the lookup-only Secure ids (review pass B).** For the few lookup-only ids on Secure records, ask Dataverse app-only `RetrievePrincipalAccess` bound to the systemuser (the pattern `NoAccessEnforcementStore.GetPrincipalRightsAsync` already uses on master, task 143) and keep the ones it admits. Closes F1 without widening K1. It is the same app-only named-principal mechanism as 036 option C, so it waits for that decision.
 - **(b) Land 036** with `ExternalAccess:ImpersonatedRootSets:Enabled` on. Dataverse's own answer would then replace the membership rules for systemusers, which fixes F1 and K1 together. It is held pending the OBO decision (rounds 103–106).
 
 Recommendation: (a) now, because it is small and closes the disclosure path regardless of how 036 resolves. Then (b) as planned.
