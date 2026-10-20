@@ -281,7 +281,21 @@ R3 shows **`spaarke-bff-api-prod` with tenant-wide consent to the DEV BFF app** 
 ### Stage C — 2026-10-19, owner approval "yes approve DC admin consent"
 
 - URL given to the owner: `https://login.microsoftonline.com/bc3aa7f4-3ca3-47e6-84e7-fea35f5c245b/adminconsent?client_id=5859e812-e5e7-452c-be21-1e5aa7b4d478`.
-- Pending: the owner accepts as a Dewey Cheatham administrator and reads back Enterprise applications (expect "Spaarke Workforce SPA" and the dev BFF app, each with admin-granted delegated permissions).
+- Done by the owner (2026-10-19/20). Read-back (owner's screenshots of the Dewey Cheatham admin center):
+  - "Spaarke Workforce SPA": one grant, SDAP-BFF-SPE-API `user_impersonation`, delegated, admin consent. **As planned.**
+  - **SDAP-BFF-SPE-API (the dev BFF app): NOT as planned.** Its own permissions were consented in Dewey Cheatham too:
+    - Dataverse `user_impersonation` (delegated);
+    - 25 Microsoft Graph grants, including **application** permissions `User.ReadWrite.All`, `Directory.ReadWrite.All`, `Group.ReadWrite.All`, `Files.ReadWrite.All`, `Mail.Read`, `Mail.Send`, `AppRoleAssignment.ReadWrite.All`, `FileStorageContainer.Selected`, `FileStorageContainerTypeReg.Selected`, `Files.SelectedOperations.Selected`;
+    - plus delegated `Directory.ReadWrite.All`, `Files.Read(Write).All`, `FileStorageContainer*`, `GroupMember.ReadWrite.All`, `Mail.Read` and more.
+- **Finding C-1 (security, plan defect):** the v1 `/adminconsent` for a client listed in the BFF's `knownClientApplications` is a combined consent. It also consented the BFF app's own `requiredResourceAccess`, application permissions included. §6 said only that both service principals get created; it did not foresee this.
+  - **Exposure:** any holder of a credential for `1e40baad` can now get app-only Graph tokens in Dewey Cheatham with tenant-wide write rights. That includes the MI federated credential, the GitHub `deploy-staging` federated credential and the dormant password credential that is valid to 2027-12.
+  - **Need:** the BFF does not use them. No BFF code builds a customer-tenant authority (`WithTenantId`/`WithAuthority` match only provisioning code). A9 validates home tokens and writes the stamp's Dataverse app-only in Spaarke's tenant (`a9-bff-design.md`). The BFF's service principal must exist in Dewey Cheatham as a resource; it needs no grants there.
+  - **Proposed fix (owner decision):** revoke every grant whose client is SDAP-BFF-SPE-API in Dewey Cheatham, both app-role assignments and its delegated grants. Keep the service principal and keep Spaarke Workforce SPA → `user_impersonation`.
+  - **Production/design follow-up:** stamp onboarding must not use a combined consent that carries the BFF's permissions into customer tenants. Candidates, to research before choosing: v2 `adminconsent` with an explicit `scope`, or no `knownClientApplications` plus a separate resource consent. Provisioning is informed after the owner decides.
+- **Browser check (owner, 2026-10-20): all surfaces work.** App Insights 21:13:14Z → 03:30Z:
+  - 466 × 200; 77 × 401, all on `GET /` (anonymous root probe);
+  - 11 × `sdap.auth.deny.workforce_home` (`tid_is_spaarke_tenant`), each within 2 s of a 200/204 on `/api/v1/external/*` (notifications poll, entitlements, grid-config, metadata, fetch).
+  - These 11 are new multi-scheme noise: a Spaarke-tenant **v2** token now passes the WorkforceHome scheme's issuer form and is refused at its tenant check, while the default scheme accepts it. Behaviour is correct; the noise is a candidate for the issuer-based scheme selector noted above.
 - From here, rolling back stage B first needs this consent removed (§5, §10).
 
 ### Side finding (owner-approved App Insights read, 2026-10-19): `IDX10214` and `IDX40001` on dev are log noise, not failures
