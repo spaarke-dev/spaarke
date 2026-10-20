@@ -651,7 +651,7 @@ public class InvoiceSubmissionAfterStepsTests
         world.RecordCreates.Should().Be(0);
     }
 
-    [Fact(DisplayName = "049 D: Blocked - the rule Signal as planned (073 decided it rejects; the channel blocked), no record, indexed, notified Rejected + blocked code")]
+    [Fact(DisplayName = "049 D: Blocked - the rule Signal as planned (presented as held for review: the stored plan is written as it is), no record, indexed, notified Rejected + blocked code")]
     public async Task Blocked_HeldSignal_Indexed_NotifiedRejectedBlocked()
     {
         var outcome = await Blocked();
@@ -663,7 +663,9 @@ public class InvoiceSubmissionAfterStepsTests
         result.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
         var signal = world.Writes.Should().ContainSingle().Subject;
         signal.PolicyCode.Should().Be("BILL-AGE");
-        signal.EvidenceRefs!.Should().NotContain(e => e.Kind == BillingFindingSignalMapper.DecisionEvidenceKind, "not held: the finding decided");
+        // Held presentation (049): the mapper's output, stored in the plan and written as it is; the after-steps add nothing of their own.
+        signal.ShortHeadline.Should().Be(BillingFindingSignalMapper.HeldHeadline);
+        signal.EvidenceRefs!.Should().ContainSingle(e => e.Kind == BillingFindingSignalMapper.DecisionEvidenceKind).Which.Text.Should().Be(SubmissionReasonCodes.Blocked);
         world.RecordCreates.Should().Be(0, "a held invoice is not decided; 105's Override / Return records it");
         world.Jobs.Should().ContainSingle();
         world.Notified.Should().ContainSingle().Which.Should().Be(new SubmissionDecidedNotification(
@@ -674,7 +676,7 @@ public class InvoiceSubmissionAfterStepsTests
     [Fact(DisplayName = "049 D: a held group's stored billing.decision Held line is written with the Signal, text included")]
     public async Task AHeldPlanEntry_IsWrittenWithItsHeldLine()
     {
-        var outcome = await Blocked();
+        var outcome = await AutoRejected();
         var world = new World(outcome, json =>
         {
             var entry = json["signalPlan"]!.AsArray()[0]!.AsObject();
