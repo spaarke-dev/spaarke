@@ -519,6 +519,70 @@ public class InvoiceReviewWritePathTests
         }
     }
 
+    /// <summary>
+    /// Review round 2, item 4: the share seam as the Web API's HTTP calls behave - a cancelled token is never sent, read or
+    /// write. The shared <see cref="FakeRecordShareTable"/> ignores the token, so without this a step after the re-file that
+    /// ran on the job's (cancelled) token would pass the K1 test exactly as one on <see cref="CancellationToken.None"/>.
+    /// </summary>
+    private sealed class TokenHonouringShares(Sprk.Bff.Api.Services.Access.IDataverseRecordShareService inner)
+        : Sprk.Bff.Api.Services.Access.IDataverseRecordShareService
+    {
+        public Task GrantAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal, string accessRightsCsv, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return inner.GrantAccessAsync(entitySetName, recordId, principal, accessRightsCsv, ct);
+        }
+
+        public Task ModifyAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal, string accessRightsCsv, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return inner.ModifyAccessAsync(entitySetName, recordId, principal, accessRightsCsv, ct);
+        }
+
+        public Task RevokeAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return inner.RevokeAccessAsync(entitySetName, recordId, principal, ct);
+        }
+
+        public Task RevokeAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal, DataversePrincipalRef recordOwner, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return inner.RevokeAccessAsync(entitySetName, recordId, principal, recordOwner, ct);
+        }
+
+        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return inner.GetPrincipalAccessAsync(entityLogicalName, recordId, ct);
+        }
+
+        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(string entityLogicalName, Guid recordId, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return inner.GetPrincipalAccessOrThrowAsync(entityLogicalName, recordId, ct);
+        }
+
+        public Task<AccessRights> GetPrincipalRightsAsync(Guid principalSystemUserId, string entitySetName, Guid recordId, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return inner.GetPrincipalRightsAsync(principalSystemUserId, entitySetName, recordId, ct);
+        }
+
+        public Task<AccessRights?> GetPrincipalRightsOrUnknownAsync(Guid principalSystemUserId, string entitySetName, Guid recordId, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return inner.GetPrincipalRightsOrUnknownAsync(principalSystemUserId, entitySetName, recordId, ct);
+        }
+
+        public Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+            string entityLogicalName, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return inner.GetPrincipalAccessForRecordsOrThrowAsync(entityLogicalName, recordIds, ct);
+        }
+    }
+
     /// <summary>The world: the two matters, an invoice under each, and a third invoice under a matter flagged but not isolated.</summary>
     private void Matters()
     {
@@ -602,7 +666,7 @@ public class InvoiceReviewWritePathTests
     /// <summary>The re-file of <paramref name="document"/>'s confirm submission under <paramref name="invoice"/>, all real.</summary>
     private Task<InvoiceDocumentRefileResult> Refile(Guid document, Guid invoice, CancellationToken ct = default) =>
         new InvoiceDocumentRefile(new AfterReparentHook(RealResolver(), () => _afterReparent),
-                SecureChildShareWorld.ReconcilerOver(() => _world, _shares, null!), WorldDocuments().Object,
+                SecureChildShareWorld.ReconcilerOver(() => _world, new TokenHonouringShares(_shares), null!), WorldDocuments().Object,
                 NullLogger<InvoiceDocumentRefile>.Instance)
             .RefileAsync(InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(document), document, invoice, ct);
 
