@@ -1067,8 +1067,9 @@ public static class ExternalProjectDataEndpoints
     /// caller's token is never exchanged here: the plane's read set and its write confirmation are both Dataverse's
     /// answer about the same resolved systemuser, asked app-only with <c>MSCRMCallerID</c> impersonation (ADR-028 A5's
     /// mechanism). The probe's OBO questions stay for the internal routes only.</para>
-    /// <para>Enforced by: <c>tests/Spaarke.ArchTests/ExternalPlaneNoOboGuardTests.cs</c> (no token-taking probe call in
-    /// <c>Api/ExternalAccess/External*.cs</c>).</para>
+    /// <para>Enforced by: <c>tests/Spaarke.ArchTests/ExternalPlaneNoOboGuardTests.cs</c> (no token-taking probe call, OBO
+    /// exchange or caller-token read in <c>Api/ExternalAccess/External*.cs</c> or in any filter or handler file the
+    /// <c>/api/v1/external</c> mappings bind).</para>
     /// </remarks>
     internal static Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>> CallerRightsReader(
         CallerRecordAccessProbe probe, HttpContext httpContext)
