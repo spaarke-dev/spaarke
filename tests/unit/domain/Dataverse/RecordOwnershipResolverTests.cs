@@ -3456,6 +3456,82 @@ public class RecordOwnershipResolverTests
         return (directory, messageId, otherOrdinaryMatterId);
     }
 
+    // ---- #2143 round 7 (F1) ----
+
+    /// <summary>
+    /// #2143 round 7 (F1): a message regarding the secure matter S (<see cref="SecureThreadMatterId"/>), sitting in S's own record
+    /// thread T (<see cref="SecureThreadId"/>), owned by the Secure team: what a re-file of its regarding off S starts from.
+    /// </summary>
+    private static (FakeDirectory Directory, Guid MessageId) MessageInItsSecureRecordsThread() =>
+        MessageWorld(SecureThreadMatterId, SecureBu, SecureNamedTeam, threadId: SecureThreadId);
+
+    [Fact]
+    public async Task Reparent_OfAMessageOffTheSecureRecordItsThreadAlsoHolds_ByACallerWithoutFullAccess_IsRefused_AndNothingIsWritten()
+    {
+        // Must-fire (#2143 round 7, F1): the re-file takes S out of the message's own regarding; its thread T still files it under
+        // S, but the thread follows the filing after the write, so the move out of S is THIS re-file's. A caller without Full
+        // Access on S is refused here â€” before round 7 the thread hid S and no F3 was asked.
+        var (directory, messageId) = MessageInItsSecureRecordsThread();
+        var asked = new List<Guid>();
+        var request = MoveMessageTo(messageId, MatterId, CallerHolding(Collaborate, asked: asked));
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            request,
+            _ =>
+            {
+                applied = true;
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue();
+        resolution.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode);
+        asked.Should().Contain(SecureThreadMatterId, "leaving the regarding leaves S");
+        applied.Should().BeFalse("refused before anything is written");
+        directory.Assignments.Should().BeEmpty();
+        directory.ConditionalWrites.Should().BeEmpty();
+        directory.FieldUpdates.Should().BeEmpty();
+        directory.Row("sprk_communication", messageId).GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id
+            .Should().Be(SecureThreadMatterId);
+        MessageOwnerOf(directory, messageId).Should().Be(SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task Reparent_OfAMessageOffTheSecureRecordItsThreadAlsoHolds_ByAFullAccessHolder_AsksF3OnThatRecord_AndProceeds()
+    {
+        // Must-NOT-fire control (#2143 round 7, F1): the same re-file by a Full Access holder on S is permitted (F3 asked about
+        // S) and written; the message stays Secure-owned until its thread follows the filing (the step after the re-file).
+        var (directory, messageId) = MessageInItsSecureRecordsThread();
+        var asked = new List<Guid>();
+        var request = MoveMessageTo(messageId, MatterId, CallerHolding(FullAccess, asked: asked));
+
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse();
+        asked.Should().Equal(new[] { SecureThreadMatterId }, "F3 is asked about S, the record the regarding leaves");
+        resolution.IsSecureOwner.Should().BeTrue("its thread still files it under S until the thread follows the filing");
+        directory.Row("sprk_communication", messageId).GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id
+            .Should().Be(MatterId);
+        NoOrdinaryOwnerEverSent(directory);
+    }
+
+    [Fact]
+    public async Task Reparent_OfAMessageBetweenOrdinaryRecords_InAnOrdinaryThread_AsksNoF3()
+    {
+        // Must-NOT-fire (#2143 round 7, F1): a message regarding an ordinary matter, in that matter's thread, re-filed onto
+        // another ordinary matter leaves no secure record: nothing is asked, and it takes the new matter's team.
+        var (directory, messageId) = MessageWorld(MatterId, ChildBu, ChildTeam, threadId: OrdinaryThreadId);
+        directory.WithRecord("sprk_matter", OtherOrdinaryMatterId, GeneralBu, owningTeam: GeneralTeam);
+        var asked = new List<Guid>();
+        var request = MoveMessageTo(messageId, OtherOrdinaryMatterId, CallerHolding(Collaborate, asked: asked));
+
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse();
+        asked.Should().BeEmpty("no secure record is left");
+    }
+
     private static RecordReparent MoveMessageTo(
         Guid messageId, Guid matterId, Sprk.Bff.Api.Services.Access.SecureRemovalCaller caller) => new()
     {

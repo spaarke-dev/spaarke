@@ -1357,6 +1357,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // (owner round 10 item 7, task 146 c1).
         var filedUnderBefore = byColumn.Values.Concat(threadBefore).Distinct().ToArray();
 
+        // #2143 round 7 (F1): the parents the row's OWN columns hold before the change — F3 is asked about every secure record
+        // the change takes out of them, even while the row's thread still files it under that record.
+        var ownBefore = byColumn.Values.Distinct().ToArray();
+
         // What the row was filed under BEFORE the change, for every column the change moves — so a failed owner
         // assignment after the change can put the row back where its CURRENT owner belongs (CompensateAsync).
         var restore = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
@@ -1448,7 +1452,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // different one — needs the caller's F3 rights on every secure root it leaves, decided BEFORE anything is
         // written, by the same check the unsecure endpoint makes (SecureDesignationRemoval).
         var (exitRefusal, permittedToLeaveSecure) = await RefuseUnlessPermittedToLeaveSecureRootsAsync(
-            request, current, filedUnderBefore, parents, resolution, ct).ConfigureAwait(false);
+            request, current, filedUnderBefore, parents, ownBefore, byColumn.Values.Distinct().ToArray(), resolution, ct)
+            .ConfigureAwait(false);
         if (exitRefusal is not null)
         {
             _logger.LogWarning(
@@ -2102,6 +2107,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// those above its parents AFTER it (<see cref="SecureRootsAboveAsync"/>). Leaving one root for another secure root
     /// still leaves the first ("or to a different root"); adding a parent, or moving between ordinary records, leaves
     /// none and asks nothing.</para>
+    /// <para><b>Out of the row's own columns</b> (#2143 round 7, F1). Also every secure root above the parents the row's OWN
+    /// columns hold before the change, less those above what they hold after it (<paramref name="ownBefore"/>,
+    /// <paramref name="ownAfter"/>) — even while the row's record thread still files it under that root: the thread follows
+    /// the filing after the write, so the move out is this re-file's.</para>
     /// <para><b>Who may.</b> <see cref="Sprk.Bff.Api.Services.Access.SecureDesignationRemoval"/> — the unsecure endpoint's
     /// F3 check — with Full Access asked on EVERY secure root left and the creator counted on the ROW
     /// (<c>sprk_createdbyperson</c>, else <c>createdby</c>). A writer that acts for no person
@@ -2113,14 +2122,18 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// </remarks>
     private async Task<(RecordOwnerResolution? Refusal, bool PermittedToLeave)> RefuseUnlessPermittedToLeaveSecureRootsAsync(
         RecordReparent request, Entity current, IReadOnlyCollection<RecordOwnershipParent> filedUnderBefore,
-        IReadOnlyCollection<RecordOwnershipParent> filedUnderAfter, RecordOwnerResolution resolution, CancellationToken ct)
+        IReadOnlyCollection<RecordOwnershipParent> filedUnderAfter, IReadOnlyCollection<RecordOwnershipParent> ownBefore,
+        IReadOnlyCollection<RecordOwnershipParent> ownAfter, RecordOwnerResolution resolution, CancellationToken ct)
     {
         // Two cheap facts first, so the many re-files that leave nothing (a thread JOIN, an invoice link, additive inbound
         // filing) cost no read: a change that removes none of the row's parents leaves no root (both walks would read the
         // same parents), and an answer that keeps the row secure or keeps its owner cannot take it out of isolation.
         var removesAParent = filedUnderBefore.Any(parent => !filedUnderAfter.Contains(parent));
+        // #2143 round 7 (F1): a parent taken out of the row's OWN columns, though another source (its thread) still files the
+        // row under it — the move a re-file makes; the thread follows it after the write.
+        var removesAnOwnParent = ownBefore.Any(parent => !ownAfter.Contains(parent));
         var mayLeaveIsolation = !resolution.IsSecureOwner && resolution.Outcome != RecordOwnerOutcome.Unchanged;
-        if (!removesAParent && !mayLeaveIsolation)
+        if (!removesAParent && !removesAnOwnParent && !mayLeaveIsolation)
         {
             return (null, false);
         }
@@ -2148,6 +2161,25 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
 
         var left = before.Roots.Where(root => !after.Roots.Contains(root)).ToList();
+
+        // #2143 round 7 (F1): every secure root the row's OWN columns leave, even while its thread keeps the row under it — the
+        // thread follows the filing after the write (ThreadResolver.ReconcileThreadForFilingAsync), and that move asks the same
+        // caller. A caller without Full Access on the record is refused here, before anything is written.
+        if (removesAnOwnParent)
+        {
+            var ownRootsBefore = await SecureRootsAboveAsync(ownBefore, secureBu.Id, ct).ConfigureAwait(false);
+            var ownRootsAfter = await SecureRootsAboveAsync(ownAfter, secureBu.Id, ct).ConfigureAwait(false);
+            if ((ownRootsBefore.TooDeepAt ?? ownRootsAfter.TooDeepAt) is { } ownTooDeep)
+            {
+                return (RecordOwnerResolution.Refused(
+                    RecordOwnerRefusal.ParentUnresolved,
+                    $"the record's filing runs through more than {MaxLineageDepth} levels of records (still unresolved at "
+                    + $"{ownTooDeep.EntityLogicalName} {ownTooDeep.RecordId:D}), so whether the change leaves a secure record "
+                    + "cannot be decided"), false);
+            }
+
+            left.AddRange(ownRootsBefore.Roots.Where(root => !ownRootsAfter.Roots.Contains(root) && !left.Contains(root)));
+        }
 
         // Held in the Secure Record business unit, about to leave its isolation, yet no secure root above it can be named.
         var unidentified = left.Count == 0
