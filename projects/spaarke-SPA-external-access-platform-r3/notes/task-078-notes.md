@@ -249,3 +249,13 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
   - Private-state control → 200, 0 rows.
 - Ontology smoke passed on the new build.
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T163210Z` (= `00aba6d99`, which contains 077).
+
+## Dev redeploy from master c3ec5d6e5 (2026-10-20, owner "approved bff deploy"; requested by UAC)
+
+- **Candidate** master `c3ec5d6e5`. It adds UAC #2138 (#2128, guest auto-create retired) and #2133 (#2130/#2131, PII logs and census) to the live `21184ecd4`, which is an ancestor. Both PRs' CI was green with nothing failing.
+- **Coordination:** OK from UAC (requester), ontology, ebilling (`sprk_invoicestatus` still exists; `e0df77339` is not in the candidate), provisioning, field-mapping, word-add-in and spe-admin. The SPA precondition for #2138 was met (dev SPA `28274e04e`). No data step was needed (UAC: the 3 guest-bound contacts are licensed guests).
+- **Pre-checks:** the live DLL read `21184ecd4`; the last Kudu deployment was this project's 16:34Z deploy; healthz 200.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261020T180912Z` (222 files, DLL `21184ecd4`).
+- **Deploy:** `scripts/Deploy-BffApi.ps1` from a detached worktree `C:\wtbffc` at `c3ec5d6e5`. Package 37.47 MB; 4 critical files SHA-256 verified.
+- **Read-back** (18:12:51Z): ProductVersion `1.0.0+c3ec5d6e56f0074cf238b84bccf202cb1c0c84b7`; `/healthz` 200; `/healthz/dataverse` 200; `/api/me` anonymous 401.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T180912Z` (= `21184ecd4`).
