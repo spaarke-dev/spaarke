@@ -168,7 +168,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     public async Task Fr20_Upload_ReadAndWriteButNoAppendToInDataverse_Is403_AndWritesNothing(string segment)
     {
         _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
-        _fixture.Probe.Answer(EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.Write);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.Write);
 
         using var client = _fixture.CreateAuthenticatedClient();
         using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
@@ -176,8 +176,8 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         upload.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         _fixture.Uploads.Should().BeEmpty("nothing reaches SPE unless Dataverse confirms the write");
         _fixture.Data.Documents.Should().BeEmpty();
-        _fixture.Probe.Calls.Should().ContainSingle().Which.Should().Match<(string? Token, string EntitySet, Guid RecordId)>(
-            c => c.EntitySet == EntitySetOf(segment) && c.RecordId == RecordA, "Dataverse is asked about the target record");
+        _fixture.Probe.AppOnlyCalls.Should().ContainSingle().Which.Should().Match<(Guid SystemUserId, string EntitySet, Guid RecordId)>(
+            c => c.SystemUserId == CallerUser && c.EntitySet == EntitySetOf(segment) && c.RecordId == RecordA, "Dataverse is asked about the target record");
     }
 
     [Theory]
@@ -185,8 +185,8 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     public async Task Fr20_Upload_AppendToInDataverse_Is201(string segment)
     {
         _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
-        _fixture.Probe.Answer(EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo)
-            .Holds(DocumentCreatePrivilege);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo)
+            .HoldsAppOnly(CallerUser, DocumentCreatePrivilege);
 
         using var client = _fixture.CreateAuthenticatedClient();
         using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
@@ -194,7 +194,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
         _fixture.Uploads.Should().ContainSingle();
         _fixture.Data.Documents.Should().ContainSingle();
-        _fixture.Probe.PrivilegeCalls.Should().Equal(new[] { DocumentCreatePrivilege });
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().Equal(new[] { (CallerUser, DocumentCreatePrivilege) });
     }
 
     // Task 036 fix round 1 (F1): the document is written app-only, so AppendTo on the parent is not enough — the caller
@@ -206,7 +206,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     public async Task Fr20_Upload_AppendToButNoCreatePrivilegeOnSprkDocument_Is403_AndWritesNothing(string segment)
     {
         _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
-        _fixture.Probe.Answer(EntitySetOf(segment), RecordA,
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA,
             AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -215,7 +215,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         upload.StatusCode.Should().Be(HttpStatusCode.Forbidden, "MDA would refuse a user without prvCreatesprk_Document");
         _fixture.Uploads.Should().BeEmpty();
         _fixture.Data.Documents.Should().BeEmpty();
-        _fixture.Probe.PrivilegeCalls.Should().Equal(new[] { DocumentCreatePrivilege });
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().Equal(new[] { (CallerUser, DocumentCreatePrivilege) });
     }
 
     [Theory]
@@ -223,9 +223,9 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     public async Task Fr20_Upload_APrivilegeReadThatFaults_Is403_AndWritesNothing(string segment)
     {
         _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
-        _fixture.Probe.Answer(EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo)
-            .Holds(DocumentCreatePrivilege);
-        _fixture.Probe.PrivilegeFault = new HttpRequestException("RetrieveUserSetOfPrivilegesByNames failed");
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo)
+            .HoldsAppOnly(CallerUser, DocumentCreatePrivilege);
+        _fixture.Probe.AppOnlyPrivilegeFault = new HttpRequestException("RetrieveUserSetOfPrivilegesByNames failed");
 
         using var client = _fixture.CreateAuthenticatedClient();
         using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
@@ -240,8 +240,8 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     public async Task Fr20_Upload_AProbeThatFaults_Is403_AndWritesNothing(string segment)
     {
         _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
-        _fixture.Probe.Answer(EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo);
-        _fixture.Probe.Fault = new HttpRequestException("Dataverse unreachable");
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo);
+        _fixture.Probe.AppOnlyFault = new HttpRequestException("Dataverse unreachable");
 
         using var client = _fixture.CreateAuthenticatedClient();
         using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
@@ -257,14 +257,14 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     {
         // The same Read-only caller with the flag off: Dataverse would say AppendTo, but nobody asks — still 403.
         _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: false);
-        _fixture.Probe.Answer(EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo);
 
         using var client = _fixture.CreateAuthenticatedClient();
         using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
 
         upload.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         _fixture.Uploads.Should().BeEmpty();
-        _fixture.Probe.Calls.Should().BeEmpty("flag off is byte-equivalent: no Dataverse confirmation");
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty("flag off is byte-equivalent: no Dataverse confirmation");
     }
 
     // Task 036 fix round 1 (F4, open question g settled): a Dataverse-decided caller's list reports the UPLOAD ROUTE's own
@@ -289,10 +289,10 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         string segment, AccessRights dataverse, bool holdsCreate, bool expected)
     {
         _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
-        _fixture.Probe.Answer(EntitySetOf(segment), RecordA, dataverse);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, dataverse);
         if (holdsCreate)
         {
-            _fixture.Probe.Holds(DocumentCreatePrivilege);
+            _fixture.Probe.HoldsAppOnly(CallerUser, DocumentCreatePrivilege);
         }
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -301,8 +301,8 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         response.StatusCode.Should().Be(HttpStatusCode.OK, "Read is unchanged: Dataverse only widens a parent already held");
         var list = await response.Content.ReadFromJsonAsync<ExternalDocumentListResponse>();
         list!.CanCreate.Should().Be(expected);
-        _fixture.Probe.Calls.Should().ContainSingle().Which.Should().Match<(string? Token, string EntitySet, Guid RecordId)>(
-            c => c.EntitySet == EntitySetOf(segment) && c.RecordId == RecordA, "one probe, for the record in hand");
+        _fixture.Probe.AppOnlyCalls.Should().ContainSingle().Which.Should().Match<(Guid SystemUserId, string EntitySet, Guid RecordId)>(
+            c => c.SystemUserId == CallerUser && c.EntitySet == EntitySetOf(segment) && c.RecordId == RecordA, "one probe, for the record in hand");
     }
 
     [Theory]
@@ -310,9 +310,9 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     public async Task Fr20_List_AProbeThatFaults_ReportsCanCreateFalse_AndStillLists(string segment)
     {
         _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
-        _fixture.Probe.Answer(EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo)
-            .Holds(DocumentCreatePrivilege);
-        _fixture.Probe.Fault = new HttpRequestException("Dataverse unreachable");
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo)
+            .HoldsAppOnly(CallerUser, DocumentCreatePrivilege);
+        _fixture.Probe.AppOnlyFault = new HttpRequestException("Dataverse unreachable");
 
         using var client = _fixture.CreateAuthenticatedClient();
         using var response = await client.GetAsync($"/api/v1/external/{segment}/{RecordA}/documents");
@@ -327,15 +327,15 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     public async Task Fr20_List_FlagOff_ReportsCanCreateFromTheComposedRights_AndAsksDataverseNothing(string segment)
     {
         _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: false);
-        _fixture.Probe.Answer(EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo)
-            .Holds(DocumentCreatePrivilege);
+        _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo)
+            .HoldsAppOnly(CallerUser, DocumentCreatePrivilege);
 
         using var client = _fixture.CreateAuthenticatedClient();
         var list = await client.GetFromJsonAsync<ExternalDocumentListResponse>($"/api/v1/external/{segment}/{RecordA}/documents");
 
         list!.CanCreate.Should().BeFalse("flag off, the composed Read decides, exactly as before");
-        _fixture.Probe.Calls.Should().BeEmpty("flag off is byte-equivalent: no Dataverse confirmation");
-        _fixture.Probe.PrivilegeCalls.Should().BeEmpty();
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty("flag off is byte-equivalent: no Dataverse confirmation");
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty();
     }
 
     // =====================================================================

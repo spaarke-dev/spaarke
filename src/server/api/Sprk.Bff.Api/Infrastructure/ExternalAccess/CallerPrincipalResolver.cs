@@ -185,11 +185,12 @@ public sealed class CallerPrincipal
     /// <summary>
     /// Task 036 owner decision (a), 2026-10-18: <c>true</c> when this workforce systemuser signed in through WorkforceHome
     /// (ADR-028 A9) and was resolved through the stored home link (<see cref="WorkforcePrincipal.ResolvedThroughHomeLink"/>).
-    /// Its customer-directory token cannot be exchanged for a Dataverse token in Spaarke's tenant, so a write confirmation
-    /// (<see cref="DataverseConfirmsWrites"/>) asks the same questions APP-ONLY, naming <see cref="SystemUserId"/>
-    /// (<c>ExternalProjectDataEndpoints.CallerRightsReader</c> / <c>CallerPrivilegeReader</c>). Same trust basis as the A5
-    /// impersonated read: the id is the one the authenticated identity was resolved to, never client-supplied.
-    /// <c>false</c> for every other caller, whose confirmations stay OBO as the caller.
+    /// Its customer-directory token cannot be exchanged for a Dataverse token in Spaarke's tenant. <c>false</c> for every
+    /// other caller.
+    /// <para><b>No longer chooses a path</b> (task 036 option C, owner 2026-10-20): every systemuser's write confirmation
+    /// (<see cref="DataverseConfirmsWrites"/>) is now asked APP-ONLY, naming <see cref="SystemUserId"/>, however they
+    /// signed in (<c>ExternalProjectDataEndpoints.CallerRightsReader</c> / <c>CallerPrivilegeReader</c>). The property
+    /// still records how the principal was resolved.</para>
     /// </summary>
     public bool ResolvedThroughHomeLink { get; init; }
 

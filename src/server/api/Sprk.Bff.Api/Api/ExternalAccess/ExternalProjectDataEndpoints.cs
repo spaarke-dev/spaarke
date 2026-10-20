@@ -893,7 +893,8 @@ public static class ExternalProjectDataEndpoints
     /// FR-20 (unified-access-control-r2 task 036, owner round 59 item 2): the ONE Dataverse confirmation of a write on this
     /// surface. For a caller whose own access Dataverse decided (<see cref="CallerPrincipal.DataverseConfirmsWrites"/>), the
     /// rights a write route checks are <paramref name="composed"/> widened by what Dataverse itself grants the caller on the
-    /// target record, asked as the caller through <see cref="CallerRecordAccessProbe"/>. For every other caller it returns
+    /// target record, asked app-only naming the caller's resolved systemuser (<see cref="CallerRightsReader"/>; never OBO on
+    /// this plane, task 036 option C, owner 2026-10-20). For every other caller it returns
     /// <paramref name="composed"/> unchanged and asks nothing, so their routes decide exactly as before.
     /// </summary>
     /// <remarks>
@@ -904,29 +905,31 @@ public static class ExternalProjectDataEndpoints
     /// <para><b>Read first.</b> Nothing is asked unless <paramref name="composed"/> holds Read: a record outside the caller's
     /// accessible set, or removed by the deny list or the Restricted veto, is refused by the route without a Dataverse
     /// call, so the vetoes stay in force.</para>
-    /// <para><b>Fail closed (NFR-01).</b> The probe answers None when it cannot ask (no token, a failed exchange, a refused
-    /// or failed call); a reader that throws, or no reader, also adds None. The route then refuses the write unless the
+    /// <para><b>Fail closed (NFR-01).</b> The probe answers None when it cannot ask (no systemuser id, no app-only client, a
+    /// refused, faulted or timed-out call, or an answer that is not about the user's access); a reader that throws, or no
+    /// reader, also adds None. The route then refuses the write unless the
     /// grants alone allow it. There is no fallback to membership, an app-only read or a constant. The caller's own
     /// cancellation is rethrown.</para>
     /// <para><b>A child create needs the child table's Create privilege too</b> (task 036 fix round 1, F1). The BFF writes
     /// the child app-only, so Dataverse never checks the caller's own Create privilege on the CHILD table. Dataverse adds
     /// <see cref="Spaarke.Dataverse.AccessRights.Create"/> here only when it answers AppendTo on the parent AND the caller
-    /// holds <paramref name="childCreatePrivilege"/> (<see cref="CallerRecordAccessProbe.CallerHoldsPrivilegeAsync"/>, OBO,
-    /// uncached — the task 166 / G5 pairing of <c>TodoSourceAccessFilter</c> and
+    /// holds <paramref name="childCreatePrivilege"/> (<see cref="CallerRecordAccessProbe.PrincipalHoldsPrivilegeAppOnlyAsync"/>,
+    /// app-only naming the systemuser, uncached — the rule of the task 166 / G5 pairing of <c>TodoSourceAccessFilter</c> and
     /// <c>CommunicationRecordAuthorizationFilter</c>). The privilege is asked only when it can change the answer: Dataverse
     /// answered AppendTo and <paramref name="composed"/> does not already carry Create. No privilege named (a route that
     /// creates nothing — not a refusal, so nothing is logged), no reader, a false answer or a fault: Dataverse adds no
     /// Create (NFR-01). Read, Write and Delete are unaffected, so the PATCH and
     /// delete-own confirmations (which name no child table) are unchanged.</para>
     /// <para>One Dataverse round trip per confirmed write (NFR-02), for the single record in hand; a child create that
-    /// Dataverse answers with AppendTo adds the privilege read (WhoAmI + <c>RetrieveUserSetOfPrivilegesByNames</c>).</para>
+    /// Dataverse answers with AppendTo adds the privilege read (<c>RetrieveUserSetOfPrivilegesByNames</c> on the
+    /// systemuser).</para>
     /// </remarks>
     /// <param name="caller">The resolved principal.</param>
     /// <param name="composed">The rights the route computed from the principal.</param>
     /// <param name="entitySet">The target record's entity set (plural), as the probe needs it.</param>
     /// <param name="recordId">The target record.</param>
-    /// <param name="readCallerRights">Asks Dataverse for the caller's rights on (entity set, id): the probe with the
-    /// caller's bearer token (<see cref="CallerRightsReader"/>).</param>
+    /// <param name="readCallerRights">Asks Dataverse for the caller's rights on (entity set, id): the probe app-only, naming
+    /// the caller's resolved systemuser (<see cref="CallerRightsReader"/>).</param>
     /// <param name="logger">Logger.</param>
     /// <param name="ct">Cancellation.</param>
     /// <param name="childCreatePrivilege">The child table's Create privilege, by its live name (for example
@@ -987,9 +990,7 @@ public static class ExternalProjectDataEndpoints
             "[WF-AUTHZ] Dataverse-confirmed write rights for systemuser {SystemUserId} on {EntitySet} {RecordId}: Dataverse " +
             "{Dataverse} -> {Surface} (composed {Composed}; answered via {Path}).",
             caller.SystemUserId, entitySet, recordId, dataverse, surface, composed,
-            AppOnlyConfirmationPrincipal(caller) is null
-                ? CallerRecordAccessProbe.OboPath
-                : CallerRecordAccessProbe.AppOnlyNamedPrincipalPath);
+            CallerRecordAccessProbe.AppOnlyNamedPrincipalPath);
         return composed | surface;
     }
 
@@ -1057,53 +1058,50 @@ public static class ExternalProjectDataEndpoints
             : Spaarke.Dataverse.AccessRights.None);
 
     /// <summary>
-    /// The Dataverse rights reader for <see cref="WithDataverseRightsAsync"/>: the existing
-    /// <see cref="CallerRecordAccessProbe"/> (OBO, as the caller, fail closed) with this request's bearer token — or, for a
-    /// WorkforceHome-linked systemuser (<see cref="AppOnlyConfirmationPrincipal"/>, task 036 owner decision (a)), the same
-    /// question asked app-only naming that systemuser (<see cref="CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync"/>).
+    /// The Dataverse rights reader for <see cref="WithDataverseRightsAsync"/>: the question asked APP-ONLY, naming the
+    /// caller's resolved systemuser (<see cref="AppOnlyConfirmationPrincipal"/>,
+    /// <see cref="CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync"/>) — for every systemuser on this plane.
     /// </summary>
-    /// <remarks>The path comes from the request's resolved principal, never from a failed exchange: there is no OBO
-    /// attempt and fallback, so an OBO fault can never become an app-only answer. Every other caller gets the OBO reader
-    /// exactly as before.</remarks>
+    /// <remarks>
+    /// <para><b>No OBO on <c>/api/v1/external</c></b> (task 036 option C, owner 2026-10-20; ADR-028 A1–A3, A5). The
+    /// caller's token is never exchanged here: the plane's read set and its write confirmation are both Dataverse's
+    /// answer about the same resolved systemuser, asked app-only with <c>MSCRMCallerID</c> impersonation (ADR-028 A5's
+    /// mechanism). The probe's OBO questions stay for the internal routes only.</para>
+    /// <para>Enforced by: <c>tests/Spaarke.ArchTests/ExternalPlaneNoOboGuardTests.cs</c> (no token-taking probe call in
+    /// <c>Api/ExternalAccess/External*.cs</c>).</para>
+    /// </remarks>
     internal static Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>> CallerRightsReader(
         CallerRecordAccessProbe probe, HttpContext httpContext)
     {
-        if (AppOnlyConfirmationPrincipal(GetCallerPrincipal(httpContext)) is { } systemUserId)
-        {
-            return (entitySet, recordId, ct) => probe.GetPrincipalRightsAppOnlyAsync(systemUserId, entitySet, recordId, ct);
-        }
-
-        var token = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext);
-        return (entitySet, recordId, ct) => probe.GetCallerRightsAsync(token, entitySet, recordId, ct);
+        var systemUserId = AppOnlyConfirmationPrincipal(GetCallerPrincipal(httpContext));
+        return (entitySet, recordId, ct) => probe.GetPrincipalRightsAppOnlyAsync(systemUserId, entitySet, recordId, ct);
     }
 
     /// <summary>
-    /// The privilege reader for <see cref="WithDataverseRightsAsync"/> (task 036 fix round 1, F1): the existing
-    /// <see cref="CallerRecordAccessProbe.CallerHoldsPrivilegeAsync"/> (OBO, as the caller, uncached, fail closed) with this
-    /// request's bearer token — or, for a WorkforceHome-linked systemuser (task 036 decision (a)), the same privilege asked
-    /// app-only naming that systemuser (<see cref="CallerRecordAccessProbe.PrincipalHoldsPrivilegeAppOnlyAsync"/>).
+    /// The privilege reader for <see cref="WithDataverseRightsAsync"/> (task 036 fix round 1, F1): the privilege asked
+    /// APP-ONLY, naming the caller's resolved systemuser
+    /// (<see cref="CallerRecordAccessProbe.PrincipalHoldsPrivilegeAppOnlyAsync"/>) — for every systemuser on this plane,
+    /// never OBO (task 036 option C; see <see cref="CallerRightsReader"/>).
     /// </summary>
     internal static Func<string, CancellationToken, Task<bool>> CallerPrivilegeReader(
         CallerRecordAccessProbe probe, HttpContext httpContext)
     {
-        if (AppOnlyConfirmationPrincipal(GetCallerPrincipal(httpContext)) is { } systemUserId)
-        {
-            return (privilege, ct) => probe.PrincipalHoldsPrivilegeAppOnlyAsync(systemUserId, privilege, ct);
-        }
-
-        var token = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext);
-        return (privilege, ct) => probe.CallerHoldsPrivilegeAsync(token, privilege, ct);
+        var systemUserId = AppOnlyConfirmationPrincipal(GetCallerPrincipal(httpContext));
+        return (privilege, ct) => probe.PrincipalHoldsPrivilegeAppOnlyAsync(systemUserId, privilege, ct);
     }
 
     /// <summary>
-    /// The systemuser a write confirmation names app-only for <paramref name="caller"/> (task 036 owner decision (a),
-    /// 2026-10-18), or <c>null</c> when the confirmation stays OBO as the caller. Non-null only for a principal resolved
-    /// through the WorkforceHome home link (<see cref="CallerPrincipal.ResolvedThroughHomeLink"/>): its customer-directory
-    /// token cannot be exchanged for Dataverse in Spaarke's tenant. A missing systemuser id is <see cref="Guid.Empty"/>,
-    /// which the probe refuses (no rights) — never a fall back to OBO.
+    /// The systemuser a write confirmation names app-only for <paramref name="caller"/>: the principal's resolved
+    /// <see cref="CallerPrincipal.SystemUserId"/>, however the caller signed in (a Spaarke-tenant token or the WorkforceHome
+    /// home link) — task 036 option C, owner 2026-10-20, widening decision (a) of 2026-10-18 from home-linked users to
+    /// every systemuser. The id is the one the validated token was resolved to, never client input (ADR-028 A5's trust
+    /// basis).
     /// </summary>
-    internal static Guid? AppOnlyConfirmationPrincipal(CallerPrincipal? caller) =>
-        caller is { ResolvedThroughHomeLink: true } ? caller.SystemUserId ?? Guid.Empty : null;
+    /// <remarks>Fail closed: no principal, or a principal with no systemuser id (a contact, or a defaulted id), is
+    /// <see cref="Guid.Empty"/>, which both app-only probe questions refuse with no Dataverse call (no rights). There is no
+    /// other path to fall back to.</remarks>
+    internal static Guid AppOnlyConfirmationPrincipal(CallerPrincipal? caller) =>
+        caller?.SystemUserId ?? Guid.Empty;
 
     /// <summary>
     /// A root's rights for a write route: <see cref="RightsForRoot"/>, confirmed against Dataverse (task 036). A route that
@@ -2337,8 +2335,9 @@ public static class ExternalProjectDataEndpoints
     /// parent the caller lost all get the SAME 403 (<see cref="DeleteOwnDeniedReasonCode"/>). A read that FAILED is a 503
     /// (<see cref="DeleteOwnUnavailableReasonCode"/>, or the service-request 503 of
     /// <see cref="RightsForDocumentParentAsync"/>), never a 403 and never a delete.</para>
-    /// <para>App-only, like every read on this plane: no OBO (ADR-028) — except step (2b), which, for a caller whose access
-    /// Dataverse decided (task 036), asks Dataverse as the caller through <see cref="CallerRecordAccessProbe"/>.</para>
+    /// <para>App-only, like every read on this plane: no OBO (ADR-028). Step (2b), for a caller whose access Dataverse
+    /// decided (task 036), asks Dataverse about the caller app-only, naming their systemuser
+    /// (<see cref="CallerRightsReader"/>).</para>
     /// </remarks>
     private static async Task<IResult?> AuthorizeDeleteOwnAsync(
         CallerPrincipal caller,

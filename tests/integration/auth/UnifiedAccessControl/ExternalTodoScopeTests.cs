@@ -1060,14 +1060,14 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     {
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(kind, rootId, AccessRights.Read, dataverseDecides: true);
-        _fixture.Probe.Answer(EntitySetOf(kind), rootId, AccessRights.Read);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, EntitySetOf(kind), rootId, AccessRights.Read);
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/todos", ValidCreate());
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         _fixture.Data.CreateCallCount.Should().Be(0, "a Read-only Dataverse answer must never reach the write");
-        _fixture.Probe.Calls.Should().ContainSingle().Which.Should().Match<(string?, string EntitySet, Guid RecordId)>(
+        _fixture.Probe.AppOnlyCalls.Should().ContainSingle().Which.Should().Match<(Guid, string EntitySet, Guid RecordId)>(
             c => c.EntitySet == EntitySetOf(kind) && c.RecordId == rootId, "the TARGET root is asked about, as the caller");
     }
 
@@ -1078,7 +1078,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     {
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(kind, rootId, AccessRights.Read, dataverseDecides: true);
-        _fixture.Probe.Answer(EntitySetOf(kind), rootId, AccessRights.Read | AccessRights.AppendTo).Holds(TodoCreatePrivilege);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, EntitySetOf(kind), rootId, AccessRights.Read | AccessRights.AppendTo).HoldsAppOnly(Fr20SystemUser, TodoCreatePrivilege);
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/todos", ValidCreate());
@@ -1086,7 +1086,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         _fixture.Data.CreateCallCount.Should().Be(1);
         _fixture.Data.LastCreateArgs.Should().Be((kind, rootId));
-        _fixture.Probe.PrivilegeCalls.Should().Equal(new[] { TodoCreatePrivilege });
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().Equal(new[] { (Fr20SystemUser, TodoCreatePrivilege) });
     }
 
     // Task 036 fix round 1 (F1): the to-do is written app-only, so AppendTo on the root is not enough — the caller must
@@ -1101,7 +1101,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     {
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(kind, rootId, AccessRights.Read, dataverseDecides: true);
-        _fixture.Probe.Answer(EntitySetOf(kind), rootId,
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, EntitySetOf(kind), rootId,
             AccessRights.Read | AccessRights.Write | AccessRights.AppendTo | AccessRights.Delete);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -1109,7 +1109,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "MDA would refuse a user without prvCreatesprk_Todo");
         _fixture.Data.CreateCallCount.Should().Be(0);
-        _fixture.Probe.PrivilegeCalls.Should().Equal(new[] { TodoCreatePrivilege });
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().Equal(new[] { (Fr20SystemUser, TodoCreatePrivilege) });
     }
 
     [Fact(DisplayName = "Task 036 F1 (NFR-01): flag ON, a privilege read that FAILS denies the to-do create")]
@@ -1118,8 +1118,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(
             ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
-        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo).Holds(TodoCreatePrivilege);
-        _fixture.Probe.PrivilegeFault = new HttpRequestException("RetrieveUserSetOfPrivilegesByNames failed");
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo).HoldsAppOnly(Fr20SystemUser, TodoCreatePrivilege);
+        _fixture.Probe.AppOnlyPrivilegeFault = new HttpRequestException("RetrieveUserSetOfPrivilegesByNames failed");
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
@@ -1136,14 +1136,14 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Reset();
         var rights = collaborate ? ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate) : AccessRights.Read;
         _fixture.Principal = SystemUserHolding(ExternalDataService.TodoRootKind.Project, InScopeProject, rights, dataverseDecides: false);
-        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo);
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
 
         response.StatusCode.Should().Be(expected);
         _fixture.Data.CreateCallCount.Should().Be(creates);
-        _fixture.Probe.Calls.Should().BeEmpty("flag off, no write consults Dataverse — the routes are unchanged");
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty("flag off, no write consults Dataverse — the routes are unchanged");
     }
 
     [Fact(DisplayName = "Task 036 (NFR-01): flag ON, a probe that FAILS denies the write — no fallback to a constant")]
@@ -1152,7 +1152,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(
             ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
-        _fixture.Probe.Fault = new HttpRequestException("RetrievePrincipalAccess failed");
+        _fixture.Probe.AppOnlyFault = new HttpRequestException("RetrievePrincipalAccess failed");
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
@@ -1167,7 +1167,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(ExternalDataService.TodoRootKind.Project, InScopeProject,
             ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate), dataverseDecides: true);
-        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read);
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
@@ -1175,7 +1175,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         response.StatusCode.Should().Be(HttpStatusCode.Created,
             "the linked contact's grant is its own term (B-17): Dataverse widens the rights, it never narrows them");
         _fixture.Data.CreateCallCount.Should().Be(1);
-        _fixture.Probe.PrivilegeCalls.Should().BeEmpty("the grant already carries Create; the privilege could not change it");
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty("the grant already carries Create; the privilege could not change it");
     }
 
     [Fact(DisplayName = "Task 036: flag ON, a root outside the composed set (or vetoed off it) is 403 WITHOUT a Dataverse call")]
@@ -1184,14 +1184,14 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(
             ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
-        _fixture.Probe.Answer("sprk_projects", OtherProject, AccessRights.Read | AccessRights.AppendTo);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", OtherProject, AccessRights.Read | AccessRights.AppendTo);
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{OtherProject}/todos", ValidCreate());
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         _fixture.Data.CreateCallCount.Should().Be(0);
-        _fixture.Probe.Calls.Should().BeEmpty("the deny list and the Restricted veto act on the composed set — Read comes first");
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty("the deny list and the Restricted veto act on the composed set — Read comes first");
     }
 
     [Theory(DisplayName = "Task 036: flag ON, PATCH a to-do — confirmed on the TO-DO itself: Read-only is 403, Write is 204")]
@@ -1203,17 +1203,17 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Principal = SystemUserHolding(
             ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
         _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
-        _fixture.Probe.Answer("sprk_todos", TodoId, dataverse);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_todos", TodoId, dataverse);
         // A Write on the ROOT must not stand in for Write on the to-do.
-        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.Write | AccessRights.AppendTo);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read | AccessRights.Write | AccessRights.AppendTo);
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
 
         response.StatusCode.Should().Be(expected);
         _fixture.Data.UpdateCallCount.Should().Be(updates);
-        _fixture.Probe.Calls.Select(c => (c.EntitySet, c.RecordId)).Should().Equal(new[] { ("sprk_todos", TodoId) });
-        _fixture.Probe.PrivilegeCalls.Should().BeEmpty("an update creates nothing, so no table Create privilege is asked");
+        _fixture.Probe.AppOnlyCalls.Select(c => (c.EntitySet, c.RecordId)).Should().Equal(new[] { ("sprk_todos", TodoId) });
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty("an update creates nothing, so no table Create privilege is asked");
     }
 
     [Fact(DisplayName = "Task 036 twin: flag OFF, a Read-only PATCH is 403 and Dataverse is never asked")]
@@ -1223,14 +1223,14 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Principal = SystemUserHolding(
             ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: false);
         _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
-        _fixture.Probe.Answer("sprk_todos", TodoId, AccessRights.Read | AccessRights.Write);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_todos", TodoId, AccessRights.Read | AccessRights.Write);
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         _fixture.Data.UpdateCallCount.Should().Be(0);
-        _fixture.Probe.Calls.Should().BeEmpty();
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty();
     }
 
     [Theory(DisplayName = "Task 036 fix round 2 (F2): a confirmation that names no child privilege (PATCH to-do, delete-own) logs no warning and adds no Create")]
@@ -1293,10 +1293,10 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(
             ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
-        _fixture.Probe.Answer("sprk_projects", InScopeProject, dataverse);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, dataverse);
         if (holdsCreate)
         {
-            _fixture.Probe.Holds(EventCreatePrivilege);
+            _fixture.Probe.HoldsAppOnly(Fr20SystemUser, EventCreatePrivilege);
         }
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -1313,7 +1313,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(
             ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: false);
-        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo);
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
@@ -1321,7 +1321,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         _fixture.Data.CreateEventCallCount.Should().Be(0);
-        _fixture.Probe.Calls.Should().BeEmpty();
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty();
     }
 
     // =====================================================================
@@ -1359,17 +1359,17 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     {
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(kind, rootId, AccessRights.Read, dataverseDecides: true);
-        _fixture.Probe.Answer(EntitySetOf(kind), rootId, dataverse);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, EntitySetOf(kind), rootId, dataverse);
         if (holdsCreate)
         {
-            _fixture.Probe.Holds(TodoCreatePrivilege);
+            _fixture.Probe.HoldsAppOnly(Fr20SystemUser, TodoCreatePrivilege);
         }
 
         using var client = _fixture.CreateAuthenticatedClient();
         var json = await ListJsonAsync(client, $"/api/v1/external/{segment}/{rootId}/todos");
 
         json.GetProperty("canCreate").GetBoolean().Should().Be(expected);
-        _fixture.Probe.Calls.Should().ContainSingle("one probe, for the record in hand");
+        _fixture.Probe.AppOnlyCalls.Should().ContainSingle("one probe, for the record in hand");
     }
 
     [Fact(DisplayName = "Task 036 F4 (NFR-01): flag ON, a probe that FAILS reports canCreate=false and still lists")]
@@ -1378,8 +1378,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(
             ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
-        _fixture.Probe.Holds(TodoCreatePrivilege);
-        _fixture.Probe.Fault = new HttpRequestException("RetrievePrincipalAccess failed");
+        _fixture.Probe.HoldsAppOnly(Fr20SystemUser, TodoCreatePrivilege);
+        _fixture.Probe.AppOnlyFault = new HttpRequestException("RetrievePrincipalAccess failed");
 
         using var client = _fixture.CreateAuthenticatedClient();
         var json = await ListJsonAsync(client, $"/api/v1/external/projects/{InScopeProject}/todos");
@@ -1395,14 +1395,14 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Reset();
         var rights = collaborate ? ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate) : AccessRights.Read;
         _fixture.Principal = SystemUserHolding(ExternalDataService.TodoRootKind.Project, InScopeProject, rights, dataverseDecides: false);
-        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo).Holds(TodoCreatePrivilege);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo).HoldsAppOnly(Fr20SystemUser, TodoCreatePrivilege);
 
         using var client = _fixture.CreateAuthenticatedClient();
         var json = await ListJsonAsync(client, $"/api/v1/external/projects/{InScopeProject}/todos");
 
         json.TryGetProperty("canCreate", out _).Should().BeFalse("flag off, the wire is byte-for-byte what it was");
-        _fixture.Probe.Calls.Should().BeEmpty();
-        _fixture.Probe.PrivilegeCalls.Should().BeEmpty();
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty();
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty();
     }
 
     [Theory(DisplayName = "Task 036 F4: flag ON, the PROJECT event list's canCreate is the event create route's Dataverse answer")]
@@ -1415,10 +1415,10 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(
             ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
-        _fixture.Probe.Answer("sprk_projects", InScopeProject, dataverse);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, dataverse);
         if (holdsCreate)
         {
-            _fixture.Probe.Holds(EventCreatePrivilege);
+            _fixture.Probe.HoldsAppOnly(Fr20SystemUser, EventCreatePrivilege);
         }
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -1437,13 +1437,13 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
             ? (ExternalDataService.TodoRootKind.Matter, InScopeMatter)
             : (ExternalDataService.TodoRootKind.Project, InScopeProject);
         _fixture.Principal = SystemUserHolding(kind, rootId, AccessRights.Read, dataverseDecides);
-        _fixture.Probe.Answer(EntitySetOf(kind), rootId, AccessRights.Read | AccessRights.AppendTo).Holds(EventCreatePrivilege);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, EntitySetOf(kind), rootId, AccessRights.Read | AccessRights.AppendTo).HoldsAppOnly(Fr20SystemUser, EventCreatePrivilege);
 
         using var client = _fixture.CreateAuthenticatedClient();
         var json = await ListJsonAsync(client, $"/api/v1/external/{segment}/{rootId}/events");
 
         json.TryGetProperty("canCreate", out _).Should().BeFalse();
-        _fixture.Probe.Calls.Should().BeEmpty();
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty();
     }
 
     // =====================================================================
@@ -1452,6 +1452,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     // SAME questions app-only, naming its systemuser (CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync /
     // PrincipalHoldsPrivilegeAppOnlyAsync). The double answers the app-only questions separately from the OBO ones, so an
     // allow below can only come from the app-only path; before the change the OBO path found nothing and refused.
+    // Task 036 option C (owner 2026-10-20) widens this to EVERY systemuser (the Fr20c rows; the Fr20 rows above are asked
+    // app-only too): the OBO questions are never asked on /api/v1/external.
     // =====================================================================
 
     /// <summary><see cref="SystemUserHolding"/>, resolved through the WorkforceHome home link.</summary>
@@ -1594,12 +1596,14 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Probe.Calls.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "Task 036 (a) twin: a Spaarke-tenant systemuser keeps the OBO probe and the app-only path is never called")]
-    public async Task Fr20a_ANormalSystemUser_StillUsesObo_AndNeverTheAppOnlyPath()
+    [Fact(DisplayName = "Task 036 option C: a Spaarke-tenant systemuser is confirmed app-only, naming its systemuser — the OBO probe is never called on /api/v1/external")]
+    public async Task Fr20c_ANormalSystemUser_UsesTheAppOnlyPath_AndNeverObo()
     {
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(
             ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        _fixture.Principal.ResolvedThroughHomeLink.Should().BeFalse("this caller signed in with a Spaarke-tenant token");
+        // The OBO path would also allow, were it (wrongly) asked: only the app-only path may answer.
         _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo).Holds(TodoCreatePrivilege);
         _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo)
             .HoldsAppOnly(Fr20SystemUser, TodoCreatePrivilege);
@@ -1608,10 +1612,52 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        _fixture.Probe.Calls.Should().ContainSingle();
-        _fixture.Probe.PrivilegeCalls.Should().Equal(new[] { TodoCreatePrivilege });
-        _fixture.Probe.AppOnlyCalls.Should().BeEmpty("a caller whose token CAN be exchanged is asked OBO, as before");
-        _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty();
+        _fixture.Probe.AppOnlyCalls.Should().Equal(new[] { (Fr20SystemUser, "sprk_projects", InScopeProject) },
+            "every systemuser is asked app-only, naming the RESOLVED systemuser (ADR-028: no OBO on this plane)");
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().Equal(new[] { (Fr20SystemUser, TodoCreatePrivilege) });
+        _fixture.Probe.Calls.Should().BeEmpty("the caller's token is never exchanged on /api/v1/external");
+        _fixture.Probe.PrivilegeCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Task 036 option C: the confirmation names every systemuser's resolved id; no systemuser id is Guid.Empty (fail closed)")]
+    public void Fr20c_AppOnlyConfirmationPrincipal_IsEverySystemUser_AndEmptyFailsClosed()
+    {
+        var spaarkeTenant = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        var homeLinked = HomeLinkedSystemUserHolding(ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read);
+        var homeLinkedWithoutId = HomeLinkedSystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, systemUserId: Guid.Empty);
+        var contact = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = Guid.NewGuid(),
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        };
+
+        Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.AppOnlyConfirmationPrincipal(spaarkeTenant).Should().Be(Fr20SystemUser,
+            "a Spaarke-tenant systemuser is confirmed app-only too (option C), not OBO");
+        Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.AppOnlyConfirmationPrincipal(homeLinked).Should().Be(Fr20SystemUser);
+        Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.AppOnlyConfirmationPrincipal(homeLinkedWithoutId).Should().Be(Guid.Empty);
+        Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.AppOnlyConfirmationPrincipal(contact).Should().Be(Guid.Empty);
+        Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.AppOnlyConfirmationPrincipal(null).Should().Be(Guid.Empty);
+    }
+
+    [Fact(DisplayName = "Task 036 option C: an app-only refusal for a Spaarke-tenant systemuser is not overturned by OBO")]
+    public async Task Fr20c_ANormalSystemUser_AppOnlyRefusal_IsFinal()
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.Answer("sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo).Holds(TodoCreatePrivilege);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.CreateCallCount.Should().Be(0);
+        _fixture.Probe.Calls.Should().BeEmpty();
+        _fixture.Probe.PrivilegeCalls.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "Task 036 (a) twin: a contact caller is unaffected — its grants decide and neither path is asked")]

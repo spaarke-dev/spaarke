@@ -354,14 +354,14 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         var id = _fixture.Seed(KindOf(segment), contact: CallerContact, parents: Project(RecordA));
         _fixture.Principal = DataverseDecidedSystemUserOn(RecordA, linkedContact: CallerContact);
         // Everything but Delete: Write and AppendTo on the row admit no delete.
-        _fixture.Probe.Answer(DeletableSetOf(segment), id, AccessRights.Read | AccessRights.Write | AccessRights.AppendTo);
+        _fixture.Probe.AnswerAppOnly(CallerUser, DeletableSetOf(segment), id, AccessRights.Read | AccessRights.Write | AccessRights.AppendTo);
 
         using var response = await Delete(segment, id);
 
         await ShouldBeTheUniformDenial(response);
         _fixture.Exists(KindOf(segment), id).Should().BeTrue("nothing is deleted without Dataverse's Delete");
-        _fixture.Probe.Calls.Should().ContainSingle().Which.Should().Match<(string? Token, string EntitySet, Guid RecordId)>(
-            c => c.EntitySet == DeletableSetOf(segment) && c.RecordId == id, "Dataverse is asked about the ROW, not its parent");
+        _fixture.Probe.AppOnlyCalls.Should().ContainSingle().Which.Should().Match<(Guid SystemUserId, string EntitySet, Guid RecordId)>(
+            c => c.SystemUserId == CallerUser && c.EntitySet == DeletableSetOf(segment) && c.RecordId == id, "Dataverse is asked about the ROW, not its parent");
     }
 
     [Theory]
@@ -370,13 +370,13 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     {
         var id = _fixture.Seed(KindOf(segment), contact: CallerContact, parents: Project(RecordA));
         _fixture.Principal = DataverseDecidedSystemUserOn(RecordA, linkedContact: CallerContact);
-        _fixture.Probe.Answer(DeletableSetOf(segment), id, AccessRights.Read | AccessRights.Delete);
+        _fixture.Probe.AnswerAppOnly(CallerUser, DeletableSetOf(segment), id, AccessRights.Read | AccessRights.Delete);
 
         using var response = await Delete(segment, id);
 
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
         _fixture.Exists(KindOf(segment), id).Should().BeFalse();
-        _fixture.Probe.Calls.Should().ContainSingle();
+        _fixture.Probe.AppOnlyCalls.Should().ContainSingle();
     }
 
     [Theory]
@@ -385,13 +385,13 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     {
         var id = _fixture.Seed(KindOf(segment), contact: OtherContact, parents: Project(RecordA));
         _fixture.Principal = DataverseDecidedSystemUserOn(RecordA, linkedContact: CallerContact);
-        _fixture.Probe.Answer(DeletableSetOf(segment), id, AccessRights.Read | AccessRights.Delete);
+        _fixture.Probe.AnswerAppOnly(CallerUser, DeletableSetOf(segment), id, AccessRights.Read | AccessRights.Delete);
 
         using var response = await Delete(segment, id);
 
         await ShouldBeTheUniformDenial(response);
         _fixture.Exists(KindOf(segment), id).Should().BeTrue();
-        _fixture.Probe.Calls.Should().BeEmpty("the stamp is checked first, and a row that is not the caller's asks nothing");
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty("the stamp is checked first, and a row that is not the caller's asks nothing");
     }
 
     [Theory]
@@ -400,8 +400,8 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     {
         var id = _fixture.Seed(KindOf(segment), contact: CallerContact, parents: Project(RecordA));
         _fixture.Principal = DataverseDecidedSystemUserOn(RecordA, linkedContact: CallerContact);
-        _fixture.Probe.Answer(DeletableSetOf(segment), id, AccessRights.Read | AccessRights.Delete);
-        _fixture.Probe.Fault = new HttpRequestException("Dataverse unreachable");
+        _fixture.Probe.AnswerAppOnly(CallerUser, DeletableSetOf(segment), id, AccessRights.Read | AccessRights.Delete);
+        _fixture.Probe.AppOnlyFault = new HttpRequestException("Dataverse unreachable");
 
         using var response = await Delete(segment, id);
 
@@ -420,7 +420,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
         _fixture.Exists(KindOf(segment), id).Should().BeFalse();
-        _fixture.Probe.Calls.Should().BeEmpty("a caller whose access Dataverse did not decide is decided exactly as before");
+        _fixture.Probe.AppOnlyCalls.Should().BeEmpty("a caller whose access Dataverse did not decide is decided exactly as before");
     }
 
     // =====================================================================

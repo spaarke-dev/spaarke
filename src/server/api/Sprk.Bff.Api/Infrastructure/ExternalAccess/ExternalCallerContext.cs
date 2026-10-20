@@ -507,9 +507,10 @@ public sealed class WorkforcePrincipal
     /// On-Behalf-Of for a Dataverse token in Spaarke's tenant. Set only by the resolver's home-link branch; <c>false</c> for
     /// every Spaarke-tenant systemuser and every contact.
     /// </summary>
-    /// <remarks>Task 036 owner decision (a), 2026-10-18: a Dataverse write confirmation for such a principal asks the same
-    /// questions app-only, naming <see cref="SystemUserId"/> (<c>CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync</c>,
-    /// <c>PrincipalHoldsPrivilegeAppOnlyAsync</c>). The path is chosen from this property, never from a failed exchange.</remarks>
+    /// <remarks>Task 036 owner decision (a), 2026-10-18, widened by option C on 2026-10-20: a Dataverse write confirmation
+    /// on <c>/api/v1/external</c> asks app-only, naming <see cref="SystemUserId"/>
+    /// (<c>CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync</c>, <c>PrincipalHoldsPrivilegeAppOnlyAsync</c>), for
+    /// EVERY systemuser, so this property no longer chooses the path; it records how the principal was resolved.</remarks>
     public bool ResolvedThroughHomeLink { get; init; }
 
     /// <summary>The workforce AAD object id (<c>oid</c> claim) the caller was resolved by.</summary>
