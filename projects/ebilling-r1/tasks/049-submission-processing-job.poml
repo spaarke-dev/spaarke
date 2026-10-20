@@ -4,7 +4,7 @@
     <title>InvoiceSubmissionProcessing job</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>The only creator of sprk_invoice (ADR-002), all-or-nothing persistence across several tables, idempotent re-delivery, and the point where AI output turns into accept / reject decisions.</rigor-reason>
     <model-tier>opus</model-tier>

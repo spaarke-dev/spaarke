@@ -11,10 +11,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Parallel mode. 50/79 complete. 049 in progress, nearly done. HEAD 0d4e64312 (local). On the branch since the last checkpoint: §13a ontology limits (d45b1403c); part E F4-1 fix, a linked submission is never marked Failed (8098ec9b3, ontology PASS) + notes 14b (e05de72e6); D-122 wiring 873b5a740 + 331e71eda (ontology PASS); D-122 follow-up 09e832081 + 552e5e0bb (ontology PASS: missing listed Signal shrinks the set and retries once; pre-D-122 fallback removed; set = every Open/Acknowledged Signal on invoice + lines); F1-3 ec6516c38, 9563a2fc2, 174a203e3 + notes 13d 0d4e64312 (OUT FOR ONTOLOGY REVIEW: shape guards on firm-supplied facts, PreflightRefusal at persist → signalPlanRefusals, permanent vs transient write refusals → signalWriteRefusals, the run continues to the record). Running: impl049held (sonnet, base 0d4e64312): Held presentation for Blocked, CODE_PATTERN pin vs RuleReview ruleTypes.ts:63, a real-SignalWriter test, sprk_ruleset.md gets the 2 new F1-3 reasons, notes 13e |
-| **Step** | Last verify on 0d4e64312: build 0/0, broad filter 8,250/0, ArchTests 1,214/0. ADR-010 ceiling 169. Dev BFF is R3 00aba6d99 (no 015 e0df77339: the 015 delete script must not run); since 21:13Z v2 tokens, any dev BFF candidate must contain R3 077 (283466d40). Origin is 33723dbdc; ask the owner before any push |
+| **Task** | Parallel mode. 51/79 complete. 049 DONE 2026-10-20 (POML + TASK-INDEX ✅). Ontology-r1 passed every 049 range, including D-122, F1-3 and F2, Held, R1/R4 and R2/R3/R5. The Opus adversarial review (R1-R6) is fixed; R7 follow-up 9f1f54783. Owner decisions this session: D-133 (sprk_adminattention + view "Submissions needing attention"; created live on dev 2026-10-19 with notices; main form updated). Next startable tasks: 050 (retire the legacy extraction path), 100 (review read model + line decisions), 105 (Override server). 052 waits on 105; 130 waits on 100; 152 waits on 103 |
+| **Step** | Last verify 913e37266: build 0/0, broad filter 8,344/0, ArchTests 1,214; R7 agent at 2ef21b6e1: 8,362/0. ADR-010 ceiling 169. The owner approved pushes 2026-10-19 ("ensure all work is committed and pushed"); push after each verified batch. Dev BFF is R3 00aba6d99 (no 015 e0df77339: the 015 delete script must not run); any dev BFF candidate must contain R3 077 (283466d40). #1911 shows CONFLICTING against master: resolve before it leaves draft |
 | **Status** | in-progress (parallel mode) |
-| **Next Action** | (1) Wait for ontology's F1-3 verdict. They are checking whether judgement (ii) holds: billing Signals are not nightly re-evaluated, so a permanently refused ownership Signal may never be raised later. If they ask for a change, brief a fix agent. (2) When impl049held reports: pick, broad filter, send ontology the range. (3) Full verify, one Opus adversarial review of 049 (adversarial-reviewer, whole 049 change set), fix F-class findings, mark 049 done (POML + TASK-INDEX: 049 is still 🔲, set ✅ at the end). (4) Queued: the 077 F1-b note. Then the next 🔲 tasks in TASK-INDEX |
+| **Next Action** | (1) Brief 050, 100 and 105 as parallel implementer agents (read their POMLs; 100 and 105 are FULL rigor). (2) The 077 F1-b note (queued). (3) field-mapping-server-write-path-r1 will send its tasks 025 and 032 and the registry rule for review; their W2 waits on #1911 (their owner decides). (4) Owner manual steps: add the 7 tables to the apps (including sprk_invoicesubmission → Matter Management, so the D-133 view is reachable); export sprk_submittedby + sprk_adminattention + the view + the form to SpaarkeMaster |
 
 ### Ranges out for review
 - ontology-r1 PASS: D-130 closed (review round ae5197e25 + re-check fixes 77690aa4f). PASS 2026-10-19: 452acb6c0 PreflightRefusal, 07a2f67b3 D-170 sweep; 650109d97 close method approved once the F3-1..3 tests land. Earlier PASS: 072 (3ce07e0e3), 049 D-104 (295aa332a), D-125 (183c2cf47). Part D review FINDINGS addressed in pieces; core fixes PASS 5a04a41fb.
@@ -74,7 +74,7 @@ D-111 to D-120 are in the decisions log.
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 049 (F1-3 in ontology review; Held presentation running) |
+| **Task ID** | next: 050 / 100 / 105 |
 
 ## Next Action
 
