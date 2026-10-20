@@ -582,3 +582,17 @@ about 39.2 MB zipped, well under 55 MB.
   that is already flagged as capped.
 - The concise ADR edits (ADR-034 A2; ADR-028 A5, with an optional A9 pointer) are drafted for the main session in
   `036-adr-edits-owner-a-f.md`. Edit 5c of `036-adr034-concise-amendment.md` is marked superseded.
+
+## 13. Option C (owner 2026-10-20) — before → after
+
+| # | Item | Before | After |
+|---|---|---|---|
+| C | Write confirmation on `/api/v1/external` | OBO probe (`GetCallerRightsAsync` / `CallerHoldsPrivilegeAsync`) for a Spaarke-tenant systemuser; app-only only for a home-linked one | App-only, naming the resolved systemuser, for **every** systemuser (`ExternalProjectDataEndpoints.CallerRightsReader` / `CallerPrivilegeReader`; `AppOnlyConfirmationPrincipal` = `SystemUserId ?? Guid.Empty`). No OBO on the plane. `CallerPrincipal.ResolvedThroughHomeLink` no longer chooses a path (kept as a record of how the principal was resolved) |
+| F | 404 right after a create | App-only path mapped 404 to None at once | Re-asked on `CallerRecordAccessProbe.NotFoundRetryDelay`'s schedule (400 ms, 1200 ms) through a new optional `reaskOnNotFound` hook on `DataverseWebApiService.RetrievePrincipalRightsOrUnknownAsync`; 403 answered at once |
+| Fault | 403 `0x8004A110` (no `prvActOnBehalfOfAnotherUser`) | Read as "no rights", logged at Information | `RetrievePrincipalRightsOrUnknownAsync` → UNKNOWN → None with its own Warning (`answered a fault, not an access answer`) |
+| K iii | Slow Dataverse | No bound on the app-only calls | 15 s linked timeout (`AppOnlyQuestionTimeout`) on both app-only questions; a timeout answers None / false with a Warning; the caller's own cancellation is rethrown |
+| Guard | No-OBO rule | Prose only | `tests/Spaarke.ArchTests/ExternalPlaneNoOboGuardTests.cs`: no token-taking probe question, MSAL OBO exchange, `ForUser*`, `*AsUserAsync` or `IDataverseUserClient` in `Api/ExternalAccess/External*.cs`; vacuity, must-fire and must-not-fire controls |
+| K i, ii | Guide §12.8 | No WorkforceHome live check; "writes exactly what the same user could write in the model-driven app" | Verify (vi) WorkforceHome check and (vii) disabled / unlicensed / team-role checks; parity stated as expected, not proven for team-inherited roles |
+| K iv | Probe comments | Class summary and constructor warning implied the probe serves `/api/v1/external` | The OBO questions serve internal routes only; the external plane uses the app-only questions |
+
+Tests and mutations: see the PR description for this round. ADR edits: `036-adr-edits-owner-a-f.md` § Option C.

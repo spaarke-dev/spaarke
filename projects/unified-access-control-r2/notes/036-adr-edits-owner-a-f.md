@@ -131,3 +131,36 @@ New:
 ADR-028 A5 ("No OBO is sanctioned anywhere by A5") and A9 ("no OBO on any collaboration plane") read against ADR-034
 A2's OBO probe for Spaarke-tenant callers (`CallerRecordAccessProbe`, WhoAmI + RetrievePrincipalAccess as the caller).
 That tension predates decision (a); this change does not widen it. Decision (a) adds no token exchange.
+
+## Option C (owner 2026-10-20) — the edits to apply instead
+
+> Option C makes the app-only, named-principal confirmation the write confirmation of EVERY systemuser on
+> `/api/v1/external`, with no OBO on that plane. It resolves the observation above. Anchors are as on this branch after
+> the option C round. There is no full ADR-028 under `docs/adr/`, so every ADR-028 change is a concise edit.
+
+- **ADR-034 A1** (line 116): apply as drafted above.
+- **ADR-034 A2** (line 93): **superseded** by A2c below.
+- **ADR-034 A3** (line 93): apply as drafted above.
+- **ADR-034 A4** (line 115): apply with this New text instead:
+  `fall back to the membership walk, an app-only read or a constant when Dataverse's answer cannot be read (the app-only, named-principal confirmation is not a fallback: it is the plane's only confirmation, for every systemuser, and a fault on it adds no rights either), or stamp`
+- **ADR-034 A2c** (line 93). Old: `` against Dataverse before writing, through the existing `CallerRecordAccessProbe`: adding a child ``
+  New: `` against Dataverse before writing, app-only, naming the caller's resolved systemuser with `MSCRMCallerID` impersonation (`CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync` / `PrincipalHoldsPrivilegeAppOnlyAsync`, ADR-028 A5's mechanism) — for every systemuser, never OBO (task 036 decision a, widened by option C, owner 2026-10-20); a 404 is re-asked on the replication-lag schedule, an impersonation fault is UNKNOWN and adds no rights, and each question is bounded at 15 s: adding a child ``
+  and, in the same bullet, Old: `` and `RouteAuthorizationGuardTests.ExternalWrites` (every `` New: `` `ExternalPlaneNoOboGuardTests` (no token-taking probe question in `Api/ExternalAccess/External*.cs`), and `RouteAuthorizationGuardTests.ExternalWrites` (every ``
+- **ADR-034 header** (line 26). Old: `` (`CallerRecordAccessProbe`). The membership walk `` New: `` (asked app-only, naming the user's systemuser; never OBO on that plane — task 036 option C). The membership walk ``
+- **ADR-028 B1, widened.** Insert as drafted above, with the heading `### Scope extension (2026-10-18, widened 2026-10-20, owner-accepted): confirming a systemuser's write on /api/v1/external`
+  and this first paragraph: "A licensed core user's SPA/Teams token is never exchanged on `/api/v1/external` (A1–A3), and
+  one resolved through A9's stored home link holds a customer-directory token that could not be exchanged anyway. To
+  confirm **every systemuser's** write there (ADR-034 A2) …"; the condition "chosen from the resolved principal
+  (`CallerPrincipal.ResolvedThroughHomeLink`) …" becomes "the only confirmation on the plane, for every systemuser
+  (`ExternalProjectDataEndpoints.AppOnlyConfirmationPrincipal`), never a fallback after a token exchange"; add the
+  conditions "a 404 is re-asked on `CallerRecordAccessProbe.NotFoundRetryDelay`'s schedule; a 403 that is not an access
+  answer (e.g. `0x8004A110`) is UNKNOWN and logged as a Warning; each question is bounded at 15 s" and "Enforced by:
+  `tests/Spaarke.ArchTests/ExternalPlaneNoOboGuardTests.cs`".
+- **ADR-028 A5 deployment prerequisite 3** (after line 370), from the independent critique: "3. **Conditional Access
+  targets the BFF API and the SPA client.** On `/api/v1/external` the BFF never exchanges the user's token (A1–A3, and
+  the write confirmation above), so a Conditional Access or sign-in-risk policy that targets only Dataverse, Graph or
+  SharePoint is never evaluated for SPA/Teams users. Such policies MUST target the BFF API app registration and the SPA
+  client, where those users sign in."
+- **ADR-028 B2, widened** (line 642): "- **Write confirmation for every core user** (2026-10-18, widened 2026-10-20): a
+  licensed core user, Spaarke-tenant or resolved through the stored link, is confirmed for ADR-034 A2 writes app-only,
+  impersonating their systemuser ([A5 scope extension](#…)); no token of theirs is exchanged."

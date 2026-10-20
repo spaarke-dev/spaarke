@@ -401,27 +401,27 @@ group) while **`ExternalAccess:ImpersonatedRootSets:Enabled` is `true`**:
   type, cached two minutes, capped at 5,000 rows — a capped set is `Capped` and the module data response says
   `truncated`). That answer confers **Read**.
 - **Every write is confirmed by Dataverse.** Before any write on that plane — create to-do, upload, create event, edit a
-  to-do, post a message, delete own — the route asks Dataverse, as the user, for the user's rights on the target record
-  through the existing `CallerRecordAccessProbe` (RetrievePrincipalAccess, OBO, fail closed). A child (to-do, document,
-  event, message) is admitted by `AppendTo` on the parent record **AND** the user's own Create privilege on the child
-  table (`prvCreatesprk_Todo` / `_Document` / `_Event` / `_Communication`, asked as the user through
-  `CallerRecordAccessProbe.CallerHoldsPrivilegeAsync`, uncached). The second half matters because the BFF writes the
-  child app-only: Dataverse would otherwise never check the user's Create privilege, and a user MDA refuses could create
-  the row here (task 036 fix round 1). `Write` admits an edit; `Delete` admits a delete-own, which also still requires
-  the creator stamp.
-- **A WorkforceHome-linked user is confirmed app-only, naming them** (task 036 decision (a), owner 2026-10-18). A
-  systemuser who signed in through WorkforceHome (ADR-028 A9) and was resolved through the stored home link holds a
-  customer-directory token, which cannot be exchanged for a Dataverse token in Spaarke's tenant. For that principal the
-  same two questions are asked app-only, as the BFF application user, naming the resolved systemuser:
-  `RetrievePrincipalAccess` with `Principal = systemusers(<id>)` on the target record
-  (`CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync`, over the existing
-  `DataverseWebApiService.RetrievePrincipalRightsAsync`), and `RetrieveUserSetOfPrivilegesByNames` on that systemuser for
-  the child Create privilege (`PrincipalHoldsPrivilegeAppOnlyAsync`). Both impersonate the user, like the A5 read, and
-  rest on the same trust basis: the id is the one the authenticated identity was resolved to, never client-supplied, and
-  Dataverse answers from that user's own roles, teams and shares. The path is chosen from the resolved principal
-  (`CallerPrincipal.ResolvedThroughHomeLink`), never by trying OBO and falling back; every Spaarke-tenant caller keeps
-  the OBO probe. The same answer drives that user's list `canCreate`, and `/me` says `writeAccessPerRecord: true` for
-  them as for every Dataverse-decided user.
+  to-do, post a message, delete own — the route asks Dataverse for the user's rights on the target record: app-only, as
+  the BFF application user, naming the user's resolved systemuser and impersonating it (`RetrievePrincipalAccess` with
+  `Principal = systemusers(<id>)`, through `CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync` over
+  `DataverseWebApiService.RetrievePrincipalRightsOrUnknownAsync`; fail closed). A child (to-do, document, event, message)
+  is admitted by `AppendTo` on the parent record **AND** the user's own Create privilege on the child table
+  (`prvCreatesprk_Todo` / `_Document` / `_Event` / `_Communication`, asked the same way through
+  `CallerRecordAccessProbe.PrincipalHoldsPrivilegeAppOnlyAsync` — `RetrieveUserSetOfPrivilegesByNames` on that
+  systemuser — uncached). The second half matters because the BFF writes the child app-only: Dataverse would otherwise
+  never check the user's Create privilege, and a user MDA refuses could create the row here (task 036 fix round 1).
+  `Write` admits an edit; `Delete` admits a delete-own, which also still requires the creator stamp.
+- **The same mechanism for every systemuser** (task 036 decision (a), owner 2026-10-18, widened by option C, owner
+  2026-10-20). ADR-028 forbids exchanging the caller's token on this plane (A1–A3), and a WorkforceHome-linked user's
+  customer-directory token (ADR-028 A9) could not be exchanged for Dataverse anyway. So every systemuser — whether they
+  signed in with a Spaarke-tenant token or through the stored home link — is confirmed by the questions above, under
+  ADR-028 A5's trust basis: the id is the one the authenticated identity was resolved to, never client-supplied, and
+  Dataverse answers from that user's own roles, teams and shares. The plane's read set (the impersonated read) and its
+  write confirmation therefore rest on one mechanism and one resolved id. A 404 is re-asked on the replication-lag
+  schedule (a write right after a create); an impersonation fault (`0x8004A110`) is UNKNOWN, not a denial, and adds no
+  rights; each question is bounded at 15 seconds. The same answer drives the user's list `canCreate`, and `/me` says
+  `writeAccessPerRecord: true` for every Dataverse-decided user. Enforced by:
+  `tests/Spaarke.ArchTests/ExternalPlaneNoOboGuardTests.cs` (no token-taking probe question on the plane).
 - **Exempt — a service request's writes** (upload to it, a message on it, deleting one's own request) keep the
   requester rule in both flag states and are not confirmed (task 036 decision e, accepted by the owner). The requester's
   access is explicit access Dataverse cannot see, like the B-17 contact grants: widening could add nothing, and replacing
@@ -464,8 +464,8 @@ Dataverse Read reaches a record through their unit's depth (owner D1).
   equivalent privileges), exactly as in the model-driven app.
 - **MUST** fail closed: a failed impersonated read (a fault, a missing or empty `SystemUserId`, no source) fails the
   composition; a failed, refused or absent rights answer adds no rights. **MUST NOT** fall back to the membership walk, an
-  app-only read or a constant. (The app-only, named-principal confirmation of a WorkforceHome-linked systemuser is not a
-  fallback: it is chosen from how that principal was resolved, and a fault on it adds no rights either.)
+  app-only read or a constant. (The app-only, named-principal confirmation is not a fallback: it is the plane's only
+  confirmation, for every systemuser, and a fault on it adds no rights either.)
 - **MUST NOT** stamp `MembershipTermRights`, or any constant, on a record of a flag-on systemuser composition.
 - **MUST NOT** edit `PlatformOwnershipColumns`, or otherwise narrow A1.1, for the flag-off path.
 - **MUST NOT** turn the flag on in an environment before tasks 142 and 143 are complete there and the task 034 negative
@@ -487,9 +487,11 @@ Dataverse Read reaches a record through their unit's depth (owner D1).
   route's own Dataverse answer and `/me` says `writeAccessPerRecord`, so the SPA offers create/upload, download and the
   to-do status toggle where the routes admit them. Still level-gated for such a user: Invite User and the issued-grants
   list (contact-grant routes refuse a systemuser, so hiding them is correct).
-- **WorkforceHome-linked users (ADR-028 A9) are confirmed app-only** (settled, task 036 decision (a), owner 2026-10-18;
-  above). Their writes and their lists' `canCreate` follow Dataverse's answer for their own systemuser, as in the
-  model-driven app, so such a tenant needs nothing beyond the flag's other preconditions.
+- **Every systemuser is confirmed app-only, naming them** (settled, task 036 decision (a), owner 2026-10-18, widened by
+  option C, owner 2026-10-20; above). Writes and lists' `canCreate` follow Dataverse's answer for the user's own
+  systemuser, so a WorkforceHome tenant needs nothing beyond the flag's other preconditions. That answer is expected to
+  match what the model-driven app allows the same user; it is not yet proven live for roles a user holds only through a
+  team, or for disabled and unlicensed users (the 036 dev gate checks them).
 - **A capped set keeps the most recently modified records** (register item C-1; settled, task 036 decision (f), owner
   2026-10-18): the impersonated read orders by `modifiedon desc` before its 5,000-row `$top`, and the cap is still
   flagged. The flag-off membership walk keeps its own total order (primary id ascending, FR-14), which its page cookies

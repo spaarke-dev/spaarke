@@ -2183,7 +2183,7 @@ contacts and workforce contacts are decided exactly as before in both states.
 | | Off (the default; transitional) | On (the end state) |
 |---|---|---|
 | Records an internal user sees | The BFF's membership rules (ownership, owning team, owning business unit, the "Assigned *" contacts), each at Read / Write / Create | Dataverse's own answer, read AS the user — one id-only read per root type (project, matter, work assignment), cached 2 minutes — each at Read |
-| A write (create to-do, upload, create event, edit to-do, post a message, delete own) | Decided by the rights above | The BFF also asks Dataverse, as the user, for the user's rights on the target record (one call per write; for a user who signed in through WorkforceHome, the same questions app-only naming their systemuser — precondition 3). A child (to-do, document, event, message) needs AppendTo on the parent **and** the user's Create privilege on the child table (`prvCreatesprk_Todo`, `prvCreatesprk_Document`, `prvCreatesprk_Event`, `prvCreatesprk_Communication`; a second call); an edit needs Write on the to-do; a delete-own needs Delete on the row as well as the creator stamp. A service request's writes stay the requester rule in both states (accepted, decision e) |
+| A write (create to-do, upload, create event, edit to-do, post a message, delete own) | Decided by the rights above | The BFF also asks Dataverse for the user's rights on the target record, app-only, impersonating the user's systemuser (one call per write, for every internal user however they signed in — precondition 3). A child (to-do, document, event, message) needs AppendTo on the parent **and** the user's Create privilege on the child table (`prvCreatesprk_Todo`, `prvCreatesprk_Document`, `prvCreatesprk_Event`, `prvCreatesprk_Communication`; a second call); an edit needs Write on the to-do; a delete-own needs Delete on the row as well as the creator stamp. A service request's writes stay the requester rule in both states (accepted, decision e) |
 | Contact grants of a user who is also a granted contact | Kept | Kept — Dataverse cannot see them |
 | No Access list, Restricted veto | In force | In force |
 | A root set over 5,000 records | Module data responses carry `"truncated": true` | Same; the 5,000 kept are the most recently modified (task 036 decision (f), owner 2026-10-18) |
@@ -2198,17 +2198,20 @@ state.
    users in Dataverse) are complete and deployed to the environment. Without them, turning it on removes internal users'
    "Assigned To *" access and the internal half of the No Access list.
 2. Both Dataverse App Users hold `prvActOnBehalfOfAnotherUser` and are not narrowed (§7.7).
-3. **Internal users who sign in through WorkforceHome (ADR-028 A9) — settled, task 036 decision (a), owner 2026-10-18;
-   nothing to do beyond item 2.** A write is normally confirmed by asking Dataverse with the user's own token
-   (on-behalf-of), and a token issued by the customer's directory cannot be exchanged for a Dataverse token in Spaarke's
-   tenant. For a systemuser resolved through the stored home link, the BFF therefore asks the **same** questions
-   app-only, as the Dataverse App User, naming that systemuser: `RetrievePrincipalAccess` with
-   `Principal = systemusers(<id>)` on the target record, and `RetrieveUserSetOfPrivilegesByNames` on that systemuser for
-   the child table's Create privilege (both impersonating the user, like the read, so item 2's
-   `prvActOnBehalfOfAnotherUser` covers them). Dataverse still answers from the user's own roles, teams and shares, so
-   such a user writes exactly what the same user could write in the model-driven app, and their lists' `canCreate` is the
-   same answer. The path is chosen from how the user signed in, never by trying on-behalf-of first; a failed or
-   unreadable answer refuses the write. Every user who signs in with a Spaarke-tenant token keeps the on-behalf-of check.
+3. **How a write is confirmed — settled, task 036 decision (a), owner 2026-10-18, widened by option C, owner
+   2026-10-20; nothing to do beyond item 2.** The BFF never exchanges an SPA/Teams user's token on this plane (ADR-028
+   A1–A3), and a token issued by a customer's directory (WorkforceHome, ADR-028 A9) could not be exchanged for a
+   Dataverse token in Spaarke's tenant anyway. For **every** internal user — a Spaarke-tenant sign-in or one resolved
+   through the stored home link — the BFF asks app-only, as the Dataverse App User, naming the user's systemuser:
+   `RetrievePrincipalAccess` with `Principal = systemusers(<id>)` on the target record, and
+   `RetrieveUserSetOfPrivilegesByNames` on that systemuser for the child table's Create privilege (both impersonating the
+   user, like the read, so item 2's `prvActOnBehalfOfAnotherUser` covers them). Dataverse answers from the user's own
+   roles, teams and shares, so such a user is expected to write what the same user could write in the model-driven app,
+   and their lists' `canCreate` is the same answer. That parity is **not yet proven live** for roles the user holds only
+   through a team, or for disabled and unlicensed users: the task 036 live checks (Verify, (vi) and (vii)) cover them.
+   A record created seconds earlier that answers "not found" is asked again (twice, within about 1.6 s); a fault, an
+   impersonation failure (`0x8004A110`, logged as a Warning, not as "no rights") or no answer within 15 seconds refuses
+   the write.
 4. **Internal users who write in the SPA or Teams hold Spaarke Core User** (or a role with the same privileges). Under
    "on", Dataverse decides writes from the user's own roles, as the model-driven app does. Spaarke Core User grants
    Create, Write and Delete on `sprk_todo`, `sprk_document`, `sprk_event` and `sprk_communication`. **Spaarke Basic User**
@@ -2264,7 +2267,14 @@ App Service restarts the app on a settings change. Cached principals and root se
   in the task notes: (ii) a record the user can Read but not Write in the model-driven app is listed and refuses a write
   with 403; (iii) a record in the user's business unit (or owned by its default team) but outside the user's role depth is
   not listed; (iv) a record whose "Assigned To *" names the user's linked contact is listed (task 142's share); (v) a
-  secure record with the user on its No Access list is refused in both the model-driven app and the SPA/Teams.
+  secure record with the user on its No Access list is refused in both the model-driven app and the SPA/Teams; (vi) in a
+  tenant whose internal users sign in through WorkforceHome, sign in to the SPA as such a user and repeat (ii): the
+  write the model-driven app refuses is refused with 403, the one it allows succeeds, and the BFF log for it says
+  `answered via app-only-named-principal`; (vii) with one disabled and one unlicensed test systemuser, a write is
+  refused (if Dataverse answers either with rights, stop: do not turn it on, and report it), and with a user whose only
+  role comes through a team, the SPA allows exactly the writes the model-driven app allows.
+- A Warning `[DELEGATION-RPA-UNAVAILABLE] App-only RetrievePrincipalAccess … answered a fault, not an access answer`
+  means the BFF App User lacks `prvActOnBehalfOfAnotherUser` (item 2): every write is refused until it is fixed.
 
 **Turn it off (the kill switch):** set `ExternalAccess__ImpersonatedRootSets__Enabled=false`, or delete the setting. The
 next composition uses the membership rules again. The "on" state writes nothing, so there is nothing to undo.
