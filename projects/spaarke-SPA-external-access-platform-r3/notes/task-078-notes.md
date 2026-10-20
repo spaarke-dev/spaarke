@@ -270,3 +270,15 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
 - **Read-back** (20:37:26Z): ProductVersion `1.0.0+0b976628e48b0082c6235a40e9e3508603f5cd81`; `/healthz` and `/healthz/dataverse` 200; `/api/me` anonymous 401.
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T203441Z` (= `c3ec5d6e5`).
 
+## Dev redeploy from master 4f5f22694 (2026-10-20, owner "deploy approved"; UAC #2078 / task 036, flag OFF)
+
+- **Candidate:** master `4f5f22694` = the live `0b976628e` + UAC #2078 (FR-20 flag-gated swap; 15 server files, including the shared `Spaarke.Dataverse/DataverseWebApiService.cs` +163, which only adds surface per spe-admin and ontology). #2078 CI was green.
+- **Flag:** `ExternalAccess__ImpersonatedRootSets__Enabled` is absent on dev (= OFF), re-checked right before the deploy. The deploy changes no app settings.
+- **Coordination:** OK from word-add-in, spe-admin, ontology and ebilling (`sprk_invoicestatus` exists; `e0df77339` not included), plus the standing OKs from provisioning and field-mapping.
+- **Pre-checks:** the live DLL read `0b976628e`, which is an ancestor; healthz 200. A `git fetch` failed once on DNS, so the local commit was used (it was already verified on origin/master).
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261020T233210Z` (222 files, DLL `0b976628e`).
+- **Deploy:** `Deploy-BffApi.ps1` from a detached worktree `C:/wtbffe`. Package 37.49 MB; 4 critical files SHA-256 verified.
+- **Read-back** (23:34:36Z): ProductVersion `1.0.0+4f5f22694c2965f4f0d6c78f9f322d3d5dfe1775`; `/healthz` and `/healthz/dataverse` 200; `/api/me` anonymous 401.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T233210Z` (= `0b976628e`).
+- **Next (UAC):** a flag-off sanity check and the 034 canary. The flip needs a direct owner yes in this session, with the command shown first.
+
