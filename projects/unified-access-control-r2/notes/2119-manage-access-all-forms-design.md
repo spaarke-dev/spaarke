@@ -318,9 +318,9 @@ Three save paths can produce a document from an internal-only email with no comm
 
 | Gap | Path | Closed by |
 |---|---|---|
-| 1 | Outlook add-in attachments of a saved email: child documents set only `ParentDocumentLookup` (`UploadFinalizationWorker.cs:1254/:1294`) | §6.1 rule 3's parent hop. No writer change is required. |
-| 2 | Outlook add-in single-attachment save (`SaveContentType.Attachment`): no capture, no communication row, no link (`OfficeService.cs:506`, `OfficeDocumentPersistence.cs:795`) | **Writer rule:** a document saved from an email item that cannot be linked to its communication is created with own Access Permission = Restricted, which fails closed. The user can widen it later only to the root's level (rule 2). Owner: Office. |
-| 3 | The add-in .eml whenever the best-effort canonical link misses (`OfficeDocumentPersistence.cs:790-817`: empty InternetMessageId, a failed lookup, or null services) | The same writer rule as gap 2. Better still, link it to the communication that the add-in capture creates (`EmailUploadCaptureService`, flag true), so the link is never missing. Owner: Office. |
+| 1 | Outlook add-in attachments of a saved email: child documents set only `ParentDocumentLookup` (`UploadFinalizationWorker.cs:1254/:1294`) | §6.1 rule 3's parent hop, **once gap 3 is fixed**: the hop reaches the add-in .eml document, which is exactly the one that may be unlinked. Until T8 lands, a child whose parent .eml missed its link stays visible. |
+| 2 | Outlook add-in single-attachment save (`SaveContentType.Attachment`): no capture, no communication row, no link (`OfficeService.cs:506`, `OfficeDocumentPersistence.cs:795`) | **Recommended:** run the email capture, or the canonical lookup by InternetMessageId, for attachment saves too, and link the attachment to that communication. Only a save whose email still cannot be identified falls back to the writer rule: own Access Permission = Restricted, which fails closed; a user can widen it later only to the root's level (rule 2). **Trade-off if only the fallback ships:** the add-in runs no capture for `SaveContentType.Attachment`, so *every* single attachment saved from Outlook would become Restricted, including those from emails that are not internal-only, and partners would lose them until someone widens them. Owner: Office. |
+| 3 | The add-in .eml whenever the best-effort canonical link misses (`OfficeDocumentPersistence.cs:790-842`; the link write is at `:840`, the null-services skip at `:793`; it misses on an empty InternetMessageId, a failed lookup, or null services) | The same writer rule as gap 2. Better still, link it to the communication that the add-in capture creates (`EmailUploadCaptureService`, flag true), so the link is never missing. Owner: Office. |
 
 - Not email-related, so out of scope: the generic `POST /api/documents`, partner uploads (`ExternalDataService.cs:666`), the client `DocumentRecordService.ts`, and the AI, RAG and indexing updates.
 - Re-file and set-regarding paths are untraced. They don't change the communication link, and the rule is computed at read time, so no gap is expected. The task confirms this.
@@ -333,10 +333,11 @@ Three save paths can produce a document from an internal-only email with no comm
     - linked to an internal-only communication;
     - linked to a communication on a non-Open thread;
     - an attachment whose parent .eml is linked to an internal-only communication;
+    - an attachment whose parent .eml has no link (child → unlinked parent): visible until T8, so this test pins today's state and T8's test flips it;
     - an unreadable flag, which is hidden.
   - Must-not-fire tests:
     - linked to a visible communication;
     - no link anywhere in the chain and own Standard, which stays visible as today;
     - a 4-hop chain, which is hidden (bounded).
-- **T8 — Office writer rule (Office owner; UAC reviews).** Gaps 2 and 3. Each has a must-fire test, including the canonical-link miss, plus a must-not-fire test: a linked save keeps its own default.
+- **T8 — Office writer rule (Office owner; UAC reviews).** Gaps 2 and 3: capture or look up the communication for attachment saves; make the .eml link non-best-effort; Restricted only when the email cannot be identified. Must-fire tests: the canonical-link miss; an attachment of an unidentifiable email; the chain child → parent .eml that missed its link, which is hidden after T8. Must-not-fire tests: a linked save keeps its own default; an attachment of an identified, non-internal-only email stays Standard.
 - **ADR / architecture.** Amend I-14 in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` and the concise ADR-034 / auth constraint text: "a child's Access Permission may narrow partner visibility (Restricted hides it); it never widens it." Enforced by: T7's tests.
