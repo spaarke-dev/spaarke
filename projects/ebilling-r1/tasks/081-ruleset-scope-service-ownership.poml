@@ -54,6 +54,7 @@
     </relevant-files>
     <dependencies>
       <dependency task="080" status="pending">S1-S4 and S7 on dev (lookups, scope options, BU flag and N:N, scope-column field security)</dependency>
+      <dependency task="uac-r2 #2143" status="pending">RecordOwnershipResolver.ReparentAsync becomes a conditional update on RowVersion: it re-reads, re-resolves, retries at most 3 times, then fails closed. Build on that contract, not on today's unconditional write.</dependency>
     </dependencies>
   </context>
 
@@ -73,6 +74,7 @@
     <constraint source="ontology-r1 Q14 condition 2">SecureFamilyConsistencyTests and a SecureChildReconciler test cover version → policy → ruleset → core end to end, on secure and on unsecure. CitationLookups unchanged.</constraint>
     <constraint source="D-141 (Q10), uac-r2 86cba5a00">No delete-Restrict and no delete code in this task: the delete job is uac-r2's. Once the citing lookups are fixed by this task's schema reading, send uac-r2 the exact list of lookups that cite the set's rows (Signal, Decision Record and invoice-side columns → sprk_policyversion / sprk_policy / sprk_ruleset), each as table.column → target, read from live metadata; their planner reads them. Do NOT send a "retire if cited" rule: D-141 has no Retire.</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement (existing RuleSetService and endpoints), publish-size delta against a fresh master build, no new package, no new HIGH CVE.</constraint>
+    <constraint source="uac-r2 2026-10-20 (#2143)">Every owner write that this task routes through IRecordOwnershipResolver (create and reparent) handles the resolver's fail-closed refusal after its bounded RowVersion retries. Nothing is written, the caller gets the existing ownership-refusal error (never a 500 and never a partial write), and a test pins the refusal path. Re-read RecordOwnershipResolver.cs on origin/master before starting. If #2143 has not merged, STOP and ask the main session.</constraint>
   </constraints>
 
   <knowledge>

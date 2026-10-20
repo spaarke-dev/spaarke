@@ -45,6 +45,7 @@
     <dependencies>
       <dependency task="081" status="pending">The secure-family change for sprk_ruleset (same files; this task follows its shape)</dependency>
       <dependency task="085" status="pending">RateCardImportService writes sprk_scope (same file)</dependency>
+      <dependency task="uac-r2 #2143" status="pending">RecordOwnershipResolver.ReparentAsync becomes a conditional update on RowVersion: it re-reads, re-resolves, retries at most 3 times, then fails closed. Build on that contract, not on today's unconditional write.</dependency>
     </dependencies>
   </context>
 
@@ -56,6 +57,7 @@
     <constraint source="uac-r2 review item 1 (NFR-05)">The depth check covers sprk_ratecard and sprk_ratecardrate for every non-admin role; record the live NFR-05 result on dev.</constraint>
     <constraint source="D-120, D-141">No delete code and no delete-Restrict: uac-r2's delete job already deletes a card scoped to the record (+ its rates). Q8 is unchanged: a matter's card judges its direct children's invoices app-only; joining the secure family changes who can READ the card, not which invoices it judges.</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: no new service or registration; publish-size delta; no package; no new HIGH CVE.</constraint>
+    <constraint source="uac-r2 2026-10-20 (#2143)">Every owner write that this task routes through IRecordOwnershipResolver (create and reparent) handles the resolver's fail-closed refusal after its bounded RowVersion retries. Nothing is written, the caller gets the existing ownership-refusal error (never a 500 and never a partial write), and a test pins the refusal path. Re-read RecordOwnershipResolver.cs on origin/master before starting. If #2143 has not merged, STOP and ask the main session.</constraint>
   </constraints>
 
   <knowledge>
