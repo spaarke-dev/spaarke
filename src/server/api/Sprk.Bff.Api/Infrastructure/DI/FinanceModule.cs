@@ -121,6 +121,11 @@ public static class FinanceModule
         // Scoped (holds the scoped AuthorizationService and search). Unconditional (flag rule above); ISemanticSearchService resolves to its
         // Null-Object (AnalysisServicesModule, ADR-032 P3) when AI is off, so the answer is "unavailable", never a silent empty.
         services.AddScoped<InvoiceRelatedWorkService>();
+        // Invoice Review read model and line decisions (ebilling-r1 task 100, FR-31, D-64, D-75). Two concrete services (ADR-010: no interface, one
+        // implementation each). Scoped: per request, they hold the scoped AuthorizationService (read) and the singleton generic Dataverse client, 016 totals,
+        // 074 recorder and processing lock (decisions). Unconditional (flag rule above); the routes carry the kill switch.
+        services.AddScoped<InvoiceReviewReadService>();
+        services.AddScoped<InvoiceLineDecisionService>();
         // UTBMS line coding (ebilling-r1 task 047, FR-22, D-46): resolves an invoice's code set (CodeSetResolver), codes its
         // lines through IInvoiceAi.CodeLinesAsync in chunks, and refuses any code outside the set (ILineCodingService).
         // Scoped (they hold the scoped IInvoiceAi and the scoped suggestion provider; IGenericEntityService is a singleton);

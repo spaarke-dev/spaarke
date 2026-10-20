@@ -354,6 +354,13 @@ public partial class RouteAuthorizationGuardTests
             "GET /api/finance/invoices/{invoiceId}/context (ebilling-r1 task 106, FR-33) -- the Invoice Review context panel. The route carries "
             + "AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; the eBilling "
             + "kill switch runs after it. The firm and core record the sections are scoped to are read from that invoice, never from the request."),
+        new GovernedFile("Api/Finance/InvoiceLineReviewEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/invoices/{invoiceId}/review and POST /api/finance/invoices/{invoiceId}/lines/{lineId}/decision, .../lines/decisions, "
+            + ".../lines/accept-clean (ebilling-r1 task 100, FR-31) -- the Invoice Review read model and the line decisions. Every route carries "
+            + "AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail closed: the read with \"finance.read\" (Read), the three "
+            + "decisions with \"ebilling.invoice.decide\" (Write, D-77); invoice access reaches the caller through the core record (013, ADR-034). The "
+            + "eBilling kill switch runs after it. Every line id is checked against the invoice's own lines (uniform 404) before a write; the decider "
+            + "is the caller's systemuserid from their own token, never the body."),
         new GovernedFile("Api/Finance/InvoiceRelatedWorkEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/lines/{lineId}/related-work (ebilling-r1 task 107, FR-34) -- the Related work pane of one fee line. "
             + "The route carries AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; "
@@ -971,7 +978,12 @@ public partial class RouteAuthorizationGuardTests
     // 137 + 132 -> 139 (2026-10-18, ebilling-r1 merge of origin/master 1473b34c6): both sides already shared master 1df4ee12d (130).
     // ebilling-r1 added 7 on it (137); master added 2 (external-access-r3 047 ExternalRegistrationEndpoints.cs, 048
     // ExternalWorkforceLinkEndpoints.cs) for 132. Union 130 + 7 + 2 = 139. No route added or removed here.
-    private const int ExpectedEndpointFileCount = 139;
+    // 139 -> 140 (2026-10-20, ebilling-r1 task 100, FR-31). Net +1: Api/Finance/InvoiceLineReviewEndpoints.cs ADDED -- GET
+    // /api/finance/invoices/{invoiceId}/review, POST .../lines/{lineId}/decision, POST .../lines/decisions, POST .../lines/accept-clean.
+    // Classified by GovernedFiles (RouteLevelGate: AddFinanceAuthorizationFilter, finance.read / ebilling.invoice.decide on the route's invoice);
+    // the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms. Parallel tasks that also add a file (050,
+    // 105) each bump this by one: reconcile the sum at integration.
+    private const int ExpectedEndpointFileCount = 140;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
