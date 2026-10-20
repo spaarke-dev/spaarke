@@ -529,6 +529,9 @@ public class FinanceEndpointsAuthorizationContractTests
         var json = JsonNode.Parse(text)!.AsObject();
         json["reasonCode"]!.GetValue<string>().Should().Be(Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException.ReasonCode);
         json["detail"]!.GetValue<string>().Should().Contain("Reload it and try again");
+        // #2143 round 3 (K3): the id under the key every other Finance problem carries it under, never traceId.
+        json["correlationId"]!.GetValue<string>().Should().NotBeNullOrWhiteSpace();
+        json.Should().NotContainKey("traceId");
     }
 
     public static TheoryData<InvoiceReviewFailure, HttpStatusCode, bool> ConfirmFailures => new()

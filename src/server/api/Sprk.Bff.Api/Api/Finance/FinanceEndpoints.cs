@@ -287,7 +287,7 @@ public static class FinanceEndpoints
                 "Invoice review confirmation: the document's owner could not be settled under its invoice against concurrent "
                 + "writers. DocumentId={DocumentId}, CorrelationId={CorrelationId}",
                 request.DocumentId, correlationId);
-            return ProblemDetailsHelper.RecordOwnerUnsettled("document", correlationId);
+            return ProblemDetailsHelper.RecordOwnerUnsettled("document", correlationId, traceIdExtension: "correlationId");
         }
         catch (Exception ex)
         {

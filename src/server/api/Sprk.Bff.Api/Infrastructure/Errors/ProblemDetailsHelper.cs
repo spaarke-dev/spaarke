@@ -262,7 +262,9 @@ public static partial class ProblemDetailsHelper
     /// </remarks>
     /// <param name="noun">What was being re-filed ("document", "event", …), for the detail.</param>
     /// <param name="traceId">Optional correlation id for support.</param>
-    public static IResult RecordOwnerUnsettled(string noun, string? traceId = null)
+    /// <param name="traceIdExtension">The extension the id is carried under: <c>traceId</c> by default; a route whose other
+    /// problems carry <c>correlationId</c> (Finance) passes that, so its 409 matches them (#2143 round 3).</param>
+    public static IResult RecordOwnerUnsettled(string noun, string? traceId = null, string traceIdExtension = "traceId")
     {
         var extensions = new Dictionary<string, object?>
         {
@@ -270,7 +272,7 @@ public static partial class ProblemDetailsHelper
         };
         if (!string.IsNullOrWhiteSpace(traceId))
         {
-            extensions["traceId"] = traceId;
+            extensions[traceIdExtension] = traceId;
         }
 
         return Results.Problem(
