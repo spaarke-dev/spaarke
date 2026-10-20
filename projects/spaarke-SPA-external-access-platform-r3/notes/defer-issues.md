@@ -668,6 +668,28 @@ Failure mode: a licensed user flagged external gets internal-only email content 
 ---
 
 
+### ISS-017 — "Could not read your email address" does not tell the customer admin what to fix
+
+| Field | Value |
+|---|---|
+| **Status** | Open (R4 backlog) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-20 |
+| **Source** | Owner live check on dev (Dewey Cheatham test user Tracy Cheatham, no Email in Entra) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2155 |
+
+**Description**
+
+A customer employee whose Entra user has no Email gets a token with no `email` claim, so registration answers `registration_email_missing`. The SPA says only "Contact your administrator". Owner fix on dev: set the user's Email in Entra; registration then completed and the contact was created.
+
+**Suggested fix**: R4 copy change in `RegistrationPage.tsx` (`emailMissing`): tell the IT admin to set the Email field on the user's Entra account, then sign in again; update the `registration_email_missing` test. Keep the token-only email rule.
+
+**Estimated effort**: under 0.5 day.
+**Blockers**: none.
+**Related**: task 047, task 074.
+
+---
+
 ## Closed
 
 (none)
