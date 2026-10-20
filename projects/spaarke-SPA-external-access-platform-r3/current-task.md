@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-20 16:50Z (dev BFF live 21184ecd4; interim merge-to-master in progress; R4 project to create after the merge)
+> **Last Updated**: 2026-10-20 17:20Z (interim merge PR #2141 MERGED 28274e04e; R4 worktree created; dev BFF live 21184ecd4)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | No POML task in progress. Running the **merge-to-master skill (Single Merge, Path A)** for an interim R3 merge, owner request 2026-10-20 ("ensure all work committed and pushed; latest master; no conflicts"). |
+| **Task** | No POML task in progress. Interim merge done (owner request 2026-10-20): PR #2141 merged 17:12:51Z as `28274e04e` (43 checks pass, 3 skipped); main checkout fast-forwarded; comment on #2099. |
 | **Step** | Step 2.5 done: branch merged with origin/master (`3ebb747d8`, pushed; build 0/0; master's 2 new commits were provisioning PS only). **Next: Step 3 Path A** — `gh pr create --base master --head work/spaarke-SPA-external-access-platform-r3` (body: R3 since #2086 = 058/075/076/077/078, 059 records, SPA #2128 detail, ISS-014..016 filings; verification: build 0/0, ArchTests 1152/1152, unit filter 6758/6758, deployed to dev as 21184ecd4), then `gh pr merge <N> --auto --merge`, Monitor until MERGED, gate on full `gh pr checks` (zero fail/pending; mergeStateStatus CLEAN), then A.6 (main checkout ff-only with HEAD guard; never reset/stash/checkout there). |
 | **Status** | **Dev BFF = `21184ecd4`** (deployed 16:32:41–16:35:10Z, owner "yes bff deploy"; read-back ProductVersion 1.0.0+21184ecd4…; healthz/dataverse 200; /api/me anon 401, v2 200; K1 nav-clause smoke 200; ontology smoke passed; rollback `Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T163210Z` = 00aba6d99). **Dev SPA = `1908696a8`**. Branch head `3ebb747d8`. |
-| **Next Action** | Finish the merge (above). Then create **R4 project** `spaarke-SPA-external-access-platform-r4` (own worktree `C:\code_files\spaarke-wt-SPA-external-access-platform-r4`, branch `work/spaarke-SPA-external-access-platform-r4` from master AFTER the R3 PR merges) — owner will provide idea/requirements + prototype reference; then `/design-to-spec` → `/project-pipeline` in that worktree. |
+| **Next Action** | **R4 worktree CREATED**: `C:\code_files\spaarke-wt-SPA-external-access-platform-r4`, branch `work/spaarke-SPA-external-access-platform-r4` (pushed) at master `28274e04e`; no project folder yet. Waiting for the owner's requirements + prototype → `/design-to-spec` then `/project-pipeline` there. R3 is 1 merge commit behind master (sync before new R3 work). (Original plan:) create **R4 project** `spaarke-SPA-external-access-platform-r4` (own worktree `C:\code_files\spaarke-wt-SPA-external-access-platform-r4`, branch `work/spaarke-SPA-external-access-platform-r4` from master AFTER the R3 PR merges) — owner will provide idea/requirements + prototype reference; then `/design-to-spec` → `/project-pipeline` in that worktree. |
 
 ### Uncommitted files
 - `.claude/agent-memory/researcher/MEMORY.md` (modified) and three untracked researcher files belong to the OWNER. Never commit or discard them. Commit by pathspec only.
