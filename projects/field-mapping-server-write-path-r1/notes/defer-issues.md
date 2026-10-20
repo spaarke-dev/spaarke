@@ -12,3 +12,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Owner task** | 002 (fill-only applier plus target guard) |
 | **Failure** | Default→Money writes a `decimal`, not a `Money`. Concat/Template into number, option-set, date or boolean writes a string. Either way the SDK create throws. |
 | **Pinned by** | `Default_MoneyTarget_WritesAPlainDecimalNotAMoney`, `Expression_NonTextNonLookupTarget_WritesTheResolvedStringWithoutConversion` (002 updates both) |
+
+## DI-002 — Read checks leak record existence via timing; duplicate Read-check copies
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-20, task 003 (pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2137 |
+| **Class** | F1 (existence oracle) + F2 (duplicate mechanism) |
+| **Owner task** | Push site: 040 (reuse `MappingSourceReadProbe.CheckCallerReadAsync`). Quick-create filter sites (source + Assigned To) and `TodoSourceAccessFilter`: **operator decision**; small, but outside a planned task |
+| **Failure** | `GetCallerRightsAsync` (not timing-equalised) makes a missing id ~1.6 s slower than a denied one, with identical text |

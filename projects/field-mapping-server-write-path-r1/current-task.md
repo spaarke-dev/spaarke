@@ -7,9 +7,13 @@
 
 | Field | Value |
 |---|---|
-| **Task** | none active |
-| **Status** | between waves |
-| **Next Action** | Start the next wave via task-execute: **002, 003, 004** (W1-B) and **005** (W1-C) in parallel, plus **011** (opus/xhigh, `parallel-safe=false`; it shares no files with W1, so it can run alongside, but alone among W2 tasks) |
+| **Task** | Wave 2 running: 002, 003, 004→005, 011 (4 background implementer agents, each in an isolated worktree) |
+| **Status** | in-progress (launched from c4a2a7b81; master 2b07480ab, 0 behind) |
+| **Next Action** | On each agent report:<br>• verify its branch (`task/fm-002`, `task/fm-003`, `task/fm-004-005`, `task/fm-011`);<br>• merge it into `work/field-mapping-server-write-path-r1`;<br>• build and test;<br>• mark the POML and TASK-INDEX;<br>• push.<br>For 011, send the diff range to UAC-r2 for review. For 005, the live `sprk_syncmode` migration needs the owner's OK (dry run only so far). |
+
+Corrections given to every wave-2 agent:
+- new tests go under `tests/unit/domain/**` (testing.md:132), not the POML paths;
+- the master publish baseline is 39,281,358 B at 2b07480ab, reused only while master is unmoved.
 
 ## State
 

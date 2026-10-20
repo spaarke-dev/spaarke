@@ -4,7 +4,7 @@
     <title>Mapping-source resolver + Read-as-caller source probe (FR-03, FR-04)</title>
     <phase>1 W1 Canonical engine and configuration</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-sensitive (tags include security; a source read must not become an existence oracle or an AppendTo bypass, NFR-01); modifies .cs in Sprk.Bff.Api; adds tests at KEEP paths.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -108,7 +108,9 @@
     <criterion testable="true">Existing QuickCreateSourceAccessFilter tests pass unchanged; BFF build 0 errors; publish-size delta and CVE result recorded in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-03, FR-04, NFR-01. Security tag: one adversarial pass runs with the W2 review (task 019). The unified service wires this resolver at pipeline step 3 in task 014.</notes>
+  <notes>Spec FR-03, FR-04, NFR-01. Security tag: one adversarial pass runs with the W2 review (task 019). The unified service wires this resolver at pipeline step 3 in task 014.
+Completed 2026-10-20 (task/fm-003, merged 463c2a8f8). 28 new tests (unit/domain + integration/auth); quick-create filter contract unchanged; publish +6,876 B cumulative vs master; no CVE. Found DI-002 / #2137. Details: notes/task-003-notes.md.
+rework: fix-round-1 task 003</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

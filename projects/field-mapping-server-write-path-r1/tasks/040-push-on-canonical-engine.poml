@@ -103,7 +103,8 @@
     <criterion testable="true">BFF build 0 errors; all tests green; publish-size delta and CVE result recorded in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-23, NFR-07. #2098 out of scope. The push web resource is unchanged unless it displays the error text.</notes>
+  <notes>Spec FR-23, NFR-07. #2098 out of scope. The push web resource is unchanged unless it displays the error text.
+DI-002 / #2137 (2026-10-20): replace AuthorizePushSourceAsync's own Read check with MappingSourceReadProbe.CheckCallerReadAsync (timing-equalised; task 003). Close the push part of #2137.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
