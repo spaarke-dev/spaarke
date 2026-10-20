@@ -83,8 +83,15 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
     /// single-descriptor result would be served for up to <see cref="MembershipOptions.MetadataCacheTtlMinutes"/>
     /// (60 min) and team-owned records would keep resolving to nobody. The bump orphans every v1 entry;
     /// they expire on their own TTL.
+    /// <para>
+    /// <b>Bumped 2 → 3 by GitHub #2152.</b> The key and shape are unchanged, but the exclusion rule is not:
+    /// the ADR-034 mandatory audit lookups (<c>createdby</c>, <c>modifiedby</c>, <c>createdonbehalfby</c>,
+    /// <c>modifiedonbehalfby</c>) are now always excluded. A v2 entry built where a configured exclusion list
+    /// replaced them would still be addressable and would keep serving touch history as membership for up to
+    /// the TTL; the bump orphans every v2 entry.
+    /// </para>
     /// </remarks>
-    internal const int CacheVersion = 2;
+    internal const int CacheVersion = 3;
 
     // Strip trailing decimal digits from a logical name suffix, e.g.,
     // "assignedattorney1" → "assignedattorney". Matches the CamelCase strategy
@@ -224,31 +231,8 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
             identityTypeByTable[cfg.Table.Trim()] = cfg.IdentityType.Trim();
         }
 
-        var globalExclusions = new HashSet<string>(
-            (_options.GlobalFieldExclusions ?? new List<string>())
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .Select(s => s.Trim()),
-            StringComparer.OrdinalIgnoreCase);
-
-        EntityOverride? entityOverride = null;
-        if (_options.EntityOverrides is { } overrides &&
-            overrides.TryGetValue(normalizedEntityName, out var matchedOverride) &&
-            matchedOverride is not null)
-        {
-            entityOverride = matchedOverride;
-        }
-
-        var perEntityExclusions = new HashSet<string>(
-            (entityOverride?.ExcludedFields ?? new List<string>())
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .Select(s => s.Trim()),
-            StringComparer.OrdinalIgnoreCase);
-
-        var perEntityIncludes = new HashSet<string>(
-            (entityOverride?.IncludedFields ?? new List<string>())
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .Select(s => s.Trim()),
-            StringComparer.OrdinalIgnoreCase);
+        var entityOverride = ResolveEntityOverride(normalizedEntityName);
+        var exclusionRules = BuildFieldExclusionRules(entityOverride);
 
         var fieldRoleOverrides = new Dictionary<string, string>(
             StringComparer.OrdinalIgnoreCase);
@@ -274,24 +258,14 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
 
             var field = lookup.LogicalName.Trim();
 
-            // Per-entity exclusion is unconditional — takes precedence even
-            // over per-entity IncludedFields force-include (operators who set
-            // both have a configuration conflict; the safer interpretation is
-            // "I really do not want this field").
-            if (perEntityExclusions.Contains(field))
+            var exclusionReason = exclusionRules.ExclusionReason(field);
+            if (exclusionReason is not null)
             {
-                excludedFields.Add(new IgnoredField(field, "per-entity-exclusion"));
+                excludedFields.Add(new IgnoredField(field, exclusionReason));
                 continue;
             }
 
-            var isGloballyExcluded = globalExclusions.Contains(field);
-            var isForceIncluded = perEntityIncludes.Contains(field);
-
-            if (isGloballyExcluded && !isForceIncluded)
-            {
-                excludedFields.Add(new IgnoredField(field, "global-exclusion"));
-                continue;
-            }
+            var isForceIncluded = exclusionRules.IsForceIncluded(field);
 
             // Collect EVERY target that matches a configured identity table, in the
             // target array's order, one per identity type (unified-access-control-r2
@@ -379,6 +353,68 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
             DiscoveredFields: discoveredFields,
             ExcludedFields: excludedFields,
             IgnoredFields: ignoredFields);
+    }
+
+    private EntityOverride? ResolveEntityOverride(string normalizedEntityName)
+        => _options.EntityOverrides is { } overrides &&
+           overrides.TryGetValue(normalizedEntityName, out var matchedOverride)
+            ? matchedOverride
+            : null;
+
+    /// <summary>
+    /// The ONE field-exclusion rule for lookups on an entity, shared by <see cref="BuildDiscoveryResult"/> and
+    /// <see cref="DiscoverLookupsTargetingAsync"/> (GitHub #2152): the configured global exclusions — which
+    /// <see cref="MembershipOptionsDefaults"/> always unions with the ADR-034 mandatory audit lookups — plus the
+    /// entity's own <see cref="EntityOverride.ExcludedFields"/> and <see cref="EntityOverride.IncludedFields"/>.
+    /// Names compare trimmed and case-insensitively.
+    /// </summary>
+    private FieldExclusionRules BuildFieldExclusionRules(EntityOverride? entityOverride)
+        => new(
+            global: TrimmedNameSet(_options.GlobalFieldExclusions),
+            perEntityExclusions: TrimmedNameSet(entityOverride?.ExcludedFields),
+            perEntityIncludes: TrimmedNameSet(entityOverride?.IncludedFields));
+
+    private static HashSet<string> TrimmedNameSet(IEnumerable<string>? names)
+        => new(
+            (names ?? Enumerable.Empty<string>())
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s.Trim()),
+            StringComparer.OrdinalIgnoreCase);
+
+    private sealed class FieldExclusionRules
+    {
+        private readonly HashSet<string> _global;
+        private readonly HashSet<string> _perEntityExclusions;
+        private readonly HashSet<string> _perEntityIncludes;
+
+        public FieldExclusionRules(
+            HashSet<string> global,
+            HashSet<string> perEntityExclusions,
+            HashSet<string> perEntityIncludes)
+        {
+            _global = global;
+            _perEntityExclusions = perEntityExclusions;
+            _perEntityIncludes = perEntityIncludes;
+        }
+
+        public bool IsForceIncluded(string field) => _perEntityIncludes.Contains(field);
+
+        /// <summary>The exclusion reason for <paramref name="field"/>, or null when the field is admitted.</summary>
+        public string? ExclusionReason(string field)
+        {
+            // Per-entity exclusion is unconditional — takes precedence even
+            // over per-entity IncludedFields force-include (operators who set
+            // both have a configuration conflict; the safer interpretation is
+            // "I really do not want this field").
+            if (_perEntityExclusions.Contains(field))
+            {
+                return "per-entity-exclusion";
+            }
+
+            return _global.Contains(field) && !_perEntityIncludes.Contains(field)
+                ? "global-exclusion"
+                : null;
+        }
     }
 
     /// <summary>
@@ -774,10 +810,21 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
         var lookups = await FetchLookupAttributesAsync(normalizedSource, ct)
             .ConfigureAwait(false);
 
+        // GitHub #2152 (ADR-034 MUST): a back-reference is a membership link too, so the
+        // same exclusion rule as DiscoverAsync applies — the four audit lookups
+        // (createdby/modifiedby/…onbehalfby) are touch history, never association, and
+        // sourceEntity's own EntityOverride governs its own lookups exactly as it does
+        // when sourceEntity is discovered directly.
+        var exclusionRules = BuildFieldExclusionRules(ResolveEntityOverride(normalizedSource));
+
         var matches = new List<string>();
         foreach (var lookup in lookups)
         {
             if (string.IsNullOrWhiteSpace(lookup.LogicalName))
+            {
+                continue;
+            }
+            if (exclusionRules.ExclusionReason(lookup.LogicalName.Trim()) is not null)
             {
                 continue;
             }

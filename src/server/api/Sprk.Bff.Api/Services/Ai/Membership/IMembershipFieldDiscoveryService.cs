@@ -110,7 +110,11 @@ public interface IMembershipFieldDiscoveryService
     /// <returns>
     /// The lowercase logical attribute names of Lookup fields on
     /// <paramref name="sourceEntity"/> whose <c>Targets[]</c> include
-    /// <paramref name="targetEntity"/>. Empty list when no such Lookups exist
+    /// <paramref name="targetEntity"/>, minus the fields the membership exclusion
+    /// rule removes — the global exclusions (always including the ADR-034 audit
+    /// lookups, GitHub #2152) and <paramref name="sourceEntity"/>'s own
+    /// per-entity overrides, exactly as <see cref="DiscoverAsync"/> applies them.
+    /// Empty list when no such Lookups exist
     /// (caller surfaces empty as the 1-hop-not-possible case). Always non-null.
     /// </returns>
     /// <exception cref="ArgumentException">
