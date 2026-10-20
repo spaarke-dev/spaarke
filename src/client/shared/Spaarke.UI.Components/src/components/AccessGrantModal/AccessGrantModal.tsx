@@ -514,6 +514,25 @@ type SpeContainerRevokeOutcome = 'NotAttempted' | 'PermissionRemoved' | 'NoPermi
  * switching on the code. */
 const REVOKE_SPE_CLEANUP_INCOMPLETE_REASON_CODE = 'sdap.revoke.incomplete.container_not_cleared';
 
+/** #2103 follow-up: the NON-retryable leaf of the same family — an organization grant was revoked, but the
+ * organization has more active members than one revoke may sweep, so no member's container permission was removed
+ * and a retry cannot change that. The server's `detail` says what an administrator must do. MUST match
+ * `RevokeExternalAccessEndpoint.RevokeOrganizationTooLargeReason` exactly. */
+const REVOKE_ORGANIZATION_TOO_LARGE_REASON_CODE = 'sdap.revoke.incomplete.organization_too_large';
+
+/** #2104 round 3: the other NON-retryable leaf of the family — the grant was revoked, but a container permission
+ * matching the revoked grantee is ambiguous (more than one matches) or its holder cannot be verified, so nothing was
+ * removed for them and a retry refuses again. The server's `detail` tells an administrator to resolve the container's
+ * permissions in the SPE admin app. MUST match `RevokeExternalAccessEndpoint.RevokePermissionAmbiguousReason` exactly. */
+const REVOKE_PERMISSION_AMBIGUOUS_REASON_CODE = 'sdap.revoke.incomplete.permission_ambiguous';
+
+/** The `/revoke` reason codes a retry cannot fix: the grant WAS deactivated, and the server's `detail` says what an
+ * administrator must do — shown as a warning, never as "please try again". */
+const NON_RETRYABLE_REVOKE_REASON_CODES: ReadonlySet<string> = new Set([
+  REVOKE_ORGANIZATION_TOO_LARGE_REASON_CODE,
+  REVOKE_PERMISSION_AMBIGUOUS_REASON_CODE,
+]);
+
 /**
  * Thrown by {@link postJson}/{@link getJson} for a non-OK BFF response (task-024
  * finding M8, transferred to task 065). Carries the parsed RFC 7807
@@ -2208,6 +2227,19 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
             deactivatedCount: err.deactivatedCount,
           })
         );
+      } else if (
+        pendingRevoke.kind === 'grant' &&
+        err instanceof AccessGrantModalApiError &&
+        err.reasonCode !== undefined &&
+        NON_RETRYABLE_REVOKE_REASON_CODES.has(err.reasonCode)
+      ) {
+        // #2103 follow-up: the organization is too large for one revoke to sweep; #2104 round 3: a matching container
+        // permission is ambiguous or unverifiable. Either way the grant WAS deactivated, and a retry meets the same
+        // answer — so show the server's sentence (what an administrator must do), never the generic "please try
+        // again" below.
+        setPendingRevoke(null);
+        await loadData();
+        setNoticeIfCurrent({ intent: 'warning', text: err.detail });
       } else if (
         pendingRevoke.kind === 'share' &&
         err instanceof AccessGrantModalApiError &&

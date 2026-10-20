@@ -42,6 +42,31 @@ public static class RevokeExternalAccessEndpoint
     internal const string RevokeSpeCleanupIncompleteReason = "sdap.revoke.incomplete.container_not_cleared";
 
     /// <summary>
+    /// #2103 follow-up. The NON-retryable leaf of the same <c>sdap.*.incomplete.*</c> family: an ORGANIZATION grant was
+    /// revoked in Dataverse, but the organization has more active members than one revoke may sweep
+    /// (<see cref="ExternalOrganizationMembership.MaxMembersPerSweep"/>), so no member's container permission was
+    /// touched. A retry meets the same bound and changes nothing — the detail tells an administrator what to do instead.
+    /// Still fail-closed (a 500, never a 200): members may retain file access.
+    /// </summary>
+    internal const string RevokeOrganizationTooLargeReason = "sdap.revoke.incomplete.organization_too_large";
+
+    /// <summary>
+    /// #2104 round 3. The NON-retryable leaf for a match the revoke refused to act on: more than one eligible permission
+    /// on the container matches a revoked grantee, or the one match names no holder object id and so cannot be told
+    /// apart from an internal user's (<see cref="SpeContainerMembershipService.IsAmbiguousPermissionMatch"/>). Nothing
+    /// was removed for that grantee, and a retry reads the same permissions and refuses again — the detail tells an
+    /// administrator to resolve the container's permissions in the SPE admin app. Still fail-closed (a 500).
+    /// </summary>
+    /// <remarks>
+    /// <b>Precedence</b> (the rule <see cref="ProjectClosureEndpoint"/> applies to <c>organization_too_large</c> versus
+    /// <c>container_not_cleared</c>): a non-retryable cause wins over a transient one, because a retry can clear only the
+    /// transient part and the revoke still cannot complete. The detail then also counts the other members not confirmed
+    /// removed. <see cref="RevokeOrganizationTooLargeReason"/> never meets this one: an oversized organization is not
+    /// swept member by member, so no member's permission is matched.
+    /// </remarks>
+    internal const string RevokePermissionAmbiguousReason = "sdap.revoke.incomplete.permission_ambiguous";
+
+    /// <summary>
     /// Registers the revoke endpoint on the external-access group.
     /// </summary>
     public static RouteGroupBuilder MapRevokeExternalAccessEndpoint(this RouteGroupBuilder group)
@@ -96,7 +121,8 @@ public static class RevokeExternalAccessEndpoint
         // ContactId is OPTIONAL (task 073 #7): revoke is authoritative by AccessRecordId (root- AND
         // grantee-agnostic). Since task 137 the cache invalidation (Step 3) is keyed on the revoked ROW's grantee,
         // so it no longer needs ContactId either: a contact grant clears that contact, an ORGANIZATION grant clears
-        // every active member. ContactId still keys the per-contact SPE cleanup (Step 2), unchanged.
+        // every active member. Since #2104 (pass-1 K3) the per-contact SPE cleanup (Step 2) is keyed on the row's
+        // grantee too, so ContactId is not read by any step; it is logged only.
         //
         // Note (task 070): ProjectId is NOT required — revoke deactivates by AccessRecordId and is
         // root-agnostic (works for a project/matter/work-assignment grant alike). The field is retained
@@ -190,8 +216,8 @@ public static class RevokeExternalAccessEndpoint
         }
 
         // ── Step 2: Remove the revoked grantee's SPE container permission(s) ──
-        var (speOutcome, orgCleanup) = await RemoveSpeContainerPermissionsAsync(
-            speContainerMembership, dataverseClient, containerResolver, request, grantKey,
+        var (speOutcome, orgCleanup, organizationTooLarge, permissionsAmbiguous) = await RemoveSpeContainerPermissionsAsync(
+            speContainerMembership, dataverseClient, containerResolver, request.AccessRecordId, grantKey,
             ExternalGrantLifecycle.TodayUtc(timeProvider ?? TimeProvider.System), logger, ct);
 
         // ── Step 3: Invalidate the grant cache — the ONE routine (task 137) ───
@@ -236,7 +262,9 @@ public static class RevokeExternalAccessEndpoint
                 "grantee may RETAIN file access. Reporting 500 (M2) rather than 200.",
                 request.AccessRecordId, deactivatedCount);
 
-            return RevokeIncomplete(httpContext, deactivatedCount, speOutcome, orgCleanup, residualAccessTerms);
+            return RevokeIncomplete(
+                httpContext, deactivatedCount, speOutcome, orgCleanup, residualAccessTerms, organizationTooLarge,
+                permissionsAmbiguous);
         }
 
         // DeactivatedCount makes the outcome explicit rather than inferable: 0 means the grant was
@@ -275,9 +303,30 @@ public static class RevokeExternalAccessEndpoint
         int deactivatedCount,
         SpeContainerRevokeOutcome speOutcome,
         SpeOrgMemberCleanupSummary? orgCleanup,
-        IReadOnlyList<string>? residualAccessTerms = null)
+        IReadOnlyList<string>? residualAccessTerms = null,
+        bool organizationTooLarge = false,
+        int permissionsAmbiguous = 0)
     {
-        var detail = deactivatedCount > 0
+        var deactivated = deactivatedCount > 0
+            ? $"Deactivated {deactivatedCount} Dataverse access grant(s). "
+            : "No Dataverse access grants were active to deactivate. ";
+
+        // Precedence (RevokePermissionAmbiguousReason): too-large, then ambiguous, then the retryable not-cleared.
+        var reasonCode = organizationTooLarge
+            ? RevokeOrganizationTooLargeReason
+            : permissionsAmbiguous > 0
+                ? RevokePermissionAmbiguousReason
+                : RevokeSpeCleanupIncompleteReason;
+
+        var detail = organizationTooLarge
+            ? deactivated +
+              $"The organization has more than {ExternalOrganizationMembership.MaxMembersPerSweep} active members, " +
+              "more than one revoke may sweep, so no member's SPE container permission was removed and members may " +
+              "RETAIN file access. Retrying will not change this. An administrator must remove those members' " +
+              "permissions from the record's container in the SPE admin app (the container's Permissions)."
+            : permissionsAmbiguous > 0
+            ? deactivated + PermissionAmbiguousSentence(orgCleanup, permissionsAmbiguous)
+            : deactivatedCount > 0
             ? $"Deactivated {deactivatedCount} Dataverse access grant(s), but the SPE container " +
               "permission could not be confirmed removed. The grantee may RETAIN file access. Retry the " +
               "revoke."
@@ -291,13 +340,37 @@ public static class RevokeExternalAccessEndpoint
             type: "https://tools.ietf.org/html/rfc7231#section-6.6.1",
             extensions: new Dictionary<string, object?>
             {
-                ["reasonCode"] = RevokeSpeCleanupIncompleteReason,
+                ["reasonCode"] = reasonCode,
                 ["deactivatedCount"] = deactivatedCount,
                 ["speContainerOutcome"] = speOutcome,
                 ["speOrgMemberCleanup"] = orgCleanup,
                 ["residualAccessTerms"] = residualAccessTerms is { Count: > 0 } ? residualAccessTerms : null,
                 ["traceId"] = httpContext.TraceIdentifier
             });
+    }
+
+    /// <summary>
+    /// #2104 round 3: the <see cref="RevokePermissionAmbiguousReason"/> sentence and its NON-retryable administrator
+    /// instruction. Names no person and no address (the detail reaches the caller's UI): a count, for an organization.
+    /// </summary>
+    private static string PermissionAmbiguousSentence(SpeOrgMemberCleanupSummary? orgCleanup, int permissionsAmbiguous)
+    {
+        const string instruction =
+            "Retrying will not change this. An administrator must resolve the container's permissions in the SPE admin " +
+            "app (the record's container, its Permissions).";
+
+        if (orgCleanup is null)
+        {
+            return "More than one permission on the record's SPE container matches the revoked grantee, or the matching " +
+                   "permission's holder cannot be verified, so none was removed and the grantee may RETAIN file access. " +
+                   instruction;
+        }
+
+        var others = orgCleanup.Failed - permissionsAmbiguous;
+        return $"{permissionsAmbiguous} member(s) of the organization match more than one permission on the record's SPE " +
+               "container, or a permission whose holder cannot be verified, so none of those permissions was removed and " +
+               "those members may RETAIN file access. " + instruction +
+               (others > 0 ? $" {others} other member(s) could also not be confirmed removed." : string.Empty);
     }
 
     // =========================================================================
@@ -317,7 +390,8 @@ public static class RevokeExternalAccessEndpoint
     ///
     /// <para>The fix is deletion, not repair: the service already had a correct email matcher with zero
     /// callers (CLAUDE.md §11 — reuse, don't fork). What remains here is the endpoint's own job — turning
-    /// a contact id into the email key, and mapping the result to an honest outcome.</para>
+    /// a contact id into its identity key (#2105: bound object id and email, <see cref="ResolveContactMembershipKeyAsync"/>),
+    /// and mapping the result to an honest outcome.</para>
     ///
     /// <para><b>Broker-only context.</b> Nothing in this codebase ADDS a container permission
     /// (<c>GrantMembershipAsync</c> has no callers; <c>/grant</c> reports
@@ -336,7 +410,7 @@ public static class RevokeExternalAccessEndpoint
     /// container is <c>Failed</c> (→ the M2 500). Note the shipped Manage Access modal never sent a container, so
     /// until this change secure-root revokes never cleaned up SPE at all.</para>
     ///
-    /// <para><b>Overlap — task 166 r1.</b> Permissions are keyed by EMAIL, not by grant, so one person can hold the
+    /// <para><b>Overlap — task 166 r1.</b> Permissions are keyed by IDENTITY, not by grant, so one person can hold the
     /// same container permission on the strength of two grants on this root (a direct contact grant AND membership of
     /// an organization granted the same root). Revoking one of them must not strip a permission the other still
     /// justifies. So before removing, the root's REMAINING active, unexpired grants are read and every contact they
@@ -344,12 +418,12 @@ public static class RevokeExternalAccessEndpoint
     /// cannot be established (a read fault, or more rows than one revoke may read) the removal proceeds for everyone
     /// the revoked grant named — fail closed (ADR-003): an entitlement that cannot be verified is not honoured.</para>
     /// </remarks>
-    private static async Task<(SpeContainerRevokeOutcome Outcome, SpeOrgMemberCleanupSummary? OrgCleanup)>
+    private static async Task<(SpeContainerRevokeOutcome Outcome, SpeOrgMemberCleanupSummary? OrgCleanup, bool OrganizationTooLarge, int PermissionsAmbiguous)>
         RemoveSpeContainerPermissionsAsync(
             SpeContainerMembershipService speContainerMembership,
             DataverseWebApiClient dataverseClient,
             RecordContainerResolver containerResolver,
-            RevokeAccessRequest request,
+            Guid accessRecordId,
             ExternalGrantKey grantKey,
             DateOnly today,
             ILogger logger,
@@ -364,7 +438,7 @@ public static class RevokeExternalAccessEndpoint
                 "[EXT-REVOKE] The container of grant root {RootType} {RootId} could not be determined; the SPE "
                 + "permission cleanup cannot run and the grantee may RETAIN file access.",
                 grantKey.RootType, grantKey.RootId);
-            return (SpeContainerRevokeOutcome.Failed, grantKey.IsOrganizationGrant ? UnknownMembership : null);
+            return (SpeContainerRevokeOutcome.Failed, grantKey.IsOrganizationGrant ? UnknownMembership : null, false, 0);
         }
 
         if (derivedContainerId is null)
@@ -372,7 +446,7 @@ public static class RevokeExternalAccessEndpoint
             logger.LogInformation(
                 "[EXT-REVOKE] Grant root {RootType} {RootId} is not a secure record with its own container — no "
                 + "record-owned container permission to remove.", grantKey.RootType, grantKey.RootId);
-            return (SpeContainerRevokeOutcome.NotAttempted, null);
+            return (SpeContainerRevokeOutcome.NotAttempted, null, false, 0);
         }
 
         var containerId = derivedContainerId;
@@ -401,37 +475,38 @@ public static class RevokeExternalAccessEndpoint
                 logger.LogError(
                     "[EXT-REVOKE] Access record {AccessRecordId} derives an organization grant with no " +
                     "organization id. Members cannot be identified; no SPE container permission on " +
-                    "{ContainerId} was removed.", request.AccessRecordId, containerId);
-                return (SpeContainerRevokeOutcome.Failed, UnknownMembership);
+                    "{ContainerId} was removed.", accessRecordId, containerId);
+                return (SpeContainerRevokeOutcome.Failed, UnknownMembership, false, 0);
             }
 
             return await RemoveOrganizationMembersSpePermissionsAsync(
                 speContainerMembership, dataverseClient, containerId, organizationId, stillEntitled, logger, ct);
         }
 
-        // A CONTACT-grant row revoked without a ContactId on the request: the row names the grantee, but
-        // resolving them here would change which identity the per-contact path acts on, which task 017's
-        // constraint pins. Left as NotAttempted — the honest answer, and unchanged behaviour.
-        if (request.ContactId == Guid.Empty)
+        // A CONTACT grant: the ROW's contact is the one revoked (pass-1 K3), never request.ContactId — a request naming
+        // nobody, or a different contact, must not change whose permission is cleared. Unreachable when null:
+        // IsOrganizationGrant is exactly "no contact". Handled fail closed (Failed), never as a silent NotAttempted.
+        if (grantKey.ContactId is not { } contactId)
         {
-            logger.LogInformation(
-                "[EXT-REVOKE] Contact-grant revoke with no ContactId on the request — no identity key to " +
-                "match; SPE container permission removal not attempted for container {ContainerId}.",
-                containerId);
-            return (SpeContainerRevokeOutcome.NotAttempted, null);
+            logger.LogError(
+                "[EXT-REVOKE] Access record {AccessRecordId} derives a contact grant with no contact. The grantee "
+                + "cannot be identified; no SPE container permission on {ContainerId} was removed.",
+                accessRecordId, containerId);
+            return (SpeContainerRevokeOutcome.Failed, null, false, 0);
         }
 
-        if (stillEntitled is not null && stillEntitled.Contains(request.ContactId))
+        if (stillEntitled is not null && stillEntitled.Contains(contactId))
         {
             logger.LogInformation(
                 "[EXT-REVOKE] Contact {ContactId} is still entitled to {RootType} {RootId} through another active grant "
                 + "on it; their container permission on {ContainerId} is KEPT (task 166).",
-                request.ContactId, grantKey.RootType, grantKey.RootId, containerId);
-            return (SpeContainerRevokeOutcome.NotAttempted, null);
+                contactId, grantKey.RootType, grantKey.RootId, containerId);
+            return (SpeContainerRevokeOutcome.NotAttempted, null, false, 0);
         }
 
-        return (await RemoveContactSpePermissionAsync(
-            speContainerMembership, dataverseClient, request, containerId, logger, ct), null);
+        var (contactOutcome, contactAmbiguous) = await RemoveContactSpePermissionAsync(
+            speContainerMembership, dataverseClient, contactId, containerId, logger, ct);
+        return (contactOutcome, null, false, contactAmbiguous ? 1 : 0);
     }
 
     /// <summary>The most remaining grant rows on one root a single revoke reads for the overlap check.</summary>
@@ -535,49 +610,53 @@ public static class RevokeExternalAccessEndpoint
     }
 
     /// <summary>
-    /// The per-CONTACT half of the SPE cleanup: one identity, one permission. Unchanged by task 020.
+    /// The per-CONTACT half of the SPE cleanup: one identity, one permission. <paramref name="contactId"/> is the
+    /// revoked ROW's contact (pass-1 K3), never the request's. <c>Ambiguous</c> (#2104 round 3): the Failed outcome is
+    /// one a retry cannot fix (<see cref="SpeContainerMembershipService.IsAmbiguousPermissionMatch"/>).
     /// </summary>
-    private static async Task<SpeContainerRevokeOutcome> RemoveContactSpePermissionAsync(
+    private static async Task<(SpeContainerRevokeOutcome Outcome, bool Ambiguous)> RemoveContactSpePermissionAsync(
         SpeContainerMembershipService speContainerMembership,
         DataverseWebApiClient dataverseClient,
-        RevokeAccessRequest request,
+        Guid contactId,
         string containerId,
         ILogger logger,
         CancellationToken ct)
     {
-        string? contactEmail;
+        SpeMembershipKey contactKey;
         try
         {
-            contactEmail = await ResolveContactEmailAsync(dataverseClient, request.ContactId, ct);
+            contactKey = await ResolveContactMembershipKeyAsync(dataverseClient, contactId, ct);
         }
         catch (Exception ex)
         {
             logger.LogError(ex,
-                "[EXT-REVOKE] Could not read the email for Contact {ContactId}; the SPE container " +
-                "permission on {ContainerId} could NOT be matched and may remain.",
-                request.ContactId, containerId);
-            return SpeContainerRevokeOutcome.Failed;
+                "[EXT-REVOKE] Could not read the identity key (object id / email) of Contact {ContactId}; the SPE " +
+                "container permission on {ContainerId} could NOT be matched and may remain.",
+                contactId, containerId);
+            return (SpeContainerRevokeOutcome.Failed, false);
         }
 
-        if (string.IsNullOrWhiteSpace(contactEmail))
+        if (HasNoContainerMembershipKey(contactKey))
         {
-            // No email means no way to identify their ACL entry. If one exists we cannot find it, so this
-            // is an unknown state, not an absence — report Failed rather than NoPermissionFound.
-            logger.LogWarning(
-                "[EXT-REVOKE] Contact {ContactId} has no emailaddress1, which is the key SPE membership " +
-                "is written with — any container permission on {ContainerId} cannot be matched.",
-                request.ContactId, containerId);
-            return SpeContainerRevokeOutcome.Failed;
+            // #2103: the shared decision (see HasNoContainerMembershipKey) — nothing on the container can be this
+            // contact's, so there is nothing to clear. It used to be Failed → a 500 telling the caller to retry, which
+            // could never succeed: a missing key is permanent.
+            logger.LogInformation(
+                "[EXT-REVOKE] Contact {ContactId} has neither a bound object id nor an emailaddress1 — the keys a " +
+                "container permission is matched by — so no permission on {ContainerId} can be attributed to them; " +
+                "container step {Outcome} (#2103).",
+                contactId, containerId, NoContainerMembershipKeyOutcome);
+            return (NoContainerMembershipKeyOutcome, false);
         }
 
-        var result = await speContainerMembership.RevokeMembershipAsync(containerId, contactEmail, ct);
+        var result = await speContainerMembership.RevokeMembershipAsync(containerId, contactKey, dataverseClient, ct);
 
         if (result.Success)
         {
             logger.LogInformation(
                 "[EXT-REVOKE] Removed SPE container permission {PermissionId} for Contact {ContactId} on {ContainerId}",
-                result.PermissionId, request.ContactId, containerId);
-            return SpeContainerRevokeOutcome.PermissionRemoved;
+                result.PermissionId, contactId, containerId);
+            return (SpeContainerRevokeOutcome.PermissionRemoved, false);
         }
 
         // The service distinguishes "nobody matched" from "Graph refused". Only the former is benign:
@@ -587,15 +666,15 @@ public static class RevokeExternalAccessEndpoint
             logger.LogInformation(
                 "[EXT-REVOKE] No SPE container permission exists for Contact {ContactId} on {ContainerId} " +
                 "— nothing to remove (expected under the broker-only model).",
-                request.ContactId, containerId);
-            return SpeContainerRevokeOutcome.NoPermissionFound;
+                contactId, containerId);
+            return (SpeContainerRevokeOutcome.NoPermissionFound, false);
         }
 
         logger.LogError(
             "[EXT-REVOKE] Failed to remove the SPE container permission for Contact {ContactId} on " +
             "{ContainerId}: {Error}. They may RETAIN file access.",
-            request.ContactId, containerId, result.Error);
-        return SpeContainerRevokeOutcome.Failed;
+            contactId, containerId, result.Error);
+        return (SpeContainerRevokeOutcome.Failed, SpeContainerMembershipService.IsAmbiguousPermissionMatch(result));
     }
 
     /// <summary>
@@ -618,16 +697,22 @@ public static class RevokeExternalAccessEndpoint
     /// under-including does not. (Before task 109 the read side conferred on <c>statecode</c> alone, and
     /// this sweep matched it exactly; the superset relation is what has to hold, and still does.)</para>
     ///
-    /// <para><b>⚠️ What this CANNOT confirm.</b> Per-member <c>NoPermissionFound</c> is only as good as
-    /// <see cref="SpeContainerMembershipService.RevokeMembershipAsync"/>'s match, and that method reads
-    /// the container's permissions with a single <c>GetAsync</c> — it does not follow Graph's
-    /// <c>@odata.nextLink</c>. On a container whose permission list spans more than one page, a member
-    /// whose entry sits beyond page 1 is reported as "holds no permission" when they in fact retain file
-    /// access. That is the same class of false assurance as <c>container_not_cleared</c>'s and is owned by
-    /// task 024 (SPE Graph paging); this method inherits it and cannot detect it from the callee's
-    /// result. Fixing it HERE would mean forking the matcher, which is exactly what task 017 deleted.</para>
+    /// <para><b>What a per-member <c>NoPermissionFound</c> rests on.</b> It is only as good as the one paged read
+    /// <see cref="SpeContainerMembershipService.RemoveMembershipsAsync"/> makes. That read follows Graph's
+    /// <c>@odata.nextLink</c> (task 024) up to its page bound and reports whether it reached the end; a member not
+    /// seen on an INCOMPLETE read is a failure, never "holds no permission". The match itself is the service's one
+    /// matcher (<see cref="SpeContainerMembershipService.FindContactPermissions"/>, #2105 / #2104 round 2): the bound
+    /// object id, then the email against the permission's <c>email</c> and <c>userPrincipalName</c>; never a
+    /// Spaarke-managed or an internal user's permission; and never a guess — two eligible matches, or a match whose
+    /// holder cannot be verified, remove nothing and are counted Failed, which the response names as
+    /// <see cref="RevokePermissionAmbiguousReason"/> (#2104 round 3).</para>
+    ///
+    /// <para><b>An organization over the sweep bound (#2104 round 3)</b> is not swept member by member; the container is
+    /// asked whether it holds any contact permission at all (<see cref="ContainerContactPermissionStateAsync"/>). None: a
+    /// 200. One definitely left: <see cref="RevokeOrganizationTooLargeReason"/> (a retry meets the same bound). Not
+    /// established (round 4): the retryable <see cref="RevokeSpeCleanupIncompleteReason"/> — a retry may prove it clean.</para>
     /// </remarks>
-    private static async Task<(SpeContainerRevokeOutcome Outcome, SpeOrgMemberCleanupSummary? OrgCleanup)>
+    private static async Task<(SpeContainerRevokeOutcome Outcome, SpeOrgMemberCleanupSummary? OrgCleanup, bool OrganizationTooLarge, int PermissionsAmbiguous)>
         RemoveOrganizationMembersSpePermissionsAsync(
             SpeContainerMembershipService speContainerMembership,
             DataverseWebApiClient dataverseClient,
@@ -653,11 +738,42 @@ public static class RevokeExternalAccessEndpoint
                 "[EXT-REVOKE] Could not enumerate the active members of Organization {OrganizationId}; " +
                 "NO SPE container permission on {ContainerId} was removed and members may RETAIN file access.",
                 organizationId, containerId);
-            return (SpeContainerRevokeOutcome.Failed, UnknownMembership);
+            return (SpeContainerRevokeOutcome.Failed, UnknownMembership, false, 0);
         }
 
         if (memberSet.ExceededBound)
         {
+            // #2104 round 3: the members cannot be swept one by one, but the container itself can still prove that none
+            // of them holds a permission there — the rule close-project applies (round 2, F1): a COMPLETE read on which
+            // every user permission is Spaarke-managed or an internal user's (SpeContainerContactPermissionState.Clean).
+            // Then nobody, member or not, holds a permission a contact grant could account for: a 200.
+            var containerState = await ContainerContactPermissionStateAsync(
+                speContainerMembership, dataverseClient, containerId, organizationId, logger, ct);
+
+            if (containerState == SpeContainerContactPermissionState.Clean)
+            {
+                logger.LogInformation(
+                    "[EXT-REVOKE] Organization {OrganizationId} has more than {Bound} active members, more than one " +
+                    "revoke may sweep, but container {ContainerId} holds no permission a contact grant could account for " +
+                    "(read in full; every user permission is Spaarke-managed or an internal user's), so no member can hold one there " +
+                    "(#2104 round 3).",
+                    organizationId, ExternalOrganizationMembership.MaxMembersPerSweep, containerId);
+                return (SpeContainerRevokeOutcome.NoPermissionFound, UnknownMembership, false, 0);
+            }
+
+            if (containerState == SpeContainerContactPermissionState.Unknown)
+            {
+                // #2104 round 4 (F1): the container could not answer (a read, marker or lookup fault, an incomplete read, a
+                // throw). A retry may prove it clean, so this is the retryable container_not_cleared — never the
+                // "retrying will not change this" of organization_too_large.
+                logger.LogError(
+                    "[EXT-REVOKE] Organization {OrganizationId} has more than {Bound} active members, and whether container "
+                    + "{ContainerId} still holds a contact permission could not be established; members may RETAIN file "
+                    + "access. Retry the revoke.",
+                    organizationId, ExternalOrganizationMembership.MaxMembersPerSweep, containerId);
+                return (SpeContainerRevokeOutcome.Failed, UnknownMembership, false, 0);
+            }
+
             // Task 020's escalation trigger, enforced in code rather than assumed away: a sweep that
             // silently truncates and reports success is the exact failure class this project exists to
             // remove. Refusing, loudly, hands the operator a decision instead of a false assurance.
@@ -666,12 +782,14 @@ public static class RevokeExternalAccessEndpoint
                 "than one revoke request may sweep. NO SPE container permission on {ContainerId} was " +
                 "removed; escalate for a bulk cleanup rather than retrying.",
                 organizationId, ExternalOrganizationMembership.MaxMembersPerSweep, containerId);
-            return (SpeContainerRevokeOutcome.Failed, UnknownMembership);
+            // #2103 follow-up: flagged so the response names THIS condition (organization_too_large) instead of the
+            // retryable container_not_cleared — a retry meets the same bound.
+            return (SpeContainerRevokeOutcome.Failed, UnknownMembership, true, 0);
         }
 
         // ── Resolve identities ───────────────────────────────────────────────
-        // Membership is written with userPrincipalName = the contact's email, so an email is the ONLY
-        // key that can match an ACL entry. Resolve them all first, then do ONE container read.
+        // A permission is matched by the member's bound object id, then their email (#2105,
+        // SpeContainerMembershipService.FindContactPermissions). Resolve them all first, then do ONE container read.
         //
         // ISS-004 (#968), closed by task 024: this loop used to call RevokeMembershipAsync per member,
         // and each of those calls read the container's ENTIRE permission collection — N members = N
@@ -680,8 +798,12 @@ public static class RevokeExternalAccessEndpoint
         var notFound = 0;
         var failed = 0;
         var retained = 0;
+        var noKey = 0;
+        // #2104 round 3: members whose Failed is an ambiguous or unverifiable match (counted in `failed` too) — the part
+        // a retry cannot fix.
+        var ambiguous = 0;
 
-        var resolved = new List<(Guid ContactId, string Email)>();
+        var resolved = new List<(Guid ContactId, SpeMembershipKey Key)>();
 
         foreach (var memberContactId in memberSet.ContactIds)
         {
@@ -700,26 +822,28 @@ public static class RevokeExternalAccessEndpoint
             // strictly MORE access in place. Every member gets an outcome, and the failures are counted.
             try
             {
-                var memberEmail = await ResolveContactEmailAsync(dataverseClient, memberContactId, ct);
+                var memberKey = await ResolveContactMembershipKeyAsync(dataverseClient, memberContactId, ct);
 
-                if (string.IsNullOrWhiteSpace(memberEmail))
+                if (HasNoContainerMembershipKey(memberKey))
                 {
-                    failed++;
-                    logger.LogWarning(
-                        "[EXT-REVOKE] Member Contact {ContactId} of Organization {OrganizationId} has no " +
-                        "emailaddress1 — the key SPE membership is written with — so any permission on " +
-                        "{ContainerId} cannot be matched. They may RETAIN file access.",
+                    // #2103: the shared decision — no permission can be this member's, so nothing to clear, and
+                    // not a failure (it used to be, which made every revoke of this organization a permanent 500).
+                    noKey++;
+                    logger.LogInformation(
+                        "[EXT-REVOKE] Member Contact {ContactId} of Organization {OrganizationId} has neither a bound " +
+                        "object id nor an emailaddress1 — the keys a container permission is matched by — so no " +
+                        "permission on {ContainerId} can be attributed to them; nothing to clear (#2103).",
                         memberContactId, organizationId, containerId);
                     continue;
                 }
 
-                resolved.Add((memberContactId, memberEmail));
+                resolved.Add((memberContactId, memberKey));
             }
             catch (Exception ex)
             {
                 failed++;
                 logger.LogError(ex,
-                    "[EXT-REVOKE] Could not resolve the email for member Contact {ContactId} of " +
+                    "[EXT-REVOKE] Could not resolve the identity key for member Contact {ContactId} of " +
                     "Organization {OrganizationId}; their permission on {ContainerId} cannot be matched " +
                     "and may remain. Continuing with the rest.",
                     memberContactId, organizationId, containerId);
@@ -727,19 +851,20 @@ public static class RevokeExternalAccessEndpoint
         }
 
         // ── Sweep: ONE paged read, then match every member against it ────────
-        // ⚠️ Behaviour note: results are keyed by EMAIL, so two contact rows sharing one address now
-        // both report the outcome of the single permission that address owns. Previously the second
-        // call found the permission already deleted and reported NoPermissionFound, which read as "this
-        // person never had access". Keying by identity is the more truthful of the two.
-        IReadOnlyDictionary<string, SpeContainerMembershipResult> speResults =
+        // ⚠️ Behaviour note: results are keyed by IDENTITY KEY, so two contact rows sharing one key both report
+        // the outcome of the single permission it names (and the service deletes a permission two keys name only
+        // once). Previously the second call found the permission already deleted and reported NoPermissionFound,
+        // which read as "this person never had access".
+        IReadOnlyDictionary<SpeMembershipKey, SpeContainerMembershipResult> speResults =
             resolved.Count == 0
-                ? new Dictionary<string, SpeContainerMembershipResult>(StringComparer.OrdinalIgnoreCase)
-                : await speContainerMembership.RemoveMembershipsAsync(
-                    containerId, resolved.Select(r => r.Email).ToList(), ct);
+                ? new Dictionary<SpeMembershipKey, SpeContainerMembershipResult>()
+                : (await speContainerMembership.RemoveMembershipsAsync(
+                    containerId, resolved.Select(r => r.Key).ToList(), dataverseClient,
+                    confirmNoContactPermission: false, ct)).Results;
 
-        foreach (var (memberContactId, memberEmail) in resolved)
+        foreach (var (memberContactId, memberKey) in resolved)
         {
-            if (!speResults.TryGetValue(memberEmail, out var result))
+            if (!speResults.TryGetValue(memberKey, out var result))
             {
                 // A member we asked about but got no answer for is an unknown, not an absence.
                 failed++;
@@ -766,6 +891,11 @@ public static class RevokeExternalAccessEndpoint
             else
             {
                 failed++;
+                if (SpeContainerMembershipService.IsAmbiguousPermissionMatch(result))
+                {
+                    ambiguous++;
+                }
+
                 logger.LogError(
                     "[EXT-REVOKE] Failed to remove the SPE container permission for member Contact " +
                     "{ContactId} of Organization {OrganizationId} on {ContainerId}: {Error}. They may " +
@@ -779,16 +909,53 @@ public static class RevokeExternalAccessEndpoint
             PermissionsRemoved: removed,
             PermissionsNotFound: notFound,
             Failed: failed,
-            RetainedByOtherGrant: retained);
+            RetainedByOtherGrant: retained,
+            NoMembershipKey: noKey);
 
         var outcome = AggregateOrgOutcome(summary);
 
         logger.LogInformation(
             "[EXT-REVOKE] Organization {OrganizationId} SPE cleanup on {ContainerId}: {Members} active " +
-            "member(s), {Removed} permission(s) removed, {NotFound} with none, {Failed} FAILED → {Outcome}",
-            organizationId, containerId, summary.MembersEnumerated, removed, notFound, failed, outcome);
+            "member(s), {Removed} permission(s) removed, {NotFound} with none, {NoKey} with no identity key, " +
+            "{Failed} FAILED → {Outcome}",
+            organizationId, containerId, summary.MembersEnumerated, removed, notFound, noKey, failed, outcome);
 
-        return (outcome, summary);
+        return (outcome, summary, false, ambiguous);
+    }
+
+    /// <summary>
+    /// #2104 round 3: does <paramref name="containerId"/> hold any permission a contact grant could account for? The
+    /// container-wide answer <see cref="SpeContainerMembershipService.RemoveMembershipsAsync"/> gives with no key and
+    /// <c>confirmNoContactPermission</c> (<see cref="SpeMembershipRemoval.ContactPermissionState"/>). Three-state since
+    /// round 4 (F1): a throw is <see cref="SpeContainerContactPermissionState.Unknown"/> — never clean, and never "one
+    /// remains" either, which would tell the caller a retry cannot help. Removes nothing (there is no key).
+    /// </summary>
+    private static async Task<SpeContainerContactPermissionState> ContainerContactPermissionStateAsync(
+        SpeContainerMembershipService speContainerMembership,
+        DataverseWebApiClient dataverseClient,
+        string containerId,
+        Guid organizationId,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        try
+        {
+            var removal = await speContainerMembership.RemoveMembershipsAsync(
+                containerId, Array.Empty<SpeMembershipKey>(), dataverseClient, confirmNoContactPermission: true, ct);
+            return removal.ContactPermissionState;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "[EXT-REVOKE] Could not establish whether container {ContainerId} holds any contact permission; the "
+                + "oversized organization {OrganizationId}'s members are not confirmed absent (fail closed).",
+                containerId, organizationId);
+            return SpeContainerContactPermissionState.Unknown;
+        }
     }
 
     /// <summary>
@@ -821,8 +988,10 @@ public static class RevokeExternalAccessEndpoint
             return SpeContainerRevokeOutcome.PermissionRemoved;
 
         // Task 166 r1: every enumerated member is still entitled through another live grant on this root — nobody's
-        // permission was even looked up, so "nobody held one" would be a claim this revoke never checked.
-        if (summary.MembersEnumerated > 0 && summary.RetainedByOtherGrant == summary.MembersEnumerated)
+        // permission was even looked up, so "nobody held one" would be a claim this revoke never checked. #2103: a member
+        // with no email key is the same — nothing was looked up for them either.
+        if (summary.MembersEnumerated > 0
+            && summary.RetainedByOtherGrant + summary.NoMembershipKey == summary.MembersEnumerated)
             return SpeContainerRevokeOutcome.NotAttempted;
 
         // The member list was established (possibly empty) and nobody held a permission. Under the
@@ -830,27 +999,96 @@ public static class RevokeExternalAccessEndpoint
         return SpeContainerRevokeOutcome.NoPermissionFound;
     }
 
+    /// <summary>The contact columns <see cref="ResolveContactMembershipKeyAsync"/> reads.</summary>
+    internal static readonly string ContactMembershipKeySelect = string.Join(",",
+        "emailaddress1", ContactBindingDecision.ExternalObjectIdColumn, ContactBindingDecision.IdentityPlaneColumn);
+
     /// <summary>
-    /// Reads a contact's <c>emailaddress1</c> — the key SPE membership is written with.
+    /// Reads a contact's identity key (#2105): its bound Entra object id (<c>sprk_externalobjectid</c>, read through
+    /// <see cref="ContactBindingDecision.ReadBinding"/>, the one binding parse) and its <c>emailaddress1</c>.
     /// </summary>
     /// <remarks>
-    /// Uses <see cref="DataverseWebApiClient.RetrieveAsync{T}"/> directly rather than introducing a
-    /// contact-email service: one column on one row, and the client is already injected (CLAUDE.md §11).
+    /// <para>Uses <see cref="DataverseWebApiClient.RetrieveAsync{T}"/> directly rather than introducing a
+    /// contact-key service: three columns on one row, and the client is already injected (CLAUDE.md §11).
     /// <c>internal</c> since task 166: project closure removes the revoked grantees' container permissions by the
-    /// SAME identity key, so it reuses this rather than a second copy.
+    /// SAME identity key, so it reuses this rather than a second copy.</para>
+    /// <para><b>An UNREADABLE binding is not "no object id"</b> (<see cref="BindingKind.Unreadable"/>: a plane marker
+    /// with no readable oid — the field-security masking signature — is never treated as unbound). With an email the
+    /// email still matches, as it always has. With no email the contact may hold a permission under an oid this read
+    /// cannot see, so "nothing to clear" would be a guess: it THROWS, which every caller already reports as a key that
+    /// could not be read (Failed / not cleared) — fail closed.</para>
     /// </remarks>
-    internal static async Task<string?> ResolveContactEmailAsync(
+    internal static async Task<SpeMembershipKey> ResolveContactMembershipKeyAsync(
         DataverseWebApiClient dataverseClient, Guid contactId, CancellationToken ct)
     {
         var row = await dataverseClient.RetrieveAsync<ContactEmailRow>(
-            "contacts", contactId, "emailaddress1", ct);
+            "contacts", contactId, ContactMembershipKeySelect, ct);
 
-        return row?.emailaddress1;
+        var binding = ContactBindingDecision.ReadBinding(row?.sprk_externalobjectid, row?.sprk_identityplane);
+        var key = new SpeMembershipKey(binding.Kind == BindingKind.Bound ? binding.Oid : null, row?.emailaddress1);
+
+        if (binding.Kind == BindingKind.Unreadable && key.IsEmpty)
+        {
+            throw new InvalidOperationException(
+                $"Contact {contactId} has no emailaddress1 and an unreadable identity binding (a plane marker without a "
+                + "readable object id), so its container permission cannot be matched or ruled out.");
+        }
+
+        return key;
     }
 
-    /// <summary>Minimal projection of <c>contacts</c> for SPE identity matching.</summary>
+    /// <summary>
+    /// #2103 / #2105 — THE decision for a grantee contact with no identity key (no bound Entra object id AND no
+    /// <c>emailaddress1</c>), shared by every SPE cleanup that revokes contacts: the single-grant revoke (a contact
+    /// grant, and each member of an organization grant) and project closure. <see langword="true"/> means no container
+    /// permission can be attributed to this contact, so there is nothing to clear — NOT a failure, and never a "retry".
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why "nothing to clear" is the truthful answer, not a guess.</b></para>
+    /// <list type="number">
+    /// <item><b>No grant-time write records a key.</b> <see cref="SpeContainerMembershipService.GrantMembershipAsync"/>
+    /// has no caller and never had one; <c>/grant</c> answers <c>SpeContainerMembershipGranted: false</c>; the invite
+    /// endpoints do not touch SPE. A contact's container permission, when one exists, was added by hand — in the SPE
+    /// admin app (a Spaarke surface: Add Permission names the user by UPN, resolved from their object id) or outside
+    /// Spaarke.</item>
+    /// <item><b>Such a permission names its holder by object id, email and UPN.</b> The revoke matches it by the
+    /// contact's bound object id first, then by its email against the permission's <c>email</c> and
+    /// <c>userPrincipalName</c> (<see cref="SpeContainerMembershipService.FindContactPermissions"/>). With either key,
+    /// "no permission under it" is the healthy <see cref="SpeContainerRevokeOutcome.NoPermissionFound"/>; with neither,
+    /// no permission on the container can be tied to this contact at all.</item>
+    /// <item><b>The roles Spaarke itself creates are never a contact's.</b> The marked grants
+    /// (<see cref="SpeContainerMembershipService.StandingWriterMarkerPrefix"/> /
+    /// <see cref="SpeContainerMembershipService.JitWriterMarkerPrefix"/> keyed by a systemuserid,
+    /// <see cref="SpeContainerMembershipService.DemoWriterMarkerPrefix"/> by a demo user's Entra object id) belong to
+    /// <c>SpeContainerMembershipSync</c> and demo expiry. The matcher excludes every permission a marker records
+    /// (#2105), so a contact revoke never removes one — whatever its keys match.</item>
+    /// </list>
+    /// <para>It used to report <see cref="SpeContainerRevokeOutcome.Failed"/> (a 500 that says "retry"). A missing
+    /// key is permanent, so the retry could never succeed (#2103, found by the UAC 099b live gate). Every other
+    /// Failed — the key read faulting (an unreadable binding with no email included), Graph refusing, an incomplete
+    /// permission or marker read — is transient and stays Failed.</para>
+    /// </remarks>
+    internal static bool HasNoContainerMembershipKey(SpeMembershipKey contactKey) => contactKey.IsEmpty;
+
+    /// <summary>
+    /// The per-contact outcome of <see cref="HasNoContainerMembershipKey"/>: <see cref="SpeContainerRevokeOutcome.NotAttempted"/>,
+    /// because the container was not read for this contact. It is not <see cref="SpeContainerRevokeOutcome.NoPermissionFound"/>, which
+    /// claims a read. It is a 200.
+    /// </summary>
+    internal const SpeContainerRevokeOutcome NoContainerMembershipKeyOutcome = SpeContainerRevokeOutcome.NotAttempted;
+
+    /// <summary>
+    /// Minimal projection of <c>contacts</c> for SPE identity matching (<see cref="ContactMembershipKeySelect"/>). The
+    /// name predates #2105, which added the binding columns.
+    /// </summary>
     internal sealed class ContactEmailRow
     {
         public string? emailaddress1 { get; set; }
+
+        /// <summary><c>sprk_externalobjectid</c> — the bound Entra object id (field-secured; null when masked).</summary>
+        public string? sprk_externalobjectid { get; set; }
+
+        /// <summary><c>sprk_identityplane</c> — which plane wrote the binding.</summary>
+        public int? sprk_identityplane { get; set; }
     }
 }

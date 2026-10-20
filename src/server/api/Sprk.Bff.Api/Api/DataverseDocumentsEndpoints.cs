@@ -220,9 +220,14 @@ public static class DataverseDocumentsEndpoints
                         return ProblemDetailsHelper.RecordOwnerRefused(reparent, "document", traceId);
                     }
 
-                    refiledFromIsolation = () => isolationReadFault is null
-                        ? Task.FromResult(isolatedBefore)
-                        : Task.FromException<bool>(isolationReadFault);
+                    // #2091: a change that moved none of the document's parents (ParentsUnchanged — a re-bind onto the
+                    // record a column already holds) is written, but is no re-file: no step after one.
+                    if (!reparent.ParentsUnchanged)
+                    {
+                        refiledFromIsolation = () => isolationReadFault is null
+                            ? Task.FromResult(isolatedBefore)
+                            : Task.FromException<bool>(isolationReadFault);
+                    }
                 }
 
                 // Task 156 (owner round 4 item 5, option b): a document re-filed to another matter / project / work
