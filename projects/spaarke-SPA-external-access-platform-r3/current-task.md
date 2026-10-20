@@ -36,7 +36,7 @@
 2. Create the R4 worktree/project after the PR merges; wait for the owner's requirements + prototype.
 3. Propose where ISS-015's document internal flag lands (R3 task vs R4) and its design options.
 4. C-1 revoke when the owner is ready (give exact commands).
-5. UAC: #2138/#2133 live on dev (c3ec5d6e5); UAC runs the #2128/#2130 gates. Tracy Cheatham (DC) registration fails `registration_email_missing`: her DC-tenant user likely has no `mail`; owner checking (her Spaarke guest account is irrelevant to that path). UAC runs the #2110 gate and 186 on the new builds.
+5. UAC: #2138/#2133 live on dev (c3ec5d6e5); UAC runs the #2128/#2130 gates. **074 evidence (owner, 2026-10-20 ~18:40Z):** Dewey Cheatham member Tracy Cheatham signed in via "Sign in with your company account", completed the profile form, and her contact now exists in Dataverse (A9 registration works end to end on dev SPA 28274e04e + BFF c3ec5d6e5). The first try failed `registration_email_missing` because the hand-made DC test user had no Email; the owner set it in Entra. Backlog for R4: make that error text tell the customer admin what to set.
 6. 074 → 070/071/072 → 090.
 
 ## Open owner questions
