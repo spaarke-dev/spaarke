@@ -984,7 +984,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             [InvoiceSubmissionPersister.SubmissionFindingsJson] = json,
         };
 
-        // D-133: the same conditional update marks the submission for the administrator. The text is a function of every refusal stored
+        // D-133: the same update (a plain UpdateAsync: findings writes carry no row-version guard) marks the submission for the administrator. The text is a function of every refusal stored
         // (the plan's and the writer's), so a resume that adds nothing writes nothing and never repeats it; it is never cleared here.
         if (AdminAttentionText.FromFindings(root) is { } attention)
         {
