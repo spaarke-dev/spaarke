@@ -937,4 +937,6 @@ Each restamps afterwards, but none refuses any of these:
 
 **Suggested fix (owner options)**: (a) make the three relationships Restrict, a dev schema change with the owner's OK; (b) add an explicit scope column, so a cleared lookup applies to nothing; (c) both.
 
+**UAC context (2026-10-20, also on #2132)**: the UAC delete design D1 keeps RemoveLink deliberately. D6 removes `prvDelete` on the core tables from Core User and replaces the model-driven app's Delete with the BFF flow. After UAC delete task 1 ships, only admins and holders of the named delete role can delete a core record outside the BFF. That narrows the defect but does not close it: a D-120 preview check or a sweep is still worth having, and (b) remains the structural fix.
+
 ---
