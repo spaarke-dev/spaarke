@@ -3,6 +3,8 @@ using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.Privileges;
 using Sprk.Bff.Api.Services.Registration;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -67,6 +69,8 @@ public static class InviteAndGrantExternalUserEndpoint
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
+        IRecordOwnershipResolver ownership,
+        IDataversePrivilegeChecker ownerPrivileges,
         CallerRecordAccessProbe callerAccessProbe,
         CiamUserProvisioningService ciamProvisioner,
         RegistrationEmailService emailService,
@@ -229,6 +233,46 @@ public static class InviteAndGrantExternalUserEndpoint
             return GrantExternalAccessEndpoint.PolicyRefusalProblem(preRefusal, httpContext);
         }
 
+        // ── Task 099b review round 1 (F2): the new grant row's OWNER, BEFORE onboarding ──
+        // With no existing row on the key the core will CREATE one, and a create needs its owner team (D-11). It is resolved
+        // HERE, so a refusal — 503 owner_unreadable on a read fault, 500 owner_unresolved when no team resolves — leaves no
+        // Contact, no CIAM account and no onboarding email behind (the rule above). The team is handed to the core, which
+        // does not resolve it a second time; BuildGrantPayload stays the one place that writes ownerid. An existing row is
+        // updated in place and never re-owned, so no owner is asked for then (if that row vanishes before the write, the core
+        // resolves the owner itself).
+        Guid? ownerTeamId = null;
+        if (preCheck.ExistingRows.Count == 0)
+        {
+            var owner = await GrantExternalAccessEndpoint.ResolveGrantOwnerAsync(
+                ownership, grantRoot.Type, grantRoot.Id, preGrantee.Key, logger, ct);
+            if (owner.Refusal is { } ownerRefusal)
+            {
+                logger.LogWarning(
+                    "[EXT-INVITE-GRANT] Refused {Email} on {RootType} {RootId} before onboarding: the new grant row's owner " +
+                    "team could not be resolved ({ReasonCode}). Nothing was onboarded or granted.",
+                    request.Email, grantRoot.Type, grantRoot.Id, ownerRefusal.ReasonCode);
+                return GrantExternalAccessEndpoint.PolicyRefusalProblem(ownerRefusal, httpContext);
+            }
+
+            // Review round 2 (F1): the resolved team must also be ALLOWED to own the row. Dataverse refuses a create owned by a
+            // team whose roles lack Read on the table (the Secure Record Owner role until it holds the privilege), and that
+            // refusal would come only after the Contact, the CIAM account and the email. So it is asked here, read-only,
+            // through the ONE owner-privilege helper: 500 owner_privilege_missing, or 503 owner_unreadable when it cannot be
+            // read (fail closed) — before any side effect.
+            var privilegeRefusal = await GrantExternalAccessEndpoint.CheckGrantOwnerPrivilegeAsync(
+                ownerPrivileges, owner.TeamId!.Value, grantRoot.Type, grantRoot.Id, preGrantee.Key, fresh: false, logger, ct);
+            if (privilegeRefusal is not null)
+            {
+                logger.LogWarning(
+                    "[EXT-INVITE-GRANT] Refused {Email} on {RootType} {RootId} before onboarding: the new grant row's owner " +
+                    "team may not own it ({ReasonCode}). Nothing was onboarded or granted.",
+                    request.Email, grantRoot.Type, grantRoot.Id, privilegeRefusal.ReasonCode);
+                return GrantExternalAccessEndpoint.PolicyRefusalProblem(privilegeRefusal, httpContext);
+            }
+
+            ownerTeamId = owner.TeamId;
+        }
+
         var portalUrl = configuration["ExternalAccess:PortalUrl"]
             ?? throw new InvalidOperationException("ExternalAccess:PortalUrl is not configured.");
 
@@ -305,7 +349,8 @@ public static class InviteAndGrantExternalUserEndpoint
             // not happen.
             grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 grantRequest, grantRoot.Type, grantRoot.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, logger, ct, reAddRestoresLapsed: true);
+                dataverseClient, participations, accessibleRecords, ownership, ownerPrivileges, logger, ct,
+                reAddRestoresLapsed: true, resolvedOwnerTeamId: ownerTeamId);
 
             // Task 138: the core's own policy check refused (the record changed after the pre-check above) — or, since
             // task 139, its ceiling, never-lower or No Access check did. The Contact was onboarded; the refusal is
@@ -313,8 +358,8 @@ public static class InviteAndGrantExternalUserEndpoint
             if (grantOutcome.Refusal is { } refusal)
             {
                 logger.LogWarning(
-                    "[EXT-INVITE-GRANT] Onboarded Contact {ContactId} but the grant was refused by the record's " +
-                    "access policy: {ReasonCode}.", contactId, refusal.ReasonCode);
+                    "[EXT-INVITE-GRANT] Onboarded Contact {ContactId} but the grant core refused the grant: {ReasonCode}.",
+                    contactId, refusal.ReasonCode);
                 return GrantExternalAccessEndpoint.PolicyRefusalProblem(
                     refusal, httpContext, new Dictionary<string, object?> { ["contactId"] = contactId });
             }

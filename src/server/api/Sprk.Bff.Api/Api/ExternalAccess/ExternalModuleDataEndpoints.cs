@@ -57,6 +57,7 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.FetchXml;
 using Sprk.Bff.Api.Services.Dataverse.Models;
+using Sprk.Bff.Api.Services.Dataverse.Privileges;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -127,6 +128,7 @@ public static class ExternalModuleDataEndpoints
         // accessible record set. Non-participant → empty result.
         data.MapPost("/fetch", ExecuteScopedFetchAsync)
             .WithName("ExternalModuleFetch")
+            .WorkforceCeilingInHandler("Read on the requested module's table, decided at the seam before the read (the table is in the body).")
             .WithSummary("Execute a module read (FetchXML), Tier-2-scoped to the caller's accessible records")
             .Produces<FetchResponseDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -138,6 +140,7 @@ public static class ExternalModuleDataEndpoints
         // any Dataverse read. App-only.
         data.MapGet("/record/{entityLogicalName}/{id:guid}", GetScopedRecordAsync)
             .WithName("ExternalModuleRecord")
+            .WorkforceCeilingInHandler("Read on the requested module's table, decided at the seam before the read.")
             .WithSummary("Read one module record by id, denied unless it is in the caller's Tier-2 set")
             .Produces<IReadOnlyDictionary<string, object?>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -148,6 +151,7 @@ public static class ExternalModuleDataEndpoints
         // GET /metadata/{entity} — projected entity metadata (schema; no record data). App-only passthrough.
         data.MapGet("/metadata/{entityLogicalName}", GetMetadataAsync)
             .WithName("ExternalModuleMetadata")
+            .ExemptFromWorkforceCeiling("Schema only (column metadata); no record data. The rows are read through /fetch, which is checked.")
             .WithSummary("Projected entity metadata for a module DataGrid (schema only)")
             .Produces<EntityMetadataDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -158,6 +162,7 @@ public static class ExternalModuleDataEndpoints
         // grid is registered to use (task 157, F1); 404 otherwise.
         data.MapGet("/savedquery/{savedQueryId:guid}", GetSavedQueryAsync)
             .WithName("ExternalModuleSavedQuery")
+            .ExemptFromWorkforceCeiling("A registered view definition; no record data. The rows are read through /fetch, which is checked.")
             .WithSummary("Saved query payload for a module DataGrid (a registered view only)")
             .Produces<SavedQueryDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -168,6 +173,7 @@ public static class ExternalModuleDataEndpoints
         // App-only. 404 when the entity has no module or its module registers no view.
         data.MapGet("/savedqueries/{entityLogicalName}", GetSavedQueriesAsync)
             .WithName("ExternalModuleSavedQueries")
+            .ExemptFromWorkforceCeiling("Registered view definitions; no record data. The rows are read through /fetch, which is checked.")
             .WithSummary("Registered saved queries for a module entity (view definitions only)")
             .Produces<IReadOnlyList<SavedQuerySummaryDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -182,22 +188,52 @@ public static class ExternalModuleDataEndpoints
     // Handlers
     // =========================================================================
 
-    private static Task<IResult> ExecuteScopedFetchAsync(
+    private static async Task<IResult> ExecuteScopedFetchAsync(
         [FromBody] FetchRequestDto request,
         HttpContext httpContext,
         ExternalModuleRegistry registry,
         FetchService fetchService,
         IFetchXmlEntityExtractor entityExtractor,
         ExternalDataService dataService,
+        IDataversePrivilegeChecker privileges,
         ILogger<Program> logger,
         CancellationToken ct)
     {
         var principal = GetCallerPrincipal(httpContext);
-        if (principal is null) return Task.FromResult(MissingContextResult());
+        if (principal is null) return MissingContextResult();
 
-        return ExecuteScopedFetchCoreAsync(
+        if (await WorkforceCeilingDeniedAsync(request?.EntityName, principal, registry, privileges, logger, ct)
+                .ConfigureAwait(false) is { } ceilingDenied)
+        {
+            return ceilingDenied;
+        }
+
+        return await ExecuteScopedFetchCoreAsync(
             request, principal, registry, entityExtractor, fetchService.ExecuteAsync, dataService.GetNonSecureRootsAsync,
-            logger, ct, dataService.GetLiveParentRootsAsync);
+            logger, ct, dataService.GetLiveParentRootsAsync).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The workforce ceiling (unified-access-control-r2 task 186) at the module-data seam: a workforce-contact caller
+    /// reading ANY module (review round 1 F1: service requests, projects, matters, work assignments, documents, invoices
+    /// and the grid configuration the grids read) also needs Read on that module's table
+    /// (<see cref="ExternalModuleDescriptor.RecordEntity"/>) in the Workforce role. Decided before the pipeline reads
+    /// anything; the Tier-2 scope still applies after it (both must pass). An entity with no module is not checked here:
+    /// the pipeline refuses it before any read.
+    /// </summary>
+    private static Task<IResult?> WorkforceCeilingDeniedAsync(
+        string? entityLogicalName,
+        CallerPrincipal principal,
+        ExternalModuleRegistry registry,
+        IDataversePrivilegeChecker privileges,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var module = string.IsNullOrWhiteSpace(entityLogicalName) ? null : registry.FindByEntity(entityLogicalName);
+        return module is not null
+            ? WorkforceRoleCeilingGate.DenyAsync(
+                principal, privileges, WorkforceRoleCeilingGate.ReadModuleRecords(module.RecordEntity), logger, ct)
+            : Task.FromResult<IResult?>(null);
     }
 
     /// <summary>
@@ -345,21 +381,28 @@ public static class ExternalModuleDataEndpoints
         }
     }
 
-    private static Task<IResult> GetScopedRecordAsync(
+    private static async Task<IResult> GetScopedRecordAsync(
         string entityLogicalName,
         Guid id,
         [FromQuery(Name = "$select")] string? select,
         HttpContext httpContext,
         ExternalModuleRegistry registry,
         RecordService recordService,
+        IDataversePrivilegeChecker privileges,
         ILogger<Program> logger,
         CancellationToken ct)
     {
         var principal = GetCallerPrincipal(httpContext);
-        if (principal is null) return Task.FromResult(MissingContextResult());
+        if (principal is null) return MissingContextResult();
 
-        return GetScopedRecordCoreAsync(
-            entityLogicalName, id, select, principal, registry, recordService.GetRecordAsync, logger, ct);
+        if (await WorkforceCeilingDeniedAsync(entityLogicalName, principal, registry, privileges, logger, ct)
+                .ConfigureAwait(false) is { } ceilingDenied)
+        {
+            return ceilingDenied;
+        }
+
+        return await GetScopedRecordCoreAsync(
+            entityLogicalName, id, select, principal, registry, recordService.GetRecordAsync, logger, ct).ConfigureAwait(false);
     }
 
     /// <summary>

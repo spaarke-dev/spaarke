@@ -919,6 +919,13 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
     public Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable RecordShares { get; } = new();
 
     /// <summary>
+    /// The Workforce-role ceiling (unified-access-control-r2 task 186) this host answers with: every privilege the
+    /// <c>/api/v1/external</c> routes need, so the "workforce" plane's contacts (no systemuser) keep the contract these
+    /// tests pin. The role read needs a live ServiceClient; the per-user Read questions still go to the real checker.
+    /// </summary>
+    internal Sprk.Bff.Api.Tests.AccessControl.WorkforceCeilingDouble WorkforceCeiling { get; } = new();
+
+    /// <summary>
     /// The instant the fixture's clock is fixed at (task 097). Grant-expiry decisions read "today" from the
     /// injected <see cref="TimeProvider"/>, so every expiry assertion here is deterministic. Never advanced —
     /// <see cref="FakeTimeProvider"/> cannot move backwards, so a test that advanced it would leak.
@@ -1062,6 +1069,18 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
 
             services.RemoveAll<IHostedService>();
 
+            // Task 186: the Workforce role ceiling, scripted (see WorkforceCeiling).
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker>(sp =>
+            {
+                WorkforceCeiling.Inner = ActivatorUtilities.CreateInstance<Sprk.Bff.Api.Services.Dataverse.Privileges.UserPrivilegeChecker>(sp);
+                // Task 099b review round 2: /invite-and-grant asks whether the owner team may own the row (it does); the
+                // host's UserPrivilegeChecker would need a real ServiceClient, so the owner-team question is answered at its
+                // boundary. One registration: a second IDataversePrivilegeChecker would replace this ceiling double.
+                WorkforceCeiling.OwnerTeams = new Sprk.Bff.Api.Tests.TestInfrastructure.TeamPrivilegeCheckerDouble();
+                return WorkforceCeiling;
+            });
+
             // Avoid real MSAL on incidental Graph paths.
             services.RemoveAll<IGraphClientFactory>();
             services.AddSingleton<IGraphClientFactory, FakeGraphClientFactory>();
@@ -1088,6 +1107,14 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
 
             services.RemoveAll<DataverseWebApiClient>();
             services.AddSingleton<DataverseWebApiClient>(Dataverse);
+
+            // Task 099b (D-11): the grant core asks the ownership resolver for a new grant row's owner team — at its module
+            // boundary here (a fixed team); the real resolver over this host's mocked Dataverse would refuse every create.
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
+            // Task 099b review round 2: the owner-team question is answered by WorkforceCeiling.OwnerTeams (registered with
+            // the task 186 ceiling above).
 
             // Task 063: the system-user share routes read and write POA shares through the one seam. In memory, so
             // their wire contract can be asserted without a Dataverse.

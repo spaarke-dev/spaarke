@@ -69,12 +69,7 @@ public class DirectThreadAccessServiceTests
             }));
     }
 
-    private DirectThreadAccessService BuildSut() => new(
-        _entityService.Object,
-        _accessGrant.Object,
-        new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
-        new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
-        Mock.Of<ILogger<DirectThreadAccessService>>());
+    private DirectThreadAccessService BuildSut() => BuildSut(new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
 
     // ── FindOrCreateDirectThreadAsync: create + no regarding anchor ────────────────────────────
 
@@ -232,6 +227,58 @@ public class DirectThreadAccessServiceTests
         _membershipDerivation
             .Setup(m => m.DeriveAnchorGranteeUserIdsAsync("sprk_matter", matter, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(users);
+
+    // ── Ontology task 042b (D-169): a user-owned message's gate Decision Records follow its shares ───────────
+
+    private static readonly Guid GateRecordId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+
+    /// <summary>The message's gate Decision Record (owned by the message's user) and the shares the grant below leaves on the message.</summary>
+    private static Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld GateRecordWorld() =>
+        new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld()
+            .WithCommunication(CommunicationId, Caller)
+            .WithUser(Caller).WithUser(Other)
+            .WithGateRecord(GateRecordId, CommunicationId, Caller)
+            .Share(Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld.Communication, CommunicationId, Other);
+
+    private DirectThreadAccessService BuildSut(Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing gateDecisionRecords) => new(
+        _entityService.Object,
+        _accessGrant.Object,
+        new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
+        new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+        Mock.Of<ILogger<DirectThreadAccessService>>(),
+        gateDecisionRecords);
+
+    [Fact]
+    public async Task GrantMessageAccessAsync_AUserOwnedMessage_MirrorsTheGrantToItsGateDecisionRecord_D169()
+    {
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
+        var world = GateRecordWorld();
+
+        await BuildSut(world.Sharing).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Other), "ReadAccess", It.IsAny<CancellationToken>()), Times.Once);
+        world.RecordSharees(GateRecordId).Should().Equal(new[] { Other }, "the message's new sharee reads its gate record too (the owner already owns it)");
+    }
+
+    [Fact]
+    public async Task GrantMessageAccessAsync_ATeamOwnedMessage_IsNotMirrored_D169()
+    {
+        MessageOwnedByOrdinaryTeam(TeamId);
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
+        var world = GateRecordWorld();
+
+        await BuildSut(world.Sharing).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        world.Calls.Should().BeEmpty();
+        world.Entities.Invocations.Should().BeEmpty("a team-owned message has no user-owned gate record to look for");
+    }
 
     [Fact]
     public async Task GrantMessageAccessAsync_DirectThread_GrantsReadAccessToBothParticipantsOnTheMessage()
@@ -606,7 +653,7 @@ public class DirectThreadAccessServiceTests
             _entityService.Object, _accessGrant.Object,
             new Lazy<IThreadMembershipDerivationService>(() => derivation),
             new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
-            Mock.Of<ILogger<DirectThreadAccessService>>());
+            Mock.Of<ILogger<DirectThreadAccessService>>(), new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

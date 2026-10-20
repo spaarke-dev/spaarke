@@ -205,7 +205,7 @@ public enum UnfiledOwnership
 /// <b>Every parent, not the first (task 146).</b> <see cref="TargetEntityLogicalName"/>/<see cref="TargetRecordId"/>
 /// is the PRIMARY parent — it decides the business unit of an ordinary child. <see cref="Parents"/> carries every
 /// OTHER parent lookup value the child has; together they are the set secure-if-any is applied to. Build them
-/// from the row being written with <see cref="ParentsOf(IEnumerable{KeyValuePair{string, object}})"/> so a lookup
+/// from the row being written with <see cref="ParentsOf(IEnumerable{KeyValuePair{string, object}}, string?)"/> so a lookup
 /// cannot be forgotten.
 /// </para>
 /// </remarks>
@@ -302,14 +302,20 @@ public sealed record RecordOwnershipContext
     /// Every ownership-parent reference among <paramref name="fields"/> — the attributes of a row being written, or
     /// an update payload. Reads <see cref="EntityReference"/> values only, keyed by whatever column holds them, so
     /// a child table's every parent lookup is picked up without a per-table column list (the set of lookups comes
-    /// from the row itself, never from a guess).
+    /// from the row itself, never from a guess). #2084: a column of <paramref name="table"/> that CITES rather than files
+    /// (<see cref="RecordOwnershipResolver.IsCitation"/>) is left out, so a row is never filed under the record it cites.
+    /// <paramref name="table"/> is the row's own table (required, so no caller can skip the exclusion by omission);
+    /// <c>null</c> only where the fields belong to no one table.
     /// </summary>
-    public static IReadOnlyList<RecordOwnershipParent> ParentsOf(IEnumerable<KeyValuePair<string, object>> fields)
+    public static IReadOnlyList<RecordOwnershipParent> ParentsOf(IEnumerable<KeyValuePair<string, object>> fields, string? table)
     {
         ArgumentNullException.ThrowIfNull(fields);
         var parents = new List<RecordOwnershipParent>();
-        foreach (var (_, value) in fields)
+        foreach (var (column, value) in fields)
         {
+            if (RecordOwnershipResolver.IsCitation(table, column))
+                continue;
+
             if (value is EntityReference reference
                 && reference.Id != Guid.Empty
                 && RecordOwnershipResolver.IsOwnershipParent(reference.LogicalName))
@@ -319,6 +325,18 @@ public sealed record RecordOwnershipContext
         }
 
         return parents.Distinct().ToArray();
+    }
+
+    /// <summary>
+    /// #2084: <see cref="ParentsOf(IEnumerable{KeyValuePair{string, object}}, string?)"/> for a row, keyed by its own table, so
+    /// its citation lookups (<see cref="RecordOwnershipResolver.IsCitation"/>) are left out: a lookup to an ownership-parent table
+    /// that names what the row cites, not what it is filed under. Used for a row being created (<see cref="ForChild"/>) and for an
+    /// existing row the reconciler re-owns (<c>ContextFor</c>).
+    /// </summary>
+    public static IReadOnlyList<RecordOwnershipParent> ParentsOf(Entity row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return ParentsOf(row.Attributes, row.LogicalName);
     }
 
     /// <summary>
@@ -354,7 +372,7 @@ public sealed record RecordOwnershipContext
     public static RecordOwnershipContext ForChild(Entity child, RecordOwnershipParent? primaryParent = null)
     {
         ArgumentNullException.ThrowIfNull(child);
-        var parents = ParentsOf(child.Attributes);
+        var parents = ParentsOf(child); // #2084: keyed by the child's table, so a citation files nothing
         var primary = primaryParent is { IsSpecified: true } p && RecordOwnershipResolver.IsOwnershipParent(p.EntityLogicalName)
             ? p
             : parents.FirstOrDefault();
@@ -439,7 +457,10 @@ public sealed record RecordReparent
     /// entry for a column that holds no ownership parent on the row is not a parent change either; when the change
     /// neither sets a parent nor clears one the row holds, <see cref="IRecordOwnershipResolver.ReparentAsync"/> writes
     /// the change and makes no ownership decision (verifier item 8 — a writer may pass every null it writes without
-    /// knowing which of them are lookups).
+    /// knowing which of them are lookups). #2110 (ontology K3): an entry for a LINEAGE lookup that files the row under no
+    /// ownership parent (<see cref="LineageOnlyTargetOf"/> — a message's thread) decides no owner either, but is compared
+    /// with the row: a change that moves one is no <see cref="RecordOwnerResolution.ParentsUnchanged"/>
+    /// (<see cref="WithLineageLookupsIn"/> adds them).
     /// </summary>
     public required IReadOnlyDictionary<string, EntityReference?> ParentChanges { get; init; }
 
@@ -606,6 +627,92 @@ public sealed record RecordReparent
 
     private const string BindSuffix = "@odata.bind";
 
+    /// <summary>
+    /// #2110 (ontology K3): the target of a LINEAGE lookup of <paramref name="table"/>
+    /// (<see cref="Sprk.Bff.Api.Services.Access.SecureChildLineage"/>) that files the row under NO ownership parent — a message's
+    /// thread (<c>sprk_communication.sprk_communicationthread</c>), a document's current version. It decides no owner (a thread
+    /// is deliberately not an ownership parent: the remarks of <see cref="RecordOwnershipResolver.OwnershipParentEntities"/>),
+    /// but the step after a re-file walks it (the mirror's secure roots), so a change that moves it is no
+    /// <see cref="RecordOwnerResolution.ParentsUnchanged"/>. <c>null</c> for any other column.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="FilingParentOf"/> maps the lineage lookups
+    /// that ARE ownership parents. (2) Extension — its complement over the same map, beside it, not a second map. (3) Cost of
+    /// doing nothing — the same-parent skip read a change of a message's thread alongside a re-bind of its held matter as
+    /// "nothing moved", and the step after a re-file did not run.</remarks>
+    internal static string? LineageOnlyTargetOf(string? table, string? column) =>
+        table is not null && column is not null
+        && Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(table.Trim(), out var lineage)
+        && lineage.Lookups.TryGetValue(column, out var target)
+        && !RecordOwnershipResolver.IsOwnershipParent(target)
+            ? target
+            : null;
+
+    /// <summary>
+    /// #2110 (ontology K3): <paramref name="parentChanges"/> plus every lineage lookup <paramref name="fields"/> SETS that files
+    /// the row under no ownership parent (<see cref="LineageOnlyTargetOf"/>), as an <see cref="EntityReference"/> value or an
+    /// <c>@odata.bind</c> naming one row of its target — so the reparent can tell whether the change moved it. A clear is in
+    /// <paramref name="parentChanges"/> already (every null is). They decide no owner and never make a change a reparent on
+    /// their own: an empty map is returned as it is. A bind that names no row of the lookup's target is left out (Dataverse
+    /// refuses it).
+    /// </summary>
+    public static IReadOnlyDictionary<string, EntityReference?> WithLineageLookupsIn<TValue>(
+        string entityLogicalName,
+        IReadOnlyDictionary<string, EntityReference?> parentChanges,
+        IEnumerable<KeyValuePair<string, TValue>> fields)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        ArgumentNullException.ThrowIfNull(parentChanges);
+        ArgumentNullException.ThrowIfNull(fields);
+        if (parentChanges.Count == 0)
+            return parentChanges;
+
+        var table = entityLogicalName.Trim().ToLowerInvariant();
+        Dictionary<string, EntityReference?>? merged = null;
+        foreach (var (key, raw) in fields)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+
+            var column = Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key);
+            if (LineageOnlyTargetOf(table, column) is not { } target || parentChanges.ContainsKey(column))
+                continue;
+
+            var reference = raw switch
+            {
+                EntityReference set when set.Id != Guid.Empty => set,
+                _ when key.EndsWith(BindSuffix, StringComparison.OrdinalIgnoreCase) && LineageBoundIdOf(target, raw) is { } id
+                    => new EntityReference(target, id),
+                _ => null,
+            };
+            if (reference is not null)
+                (merged ??= new Dictionary<string, EntityReference?>(parentChanges, StringComparer.OrdinalIgnoreCase))[column] = reference;
+        }
+
+        return merged ?? parentChanges;
+    }
+
+    /// <summary>The row a lineage lookup's <c>@odata.bind</c> names — its last path segment, <c>&lt;target set&gt;(&lt;id&gt;)</c>
+    /// (a relative or an absolute URI) — or <c>null</c>.</summary>
+    private static Guid? LineageBoundIdOf(string target, object? value)
+    {
+        var path = (value switch
+        {
+            string text => text,
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element => element.GetString(),
+            _ => null,
+        })?.Trim();
+        if (path is null || EntitySetOf(target) is not { } entitySet)
+            return null;
+
+        var segment = path[(path.LastIndexOf('/') + 1)..];
+        var open = segment.IndexOf('(');
+        return open > 0 && segment.EndsWith(')')
+               && string.Equals(segment[..open], entitySet, StringComparison.OrdinalIgnoreCase)
+               && Guid.TryParse(segment[(open + 1)..^1], out var id) && id != Guid.Empty
+            ? id
+            : null;
+    }
+
     /// <summary>The id an <c>@odata.bind</c> on a filing lookup names: exactly <c>/&lt;target entity set&gt;(&lt;id&gt;)</c>
     /// (the leading slash optional). Anything else refuses the write.</summary>
     private static Guid BoundIdOf(string table, string column, string target, object value)
@@ -738,8 +845,10 @@ public sealed record RecordOwnerResolution(
     /// <summary>
     /// #2091 round 4: set by <see cref="IRecordOwnershipResolver.ReparentAsync"/> when it read the row and the change moves
     /// none of its parents (every parent it sets is the one the column already holds, and every null clears a column that
-    /// holds none). The change was written and nothing was re-filed, so a writer runs no step after a re-file. <c>false</c>
-    /// otherwise — including on any resolution a reparent did not decide, so a writer that cannot tell runs the step.
+    /// holds none) — nor any lineage lookup it names that is no ownership parent (#2110: a message's thread,
+    /// <see cref="RecordReparent.LineageOnlyTargetOf"/>). The change was written and nothing was re-filed, so a writer runs no
+    /// step after a re-file. <c>false</c> otherwise — including on any resolution a reparent did not decide, so a writer that
+    /// cannot tell runs the step.
     /// </summary>
     public bool ParentsUnchanged { get; init; }
 
@@ -928,6 +1037,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         "sprk_invoice",
         "sprk_kpiassessment",
         "sprk_memo",
+        // unified-access-control-r2 #2084 (owner round 102 item 4): a rule scoped to a matter is that matter's child, and the
+        // parent of its versions. sprk_policyversion is NOT listed: it is a lineage child only (SecureChildLineage), like
+        // sprk_signal, because Signals and Decision Records name the version they cite, which files nothing.
+        "sprk_policy",
         "sprk_reportcard",
         "sprk_spendsignal",
         "sprk_spendsnapshot",
@@ -935,6 +1048,33 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     ];
 
     private static readonly HashSet<string> ParentSet = new(OwnershipParentEntities, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// #2084: lookups to an ownership-parent table that CITE rather than file — (table, column). A Signal names the rule that
+    /// raised it (<c>sprk_signal.sprk_policy</c>); it is filed under its subject and core record, never under the rule
+    /// (SecureChildLineage leaves the lookup out). Read as a parent, an all-matters rule owned in its author's business unit
+    /// would decide an ordinary Signal's team on an Unsecure, and a rule held by a Secure matter would pull a Signal about
+    /// another matter into isolation. The one predicate every parent derivation applies: <see cref="RecordOwnershipContext.ParentsOf(IEnumerable{KeyValuePair{string, object}}, string?)"/>
+    /// (and through it <see cref="RecordOwnershipContext.ParentsOf(Entity)"/> and <see cref="RecordOwnershipContext.ForChild"/>) and
+    /// <c>OwnedChildWrite.ParentsOf</c>.
+    /// </summary>
+    private static readonly HashSet<(string Table, string Column)> CitationLookups = new(
+        [("sprk_signal", "sprk_policy")], CitationComparer.Instance);
+
+    /// <summary>True when <paramref name="column"/> of <paramref name="table"/> cites a record rather than files the row under it.</summary>
+    public static bool IsCitation(string? table, string? column) =>
+        table is not null && column is not null && CitationLookups.Contains((table, column));
+
+    private sealed class CitationComparer : IEqualityComparer<(string Table, string Column)>
+    {
+        public static readonly CitationComparer Instance = new();
+
+        public bool Equals((string Table, string Column) x, (string Table, string Column) y) =>
+            StringComparer.OrdinalIgnoreCase.Equals(x.Table, y.Table) && StringComparer.OrdinalIgnoreCase.Equals(x.Column, y.Column);
+
+        public int GetHashCode((string Table, string Column) obj) =>
+            HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Table), StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Column));
+    }
 
     /// <summary>True when a lookup to <paramref name="entityLogicalName"/> files a child under a parent for ownership.</summary>
     public static bool IsOwnershipParent(string? entityLogicalName) =>
@@ -1132,8 +1272,19 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // A change that sets a parent, or clears one the row holds, is a parent change. A null for a column that holds
         // no parent (a cleared text column a generic writer could not tell from a lookup) is not.
         var changesAParent = request.InheritedParents.Any(p => p.IsSpecified && IsOwnershipParent(p.EntityLogicalName));
+        var movesALineageLookup = false;
         foreach (var (column, value) in request.ParentChanges)
         {
+            if (RecordReparent.LineageOnlyTargetOf(request.EntityLogicalName, column) is not null)
+            {
+                // #2110 (ontology K3): a lineage lookup that is no ownership parent (a message's thread) decides no owner,
+                // but one the change moves — set to another row, or cleared while the row holds one — is a change the step
+                // after a re-file must see.
+                var held = current.GetAttributeValue<EntityReference>(column)?.Id ?? Guid.Empty;
+                movesALineageLookup |= (value?.Id ?? Guid.Empty) != held;
+                continue;
+            }
+
             if (value is null || value.Id == Guid.Empty)
             {
                 if (byColumn.Remove(column))
@@ -1172,7 +1323,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             await applyChange(ct).ConfigureAwait(false);
             var unchanged = RecordOwnerResolution.Unchanged(
                 $"the change to {request.EntityLogicalName} {request.RecordId:D} sets no parent and clears none it holds");
-            return unchanged with { ParentsUnchanged = true };
+            return unchanged with { ParentsUnchanged = !movesALineageLookup };
         }
 
         var parents = byColumn.Values
@@ -1863,7 +2014,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         };
         query.Criteria.AddCondition($"{row.EntityLogicalName}id", ConditionOperator.Equal, row.RecordId);
         var entity = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        return entity is null ? null : RecordOwnershipContext.ParentsOf(entity.Attributes);
+        // #2084 round 2: no citation exclusion here. Every row read here is an ownership parent — a reparentable child on a
+        // lineage walk, or a ContentOf / DecisionRecordWriter target (ForParents keeps ownership parents only) — and no citing
+        // table (RecordOwnershipResolver.IsCitation: sprk_signal) is one, so the exclusion could never fire.
+        return entity is null ? null : RecordOwnershipContext.ParentsOf(entity.Attributes, table: null);
     }
 
     /// <summary>

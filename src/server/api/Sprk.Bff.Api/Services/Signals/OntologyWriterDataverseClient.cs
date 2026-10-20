@@ -263,6 +263,16 @@ public sealed class OntologyWriterDataverseClient : IDisposable
         return response.Entity;
     }
 
+    /// <summary>
+    /// Ontology task 042b (D-169): gives the row a new owner with the SDK's <see cref="AssignRequest"/>, which the platform checks against the
+    /// writer's Assign privilege (<c>prvAssignsprk_DecisionRecord</c>, Global, D-33c). The writer holds no Write on
+    /// <c>sprk_decisionrecord</c>, so an owner change through <see cref="UpdateAsync"/> is not this identity's to make. The caller decides the
+    /// owner (<see cref="GateDecisionRecordSharing"/> takes the ownership resolver's answer) and reads it back.
+    /// </summary>
+    public Task AssignAsync(string entityLogicalName, Guid id, EntityReference assignee, CancellationToken ct = default) =>
+        GetOrganizationService().ExecuteAsync(
+            new AssignRequest { Target = new EntityReference(entityLogicalName, id), Assignee = assignee }, ct);
+
     public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default)
     {
         var entity = new Entity(entityLogicalName, id);

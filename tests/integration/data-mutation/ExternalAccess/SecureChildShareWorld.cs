@@ -241,6 +241,18 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    private readonly Dictionary<Guid, Exception> _ownerWriteFaults = new();
+
+    /// <summary>
+    /// UAC task 099b review round 5: an owner write to THIS row throws <paramref name="fault"/> (recorded first) — Dataverse
+    /// refusing the re-own with a specific fault, e.g. the Web API client's bare 403 on a privilege check.
+    /// </summary>
+    public SecureChildShareWorld RefusingOwnerWritesOf(Guid id, Exception fault)
+    {
+        _ownerWriteFaults[id] = fault;
+        return this;
+    }
+
     /// <summary>Task 148: an owner write to THIS row is accepted (recorded) but not applied — the read-back must catch it.</summary>
     public SecureChildShareWorld IgnoringOwnerWritesOf(Guid id)
     {
@@ -253,6 +265,7 @@ internal sealed class SecureChildShareWorld
     {
         _refusedOwnerWrites.Clear();
         _ignoredOwnerWrites.Clear();
+        _ownerWriteFaults.Clear();
         return this;
     }
 
@@ -394,6 +407,8 @@ internal sealed class SecureChildShareWorld
         OwnerWrites.Add((table, id, principal, Sequence?.Invoke() ?? 0));
         if (_refusedOwnerWrites.Contains(id))
             throw new InvalidOperationException("Test: Dataverse refused the re-own.");
+        if (_ownerWriteFaults.TryGetValue(id, out var fault))
+            throw fault;
         if (_ignoredOwnerWrites.Contains(id))
             return;
         MoveOwner(table, id, principal);
@@ -529,7 +544,9 @@ internal sealed class SecureChildShareWorld
         Func<SecureChildShareWorld> current, IDataverseRecordShareService shares,
         Spaarke.Dataverse.DataverseWebApiClient webApi, SecureShareNoAccessGuard? noAccessGuard = null,
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
-        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null)
+        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
+        Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
+        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null)
     {
         var entities = EntitiesOver(current).Object;
         var configuration = Configuration();
@@ -539,7 +556,8 @@ internal sealed class SecureChildShareWorld
             entities, shares, noAccessGuard ?? NobodyWalled(), configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
         return new SecureChildReconciler(
             entities, resolver, synchronizer, webApi, configuration, NullLogger<SecureChildReconciler>.Instance,
-            accessCacheInvalidator, threads);
+            gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
+            accessCacheInvalidator, threads, ownerPrivileges);
     }
 
     /// <summary>

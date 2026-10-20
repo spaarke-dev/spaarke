@@ -1261,10 +1261,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         {
             // Task 146 / S6: joining a RECORD thread files the message under the thread's record — the same shared
             // step the resolver's JOIN path takes (owner re-derived before the stamp; a refusal stamps nothing and
-            // lands in the best-effort catch below, leaving the sent message unthreaded rather than mis-owned).
-            var assignment = await ThreadResolver.AssignToThreadReconcilingOwnerAsync(
+            // lands in the best-effort catch below, leaving the sent message unthreaded rather than mis-owned). #2091: then
+            // the step after a re-file (its mirror, what is filed under it, its gate Decision Records), never thrown.
+            var assignment = await ThreadResolver.JoinThreadAsync(
                 _genericEntityService,
                 _ownership,
+                _scopeFactory,
+                _logger,
                 communicationId,
                 threadId,
                 token => _genericEntityService.UpdateAsync(

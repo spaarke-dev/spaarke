@@ -2611,7 +2611,7 @@ public partial class SignalReevaluationJobTests
             services.AddScoped<Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore>(_ => Links);
             services.AddScoped(sp => new Sprk.Bff.Api.Services.Access.SecureChildReconciler(
                 Sysadmin, Ownership, sp.GetRequiredService<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>(), ReownApi,
-                configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildReconciler>.Instance));
+                configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildReconciler>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing));
             var scopes = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
             Writer = new SignalWriter(writerClient, Sysadmin,
                 new Ownership.CoreAncestorResolver(Sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
@@ -2626,7 +2626,7 @@ public partial class SignalReevaluationJobTests
                 new Ownership.CoreAncestorResolver(Sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
                 Sysadmin,
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
-                Clock, Logger<DecisionRecordWriter>());
+                Clock, Logger<DecisionRecordWriter>(), new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
             Job = new SignalReevaluationJob(Evaluator, Writer, Suppression, Closure, Records, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
             Sysadmin.Stub(new Entity("sprk_matter", MatterId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
             Sysadmin.Stub(new Entity("sprk_project", ProjectId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });

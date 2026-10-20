@@ -671,7 +671,7 @@ public class RecordOwnershipResolverTests
             ["sprk_documentname"] = "x.docx",
         };
 
-        RecordOwnershipContext.ParentsOf(fields).Should().BeEquivalentTo(new[]
+        RecordOwnershipContext.ParentsOf(fields, "sprk_document").Should().BeEquivalentTo(new[]
         {
             new RecordOwnershipParent("sprk_project", OrdinaryProjectId),
             new RecordOwnershipParent("sprk_project", SecureProjectId),

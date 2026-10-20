@@ -17,7 +17,8 @@ namespace Spaarke.ArchTests;
 /// <remarks>
 /// <para><b>The signal.</b> A re-file goes through a re-file seam: <see cref="IRecordOwnershipResolver.ReparentAsync"/> (the
 /// one owner re-derivation for a row whose filing lookups move), <see cref="OwnedChildWrite.RefileAsync"/> (the one re-file
-/// core) or <see cref="ThreadResolver.AssignToThreadReconcilingOwnerAsync"/> (a message joining a record thread, S6). A type
+/// core) or <see cref="ThreadResolver.AssignToThreadReconcilingOwnerAsync"/> (a message joining a record thread, S6, without
+/// the step — the join that runs it is <c>ThreadResolver.JoinThreadAsync</c>, which a caller uses instead). A type
 /// whose compiled code references a seam must also reference <see cref="SecureChildReconciler.AfterRefileAsync"/>, or be
 /// listed: <see cref="DelegatingWriters"/> (it hands the re-file back to its callers, and THEIR calls of the named members
 /// are held to the same rule) or <see cref="KnownViolations"/> (the ratchet baseline: each one has a reason, a new one
@@ -65,17 +66,9 @@ public class RefileWriterAfterRefileGuardTests
     /// <summary>The ratchet baseline: re-file writers that do not run the step yet, each with its reason.</summary>
     private sealed record KnownViolation(Type Type, string Reason);
 
-    private static readonly IReadOnlyList<KnownViolation> KnownViolations = new[]
-    {
-        new KnownViolation(typeof(ThreadResolver),
-            "UAC technical follow-up (#2091): AfterRefileAsync option to skip the thread reconcile, after ontology 042b. " +
-            "The thread JOIN and the filing reconcile's move to a record's default thread: AfterRefileAsync runs the communication's filing-thread reconcile, which can move a message straight back out of " +
-            "the thread it just joined (an unfiled reply in a record thread goes to its owner's master thread) and leaves the " +
-            "join's grant audience stale; the reconcile itself runs INSIDE AfterRefileAsync, so a call there re-enters it."),
-        new KnownViolation(typeof(CommunicationService),
-            "UAC technical follow-up (#2091): AfterRefileAsync option to skip the thread reconcile, after ontology 042b. " +
-            "Respond-into-thread (AssignToThreadReconcilingOwnerAsync) — the same case as ThreadResolver's join."),
-    };
+    // Empty: ThreadResolver and CommunicationService run the step since #2110 (#2091), and InvoiceReviewService since #2095
+    // (ebilling-r1). A new entry needs a reason; an entry that no longer violates must be removed.
+    private static readonly IReadOnlyList<KnownViolation> KnownViolations = Array.Empty<KnownViolation>();
 
     private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());
 
@@ -90,6 +83,9 @@ public class RefileWriterAfterRefileGuardTests
                      "Sprk.Bff.Api.Api.ChildRecordEndpoints", "Sprk.Bff.Api.Api.DataverseDocumentsEndpoints",
                      "Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler", "Sprk.Bff.Api.Services.Office.ReconciledEmailFiling",
                      "Sprk.Bff.Api.Services.Finance.InvoiceReviewService",
+                     // #2091: the thread JOIN (ThreadResolver.JoinThreadAsync, which CommunicationService's respond-into-thread
+                     // also calls) re-files through ReparentAsync and runs the step with RefileThreadStep.PlacedByWriter.
+                     "Sprk.Bff.Api.Services.Communication.ThreadResolver",
                  })
         {
             Assert.True(

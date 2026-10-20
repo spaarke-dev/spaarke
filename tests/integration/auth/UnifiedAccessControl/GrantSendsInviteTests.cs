@@ -55,7 +55,7 @@ public class GrantSendsInviteTests
     private Task<IResult> Grant(Guid contactId, ExternalAccessLevel level = ExternalAccessLevel.Collaborate) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contactId, Guid.Empty, level, null, null, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
     private static GrantAccessResponse OkBody(IResult result) =>
@@ -338,7 +338,7 @@ public class GrantSendsInviteTests
 
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contact, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Materializer, _h.Notifier, invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
         OkBody(result).Invite.Should().Be(
@@ -356,7 +356,7 @@ public class GrantSendsInviteTests
 
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(Guid.Empty, Guid.Empty, ExternalAccessLevel.Collaborate, null, organization, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
         OkBody(result).Invite.Should().BeNull();
@@ -373,7 +373,7 @@ public class GrantSendsInviteTests
         var result = await InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             new InviteExternalUserRequest(Email, Guid.Empty, (int)ExternalAccessLevel.Collaborate, "Pat", "Partner", null, null,
                 "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Ciam, _h.Emails, IdentityBindingTestKit.Binder(_h.Identities),
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl })

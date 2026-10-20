@@ -65,7 +65,8 @@ public sealed class DecisionRecordWriterBillingSeamTests : IClassFixture<SignalW
             return (await _dv.OperatorClient.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault();
         });
         return new DecisionRecordWriter(
-            client, ownership, coreAncestors, sysadmin.Object, recordTypes, TimeProvider.System, NullLogger<DecisionRecordWriter>.Instance);
+            client, ownership, coreAncestors, sysadmin.Object, recordTypes, TimeProvider.System, NullLogger<DecisionRecordWriter>.Instance,
+            new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
     }
 
     [Fact]

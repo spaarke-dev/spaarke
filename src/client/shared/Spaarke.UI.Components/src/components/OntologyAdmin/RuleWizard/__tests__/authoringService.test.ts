@@ -12,6 +12,8 @@ import {
   REASON_POLICY_CHANGED,
   REASON_POLICY_CODE_TAKEN,
   REASON_POLICY_RETIRED,
+  REASON_OWNER_UNAVAILABLE,
+  REASON_RULE_HELD_SECURE,
   REASON_SCOPE_INTENT_REQUIRED,
   REASON_SCOPE_MATTER_SECURED,
   REASON_SCOPE_SUBJECT_MISMATCH,
@@ -256,6 +258,34 @@ describe('createOntologyAuthoringService - failures are results', () => {
     expect(answer.ok ? '' : answer.message).toMatch(pattern);
   });
 
+  it("says a rule held by a Secure matter's team must be replaced by a new rule, naming no matter (uac-r2 #2084)", async () => {
+    const service = createOntologyAuthoringService({
+      fetch: jest.fn(async () => bad(409, { reasonCode: 'ontology.admin.rule_held_secure' })),
+      baseUrl: 'https://bff.example',
+    });
+    const answer = await service.publishVersion('p', { draft, matterId: 'm-1' });
+    expect(REASON_RULE_HELD_SECURE).toBe('ontology.admin.rule_held_secure');
+    expect(answer).toMatchObject({
+      ok: false,
+      status: 409,
+      reasonCode: REASON_RULE_HELD_SECURE,
+      outcomeUnknown: false,
+    });
+    expect(answer.ok ? '' : answer.message).toBe(
+      "This rule is held by a Secure matter's team; publish a new rule instead."
+    );
+    expect(answer.ok ? '' : answer.message).not.toContain('m-1');
+  });
+
+  it('falls back to the generic 409 sentence for a reason code it does not know (an older Console against a newer BFF)', async () => {
+    const service = createOntologyAuthoringService({
+      fetch: jest.fn(async () => bad(409, { reasonCode: 'ontology.admin.some_future_code' })),
+      baseUrl: 'https://bff.example',
+    });
+    const answer = await service.publishVersion('p', { draft });
+    expect(answer.ok ? '' : answer.message).toBe('The rule is in a state that does not allow this change.');
+  });
+
   it('reads 403 and 404 as plain refusals, with nothing changed', async () => {
     const forbidden = createOntologyAuthoringService({
       fetch: jest.fn(async () => bad(403, {})),
@@ -297,6 +327,37 @@ describe('createOntologyAuthoringService - failures are results', () => {
     expect(read.ok ? '' : read.message).not.toMatch(/may not have been saved/);
     // Validate and the dry run write nothing, so a failure there never claims anything may have been saved.
     expect(check).toMatchObject({ ok: false, outcomeUnknown: false });
+  });
+
+  it('says nothing was changed for a publish 503 the server answered before any write (uac-r2 #2084 round 2)', async () => {
+    const service = createOntologyAuthoringService({
+      fetch: jest.fn(async () =>
+        bad(503, {
+          reasonCode: 'ontology.admin.owner_unavailable',
+          detail: 'The rule service is unavailable. Try again.',
+        })
+      ),
+      baseUrl: 'https://bff.example',
+    });
+    const other = createOntologyAuthoringService({
+      fetch: jest.fn(async () => bad(503, { reasonCode: 'ontology.admin.unavailable' })),
+      baseUrl: 'https://bff.example',
+    });
+
+    const answer = await service.publishVersion('p', { draft, matterId: 'm-1' });
+    const unknown = await other.publishVersion('p', { draft });
+
+    expect(REASON_OWNER_UNAVAILABLE).toBe('ontology.admin.owner_unavailable');
+    expect(answer).toMatchObject({
+      ok: false,
+      status: 503,
+      reasonCode: REASON_OWNER_UNAVAILABLE,
+      outcomeUnknown: false,
+    });
+    expect(answer.ok ? '' : answer.message).toBe('Nothing was changed. Try again later.');
+    // Must not fire: every other 503 on a write still says the outcome is unknown.
+    expect(unknown).toMatchObject({ ok: false, status: 503, outcomeUnknown: true });
+    expect(unknown.ok ? '' : unknown.message).toMatch(/may not have been saved/);
   });
 
   it('carries the id of a policy that was created Off but has no version in force yet', async () => {

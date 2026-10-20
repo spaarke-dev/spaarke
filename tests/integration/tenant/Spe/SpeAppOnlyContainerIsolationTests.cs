@@ -248,11 +248,12 @@ public class SpeAppOnlyContainerIsolationTests
         var graph = new RoutedGraph().Container(ForeignContainer, marker: OtherCustomer);
         var membership = new SpeContainerMembershipService(Guard(graph), NullLogger<SpeContainerMembershipService>.Instance);
 
-        var revoked = await membership.RevokeMembershipAsync(ForeignContainer, "x@contoso.test");
-        var removed = await membership.RemoveMembershipsAsync(ForeignContainer, new[] { "x@contoso.test", "y@contoso.test" });
+        var revoked = await membership.RevokeMembershipAsync(ForeignContainer, new SpeMembershipKey(null, "x@contoso.test"), TestInternalUserDirectory.Empty().Client);
+        var removed = await membership.RemoveMembershipsAsync(
+            ForeignContainer, new[] { new SpeMembershipKey(null, "x@contoso.test"), new SpeMembershipKey(null, "y@contoso.test") }, TestInternalUserDirectory.Empty().Client);
 
         revoked.Success.Should().BeFalse();
-        removed.Should().HaveCount(2).And.OnlyContain(r => !r.Value.Success);
+        removed.Results.Should().HaveCount(2).And.OnlyContain(r => !r.Value.Success);
         graph.Requests.Should().OnlyContain(r => r.Method == "GET" && r.Path == $"/v1.0/storage/fileStorage/containers/{ForeignContainer}");
     }
 

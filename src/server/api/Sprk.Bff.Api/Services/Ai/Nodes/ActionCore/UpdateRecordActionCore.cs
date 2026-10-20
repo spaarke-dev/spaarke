@@ -309,7 +309,9 @@ internal sealed class UpdateRecordActionCore
     /// <summary>
     /// Task 129: after a written re-file of a <c>sprk_communication</c>, its thread follows the filing
     /// (<see cref="Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync"/>, best-effort, never
-    /// throws). No other table; a host without the resolver skips it. Runs to completion once the record is written.
+    /// throws). No other table; a host without the resolver skips it. Runs to completion once the record is written. It runs
+    /// outside the after-re-file step, so it reconciles as <c>Standalone</c>: a join it makes under another record runs that
+    /// step itself (#2110 re-check K2).
     /// </summary>
     private async Task ReconcileThreadAfterRefileAsync(string entityLogicalName, Guid recordId)
     {
@@ -318,7 +320,8 @@ internal sealed class UpdateRecordActionCore
 
         using var scope = _scopeFactory.CreateScope();
         if (scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IThreadResolver>() is { } threads)
-            await threads.ReconcileThreadForFilingAsync(recordId, CancellationToken.None).ConfigureAwait(false);
+            await threads.ReconcileThreadForFilingAsync(
+                recordId, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.Standalone, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -377,7 +380,9 @@ internal sealed class UpdateRecordActionCore
             changes.TryAdd(column, parent);
         }
 
-        return changes;
+        // #2110 (ontology K3): with the lineage lookups the update sets that are no ownership parent (a message's thread) — the
+        // typed lookups are binds in the payload by now — so the reparent can tell whether it moved one (ParentsUnchanged).
+        return RecordReparent.WithLineageLookupsIn(input.EntityLogicalName, changes, payload);
     }
 
     /// <summary>
