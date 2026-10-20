@@ -305,7 +305,8 @@ public sealed record OrdinaryRowReownResult(OrdinaryRowReownOutcome Outcome, str
 /// neither it nor its own children are reached. An unfiled row is never reached.</para>
 /// <para><b>The rule is the resolver's, with 146's inputs.</b> Each row's parents are every ownership-parent lookup it
 /// carries (<see cref="RecordOwnershipContext.ParentsOf"/> over all its columns — the reparent's input), plus, for a message,
-/// its record thread's filing (S6, as <c>AssignToThreadReconcilingOwnerAsync</c> passes it); a row that names no parent keeps
+/// its record thread's filing (S6, <c>RecordThreadFiling</c> — the re-file path's rule; #2143 round 6: a thread outside the
+/// pass is read, and a message whose thread cannot be read is left undecided); a row that names no parent keeps
 /// its owner (<see cref="UnfiledOwnership.KeepCreator"/>). Rows are decided shallowest first and
 /// REPEATED TO A FIXPOINT (task 148 r1; report-only too since r2, over planned owners): a row whose parent sits at its own level (an FR-26-stamped analysis of a document, a
 /// stamped communication regarding an event) may be decided before that parent moves, so every row a move could change —
@@ -352,7 +353,6 @@ public sealed class SecureChildReconciler
     private const string OwnerColumn = "ownerid";
     private const string IsSecureColumn = "sprk_issecure";
     private const string CommunicationTable = "sprk_communication";
-    private const string ThreadLookupOnCommunication = "sprk_communicationthread";
 
     /// <summary>
     /// UAC task 099b review round 2: the grant table. Its rows of the root, in EVERY state (review round 3, F1), are owned by
@@ -1066,6 +1066,11 @@ public sealed class SecureChildReconciler
 
         private readonly List<(int Level, Entity Row)> _descendants = new();
         private readonly Dictionary<(string Table, Guid Id), Entity> _byRef = new();
+
+        // #2143 round 6: the record threads this pass's messages sit in that are NOT rows of the pass (a thread regarding a
+        // root outside it), read once by RecordThreadFiling, and the ones whose read faulted (thread id -> why).
+        private readonly Dictionary<Guid, Entity> _threadsOutsidePass = new();
+        private readonly Dictionary<Guid, string> _threadReadFaults = new();
         private readonly Dictionary<string, int[]> _counts = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<SecureChildRowChange> _changes = new();
 
@@ -1158,6 +1163,36 @@ public sealed class SecureChildReconciler
             }
 
             await LoadGrantRowsAsync().ConfigureAwait(false);
+            await LoadThreadsOutsidePassAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// #2143 round 6: every record thread a message of this pass sits in that is not itself a row of the pass, read the way
+        /// the re-file path reads it (<see cref="RecordThreadFiling.ReadThreadAsync"/>: committed, every column) — so a message in
+        /// a thread regarding a secure root OUTSIDE this pass is still filed under that root (<see cref="ContextFor"/>). A
+        /// preloaded thread is never read again. A read that faults is recorded, not thrown: its messages are left undecided
+        /// (<see cref="DecideRowAsync"/> reports them failed and writes nothing), never decided as if the thread filed nothing.
+        /// </summary>
+        private async Task LoadThreadsOutsidePassAsync()
+        {
+            foreach (var threadId in _descendants
+                         .Select(d => RecordThreadFiling.ThreadOf(d.Row))
+                         .OfType<Guid>()
+                         .Distinct()
+                         .Where(id => !_byRef.ContainsKey((RecordThreadFiling.ThreadTable, id))))
+            {
+                try
+                {
+                    _threadsOutsidePass[threadId] =
+                        await RecordThreadFiling.ReadThreadAsync(_owner._dataverse, threadId, _ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+                {
+                    Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] record thread {ThreadId}: it could not be read, so the messages in "
+                        + "it are left as they are (#2143).", threadId);
+                    _threadReadFaults[threadId] = "its record thread could not be read";
+                }
+            }
         }
 
         /// <summary>
@@ -1638,6 +1673,12 @@ public sealed class SecureChildReconciler
         private async Task<RowDecision> DecideRowAsync(Entity row, DataversePrincipalRef? current, DataversePrincipalRef? start)
         {
             var table = row.LogicalName;
+            if (RecordThreadFiling.ThreadOf(row) is { } threadId && _threadReadFaults.TryGetValue(threadId, out var threadFault))
+            {
+                // #2143 round 6: its record thread's filing is not known — undecided, written nothing, left for the next pass.
+                return new(RowMove.None, SecureChildRowOutcome.Failed, null, threadFault);
+            }
+
             RecordOwnerResolution resolution;
             try
             {
@@ -1813,11 +1854,14 @@ public sealed class SecureChildReconciler
             var parents = IsGrant(row.LogicalName)
                 ? GrantRootParent(row)
                 : RecordOwnershipContext.ParentsOf(row).ToList();
-            if (string.Equals(row.LogicalName, CommunicationTable, StringComparison.OrdinalIgnoreCase)
-                && row.GetAttributeValue<EntityReference>(ThreadLookupOnCommunication) is { Id: var threadId } && threadId != Guid.Empty
-                && _byRef.TryGetValue(("sprk_communicationthread", threadId), out var thread))
+            // #2143 round 6: the ONE rule for a message's thread parents (RecordThreadFiling), from the pass's preloaded row or,
+            // for a thread outside the pass, the one LoadThreadsOutsidePassAsync read (a faulted read decides nothing here:
+            // DecideRowAsync never resolves such a row).
+            if (RecordThreadFiling.ThreadOf(row) is { } threadId
+                && (_byRef.TryGetValue((RecordThreadFiling.ThreadTable, threadId), out var thread)
+                    || _threadsOutsidePass.TryGetValue(threadId, out thread)))
             {
-                parents.AddRange(RecordOwnershipContext.ParentsOf(thread));
+                parents.AddRange(RecordThreadFiling.ParentsOf(thread));
             }
 
             return new RecordOwnershipContext
