@@ -4,7 +4,7 @@
     <title>Override (server)</title>
     <phase>4 Review and approval (WP4) — wave W4-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Introduces a new privilege that lets one person accept a submission the rules blocked; authorization is security-class and the accept path must stay all-or-nothing.</rigor-reason>
     <model-tier>sonnet</model-tier>

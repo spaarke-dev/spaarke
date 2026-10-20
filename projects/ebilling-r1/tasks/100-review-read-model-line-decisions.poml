@@ -4,7 +4,7 @@
     <title>Review read model and line decision endpoints</title>
     <phase>4 Review and approval (WP4) — wave W4-1</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New authorized read and write routes over invoice lines; a missed check exposes another core record's invoice, a wrong write breaks I-1 totals or NFR-09 attribution.</rigor-reason>
     <model-tier>sonnet</model-tier>

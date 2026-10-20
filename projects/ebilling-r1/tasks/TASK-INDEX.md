@@ -84,12 +84,12 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 100 | 🔲 [open] | Review read model and line decision endpoints | FULL | sonnet / high | P4-A | 014, 016, 049 |
+| 100 | 🟡 [wip] | Review read model and line decision endpoints | FULL | sonnet / high | P4-A | 014, 016, 049 |
 | 101 | 🔲 [open] | Value / code corrections, structured capture, re-evaluation | FULL | sonnet / xhigh | P4-B | 100, 027, 072 |
 | 102 | 🔲 [open] | Invoice-level adjustments | STANDARD | sonnet / high | P4-B | 100 |
 | 103 | 🔲 [open] | Approval: eligible approvers, worklist, approve | FULL | opus / high | P4-B | 100, 021, 024, 025, 074 |
 | 104 | 🔲 [open] | Reject and Return to Firm; resubmission linkage | FULL | sonnet / high | P4-C | 103, 045 |
-| 105 | 🔲 [open] | Override (server) | FULL | sonnet / high | P4-B | 044, 049, 074 |
+| 105 | 🟡 [wip] | Override (server) | FULL | sonnet / high | P4-B | 044, 049, 074 |
 | 106 | ✅ [done] | Context panel API | STANDARD | sonnet / high | P4-A | 029, 040 |
 | 107 | ✅ [done] | Related work product API | STANDARD | sonnet / high | P4-A | 029, 040 |
 | 108 | ✅ [done] | Bounding-box document viewer (shared component) | STANDARD | sonnet / high | P4-A | none |
