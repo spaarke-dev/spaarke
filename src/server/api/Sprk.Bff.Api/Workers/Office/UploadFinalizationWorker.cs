@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
+using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Workers.Office.Messages;
 // Alias to resolve ambiguity between Services.Jobs.JobStatus and Models.Office.JobStatus
 using JobStatus = Sprk.Bff.Api.Models.Office.JobStatus;
@@ -299,6 +300,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     itemId,
                     webUrl: null, // Not available in fallback path
                     message.UserId,
+                    message.JobId,
                     cancellationToken);
             }
 
@@ -325,6 +327,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     documentId,
                     payload,
                     message.UserId,
+                    message.JobId,
                     cancellationToken);
 
                 await UpdateJobStatusAsync(
@@ -617,6 +620,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string itemId,
         string? webUrl,
         string userId,
+        Guid jobId,
         CancellationToken cancellationToken)
     {
         var hasAssociation = !string.IsNullOrEmpty(payload.AssociationType) && payload.AssociationId.HasValue;
@@ -647,8 +651,19 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             CreatedByPersonId = payload.CreatedByPersonId,
         };
 
+        // Task 130 (#2126): an Email or Attachment document is created linked to the email's communication the save
+        // carried, or Restricted when it carried none — the same rule as the save's own create.
+        var createdRestricted = OfficeDocumentPersistence.IsEmailDerived(payload.ContentType)
+            && OfficeDocumentPersistence.ApplyEmailCommunicationOutcome(createRequest, payload.RelatedCommunicationId);
+
         var documentIdString = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
         var documentId = Guid.Parse(documentIdString);
+
+        if (createdRestricted)
+        {
+            OfficeDocumentPersistence.LogCreatedRestricted(
+                _logger, documentId, jobId, !string.IsNullOrWhiteSpace(payload.EmailMetadata?.InternetMessageId));
+        }
 
         _logger.LogInformation(
             "Document record created in Dataverse: DocumentId={DocumentId}",
@@ -982,6 +997,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         Guid parentDocumentId,
         UploadFinalizationPayload payload,
         string userId,
+        Guid jobId,
         CancellationToken cancellationToken)
     {
         _logger.LogInformation(
@@ -1116,6 +1132,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                         payload.AssociationType,
                         payload.AssociationId,
                         owningTeamId.Value,
+                        // Task 130: the parent email's communication (null → the parent was created Restricted).
+                        payload.RelatedCommunicationId,
+                        jobId,
                         cancellationToken,
                         payload.CreatedByPersonId); // task 146 c1-r1 — the saving user
 
@@ -1197,6 +1216,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string? associationType,
         Guid? associationId,
         Guid owningTeamId,
+        Guid? relatedCommunicationId,
+        Guid jobId,
         CancellationToken cancellationToken,
         Guid? createdByPersonId = null)
     {
@@ -1251,11 +1272,21 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             CreatedByPersonId = createdByPersonId, // task 146 c1-r1 — the person who saved the parent email
         };
 
+        // Task 130 (#2126, UAC D7 T8): the child is created linked to its parent email's communication — or Restricted
+        // when the parent email could not be identified (the parent itself was created Restricted). In the create.
+        var createdRestricted = OfficeDocumentPersistence.ApplyEmailCommunicationOutcome(createRequest, relatedCommunicationId);
+
         var childDocumentIdStr = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
 
         if (!Guid.TryParse(childDocumentIdStr, out var childDocumentId))
         {
             throw new InvalidOperationException($"Failed to create Dataverse document record for attachment '{attachment.FileName}'");
+        }
+
+        if (createdRestricted)
+        {
+            OfficeDocumentPersistence.LogCreatedRestricted(
+                _logger, childDocumentId, jobId, !string.IsNullOrWhiteSpace(internetMessageId));
         }
 
         // Update child document with file info and parent relationship

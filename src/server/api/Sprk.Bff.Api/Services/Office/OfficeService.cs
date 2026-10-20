@@ -377,8 +377,8 @@ public class OfficeService : IOfficeService
         if (request.ContentType == SaveContentType.Email && request.Email != null)
         {
             _logger.LogInformation(
-                "[EMAIL BODY DEBUG] Subject={Subject}, HasBody={HasBody}, BodyLength={BodyLength}",
-                request.Email.Subject,
+                // Task 130: no subject — email content stays out of the logs (ids and sizes only).
+                "[EMAIL BODY DEBUG] HasBody={HasBody}, BodyLength={BodyLength}",
                 !string.IsNullOrEmpty(request.Email.Body),
                 request.Email.Body?.Length ?? 0);
         }
@@ -389,10 +389,13 @@ public class OfficeService : IOfficeService
             request = await _emailEnricher.EnrichEmailFromGraphAsync(request, httpContext, cancellationToken);
         }
 
-        // Fetch attachment content from Graph API if missing (single attachment save)
+        // Fetch attachment content from Graph API if missing (single attachment save). Task 130: the same read also yields
+        // the PARENT email, whose communication the attachment's document is created linked to (captured below).
+        EmailMetadata? attachmentParentEmail = null;
         if (request.ContentType == SaveContentType.Attachment && request.Attachment != null)
         {
-            request = await _emailEnricher.EnrichAttachmentFromGraphAsync(request, httpContext, cancellationToken);
+            (request, attachmentParentEmail) =
+                await _emailEnricher.EnrichAttachmentFromGraphAsync(request, httpContext, cancellationToken);
         }
 
         // Declared outside the try (task 039, finding 2) so the outer catch can mark THIS save's ProcessingJob
@@ -503,9 +506,14 @@ public class OfficeService : IOfficeService
             // OfficeDocumentPersistence's cross-path link (FR-C4) resolves the canonical this produces. Message-
             // level dedup is structural (FR-C1 alternate key) inside CaptureAsync — no second dedup mechanism.
             // CaptureAsync is internally best-effort/non-fatal (NFR-04): it never throws out of the save.
+            //
+            // Task 130 (#2126): the capture's communication id is KEPT and handed to the document create, which links
+            // the document to it in the create itself — no re-resolve by Message-ID unless the capture produced none.
+            Guid? emailCommunicationId = null;
             if (request.ContentType == SaveContentType.Email)
             {
                 var capture = await _emailUploadCapture.CaptureWithOutcomeAsync(request, userId, cancellationToken);
+                emailCommunicationId = capture?.CommunicationId;
 
                 // Task 121 (owner 2026-10-09, "file it if unfiled"): the email may already have been captured — from a
                 // mailbox, or saved by someone else — and so reconciled to an existing communication, which the capture
@@ -514,6 +522,28 @@ public class OfficeService : IOfficeService
                 // Best-effort: it never fails the save.
                 await _reconciledEmailFiling.FileIfUnfiledAsync(
                     request, capture, TokenHelper.ExtractBearerTokenOrNull(httpContext), cancellationToken);
+            }
+            else if (request.ContentType == SaveContentType.Attachment
+                     && attachmentParentEmail is { } parentEmail
+                     && !string.IsNullOrWhiteSpace(parentEmail.InternetMessageId))
+            {
+                // Task 130: a single attachment saved on its own belongs to its parent email's communication. The SAME
+                // capture an email save runs, over the SAME request shape — the canonical when the email was already
+                // captured (race-proof on the Message-ID alternate key, so a second save reuses the row), else the one
+                // it creates now. A parent without a Message-ID is not captured (it would have no dedup key); the
+                // document create then looks the communication up by the attachment's ParentEmailId, else is Restricted.
+                // ReconciledEmailFiling deliberately does NOT run here: it would file the WHOLE email to the record
+                // picked for one attachment, a filing decision no attachment save asks the user for.
+                var parentCapture = await _emailUploadCapture.CaptureWithOutcomeAsync(
+                    new SaveRequest
+                    {
+                        ContentType = SaveContentType.Email,
+                        Email = parentEmail,
+                        TargetEntity = request.TargetEntity,
+                    },
+                    userId,
+                    cancellationToken);
+                emailCommunicationId = parentCapture?.CommunicationId;
             }
 
             // Step 3: Determine job type based on content type
@@ -963,7 +993,7 @@ public class OfficeService : IOfficeService
                 await _jobs.RecordAsync(jobRecord, null, cancellationToken);
 
                 // Create Document record with SPE pointers
-                var (documentId, wasContentDuplicate) = await _documentPersistence.CreateDocumentWithSpePointersAsync(
+                var (documentId, wasContentDuplicate, relatedCommunicationId) = await _documentPersistence.CreateDocumentWithSpePointersAsync(
                     request,
                     driveId,
                     itemId,
@@ -978,7 +1008,10 @@ public class OfficeService : IOfficeService
                     preAssignedDocumentId,
                     // Task 080: resolved (or refused) before anything was written — see RECORD OWNERSHIP above.
                     owningTeamId,
-                    createdByPersonId);
+                    createdByPersonId,
+                    // Task 130: the capture's communication — the document is created linked to it (or Restricted).
+                    emailCommunicationId: emailCommunicationId,
+                    jobId: jobId);
 
                 // FR-C3 (email-communication-intelligence-r2, R-3): the content is byte-identical to an existing
                 // canonical document (returned as `documentId`). No second document was created — and there is
@@ -1070,7 +1103,10 @@ public class OfficeService : IOfficeService
                     isVersionSave: false,
                     owningTeamId,
                     cancellationToken,
-                    createdByPersonId);
+                    createdByPersonId,
+                    // Task 130: the email's communication, so the worker creates the attachment children linked to it —
+                    // null for an email-derived save whose document was created Restricted (its children are too).
+                    relatedCommunicationId: relatedCommunicationId);
 
                 // Mark job as complete - background workers will process asynchronously
                 // User sees immediate success while AI processing continues in background. The save's view (task 060)
