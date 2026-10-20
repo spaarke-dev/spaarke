@@ -961,3 +961,42 @@ Each restamps afterwards, but none refuses any of these:
 **Suggested fix**: before any write, probe AppendTo on the core record as the caller. A caller without it gets a 403 and nothing is written. Add a must-fire and a must-not-fire test.
 
 ---
+
+### DEF-029 — 105: a planted empty Signal set makes a decision resolve no Signals (known limit)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (known limit, ontology-r1 2nd pass 2026-10-20) |
+| **Urgency** | low |
+| **Filed** | 2026-10-20 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2144 |
+
+**Description**: a user with Write on a submission can plant an empty `humanDecisionSignalSet`. The Signals then stay open, and the record names the real caller. The harmful variant (another invoice) is refused since F1-a. Fix: rebuild the set from an app-only read when the stored set is empty, or add field security on `sprk_findingsjson`.
+
+---
+
+### DEF-030 — 105: a Signal deleted between storing the set and writing the record leaves the decision stuck at 409
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | medium (a decision can stay blocked) |
+| **Filed** | 2026-10-20 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2145 |
+
+**Description**: 105 has no shrink-and-retry path like 049's. A retry re-uses the stored set that names the missing Signal, so it ends 409 `record_refused` every time. Fix: give 105 the 049 shrink path, plus a test.
+
+---
+
+### DEF-031 — 105: a junk Signal set in the user-writable findings JSON blocks a submission's decision
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner and uac-r2 decide) |
+| **Urgency** | medium |
+| **Filed** | 2026-10-20 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2146 |
+
+**Description**: `sprk_findingsjson` has no field security, and Core User has Write Deep. A planted junk set makes every Override or Return answer 409 `findings_unreadable`. Fix: field security that lets only the writer identity write the column, or move the set to a writer-owned row.
+
+---
