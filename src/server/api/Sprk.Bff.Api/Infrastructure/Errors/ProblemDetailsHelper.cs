@@ -252,6 +252,14 @@ public static partial class ProblemDetailsHelper
     /// was written"; here the change was written and its filing put back or superseded (the exception's remarks), so the
     /// client's copy is stale either way.
     /// </summary>
+    /// <remarks>
+    /// CLAUDE.md §11. <i>Existing</i> — <see cref="RecordOwnerRefused(string?, string?, string, string?)"/> is the other owner
+    /// 409; it is not reused because its detail says "was not saved" and its reason code is a refusal code, both false here
+    /// (the change was written). <i>Extension</i> — it is that method's shape (title, 409, <c>reasonCode</c>, optional
+    /// <c>traceId</c>) with its own reason code, shared by every HTTP re-file writer instead of one copy per route.
+    /// <i>Cost of doing nothing</i> — each route would render its own 409 for one condition, or let it reach the global
+    /// handler as a 500.
+    /// </remarks>
     /// <param name="noun">What was being re-filed ("document", "event", …), for the detail.</param>
     /// <param name="traceId">Optional correlation id for support.</param>
     public static IResult RecordOwnerUnsettled(string noun, string? traceId = null)

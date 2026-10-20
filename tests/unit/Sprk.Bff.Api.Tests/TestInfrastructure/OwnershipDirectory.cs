@@ -55,6 +55,10 @@ internal sealed class OwnershipDirectory
     private bool _ignoreAssignments;
 
     public List<string> QueriedEntities { get; } = new();
+
+    /// <summary>#2143 round 2: every query on a record table (not systemuser, team or businessunit), as sent — so a test can
+    /// assert how the resolver reads a row (its <c>NoLock</c>, its column set).</summary>
+    public List<QueryExpression> RecordQueries { get; } = new();
     public List<string> UserKeyColumns { get; } = new();
 
     /// <summary>Every owner assignment the resolver made (task 146 reparent).</summary>
@@ -126,7 +130,7 @@ internal sealed class OwnershipDirectory
         entities
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string entity, Guid id, string[] _, CancellationToken _) =>
-                OwnerReadFault is { } readFault ? Task.FromException<Entity>(readFault) : Task.FromResult(Row(entity, id)));
+                OwnerReadFault is { } readFault ? Task.FromException<Entity>(readFault) : Task.FromResult(Snapshot(Row(entity, id))));
 
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -464,7 +468,7 @@ internal sealed class OwnershipDirectory
             "businessunit" => _businessUnits
                 .Where(b => MatchesName(conditions, b.Name))
                 .Select(b => new Entity("businessunit", b.BusinessUnitId)),
-            _ => RecordsMatching(query.EntityName, conditions),
+            _ => RecordQuery(query, conditions),
         };
 
         var list = rows.ToList();
@@ -474,6 +478,12 @@ internal sealed class OwnershipDirectory
         }
 
         return new EntityCollection(list);
+    }
+
+    private IEnumerable<Entity> RecordQuery(QueryExpression query, IReadOnlyDictionary<string, object> conditions)
+    {
+        RecordQueries.Add(query);
+        return RecordsMatching(query.EntityName, conditions);
     }
 
     private IEnumerable<Entity> UsersMatching(IReadOnlyDictionary<string, object> conditions)
@@ -499,7 +509,19 @@ internal sealed class OwnershipDirectory
         }
 
         var id = (Guid)conditions[$"{entity}id"];
-        return _records.TryGetValue((entity, id), out var row) ? new[] { row } : Array.Empty<Entity>();
+        return _records.TryGetValue((entity, id), out var row) ? new[] { Snapshot(row) } : Array.Empty<Entity>();
+    }
+
+    /// <summary>
+    /// #2143 round 2 (F3c): a COPY of the row, as the SDK hands back — a later write to the directory never changes a row the
+    /// resolver already read (the live row aliased into the resolver would make a pre-change read show the change).
+    /// </summary>
+    private static Entity Snapshot(Entity row)
+    {
+        var copy = new Entity(row.LogicalName, row.Id) { RowVersion = row.RowVersion };
+        foreach (var (column, value) in row.Attributes)
+            copy[column] = value;
+        return copy;
     }
 
     /// <summary>An ABSENT condition matches everything — so a dropped predicate widens the match.</summary>

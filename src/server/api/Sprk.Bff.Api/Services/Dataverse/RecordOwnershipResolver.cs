@@ -1013,10 +1013,24 @@ public sealed class RecordOwnerUnresolvedException : InvalidOperationException
 /// against it.</item>
 /// <item>When the owner could not be read back at all: the filing is put back if the resolved owner was the Secure team,
 /// and kept otherwise (the safe direction; logged for repair).</item>
+/// <item>When this call wrote the Secure team unconditionally (attempts exhausted toward it) and another writer had moved the
+/// row out from under its secure record first: the owner its parents now give was written back where the Secure owner was
+/// this call's own; otherwise the row is held in the Secure Record business unit and logged
+/// <see cref="RecordOwnershipResolver.ReparentLeftInconsistent"/> (#2143 round 2).</item>
 /// </list>
-/// <para>No owner that disagrees with the row's current parents was written by this call; a row held in the Secure Record
-/// business unit stays there (over-restricted, never exposed) until the writer that re-filed it, or the reconcile, settles
-/// it. The message names only the row (table and id).</para>
+/// <para>No ordinary owner that disagrees with the row's current parents was written by this call, and no step after a re-file
+/// runs on a row this is thrown for. A row held in the Secure Record business unit stays there (over-restricted, never
+/// exposed). No sweep releases such a row (the sweep and the recent-changes pass only move rows INTO isolation); a re-file
+/// its F3 check admits, or manual repair from the <see cref="RecordOwnershipResolver.ReparentLeftInconsistent"/> log,
+/// settles it. The message names only the row (table and id).</para>
+/// <para>CLAUDE.md §11. <i>Existing</i> — <see cref="RecordOwnerUnresolvedException"/> is the resolver's other typed owner
+/// failure; it is not reused because every catcher of it (the review-memo and document-operation routes, the action seam,
+/// the communication and thread writers, the incoming-communication job's hold) reads it as "refused, nothing was written",
+/// and here the change WAS written. <i>Extension</i> — it derives from <see cref="InvalidOperationException"/>, so every
+/// writer that does not name it (the queue and AI writers, and those that swallow a filing failure) keeps the handling it
+/// already gives a Dataverse fault; only the HTTP writers that answer 409 catch it by name. <i>Cost of doing nothing</i> — a concurrent re-file whose owner cannot be settled
+/// reaches the global handler as a 500 "server_error", telling the client the server failed when the record changed
+/// under it and a reload and retry settles it.</para>
 /// </remarks>
 public sealed class RecordOwnerUnsettledException : InvalidOperationException
 {
@@ -1382,7 +1396,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // limit applies". A change that takes the row out from under a secure root — to no secure root, or to a
         // different one — needs the caller's F3 rights on every secure root it leaves, decided BEFORE anything is
         // written, by the same check the unsecure endpoint makes (SecureDesignationRemoval).
-        var exitRefusal = await RefuseUnlessPermittedToLeaveSecureRootsAsync(
+        var (exitRefusal, permittedToLeaveSecure) = await RefuseUnlessPermittedToLeaveSecureRootsAsync(
             request, current, filedUnderBefore, parents, resolution, ct).ConfigureAwait(false);
         if (exitRefusal is not null)
         {
@@ -1391,6 +1405,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 + "written.", request.EntityLogicalName, request.RecordId, exitRefusal.Reason, exitRefusal.RefusalCode);
             return exitRefusal;
         }
+
+        // #2143 round 2 (F3c): the row's owner as read BEFORE the change, captured before the change is written. `current`
+        // is the SDK's own copy of the row, so the change cannot alter it in production; capturing it here keeps "before"
+        // true by construction rather than by that property of the client.
+        var before = new RowBeforeChange(
+            current.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id,
+            current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id,
+            permittedToLeaveSecure);
 
         await applyChange(ct).ConfigureAwait(false);
 
@@ -1404,9 +1426,6 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // (the ProvisionProjectEndpoint.AssignOwnerToSecureTeamAsync rationale). #2143: it is assigned CONDITIONALLY, at the
         // version read after the change, from the parents the row holds at that version (SettleOwnerAsync).
         var observed = new AfterChangeObservation();
-        var before = new RowBeforeChange(
-            current.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id,
-            current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id);
         try
         {
             return await SettleOwnerAsync(request, parents, before, observed, ct).ConfigureAwait(false);
@@ -1458,10 +1477,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     }
 
     /// <summary>
-    /// The row's owner as read BEFORE the change (#2143): its owning team — what a put-back restores the filing for — and its
-    /// owning business unit — whether this call's F3 check covered taking it out of the Secure Record business unit.
+    /// The row's owner as read BEFORE the change (#2143): its owning team — what a put-back restores the filing for — its
+    /// owning business unit, and whether this call's F3 check (<see cref="RefuseUnlessPermittedToLeaveSecureRootsAsync"/>)
+    /// was asked and PERMITTED the row to leave a secure record. The last two together say whether this call's own F3 check
+    /// covered taking the row out of the Secure Record business unit (<see cref="WouldLeaveSecureBusinessUnitAsync"/>).
     /// </summary>
-    private sealed record RowBeforeChange(Guid? OwningTeam, Guid? OwningBusinessUnit);
+    private sealed record RowBeforeChange(Guid? OwningTeam, Guid? OwningBusinessUnit, bool PermittedToLeaveSecure);
 
     /// <summary>A row's version, owner and ownership parents, from one read (#2143).</summary>
     private sealed record RowOwnership(
@@ -1472,13 +1493,19 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// column list is exactly the guess task 146 forbids. A reparent is an explicit filing action, not a hot path, so the
     /// wide read is the honest price. <c>null</c> when the row does not exist.
     /// </summary>
+    /// <remarks>
+    /// #2143 round 2: a COMMITTED read (<c>NoLock = false</c>). Every settle and put-back decision is taken from this read —
+    /// "already owned, write nothing", the version a conditional write is conditioned on, the parents the owner is derived
+    /// from — and a dirty read could answer "already owned" from another writer's uncommitted owner write that then rolls
+    /// back, leaving the row with no owner write at all. The pre-#2143 owner check was a committed <c>RetrieveAsync</c>.
+    /// </remarks>
     private async Task<Entity?> ReadWholeRowAsync(RecordReparent request, CancellationToken ct)
     {
         var query = new QueryExpression(request.EntityLogicalName)
         {
             ColumnSet = new ColumnSet(true),
             TopCount = 1,
-            NoLock = true,
+            NoLock = false,
         };
         query.Criteria.AddCondition($"{request.EntityLogicalName}id", ConditionOperator.Equal, request.RecordId);
         return (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
@@ -1555,14 +1582,16 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// <remarks>
     /// <para><b>Fail closed.</b> A re-derivation that is REFUSED writes no owner and throws. An ORDINARY owner is not written
     /// to a row held in the Secure Record business unit (<see cref="WouldLeaveSecureBusinessUnitAsync"/>) unless this call's
-    /// own F3 check covered that move — the row was held there BEFORE the change and is still filed exactly as this call
-    /// resolved it; otherwise the filing it answers was not this call's, the row stays over-restricted until the writer that
-    /// made that filing (or the reconcile) settles it, and the call throws at once. Attempts that run out toward an ordinary
-    /// owner throw; attempts that run out toward the SECURE team end in one unconditional write of the Secure team (F1-b):
-    /// leaving a row filed under a secure record with an ordinary owner until the reconcile is the exposure, while a Secure
-    /// owner on a row a concurrent writer is moving out is only over-restriction (that writer's own F3-checked settle
-    /// re-owns it). Every throw but a missing row version is <see cref="RecordOwnerUnsettledException"/>, naming only the
-    /// row.</para>
+    /// own F3 check covered that move — the row is still filed exactly as this call resolved it, and it was held there BEFORE
+    /// the change or this call's F3 check permitted it to leave a secure record; otherwise the filing it answers was not this
+    /// call's, the row stays over-restricted, and the call throws at once. Attempts that run out toward an ordinary owner
+    /// throw; attempts that run out toward the SECURE team end in one unconditional write of the Secure team (F1-b): leaving a
+    /// row filed under a secure record with an ordinary owner until the reconcile is the exposure. That write is then checked
+    /// against a fresh read (<see cref="ConfirmUnconditionalSecureWriteAsync"/>): a concurrent writer may already have moved
+    /// the row out and settled its own owner, and nothing re-owns it after that, so when the fresh parents no longer resolve
+    /// to the Secure team this call puts back the owner they give where it can (<see cref="ReleaseOwnSecureWriteAsync"/>),
+    /// logs the row for repair where it cannot, and throws. Every throw but a missing row version is
+    /// <see cref="RecordOwnerUnsettledException"/>, naming only the row.</para>
     /// <para>The owner is read AFTER the change, never taken from the row read before it (task 146 b2): another writer
     /// may have re-owned the row in between, and a stale "already owned" answer would leave the re-filed row with that
     /// writer's owner. A written owner is read back (task 146).</para>
@@ -1573,6 +1602,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         AfterChangeObservation? observed, CancellationToken ct)
     {
         RecordOwnerResolution? lastTarget = null;
+        RowOwnership? lastState = null;
         for (var attempt = 1; attempt <= MaxOwnerWriteAttempts; attempt++)
         {
             var state = await ReadRowOwnershipAsync(request, ct).ConfigureAwait(false)
@@ -1580,6 +1610,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     request.EntityLogicalName, request.RecordId,
                     $"The {request.EntityLogicalName} {request.RecordId:D} being re-filed no longer exists, so its owner could "
                     + "not be settled (#2143).");
+            lastState = state;
 
             var parentsAsResolved = FiledAsResolved(state, resolvedFrom);
             if (observed is { Read: false })
@@ -1679,7 +1710,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 request.RecordId,
                 new Dictionary<string, object> { [OwnerColumn] = new EntityReference(TeamEntity, secure.OwningTeamId!.Value) },
                 ct).ConfigureAwait(false);
-            return await ConfirmOwnerAsync(request, secure, ct).ConfigureAwait(false);
+            return await ConfirmUnconditionalSecureWriteAsync(request, secure, lastState!, ct).ConfigureAwait(false);
         }
 
         _logger.LogError(
@@ -1693,15 +1724,20 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             + "written (#2143).");
     }
 
-    /// <summary>Reads a written owner back (task 146): <paramref name="target"/> when it is the team, else throws.</summary>
+    /// <summary>
+    /// Reads a written owner back (task 146): <paramref name="target"/> when it is the team, else throws
+    /// <see cref="RecordOwnerUnsettledException"/> (#2143 round 2: the write succeeded, so a different owner read back is
+    /// another writer's — a conflict the HTTP writers answer 409, not a server fault).
+    /// </summary>
     private async Task<RecordOwnerResolution> ConfirmOwnerAsync(
         RecordReparent request, RecordOwnerResolution target, CancellationToken ct)
     {
         var teamId = target.OwningTeamId!.Value;
         if (await ReadOwningTeamAsync(request, ct).ConfigureAwait(false) != teamId)
         {
-            throw new InvalidOperationException(
-                $"The owner of {request.EntityLogicalName} {request.RecordId:D} did not read back as team {teamId:D} "
+            throw new RecordOwnerUnsettledException(
+                request.EntityLogicalName, request.RecordId,
+                $"The owner of {request.EntityLogicalName} {request.RecordId:D} did not read back as the team it was assigned "
                 + "after the reassignment; the re-filed row may be readable outside its new parent's team (task 146).");
         }
 
@@ -1712,11 +1748,127 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     }
 
     /// <summary>
+    /// #2143 round 2 (F2): what F1-b's UNCONDITIONAL Secure write is checked against. That write is conditioned on nothing,
+    /// so another writer may have moved the row out from under its secure record between this call's last read
+    /// (<paramref name="lastRead"/>) and the write — a mover whose own settle already wrote the ordinary owner its new parents
+    /// give, and whose call answered success. The row is read again (committed): while its parents still resolve to the Secure
+    /// team, the owner is read back as before (<see cref="ConfirmOwnerAsync"/>) and the re-file stands; otherwise the Secure
+    /// owner just written belongs to no parent the row holds, the steps after a re-file must not run on it (a descendant pass
+    /// would pull everything filed under it into isolation), and the call throws <see cref="RecordOwnerUnsettledException"/>
+    /// after ONE settle decision from the fresh parents (<see cref="ReleaseOwnSecureWriteAsync"/>).
+    /// </summary>
+    private async Task<RecordOwnerResolution> ConfirmUnconditionalSecureWriteAsync(
+        RecordReparent request, RecordOwnerResolution secure, RowOwnership lastRead, CancellationToken ct)
+    {
+        var fresh = await ReadRowOwnershipAsync(request, ct).ConfigureAwait(false)
+            ?? throw new RecordOwnerUnsettledException(
+                request.EntityLogicalName, request.RecordId,
+                $"The {request.EntityLogicalName} {request.RecordId:D} being re-filed no longer exists, so its owner could "
+                + "not be settled (#2143).");
+
+        var freshTarget = await ResolveReparentOwnerAsync(request, fresh.Parents.ToArray(), ct).ConfigureAwait(false);
+        if (freshTarget.IsSecureOwner)
+        {
+            return await ConfirmOwnerAsync(request, secure, ct).ConfigureAwait(false);
+        }
+
+        var outcome = await ReleaseOwnSecureWriteAsync(request, secure, freshTarget, fresh, lastRead, ct).ConfigureAwait(false);
+        if (outcome == SecureWriteRelease.Held)
+        {
+            _logger.LogCritical(
+                ReparentLeftInconsistent,
+                "Re-file of {Entity} {RecordId} needs checking: its owner was written as the Secure team {SecureTeamId} "
+                + "unconditionally, but another writer had moved it out from under its secure record first; its parents now "
+                + "give {Outcome} {TeamId}, and that owner could not be restored by this call. It is held in the Secure Record "
+                + "business unit (over-restricted, not exposed). No sweep releases it: a re-file that its F3 check admits (the "
+                + "row's creator), or manual repair, settles it (#2143).",
+                request.EntityLogicalName, request.RecordId, secure.OwningTeamId, freshTarget.Outcome, freshTarget.OwningTeamId);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Re-file of {Entity} {RecordId}: its owner was written as the Secure team unconditionally, but another writer "
+                + "had moved it out from under its secure record first; its owner is the one its parents now give ({Outcome} "
+                + "{TeamId}, {Release}). This re-file did not stand (#2143).",
+                request.EntityLogicalName, request.RecordId, freshTarget.Outcome, freshTarget.OwningTeamId, outcome);
+        }
+
+        throw new RecordOwnerUnsettledException(
+            request.EntityLogicalName, request.RecordId,
+            $"The {request.EntityLogicalName} {request.RecordId:D} was moved out from under its secure record by another "
+            + "writer while this re-file settled its owner, so this re-file did not stand; reload it and retry (#2143).");
+    }
+
+    /// <summary>What <see cref="ReleaseOwnSecureWriteAsync"/> did (#2143 round 2).</summary>
+    private enum SecureWriteRelease
+    {
+        /// <summary>The Secure owner this call wrote was replaced, conditionally, with the owner the fresh parents give.</summary>
+        Released,
+
+        /// <summary>The row already holds the owner its fresh parents give (the mover's write landed after this call's).</summary>
+        AlreadySettled,
+
+        /// <summary>Nothing was written: the row stays held in the Secure Record business unit (logged for repair).</summary>
+        Held,
+    }
+
+    /// <summary>
+    /// #2143 round 2 (F2): ONE settle decision for a row this call just wrote the Secure team to, unconditionally, although its
+    /// fresh parents (<paramref name="fresh"/>) no longer resolve to it. The owner they give is written back — CONDITIONALLY, at
+    /// the fresh read's version — only when the Secure owner the row holds is the one this call wrote AND the row was outside
+    /// the Secure Record business unit at this call's last read before that write (<paramref name="lastRead"/>): its isolation
+    /// is then this call's own write, not a hold another writer's guard or the reconcile placed (which only an F3-checked move
+    /// may lift, so it is left). Every other case writes nothing: a refused or unchanged answer, another writer's owner, an
+    /// ambiguous or absent Secure Record business unit, no version, a row changed again (412), or an owner that does not read
+    /// back. Never writes an owner that disagrees with the fresh parents.
+    /// </summary>
+    private async Task<SecureWriteRelease> ReleaseOwnSecureWriteAsync(
+        RecordReparent request, RecordOwnerResolution secure, RecordOwnerResolution freshTarget, RowOwnership fresh,
+        RowOwnership lastRead, CancellationToken ct)
+    {
+        if (!freshTarget.IsOwned || freshTarget.IsSecureOwner)
+            return SecureWriteRelease.Held;
+
+        var ordinaryTeam = freshTarget.OwningTeamId!.Value;
+        if (fresh.OwningTeam == ordinaryTeam)
+            return SecureWriteRelease.AlreadySettled;
+        if (fresh.OwningTeam != secure.OwningTeamId || fresh.Version is not { } version)
+            return SecureWriteRelease.Held;
+
+        var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
+        if (secureBu.Ambiguous || secureBu.Id is not { } secureBuId
+            || lastRead.OwningBusinessUnit is not { } lastBu || lastBu == secureBuId)
+        {
+            return SecureWriteRelease.Held;
+        }
+
+        try
+        {
+            await _dataverse.UpdateIfRowVersionMatchesAsync(
+                request.EntityLogicalName,
+                request.RecordId,
+                version,
+                new Dictionary<string, object> { [OwnerColumn] = new EntityReference(TeamEntity, ordinaryTeam) },
+                ct).ConfigureAwait(false);
+        }
+        catch (System.Data.DBConcurrencyException)
+        {
+            return SecureWriteRelease.Held;
+        }
+
+        return await ReadOwningTeamAsync(request, ct).ConfigureAwait(false) == ordinaryTeam
+            ? SecureWriteRelease.Released
+            : SecureWriteRelease.Held;
+    }
+
+    /// <summary>
     /// Whether writing an ORDINARY owner to <paramref name="state"/>'s row would take it out of the Secure Record business
     /// unit on a filing this call's F3 check did not cover (#2143). <c>false</c> when the row is not held there, or when it
-    /// was held there before the change AND is still filed exactly as this call resolved it — the move out this call's own
-    /// F3 check permitted. An ambiguous Secure Record business unit, or a row whose owning business unit did not come back,
-    /// counts as held there (fail closed); no Secure Record business unit at all answers <c>false</c>.
+    /// is still filed exactly as this call resolved it AND either it was held there before the change or this call's F3 check
+    /// was asked and permitted it to leave a secure record (round 2, F1: a row another writer's Secure write moved into the
+    /// unit AFTER this call read it is still the move out its own F3 check permitted). An ambiguous Secure Record business
+    /// unit, or a row whose owning business unit did not come back, counts as held there (fail closed); no Secure Record
+    /// business unit at all answers <c>false</c>.
     /// </summary>
     private async Task<bool> WouldLeaveSecureBusinessUnitAsync(
         RowOwnership state, bool parentsAsResolved, RowBeforeChange before, CancellationToken ct)
@@ -1728,7 +1880,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return false;
         if (state.OwningBusinessUnit is { } held && held != secureBuId)
             return false;
-        return !(parentsAsResolved && before.OwningBusinessUnit == secureBuId);
+        return !(parentsAsResolved && (before.OwningBusinessUnit == secureBuId || before.PermittedToLeaveSecure));
     }
 
     /// <summary>The team that owns the row now (<c>owningteam</c>), or <c>null</c> when a user owns it.</summary>
@@ -1782,7 +1934,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
     /// <summary>
     /// Owner round 10 item 7 (task 146 c1): the refusal to send when the re-file takes the row out from under a secure
-    /// root and the caller may not, or <c>null</c> when it may proceed. Nothing is written here.
+    /// root and the caller may not, or <c>null</c> when it may proceed — with <c>PermittedToLeave</c> <c>true</c> exactly
+    /// when the F3 decision was asked and permitted the move out (#2143 round 2: the settle's Secure-unit guard keys on it).
+    /// Nothing is written here.
     /// </summary>
     /// <remarks>
     /// <para><b>Which secure roots the row leaves.</b> The secure roots above the row's parents BEFORE the change, less
@@ -1798,7 +1952,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// record thread it joined) admits only its creator. A filing deeper than <see cref="MaxLineageDepth"/> refuses, as
     /// the owner decision does.</para>
     /// </remarks>
-    private async Task<RecordOwnerResolution?> RefuseUnlessPermittedToLeaveSecureRootsAsync(
+    private async Task<(RecordOwnerResolution? Refusal, bool PermittedToLeave)> RefuseUnlessPermittedToLeaveSecureRootsAsync(
         RecordReparent request, Entity current, IReadOnlyCollection<RecordOwnershipParent> filedUnderBefore,
         IReadOnlyCollection<RecordOwnershipParent> filedUnderAfter, RecordOwnerResolution resolution, CancellationToken ct)
     {
@@ -1809,16 +1963,16 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var mayLeaveIsolation = !resolution.IsSecureOwner && resolution.Outcome != RecordOwnerOutcome.Unchanged;
         if (!removesAParent && !mayLeaveIsolation)
         {
-            return null;
+            return (null, false);
         }
 
         var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
         if (secureBu.Ambiguous)
         {
-            return RecordOwnerResolution.Refused(
+            return (RecordOwnerResolution.Refused(
                 RecordOwnerRefusal.SecureBusinessUnitAmbiguous,
                 "more than one business unit carries the Secure Record name, so whether the change leaves a secure record "
-                + "cannot be decided");
+                + "cannot be decided"), false);
         }
 
         (IReadOnlyList<RecordOwnershipParent> Roots, RecordOwnershipParent? TooDeepAt) none =
@@ -1827,11 +1981,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var after = removesAParent ? await SecureRootsAboveAsync(filedUnderAfter, secureBu.Id, ct).ConfigureAwait(false) : none;
         if ((before.TooDeepAt ?? after.TooDeepAt) is { } tooDeep)
         {
-            return RecordOwnerResolution.Refused(
+            return (RecordOwnerResolution.Refused(
                 RecordOwnerRefusal.ParentUnresolved,
                 $"the record's filing runs through more than {MaxLineageDepth} levels of records (still unresolved at "
                 + $"{tooDeep.EntityLogicalName} {tooDeep.RecordId:D}), so whether the change leaves a secure record cannot "
-                + "be decided");
+                + "be decided"), false);
         }
 
         var left = before.Roots.Where(root => !after.Roots.Contains(root)).ToList();
@@ -1844,7 +1998,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         if (left.Count == 0 && !unidentified)
         {
-            return null; // no secure root is left, and the row is not taken out of secure isolation
+            return (null, false); // no secure root is left, and the row is not taken out of secure isolation
         }
 
         var decision = await Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.DecideAsync(
@@ -1874,9 +2028,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             request.EntityLogicalName, request.RecordId, left.Count, decision.Outcome, decision.Basis,
             decision.CallerSystemUserId);
 
+        // #2143 round 2 (F1): a PERMITTED decision is also what the settle's Secure-unit guard keys on — the move out of the
+        // Secure Record business unit this check covered, even when another writer's Secure write lands after this read.
         return decision.IsPermitted
-            ? null
-            : RecordOwnerResolution.SecureRemovalRefused(decision, ChildNoun(request.EntityLogicalName));
+            ? (null, true)
+            : (RecordOwnerResolution.SecureRemovalRefused(decision, ChildNoun(request.EntityLogicalName)), false);
     }
 
     /// <summary>The noun a move-out message names the row by ("document", "event", "to-do", …).</summary>
@@ -2046,32 +2202,41 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     }
 
     /// <summary>
-    /// #2143: after a put-back was NOT applied because a newer writer re-filed the row, checks that the row's owner matches the
-    /// parents it holds now — the same settle loop as the re-file (<see cref="SettleOwnerAsync"/>) — and logs the outcome.
-    /// Never throws (recovery): a check that cannot settle is logged <see cref="ReparentLeftInconsistent"/>.
+    /// #2143: after a put-back was NOT applied — a newer writer re-filed or re-owned the row
+    /// (<see cref="PutBackOutcome.LeftToNewerWriter"/>), or the put-back could not be sent safely
+    /// (<see cref="PutBackOutcome.Unsettled"/>: the row kept changing, could not be read, or was never read toward an ordinary
+    /// owner) — checks that the row's owner matches the parents it holds now, the same settle loop as the re-file
+    /// (<see cref="SettleOwnerAsync"/>), and logs the outcome. Never throws (recovery): a check that cannot settle is logged
+    /// <see cref="ReparentLeftInconsistent"/>.
     /// </summary>
     private async Task RecheckOwnerAfterNewerFilingAsync(
         RecordReparent request, IReadOnlyCollection<RecordOwnershipParent> resolvedFrom, RowBeforeChange before,
-        Exception assignFailure)
+        Exception assignFailure, PutBackOutcome putBack)
     {
+        // K3 (round 2): say WHY the filing was not put back. Only LeftToNewerWriter saw another writer's filing or owner; an
+        // Unsettled put-back may be leaving this call's own filing in place.
+        var whyNotPutBack = putBack == PutBackOutcome.LeftToNewerWriter
+            ? "another writer re-filed or re-owned the row"
+            : "the put-back could not be sent safely (the row kept changing or could not be read), so the filing may be this "
+              + "re-file's own";
         try
         {
             var settled = await SettleOwnerAsync(request, resolvedFrom, before, observed: null, CancellationToken.None)
                 .ConfigureAwait(false);
             _logger.LogWarning(
                 assignFailure,
-                "Re-file of {Entity} {RecordId}: its owner assignment failed and a newer writer re-filed the row, so its filing "
-                + "was NOT put back; its owner matches the parents it holds now ({Outcome} {TeamId}) (#2143).",
-                request.EntityLogicalName, request.RecordId, settled.Outcome, settled.OwningTeamId);
+                "Re-file of {Entity} {RecordId}: its owner assignment failed and its filing was NOT put back ({WhyNotPutBack}); "
+                + "its owner matches the parents it holds now ({Outcome} {TeamId}) (#2143).",
+                request.EntityLogicalName, request.RecordId, whyNotPutBack, settled.Outcome, settled.OwningTeamId);
         }
         catch (Exception recheckFailure)
         {
             _logger.LogCritical(
                 ReparentLeftInconsistent, recheckFailure,
-                "Re-file of {Entity} {RecordId} needs checking: its owner assignment failed ({AssignFailure}), a newer writer "
-                + "re-filed the row so its filing was NOT put back, and its owner could not be confirmed against the parents it "
-                + "holds now (#2143).",
-                request.EntityLogicalName, request.RecordId, assignFailure.GetType().Name);
+                "Re-file of {Entity} {RecordId} needs checking: its owner assignment failed ({AssignFailure}), its filing was "
+                + "NOT put back ({WhyNotPutBack}), and its owner could not be confirmed against the parents it holds now "
+                + "(#2143).",
+                request.EntityLogicalName, request.RecordId, assignFailure.GetType().Name, whyNotPutBack);
         }
     }
 
@@ -2089,7 +2254,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// against the parents it holds (<see cref="RecheckOwnerAfterNewerFilingAsync"/>). A version that moved while the
     /// filing is still ours (an unrelated column written) is read again, up to <see cref="MaxOwnerWriteAttempts"/>
     /// attempts. Only when the row's version was never read at all — every read after the change failed, so there is no
-    /// sign of a newer writer — is the put-back sent unconditionally, as before #2143 (exposure is the worse failure).
+    /// sign of a newer writer — AND the owner this re-file resolved is the Secure team is the put-back sent unconditionally,
+    /// as before #2143 (exposure is the worse failure). Toward an ORDINARY owner it is never sent blind (round 2, K1): the
+    /// filing it would restore can be a secure record's, written over a newer writer's ordinary owner; the row is left filed
+    /// under this re-file's ordinary parents and logged, and its owner re-checked.
     /// </remarks>
     private async Task RestoreFilingAsync(
         RecordReparent request, IReadOnlyDictionary<string, object> restore,
@@ -2111,7 +2279,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         try
         {
-            var putBack = await PutBackFilingAsync(request, restore, resolvedFrom, before, observed).ConfigureAwait(false);
+            var putBack = await PutBackFilingAsync(request, restore, resolvedFrom, resolution, before, observed)
+                .ConfigureAwait(false);
             if (putBack != PutBackOutcome.Applied)
             {
                 if (putBack == PutBackOutcome.Unsettled)
@@ -2119,12 +2288,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     _logger.LogCritical(
                         ReparentLeftInconsistent, assignFailure,
                         "Re-file of {Entity} {RecordId} needs checking: the owner could not be assigned to team {TeamId}, and "
-                        + "its filing columns ({Columns}) were NOT put back — the row kept changing, or could not be read after "
-                        + "it changed, and a put-back is never sent blind over a newer write (#2143).",
+                        + "its filing columns ({Columns}) were NOT put back — the row kept changing, or could not be read, and a "
+                        + "put-back is never sent blind over a newer write (nor ever blind toward an ordinary owner) (#2143).",
                         request.EntityLogicalName, request.RecordId, teamId, string.Join(", ", restore.Keys));
                 }
 
-                await RecheckOwnerAfterNewerFilingAsync(request, resolvedFrom, before, assignFailure).ConfigureAwait(false);
+                await RecheckOwnerAfterNewerFilingAsync(request, resolvedFrom, before, assignFailure, putBack)
+                    .ConfigureAwait(false);
                 return;
             }
 
@@ -2197,7 +2367,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// </summary>
     private async Task<PutBackOutcome> PutBackFilingAsync(
         RecordReparent request, IReadOnlyDictionary<string, object> restore,
-        IReadOnlyCollection<RecordOwnershipParent> resolvedFrom, RowBeforeChange before, AfterChangeObservation observed)
+        IReadOnlyCollection<RecordOwnershipParent> resolvedFrom, RecordOwnerResolution target, RowBeforeChange before,
+        AfterChangeObservation observed)
     {
         for (var attempt = 1; attempt <= MaxOwnerWriteAttempts; attempt++)
         {
@@ -2223,7 +2394,19 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     if (attempt > 1)
                         return PutBackOutcome.Unsettled; // it changed since the change, and cannot be read now
 
-                    // Never read since the change, and not now: no sign of a newer writer. As before #2143.
+                    if (!target.IsSecureOwner)
+                    {
+                        // #2143 round 2 (K1): never sent blind toward an ORDINARY target. The filing it restores is the one
+                        // before a move to ordinary parents — possibly a secure record's — and a newer writer may since have
+                        // given the row an ordinary owner: restoring the secure filing over it is the exposure. Left as it is,
+                        // the row stays filed under this re-file's ordinary parents with whatever owner it holds (its old,
+                        // stricter owner, or a newer writer's), and is logged for repair by the caller.
+                        return PutBackOutcome.Unsettled;
+                    }
+
+                    // Never read since the change, and not now, toward the SECURE team (a move into a secure record): no
+                    // sign of a newer writer, and leaving the row filed under the secure record with an owner the failed
+                    // assignment may not have changed is the exposure this put-back exists to undo. As before #2143.
                     await _dataverse.UpdateAsync(
                         request.EntityLogicalName, request.RecordId, new Dictionary<string, object>(restore),
                         CancellationToken.None).ConfigureAwait(false);
