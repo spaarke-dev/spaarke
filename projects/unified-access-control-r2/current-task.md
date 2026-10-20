@@ -50,4 +50,4 @@
 - **R3:** deploys with owner approval. Stage B (1e40baad v2 tokens). 036 flag flip tasked to R3. 186 email-claim result owed to R3.
 - **Ontology:** #2113 OK'd; #2102 smoke PASS.
 - **ebilling:** #1911 (draft) carries the 4 invoice-family SRO Reads.
-- **Field-mapping:** awaiting owner's FR-08 amendment decision; review 011/017 diffs when sent.
+- **Field-mapping:** owner accepted condition (c) as FR-08 amendment (filing lookup failing AppendTo → uniform refusal, no create; 014 must-fire on Secure parent + control); W2 proceeds on master, not waiting on ebilling #1911. (a)(b)(d) + ping-before-merge binding. Review 011 diff range when sent.
