@@ -15,10 +15,14 @@ namespace Spaarke.ArchTests;
 ///
 /// <para><b>Two rules.</b></para>
 /// <list type="number">
-///   <item>No message-template placeholder named <c>{Email}</c>, <c>{Upn}</c>, <c>{UserPrincipalName}</c> or
-///   <c>{PrincipalDomainName}</c> (with or without a format suffix) in any code line under
-///   <c>Services/ExternalAccess</c> or <c>Infrastructure/ExternalAccess</c> — every <c>[ID-LINK-RECON]</c>,
-///   <c>[SECURE-CENSUS]</c>, <c>[ID-BIND]</c> and SPE-membership template lives there.</item>
+///   <item>No placeholder or interpolation hole whose name contains <c>Email</c>, <c>Mail</c>, <c>Upn</c>/<c>UPN</c>,
+///   <c>UserPrincipalName</c>, <c>DomainName</c> or <c>PrincipalName</c> (<c>{Email}</c>, <c>{UserEmail}</c>,
+///   <c>{ContactEmail}</c>, <c>{Mail}</c>, <c>{DomainName}</c>…, with or without a format suffix) in any code line under
+///   <c>Services/ExternalAccess</c> or <c>Infrastructure/ExternalAccess</c>. Booleans and counts (<c>{HasEmail}</c>,
+///   <c>{IsMailbox}</c>, <c>{EmailCount}</c>) carry no address and are allowed. The <c>[ID-LINK-RECON]</c> and
+///   SPE-membership templates, and most <c>[SECURE-CENSUS]</c> and <c>[ID-BIND]</c> ones, live there; but
+///   <c>KeylessProofEndpoints.cs</c> and <c>RegistrationDataverseService.cs</c> carry such lines outside this scope.
+///   Widening the scope to them is #2134.</item>
 ///   <item>No interpolation hole in <c>SecureBuRoleDepthAssertion.cs</c> (the census evaluator, which builds the finding
 ///   messages) that reads a principal's domain name or display name.</item>
 /// </list>
@@ -47,9 +51,13 @@ public sealed class UacPiiLogTemplateGuardTests
     /// <summary>The census evaluator whose finding messages are logged and returned.</summary>
     internal const string CensusEvaluatorFile = "Infrastructure/Dataverse/SecureBuRoleDepthAssertion.cs";
 
-    /// <summary>A structured-log placeholder for an email-shaped value: <c>{Email}</c>, <c>{Upn:l}</c>, <c>{Email,20}</c>…</summary>
+    /// <summary>
+    /// A placeholder or hole for an email-shaped value: <c>{Email}</c>, <c>{UserEmail:l}</c>, <c>{ContactEmail,20}</c>,
+    /// <c>{Mail}</c>, <c>{Upn}</c>, <c>{DomainName}</c>, <c>{PrincipalName}</c>… A <c>Has*</c> or <c>Is*</c> boolean and a
+    /// <c>*Count</c> carry no address and are excluded.
+    /// </summary>
     private static readonly Regex PiiPlaceholder = new(
-        @"\{(?:Email|Upn|UPN|UserPrincipalName|PrincipalDomainName)(?:[,:][^}]*)?\}",
+        @"\{(?!(?:Has|Is)[A-Z])(?!\w*Count[,:}])\w*(?:Email|Mail|Upn|UPN|UserPrincipalName|DomainName|PrincipalName)\w*(?:[,:][^}]*)?\}",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>
@@ -91,7 +99,7 @@ public sealed class UacPiiLogTemplateGuardTests
 
     // ── Real tree ─────────────────────────────────────────────────────────────────────────────
 
-    [Fact(DisplayName = "No UAC log template (Services/ExternalAccess, Infrastructure/ExternalAccess) has an {Email}, {Upn}, {UserPrincipalName} or {PrincipalDomainName} placeholder")]
+    [Fact(DisplayName = "No UAC log template (Services/ExternalAccess, Infrastructure/ExternalAccess) has an email, mail, UPN, domain-name or principal-name placeholder")]
     public void RealTree_NoPiiPlaceholderInUacLogTemplates()
     {
         var violations = ScannedFiles()
@@ -135,6 +143,12 @@ public sealed class UacPiiLogTemplateGuardTests
     [InlineData("\"[EXT] user {Upn} signed in\"")]
     [InlineData("\"[EXT] user {UserPrincipalName,30} signed in\"")]
     [InlineData("\"[SECURE-CENSUS] principal {PrincipalDomainName}\"")]
+    [InlineData("\"[EXT] user {UserEmail} signed in\"")]
+    [InlineData("\"[ID-BIND] contact {ContactEmail:l} bound\"")]
+    [InlineData("\"[EXT] invited {InternalEmail,20}\"")]
+    [InlineData("\"[EXT] mailbox {Mail}\"")]
+    [InlineData("\"[SECURE-CENSUS] user {DomainName}\"")]
+    [InlineData("\"[SECURE-CENSUS] user {PrincipalName}\"")]
     public void Control_PiiPlaceholder_Fires(string sample)
     {
         Assert.Equal([1], Violations([sample], PiiPlaceholder));
@@ -143,6 +157,9 @@ public sealed class UacPiiLogTemplateGuardTests
     [Theory(DisplayName = "Control (must not fire): id placeholders, look-alike names and comments")]
     [InlineData("\"[ID-LINK-RECON] decision systemuser={SystemUserId} contact={ContactId} oid={Oid}\",")]
     [InlineData("\"sent {EmailCount} message(s) to {EmailAddressCount} recipient(s)\"")]
+    [InlineData("\"email present: {HasEmail}\"")]
+    [InlineData("\"counted {EmailCount:N0}\"")]
+    [InlineData("\"shared mailbox: {IsMailbox}\"")]
     [InlineData("    /// The job used to log email={Email}; it logs ids now.")]
     [InlineData("    // email={Email}")]
     public void Control_PiiPlaceholder_DoesNotFire(string sample)

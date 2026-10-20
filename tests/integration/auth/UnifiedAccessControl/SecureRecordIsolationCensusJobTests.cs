@@ -170,6 +170,25 @@ public class SecureRecordIsolationCensusJobTests
         result.ResultJson.Should().NotContain("@example.test", "#2130: the same messages are returned in ResultJson");
     }
 
+    /// <summary>
+    /// #2131 round 1 must-fire, through the production reader: an interactive (access mode 0), enabled, non-application
+    /// user whose full name starts with <c>#</c> is human. The old reader also required <c>!name.StartsWith('#')</c> and
+    /// so skipped exactly this user.
+    /// </summary>
+    [Fact]
+    public async Task Run_WhenAnInteractiveUserNamedWithAHashReachesByDepth_LogsCritical()
+    {
+        var guest = Guid.NewGuid();
+        _directory.User(guest, "# Guest", RootBu, accessMode: 0, isDisabled: false, isApplication: false, BasicUserRootCopy);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical
+                                           && e.Message.Contains(nameof(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit))
+                                           && e.Message.Contains(guest.ToString()));
+    }
+
     [Fact]
     public async Task Run_WhenTheOffendingUserIsOnTheSecondPage_StillFindsThem()
     {

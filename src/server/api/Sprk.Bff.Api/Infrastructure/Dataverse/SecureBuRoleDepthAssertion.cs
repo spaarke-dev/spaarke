@@ -349,19 +349,21 @@ public static class SecureBuRoleDepthAssertion
 
     /// <summary>
     /// Whether the same principal also holds the same role by DIRECT assignment — i.e. whether the
-    /// team-conferred copy is redundant. Identity is matched by <see cref="SamePrincipal"/>.
+    /// team-conferred copy is redundant. Identity is matched by systemuser id (<see cref="EffectiveGrant.PrincipalId"/>).
     /// </summary>
     private static bool HoldsTheSameRoleDirectly(SecureBuRoleDepthCensus census, EffectiveGrant grant) =>
         census.Grants.Any(other =>
             other.HeldViaTeam is null
             && string.Equals(other.RoleName, grant.RoleName, StringComparison.OrdinalIgnoreCase)
-            && SamePrincipal(other, grant));
+            && other.PrincipalId == grant.PrincipalId);
 
     /// <summary>
     /// #2131: whether the same principal holds an ALLOW-LISTED administrative role by DIRECT assignment whose grant of the
     /// same privilege itself reaches the secure BU, so a non-administrative grant adds no reach the accepted exception does
     /// not already cover. An administrative role held only through a team never counts (it is itself a finding), and
-    /// neither does a direct one that does not reach: the holder's other reach is then covered by no exception.
+    /// neither does a direct one that does not reach: the holder's other reach is then covered by no exception. Identity is
+    /// the systemuser id, and the exempting grant must itself be held by a human principal: the exception is a human's
+    /// deliberate designation (#2131 round 1).
     /// </summary>
     private static bool HoldsAnAdministrativeRoleThatReachesDirectly(
         SecureBuRoleDepthCensus census, EffectiveGrant grant, BusinessUnitNode secureBu) =>
@@ -370,18 +372,8 @@ public static class SecureBuRoleDepthAssertion
             && AdministrativeRoleAllowList.Contains(other.RoleName, StringComparer.OrdinalIgnoreCase)
             && string.Equals(other.PrivilegeName, grant.PrivilegeName, StringComparison.Ordinal)
             && Reaches(other.Depth, other.AnchorBusinessUnitId, secureBu.Id, census.BusinessUnits)
-            && SamePrincipal(other, grant));
-
-    /// <summary>
-    /// Whether two grants belong to the same identity. Matched on domain name where present, because a display name is not
-    /// unique (dev has three enabled <c>Ralph Schroeder</c> identities). For matching only: neither name is ever put into
-    /// a finding message (#2130: messages are logged and returned, so principals are named by systemuser id).
-    /// </summary>
-    private static bool SamePrincipal(EffectiveGrant a, EffectiveGrant b) =>
-        string.Equals(
-            a.PrincipalDomainName ?? a.PrincipalName,
-            b.PrincipalDomainName ?? b.PrincipalName,
-            StringComparison.OrdinalIgnoreCase);
+            && other.PrincipalIsHuman
+            && other.PrincipalId == grant.PrincipalId);
 
     /// <summary>
     /// Clause 4 (task 144) — the no-user business unit. Every record owned by ANY team in the secure BU has that BU as
@@ -780,8 +772,6 @@ public static class SecureBuRoleDepthCensusBuilder
                 depth,
                 anchorOverride ?? role.BusinessUnitId,
                 principal.Id,
-                principal.Name,
-                principal.DomainName,
                 principal.IsHuman,
                 heldViaTeam));
         }
@@ -827,9 +817,10 @@ public sealed record BusinessUnitNode(Guid Id, string Name, Guid? ParentId);
 /// <param name="PrivilegeName">One of <see cref="SecureBuRoleDepthAssertion.GuardedPrivileges"/>.</param>
 /// <param name="Depth">The depth the ROOT role grants; child copies inherit it.</param>
 /// <param name="AnchorBusinessUnitId">The BU the depth is evaluated from — see <c>Reaches</c>.</param>
-/// <param name="PrincipalId">The systemuser id: how a finding names the principal (#2130).</param>
-/// <param name="PrincipalName">Display name, for identity matching only; never put into a finding message.</param>
-/// <param name="PrincipalDomainName">UPN, for identity matching only; never put into a finding message (#2130).</param>
+/// <param name="PrincipalId">
+/// The systemuser id: how a finding names the principal, and how two grants are matched to one identity (#2130, #2131).
+/// The record deliberately carries no display name or domain name, so neither can reach a message or its <c>ToString()</c>.
+/// </param>
 /// <param name="PrincipalIsHuman">False for application users, disabled users and platform accounts.</param>
 /// <param name="HeldViaTeam">Team name when held through a team; null for direct user assignment.</param>
 public sealed record EffectiveGrant(
@@ -838,8 +829,6 @@ public sealed record EffectiveGrant(
     PrivilegeDepth Depth,
     Guid AnchorBusinessUnitId,
     Guid PrincipalId,
-    string PrincipalName,
-    string? PrincipalDomainName,
     bool PrincipalIsHuman,
     string? HeldViaTeam);
 

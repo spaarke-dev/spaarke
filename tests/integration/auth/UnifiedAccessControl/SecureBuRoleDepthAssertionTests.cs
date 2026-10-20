@@ -93,8 +93,9 @@ public class SecureBuRoleDepthAssertionTests
         outcome.Message.Should().Contain("SECURE PROJECTS ARE NOT ISOLATED");
         outcome.Message.Should().Contain(
             PrincipalIdOf("Test User 1").ToString(), "the offending principal belongs in the build log, by systemuser id");
-        outcome.Message.Should().NotContain(DomainNameOf("Test User 1"), "#2130: the message is logged; no UPN in it")
-            .And.NotContain("Test User 1", "#2130: nor the display name, which can be email-shaped");
+        typeof(EffectiveGrant).GetProperties().Select(p => p.Name).Should().NotContain(
+            new[] { "PrincipalName", "PrincipalDomainName" },
+            "#2130: a grant carries no display name or UPN, so neither can reach a message or the record's ToString()");
         outcome.Message.Should().Contain("Spaarke Basic User", "so does the role");
         outcome.Message.Should().Contain("Deep", "and the depth");
     }
@@ -910,6 +911,82 @@ public class SecureBuRoleDepthAssertionTests
         outcome.Verdict.Should().Be(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit, outcome.Message);
     }
 
+    /// <summary>
+    /// #2131 round 1 must-fire: identity is the systemuser id, not the domain name. Two different systemusers can carry the
+    /// same domain name (a re-created or re-enabled account); one holding System Administrator directly must not exempt
+    /// the other's Deep role.
+    /// </summary>
+    [Fact]
+    public void Build_WhenTwoSystemUsersShareADomainName_TheDirectAdministratorDoesNotExemptTheOther()
+    {
+        var admin = Guid.NewGuid();
+        var deepHolder = Guid.NewGuid();
+        var deepRole = Guid.NewGuid();
+        var adminRole = Guid.NewGuid();
+        var ownerRole = Guid.NewGuid();
+
+        var depths = OwnerRoleCoveringTheWholeSet(ownerRole);
+        depths[(deepRole, "prvReadsprk_Project")] = PrivilegeDepth.Deep;
+        depths[(adminRole, "prvReadsprk_Project")] = PrivilegeDepth.Global;
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            depths,
+            new[]
+            {
+                new CensusRole(deepRole, "Spaarke Basic User", RootBu, deepRole),
+                new CensusRole(adminRole, "System Administrator", RootBu, adminRole),
+                new CensusRole(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole)
+            },
+            new[]
+            {
+                new CensusUser(admin, "Shared Name", "shared.upn@example.test", IsHuman: true, RootBu, new[] { adminRole }),
+                new CensusUser(deepHolder, "Shared Name", "shared.upn@example.test", IsHuman: true, RootBu, new[] { deepRole })
+            },
+            new[] { new CensusTeam(Guid.NewGuid(), OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()) },
+            SecureRecordOwnerRoleSet.Embedded,
+            SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded));
+
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
+
+        outcome.Findings.Should().ContainSingle()
+            .Which.Verdict.Should().Be(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit);
+        outcome.Message.Should().Contain(deepHolder.ToString()).And.NotContain(admin.ToString());
+    }
+
+    /// <summary>
+    /// #2131 round 1 must-fire: the exemption covers only the privilege the administrative role itself reaches on. A
+    /// direct System Customizer reaching the secure BU on <c>prvReadsprk_Project</c> does not cover the same user's Deep
+    /// role on <c>prvReadsprk_Matter</c>.
+    /// </summary>
+    [Fact]
+    public void Evaluate_WhenTheDirectAdministrativeRoleReachesOnAnotherPrivilegeOnly_StillReportsTheExposure()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusWith(
+            Grant("System Customizer", PrivilegeDepth.Global, RootBu, "Customizer", isHuman: true, privilege: "prvReadsprk_Project"),
+            Grant("Spaarke Basic User", PrivilegeDepth.Deep, RootBu, "Customizer", isHuman: true, privilege: "prvReadsprk_Matter")));
+
+        outcome.Findings.Should().ContainSingle()
+            .Which.Message.Should().Contain("prvReadsprk_Matter").And.Contain("Spaarke Basic User");
+        outcome.Verdict.Should().Be(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit);
+    }
+
+    /// <summary>
+    /// #2131 round 1 must-fire: the exempting grant must be held by a human principal. A non-human grant of System
+    /// Administrator (one the census skips) exempts nothing, even under the same systemuser id.
+    /// </summary>
+    [Fact]
+    public void Evaluate_WhenTheExemptingAdministrativeGrantIsNotHuman_StillReportsTheDeepRole()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusWith(
+            Grant("System Administrator", PrivilegeDepth.Global, RootBu, "Mixed Principal", isHuman: false),
+            Grant("Spaarke Basic User", PrivilegeDepth.Deep, RootBu, "Mixed Principal", isHuman: true)));
+
+        outcome.Verdict.Should().Be(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit, outcome.Message);
+    }
+
     // ── #2130: no email, UPN or display name in a finding message ──────────────────────────────────
 
     /// <summary>
@@ -1523,15 +1600,11 @@ public class SecureBuRoleDepthAssertionTests
         Guid anchorBusinessUnitId,
         string principalName,
         bool isHuman,
-        string? viaTeam = null) =>
-        new(roleName, "prvReadsprk_Project", depth, anchorBusinessUnitId, PrincipalIdOf(principalName), principalName,
-            DomainNameOf(principalName), isHuman, viaTeam);
+        string? viaTeam = null,
+        string privilege = "prvReadsprk_Project") =>
+        new(roleName, privilege, depth, anchorBusinessUnitId, PrincipalIdOf(principalName), isHuman, viaTeam);
 
     /// <summary>A stable systemuser id per fixture principal, so every grant of one principal carries the same id.</summary>
     private static Guid PrincipalIdOf(string principalName) =>
         new(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes(principalName)));
-
-    /// <summary>The fixture principal's (fake) domain name — #2130: a finding message must never carry it.</summary>
-    private static string DomainNameOf(string principalName) =>
-        $"{principalName.Replace(" ", ".", StringComparison.Ordinal)}@example.test";
 }
