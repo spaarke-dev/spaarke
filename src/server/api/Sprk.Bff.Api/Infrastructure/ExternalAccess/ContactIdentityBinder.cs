@@ -270,16 +270,23 @@ public sealed class ContactIdentityBinder
     // ── Workforce token plane ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Resolves a workforce caller with no systemuser (Type 2). A MEMBER of a configured customer tenant may be
-    /// email-bound on first sign-in, or have a contact created keyed by the oid; everyone else resolves only
-    /// through an existing oid binding. A registered workforce-contact guest (R3 FR-15: <c>acct = 1</c>,
-    /// <c>tid</c> = <paramref name="stampTenantId"/>, home tenant from <c>idp</c> on the customer list) is a
-    /// member here and is treated exactly like one.
+    /// Resolves a workforce caller with no systemuser (Type 2). Only a MEMBER (<c>acct = 0</c>) of a configured customer
+    /// tenant resolves: through its existing oid binding, else by an email bind on first sign-in, else a contact created
+    /// keyed by the oid. Everyone else is refused with its member-test deny code before any store call — on every
+    /// sign-in, so an existing oid binding never admits a caller who fails the member test today (#2128 round 1).
     /// </summary>
+    /// <remarks>
+    /// #2128 (owner 2026-10-20, option 1) retires the FR-15 guest auto-create. A customer-tenant guest — the member test's
+    /// FR-15 conjunction (<c>acct = 1</c>, <c>tid</c> = <paramref name="stampTenantId"/>, home tenant from <c>idp</c> on
+    /// the customer list), which still answers <see cref="WorkforceMembership.Member"/> — is refused
+    /// <see cref="WorkforceMembershipTest.DenyGuestUseHomeSignin"/> BEFORE any read: no contact is created, none is
+    /// email-bound, and a contact already bound to the guest's Spaarke-tenant oid is not resolved either. Under ADR-028 A9
+    /// customer staff sign in at their home directory and register there; that is the one door, and one contact shape.
+    /// A guest whose home tenant is not listed gets its member-test deny, with or without an existing oid binding.
+    /// </remarks>
     /// <param name="stampTenantId">
     /// The stamp's own tenant id (<c>AzureAd:TenantId</c>), never a token value. REQUIRED — there is deliberately no
-    /// overload without it, so no caller can skip FR-15 by omission; pass <c>null</c> to say "no stamp tenant" (a
-    /// guest is then never admitted).
+    /// overload without it, so no caller can skip the guest test by omission; pass <c>null</c> to say "no stamp tenant".
     /// </param>
     public async Task<ContactBindingResult> ResolveWorkforceCallerAsync(
         ClaimsPrincipal user, Guid callerOid, string? stampTenantId, CancellationToken ct)
@@ -290,12 +297,39 @@ public sealed class ContactIdentityBinder
             claims.Kind, claims.TenantId, claims.Acct, _options.CurrentValue.ParsedCustomerTenantIds(),
             stampTenantId, claims.Idp);
 
+        // #2128: Member with acct = 1 is exactly the FR-15 customer-tenant guest (the member test admits acct = 1 only
+        // through that conjunction). Refused here, before the oid lookup, so neither a create, an email bind nor an
+        // existing guest binding can admit it.
+        if (membership == WorkforceMembership.Member && claims.Acct?.Trim() == "1")
+        {
+            var refused = ContactBindingResult.Denied(WorkforceMembershipTest.DenyGuestUseHomeSignin);
+            var homeTenant = WorkforceMembershipTest.TryParseHomeTenant(claims.Idp, out var home)
+                ? home.ToString("D")
+                : "unparsed";
+            _logger.LogWarning(
+                "[ID-BIND] {Plane} caller oid={OidPrefix}… DENIED ({DenyCode}) via {Action} ({Facts})",
+                BindingPlane.WorkforceToken, callerOid.ToString("D")[..8], refused.DenyCode, refused.Action,
+                $"{membership} (customer-tenant guest, homeTenant={homeTenant}); nothing read, bound or created, "
+                + "directed to home sign-in (#2128)");
+            return refused;
+        }
+
         var request = new BindingRequest(
             BindingPlane.WorkforceToken,
             callerOid,
             claims.Email,
             membership == WorkforceMembership.Member ? BindingEligibility.EmailBindAndCreate : BindingEligibility.None,
             WorkforceMembershipTest.DenyCodeFor(membership));
+
+        // #2128 round 1: the member test gates EVERY sign-in on this plane, not only the first. A stored binding does not
+        // outlive it — a guest whose home tenant is not listed, or a member whose tenant was since removed from the
+        // customer list, is refused with its member-test code before the oid lookup (no store call).
+        if (membership != WorkforceMembership.Member)
+        {
+            var notMember = ContactBindingResult.Denied(WorkforceMembershipTest.DenyCodeFor(membership)!);
+            Log(request, notMember, $"{membership}; refused before the oid lookup (#2128)");
+            return notMember;
+        }
 
         var details = new NewContactDetails(
             claims.GivenName,
@@ -304,10 +338,7 @@ public sealed class ContactIdentityBinder
 
         var result = await RunUnlinkedAsync(request, details, ct).ConfigureAwait(false);
 
-        // The audit line tells a registered guest (FR-15) from a home-tenant member: both are Member.
-        Log(request, result, membership == WorkforceMembership.Member && claims.Acct?.Trim() == "1"
-            ? $"{membership} (registered guest, idp={claims.Idp})"
-            : membership.ToString());
+        Log(request, result, membership.ToString());
         return result;
     }
 
@@ -1395,8 +1426,10 @@ public sealed class ContactIdentityBinder
                     user.FirstName,
                     LastNameFor(user.LastName, null, user.InternalEmail),
                     user.InternalEmail);
+                // #2130: the change log names WHICH columns are written, never a person's values. The email and the last
+                // name (which falls back to the email's local part, LastNameFor) are "(set)" / "(none)".
                 changes.Add(new IdentityChange("contact", null, "(no contact)",
-                    $"create contact lastname={details.LastName} emailaddress1={details.Email ?? "(none)"} "
+                    $"create contact lastname={SetOrNone(details.LastName)} emailaddress1={SetOrNone(details.Email)} "
                     + $"sprk_externalobjectid={request.CallerOid:D} sprk_identityplane={IdentityPlaneMarker.Workforce}"));
                 changes.Add(LinkChange(suid, null));
                 if (!applyWrites)
@@ -1720,6 +1753,12 @@ public sealed class ContactIdentityBinder
     private static IdentityChange LinkChange(Guid systemUserId, Guid? contactId)
         => new("systemuser", systemUserId, "sprk_primarycontact=(null)",
             $"sprk_primarycontact={(contactId is { } c ? c.ToString("D") : "(the created contact)")}");
+
+    /// <summary>
+    /// How an <see cref="IdentityChange"/> shows a personal value (#2130): whether one is written, never the value itself.
+    /// The change strings are logged as the job's before-state lines.
+    /// </summary>
+    private static string SetOrNone(string? value) => string.IsNullOrWhiteSpace(value) ? "(none)" : "(set)";
 
     /// <summary>A last name for a created contact: the family name, else the display name, else the email's local part.</summary>
     public static string LastNameFor(string? familyName, string? displayName, string? email)

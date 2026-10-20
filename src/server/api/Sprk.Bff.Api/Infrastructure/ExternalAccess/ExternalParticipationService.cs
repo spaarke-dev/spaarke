@@ -1943,8 +1943,8 @@ public class ExternalParticipationService
         var token = await GetAppOnlyTokenAsync(ct).ConfigureAwait(false);
         string? next = $"{GetDataverseApiUrl()}/sprk_contactorganizations" +
                        $"?$filter={BuildColleagueByEmailFilter(organizationIds, email)}" +
-                       $"&$select={ColleagueByEmailSelect}" +
-                       $"&$expand={ColleagueByEmailExpand}";
+                       "&$select=" + ColleagueByEmailSelect +
+                       "&$expand=" + ColleagueByEmailExpand;
 
         var rows = new List<ColleagueMembershipRow>();
         var pages = 0;

@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
@@ -9,8 +10,9 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
-using Xunit;
+using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
+using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
@@ -85,6 +87,10 @@ public class SpeContainerPagingTests
         => ServiceOver(new ScriptedPermissionAdapter(pages));
 
     private static SpeContainerMembershipService ServiceOver(ScriptedPermissionAdapter adapter)
+        => ServiceOver(adapter, NullLogger<SpeContainerMembershipService>.Instance);
+
+    private static SpeContainerMembershipService ServiceOver(
+        ScriptedPermissionAdapter adapter, ILogger<SpeContainerMembershipService> logger)
     {
         var graphClient = new GraphServiceClient(adapter);
 
@@ -92,7 +98,7 @@ public class SpeContainerPagingTests
         factory.Setup(f => f.ForApp()).Returns(graphClient);
 
         return new SpeContainerMembershipService(
-            TestSpeOwnership.AllowAll(factory.Object), NullLogger<SpeContainerMembershipService>.Instance);
+            TestSpeOwnership.AllowAll(factory.Object), logger);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -753,6 +759,50 @@ public class SpeContainerPagingTests
             .And.NotStartWith(SpeContainerMembershipService.NoPermissionFoundError);
         SpeContainerMembershipService.IsAmbiguousPermissionMatch(result).Should().BeTrue(
             "#2104 round 3: a retry reads the same holder-less permission — named permission_ambiguous, not a retry");
+    }
+
+    /// <summary>
+    /// #2111 (CODE-QUALITY-RUBRIC D9): the contact's email is a match key, never log or error text. Every path that names
+    /// the key — a removal, a benign absence, an ambiguous match, an unverifiable holder, a grant — logs the object id and
+    /// only WHETHER an email key is set; the result <c>Error</c> (which the revoke endpoint logs as <c>{Error}</c>) is the
+    /// same. Must-fire against <c>SpeMembershipKey.ToString()</c> printing the address, or an <c>{Email}</c> log field.
+    /// </summary>
+    [Fact]
+    public async Task NoLogLineOrErrorText_CarriesTheContactsEmail()
+    {
+        const string probeEmail = "pii.probe@example.test";
+        var oid = Guid.NewGuid();
+        var log = new BindingLogCapture<SpeContainerMembershipService>();
+        var errors = new List<string?>();
+
+        async Task Revoke(SpeMembershipKey key, params Permission[] permissions)
+        {
+            var result = await ServiceOver(new ScriptedPermissionAdapter([Page(null, permissions)]), log)
+                .RevokeMembershipAsync(ContainerId, key, NoInternalUsers);
+            errors.Add(result.Error);
+        }
+
+        // Removed (email decides: the oid matches nothing).
+        await Revoke(new SpeMembershipKey(oid, probeEmail), UserPermission("perm-1", probeEmail));
+        // Benign absence, with both keys and with the email alone.
+        await Revoke(new SpeMembershipKey(oid, probeEmail), UserPermission("perm-2", "other@example.test"));
+        await Revoke(new SpeMembershipKey(null, probeEmail), UserPermission("perm-3", "other@example.test"));
+        // Ambiguous (K2).
+        await Revoke(new SpeMembershipKey(oid, probeEmail),
+            UserPermission("perm-4", probeEmail),
+            UserPermission("perm-5", "pii.probe_example.test#EXT#@tenant.example.test", email: probeEmail));
+        // Unverifiable holder (K3).
+        await Revoke(new SpeMembershipKey(oid, probeEmail), PermissionWithNoHolderId("perm-6", probeEmail));
+        // The (caller-less) grant.
+        var grant = await ServiceOver(new ScriptedPermissionAdapter([Page(null)]), log)
+            .GrantMembershipAsync(ContainerId, probeEmail, ExternalAccessLevel.ViewOnly);
+        errors.Add(grant.Error);
+
+        log.Messages.Should().NotBeEmpty();
+        log.Messages.Should().Contain(m => m.Contains(oid.ToString()), "the object id is what identifies the contact");
+        log.Messages.Should().Contain(m => m.Contains("email key only"), "an email-only key says so, without the address");
+        log.Messages.Should().AllSatisfy(m => m.Should().NotContain("pii.probe"));
+        errors.Should().AllSatisfy(e => (e ?? string.Empty).Should().NotContain("pii.probe"));
     }
 
     /// <summary>K5: a marker read that FAULTS (not a 404) is as unanswered as a 404 — nothing deleted, Failed.</summary>

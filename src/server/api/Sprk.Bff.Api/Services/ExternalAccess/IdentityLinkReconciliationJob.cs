@@ -418,10 +418,12 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
                     }
                 }
 
+                // #2130 (CODE-QUALITY-RUBRIC D9): the user and the contact are named by id. The email was logged here for
+                // every enabled interactive user on every run.
                 _logger.LogInformation(
-                    "[ID-LINK-RECON] decision mode={Mode} environment={Environment} systemuser={SystemUserId} email={Email} "
+                    "[ID-LINK-RECON] decision mode={Mode} environment={Environment} systemuser={SystemUserId} "
                     + "outcome={Outcome} contact={ContactId} code={Code} reason={Reason} correlationId={CorrelationId}",
-                    mode, report.Environment, user.SystemUserId, user.InternalEmail, result.Outcome, result.ContactId,
+                    mode, report.Environment, user.SystemUserId, result.Outcome, result.ContactId,
                     result.DenyCode, result.Reason, context.CorrelationId);
 
                 foreach (var change in result.Changes)
