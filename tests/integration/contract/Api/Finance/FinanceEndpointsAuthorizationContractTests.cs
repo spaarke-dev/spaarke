@@ -508,6 +508,29 @@ public class FinanceEndpointsAuthorizationContractTests
         json["reasonCode"]!.GetValue<string>().Should().Be("sdap.finance.invoice_review.document_linked_elsewhere");
     }
 
+    [Fact]
+    public async Task Confirm_WhenTheDocumentsOwnerCannotBeSettledUnderItsInvoice_Is409RecordOwnerUnsettled_NotA500()
+    {
+        // #2143 round 2: a RESUMED confirmation re-files the document under its invoice after the status write, outside the
+        // service's own failure wrapping. A concurrent writer that keeps the owner from settling answers 409 reload-and-retry
+        // (the invoice and its link stand; a retry resumes from them), never the generic 500.
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException(
+                "sprk_document", body.DocumentId, $"The sprk_document {body.DocumentId:D} could not be settled (#2143)."));
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain(body.DocumentId.ToString(), "the problem names no row");
+        var json = JsonNode.Parse(text)!.AsObject();
+        json["reasonCode"]!.GetValue<string>().Should().Be(Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException.ReasonCode);
+        json["detail"]!.GetValue<string>().Should().Contain("Reload it and try again");
+    }
+
     public static TheoryData<InvoiceReviewFailure, HttpStatusCode, bool> ConfirmFailures => new()
     {
         { InvoiceReviewFailure.DocumentNotFound, HttpStatusCode.NotFound, false },
