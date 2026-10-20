@@ -56,7 +56,7 @@ public class ReconciledEmailFilingTests
         /// <summary>Task 129: the #1629 grant the capture issues for the thread its join returned.</summary>
         public Mock<Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService> Grants { get; } = new();
         public Mock<CallerRecordAccessProbe> Probe { get; } = new(
-            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
         { CallBase = false };
 
         public World(bool reconciled, params DataverseEntity[] filingReads)

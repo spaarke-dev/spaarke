@@ -80,8 +80,10 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
     /// Cache schema version per ADR-009. Bump whenever the QUERY SHAPE or the cached payload changes —
     /// entries written under an older shape may carry a silently different id set, and serving one is
     /// an authorization answer derived from a query nobody ran.
+    /// <para>2: task 036 decision (f) added <c>$orderby=modifiedon desc</c>, so a capped set written under v1 kept a
+    /// different 5,000 records.</para>
     /// </summary>
-    internal const int CacheVersion = 1;
+    internal const int CacheVersion = 2;
 
     /// <summary>
     /// 2-minute TTL (was 5), matching the membership cache — unified-access-control-r2 task 132, owner rounds 3 R3/R4
@@ -195,7 +197,10 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
         // Id-only $select with a bounded $top — one round trip per entity type (NFR-02). No expansion,
         // no fan-out. Any non-success status throws inside the primitive and propagates: this method
         // has NO catch, by design.
-        var odata = $"$select={idColumn}&$top={RowCap}";
+        //
+        // $orderby=modifiedon desc (task 036 decision (f), owner 2026-10-18): a capped set keeps the most recently
+        // modified records rather than Dataverse's default order. The cap is still flagged (Truncated) either way.
+        var odata = $"$select={idColumn}&$orderby=modifiedon desc&$top={RowCap}";
 
         var rows = await _query.QueryAsync(entitySet, odata, systemUserId, ct).ConfigureAwait(false);
 

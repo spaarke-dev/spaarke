@@ -628,7 +628,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     {
         var probe = new Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(
             MockBehavior.Strict, new HttpClient(), new ConfigurationBuilder().Build(),
-            NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance, null!);
+            NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance, null!, null!);
         probe.Setup(p => p.CallerHoldsPrivilegeAsync("caller-token", RecordCreationService.ProjectCreatePrivilege, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         probe.Setup(p => p.GetCallerRightsAsync("caller-token", It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))

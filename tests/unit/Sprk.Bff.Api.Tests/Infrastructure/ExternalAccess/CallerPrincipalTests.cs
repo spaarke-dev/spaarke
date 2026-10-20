@@ -230,6 +230,41 @@ public class CallerPrincipalTests
         json.Should().Contain($"\"systemUserId\":\"{caller.SystemUserId}\"");
     }
 
+    // ── Task 036 fix round 1 (F4): a Dataverse-decided caller is told its write access is per record ─────────────
+
+    private static string MeJson(CallerPrincipal caller) => System.Text.Json.JsonSerializer.Serialize(
+        CallMe(caller), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+
+    [Fact]
+    public void Me_DataverseDecidedSystemUser_SaysWriteAccessIsPerRecord_AndKeepsItsLevels()
+    {
+        var projectId = Guid.NewGuid();
+        var caller = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = Guid.NewGuid(),
+            SystemUserId = Guid.NewGuid(),
+            Email = "staff@contoso.com",
+            ProjectAccess = new[] { new CallerProjectAccess { ProjectId = projectId, Rights = AccessRights.Read } },
+            DataverseConfirmsWrites = true,
+        };
+
+        var response = CallMe(caller);
+
+        response.WriteAccessPerRecord.Should().BeTrue();
+        response.Projects.Should().ContainSingle().Which.AccessLevel.Should().Be("ViewOnly",
+            "the level is still the composed (seen) rights; the flag tells the client to ask the record for writes");
+        MeJson(caller).Should().Contain("\"writeAccessPerRecord\":true");
+    }
+
+    [Fact]
+    public void Me_EveryOtherCaller_OmitsWriteAccessPerRecord_SoTheWireIsUnchanged()
+    {
+        MeJson(Workforce(Guid.NewGuid())).Should().NotContain("writeAccessPerRecord", "flag off: byte-for-byte as before");
+        MeJson(Ciam(CallerProjectAccess.FromLevel(Guid.NewGuid(), ExternalAccessLevel.Collaborate)))
+            .Should().NotContain("writeAccessPerRecord");
+    }
+
     // ── Defence in depth (task 136 · defect C2): the views require Read on their own ─────────────────
 
     [Fact]
@@ -255,11 +290,13 @@ public class CallerPrincipalTests
             },
             MatterAccess = new Dictionary<Guid, AccessRights>
             {
-                [readableMatter] = AccessRights.Read, [powerlessMatter] = AccessRights.None,
+                [readableMatter] = AccessRights.Read,
+                [powerlessMatter] = AccessRights.None,
             },
             WorkAssignmentAccess = new Dictionary<Guid, AccessRights>
             {
-                [readableWa] = AccessRights.Read, [powerlessWa] = AccessRights.None,
+                [readableWa] = AccessRights.Read,
+                [powerlessWa] = AccessRights.None,
             },
         };
 
