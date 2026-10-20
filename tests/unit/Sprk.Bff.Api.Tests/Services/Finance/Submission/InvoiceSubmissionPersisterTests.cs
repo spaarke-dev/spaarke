@@ -528,7 +528,23 @@ public class InvoiceSubmissionPersisterTests
         second.Status.Should().Be(SubmissionPersistStatus.Resumed);
         second.InvoiceId.Should().Be(InvoiceId);
         store.Transactions.Should().ContainSingle("the retry resumes from the link and creates nothing");
-        store.TotalsCalls.Should().Equal(InvoiceId, InvoiceId);
+        store.TotalsCalls.Should().Equal([InvoiceId], "R2: only the first call (the commit) ran the totals; the resume path does none, the after-steps' ResumeAsync recalculates them");
+    }
+
+    [Fact(DisplayName = "049 R2: a submission found already linked is Resumed even when the totals would fault; it never answers Retry-with-invoice (which the handler reads as 'committed by this delivery')")]
+    public async Task AlreadyLinked_WithATotalsFault_IsStillResumed_AndNeverRecalculates()
+    {
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { TotalsFault = new InvalidOperationException("totals down") };
+        store.Submission["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Resumed);
+        result.InvoiceId.Should().Be(InvoiceId);
+        result.ReasonCode.Should().BeNull();
+        store.TotalsCalls.Should().BeEmpty();
+        store.Transactions.Should().BeEmpty();
     }
 
     // ── re-check and resume ──
@@ -566,7 +582,7 @@ public class InvoiceSubmissionPersisterTests
         result.InvoiceId.Should().Be(storedInvoice);
         result.LineIds.Should().Equal(new Dictionary<int, Guid> { [0] = storedLine });
         store.Transactions.Should().BeEmpty();
-        store.TotalsCalls.Should().Equal(storedInvoice);
+        store.TotalsCalls.Should().BeEmpty("R2: nothing is recalculated on the resume path; the after-steps' ResumeAsync does it");
     }
 
     [Fact(DisplayName = "049 C: a deleted submission is SubmissionMissing with nothing written")]

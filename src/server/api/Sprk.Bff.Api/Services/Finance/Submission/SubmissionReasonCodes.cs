@@ -111,8 +111,10 @@ public static class SubmissionReasonCodes
     /// <summary>
     /// The persister's result names a terminal status or reason code other than the one the STORED findings JSON (kind and root reason)
     /// maps to: the caller evaluated again and got a different answer than the one committed. Nothing is written and the stored state wins.
-    /// It cannot occur on the handler path (a Resumed result goes to <see cref="IInvoiceSubmissionAfterSteps.ResumeAsync"/>, and
-    /// <c>RunAsync</c> is only called on Committed), so it signals a bug; nothing resumes a submission after it is marked Failed.
+    /// It cannot occur on the handler path (review fix R2: every outcome that finds the submission already linked - Resumed, or a totals Retry
+    /// that carries the invoice id - goes to <see cref="IInvoiceSubmissionAfterSteps.ResumeAsync"/>, which reads the stored state alone, and
+    /// <c>RunAsync</c> is only called on Committed, a run that committed in this delivery), so it signals a bug; the handler leaves the linked
+    /// submission Processing and flags it for the administrator, and nothing marks it Failed.
     /// </summary>
     public const string StoredStateMismatch = "ebilling.submission.stored_state_mismatch";
 

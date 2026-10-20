@@ -13,9 +13,11 @@ public interface IInvoiceSubmissionAfterSteps
     /// rest without a second Signal episode, Decision Record or terminal write of a different value; the notification is guarded by a
     /// marker (at-least-once only in the window between the sink returning and the marker being set, or when the cache fails open).
     /// </summary>
-    /// <param name="persisted">The persister's result: <see cref="SubmissionPersistStatus.Committed"/>, <see cref="SubmissionPersistStatus.Resumed"/>,
-    /// or a totals <see cref="SubmissionPersistStatus.Retry"/> that carries an invoice id (then only the Signals and the Decision Record
-    /// run, and the result is a Retry so the redelivery re-runs the totals).</param>
+    /// <param name="persisted">The persister's result: <see cref="SubmissionPersistStatus.Committed"/>, the one a run that committed in THIS
+    /// delivery gets (review fix R2: the handler calls <c>RunAsync</c> for nothing else; a submission found already linked, whether
+    /// <see cref="SubmissionPersistStatus.Resumed"/> or a totals <see cref="SubmissionPersistStatus.Retry"/> that carries an invoice id, goes
+    /// to <see cref="ResumeAsync"/>). The Resumed and Retry forms are still accepted here (then only the Signals and the Decision Record
+    /// run for a Retry, and the result is a Retry so the redelivery re-runs the totals).</param>
     /// <param name="correlationId">The job's correlation id (indexing job); null uses the submission's.</param>
     /// <param name="ct">Cancellation propagates.</param>
     /// <returns>See <see cref="SubmissionAfterStepsStatus"/>. Only <see cref="SubmissionAfterStepsStatus.Completed"/> wrote the terminal status.</returns>

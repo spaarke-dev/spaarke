@@ -39,6 +39,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
     private const int Accepted = (int)InvoiceSubmissionStatus.Accepted;
     private const int Rejected = (int)InvoiceSubmissionStatus.Rejected;
     private const int Failed = (int)InvoiceSubmissionStatus.Failed;
+    private const string AttentionColumn = InvoiceSubmissionPersister.SubmissionAdminAttention;
 
     // ── builders ──
 
@@ -573,7 +574,9 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
         outcome.Status.Should().Be(JobStatus.Poisoned);
         outcome.ErrorMessage.Should().Be(code);
-        rig.Writes.Should().BeEmpty("a linked submission is never marked Failed: no status write at all (Failed is terminal and the write is unconditional)");
+        rig.StatusWrites.Should().BeEmpty("a linked submission is never marked Failed: no status write at all (Failed is terminal and the write is unconditional)");
+        rig.Writes.Should().ContainSingle().Which.Keys.Should().Equal([AttentionColumn], "R3: only the administrator's attention text is written");
+        rig.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(AdminAttentionText.StoppedNote(code));
         rig.After.ResumeCalls.Should().HaveCount(1);
         var errors = rig.Log.Entries.Where(e => e.Level == LogLevel.Error).Select(e => e.Message).ToList();
         errors.Should().ContainSingle(m => m.Contains(SubmissionId.ToString()) && m.Contains(code), "the id and the code, at Error, so the operator sees the bug");
@@ -611,6 +614,179 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
         outcome.Status.Should().Be(JobStatus.Poisoned);
         rig.StatusWrites.Should().Equal([(Processing, (string?)null)]);
+    }
+
+    // -- R3 (D-133): whatever leaves a linked submission Processing for review reaches the administrator through sprk_adminattention --
+
+    [Theory(DisplayName = "049 R3: a permanent Decision Record refusal (owner / subject / core) leaves the submission Processing, sets the attention text (codes only) and writes NO status")]
+    [InlineData(DecisionRecordRefusalReason.OwnerRefused)]
+    [InlineData(DecisionRecordRefusalReason.SubjectUnfileable)]
+    [InlineData(DecisionRecordRefusalReason.CoreUnsupported)]
+    public async Task PermanentRecordRefusal_SetsAdminAttention_AndKeepsProcessing(string code)
+    {
+        var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, code));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.StatusWrites.Should().BeEmpty();
+        rig.Row.GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value.Should().Be(Processing);
+        var text = rig.Row.GetAttributeValue<string>(AttentionColumn);
+        text.Should().Be(AdminAttentionText.StoppedNote(code)).And.StartWith("Processing stopped: " + code);
+        text.Length.Should().BeLessThanOrEqualTo(InvoiceSubmissionPersister.AdminAttentionMaxLength);
+        text.Should().NotContain("INV-100", "codes only (ADR-015)");
+    }
+
+    [Fact(DisplayName = "049 R3: LeaveLinkedSubmission after a Committed run (RunAsync Refused) sets the attention text too")]
+    public async Task RunRefused_AfterCommitted_SetsAdminAttention()
+    {
+        var rig = new Rig().HappyPath();
+        rig.After.Run = _ => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, DecisionRecordRefusalReason.OwnerRefused));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null)]);
+        rig.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(AdminAttentionText.StoppedNote(DecisionRecordRefusalReason.OwnerRefused));
+    }
+
+    [Fact(DisplayName = "049 R3: a linked submission failed by FailAsync (a Received row that carries a link and fails an evaluation) is flagged, still not Failed")]
+    public async Task LinkedFailAsync_SetsAdminAttention_NotFailed()
+    {
+        var rig = new Rig { Row = SubmissionRow(Received, InvoiceId) }.HappyPath();
+        rig.Processor.Script = (_, _) => Task.FromResult(Outcome(SubmissionEvaluationKind.Failed, "invoice.read.failed"));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.StatusWrites.Should().Equal([(Processing, (string?)null)]);
+        rig.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(AdminAttentionText.StoppedNote("invoice.read.failed"));
+    }
+
+    [Fact(DisplayName = "049 R3: the final delivery of a retry with the invoice linked is Poisoned, stays Processing and sets the attention text; an earlier delivery sets nothing")]
+    public async Task LinkedFinalDelivery_SetsAdminAttention_EarlierDeliveryDoesNot()
+    {
+        var early = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        early.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Retry, "ebilling.submission.signal_write_skipped"));
+        var last = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        last.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Retry, "ebilling.submission.signal_write_skipped"));
+
+        (await early.Build().ProcessAsync(Job(), CancellationToken.None)).Status.Should().Be(JobStatus.Failed);
+        (await last.Build().ProcessAsync(FinalJob(), CancellationToken.None)).Status.Should().Be(JobStatus.Poisoned);
+
+        early.Writes.Should().BeEmpty("a delivery that will be retried says nothing");
+        last.StatusWrites.Should().BeEmpty();
+        last.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(AdminAttentionText.StoppedNote("ebilling.submission.signal_write_skipped"));
+    }
+
+    [Fact(DisplayName = "049 R3: the final delivery with NO link is Failed as before and sets no attention text (the Failed status is the signal)")]
+    public async Task UnlinkedFinalDelivery_IsFailed_WithoutAttention()
+    {
+        var rig = new Rig().HappyPath();
+        rig.After.Run = _ => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Retry, "ebilling.submission.signal_write_skipped"));
+
+        await rig.Build().ProcessAsync(FinalJob(), CancellationToken.None);
+
+        rig.StatusWrites.Should().Contain((Failed, "ebilling.submission.signal_write_skipped"));
+        rig.Row.Contains(AttentionColumn).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "049 R3: the stopped note MERGES with a Signal-refusal attention already present; the refusals are rebuilt from the stored findings, not lost")]
+    public async Task StoppedNote_MergesWithTheSignalRefusalAttention()
+    {
+        var signalText = "1 Signal could not be created: dataverse_access_denied (BILL-W on line aaaaaaaa)";
+        var row = SubmissionRow(Processing, InvoiceId);
+        row[AttentionColumn] = signalText;
+        row["sprk_findingsjson"] = new System.Text.Json.Nodes.JsonObject
+        {
+            [InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
+            {
+                ["policyCode"] = "BILL-W", ["code"] = "dataverse_access_denied",
+                ["subject"] = new System.Text.Json.Nodes.JsonObject { ["entity"] = "sprk_billingevent", ["id"] = "aaaaaaaa-0000-0000-0000-000000000000" },
+            }),
+        }.ToJsonString();
+        var rig = new Rig { Row = row }.HappyPath();
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, DecisionRecordRefusalReason.OwnerRefused));
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        rig.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(
+            signalText + AdminAttentionText.Separator + AdminAttentionText.StoppedNote(DecisionRecordRefusalReason.OwnerRefused));
+    }
+
+    [Fact(DisplayName = "049 R3: an administrator's text and a policy note already in the column are kept")]
+    public async Task StoppedNote_KeepsOtherSegments()
+    {
+        var policy = AdminAttentionText.PolicyNote("BILL-SYSTEM-SUBMISSION", "missing")!;
+        var row = SubmissionRow(Processing, InvoiceId);
+        row[AttentionColumn] = policy;
+        var rig = new Rig { Row = row }.HappyPath();
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, DecisionRecordRefusalReason.OwnerRefused));
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        rig.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(policy + AdminAttentionText.Separator + AdminAttentionText.StoppedNote(DecisionRecordRefusalReason.OwnerRefused));
+    }
+
+    [Fact(DisplayName = "049 R3: a redelivery that stops for the same reason writes nothing new (idempotent); a different reason replaces only the stopped segment")]
+    public async Task StoppedNote_IsIdempotentAcrossARedelivery()
+    {
+        var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, DecisionRecordRefusalReason.OwnerRefused));
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        rig.Writes.Should().ContainSingle("the second delivery found the same text and wrote nothing");
+        rig.After.ResumeCalls.Should().HaveCount(2);
+
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, DecisionRecordRefusalReason.SubjectUnfileable));
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        rig.Writes.Should().HaveCount(2);
+        rig.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(AdminAttentionText.StoppedNote(DecisionRecordRefusalReason.SubjectUnfileable));
+    }
+
+    [Fact(DisplayName = "049 R3: a fault writing the attention text is logged and swallowed - the outcome is still Poisoned with the same code, and no status is written")]
+    public async Task AttentionWriteFault_DoesNotChangeTheOutcome()
+    {
+        var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId), UpdateFault = new TimeoutException("dataverse") }.HappyPath();
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, DecisionRecordRefusalReason.OwnerRefused));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        outcome.ErrorMessage.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        rig.Writes.Should().BeEmpty();
+        rig.Row.Contains(AttentionColumn).Should().BeFalse();
+        rig.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("Needs Admin Attention") && e.Message.Contains("TimeoutException"));
+    }
+
+    [Fact(DisplayName = "049 R3: a read fault while composing the attention text is swallowed too")]
+    public async Task AttentionReadFault_DoesNotChangeTheOutcome()
+    {
+        var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        rig.After.Resume = () =>
+        {
+            rig.RetrieveFault = new TimeoutException("dataverse"); // every read from now on: the attention read
+            return Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, DecisionRecordRefusalReason.OwnerRefused));
+        };
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "049 R3 (must not fire): a flag-off linked submission (the administrator's own switch) is left alone with no attention text")]
+    public async Task FlagOff_WithALink_SetsNoAttention()
+    {
+        var rig = new Rig { Enabled = false, Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        rig.Writes.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "049 E F4-1: a Received row that already carries a link and then fails an evaluation is NOT marked Failed (only the Processing write)")]
@@ -1012,23 +1188,40 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         rig.After.ResumeCalls.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "049 E 4: Retry that carries an invoice id (totals failed after the commit) still runs the after-steps, which answer Retry")]
-    public async Task RetryWithInvoice_RunsTheAfterSteps()
+    [Fact(DisplayName = "049 E 4 (R2): Retry that carries an invoice id (the submission is linked) resumes from the STORED state - ResumeAsync, never RunAsync - and the resume's Retry stays Processing")]
+    public async Task RetryWithInvoice_ResumesFromTheStoredState()
     {
         var rig = new Rig().HappyPath();
         rig.Persister.Script.Clear();
         rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.Retry, InvoiceId, "ebilling.submission.totals_failed")));
-        rig.After.Run = p =>
-        {
-            p.Status.Should().Be(SubmissionPersistStatus.Retry);
-            return Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Retry, "ebilling.submission.totals_failed"));
-        };
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Retry, "ebilling.submission.totals_failed"));
 
         var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
 
         outcome.Status.Should().Be(JobStatus.Failed);
-        rig.After.RunCalls.Should().ContainSingle();
+        rig.After.RunCalls.Should().BeEmpty("RunAsync is only for a run that committed in this delivery (Committed)");
+        rig.After.ResumeCalls.Should().ContainSingle();
         rig.StatusWrites.Should().Equal([(Processing, (string?)null)], "it stays Processing with its link");
+        rig.Writes.Should().OnlyContain(w => w.ContainsKey("sprk_processingstatus"), "a retryable Retry is not 'stopped': no attention text");
+    }
+
+    [Fact(DisplayName = "049 E 4 (R2): a Resumed persist whose totals faulted (the persister's old Retry-with-invoice shape) is answered from the stored state: ResumeAsync completes it, no stored_state_mismatch, nothing flagged")]
+    public async Task ResumedWithATotalsFault_ResumesFromStoredState_NoStoredStateMismatch()
+    {
+        var rig = new Rig().HappyPath();
+        rig.Persister.Script.Clear();
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.Retry, InvoiceId, "ebilling.submission.totals_failed")));
+        // What the real after-steps do with this run's re-evaluated terminal when the stored one differs (13a A).
+        rig.After.Run = _ => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, SubmissionReasonCodes.StoredStateMismatch));
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Completed));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        rig.After.ResumeCalls.Should().ContainSingle();
+        rig.After.RunCalls.Should().BeEmpty();
+        rig.Writes.Should().OnlyContain(w => w.ContainsKey("sprk_processingstatus"), "no stored_state_mismatch, so no 'processing stopped' text");
+        rig.Row.Contains(AttentionColumn).Should().BeFalse();
     }
 
     [Fact(DisplayName = "049 E 4: Retry without an invoice is Failure (nothing persisted); on the final delivery the submission is Failed with the code")]

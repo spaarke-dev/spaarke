@@ -96,7 +96,7 @@ public class InvoiceSubmissionAfterStepsTests
         public Crash() : base("simulated process crash") { }
     }
 
-    internal enum PolicyState { Present, Missing, Disabled, NoVersionInForce, WrongType }
+    internal enum PolicyState { Present, Missing, Disabled, NoVersionInForce, WrongType, Ambiguous }
 
     private sealed class World
     {
@@ -169,6 +169,9 @@ public class InvoiceSubmissionAfterStepsTests
         public Exception? SinkFault { get; set; }
         public bool CrashAtTerminal { get; set; }
 
+        /// <summary>R5: a write of the attention column alone (the policy note) fails with this.</summary>
+        public Exception? AttentionFault { get; set; }
+
         /// <summary>Called inside the Signal read, before the rows are returned (a concurrent writer acting between read and write).</summary>
         public Action<string>? OnSignalRead { get; set; }
 
@@ -209,6 +212,11 @@ public class InvoiceSubmissionAfterStepsTests
             Entities.Setup(e => e.UpdateAsync(FinanceBaseValues.SubmissionEntity, Submission, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
                 .Returns((string _, Guid _, Dictionary<string, object> fields, CancellationToken _) =>
                 {
+                    if (AttentionFault is { } attentionFault && fields.Count == 1 && fields.ContainsKey(InvoiceSubmissionPersister.SubmissionAdminAttention))
+                    {
+                        return Task.FromException(attentionFault);
+                    }
+
                     SubmissionUpdates.Add(new Dictionary<string, object>(fields));
                     if (fields.ContainsKey(InvoiceSubmissionPersister.SubmissionStatus))
                     {
@@ -445,6 +453,18 @@ public class InvoiceSubmissionAfterStepsTests
                 [RuleDomains.PolicyDomainColumn] = new OptionSetValue(RuleDomains.PolicyDomainBilling),
                 ["sprk_lane"] = new OptionSetValue(SignalWriter.LaneDecide),
             };
+            if (Policy == PolicyState.Ambiguous)
+            {
+                // Two policies with the system code (the query asks for TopCount 2, which is how the reader tells "more than one").
+                var twin = new Entity("sprk_policy", Guid.NewGuid());
+                foreach (var (k, v) in policy.Attributes)
+                {
+                    twin[k] = v;
+                }
+
+                return new EntityCollection([policy, twin]);
+            }
+
             return new EntityCollection([policy]);
         }
 
@@ -2096,6 +2116,114 @@ public class InvoiceSubmissionAfterStepsTests
         world.SubmissionUpdates.Should().NotContain(u => u.ContainsKey(AdminAttention));
         world.TerminalWrites.Should().NotContain(u => u.ContainsKey(AdminAttention));
         world.Row.Contains(AdminAttention).Should().BeFalse();
+    }
+
+    // ── R5 (D-133): a misconfigured system policy reaches the administrator; a disabled one does not ──
+
+    private static string PolicyAttention(string state) => $"System billing policy {BillingRuleCatalogue.SystemPolicyCode} is {state}: system Signals were not created";
+
+    [Theory(DisplayName = "049 R5: a system policy that is missing, ambiguous, without a version in force or of the wrong type sets sprk_adminattention (codes only); the run still completes")]
+    [InlineData(PolicyState.Missing, "missing")]
+    [InlineData(PolicyState.Ambiguous, "ambiguous (more than one)")]
+    [InlineData(PolicyState.NoVersionInForce, "without a version in force")]
+    [InlineData(PolicyState.WrongType, "of the wrong rule type")]
+    internal async Task SystemPolicyMisconfigured_SetsAdminAttention(PolicyState state, string described)
+    {
+        var outcome = await Accepted(readNumber: "INV-999");
+        var world = new World(outcome) { Policy = state };
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        world.Writes.Should().BeEmpty("no system Signal is written");
+        StoredAttention(world).Should().Be(PolicyAttention(described));
+        StoredAttention(world).Should().NotContain("INV-999").And.NotContain("INV-100");
+        world.TerminalWrites.Should().ContainSingle("the attention write moved the row version; the terminal write re-reads it and still lands");
+        world.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+    }
+
+    [Fact(DisplayName = "049 R5 (must not fire): a DISABLED system policy (D-125, the administrator's choice) stays a Warning only - no attention")]
+    public async Task SystemPolicyDisabled_SetsNoAdminAttention()
+    {
+        var outcome = await Accepted(readNumber: "INV-999");
+        var world = new World(outcome) { Policy = PolicyState.Disabled };
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        world.Row.Contains(AdminAttention).Should().BeFalse();
+        world.SubmissionUpdates.Should().NotContain(u => u.ContainsKey(AdminAttention));
+        world.Log.Entries.Should().ContainSingle(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning);
+    }
+
+    [Fact(DisplayName = "049 R5 (must not fire): a usable system policy, or a run with no system finding, sets no attention")]
+    public async Task SystemPolicyUsable_OrNoSystemFinding_SetsNoAdminAttention()
+    {
+        var withFinding = await Accepted(readNumber: "INV-999");
+        var usable = new World(withFinding);
+        var noFinding = await Accepted();
+        var missingButNothingToSay = new World(noFinding) { Policy = PolicyState.Missing };
+
+        (await usable.Build().RunAsync(Persisted(withFinding), null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        (await missingButNothingToSay.Build().RunAsync(Persisted(noFinding), null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+
+        usable.Row.Contains(AdminAttention).Should().BeFalse();
+        missingButNothingToSay.Row.Contains(AdminAttention).Should().BeFalse("the policy is read only when there is a system finding");
+    }
+
+    [Fact(DisplayName = "049 R5: the policy note is idempotent - a redelivery that finds the same misconfiguration writes the attention column once")]
+    public async Task SystemPolicyMisconfigured_AdminAttention_IsIdempotentAcrossARedelivery()
+    {
+        var outcome = await Accepted(readNumber: "INV-999");
+        var world = new World(outcome) { Policy = PolicyState.Missing, CrashAtTerminal = true };
+
+        var first = () => world.Build().RunAsync(Persisted(outcome), null);
+        await first.Should().ThrowAsync<Crash>();
+        world.CrashAtTerminal = false;
+        var resumed = await world.Build().ResumeAsync(Submission, null);
+
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed, resumed.ReasonCode);
+        world.SubmissionUpdates.Count(u => u.ContainsKey(AdminAttention)).Should().Be(1, "the same text is already stored: nothing is written again");
+        StoredAttention(world).Should().Be(PolicyAttention("missing"));
+    }
+
+    [Fact(DisplayName = "049 R5: a policy note MERGES with a Signal-refusal attention - whichever is recorded first, both stay, Signals first")]
+    public async Task SystemPolicyMisconfigured_MergesWithSignalRefusalAttention()
+    {
+        var outcome = await AutoRejected(readNumber: "INV-999");
+        var signalText = $"1 Signal could not be created: {Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.CoreRecordUnresolved} (BILL-AGE on line {LineId.ToString("D")[..8]})";
+        var expected = signalText + AdminAttentionText.Separator + PolicyAttention("missing");
+
+        // (1) the policy is bad from the start: the policy note is written first, then the refusal is merged in.
+        var policyFirst = new World(outcome) { Policy = PolicyState.Missing };
+        FailBillAge(policyFirst, "escalation");
+        (await policyFirst.Build().RunAsync(Persisted(outcome), null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        StoredAttention(policyFirst).Should().Be(expected);
+
+        // (2) the refusal is recorded first (policy fine), then the policy goes bad before the redelivery.
+        var refusalFirst = new World(outcome) { CrashAtTerminal = true };
+        FailBillAge(refusalFirst, "escalation");
+        var crashed = () => refusalFirst.Build().RunAsync(Persisted(outcome), null);
+        await crashed.Should().ThrowAsync<Crash>();
+        StoredAttention(refusalFirst).Should().Be(signalText);
+        refusalFirst.CrashAtTerminal = false;
+        refusalFirst.Policy = PolicyState.Missing;
+        (await refusalFirst.Build().ResumeAsync(Submission, null)).Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        StoredAttention(refusalFirst).Should().Be(expected);
+    }
+
+    [Fact(DisplayName = "049 R5: a fault writing the attention text is logged and swallowed - the run completes as it would have")]
+    public async Task SystemPolicyMisconfigured_AttentionWriteFault_DoesNotChangeTheOutcome()
+    {
+        var outcome = await Accepted(readNumber: "INV-999");
+        var world = new World(outcome) { Policy = PolicyState.Missing, AttentionFault = new TimeoutException("dataverse") };
+
+        var result = await world.Build().RunAsync(Persisted(outcome), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        world.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+        world.Row.Contains(AdminAttention).Should().BeFalse();
+        world.Log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("Needs Admin Attention") && e.Message.Contains("TimeoutException"));
     }
 
     [Fact(DisplayName = "049 F1-3: a permanent refusal on an Accepted-path Signal does not stop the run either (Blocked: indexed, terminal)")]

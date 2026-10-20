@@ -29,8 +29,10 @@ public enum SubmissionPersistStatus
     Committed,
 
     /// <summary>
-    /// The submission already links an invoice: nothing was written except the (idempotent) totals recalculation. The ids are the stored
-    /// ones, so part D can resume its Signals and Decision Record from the findings JSON.
+    /// The submission already links an invoice: nothing was written and nothing was recalculated (review fix R2: a totals fault here would
+    /// have become a <see cref="Retry"/> that carries the invoice id, which the caller must read as "committed by this delivery"). The ids
+    /// are the stored ones. The caller answers it from the STORED state (<see cref="IInvoiceSubmissionAfterSteps.ResumeAsync"/>, which
+    /// recalculates the totals itself), never <see cref="IInvoiceSubmissionAfterSteps.RunAsync"/>.
     /// </summary>
     Resumed,
 
@@ -42,7 +44,8 @@ public enum SubmissionPersistStatus
 
     /// <summary>
     /// A transient fault. When <see cref="SubmissionPersistResult.InvoiceId"/> is null nothing was persisted; when set, the transaction
-    /// committed and only the after-commit totals failed. Either way the submission is left as it is for the job to retry, and a retry
+    /// committed (in THIS call; a submission found already linked is <see cref="Resumed"/>, never a Retry) and only the after-commit totals
+    /// failed. Either way the submission is left as it is for the job to retry, and a retry
     /// never creates a second invoice (the link is the commit marker, and the ids are deterministic).
     /// </summary>
     Retry,

@@ -440,7 +440,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
         _logger.LogInformation("Invoice submission {SubmissionId}: already linked to invoice {InvoiceId} ({LineCount} lines); resuming, nothing created",
             submissionId, invoiceId, lineIds.Count);
-        return await WithTotalsAsync(new SubmissionPersistResult
+
+        // R2: NO totals here. A Resumed result is always answered from the stored state (the handler calls the after-steps' ResumeAsync, which
+        // recalculates the totals itself); a totals fault turned into a Retry that carries the invoice id would be indistinguishable from this
+        // delivery's own commit and be run with this run's re-evaluated terminal.
+        return new SubmissionPersistResult
         {
             Status = SubmissionPersistStatus.Resumed,
             SubmissionId = submissionId,
@@ -448,10 +452,10 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             LineIds = lineIds,
             TerminalStatus = terminal.Status,
             TerminalReasonCode = terminal.ReasonCode,
-        }, ct).ConfigureAwait(false);
+        };
     }
 
-    /// <summary>016 after the commit (map row 6c). A fault is a retry that keeps the invoice id: the resume path recalculates again.</summary>
+    /// <summary>016 after the commit (map row 6c); only a run that committed in THIS delivery calls it. A fault is a retry that keeps the invoice id.</summary>
     private async Task<SubmissionPersistResult> WithTotalsAsync(SubmissionPersistResult committed, CancellationToken ct)
     {
         try

@@ -284,13 +284,12 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                         .ConfigureAwait(false);
 
                 case SubmissionPersistStatus.Retry when persisted.InvoiceId is not null:
-                    // Committed; only the totals failed. The after-steps do the Signals and the record and answer Retry, so the redelivery resumes.
-                    return await MapAfterStepsAsync(job, submissionId, await _afterSteps.RunAsync(persisted, correlation, ct).ConfigureAwait(false), stopwatch, ct)
-                        .ConfigureAwait(false);
-
                 case SubmissionPersistStatus.Resumed:
-                    // The link appeared while this run evaluated (a lock that expired under a slow run). The terminal this run's outcome
-                    // implies could contradict the committed one, so resume from the stored state like step 0 does.
+                    // R2: the submission links its invoice, so the after-steps run from the STORED state, never from this run's outcome. Resumed:
+                    // the link appeared while this run evaluated (a lock that expired under a slow run), and the terminal this run's outcome
+                    // implies could contradict the committed one. Retry with the invoice id: the transaction committed and only the totals
+                    // failed; the resume recalculates them again, then does the Signals, the record and the rest. RunAsync is for Committed
+                    // only - a run that committed in this delivery.
                     return await MapAfterStepsAsync(job, submissionId, await _afterSteps.ResumeAsync(submissionId, correlation, ct).ConfigureAwait(false), stopwatch, ct)
                         .ConfigureAwait(false);
 
@@ -340,8 +339,8 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
             case SubmissionAfterStepsStatus.Refused:
                 // Both callers reach here only with the invoice linked (Committed / Retry-with-invoice / Resumed / a Processing+link resume),
                 // and the refusal means a bug: never Failed (terminal, unconditional write), so the invoice is not stranded and a replay
-                // after the fix resumes it. No status write at all.
-                return LeaveLinkedSubmission(job, submissionId, result.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch);
+                // after the fix resumes it. No status write at all - only the administrator's attention text (R3, D-133).
+                return await LeaveLinkedSubmissionAsync(job, submissionId, result.ReasonCode ?? SubmissionReasonCodes.ProcessingFailed, stopwatch, ct).ConfigureAwait(false);
 
             case SubmissionAfterStepsStatus.Retry:
                 // The submission stays Processing with its invoice link; the redelivery resumes.
@@ -388,7 +387,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     {
         if (linked)
         {
-            return LeaveLinkedSubmission(job, submissionId, reasonCode, stopwatch);
+            return await LeaveLinkedSubmissionAsync(job, submissionId, reasonCode, stopwatch, ct).ConfigureAwait(false);
         }
 
         _logger.LogWarning("Invoice submission job {JobId}: submission {SubmissionId} Failed ({ReasonCode})", job.JobId, submissionId, reasonCode);
@@ -399,13 +398,16 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     /// <summary>
     /// A permanent failure of a submission that links its invoice: NO status write. It stays Processing (a replay of the dead-lettered message
     /// resumes it once the cause is fixed), the id and code are logged at Error (ADR-015), and the job is Poisoned - the same rule as the final
-    /// transient delivery with a link and the flag-off-with-link path.
+    /// transient delivery with a link and the flag-off-with-link path. R3 (D-133): the submission is shown to the administrator through
+    /// <c>sprk_adminattention</c> (a code-only "processing stopped" segment merged into the current text; not a status write, idempotent,
+    /// and a fault writing it is logged and never changes this outcome).
     /// </summary>
-    private JobOutcome LeaveLinkedSubmission(JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch)
+    private async Task<JobOutcome> LeaveLinkedSubmissionAsync(JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch, CancellationToken ct)
     {
         _logger.LogError(
             "Invoice submission job {JobId}: submission {SubmissionId} links its invoice and failed permanently ({ReasonCode}); it stays Processing, not Failed - fix the cause, then replay the message",
             job.JobId, submissionId, reasonCode);
+        await AdminAttentionText.NoteAsync(_entities, submissionId, null, AdminAttentionText.StoppedNote(reasonCode), _logger, ct).ConfigureAwait(false);
         return JobOutcome.Poisoned(job.JobId, JobType, reasonCode, job.Attempt, stopwatch.Elapsed);
     }
 
@@ -417,8 +419,8 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
 
     /// <summary>
     /// A transient failure: Failure (the broker redelivers) until the final delivery. On the final delivery a submission that committed no
-    /// invoice is marked Failed; one that links its invoice stays Processing so a replay of the dead-lettered message resumes it. Either way
-    /// the job is Poisoned.
+    /// invoice is marked Failed; one that links its invoice stays Processing so a replay of the dead-lettered message resumes it (and its
+    /// <c>sprk_adminattention</c> says so, R3). Either way the job is Poisoned.
     /// </summary>
     private async Task<JobOutcome> TransientAsync(JobContract job, Guid submissionId, string reasonCode, Stopwatch stopwatch, CancellationToken ct)
     {
@@ -442,6 +444,11 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                 _logger.LogWarning(
                     "Invoice submission job {JobId}: final delivery failed ({ReasonCode}); submission {SubmissionId} keeps its state (linked: {Linked})",
                     job.JobId, reasonCode, submissionId, linked);
+                if (linked && !IsTerminal(status))
+                {
+                    // R3 (D-133): it stays Processing for good (the message is dead-lettered), so the administrator is told. Not a status write.
+                    await AdminAttentionText.NoteAsync(_entities, submissionId, null, AdminAttentionText.StoppedNote(reasonCode), _logger, ct).ConfigureAwait(false);
+                }
             }
             else
             {

@@ -323,7 +323,12 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             requests.Add((entry.Request, entry.Fingerprint));
         }
 
-        requests.AddRange(await SystemSignalsAsync(stored, submissionId, invoiceId, ct).ConfigureAwait(false));
+        var (systemRequests, wroteAttention) = await SystemSignalsAsync(stored, submissionId, invoiceId, ct).ConfigureAwait(false);
+        requests.AddRange(systemRequests);
+        if (wroteAttention)
+        {
+            rowVersion = null; // our own attention write moved the row version: the terminal write re-reads it first
+        }
 
         var written = 0;
         string? signalFailure = null;
@@ -984,9 +989,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             [InvoiceSubmissionPersister.SubmissionFindingsJson] = json,
         };
 
-        // D-133: the same update (a plain UpdateAsync: findings writes carry no row-version guard) marks the submission for the administrator. The text is a function of every refusal stored
-        // (the plan's and the writer's), so a resume that adds nothing writes nothing and never repeats it; it is never cleared here.
-        if (AdminAttentionText.FromFindings(root) is { } attention)
+        // D-133: the same update (a plain UpdateAsync: findings writes carry no row-version guard) marks the submission for the administrator. The Signal
+        // segment is a function of every refusal stored (the plan's and the writer's), so a resume that adds nothing writes nothing and never repeats it;
+        // it is MERGED into the current text (R3, R5: the policy and processing-stopped segments stay), and never cleared here.
+        var currentAttention = await AdminAttentionText.ReadCurrentAsync(_entities, submissionId, ct).ConfigureAwait(false);
+        if (AdminAttentionText.Merge(currentAttention, root) is { } attention)
         {
             update[InvoiceSubmissionPersister.SubmissionAdminAttention] = attention;
         }
@@ -1122,15 +1129,16 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// <summary>
     /// The system findings (D-91 mismatch, refused codes, firm-code mismatches, code set needs review, no code set, coding unavailable) as
     /// Signal requests under <c>BILL-SYSTEM-SUBMISSION</c>: read app-only, once per run, and only when there is a system finding. Missing,
-    /// disabled, or with no Active version in force on the received date: no system Signal, one Warning (the policy code only), and the
-    /// findings stay in the findings JSON (D-125: an administrator may turn the policy off).
+    /// ambiguous, disabled, of another rule type, or with no Active version in force on the received date: no system Signal, one Warning
+    /// (the policy code only), and the findings stay in the findings JSON. Disabled is the administrator's choice (D-125) and stays a
+    /// Warning; every other state also sets <c>sprk_adminattention</c> (R5, D-133: a misconfiguration the administrator must hear about).
     /// </summary>
-    private async Task<IReadOnlyList<(SignalWriteRequest Request, string Fingerprint)>> SystemSignalsAsync(
+    private async Task<(IReadOnlyList<(SignalWriteRequest Request, string Fingerprint)> Requests, bool WroteAttention)> SystemSignalsAsync(
         StoredFindings stored, Guid submissionId, Guid invoiceId, CancellationToken ct)
     {
         if (!stored.HasSystemFindings)
         {
-            return [];
+            return ([], false);
         }
 
         var (rule, state) = await ReadSystemPolicyAsync(stored.ReceivedOn, ct).ConfigureAwait(false);
@@ -1138,7 +1146,12 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: system billing policy {PolicyCode} is {State}; no system Signal is written, the findings stay in the findings JSON",
                 submissionId, BillingRuleCatalogue.SystemPolicyCode, state);
-            return [];
+
+            // R5 (D-133): D-125 accepts the skip only when an administrator DISABLED the policy on purpose. Every other state is a misconfiguration
+            // the administrator must hear about; PolicyNote is null for "disabled". Merged into the current text, idempotent, a fault is swallowed.
+            var wrote = AdminAttentionText.PolicyNote(BillingRuleCatalogue.SystemPolicyCode, state) is { } policyNote
+                && await AdminAttentionText.NoteAsync(_entities, submissionId, policyNote, null, _logger, ct).ConfigureAwait(false);
+            return ([], wrote);
         }
 
         var policy = new BillingSystemPolicyVersion(rule.PolicyId, rule.PolicyCode, rule.PolicyVersionId);
@@ -1149,9 +1162,9 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             stored.InvoiceName,
             lines.ToDictionary(i => i, i => InvoiceSubmissionPersister.LineIdFor(submissionId, i)),
             lines.ToDictionary(i => i, i => InvoiceSubmissionPersister.LineNameFor(stored.TrackingNumber, i)));
-        return BillingFindingSignalMapper.MapAll(findings, new Dictionary<Guid, BillingRuleCandidate> { [rule.PolicyVersionId] = rule }, subjects)
+        return (BillingFindingSignalMapper.MapAll(findings, new Dictionary<Guid, BillingRuleCandidate> { [rule.PolicyVersionId] = rule }, subjects)
             .Select(m => (m.Request, m.Fingerprint))
-            .ToList();
+            .ToList(), false);
     }
 
     /// <summary>
