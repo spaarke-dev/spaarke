@@ -136,6 +136,12 @@ All dated 2026-10-19 unless noted; rationale in design.md §7 and spec "Owner Cl
 - 2026-10-19 — The seeder filters rules on the wrong column; use `_sprk_fieldmappingprofile_value` (#1318).
 - 2026-10-19 — Quick-create flags in solution XML may not match live (Project/Matter/Invoice Line Item). Verify live
   before 051 (task 050).
+- 2026-10-20 — An Agent launched with `isolation: worktree` gets a worktree cut from **origin/master**, not this
+  branch. Every brief must start with `git switch -c task/fm-NNN <work-branch tip>` plus a check that the POML
+  exists. The agent commits on that branch, and the main session merges it with `--no-ff` and verifies.
+- 2026-10-20 — POMLs written at planning name new test files under `tests/unit/Sprk.Bff.Api.Tests/...`, which
+  `.claude/constraints/testing.md:132` forbids. Use `tests/unit/domain/**` (globbed into Sprk.Bff.Api.Tests) or the
+  matching KEEP path.
 - 2026-10-19 — A user-owned row stays readable by Deep (Parent:Child) readers in the owner's BU and its ancestors. The
   harm of OOB Assign is the BU move and User-depth tables (e.g. `sprk_communication`), not "only the owner sees it".
 

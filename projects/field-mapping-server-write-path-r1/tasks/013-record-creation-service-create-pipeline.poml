@@ -126,7 +126,13 @@
     <criterion testable="true">From UAC-r2's 011 review (K2, 2026-10-20): the OwnedChildWrite / CallerWriteAuthorization mutual `using static` cannot silently rebind. Either qualify every cross-class call (and drop the using-static) or add an ArchTest asserting the two types share no member names, with must-fire and must-not-fire controls.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-06, FR-07, FR-12; NFR-01, NFR-03, NFR-04, NFR-05, NFR-06. Task 014 wires mapping into step 3 and merged-payload authorization; 015 swaps owner and search-index steps; 016 adds Repair mode; 017/018 re-point callers. The adversarial review for the whole W2 diff is task 019 (security: twice).</notes>
+  <notes>Spec FR-06, FR-07, FR-12; NFR-01, NFR-03, NFR-04, NFR-05, NFR-06. Task 014 wires mapping into step 3 and merged-payload authorization; 015 swaps owner and search-index steps; 016 adds Repair mode; 017/018 re-point callers. The adversarial review for the whole W2 diff is task 019 (security: twice).
+From task 012 (2026-10-20), OWNER REVIEW items to put to the owner before or during 013–015:
+(1) Document is flagged search-indexed (FR-10) but no create path fills it today.
+(2) Mapping applies by default to memo, budget, KPI assessment, billing event and communication; confirm.
+(3) The per-path server defaults recorded in the registry; converge or keep.
+(4) #1608: the route refuses the work assignment's container, securitybu and access permission, while the chat create tool allows them; the owner picks one behaviour.
+Registry: Services/RecordCreation/RecordTableRules.cs; the pre-write rule contract is in notes/task-012-notes.md.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
