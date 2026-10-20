@@ -199,8 +199,16 @@ Describe 'Customer shared mailbox (H14m)' {
         Mock -ModuleName SidecarCore Get-Group { T263Grp $global:T263GroupName }
         # Test-CustomerMailboxWritePermission is NOT mocked: it reads the stubs above, which carry -Shared and
         # -BypassSecurityGroupManagerCheck, so every test here runs the real PRQ-E-16 probe (T186 L60).
-        Mock -ModuleName SidecarCore New-Mailbox { $m = T263Mbx $Name; $global:T263Mailboxes = @($m); $m }
-        Mock -ModuleName SidecarCore Add-DistributionGroupMember { $global:T263MemberOf = @(T263Grp $global:T263GroupName) }
+        # Nor is Test-CustomerMailboxWriteAuthorization (T186 L62): its calls on the never-accepted probe address get
+        # Exchange's validation answers below — 'not an accepted domain' and "Couldn't find object" mean authorized.
+        Mock -ModuleName SidecarCore New-Mailbox {
+            if ($PrimarySmtpAddress -like '*@authz-probe.invalid') { throw "You can't use the domain authz-probe.invalid because it's not an accepted domain for your organization." }
+            $m = T263Mbx $Name; $global:T263Mailboxes = @($m); $m
+        }
+        Mock -ModuleName SidecarCore Add-DistributionGroupMember {
+            if ($Member -like '*@authz-probe.invalid') { Write-Error "Couldn't find object ""$Member"". Please make sure that it was spelled correctly or specify a different object."; return }
+            $global:T263MemberOf = @(T263Grp $global:T263GroupName)
+        }
         Mock -ModuleName SidecarCore Test-ServicePrincipalAuthorization {
             $global:T263Roles | ForEach-Object { [pscustomobject]@{ RoleName = $_; InScope = $global:T263InScope } }
         }
@@ -278,7 +286,7 @@ Describe 'Customer shared mailbox (H14m)' {
         $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
 
         $r.outcome | Should -Be 'Success'
-        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 1 -Exactly -ParameterFilter { $Identity -eq 'CN=Spaarke-AppAccess-acme20261014194847' }
+        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 1 -Exactly -ParameterFilter { $Identity -eq 'CN=Spaarke-AppAccess-acme20261014194847' -and $Member -eq 'CN=sprk-acme-mail' }
     }
 
     It 'still refuses a group whose Name only resembles this customer''s (T186 L59 must-fire)' {
@@ -297,7 +305,7 @@ Describe 'Customer shared mailbox (H14m)' {
     It 'retries the join while a new mailbox replicates, then succeeds' {
         InModuleScope SidecarCore { $script:JoinRetryDelaySeconds = 0 }
         $global:T263JoinFailures = 2
-        Mock -ModuleName SidecarCore Add-DistributionGroupMember {
+        Mock -ModuleName SidecarCore Add-DistributionGroupMember -ParameterFilter { $Member -eq 'CN=sprk-acme-mail' } {
             if ($global:T263JoinFailures-- -gt 0) { throw "Couldn't find object 'CN=sprk-acme-mail'." }
             $global:T263MemberOf = @(T263Grp $global:T263GroupName)
         }
@@ -305,18 +313,87 @@ Describe 'Customer shared mailbox (H14m)' {
         $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
 
         $r.outcome | Should -Be 'Success'
-        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 3 -Exactly
+        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 3 -Exactly -ParameterFilter { $Member -eq 'CN=sprk-acme-mail' }
     }
 
     It 'reports Failure with created = true when the join never succeeds' {
         InModuleScope SidecarCore { $script:JoinRetryDelaySeconds = 0 }
-        Mock -ModuleName SidecarCore Add-DistributionGroupMember { throw 'Access denied' }
+        Mock -ModuleName SidecarCore Add-DistributionGroupMember -ParameterFilter { $Member -eq 'CN=sprk-acme-mail' } { throw 'Access denied' }
 
         $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
 
         $r.outcome | Should -Be 'Failure'
         $r.created | Should -BeTrue
         $r.diagnostic | Should -BeLike '*could not add it to the scope group*Access denied*'
+    }
+
+    It 'joins the scope group WITHOUT -ErrorAction and creates the mailbox WITH it (T186 L62)' {
+        # Exchange checks the common parameters against the role entry. 'Spaarke Scope Group Membership' cannot be granted
+        # any (its parent role holds none for Add-DistributionGroupMember), so -ErrorAction Stop there is a 403.
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Success'
+        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 0 -Exactly -ParameterFilter { $PesterBoundParameters.ContainsKey('ErrorAction') }
+        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 1 -Exactly -ParameterFilter { $Member -eq 'CN=sprk-acme-mail' }
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 1 -Exactly -ParameterFilter { $Name -eq 'sprk-acme-mail' -and $PesterBoundParameters.ErrorAction -eq 'Stop' }
+    }
+
+    It 'a join error written to the error stream (not thrown) is a failed join, never a success (T186 L62 must-fire)' {
+        InModuleScope SidecarCore { $script:JoinRetryDelaySeconds = 0 }
+        Mock -ModuleName SidecarCore Add-DistributionGroupMember -ParameterFilter { $Member -eq 'CN=sprk-acme-mail' } { Write-Error 'Access denied for this group' }
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Failure'
+        $r.created | Should -BeTrue
+        $r.diagnostic | Should -BeLike '*could not add it to the scope group*Access denied for this group*'
+    }
+
+    It 'an "already a member" answer counts as joined' {
+        Mock -ModuleName SidecarCore Add-DistributionGroupMember -ParameterFilter { $Member -eq 'CN=sprk-acme-mail' } {
+            $global:T263MemberOf = @(T263Grp $global:T263GroupName)
+            Write-Error "The recipient ""CN=sprk-acme-mail"" is already a member of the group ""CN=$global:T263GroupName""."
+        }
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Success'
+        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 1 -Exactly -ParameterFilter { $Member -eq 'CN=sprk-acme-mail' }
+    }
+
+    It 'probes both writes on a never-accepted address before creating anything (T186 L62)' {
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Success'
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 1 -Exactly -ParameterFilter { $Shared -and $PrimarySmtpAddress -eq 'sprk-authz-probe@authz-probe.invalid' -and $PesterBoundParameters.ErrorAction -eq 'Stop' }
+        Should -Invoke -ModuleName SidecarCore Add-DistributionGroupMember -Times 1 -Exactly -ParameterFilter { $Identity -eq 'CN=Spaarke-AppAccess-acme' -and $Member -eq 'sprk-authz-probe@authz-probe.invalid' -and $BypassSecurityGroupManagerCheck }
+    }
+
+    It 'fails BEFORE creating anything when Exchange refuses New-Mailbox -ErrorAction (T186 L62 must-fire)' {
+        # Live 2026-10-20: the role entry without the common parameters made the module report only this.
+        Mock -ModuleName SidecarCore New-Mailbox -ParameterFilter { $PrimarySmtpAddress -like '*@authz-probe.invalid' } {
+            throw 'A server side error has occurred because of which the operation could not be completed. Please try again after some time.'
+        }
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Failure'
+        $r.created | Should -BeFalse
+        $r.diagnostic | Should -BeLike "*cannot run New-Mailbox -Shared -ErrorAction (role entry 'Spaarke Shared Mailbox Create\New-Mailbox' needs the common parameters*server side error*PRQ-E-16*"
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly -ParameterFilter { $Name -eq 'sprk-acme-mail' }
+    }
+
+    It 'fails BEFORE creating anything when Exchange refuses the scope-group join (T186 L62 must-fire)' {
+        Mock -ModuleName SidecarCore Add-DistributionGroupMember -ParameterFilter { $Member -like '*@authz-probe.invalid' } {
+            Write-Error 'A server side error has occurred because of which the operation could not be completed.'
+        }
+
+        $r = Invoke-CustomerMailboxEnsure -Request (T263Request)
+
+        $r.outcome | Should -Be 'Failure'
+        $r.created | Should -BeFalse
+        $r.diagnostic | Should -BeLike '*cannot run Add-DistributionGroupMember -BypassSecurityGroupManagerCheck (Exchange answered*server side error*'
+        Should -Invoke -ModuleName SidecarCore New-Mailbox -Times 0 -Exactly -ParameterFilter { $Name -eq 'sprk-acme-mail' }
     }
 
     It 'fails BEFORE creating anything when PRQ-E-16 is not applied' {
