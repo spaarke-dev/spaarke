@@ -200,4 +200,28 @@ public class ContactIdentityBinderWorkforceGuestTests
             .And.NotContain(GuestEmail)
             .And.NotContain("@");
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ANonMemberRefusal_IsLoggedAsADenyWithItsMemberTestCode_AndNoEmail(bool unlistedGuest)
+    {
+        // #2128 round 2: the round-1 refusal before the oid lookup is the operator's only trace of a non-member sign-in.
+        // It uses the binder's existing [ID-BIND] deny line (plane, oid, deny code, action, facts) — never the email.
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+        var user = unlistedGuest
+            ? Guest(UnlistedTenant)
+            : WorkforceUser(GuestOid, CustomerTenant, acct: null, email: GuestEmail);
+        var expected = unlistedGuest ? WorkforceMembershipTest.DenyForeignTenant : WorkforceMembershipTest.DenyAcctMissing;
+
+        var result = await Binder(_store, log).ResolveWorkforceCallerAsync(user, GuestOid, Stamp, CancellationToken.None);
+
+        result.DenyCode.Should().Be(expected);
+        var entry = log.Entries.Should().ContainSingle(e => e.Message.Contains("[ID-BIND]")).Subject;
+        entry.Level.Should().Be(Microsoft.Extensions.Logging.LogLevel.Warning);
+        entry.Message.Should().Contain($"DENIED ({expected})")
+            .And.Contain("refused before the oid lookup (#2128)")
+            .And.NotContain(GuestEmail)
+            .And.NotContain("@");
+    }
 }

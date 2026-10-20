@@ -24,8 +24,10 @@ using Spaarke.Core.Auth;
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 /// <summary>
-/// Options bound from <c>WorkforceIdentity</c>: which workforce tenants' MEMBERS may be email-bound to, or
-/// have created for them, a contact on first sign-in.
+/// Options bound from <c>WorkforceIdentity</c>: which workforce tenants' MEMBERS pass the member test that gates the
+/// contact-only branch of the Workforce token plane (a caller with no enabled systemuser) on EVERY sign-in — the first
+/// one email-binds or creates their contact, later ones resolve through that binding — and which home directories the
+/// WorkforceHome scheme (ADR-028 A9) accepts. An enabled systemuser is resolved before the member test runs.
 /// </summary>
 public sealed class WorkforceIdentityOptions
 {
@@ -33,9 +35,11 @@ public sealed class WorkforceIdentityOptions
     public const string SectionName = "WorkforceIdentity";
 
     /// <summary>
-    /// The customer workforce tenant ids (GUID strings) this deployment serves. Empty or absent means NO
-    /// caller is ever email-bound or gets a contact created — every Type-2 first sign-in is denied. App
-    /// Service form: <c>WorkforceIdentity__CustomerTenantIds__0</c>, <c>__1</c>, …
+    /// The customer workforce tenant ids (GUID strings) this deployment serves. Empty or absent denies every
+    /// contact-only sign-in on the Workforce token plane, the first and every later one (#2128 round 1: an existing
+    /// binding does not outlive the member test), and every WorkforceHome token. It does not affect a caller resolved
+    /// to an enabled systemuser, which runs before the member test. App Service form:
+    /// <c>WorkforceIdentity__CustomerTenantIds__0</c>, <c>__1</c>, …
     /// </summary>
     public List<string> CustomerTenantIds { get; set; } = new();
 
@@ -71,8 +75,8 @@ public sealed class WorkforceIdentityOptionsValidator : IValidateOptions<Workfor
         {
             logger.LogWarning(
                 "[WF-AUTH] {Key} is not a non-zero GUID — a customer-tenant B2B guest gets its plain member-test deny, " +
-                "not workforce_guest_use_home_signin (FR-15 guest admission is retired: every acct=1 workforce caller " +
-                "is denied either way)",
+                "not workforce_guest_use_home_signin (FR-15 guest admission is retired: an acct=1 workforce caller with " +
+                "no enabled systemuser is denied either way)",
                 WorkforcePrincipalResolver.StampTenantConfigKey);
         }
     }
@@ -285,7 +289,9 @@ public static class WorkforceMembershipTest
     /// <paramref name="customerTenantIds"/>. It yields <see cref="WorkforceMembership.Member"/>; when any part
     /// fails the result is exactly what it was before the branch existed (and so is its deny code). With no
     /// stamp tenant or no <c>idp</c> supplied the branch never applies. Since #2128 the binder refuses that Member
-    /// (<see cref="DenyGuestUseHomeSignin"/>): a customer-tenant guest is never admitted on this plane.
+    /// (<see cref="DenyGuestUseHomeSignin"/>): a customer-tenant guest with no enabled systemuser (the contact-only
+    /// branch) is never admitted on this plane. An enabled systemuser — a licensed B2B guest included — is resolved by
+    /// <c>WorkforcePrincipalResolver</c>'s systemuser branch before the binder, and this test, run.
     /// Both parameters are REQUIRED (no defaults) so that a caller cannot silently skip FR-15 by omission; pass
     /// <c>null</c> to say "no stamp tenant / no idp" explicitly.
     /// </remarks>

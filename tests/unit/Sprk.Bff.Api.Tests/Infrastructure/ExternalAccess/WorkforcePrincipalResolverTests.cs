@@ -984,6 +984,9 @@ public class WorkforcePrincipalResolverTests
             log.Entries.Should().ContainSingle(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning)
                 .Which.Message.Should().Contain("not workforce_guest_use_home_signin")
                 .And.Contain("FR-15 guest admission is retired")
+                .And.Contain("acct=1 workforce caller with no enabled systemuser is denied",
+                    "an enabled systemuser, a licensed B2B guest included, is admitted before the binder (#2128 round 2)")
+                .And.NotContain("every acct=1 workforce caller")
                 .And.NotContain("admission disabled", "FR-15 guest admission is retired, not switchable (#2128)");
             validator.Validate(null, new WorkforceIdentityOptions()).Succeeded
                 .Should().BeTrue("a missing stamp tenant must never fail startup");

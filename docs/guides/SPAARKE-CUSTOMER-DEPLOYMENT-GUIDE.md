@@ -824,27 +824,41 @@ and the two values coincide — list it anyway; nothing is inferred.
 Model 1 puts **Spaarke's side** (the stamp, its BFF app registration, its Dataverse environment) in Spaarke's
 tenant. It does **not** move the customer's people. A customer's employees keep their own company work accounts
 in **their company's own Entra tenant** — the customer's **home tenant** (e.g. Contoso's tenant). They sign in at
-that **home directory** and self-register (ADR-028 A9). A B2B guest account in Spaarke's tenant is refused
-`sdap.access.deny.workforce_guest_use_home_signin` (#2128 retired the R3 FR-15 guest admission).
+that **home directory** and self-register (ADR-028 A9). A B2B guest account in Spaarke's tenant with no enabled
+systemuser is refused `sdap.access.deny.workforce_guest_use_home_signin` (#2128 retired the R3 FR-15 guest admission).
+An enabled systemuser is resolved first and admitted, a licensed B2B guest included (item 1 below).
 
 | Where the home tenant appears | What it is |
 |---|---|
-| A B2B guest's token from the stamp (Spaarke-pinned authority, ADR-028 A8; proven live 2026-10-08; refused since #2128 — the `idp` home tenant only selects the deny code) | `tid` = **Spaarke's** tenant, `acct = 1` (guest), `idp` = `https://sts.windows.net/{home tenant id}/` |
+| A B2B guest's token from the stamp (Spaarke-pinned authority, ADR-028 A8; proven live 2026-10-08). Since #2128 it is refused when the guest has no enabled systemuser (the contact-only branch), and the `idp` home tenant only selects the deny code. A guest with an enabled systemuser (a licensed guest) is admitted by the systemuser branch, which runs first | `tid` = **Spaarke's** tenant, `acct = 1` (guest), `idp` = `https://sts.windows.net/{home tenant id}/` |
 | `WorkforceIdentity__CustomerTenantIds__N` (this setting) | The customer's home tenant id(s): "whose employees count as this customer's workforce" |
-| The Spaarke registry, next to `sprk_securitygroupid` (R3 task 060 for current customers; provisioning intake for new ones) | The same list per customer key, read by the shared workforce self-registration service |
+| The Spaarke registry, next to `sprk_securitygroupid` (R3 task 060 for current customers; provisioning intake for new ones) | The same list per customer key, meant for the R3 FR-14 workforce self-registration service. That service is superseded by A9 (item 2 below): the A9 route and the WorkforceHome scheme read this App Service setting, not the registry (`AuthorizationModule.cs:587`) |
 
 It is checked in two places:
 
-1. **Every request to the customer's BFF** on the Workforce token plane (`WorkforceMembershipTest`, on every
-   sign-in, before any contact lookup — an existing binding does not override it). Only a direct member of a listed
-   tenant (`tid` ∈ list, `acct = 0`) passes: the Model 2 / dev path. A guest is never admitted here (ADR-028 A9):
-   customer workforce users sign in at their home directory and self-register (2. below). A Spaarke-tenant B2B guest
-   whose home tenant (from `idp`) is listed is refused `sdap.access.deny.workforce_guest_use_home_signin` (#2128
-   retired the R3 FR-15 guest admission); a guest from any other home tenant is denied
-   (`sdap.access.deny.workforce_tenant_not_customer`).
-2. **Workforce self-registration** (R3 FR-14, task 060). The person signs in at home first; the service admits them
-   only if that home `tid` ∈ the customer's list **and** `acct = 0` (a member there, not someone else's guest),
-   and only then invites them into Spaarke's tenant and the customer's `sprk-{customerId}-users` group.
+1. **Every request to the customer's BFF** on the Workforce token plane **from a caller with no enabled systemuser**
+   (the contact-only branch). The resolver first looks the caller's `oid` up as a systemuser
+   (`WorkforcePrincipalResolver.cs:190`): an enabled systemuser is resolved and admitted there, before any member test
+   — a licensed B2B guest and a Model 1 Spaarke staff member included (`WorkforcePrincipalResolver.cs:207-251`); a
+   disabled one is denied (`:257`). Only the contact-only branch runs `WorkforceMembershipTest`, on every sign-in and
+   before any contact lookup — an existing binding does not override it (`ContactIdentityBinder.cs:327-332`). On that
+   branch only a direct member of a listed tenant (`tid` ∈ list, `acct = 0`) passes: the Model 2 / dev path. No guest
+   is admitted on that branch (ADR-028 A9): customer workforce users sign in at their home directory and register (2.
+   below). A Spaarke-tenant B2B guest whose home tenant (from `idp`) is listed still answers `Member` from the member
+   test, and the binder refuses it `sdap.access.deny.workforce_guest_use_home_signin` before any store call
+   (`ContactIdentityBinder.cs:303-317`; #2128 retired the R3 FR-15 guest admission). A guest from any other home tenant
+   gets its member-test deny: `sdap.access.deny.workforce_tenant_not_customer`, or `sdap.access.deny.workforce_guest`
+   where the stamp lists its own tenant (dev).
+2. ~~**Workforce self-registration** (R3 FR-14, task 060)~~ — **superseded by ADR-028 A9.** FR-14 invited the person
+   into Spaarke's tenant as a B2B guest, which is exactly the identity item 1 now refuses. Registration is the A9 route
+   `POST /api/v1/external/registration` (`ExternalRegistrationEndpoints.cs:78`). The person signs in at their home
+   directory; the WorkforceHome scheme accepts that token only if its `tid` ∈ the customer's list **and** `acct = 0`
+   (a member there, not someone else's guest; `AuthorizationModule.cs:673-700`). The route answers 200 with no write
+   for a caller who already resolves; otherwise, for the token's email, it refuses a licensed user's email
+   (`licensed_user_link_required`), answers 409 `existing_record_found` for one bindable existing contact and binds it
+   on the confirmed resubmit, refuses contacts it cannot bind (`registration_contact_conflict`), or creates one
+   WorkforceHome contact (`ContactIdentityBinder.RegisterHomeContactAsync`, `ContactIdentityBinder.cs:673`). Nothing
+   is invited into Spaarke's tenant.
 
 **Without the list**, anyone with any Microsoft work account could register as that customer's staff, and a guest
 from another company invited for an unrelated reason would be bound into the customer's environment.
@@ -862,9 +876,12 @@ az webapp config appsettings set --resource-group <rg> --name <app-service-name>
 ```
 
 **The member test also needs the `acct` claim** (§7.3): a member is a user token (`CallerIdentity`, never an
-app-only token) whose `tid` is listed here AND whose `acct` claim is `0`. A Model 1 B2B guest (`acct = 1`,
-`tid` = stamp tenant) is never a member: one whose `idp` home tenant is listed here is refused
-`sdap.access.deny.workforce_guest_use_home_signin` and signs in at their home directory instead (ADR-028 A9). A token
+app-only token) whose `tid` is listed here AND whose `acct` claim is `0`. For a Model 1 B2B guest (`acct = 1`,
+`tid` = stamp tenant), `WorkforceMembershipTest.Evaluate` answers `Member` when its `idp` home tenant is listed here
+(the FR-15 conjunction) and `ForeignTenant` otherwise (`WorkforceIdentityOptions.cs:329`; where the stamp lists its own
+tenant, `Guest`, `:340`). With no enabled systemuser neither is admitted: the binder refuses the `Member` guest
+`sdap.access.deny.workforce_guest_use_home_signin` and that person signs in at their home directory instead (ADR-028
+A9); the others get their member-test deny. A token
 with no `acct` claim fails closed (`sdap.access.deny.workforce_acct_claim_missing`) — membership is never inferred
 from an email domain or a `#EXT#` UPN.
 
