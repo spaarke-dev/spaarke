@@ -781,9 +781,11 @@ public static class SecureBuRoleDepthCensusBuilder
 /// <summary>One security-role copy. Only the ROOT copy (<c>roleid == parentrootroleid</c>) carries privileges.</summary>
 public sealed record CensusRole(Guid Id, string Name, Guid BusinessUnitId, Guid RootRoleId);
 
-/// <summary>One systemuser, with the role copies assigned to it directly.</summary>
-public sealed record CensusUser(
-    Guid Id, string Name, string? DomainName, bool IsHuman, Guid? BusinessUnitId, IReadOnlyList<Guid> RoleIds);
+/// <summary>
+/// One systemuser, with the role copies assigned to it directly. By id only (#2130): no display name or UPN, so neither
+/// can reach a finding message or the record's generated <c>ToString()</c>.
+/// </summary>
+public sealed record CensusUser(Guid Id, bool IsHuman, Guid? BusinessUnitId, IReadOnlyList<Guid> RoleIds);
 
 /// <summary>One team, with its role copies and its members.</summary>
 public sealed record CensusTeam(

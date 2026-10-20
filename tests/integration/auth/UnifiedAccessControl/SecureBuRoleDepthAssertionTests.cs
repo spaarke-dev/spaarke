@@ -354,7 +354,7 @@ public class SecureBuRoleDepthAssertionTests
             BusinessUnits.Append(new BusinessUnitNode(SecondSecureNamedBu, "Secure Record", SiblingBu)).ToArray(),
             new Dictionary<(Guid, string), PrivilegeDepth> { [(someRole, "prvReadsprk_Project")] = PrivilegeDepth.Basic },
             new[] { new CensusRole(someRole, "Spaarke Basic User", RootBu, someRole) },
-            new[] { new CensusUser(userInSecond, "Second Unit User", "second@example.test", IsHuman: true, SecondSecureNamedBu, new[] { someRole }) },
+            new[] { new CensusUser(userInSecond, IsHuman: true, SecondSecureNamedBu, new[] { someRole }) },
             Array.Empty<CensusTeam>(),
             SecureRecordOwnerRoleSet.Embedded,
             SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded));
@@ -386,9 +386,9 @@ public class SecureBuRoleDepthAssertionTests
             new[] { new CensusRole(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole) },
             new[]
             {
-                new CensusUser(humanMember, "Member Human", "member@example.test", IsHuman: true, SiblingBu, Array.Empty<Guid>()),
-                new CensusUser(appMember, "# member-app", null, IsHuman: false, RootBu, Array.Empty<Guid>()),
-                new CensusUser(disabledInBu, "Disabled In Bu", "old@example.test", IsHuman: false, SecureBu, Array.Empty<Guid>())
+                new CensusUser(humanMember, IsHuman: true, SiblingBu, Array.Empty<Guid>()),
+                new CensusUser(appMember, IsHuman: false, RootBu, Array.Empty<Guid>()),
+                new CensusUser(disabledInBu, IsHuman: false, SecureBu, Array.Empty<Guid>())
             },
             new[]
             {
@@ -826,7 +826,7 @@ public class SecureBuRoleDepthAssertionTests
     public void Build_WhenAnInteractiveUserNamedWithAHashHoldsDeepAtTheRoot_ReportsHumanReach()
     {
         var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusOfUsers(
-            ("# X", "hash.named@example.test", hasApplicationId: false, accessMode: 0)));
+            (hasApplicationId: false, accessMode: 0)));
 
         outcome.Verdict.Should().Be(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit, outcome.Message);
     }
@@ -839,7 +839,7 @@ public class SecureBuRoleDepthAssertionTests
     public void Build_WhenAPlatformAccountHoldsDeepAtTheRoot_Passes(bool hasApplicationId, int accessMode)
     {
         var outcome = SecureBuRoleDepthAssertion.Evaluate(CensusOfUsers(
-            ("# platform account", null, hasApplicationId, accessMode)));
+            (hasApplicationId, accessMode)));
 
         outcome.Passed.Should().BeTrue(outcome.Message);
     }
@@ -942,8 +942,8 @@ public class SecureBuRoleDepthAssertionTests
             },
             new[]
             {
-                new CensusUser(admin, "Shared Name", "shared.upn@example.test", IsHuman: true, RootBu, new[] { adminRole }),
-                new CensusUser(deepHolder, "Shared Name", "shared.upn@example.test", IsHuman: true, RootBu, new[] { deepRole })
+                new CensusUser(admin, IsHuman: true, RootBu, new[] { adminRole }),
+                new CensusUser(deepHolder, IsHuman: true, RootBu, new[] { deepRole })
             },
             new[] { new CensusTeam(Guid.NewGuid(), OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()) },
             SecureRecordOwnerRoleSet.Embedded,
@@ -1026,11 +1026,11 @@ public class SecureBuRoleDepthAssertionTests
             },
             new[]
             {
-                new CensusUser(reacher, "reacher.name@example.test", "reacher.upn@example.test", IsHuman: true, RootBu, new[] { deepRole }),
-                new CensusUser(teamAdmin, "Zq Team Admin", "team.admin@example.test", IsHuman: true, RootBu, Array.Empty<Guid>()),
-                new CensusUser(member, "Zq Member", "member@example.test", IsHuman: true, SiblingBu, Array.Empty<Guid>()),
-                new CensusUser(ownerRoleUser, "Zq Owner Role", "owner.role@example.test", IsHuman: true, SiblingBu, new[] { ownerRole }),
-                new CensusUser(inBu, "Zq In Bu", "in.bu@example.test", IsHuman: false, SecureBu, Array.Empty<Guid>())
+                new CensusUser(reacher, IsHuman: true, RootBu, new[] { deepRole }),
+                new CensusUser(teamAdmin, IsHuman: true, RootBu, Array.Empty<Guid>()),
+                new CensusUser(member, IsHuman: true, SiblingBu, Array.Empty<Guid>()),
+                new CensusUser(ownerRoleUser, IsHuman: true, SiblingBu, new[] { ownerRole }),
+                new CensusUser(inBu, IsHuman: false, SecureBu, Array.Empty<Guid>())
             },
             new[]
             {
@@ -1050,9 +1050,9 @@ public class SecureBuRoleDepthAssertionTests
             SecureBuVerdict.SecureOwnerRoleHeldBeyondOwnerTeam,
             SecureBuVerdict.SecureBusinessUnitHasUsers
         });
-        outcome.Message.Should().NotContain("@example.test", "no email or UPN is ever put into a finding message")
-            .And.NotContain("reacher.name", "nor an email-shaped display name")
-            .And.NotContain("Zq ", "nor any display name");
+        typeof(CensusUser).GetProperties().Select(p => p.Name).Should().NotContain(
+            new[] { "Name", "DomainName" },
+            "#2130: a census user carries no display name or UPN, so neither can reach a finding message");
         foreach (var id in new[] { reacher, teamAdmin, member, ownerRoleUser, inBu })
         {
             outcome.Message.Should().Contain(id.ToString(), "each user is named by systemuser id");
@@ -1064,7 +1064,7 @@ public class SecureBuRoleDepthAssertionTests
     /// shared rule (<see cref="SecureBuRoleDepthCensusBuilder.IsHumanPrincipal"/>) the readers use.
     /// </summary>
     private static SecureBuRoleDepthCensus CensusOfUsers(
-        params (string FullName, string? DomainName, bool hasApplicationId, int accessMode)[] users)
+        params (bool hasApplicationId, int accessMode)[] users)
     {
         var deepRole = Guid.NewGuid();
         var ownerRole = Guid.NewGuid();
@@ -1082,7 +1082,7 @@ public class SecureBuRoleDepthAssertionTests
                 new CensusRole(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole)
             },
             users.Select(u => new CensusUser(
-                    Guid.NewGuid(), u.FullName, u.DomainName,
+                    Guid.NewGuid(),
                     SecureBuRoleDepthCensusBuilder.IsHumanPrincipal(u.hasApplicationId, isDisabled: false, u.accessMode),
                     RootBu, new[] { deepRole }))
                 .ToArray(),
@@ -1386,7 +1386,7 @@ public class SecureBuRoleDepthAssertionTests
         // _businessunitid_value is read for clause 4 (task 144): every systemuser in the secure BU, of any kind.
         var users = (await GetAllAsync(
                 http,
-                "systemusers?$select=fullname,domainname,systemuserid,accessmode,applicationid,isdisabled,_businessunitid_value"
+                "systemusers?$select=systemuserid,accessmode,applicationid,isdisabled,_businessunitid_value"
                 + "&$expand=systemuserroles_association($select=roleid)"))
             .Select(ReadUser)
             .ToArray();
@@ -1432,12 +1432,8 @@ public class SecureBuRoleDepthAssertionTests
     /// </summary>
     private static CensusUser ReadUser(JsonElement row)
     {
-        var name = Text(row, "fullname") ?? string.Empty;
-
         return new CensusUser(
             GuidOf(row, "systemuserid"),
-            name,
-            Text(row, "domainname"),
             SecureBuRoleDepthCensusBuilder.IsHumanPrincipal(
                 hasApplicationId: Text(row, "applicationid") is not null,
                 isDisabled: Flag(row, "isdisabled"),
