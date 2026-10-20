@@ -2585,6 +2585,81 @@ public class RecordOwnershipResolverTests
     }
 
     [Fact]
+    public async Task Reparent_WhenTheAssignmentLandsButAnotherWriterMovedTheThreadFirst_ItIsNotALostResponse_AndTheFailureIsThrown()
+    {
+        // Must-fire (round 5, the recovery's landed check): A re-files a message (in an ordinary thread) into the secure matter.
+        // Just before A's owner write, W joins the message to a thread regarding another secure matter. A's re-read write
+        // lands as the Secure team and then reports a failure (a lost response). The owner is the Secure team and the row is
+        // still filed as A resolved it — but its thread is W's, not the one A's change left: the Secure owner is not proof
+        // that A's assignment landed for A's filing. No success is answered, nothing is put back over W's join, and A's
+        // original failure is thrown.
+        var (directory, messageId) = MessageWorld(MatterId, ChildBu, ChildTeam, threadId: OrdinaryThreadId);
+        var failure = new TimeoutException("response lost");
+        directory.AssignmentFault = failure;
+        directory.AssignmentLandsBeforeFault = true;
+        var joined = false;
+        directory.BeforeWrite = (world, fields) =>
+        {
+            if (joined || !fields.ContainsKey("ownerid"))
+                return;
+            joined = true;
+            world.Write("sprk_communication", messageId, new()
+            {
+                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", SecureThreadId),
+            });
+        };
+        var request = MoveMessageIntoTheSecureMatter(messageId);
+
+        var act = () => Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<TimeoutException>("no success over W's thread join")).Which.Should().BeSameAs(failure);
+        joined.Should().BeTrue();
+        directory.FieldUpdates.Should().BeEmpty("nothing is put back over the other writer's join");
+        directory.Row("sprk_communication", messageId).GetAttributeValue<EntityReference>("sprk_communicationthread")
+            .Id.Should().Be(SecureThreadId, "W's join stands");
+        MessageOwnerOf(directory, messageId).Should().Be(SecureNamedTeam, "held, never exposed");
+    }
+
+    [Fact]
+    public async Task Reparent_WhenAThreadJoinsAssignmentLandsButReportsAFailure_TheJoinStands_AndNothingIsPutBack()
+    {
+        // Must-NOT-fire control for the recovery's landed check: a lost-response thread join through the REAL join
+        // (ThreadResolver). The message joins a record thread regarding a secure matter; its Secure owner write lands and then
+        // reports a failure. The thread it holds is the one this join wrote (its own lineage change, named in ParentChanges),
+        // so the assignment landed: the join returns, the thread stands, and nothing is put back.
+        var (directory, messageId) = MessageWorld(MatterId, ChildBu, ChildTeam);
+        directory.AssignmentFault = new TimeoutException("response lost");
+        directory.AssignmentLandsBeforeFault = true;
+        var joinedThread = new EntityReference("sprk_communicationthread", SecureThreadId);
+        var threads = new Mock<IGenericEntityService>();
+        threads
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", SecureThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_communicationthread", SecureThreadId)
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureThreadMatterId),
+            });
+
+        var assignment = await ThreadResolver.AssignToThreadReconcilingOwnerAsync(
+            threads.Object, Build(directory), messageId, SecureThreadId,
+            _ =>
+            {
+                directory.Write("sprk_communication", messageId, new()
+                {
+                    [ThreadResolver.ThreadLookupOnCommunication] = joinedThread,
+                });
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        assignment.Should().NotBeNull("the join returns: the re-file stands");
+        directory.Assignments.Should().Equal(new[] { ("sprk_communication", messageId, SecureNamedTeam) });
+        MessageOwnerOf(directory, messageId).Should().Be(SecureNamedTeam);
+        directory.Row("sprk_communication", messageId).GetAttributeValue<EntityReference>("sprk_communicationthread")
+            .Should().Be(joinedThread, "the join stands");
+        directory.FieldUpdates.Should().BeEmpty("filing and owner agree — nothing to undo");
+    }
+
+    [Fact]
     public async Task Reparent_WhenAPermittedMoveOutsParentsAreChangedByAnotherWriter_ARowHeldInTheSecureUnitIsNotGivenAnOrdinaryOwner()
     {
         // Must-fire (the guard's conjunction): this call's F3 check permitted the move out of the secure project, and another
