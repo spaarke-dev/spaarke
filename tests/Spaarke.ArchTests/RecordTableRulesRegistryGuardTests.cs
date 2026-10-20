@@ -6,8 +6,8 @@ using Xunit;
 namespace Spaarke.ArchTests;
 
 /// <summary>
-/// Field-mapping-server-write-path-r1 task 012 (spec FR-11): every table a server create path accepts has an entry in the
-/// per-table rules registry (<see cref="RecordTableRules"/>). A create table with no entry has no declared protected
+/// Field-mapping-server-write-path-r1 task 012 (spec FR-11): every table on a server create path's fixed accept-list (the
+/// browser create route and the Office quick-create) has an entry in the per-table rules registry (<see cref="RecordTableRules"/>). A create table with no entry has no declared protected
 /// columns, owner exception, search-index or mapping policy, so the unified create service (task 013) would have nothing
 /// to enforce for it.
 /// </summary>
@@ -16,7 +16,8 @@ namespace Spaarke.ArchTests;
 /// registry would make the guard pass by construction): the browser create route's accept-list
 /// (<see cref="ChildRecordEndpoints.CreateTables"/>) and the Office quick-create's Matter and Project
 /// (<see cref="RecordCreationService.MatterEntity"/>, <see cref="RecordCreationService.ProjectEntity"/>; its Invoice is on the
-/// route's list). Task 013 adds the unified service's accepted set here when it exists.</para>
+/// route's list). The chat <c>dataverse.create_record</c> tool has no accept-list (any table but <c>sprk_document</c>), so
+/// it is not covered; task 013 adds the unified service's accepted set here when it exists.</para>
 /// <para><b>Controls.</b> <see cref="Guard_MustFire_ACreateTableWithNoEntry_IsReported"/> adds a fixture table the registry
 /// does not hold and requires the guard to report it, against the real registry and against a fixture lookup;
 /// <see cref="Guard_MustNotFire_EveryEntryPresent_ReportsNothing"/> is the same detector over a fixture where every table
@@ -26,7 +27,7 @@ public class RecordTableRulesRegistryGuardTests
 {
     private const string FixtureTableWithNoEntry = "sprk_registryguardfixture_noentry";
 
-    /// <summary>Every table a server create path accepts today.</summary>
+    /// <summary>Every table on a server create path's fixed accept-list today.</summary>
     private static IReadOnlyList<string> CreateTables() =>
         ChildRecordEndpoints.CreateTables
             .Append(RecordCreationService.MatterEntity)

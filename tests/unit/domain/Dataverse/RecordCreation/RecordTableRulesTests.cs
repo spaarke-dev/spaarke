@@ -137,7 +137,6 @@ public class RecordTableRulesTests
     [Fact]
     public void MappingApplies_EveryOtherTable_IsTrue()
     {
-        RecordTableRules.All.Where(r => r.MappingExclusion is null).Should().OnlyContain(r => r.MappingApplies);
         RecordTableRules.All.Where(r => !r.MappingApplies).Select(r => r.Table)
             .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision");
     }
@@ -164,11 +163,27 @@ public class RecordTableRulesTests
     }
 
     [Fact]
-    public void OwnershipException_UnfiledCommunicationKeepsItsCreator_IsTheOnlyOne()
+    public void OwnershipException_IsDeclaredExactlyWhereThePathKeepsTheCreatorWhenUnfiled()
     {
-        RecordTableRules.All.Where(r => r.OwnershipException is not null)
-            .Select(r => (r.Table, r.OwnershipException!.Name))
-            .Should().Equal(("sprk_communication", "UnfiledCommunicationKeepsCreator"));
+        // The registry's exception and OwnedChildWrite.KeepsItsCreatorWhenUnfiled (the rule PathFor enforces today) must
+        // name the same registered tables; sprk_communicationthread (E2) is not a registry table yet (task 012 notes).
+        var declared = RecordTableRules.All
+            .Where(r => r.OwnershipException?.Name == "UnfiledCommunicationKeepsCreator").Select(r => r.Table);
+        var enforced = RecordTableRules.All
+            .Where(r => OwnedChildWrite.KeepsItsCreatorWhenUnfiled(r.Table)).Select(r => r.Table);
+
+        declared.Should().BeEquivalentTo(enforced).And.Equal("sprk_communication");
+        RecordTableRules.All.Where(r => r.OwnershipException is not null).Should().HaveCount(1);
+    }
+
+    [Theory]
+    [InlineData("", "detail")]
+    [InlineData("invoice_family_no_core_record", " ")]
+    public void PreWriteRefusal_RefusedWithoutACodeOrADetail_IsRefused(string code, string detail)
+    {
+        var act = () => PreWriteRefusal.Refused(code, detail);
+
+        act.Should().Throw<ArgumentException>();
     }
 
     [Theory]

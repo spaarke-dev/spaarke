@@ -70,9 +70,10 @@ internal static class RecordTableRules
             ForPerson = new ForPersonLookup("sprk_assignedtointernal", "contact"),
             ServerDefaults =
             [
-                new ServerDefault("sprk_assignedtointernal",
+                new ServerDefault("sprk_assignedtointernal", "Office quick-create",
                     "The contact the request names, else a mapped value, else the maker's linked contact (Office " +
                     "RecordCreationService, tasks 100 and 152)."),
+                ChatCallerIsTheForPerson("sprk_assignedtointernal"),
             ],
             // Office RecordCreationService.ApplyBusinessUnitDefaultsAsync fills sprk_searchindexname / sprk_ai_search_index.
             SearchIndexed = true,
@@ -91,9 +92,10 @@ internal static class RecordTableRules
             ForPerson = new ForPersonLookup("sprk_assignedtointernal", "contact"),
             ServerDefaults =
             [
-                new ServerDefault("sprk_assignedtointernal",
+                new ServerDefault("sprk_assignedtointernal", "Office quick-create",
                     "The contact the request names, else a mapped value, else the maker's linked contact (Office " +
                     "RecordCreationService, tasks 100 and 152)."),
+                ChatCallerIsTheForPerson("sprk_assignedtointernal"),
             ],
             SearchIndexed = true,
         },
@@ -107,6 +109,7 @@ internal static class RecordTableRules
             // them (#1608; task 012 notes, "Pre-existing path difference"). Which paths enforce them is task 013's decision.
             TableServerOwnedColumns = Columns("sprk_containerid", "sprk_securitybu", "sprk_accesspermission"),
             ForPerson = new ForPersonLookup("sprk_assignedtointernal", "contact"),
+            ServerDefaults = [ChatCallerIsTheForPerson("sprk_assignedtointernal")],
         },
 
         // ── Children on the browser create route (ChildRecordEndpoints.CreateTables) ──────────────────────────────────
@@ -118,9 +121,10 @@ internal static class RecordTableRules
             ForPerson = new ForPersonLookup(AssignedToDefaults.AssignedToAttribute, "contact"),
             ServerDefaults =
             [
-                new ServerDefault(AssignedToDefaults.AssignedToAttribute,
+                new ServerDefault(AssignedToDefaults.AssignedToAttribute, "server writers",
                     "The triggering person's contact, else the regarding parent's responsible internal contact " +
-                    "(AssignedToDefaults; the server writers TodoGenerationService and TaskActionCore)."),
+                    "(AssignedToDefaults; TodoGenerationService and TaskActionCore)."),
+                ChatCallerIsTheForPerson(AssignedToDefaults.AssignedToAttribute),
             ],
         },
         new RecordTableRule
@@ -130,14 +134,15 @@ internal static class RecordTableRules
             ForPerson = new ForPersonLookup(AssignedToDefaults.AssignedToAttribute, "contact"),
             ServerDefaults =
             [
-                new ServerDefault(AssignedToDefaults.AssignedToAttribute,
+                new ServerDefault(AssignedToDefaults.AssignedToAttribute, "server writers",
                     "The triggering person's contact, else the regarding parent's responsible internal contact " +
                     "(AssignedToDefaults)."),
+                ChatCallerIsTheForPerson(AssignedToDefaults.AssignedToAttribute),
             ],
         },
         new RecordTableRule { Table = "sprk_memo", Kind = RecordTableKind.Child },
-        // ebilling-r1 #1911 (not on master): the invoice-family pre-write rule registers on this table and on
-        // sprk_billingevent (task 012 notes, "Invoice-family reconciliation recipe").
+        // ebilling-r1 #1911 (not on master): the invoice-family pre-write rule registers on this table, sprk_billingevent
+        // and the other four invoice-family tables (task 012 notes, "Invoice-family reconciliation recipe").
         new RecordTableRule { Table = "sprk_invoice", Kind = RecordTableKind.Child },
         new RecordTableRule { Table = "sprk_reportcard", Kind = RecordTableKind.Child },
         new RecordTableRule { Table = "sprk_analysis", Kind = RecordTableKind.Child },
@@ -160,6 +165,7 @@ internal static class RecordTableRules
             Table = "sprk_communication",
             Kind = RecordTableKind.Child,
             ForPerson = new ForPersonLookup("sprk_sentby", "systemuser"),
+            ServerDefaults = [ChatCallerIsTheForPerson("sprk_sentby")],
             OwnershipException = new NamedRule(
                 "UnfiledCommunicationKeepsCreator",
                 "Escalation E1: a communication filed under nothing keeps its creator (UnfiledOwnership.KeepCreator; " +
@@ -200,6 +206,10 @@ internal static class RecordTableRules
     internal static RecordTableRule Get(string table) =>
         Find(table) ?? throw new KeyNotFoundException($"The record table rules registry has no entry for '{table}'.");
 
+    /// <summary>The chat create's "for" person: the caller, when the item leaves the column unset (owner round 7 item 3).</summary>
+    private static ServerDefault ChatCallerIsTheForPerson(string column) => new(column, "chat create (dataverse.create_record)",
+        "The caller, when the item leaves it unset (DataverseCreateRecordHandler.WithForPersonAsync, owner round 7 item 3).");
+
     private static NamedRule OntologyContentIsNotMapped => new(
         "OntologyContentIsNotMapped",
         "spaarke-ontology-platform-r1 §0.3 binds a Signal's sprk_sentence and fact snapshot and a Decision Record's " +
@@ -222,8 +232,12 @@ internal enum RecordTableKind
 /// <summary>The column a table names the person a record is FOR in, and the table that column looks up.</summary>
 internal sealed record ForPersonLookup(string Column, string RelatedTable);
 
-/// <summary>A value the server fills on create when the request leaves the column empty (fill-only), and its rule.</summary>
-internal sealed record ServerDefault(string Column, string Rule);
+/// <summary>
+/// A value the server fills on create when the request leaves the column empty (fill-only), the create path that fills
+/// it today, and its rule. OWNER REVIEW: the paths differ today (the chat create names the caller, the Office create and
+/// the server writers apply their own precedence); task 013 decides the one default the unified service applies.
+/// </summary>
+internal sealed record ServerDefault(string Column, string Path, string Rule);
 
 /// <summary>A named exception to the default policy, with the reason it exists. The rationale is never empty.</summary>
 internal sealed record NamedRule
@@ -248,15 +262,51 @@ internal sealed record NamedRule
 internal sealed record PreWriteRow(IDataverseUserClient Caller, string Table, DataverseWriteItemMapper.MappedItem Item);
 
 /// <summary>
-/// A pre-write rule's refusal. Nothing is created. Exactly one of: a stable refusal <paramref name="Code"/> with its
-/// <paramref name="Detail"/>; the caller's own Dataverse failure (<paramref name="ClientFailure"/>); or a record the row
-/// names that the caller cannot see (<paramref name="ParentUnavailable"/>, answered as the uniform not-found).
+/// A pre-write rule's refusal. Nothing is created. Exactly one of: a stable refusal <see cref="Code"/> with its
+/// <see cref="Detail"/> (<see cref="Refused"/>); the caller's own Dataverse failure (<see cref="Failed"/>); or a record
+/// the row names that the caller cannot see (<see cref="NotFound"/>, answered as the uniform not-found). The factories
+/// are the only way to make one, so a refusal with no reason cannot exist.
 /// </summary>
-internal sealed record PreWriteRefusal(
-    string? Code,
-    string? Detail,
-    DataverseUserResponse? ClientFailure = null,
-    bool ParentUnavailable = false);
+internal sealed record PreWriteRefusal
+{
+    private PreWriteRefusal(string? code, string? detail, DataverseUserResponse? clientFailure, bool parentUnavailable)
+    {
+        Code = code;
+        Detail = detail;
+        ClientFailure = clientFailure;
+        ParentUnavailable = parentUnavailable;
+    }
+
+    /// <summary>The rule's stable refusal code; <c>null</c> for a client failure or a not-found.</summary>
+    public string? Code { get; }
+
+    /// <summary>Why, in words the caller can act on; set with <see cref="Code"/>.</summary>
+    public string? Detail { get; }
+
+    /// <summary>The caller's own Dataverse failure on a read the rule needed.</summary>
+    public DataverseUserResponse? ClientFailure { get; }
+
+    /// <summary>A record the row names that the caller cannot see (the uniform not-found).</summary>
+    public bool ParentUnavailable { get; }
+
+    /// <summary>Refused by the rule with a stable code.</summary>
+    public static PreWriteRefusal Refused(string code, string detail)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(code);
+        ArgumentException.ThrowIfNullOrWhiteSpace(detail);
+        return new(code, detail, null, false);
+    }
+
+    /// <summary>A read the rule needed failed under the caller's token.</summary>
+    public static PreWriteRefusal Failed(DataverseUserResponse clientFailure)
+    {
+        ArgumentNullException.ThrowIfNull(clientFailure);
+        return new(null, null, clientFailure, false);
+    }
+
+    /// <summary>A record the row names cannot be seen by the caller (or does not exist).</summary>
+    public static PreWriteRefusal NotFound() => new(null, null, null, true);
+}
 
 /// <summary>A pre-write check: <c>null</c> when the row may be written.</summary>
 internal delegate Task<PreWriteRefusal?> PreWriteCheck(PreWriteRow row, CancellationToken ct);
