@@ -650,6 +650,53 @@ public class InvoiceSubmissionPersisterTests
         json.RootElement.GetProperty("invoiceName").GetString().Should().NotBeNullOrWhiteSpace();
     }
 
+    [Fact(DisplayName = "049 Held: a Blocked outcome's stored plan entry is the held presentation (headline, sentence with the deciding reason, Held line); the rejected outcome's is not")]
+    public async Task SignalPlan_Blocked_StoresTheHeldPresentation()
+    {
+        var harness = new ProcessorHarness { Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()], Channel = InvoiceSubmissionChannel.Internal };
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20))];
+        var blocked = await harness.RunAsync();
+        blocked.Kind.Should().Be(SubmissionEvaluationKind.Blocked);
+        var rejected = blocked with { Kind = SubmissionEvaluationKind.AutoRejected };
+
+        using var json = JsonDocument.Parse(InvoiceSubmissionPersister.BuildFindingsJson(blocked, InvoiceId));
+        using var control = JsonDocument.Parse(InvoiceSubmissionPersister.BuildFindingsJson(rejected, InvoiceId));
+
+        var entry = json.RootElement.GetProperty("signalPlan").EnumerateArray().Single();
+        var plain = control.RootElement.GetProperty("signalPlan").EnumerateArray().Single();
+        entry.GetProperty("headline").GetString().Should().Be("Invoice held for review");
+        entry.GetProperty("sentence").GetString().Should().Be("The rejection rule would reject this invoice: " + plain.GetProperty("sentence").GetString());
+        entry.GetProperty("decision").GetString().Should().Be(nameof(BillingGroupDecision.Blocked));
+        entry.GetProperty("fingerprint").GetString().Should().Be(plain.GetProperty("fingerprint").GetString());
+        entry.GetProperty("evidence").EnumerateArray().Should().ContainSingle(e => e.GetProperty("kind").GetString() == BillingFindingSignalMapper.DecisionEvidenceKind)
+            .Which.GetProperty("text").GetString().Should().Be("ebilling.submission.blocked");
+        json.RootElement.TryGetProperty(InvoiceSubmissionPersister.SignalPlanRefusalsMember, out _).Should().BeFalse();
+
+        plain.GetProperty("headline").GetString().Should().NotBe("Invoice held for review");
+        plain.GetProperty("decision").GetString().Should().Be(nameof(BillingGroupDecision.Rejects));
+        plain.GetProperty("evidence").EnumerateArray().Should().NotContain(e => e.GetProperty("kind").GetString() == BillingFindingSignalMapper.DecisionEvidenceKind);
+    }
+
+    [Fact(DisplayName = "049 Held (F1-3 preflight): a Blocked outcome whose reason fits alone but not behind the held wording keeps its Signal with the no-value wording, not a persist refusal")]
+    public async Task SignalPlan_Blocked_OverflowingReason_FallsBackToTheNoValueWording()
+    {
+        var room = 2000 - "The rejection rule would reject this invoice: ".Length;
+        var rule = InvoiceSubmissionProcessorTests.InvoiceAgeReject() with { MessageTemplate = new string('a', room + 1) };
+        var harness = new ProcessorHarness { Rules = [rule], Channel = InvoiceSubmissionChannel.Internal };
+        harness.Lines = [InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20))];
+        var blocked = await harness.RunAsync();
+        blocked.Kind.Should().Be(SubmissionEvaluationKind.Blocked);
+
+        using var json = JsonDocument.Parse(InvoiceSubmissionPersister.BuildFindingsJson(blocked, InvoiceId));
+        using var control = JsonDocument.Parse(InvoiceSubmissionPersister.BuildFindingsJson(blocked with { Kind = SubmissionEvaluationKind.AutoRejected }, InvoiceId));
+
+        control.RootElement.GetProperty("signalPlan").GetArrayLength().Should().Be(1, "the reason alone is within the sentence limit");
+        json.RootElement.TryGetProperty(InvoiceSubmissionPersister.SignalPlanRefusalsMember, out _).Should().BeFalse();
+        var entry = json.RootElement.GetProperty("signalPlan").EnumerateArray().Single();
+        entry.GetProperty("sentence").GetString().Should().Be("The rejection rule would reject this invoice.");
+        entry.GetProperty("headline").GetString().Should().Be("Invoice held for review");
+    }
+
     [Fact(DisplayName = "049 D (D-112): a withheld group's stored plan carries no value text")]
     public async Task SignalPlan_WithheldGroup_HasNoValueText()
     {

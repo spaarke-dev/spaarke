@@ -953,8 +953,9 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     }
 
     /// <summary>
-    /// The Signal plan (notes section 5; part D): the billing findings mapped by <see cref="BillingFindingSignalMapper.MapAll(BillingEvaluationResult, BillingSignalSubjects, IReadOnlyList{FindingDecision})"/>
-    /// with 073's decisions (the deciding reason is the primary one; a held Reject group carries the Held line), one entry per
+    /// The Signal plan (notes section 5; part D): the billing findings mapped by <see cref="BillingFindingSignalMapper.MapAll(BillingEvaluationResult, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?)"/>
+    /// with 073's decisions and the outcome kind (the deciding reason is the primary one; a held Reject group carries the Held line; under a
+    /// Blocked outcome a deciding group is presented as held for review), one entry per
     /// (policy, subject): the merged, scrubbed request (headline, lane, severity, template, facts, evidence), its rendered sentence, its
     /// reason codes, consequence, fingerprint and 073's group decision. Never <see cref="BillingSignalMapping.Findings"/> (072 part E
     /// re-check, D-112). Part D writes the rule Signals from this stored copy on every run, the first and a resume alike, so it never
@@ -977,7 +978,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             return plan;
         }
 
-        var mappings = BillingFindingSignalMapper.MapAll(evaluation, SignalSubjectsFor(outcome, invoiceId), outcome.Decision?.Findings);
+        var mappings = BillingFindingSignalMapper.MapAll(evaluation, SignalSubjectsFor(outcome, invoiceId), outcome.Decision?.Findings, outcome.Kind);
         foreach (var mapping in mappings)
         {
             var request = mapping.Request;

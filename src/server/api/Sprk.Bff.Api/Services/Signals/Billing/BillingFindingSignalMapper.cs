@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Services.Signals.Billing;
 
@@ -24,6 +25,10 @@ public enum BillingMessageSource
 
     /// <summary>The type's default headline as a sentence: no template's tokens are all present for this finding.</summary>
     HeadlineOnly,
+
+    /// <summary>The Blocked outcome's held wording (<see cref="BillingFindingSignalMapper.HeldSentenceTemplate"/>, or
+    /// <see cref="BillingFindingSignalMapper.HeldSentenceNoValue"/> when the deciding reason would not fit the sentence limit).</summary>
+    HeldForReview,
 }
 
 /// <summary>How the rejection rule (073) decided a merged Signal's reasons, when the caller passed its decisions (task 049 part D).</summary>
@@ -38,6 +43,12 @@ public enum BillingGroupDecision
     /// <summary>The group's consequence is Reject but 073 held every reason: not presented as a rejection; the evidence carries a
     /// <see cref="BillingFindingSignalMapper.DecisionEvidenceKind"/> line <c>Held</c> with the hold reason.</summary>
     Held,
+
+    /// <summary>A merged reason rejects, but the submission's outcome is Blocked (an Internal submission the rule would reject is held for
+    /// review, not rejected): the Signal says the invoice is held (<see cref="BillingFindingSignalMapper.HeldHeadline"/>,
+    /// <see cref="BillingFindingSignalMapper.HeldSentenceTemplate"/>) and the evidence carries a
+    /// <see cref="BillingFindingSignalMapper.DecisionEvidenceKind"/> line <c>Held</c> with <see cref="SubmissionReasonCodes.Blocked"/>.</summary>
+    Blocked,
 
     /// <summary>The group's consequence is not Reject: nothing to present.</summary>
     NotRejecting,
@@ -87,7 +98,7 @@ public sealed record BillingSignalMapping(SignalWriteRequest Request, BillingMes
 /// <remarks>
 /// <para><b>One Signal per (policy, subject) (ontology-r1, Signal dedupe option a, 2026-10-18).</b> The writer's key is
 /// <c>policy|subjectEntity|subjectId|episode</c> and a write to an open row only refreshes it, so a second finding of one policy on one
-/// subject (an ExpenseRule code and cap on one line, RequiredData with several missing fields) was silently dropped. <see cref="MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision})"/>
+/// subject (an ExpenseRule code and cap on one line, RequiredData with several missing fields) was silently dropped. <see cref="MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?)"/>
 /// merges them: the reason codes sorted (ordinal); the strongest consequence wins (<see cref="BillingSignalMapping.Consequence"/>);
 /// the evidence holds one <see cref="ReasonEvidenceKind"/> line per reason with that reason's own text, the union of the values read
 /// (<see cref="FieldEvidenceKind"/> for an extracted field with its confidence, <see cref="ReferenceEvidenceKind"/> for a reference
@@ -138,6 +149,20 @@ public static class BillingFindingSignalMapper
     /// <summary>The <c>Ref</c> of a <see cref="DecisionEvidenceKind"/> line: the rule held the reasons for review.</summary>
     public const string HeldDecisionRef = "Held";
 
+    /// <summary>The headline of a Signal whose group decision is <see cref="BillingGroupDecision.Blocked"/> (the invoice is held for review).</summary>
+    public const string HeldHeadline = "Invoice held for review";
+
+    /// <summary>The fact (<see cref="HeldSentenceTemplate"/>'s one token) that carries the deciding finding's rendered reason.</summary>
+    public const string HeldReasonFact = "decidingReason";
+
+    /// <summary>The sentence of a <see cref="BillingGroupDecision.Blocked"/> Signal: the rejection rule's own deciding reason, as it is
+    /// rendered everywhere else (never a raw code).</summary>
+    public const string HeldSentenceTemplate = "The rejection rule would reject this invoice: {{" + HeldReasonFact + "}}";
+
+    /// <summary>The no-value wording: used when <see cref="HeldSentenceTemplate"/> with the deciding reason would be refused by the writer's
+    /// own checks (the sentence would exceed its limit). The reason is left out whole, never truncated; it stays in its evidence line.</summary>
+    public const string HeldSentenceNoValue = "The rejection rule would reject this invoice.";
+
     internal const string InvoiceEntity = "sprk_invoice";
     internal const string LineEntity = "sprk_billingevent";
     private const int MaxHeadlineLength = 200;
@@ -148,13 +173,14 @@ public static class BillingFindingSignalMapper
     /// <summary>The severity of a Signal whose primary reason is flag-only: the lowest, so a note never ranks like a breach.</summary>
     internal const int FlagOnlySeverity = SignalWriter.SeverityInfo;
 
-    /// <summary>The Signal writes of one evaluation: <see cref="MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision})"/>
+    /// <summary>The Signal writes of one evaluation: <see cref="MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?)"/>
     /// over its findings and rule versions.</summary>
     public static IReadOnlyList<BillingSignalMapping> MapAll(
-        BillingEvaluationResult evaluation, BillingSignalSubjects subjects, IReadOnlyList<FindingDecision>? decisions = null)
+        BillingEvaluationResult evaluation, BillingSignalSubjects subjects, IReadOnlyList<FindingDecision>? decisions = null,
+        SubmissionEvaluationKind? outcome = null)
     {
         ArgumentNullException.ThrowIfNull(evaluation);
-        return MapAll(evaluation.Findings, evaluation.RulesByVersion, subjects, decisions);
+        return MapAll(evaluation.Findings, evaluation.RulesByVersion, subjects, decisions, outcome);
     }
 
     /// <summary>
@@ -169,15 +195,26 @@ public static class BillingFindingSignalMapper
     /// the first deciding finding in reason order as its primary reason (message, headline, lane, severity), so the firm sees the reason that
     /// actually rejected; a group whose consequence is Reject but which 073 held throughout is not presented as a rejection (a
     /// <see cref="DecisionEvidenceKind"/> line). The fingerprint does not depend on them.</param>
+    /// <param name="outcome">Optional (task 049, Held presentation): how the pipeline classified the submission. With
+    /// <see cref="SubmissionEvaluationKind.Blocked"/> a group holding a deciding finding is presented as held for review
+    /// (<see cref="BillingGroupDecision.Blocked"/>: <see cref="HeldHeadline"/>, <see cref="HeldSentenceTemplate"/> and a
+    /// <see cref="DecisionEvidenceKind"/> <c>Held</c> line with <see cref="SubmissionReasonCodes.Blocked"/>); any other value changes nothing.
+    /// The caller does not special-case it: it passes the outcome and stores what the mapper returns.</param>
     /// <exception cref="ArgumentException">A finding's version is not in <paramref name="rulesByVersion"/>, or its line has no row in
-    /// <paramref name="subjects"/>, or <paramref name="decisions"/> is not one decision per finding, of that finding.</exception>
+    /// <paramref name="subjects"/>, or <paramref name="decisions"/> is not one decision per finding, of that finding, or
+    /// <paramref name="outcome"/> is Blocked and <paramref name="decisions"/> is null (nothing says which reason would reject).</exception>
     public static IReadOnlyList<BillingSignalMapping> MapAll(
         IReadOnlyList<BillingFinding> findings, IReadOnlyDictionary<Guid, BillingRuleCandidate> rulesByVersion, BillingSignalSubjects subjects,
-        IReadOnlyList<FindingDecision>? decisions = null)
+        IReadOnlyList<FindingDecision>? decisions = null, SubmissionEvaluationKind? outcome = null)
     {
         ArgumentNullException.ThrowIfNull(findings);
         ArgumentNullException.ThrowIfNull(rulesByVersion);
         ArgumentNullException.ThrowIfNull(subjects);
+        if (outcome == SubmissionEvaluationKind.Blocked && decisions is null)
+        {
+            throw new ArgumentException("A Blocked outcome needs the rejection rule's decisions: they say which reason would reject.", nameof(decisions));
+        }
+
         var decisionOf = DecisionsByIndex(findings, decisions);
 
         var groups = new List<List<(BillingFinding Finding, BillingRuleCandidate Rule, FindingDecision? Decision)>>();
@@ -201,7 +238,7 @@ public static class BillingFindingSignalMapper
             group.Add((finding, rule, decisionOf?[index]));
         }
 
-        return groups.Select(g => MapGroup(g, subjects, decided: decisionOf is not null)).ToList();
+        return groups.Select(g => MapGroup(g, subjects, decided: decisionOf is not null, blocked: outcome == SubmissionEvaluationKind.Blocked)).ToList();
     }
 
     private static FindingDecision[]? DecisionsByIndex(IReadOnlyList<BillingFinding> findings, IReadOnlyList<FindingDecision>? decisions)
@@ -236,7 +273,7 @@ public static class BillingFindingSignalMapper
             && string.Equals(decided.ReasonCode, finding.ReasonCode, StringComparison.Ordinal);
     }
 
-    /// <summary>One finding alone (a group of one). Internal: 049 maps an evaluation with <see cref="MapAll(BillingEvaluationResult, BillingSignalSubjects, IReadOnlyList{FindingDecision})"/>,
+    /// <summary>One finding alone (a group of one). Internal: 049 maps an evaluation with <see cref="MapAll(BillingEvaluationResult, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?)"/>,
     /// so two findings of one policy on one subject are never sent as two requests.</summary>
     /// <exception cref="ArgumentException">The finding is not <paramref name="rule"/>'s, or its line has no row in <paramref name="subjects"/>.</exception>
     internal static BillingSignalMapping Map(BillingFinding finding, BillingRuleCandidate rule, BillingSignalSubjects subjects)
@@ -249,7 +286,7 @@ public static class BillingFindingSignalMapper
             throw new ArgumentException("The finding was not produced by this rule version.", nameof(rule));
         }
 
-        return MapGroup([(finding, rule, null)], subjects, decided: false);
+        return MapGroup([(finding, rule, null)], subjects, decided: false, blocked: false);
     }
 
     /// <summary>The reason-set fingerprint: the sorted reason codes and the strongest consequence.</summary>
@@ -257,7 +294,7 @@ public static class BillingFindingSignalMapper
         string.Join(",", sortedReasonCodes) + "|" + consequence;
 
     private static BillingSignalMapping MapGroup(
-        IReadOnlyList<(BillingFinding Finding, BillingRuleCandidate Rule, FindingDecision? Decision)> group, BillingSignalSubjects subjects, bool decided)
+        IReadOnlyList<(BillingFinding Finding, BillingRuleCandidate Rule, FindingDecision? Decision)> group, BillingSignalSubjects subjects, bool decided, bool blocked)
     {
         // Reason order: code (ordinal), then content, so the result does not depend on the order the findings arrived in.
         var members = group
@@ -285,6 +322,12 @@ public static class BillingFindingSignalMapper
             : consequence == BillingConsequence.Reject ? BillingGroupDecision.Held
             : BillingGroupDecision.NotRejecting;
         var withheld = members.Any(m => m.Finding.DetailWithheld);
+        // 049 Held presentation: the rule would reject (a deciding finding), but the outcome is Blocked, so the invoice is held for review.
+        var held = blocked && groupDecision == BillingGroupDecision.Rejects;
+        if (held)
+        {
+            groupDecision = BillingGroupDecision.Blocked;
+        }
 
         var (entity, subjectId, displayName) = SubjectOf(primary.Finding.Subject, subjects);
         var (template, facts, source) = withheld
@@ -302,6 +345,10 @@ public static class BillingFindingSignalMapper
             ?? (!string.IsNullOrWhiteSpace(rule.ShortHeadline) && rule.ShortHeadline.Trim().Length <= MaxHeadlineLength
                 ? rule.ShortHeadline.Trim()
                 : BillingRuleDraftTranslator.Wording(primary.Finding.RuleType).Headline);
+        if (held)
+        {
+            headline = HeldHeadline;
+        }
 
         var reasonCodes = members.Select(m => m.Finding.ReasonCode).ToList();
         var fingerprint = FingerprintOf(reasonCodes, consequence);
@@ -316,6 +363,11 @@ public static class BillingFindingSignalMapper
             // Not presented as a rejection: lane, severity and sentence stay the policy's and the primary reason's; the evidence says 073 held it.
             evidence.Add(new SignalEvidenceRef(DecisionEvidenceKind, HeldDecisionRef, "Fact") { Text = primary.Decision?.HeldBecause });
         }
+        else if (held)
+        {
+            // The same line 073's own hold uses, with the submission's blocked code: a reader sees the invoice is held, and why it is not rejected.
+            evidence.Add(new SignalEvidenceRef(DecisionEvidenceKind, HeldDecisionRef, "Fact") { Text = SubmissionReasonCodes.Blocked });
+        }
 
         evidence.AddRange(members
             .SelectMany(m => m.Finding.ValuesRead)
@@ -323,7 +375,7 @@ public static class BillingFindingSignalMapper
             .Select(v => ValueEvidence(v, withheld || v.Value is null || !BillingRuleCatalogue.IsCitable(v.Name, v.Value) ? null : v.Value))
             .DistinctBy(e => (e.Kind, e.Ref, e.Text)));
 
-        var request = new SignalWriteRequest(
+        SignalWriteRequest RequestOf(string messageTemplate, IReadOnlyDictionary<string, object?> factValues) => new(
             rule.PolicyId,
             rule.PolicyCode,
             rule.PolicyVersionId,
@@ -333,9 +385,21 @@ public static class BillingFindingSignalMapper
             headline,
             flagOnly ? FlagOnlyLane : rule.Lane ?? SignalWriter.LaneDecide,
             flagOnly ? FlagOnlySeverity : rule.Severity,
-            template,
-            facts,
+            messageTemplate,
+            factValues,
             evidence);
+
+        var request = RequestOf(template, facts);
+        if (held)
+        {
+            // The deciding finding's own rendered reason (the text its evidence line carries; never a raw code) follows the held wording as
+            // a fact. The writer's own checks (SignalWriter.PreflightRefusal, the same ones the persisted plan is held to) decide whether
+            // that sentence fits; if not, the reason is left out whole (the no-value wording), never cut. The reason stays in its evidence line.
+            var withReason = RequestOf(HeldSentenceTemplate, new Dictionary<string, object?>(facts) { [HeldReasonFact] = ReasonText(primary.Finding, primary.Rule, withheld) });
+            request = SignalWriter.PreflightRefusal(withReason) is null ? withReason : RequestOf(HeldSentenceNoValue, facts);
+            source = BillingMessageSource.HeldForReview;
+        }
+
         return new BillingSignalMapping(request, source)
         {
             Findings = members.Select(m => m.Finding).ToList(),

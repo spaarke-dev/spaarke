@@ -2055,4 +2055,49 @@ public class InvoiceSubmissionAfterStepsTests
         stale.Status.Should().Be(InvoiceSubmissionStatus.Rejected);
         StoredWriteRefusals(stale).Should().ContainSingle().Which!["code"]!.GetValue<string>().Should().Be(SignalWriteRefusal.SentenceTooLong);
     }
+
+    /// <summary>A REAL <see cref="SignalWriter"/> over the writer test harness's Dataverse doubles (task 026's invoice-of-a-matter path), so the
+    /// Signal row it creates can be read back.</summary>
+    private static (SignalWriter Writer, Sprk.Bff.Api.Tests.Domain.Signals.SignalWriterTests.FakeOrganizationService Org) RealWriterOverFakeDataverse()
+    {
+        var sysadmin = new Sprk.Bff.Api.Tests.Domain.Signals.SignalWriterTests.FakeSysadminClient()
+            .WithMatterBusinessUnit(Matter, Sprk.Bff.Api.Tests.Domain.Signals.SignalWriterTests.BusinessUnitId)
+            .Stub(new Entity("sprk_invoice", InvoiceId) { ["sprk_matter"] = new EntityReference("sprk_matter", Matter) })
+            .Stub(new Entity("sprk_billingevent", LineId) { ["sprk_matter"] = new EntityReference("sprk_matter", Matter) });
+        var org = new Sprk.Bff.Api.Tests.Domain.Signals.SignalWriterTests.FakeOrganizationService();
+        return (Sprk.Bff.Api.Tests.Domain.Signals.SignalWriterTests.Build(org, sysadmin, new FakeTimeProvider(new DateTimeOffset(2026, 10, 19, 9, 0, 0, TimeSpan.Zero))), org);
+    }
+
+    [Fact(DisplayName = "049 Held (real SignalWriter): a Blocked submission writes the Held Signal: the held headline, the rejection rule's deciding reason in the sentence, a Held line with the blocked code")]
+    public async Task Blocked_RealWriter_WritesTheHeldSignal()
+    {
+        var outcome = await Blocked();
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Blocked);
+        var (writer, org) = RealWriterOverFakeDataverse();
+        var world = new World(outcome) { RealWriter = writer };
+        world.RealWriterPolicies.Add("BILL-AGE");
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        result.SignalsRefused.Should().Be(0, string.Join(" | ", world.Log.Entries.Select(e => e.Message)));
+        var signal = org.Rows.Values.Should().ContainSingle(r => r.LogicalName == "sprk_signal").Subject;
+        signal.GetAttributeValue<string>("sprk_name").Should().Be("Invoice held for review");
+        var sentence = signal.GetAttributeValue<string>("sprk_sentence");
+        sentence.Should().StartWith("The rejection rule would reject this invoice: ");
+        var reason = sentence["The rejection rule would reject this invoice: ".Length..];
+        reason.Should().NotBeNullOrWhiteSpace().And.NotContain("ebilling.submission.blocked").And.NotContain(BillingReasonCodes.InvoiceTooOld, "never a raw code");
+        var evidence = JsonNode.Parse(signal.GetAttributeValue<string>("sprk_evidencerefs"))!.AsArray().OfType<JsonObject>().ToList();
+        var held = evidence.Should().ContainSingle(e => e["kind"]!.GetValue<string>() == "billing.decision").Subject;
+        held["ref"]!.GetValue<string>().Should().Be("Held");
+        held["text"]!.GetValue<string>().Should().Be("ebilling.submission.blocked");
+        evidence.Should().Contain(e => e["kind"]!.GetValue<string>() == "billing.reason" && e["text"]!.GetValue<string>() == reason,
+            "the sentence's reason is the deciding finding's own rendered reason");
+
+        // The Blocked routing is unchanged: no record, no closes, indexed, notified, terminal Rejected.
+        world.RecordCreates.Should().Be(0);
+        world.Closes.Should().BeEmpty();
+        world.Jobs.Should().ContainSingle();
+        world.Status.Should().Be(InvoiceSubmissionStatus.Rejected);
+    }
 }

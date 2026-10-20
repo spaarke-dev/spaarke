@@ -8,7 +8,7 @@ using static Sprk.Bff.Api.Tests.Domain.Signals.Billing.BillingEvaluationKit;
 namespace Sprk.Bff.Api.Tests.Domain.Signals.Billing;
 
 /// <summary>
-/// ebilling-r1 task 049 part D (072 part W K1; notes 049 section 6 "Primary reason"): <see cref="BillingFindingSignalMapper.MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision})"/>
+/// ebilling-r1 task 049 part D (072 part W K1; notes 049 section 6 "Primary reason"): <see cref="BillingFindingSignalMapper.MapAll(IReadOnlyList{BillingFinding}, IReadOnlyDictionary{Guid, BillingRuleCandidate}, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?)"/>
 /// with 073's decisions. A group holding a deciding finding is titled by the first deciding finding in reason order; a Reject group that 073
 /// held throughout is not presented as a rejection and carries a <c>billing.decision</c> Held line; the fingerprint never depends on them.
 /// </summary>

@@ -96,7 +96,10 @@ public static class BillingRuleCatalogue
 
     /// <summary>
     /// The code-identifier pattern (<c>$defs.code.pattern</c>) of the billing rule bodies, read from the ExpenseRule schema: the one definition
-    /// the NonBillableActivity schema and Rule Review's <c>CODE_PATTERN</c> repeat (pinned equal by a test). Not copied into C#.
+    /// the NonBillableActivity schema and Rule Review's <c>CODE_PATTERN</c> (<c>src/solutions/RuleReview/src/services/ruleTypes.ts</c>) repeat.
+    /// The schema is the enforced one (the rule body validator); Rule Review's copy only gives an administrator the same answer before a save.
+    /// <c>BillingCodePatternTests</c> pins the string itself, both schemas, and the TypeScript literal (read from its source), so a change to
+    /// any one of them fails a test. Not copied into C#.
     /// </summary>
     internal static string CodePattern => CodeRegex.Value.ToString();
 
