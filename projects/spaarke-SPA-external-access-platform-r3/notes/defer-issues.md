@@ -327,7 +327,7 @@ Failure mode: an external licensed user with read on a matter's communications r
 - `src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs` (~:997, DELETE route: `CanCallerSeeMessageAsync`; needs Dataverse Write, so it adds no capability)
 - Shared rule: `Services/Communication/CommunicationOpenThreadGate.cs`, `CommunicationThreadReadService.ReadVisibleCommunicationAsync`
 
-**Quick fix done 2026-10-20 (task 078, owner decision the same day).** For an external or unresolved caller, `dataverse.read_query`, `dataverse.search_data` and `dataverse.describe` now apply the task 065 rule: `sprk_communication` rows are filtered, and other family tables are refused or dropped (`notes/task-078-notes.md`). It ships in the next dev BFF deploy. Still open: the model-driven app, the Web API, and `spaarke.grid_overview` (ISS-014).
+**Quick fix done 2026-10-20 (task 078, owner decision the same day).** For an external or unresolved caller, `dataverse.read_query`, `dataverse.search_data` and `dataverse.describe` now apply the task 065 rule: `sprk_communication` rows are filtered, and other family tables are refused or dropped (`notes/task-078-notes.md`). It ships in the next dev BFF deploy. Still open: the model-driven app, the Web API, `spaarke.grid_overview` (ISS-014), RAG retrieval and chat archive ingest (ISS-016), and partner-visible document copies (ISS-015). Also still open: the write tools `dataverse.update_record` and `create_record`. An external caller with write on a row can set `sprk_isinternalonly` false, repoint `sprk_communicationthread` to an Open thread, or set a thread's `sprk_privacystate` to Open, then read the row. The model-driven app allows the same. Task 078 is read-side only, and its POML forbids changes to other tools.
 
 **Suggested fix**
 
@@ -597,6 +597,72 @@ For an external caller, refuse a configuration whose target entity is in the `sp
 **Estimated effort**: half a day, including tests.
 **Blockers**: none.
 **Related**: ISS-010 (#1864), tasks 065 and 078.
+
+---
+
+### ISS-015 — Partner document list can show a document copy of an internal-only email once it is filed to the record
+
+| Field | Value |
+|---|---|
+| **Status** | Open — owner decision needed |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-20 |
+| **Source** | Task 078 review pass 1 (F1) plus a code map; not reproduced live |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2126 |
+
+**Description**
+
+The partner document list (`ExternalDataService.BuildDocumentListUrl` ~:631) and the download, versions and delete routes match only the route parent's typed lookup and the secure-root rule. The external plane never reads `sprk_relatedcommunication`, `sprk_isemailarchive` or `sprk_isinternalonly`.
+
+A freshly archived `.eml` or attachment has no parent lookup, so it is not listed. It becomes visible when it is also filed to a matter, project or work assignment. None of these writers checks internal-only:
+
+| Writer | When |
+|---|---|
+| `OfficeDocumentPersistence.cs` ~:304/:338 | Outlook save to a record of an email that was also captured as a communication |
+| `IncomingCommunicationProcessor.cs` ~:349 | The reverse order: inbound capture links an archive saved earlier |
+| `CommunicationService.cs` ~:3010-3029 | Outbound attachment copies of secure source documents; this includes internal-only sends |
+| `PUT /api/v1/documents/{id}` | A re-file of an archive or attachment document |
+
+Failure mode: a partner on the matter lists and downloads the `.eml` of an internal-only email that a user also filed to the matter.
+
+**Owner question**
+
+- **(a)** Hide documents whose related communication fails the 065 rule (a list filter and a check on each document route).
+- **(b)** Keep showing them, because filing is an explicit act, and document that.
+
+**Estimated effort**: (a) about a day, including tests.
+**Blockers**: owner decision.
+**Related**: ISS-010, ISS-014, ISS-016, tasks 065 and 078.
+
+---
+
+### ISS-016 — RAG retrieval and chat archive ingest return internal-only email content to callers flagged external
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round (closes with ISS-010's real fix) |
+| **Filed** | 2026-10-20 |
+| **Source** | Task 078 review pass 2 (F4) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2127 |
+
+**Description**
+
+Two AI paths outside the generic Dataverse tools have no externality check:
+
+- **RAG retrieval.** The archived `.eml` and its attachments are RAG-indexed (`IncomingCommunicationProcessor.cs` ~:1387, ~:1145; `CommunicationEnrichmentService.cs` ~:227). No retrieval path in `Services/Ai` checks internal-only or externality.
+- **Chat archive ingest.** `POST /sessions/{id}/documents/from-document` (`Api/Ai/ChatDocumentEndpoints.cs` ~:219) accepts a `communicationId`. It checks only document read access, then downloads the full `.eml` app-only into the session.
+
+Failure mode: a licensed user flagged external gets internal-only email content through retrieval or by attaching the archive to the chat.
+
+**Suggested fix**
+
+- Ingest: when the caller is external, apply the 065 visibility read, as `EmailDraftToolHandler` does.
+- Retrieval: for an external caller, drop chunks whose source document's related communication fails the rule.
+
+**Estimated effort**: 1 to 2 days.
+**Blockers**: none.
+**Related**: ISS-010, ISS-014, ISS-015, task 078.
 
 ---
 
