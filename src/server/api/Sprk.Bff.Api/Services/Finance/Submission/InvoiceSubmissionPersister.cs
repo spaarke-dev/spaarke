@@ -1,8 +1,8 @@
 // ebilling-r1 task 049 part C (spec FR-20, D-101, D-121, D-124, D-126; notes 049-submission-processing-job.md "Part C").
 //
 // Component Justification (CLAUDE.md §11):
-//   (1) Existing — InvoiceReviewService.ConfirmAsync creates an invoice for a confirmed document (a Web API PATCH, matter only, no lines,
-//       no status); InvoiceSubmissionService creates the submission; InvoiceLifecycleService.BuildCreateRequest (014) builds the invoice
+//   (1) Existing — InvoiceReviewService.ConfirmAsync created an invoice for a confirmed document (a Web API PATCH, matter only, no lines,
+//       no status; since 050a / D-134 confirm submits the document through InvoiceSubmissionService instead); InvoiceSubmissionService creates the submission; InvoiceLifecycleService.BuildCreateRequest (014) builds the invoice
 //       create in its status; IGenericEntityService.ExecuteTransactionAsync (part A) sends one transaction. Nothing turns an evaluated
 //       submission into an invoice with lines, an approval portion and the submission's link in one unit.
 //   (2) Extension — the processor (part B) is pure evaluation and writes nothing by contract, and the handler (part E) owns delivery,

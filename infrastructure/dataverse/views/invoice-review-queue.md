@@ -93,11 +93,9 @@ When a document IS an invoice:
    - **Matter** (`sprk_matterid`) - Required
    - **Project** (`sprk_projectid`) - Optional
    - **Vendor Organization** (`sprk_vendororgid`) - Required
-   - **Invoice Number** (if hint is incorrect)
-   - **Invoice Date** (if hint is incorrect)
-   - **Total Amount** (if hint is incorrect)
+   - **Invoice Number** - Required: the firm's own invoice number (never defaulted from the hint, D-91)
 
-3. Call the **Confirm Invoice** endpoint:
+3. Call the **Confirm Invoice** endpoint (needs eBilling enabled):
    ```http
    POST /api/finance/invoice-review/confirm
    Content-Type: application/json
@@ -105,15 +103,18 @@ When a document IS an invoice:
    {
      "documentId": "{guid}",
      "matterId": "{guid}",
-     "projectId": "{guid|null}",
-     "vendorOrgId": "{guid}"
+     "vendorOrgId": "{guid}",
+     "invoiceNumber": "{firm invoice number}",
+     "notes": "{optional}"
    }
    ```
 
-4. Result:
-   - Creates `sprk_invoice` record with `sprk_status = ToReview`
-   - Enqueues `InvoiceExtractionJob` to extract billing details
-   - Document removed from review queue (`sprk_invoicereviewstatus` updated)
+4. Result (ebilling-r1 050a, D-134):
+   - Creates ONE internal invoice submission for the document (no second copy of the file) and enqueues
+     `InvoiceSubmissionProcessing`; the job creates `sprk_invoice`, links the document to it and re-files it under the invoice.
+   - The vendor must be one of the matter's assigned law firms (403 `ebilling.submission.firm_not_linked`).
+   - Answers `202 {submissionId, jobId, trackingNumber, statusUrl}`; a retry for the same document returns the same submission.
+   - Document removed from review queue (`sprk_invoicereviewstatus` = ConfirmedInvoice)
 
 ### 3. Reject Non-Invoice
 

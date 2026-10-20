@@ -172,6 +172,10 @@ public static class FinanceModule
         services.AddScoped<IInvoiceSubmissionProcessor, InvoiceSubmissionProcessor>();
         services.AddScoped<IInvoiceSubmissionPersister, InvoiceSubmissionPersister>();
         services.AddScoped<IInvoiceSubmissionAfterSteps, InvoiceSubmissionAfterSteps>();
+        //   * InvoiceDocumentRefile - the after-steps' first step for a confirmed EXISTING document (050a, D-134 item 3): isolation read,
+        //     ReparentAsync under the invoice, SecureChildReconciler.AfterRefileAsync. Scoped like its dependencies (IRecordOwnershipResolver,
+        //     SecureChildReconciler, ExternalAccessModule).
+        services.AddScoped<InvoiceDocumentRefile>();
         services.AddScoped<IJobHandler, InvoiceSubmissionProcessingJobHandler>();
 
         // ============================================================================
@@ -201,9 +205,8 @@ public static class FinanceModule
         // ============================================================================
         // Invoice Review Service (human-in-the-loop confirmation workflow)
         // ============================================================================
-        // Scoped: confirms documents as invoices, creates sprk_invoice records,
-        // enqueues InvoiceExtraction jobs via JobSubmissionService
-        // Uses IDataverseService for record operations
+        // Scoped: confirms a classified document as an invoice by creating its Internal submission through InvoiceSubmissionService
+        // (050a, D-134; the submission job is the only invoice creator), and rejects documents. Scoped like InvoiceSubmissionService.
         services.AddScoped<IInvoiceReviewService, InvoiceReviewService>();
 
         // ============================================================================

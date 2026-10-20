@@ -52,20 +52,23 @@ public sealed class RefileWriterReconcilerRegistrationTests : IClassFixture<Cust
     }
 
     [Fact]
-    public void WithScopeValidation_TheInvoiceReviewService_ResolvesWithTheReconciler()
+    public void WithScopeValidation_TheInvoiceDocumentRefile_ResolvesWithTheReconciler_AndTheSubmissionAfterStepsCompose()
     {
-        // #2095: the invoice-review confirm files the document under the new invoice, then runs AfterRefileAsync.
+        // #2095 / ebilling-r1 050a (D-134): confirm no longer files anything; the submission job's after-steps re-file a confirmed
+        // document under the invoice (InvoiceDocumentRefile), then run AfterRefileAsync.
         using var validating = Validating();
         using var scope = validating.Services.CreateScope();
 
-        var service = scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Services.Finance.IInvoiceReviewService>()
-            .Should().BeOfType<Sprk.Bff.Api.Services.Finance.InvoiceReviewService>().Subject;
-
-        typeof(Sprk.Bff.Api.Services.Finance.InvoiceReviewService)
+        var refile = scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Services.Finance.Submission.InvoiceDocumentRefile>();
+        typeof(Sprk.Bff.Api.Services.Finance.Submission.InvoiceDocumentRefile)
             .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
             .Single(f => f.FieldType == typeof(SecureChildReconciler))
-            .GetValue(service).Should().BeSameAs(scope.ServiceProvider.GetRequiredService<SecureChildReconciler>(),
-                "the service's reconciler is the scope's own (both scoped), never a captured or missing one");
+            .GetValue(refile).Should().BeSameAs(scope.ServiceProvider.GetRequiredService<SecureChildReconciler>(),
+                "the re-file's reconciler is the scope's own (both scoped), never a captured or missing one");
+
+        scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Services.Finance.Submission.IInvoiceSubmissionAfterSteps>()
+            .Should().BeOfType<Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionAfterSteps>(
+                "the after-steps take the re-file as a constructor dependency, so they compose only with it registered");
     }
 
     [Fact]

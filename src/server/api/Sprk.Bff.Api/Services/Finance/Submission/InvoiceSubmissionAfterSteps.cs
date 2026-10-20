@@ -64,6 +64,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     internal const string NotProcessingCode = "ebilling.submission.not_processing";
     internal const string TerminalWriteConflictCode = "ebilling.submission.terminal_write_conflict";
     internal const string RowVersionMissingCode = "ebilling.submission.row_version_missing";
+    internal const string DocumentRefileFailedCode = "ebilling.submission.document_refile_failed";
 
     /// <summary>The automatic rejection's action code (074's billing catalog).</summary>
     internal const string RejectActionCode = "reject-invoice";
@@ -111,6 +112,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     private readonly Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> _record;
     private readonly Action<BillingDecision> _preflight;
     private readonly Func<JobContract, CancellationToken, Task> _submitJob;
+    private readonly Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>> _refileDocument;
 
     public InvoiceSubmissionAfterSteps(
         IGenericEntityService entities,
@@ -120,6 +122,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         IIdempotencyService idempotency,
         IInvoiceTotalsService totals,
         IEbillingNotificationSink sink,
+        InvoiceDocumentRefile refile,
         ILogger<InvoiceSubmissionAfterSteps> logger)
         : this(
             entities,
@@ -132,7 +135,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             signals.CloseActedByAutomatedDecisionAsync,
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
             recorder.Preflight,
-            (jobs ?? throw new ArgumentNullException(nameof(jobs))).SubmitJobAsync)
+            (jobs ?? throw new ArgumentNullException(nameof(jobs))).SubmitJobAsync,
+            refileDocument: (refile ?? throw new ArgumentNullException(nameof(refile))).RefileAsync)
     {
     }
 
@@ -149,7 +153,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> record,
         Action<BillingDecision> preflight,
         Func<JobContract, CancellationToken, Task> submitJob,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>>? refileDocument = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
@@ -163,6 +168,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         _record = record ?? throw new ArgumentNullException(nameof(record));
         _preflight = preflight ?? throw new ArgumentNullException(nameof(preflight));
         _submitJob = submitJob ?? throw new ArgumentNullException(nameof(submitJob));
+
+        // The unit-test seam defaults to "no existing document" (every 049 test submission was created by intake with an upload).
+        _refileDocument = refileDocument
+            ?? ((_, _, _, _) => Task.FromResult(new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.NotApplicable)));
     }
 
     /// <summary>The automatic rejection's decision id: deterministic from the submission id, so a retry or a resume reuses it (notes section 7).</summary>
@@ -310,6 +319,30 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             _logger.LogWarning("Invoice submission {SubmissionId}: the persisted result says {Claimed} ({ClaimedCode}) but the stored state is {Kind} ({Stored}, {StoredCode}); no after-commit step ran",
                 submissionId, c.Status, c.ReasonCode, stored.Kind, terminal, terminalReasonCode);
             return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, SubmissionReasonCodes.StoredStateMismatch);
+        }
+
+        // ── The re-file (050a, D-134 item 3): a confirmed EXISTING document, now linked to the invoice by the persister's transaction, is
+        //    re-filed under it (isolation read → ReparentAsync → AfterRefileAsync; InvoiceDocumentRefile). Before every other after-step, on
+        //    the first run and on every resume: a Retry or a refusal here leaves the submission Processing and writes no Signal or terminal. ──
+        var existingDocumentId = submission.GetAttributeValue<EntityReference>("sprk_document")?.Id;
+        InvoiceDocumentRefileResult refiled;
+        try
+        {
+            refiled = await _refileDocument(submissionId, existingDocumentId, invoiceId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: re-filing document {DocumentId} under invoice {InvoiceId} failed ({Fault}); retry resumes",
+                submissionId, existingDocumentId, invoiceId, ex.GetType().Name);
+            return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, DocumentRefileFailedCode);
+        }
+
+        switch (refiled.Status)
+        {
+            case InvoiceDocumentRefileStatus.IsolationUnreadable:
+                return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, refiled.ReasonCode ?? InvoiceDocumentRefile.IsolationUnreadableCode);
+            case InvoiceDocumentRefileStatus.Refused:
+                return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, refiled.ReasonCode ?? InvoiceDocumentRefile.RefileRefusedCode);
         }
 
         var rowVersion = RowVersionOf(submission);

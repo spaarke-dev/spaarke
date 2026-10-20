@@ -19,8 +19,9 @@ namespace Sprk.Bff.Api.Configuration;
 /// <b>Per-environment behaviour:</b> <see cref="Enabled"/> defaults to <c>false</c>, so a host with
 /// no "Ebilling" section starts with eBilling off. It is switched on in dev first (task 053); other
 /// environments stay off until the owner enables them. The existing Finance routes
-/// (<c>/api/finance/invoice-review/*</c>, rollups) are governed by <see cref="FinanceOptions"/> and
-/// are NOT affected by this flag.
+/// (<c>/api/finance/invoice-review/reject</c>, rollups) are governed by <see cref="FinanceOptions"/> and
+/// are NOT affected by this flag. <c>/api/finance/invoice-review/confirm</c> IS (ebilling-r1 050a, D-134):
+/// it creates an invoice submission, which only the eBilling job processes.
 /// </para>
 /// </remarks>
 public class EbillingOptions

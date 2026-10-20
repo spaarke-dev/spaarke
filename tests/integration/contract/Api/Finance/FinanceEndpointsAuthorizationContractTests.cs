@@ -10,6 +10,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,10 +23,12 @@ using Spaarke.Core.Auth.Rules;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Api.Finance;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Finance;
@@ -486,52 +489,58 @@ public class FinanceEndpointsAuthorizationContractTests
         host.VerifyNoServiceWasInvoked();
     }
 
-    [Fact]
-    public async Task Confirm_DocumentLinkedToAnotherMattersInvoice_Is409_AndNeverNamesThatInvoice()
+    // ── ebilling-r1 050a (D-134): confirm answers with the intake's outcome, rendered as the internal submission route renders it ──
+
+    public static TheoryData<int, string> IntakeRefusals => new()
+    {
+        { StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvoiceNumberRequired },
+        { StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked },
+        { StatusCodes.Status404NotFound, InvoiceSubmissionErrors.DocumentNotFound },
+        { StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentAlreadyInvoiced },
+        { StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentAlreadySubmitted },
+        { StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.DocumentHasNoFile },
+        { StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.Failed },
+    };
+
+    [Theory(DisplayName = "050a: an intake refusal is its status and errorCode, as the submission route renders it")]
+    [MemberData(nameof(IntakeRefusals))]
+    public async Task Confirm_IntakeRefusal_IsRenderedWithItsStatusAndErrorCode(int status, string errorCode)
     {
         await using var host = await FinanceAuthHost.StartAsync();
         var body = ConfirmBody.New();
         host.GrantFullConfirm(body);
-        var otherInvoice = Guid.NewGuid();
-        // Even an exception that carried the other invoice (in its message and as InvoiceId) must not leak it.
         host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvoiceReviewException(
-                InvoiceReviewFailure.DocumentLinkedToAnotherInvoice, $"linked to invoice {otherInvoice}", otherInvoice));
+            .ReturnsAsync(InvoiceSubmissionOutcome.Refused(status, errorCode, "refused; nothing was saved"));
 
         var response = await host.SendAsync(Confirm(body));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        var text = await response.Content.ReadAsStringAsync();
-        text.Should().NotContain(otherInvoice.ToString()).And.NotContainEquivalentOf(otherInvoice.ToString("N"));
-        var json = JsonNode.Parse(text)!.AsObject();
-        json.Should().NotContainKey("invoiceId");
-        json["reasonCode"]!.GetValue<string>().Should().Be("sdap.finance.invoice_review.document_linked_elsewhere");
+        ((int)response.StatusCode).Should().Be(status);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["errorCode"]!.GetValue<string>().Should().Be(errorCode);
+        json["detail"]!.GetValue<string>().Should().Be("refused; nothing was saved");
+        json.Should().NotContainKey("submissionId");
     }
 
     public static TheoryData<InvoiceReviewFailure, HttpStatusCode, bool> ConfirmFailures => new()
     {
         { InvoiceReviewFailure.DocumentNotFound, HttpStatusCode.NotFound, false },
         { InvoiceReviewFailure.DocumentChangedConcurrently, HttpStatusCode.Conflict, false },
-        { InvoiceReviewFailure.ReviewDecisionChanged, HttpStatusCode.Conflict, false },
-        { InvoiceReviewFailure.OwnerTeamUnresolved, HttpStatusCode.Forbidden, false },
-        { InvoiceReviewFailure.LinkFailed, HttpStatusCode.InternalServerError, false },
-        { InvoiceReviewFailure.LinkFailedInvoiceNotRemoved, HttpStatusCode.InternalServerError, true },
-        { InvoiceReviewFailure.CreateFailedInvoiceMayRemain, HttpStatusCode.InternalServerError, true },
+        { InvoiceReviewFailure.DocumentLinkedToInvoice, HttpStatusCode.Conflict, false },
+        { InvoiceReviewFailure.ConfirmStateUnreadable, HttpStatusCode.ServiceUnavailable, false },
         { InvoiceReviewFailure.StatusNotUpdated, HttpStatusCode.InternalServerError, true },
-        { InvoiceReviewFailure.ExtractionNotQueued, HttpStatusCode.InternalServerError, true },
     };
 
     [Theory]
     [MemberData(nameof(ConfirmFailures))]
-    public async Task Confirm_ServiceFailure_IsRenderedWithItsMessage_AndNamesTheInvoiceWhenOneExists(
-        InvoiceReviewFailure failure, HttpStatusCode expectedStatus, bool namesInvoice)
+    public async Task Confirm_ServiceFailure_IsRenderedWithItsMessage_AndNamesTheSubmissionWhenOneExists(
+        InvoiceReviewFailure failure, HttpStatusCode expectedStatus, bool namesSubmission)
     {
         await using var host = await FinanceAuthHost.StartAsync();
         var body = ConfirmBody.New();
         host.GrantFullConfirm(body);
-        var invoiceId = Guid.NewGuid();
+        var submissionId = Guid.NewGuid();
         host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvoiceReviewException(failure, $"what happened (invoice {invoiceId})", namesInvoice ? invoiceId : null));
+            .ThrowsAsync(new InvoiceReviewException(failure, $"what happened (submission {submissionId})", namesSubmission ? submissionId : null));
 
         var response = await host.SendAsync(Confirm(body));
 
@@ -539,54 +548,41 @@ public class FinanceEndpointsAuthorizationContractTests
         var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
         json["detail"]!.GetValue<string>().Should().Contain("what happened");
         json["reasonCode"]!.GetValue<string>().Should().StartWith("sdap.finance.invoice_review.");
-        if (namesInvoice)
+        json.Should().NotContainKey("invoiceId");
+        if (namesSubmission)
         {
-            json["invoiceId"]!.GetValue<string>().Should().Be(invoiceId.ToString());
+            json["submissionId"]!.GetValue<string>().Should().Be(submissionId.ToString());
         }
         else
         {
-            json.Should().NotContainKey("invoiceId");
+            json.Should().NotContainKey("submissionId");
         }
     }
 
-    [Fact(DisplayName = "#2095: an unreadable document isolation is a retryable 503 with a stable reason code, naming no record")]
-    public async Task Confirm_IsolationUnreadable_Is503_WithTheStableReasonCode_AndNamesNoRecord()
+    [Fact(DisplayName = "050a: a received confirm is 202 {submissionId, jobId, trackingNumber, statusUrl}, and every body id is authorized")]
+    public async Task Confirm_AuthorizedBodyOnlyRequest_Returns202_WithTheSubmissionShape_AndAuthorizesEveryBodyId()
     {
         await using var host = await FinanceAuthHost.StartAsync();
         var body = ConfirmBody.New();
         host.GrantFullConfirm(body);
-        host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvoiceReviewException(
-                InvoiceReviewFailure.IsolationUnreadable,
-                "Whether the document is held in a Secure record could not be read, so it was not filed under the invoice. "
-                + "Nothing was saved; retry the confirmation.",
-                inner: new TaskCanceledException("HttpClient.Timeout elapsed")));
-
-        var response = await host.SendAsync(Confirm(body));
-
-        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        var text = await response.Content.ReadAsStringAsync();
-        text.Should().NotContain(body.DocumentId.ToString()).And.NotContain(body.MatterId.ToString())
-            .And.NotContain("Timeout", "the inner fault is logged, never rendered");
-        var json = JsonNode.Parse(text)!.AsObject();
-        json["reasonCode"]!.GetValue<string>().Should().Be("sdap.finance.invoice_review.isolation_unreadable");
-        json["detail"]!.GetValue<string>().Should().Contain("retry the confirmation");
-        json.Should().NotContainKey("invoiceId");
-    }
-
-    [Fact]
-    public async Task Confirm_AuthorizedBodyOnlyRequest_Returns202_AndAuthorizesEveryBodyId()
-    {
-        await using var host = await FinanceAuthHost.StartAsync();
-        var body = ConfirmBody.New();
-        host.GrantFullConfirm(body);
+        var submissionId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
         host.Review.Setup(r => r.ConfirmInvoiceAsync(
                 It.Is<InvoiceReviewConfirmRequest>(q => q.DocumentId == body.DocumentId), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new InvoiceReviewResult { InvoiceId = Guid.NewGuid(), JobId = Guid.NewGuid(), StatusUrl = "/x" });
+            .ReturnsAsync(InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(submissionId, jobId, "INV-7.1", body.DocumentId)));
 
         var response = await host.SendAsync(Confirm(body));
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var statusUrl = $"/api/finance/invoice-submissions/{submissionId}";
+        response.Headers.Location!.OriginalString.Should().Be(statusUrl);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json.Select(p => p.Key).Should().BeEquivalentTo(["submissionId", "jobId", "trackingNumber", "statusUrl"],
+            "D-134: the confirm response is exactly the submission receipt");
+        json["submissionId"]!.GetValue<string>().Should().Be(submissionId.ToString());
+        json["jobId"]!.GetValue<string>().Should().Be(jobId.ToString());
+        json["trackingNumber"]!.GetValue<string>().Should().Be("INV-7.1");
+        json["statusUrl"]!.GetValue<string>().Should().Be(statusUrl);
         host.Access.Calls.Should().Equal(
             new AccessCall(AccessPath.Document, Documents, body.DocumentId, HasToken: true),
             new AccessCall(AccessPath.Record, Documents, body.DocumentId, HasToken: true),
@@ -595,26 +591,50 @@ public class FinanceEndpointsAuthorizationContractTests
         host.Probe.Calls.Should().Equal(new PrivilegeCall(CreateInvoicePrivilege, HasToken: true));
     }
 
-    [Fact]
-    public async Task Confirm_LostTheRaceToAConcurrentConfirm_Is202_WithNoJobId_AndExtractionAlreadyQueued()
+    [Fact(DisplayName = "050a: with eBilling off an authorized confirm is 503 ebilling.disabled and the service is never called")]
+    public async Task Confirm_EbillingDisabled_Is503_AfterAuthorization_AndTheServiceIsNotInvoked()
     {
-        await using var host = await FinanceAuthHost.StartAsync();
+        await using var host = await FinanceAuthHost.StartAsync(ebillingEnabled: false);
         var body = ConfirmBody.New();
         host.GrantFullConfirm(body);
-        var winnersInvoice = Guid.NewGuid();
-        host.Review.Setup(r => r.ConfirmInvoiceAsync(
-                It.Is<InvoiceReviewConfirmRequest>(q => q.DocumentId == body.DocumentId), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new InvoiceReviewResult { InvoiceId = winnersInvoice, ExtractionAlreadyQueued = true });
 
         var response = await host.SendAsync(Confirm(body));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        response.Headers.Location.Should().BeNull("no job of this request's exists to poll");
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
-        json["invoiceId"]!.GetValue<string>().Should().Be(winnersInvoice.ToString());
-        json["jobId"].Should().BeNull("a job id is never fabricated");
-        json["statusUrl"].Should().BeNull();
-        json["extractionAlreadyQueued"]!.GetValue<bool>().Should().BeTrue();
+        json["errorCode"]!.GetValue<string>().Should().Be(EbillingEnabledFilter.ErrorCode);
+        host.Access.Calls.Should().HaveCount(4, "the authorization filter runs first (ADR-018: the flag never replaces it)");
+        host.VerifyNoServiceWasInvoked();
+    }
+
+    [Fact(DisplayName = "050a: with eBilling off an UNauthorized confirm is still 403, not 503")]
+    public async Task Confirm_EbillingDisabled_Unauthorized_Is403()
+    {
+        await using var host = await FinanceAuthHost.StartAsync(ebillingEnabled: false);
+        var body = ConfirmBody.New();
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.VerifyNoServiceWasInvoked();
+    }
+
+    [Fact(DisplayName = "eBilling off does not gate reject (it creates nothing eBilling processes)")]
+    public async Task Reject_EbillingDisabled_StillReachesTheService()
+    {
+        await using var host = await FinanceAuthHost.StartAsync(ebillingEnabled: false);
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+        host.Review.Setup(r => r.RejectInvoiceAsync(
+                It.Is<InvoiceReviewRejectRequest>(q => q.DocumentId == documentId), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InvoiceReviewRejectResult { DocumentId = documentId });
+
+        var request = Authenticated(HttpMethod.Post, "/api/finance/invoice-review/reject");
+        request.Content = JsonContent.Create(new { documentId });
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -968,14 +988,15 @@ public class FinanceEndpointsAuthorizationContractTests
 
         /// <param name="registerProbe">False builds a host whose container has NO <see cref="CallerRecordAccessProbe"/>
         /// — the configuration fault the Privilege path must deny on.</param>
-        public static async Task<FinanceAuthHost> StartAsync(bool registerProbe = true)
+        /// <param name="ebillingEnabled">The eBilling flag (050a: the confirm route is gated by it).</param>
+        public static async Task<FinanceAuthHost> StartAsync(bool registerProbe = true, bool ebillingEnabled = true)
         {
             var host = new FinanceAuthHost();
-            await host.InitializeAsync(registerProbe);
+            await host.InitializeAsync(registerProbe, ebillingEnabled);
             return host;
         }
 
-        private async Task InitializeAsync(bool registerProbe)
+        private async Task InitializeAsync(bool registerProbe, bool ebillingEnabled)
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
@@ -1002,6 +1023,7 @@ public class FinanceEndpointsAuthorizationContractTests
             }
 
             builder.Services.AddSingleton(Review.Object);
+            builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
             builder.Services.AddSingleton(Search.Object);
             builder.Services.AddSingleton(Summary.Object);
             builder.Services.AddSingleton(new ScorecardCalculatorService(

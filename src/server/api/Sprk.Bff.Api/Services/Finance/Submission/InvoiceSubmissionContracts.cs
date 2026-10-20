@@ -117,8 +117,15 @@ public sealed record InvoiceSubmissionRequest
     /// <summary>Optional PO number (at most 100 characters).</summary>
     public string? PoNumber { get; init; }
 
-    /// <summary>The PDF; null when the request carried none.</summary>
+    /// <summary>The PDF; null when the request carried none. Always null for <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>.</summary>
     public InvoiceSubmissionFile? File { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 050a (D-134): the <c>sprk_document</c> already holding the PDF (an email attachment a reviewer confirmed as an invoice).
+    /// Set only for <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>, which uploads nothing and creates no document: the
+    /// submission points at this one. Null for an upload (<see cref="InvoiceSubmissionService.SubmitAsync"/>).
+    /// </summary>
+    public Guid? ExistingDocumentId { get; init; }
 
     /// <summary>SPA channel: the resolved external principal (the submitter contact and the document's creator stamp).</summary>
     public CallerPrincipal? ExternalCaller { get; init; }
@@ -245,6 +252,24 @@ public static class InvoiceSubmissionErrors
     /// the internal route (as a systemuser is sent to Manage Access on the contact-side grant routes).
     /// </summary>
     public const string UseInternalRoute = "ebilling.submission.use_internal_route";
+
+    /// <summary>ebilling-r1 task 050a (D-134): the existing document named by a confirm does not exist (404). Nothing was written.</summary>
+    public const string DocumentNotFound = "ebilling.submission.document_not_found";
+
+    /// <summary>
+    /// ebilling-r1 task 050a (D-134): the existing document is already linked to an invoice (<c>sprk_document.sprk_invoice</c>), so a submission
+    /// for it would make a second invoice for the same PDF (409). The invoice is never named.
+    /// </summary>
+    public const string DocumentAlreadyInvoiced = "ebilling.submission.document_already_invoiced";
+
+    /// <summary>
+    /// ebilling-r1 task 050a (D-134): the document already has its confirm submission, for another firm, record or firm invoice number (409). A
+    /// retry with the same firm and record gets that submission back instead; this one names nothing about it.
+    /// </summary>
+    public const string DocumentAlreadySubmitted = "ebilling.submission.document_already_submitted";
+
+    /// <summary>ebilling-r1 task 050a (D-134): the existing document has no stored file (no drive or item pointer), so nothing could be read (422).</summary>
+    public const string DocumentHasNoFile = "ebilling.submission.document_has_no_file";
 
     public const string StorageNotConfigured = "ebilling.submission.storage_not_configured";
     public const string CoreRecordUnavailable = "ebilling.submission.record_unavailable";

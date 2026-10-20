@@ -78,7 +78,7 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
     {
         ["Infrastructure/DI/ExternalAccessModule.cs"] = "column allow-list for the external SPA's invoice detail; no sum",
         ["Services/Finance/FinanceSummaryService.cs"] = "recent-invoices listing: each invoice's own billed total, not a spend sum (DTO contract)",
-        ["Services/Finance/InvoiceReviewService.cs"] = "the reviewer flow that WRITES the totals; the source of the amount, not a reader of spend",
+        ["Services/Finance/InvoiceReviewService.cs"] = "holds the sprk_invoice column-name constants the submission persister writes (050a: it no longer writes an invoice); no sum",
         ["Services/Finance/InvoiceTotalsService.cs"] = "writes sprk_totalamount / sprk_approvedtotal (the source of the amount)",
         ["Services/Insights/LiveFacts/InvoiceLiveFactResolver.cs"] = "per-invoice fact documented as the billed total; not an aggregate",
     };

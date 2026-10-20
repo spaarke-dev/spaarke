@@ -9,6 +9,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Submission;
@@ -365,8 +366,12 @@ public class InvoiceSubmissionAfterStepsTests
                     Jobs.Add(job);
                     return Task.CompletedTask;
                 },
-                Clock);
+                Clock,
+                refileDocument: Refile);
         }
+
+        /// <summary>050a: the re-file step (null: the production default for a test seam, "no existing document").</summary>
+        public Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>>? Refile { get; set; }
 
         /// <summary>The writer's rule (SignalWriter.CloseActedByAutomatedDecisionAsync), over the in-memory table.</summary>
         private Task<SignalAutomatedCloseOutcome> CloseActedAsync(Guid id, Guid recordId, DateTime setReadAt, string policyCode, CancellationToken _)
@@ -601,6 +606,96 @@ public class InvoiceSubmissionAfterStepsTests
 
     private static string InvoiceKey(string policyCode, int episode) =>
         SignalWriter.BuildDedupeKey(policyCode, "sprk_invoice", InvoiceId.ToString("D"), episode);
+
+
+    // ── 050a (D-134 item 3): the re-file of a confirmed existing document runs first, on every run and resume ──
+
+    private static (World World, List<(Guid Submission, Guid? Document, Guid Invoice, int WritesBefore, int TerminalBefore)> Calls) WithRefile(
+        SubmissionEvaluationOutcome outcome, Func<InvoiceDocumentRefileResult> answer)
+    {
+        var world = new World(outcome);
+        var calls = new List<(Guid, Guid?, Guid, int, int)>();
+        world.Refile = (submission, document, invoice, _) =>
+        {
+            calls.Add((submission, document, invoice, world.Writes.Count, world.TerminalWrites.Count));
+            return Task.FromResult(answer());
+        };
+        return (world, calls);
+    }
+
+    [Fact(DisplayName = "050a: the re-file runs FIRST with the stored document and the invoice, then the steps complete")]
+    public async Task Refile_RunsFirst_WithTheStoredDocumentAndInvoice()
+    {
+        var outcome = await AutoRejected();
+        var (world, calls) = WithRefile(outcome, () => new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refiled));
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        calls.Should().ContainSingle().Which.Should().Be((Submission, (Guid?)Document, InvoiceId, 0, 0),
+            "the re-file runs before any Signal and before the terminal status");
+        world.TerminalWrites.Should().ContainSingle();
+    }
+
+    public static TheoryData<InvoiceDocumentRefileStatus, SubmissionAfterStepsStatus, string> RefileStops => new()
+    {
+        { InvoiceDocumentRefileStatus.IsolationUnreadable, SubmissionAfterStepsStatus.Retry, InvoiceDocumentRefile.IsolationUnreadableCode },
+        { InvoiceDocumentRefileStatus.Refused, SubmissionAfterStepsStatus.Refused, "record_owner_parent_unresolved" },
+    };
+
+    [Theory(DisplayName = "050a: a re-file that cannot read isolation (Retry) or is refused (Refused) stops BEFORE any Signal, record, job, notification or terminal")]
+    [MemberData(nameof(RefileStops))]
+    public async Task Refile_Stop_WritesNoLaterStep(InvoiceDocumentRefileStatus refile, SubmissionAfterStepsStatus expected, string code)
+    {
+        var outcome = await AutoRejected();
+        var reason = refile == InvoiceDocumentRefileStatus.Refused ? code : InvoiceDocumentRefile.IsolationUnreadableCode;
+        var (world, _) = WithRefile(outcome, () => new InvoiceDocumentRefileResult(refile, reason));
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(expected);
+        result.ReasonCode.Should().Be(code);
+        world.Writes.Should().BeEmpty();
+        world.RecordCreates.Should().Be(0);
+        world.Jobs.Should().BeEmpty();
+        world.Notified.Should().BeEmpty();
+        world.TerminalWrites.Should().BeEmpty();
+        world.Status.Should().Be(InvoiceSubmissionStatus.Processing, "the submission stays Processing for the retry or the administrator");
+    }
+
+    [Fact(DisplayName = "050a: a re-file that throws (the reparent's Dataverse fault) is a Retry with document_refile_failed and writes no later step")]
+    public async Task Refile_Throws_IsRetry_WritesNoLaterStep()
+    {
+        var outcome = await Accepted();
+        var world = new World(outcome) { Refile = (_, _, _, _) => throw new HttpRequestException("dataverse down") };
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
+        result.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.DocumentRefileFailedCode);
+        world.Jobs.Should().BeEmpty();
+        world.TerminalWrites.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "050a: a resume runs the re-file again (idempotent), so a Retry is completed by the redelivery")]
+    public async Task Refile_RunsAgainOnResume()
+    {
+        var outcome = await Accepted();
+        var answers = new Queue<InvoiceDocumentRefileResult>(new[]
+        {
+            new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.IsolationUnreadable, InvoiceDocumentRefile.IsolationUnreadableCode),
+            new InvoiceDocumentRefileResult(InvoiceDocumentRefileStatus.Refiled),
+        });
+        var (world, calls) = WithRefile(outcome, answers.Dequeue);
+
+        var first = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+        var resumed = await world.Build().ResumeAsync(Submission, "corr-1");
+
+        first.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
+        resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed, resumed.ReasonCode);
+        calls.Should().HaveCount(2);
+        world.TerminalWrites.Should().ContainSingle();
+    }
 
     // ── Each kind ──
 

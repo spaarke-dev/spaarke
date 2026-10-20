@@ -2,6 +2,7 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Api.Finance;
 
@@ -22,7 +23,8 @@ namespace Sprk.Bff.Api.Api.Finance;
 ///   <item>confirm → Write on the BODY DocumentId; Write+Append on that document (it HOLDS the new invoice's
 ///   lookup, <c>sprk_document.sprk_invoice</c>); AppendTo on the matter and vendor organization the invoice's own
 ///   lookups point at; and the caller's Create privilege on <c>sprk_invoice</c> (owner decision G5, 2026-10-01:
-///   "check as the user, create as the app, owned by the team").</item>
+///   "check as the user, create as the app, owned by the team"). Since ebilling-r1 050a (D-134) the invoice is created by
+///   the submission job the confirm queues; the checks are unchanged, and the route also needs eBilling enabled.</item>
 /// </list>
 /// </remarks>
 public static class FinanceEndpoints
@@ -33,19 +35,28 @@ public static class FinanceEndpoints
             .RequireAuthorization()
             .WithTags("Finance");
 
-        // POST /api/finance/invoice-review/confirm — Confirm document as invoice and enqueue extraction
+        // POST /api/finance/invoice-review/confirm — Confirm a document as an invoice: submit it through the invoice intake
+        // (ebilling-r1 050a, D-134). The submission job is the only invoice creator, so the route needs eBilling on (ADR-018: the flag
+        // filter runs after, never instead of, the authorization filter).
         group.MapPost("/invoice-review/confirm", ConfirmInvoiceReview)
             .AddFinanceAuthorizationFilter(ResolveConfirmTargets)
+            .RequireEbillingEnabled()
             .WithName("ConfirmInvoiceReview")
-            .WithSummary("Confirm a document as an invoice and enqueue extraction")
+            .WithSummary("Confirm a document as an invoice and submit it for processing")
             .WithDescription(
-                "Confirms a classified document as an invoice, creates an sprk_invoice record, " +
-                "and enqueues an InvoiceExtraction background job. Returns 202 Accepted with job tracking info.")
-            .Produces<InvoiceReviewResult>(StatusCodes.Status202Accepted)
+                "Confirms a classified document as an invoice by creating its internal invoice submission (no second copy of the " +
+                "file) and enqueuing the submission processing job, which creates the invoice. The firm invoice number is required. " +
+                "Returns 202 Accepted with {submissionId, jobId, trackingNumber, statusUrl}; a retry for the same document returns " +
+                "the same submission.")
+            .Produces<InvoiceSubmissionAccepted>(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // POST /api/finance/invoice-review/reject — Reject document as not an invoice
         group.MapPost("/invoice-review/reject", RejectInvoiceReview)
@@ -231,7 +242,7 @@ public static class FinanceEndpoints
         });
 
     /// <summary>
-    /// Confirm a document as an invoice, create invoice record, and enqueue extraction.
+    /// Confirm a document as an invoice: submit it through the invoice intake (D-134) and answer with the submission.
     /// POST /api/finance/invoice-review/confirm
     /// </summary>
     private static async Task<IResult> ConfirmInvoiceReview(
@@ -258,23 +269,21 @@ public static class FinanceEndpoints
         try
         {
             // Task 146 c1-r1 (owner round 13 item 9): the signed-in reviewer asked for the invoice the app creates.
-            var result = await invoiceReviewService.ConfirmInvoiceAsync(
+            var outcome = await invoiceReviewService.ConfirmInvoiceAsync(
                 request with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
                 correlationId,
                 cancellationToken);
 
-            logger.LogInformation(
-                "Invoice review confirmed. InvoiceId={InvoiceId}, JobId={JobId}, CorrelationId={CorrelationId}",
-                result.InvoiceId, result.JobId, correlationId);
-
-            return Results.Accepted(result.StatusUrl, result);
+            // D-134: the intake's answer, rendered as the internal submission route renders it — 202 {submissionId, jobId,
+            // trackingNumber, statusUrl}, or its ProblemDetails with errorCode.
+            return InvoiceSubmissionEndpoints.ToResult(outcome, InvoiceSubmissionEndpoints.StatusUrl, correlationId);
         }
         catch (InvoiceReviewException ex)
         {
             logger.LogError(ex,
-                "Invoice review confirmation refused or incomplete ({Failure}). DocumentId={DocumentId}, " +
-                "InvoiceId={InvoiceId}, CorrelationId={CorrelationId}",
-                ex.Failure, request.DocumentId, ex.InvoiceId, correlationId);
+                "Invoice review confirmation incomplete ({Failure}). DocumentId={DocumentId}, " +
+                "SubmissionId={SubmissionId}, CorrelationId={CorrelationId}",
+                ex.Failure, request.DocumentId, ex.SubmissionId, correlationId);
 
             return ConfirmFailure(ex, correlationId);
         }
@@ -369,23 +378,18 @@ public static class FinanceEndpoints
     }
 
     /// <summary>
-    /// Renders an <see cref="InvoiceReviewException"/> from confirm — and reject's refusals (linked document, kept
-    /// changing), which carry no invoice id. Every message states what was and was not saved, and any
-    /// failure AFTER the invoice row exists names that row's id — the caller (and support) must be able to find it.
-    /// A retry is safe in every case: confirm resumes from the invoice the document is already linked to.
+    /// Renders an <see cref="InvoiceReviewException"/>: confirm's incomplete mark (the submission was received; it is named, so the
+    /// caller and support can find it, and a retry completes it) and reject's refusals (confirmed document, kept changing, confirm
+    /// state unreadable), which name nothing. Every message states what was and was not saved.
     /// </summary>
     internal static IResult ConfirmFailure(InvoiceReviewException ex, string correlationId)
     {
         var (status, title) = ex.Failure switch
         {
             InvoiceReviewFailure.DocumentNotFound => (StatusCodes.Status404NotFound, "Document Not Found"),
-            InvoiceReviewFailure.DocumentLinkedToAnotherInvoice => (StatusCodes.Status409Conflict, "Document Already Linked"),
             InvoiceReviewFailure.DocumentChangedConcurrently => (StatusCodes.Status409Conflict, "Document Changed"),
-            InvoiceReviewFailure.ReviewDecisionChanged => (StatusCodes.Status409Conflict, "Review Decision Changed"),
             InvoiceReviewFailure.DocumentLinkedToInvoice => (StatusCodes.Status409Conflict, "Document Already Confirmed"),
-            InvoiceReviewFailure.OwnerTeamUnresolved => (StatusCodes.Status403Forbidden, "Invoice Not Created"),
-            // #2095: a transient read fault before anything was written - the caller retries.
-            InvoiceReviewFailure.IsolationUnreadable => (StatusCodes.Status503ServiceUnavailable, "Invoice Review Temporarily Unavailable"),
+            InvoiceReviewFailure.ConfirmStateUnreadable => (StatusCodes.Status503ServiceUnavailable, "Invoice Review Temporarily Unavailable"),
             _ => (StatusCodes.Status500InternalServerError, "Invoice Review Incomplete"),
         };
 
@@ -395,20 +399,9 @@ public static class FinanceEndpoints
             ["correlationId"] = correlationId,
         };
 
-        // The invoice another matter's document link points at was never authorized for this caller: its id is
-        // logged server-side only, never rendered — not in the detail, not as an extension (task 130 item 5).
-        if (ex.Failure == InvoiceReviewFailure.DocumentLinkedToAnotherInvoice)
+        if (ex.SubmissionId is { } submissionId)
         {
-            return Results.Problem(
-                title: title,
-                detail: "The document is already linked to an invoice for a different matter or vendor. Nothing was saved.",
-                statusCode: status,
-                extensions: extensions);
-        }
-
-        if (ex.InvoiceId is { } invoiceId)
-        {
-            extensions["invoiceId"] = invoiceId;
+            extensions["submissionId"] = submissionId;
         }
 
         return Results.Problem(title: title, detail: ex.Message, statusCode: status, extensions: extensions);

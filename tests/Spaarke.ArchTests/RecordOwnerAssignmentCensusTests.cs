@@ -234,9 +234,8 @@ public class RecordOwnerAssignmentCensusTests
             "Generated to-dos are owned from their source event (ownershipSource); a refusal counts the rule failed."),
 
         // ── Task 146 b2 (verifier AC10): create-by-upsert sites the scanner now sees (a PATCH of a fresh id) ─────────
-        new CensusEntry("InvoiceReviewService.cs", "sprk_invoice", 1, Disposition.Routed,
-            "Invoice confirm (G5): a fresh-id PATCH whose field map BuildInvoiceCreateFields binds the matter's team "
-            + "(task 130, ResolveOwningTeamAsync record-first from the matter); an unresolved team refuses before any write."),
+        // ebilling-r1 050a (D-134): the invoice confirm no longer creates sprk_invoice (its create-by-upsert entry is gone); the
+        // submission job's persister is the only invoice creator (UnscannedWriter InvoiceSubmissionPersister.cs below).
         new CensusEntry("InvoiceSubmissionService.cs", "sprk_invoicesubmission", 1, Disposition.Routed,
             "ebilling-r1 task 044 (FR-17): the submission row is built here and created by TrackingNumberAllocator with its number "
             + "(D-87). Its owner is ResolveOwnerAsync ForParents over the one core record it is filed against (secure-if-any) and "
@@ -312,8 +311,9 @@ public class RecordOwnerAssignmentCensusTests
 
     private static readonly IReadOnlyList<UnscannedWriter> UnscannedWriters = new[]
     {
-        new UnscannedWriter("InvoiceReviewService.cs", "document re-file under the new invoice",
-            "Linking the document is a reparent (task 146); the invoice's own create-by-upsert is a census site (b2)."),
+        new UnscannedWriter("InvoiceDocumentRefile.cs", "re-file of a confirmed document under the invoice the submission job created",
+            "ebilling-r1 050a (D-134, moved from InvoiceReviewService with its calls): a reparent (task 146) with the invoice as the "
+            + "inherited parent, after the persister's transaction linked the document; a refusal writes nothing."),
         new UnscannedWriter("InvoiceSubmissionPersister.cs",
             "transaction CreateRequests of sprk_invoice (via 014's BuildCreateRequest), sprk_billingevent and sprk_invoiceapproval rows built with deterministic ids",
             "ebilling-r1 task 049 part C: ResolveOwnerAsync ForParents over the submission's one core record (secure-if-any), applied with "
@@ -532,8 +532,6 @@ public class RecordOwnerAssignmentCensusTests
             "Owned by the matter's team."),
         new OwnerWriteEntry("DataverseObservationMirror.cs", "MirrorAsync", 1, OwnerWriteKind.Routed,
             "ForChild over the mirrored analysis row."),
-        new OwnerWriteEntry("InvoiceReviewService.cs", "BuildInvoiceCreateFields", 1, OwnerWriteKind.Routed,
-            "The invoice owned by the matter's team (task 130 / G5), resolved by the caller of the builder."),
         new OwnerWriteEntry("GrantExternalAccessEndpoint.cs", "BuildGrantPayload", 1, OwnerWriteKind.Routed,
             "UAC task 099b (D-11, #1010): a new sprk_externalrecordaccess row owned record-first from its grant root, resolved by "
             + "CreateGrantAsync (ResolveGrantOwnerAsync) — the one grant core every grant route and the Assigned-To rule call; the "
@@ -1394,8 +1392,8 @@ public class RecordOwnerAssignmentCensusTests
     /// the member itself always did, so any parameter passed — proven by the verifier with
     /// <c>anchor!.RecordId</c> and <c>ParseKey(keyId)</c> in <c>ThreadResolver.FindOrCreateDefaultThreadAsync</c>.
     /// Calls from OTHER files are not followed: a builder whose owner rests on its parameters must be private to the
-    /// file in practice (the two today: <c>InvoiceReviewService.BuildInvoiceCreateFields</c>,
-    /// <c>SignalEvaluationService.UpsertSignalAsync</c>).
+    /// file in practice (the one today: <c>SignalEvaluationService.UpsertSignalAsync</c>; <c>InvoiceReviewService.BuildInvoiceCreateFields</c>
+    /// went with ebilling-r1 050a).
     /// </summary>
     private static IReadOnlySet<string> ParametersFedByResolution(string code, string member)
     {
@@ -2368,9 +2366,10 @@ public class RecordOwnerAssignmentCensusTests
     {
         new PersonBearingWriter("OwnedChildWrite.cs", "CreateAsync", "the chat caller (WhoAmI) — dataverse.create_record, email.draft"),
         new PersonBearingWriter("DataverseDocumentsEndpoints.cs", "CreateDocumentAsync", "POST /api/v1/documents caller (oid)"),
-        new PersonBearingWriter("InvoiceSubmissionService.cs", "SubmitAsync",
-            "the submitter of an invoice (ebilling-r1 task 044): the internal caller (oid) or a workforce SPA caller (systemuser); a "
-            + "CIAM contact is recorded as sprk_submitter and the document's sprk_createdbycontact"),
+        new PersonBearingWriter("InvoiceSubmissionService.cs", "DecideAsync",
+            "the submitter of an invoice (ebilling-r1 task 044; the one decision both SubmitAsync and 050a's SubmitExistingDocumentAsync "
+            + "call): the internal caller (oid) or a workforce SPA caller (systemuser); a CIAM contact is recorded as sprk_submitter and "
+            + "the document's sprk_createdbycontact"),
         new PersonBearingWriter("EventEndpoints.cs", "OwnershipContextFor", "POST /api/v1/events caller (oid)"),
         new PersonBearingWriter("EventEndpoints.cs", "CreateEventInDataverseAsync", "the event and its creation log row"),
         new PersonBearingWriter("EventEndpoints.cs", "ResolveEventLogOwnerAsync", "the caller whose change a log row records"),
@@ -2407,8 +2406,8 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("UploadFinalizationWorker.cs", "CreateEmailArtifactAsync", "the carried saving user"),
         new PersonBearingWriter("UploadFinalizationWorker.cs", "CreateAttachmentArtifactAsync", "the carried saving user"),
         new PersonBearingWriter("UploadFinalizationWorker.cs", "ProcessSingleAttachmentAsync", "the carried saving user"),
-        new PersonBearingWriter("InvoiceReviewService.cs", "CreateInvoiceRecordAsync", "the reviewer confirming the invoice"),
-        new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview", "hands the HTTP caller to the invoice create"),
+        new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview",
+            "hands the HTTP caller to the confirm's submission (ebilling-r1 050a: InvoiceReviewService passes its oid to the intake)"),
         new PersonBearingWriter("InvoiceSubmissionPersister.cs", "PersistAsync", "the submitter the submission recorded at intake, stamped on the invoice, lines and approval (ebilling-r1 D-130 3)"),
         new PersonBearingWriter("UpdateRecordActionCore.cs", "UpdateAsync", "the impersonated user, for F3 (owner round 13 item 8)"),
         new PersonBearingWriter("DecisionActionExecutors.cs", "PlanAsync", "the caller whose decision commit revises the budget (ontology task 147, #1777)"),

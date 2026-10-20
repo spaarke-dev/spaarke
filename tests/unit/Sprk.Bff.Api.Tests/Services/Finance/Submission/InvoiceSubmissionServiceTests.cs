@@ -93,6 +93,18 @@ public sealed class InvoiceSubmissionServiceTests
         /// </summary>
         public bool OtherCoreRecordsExist = true;
         public Entity? Submission;
+
+        /// <summary>050a: the <c>sprk_document</c> the existing-document entry reads (null: not found).</summary>
+        public Entity? ExistingDocument;
+
+        /// <summary>050a: non-null, the existing document's read throws this.</summary>
+        public Exception? ExistingDocumentReadFailure;
+
+        /// <summary>050a: every read of a submission by id (the existing-document entry's dedupe read).</summary>
+        public readonly List<Guid> SubmissionReads = new();
+
+        /// <summary>050a: non-null, a read of a submission by id throws this.</summary>
+        public Exception? SubmissionReadFailure;
         public Exception? MatterReadFailure;
         public Exception? JobFailure;
         public Exception? DocumentCreateFailure;
@@ -244,7 +256,8 @@ public sealed class InvoiceSubmissionServiceTests
                     "sprk_project" or "sprk_workassignment" => OtherCoreRecordsExist
                         ? new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Core record", ["sprk_matternumber"] = "C-1" }
                         : null!,
-                    "sprk_invoicesubmission" => Submission!,
+                    "sprk_invoicesubmission" => ReadSubmission(id),
+                    "sprk_document" => ExistingDocumentReadFailure is { } documentFailure ? throw documentFailure : ExistingDocument!,
                     _ => null!,
                 });
             // The SPA document create stamps the uploaded item on the row (sprk_graphitemid): a committed row is found by it.
@@ -306,6 +319,17 @@ public sealed class InvoiceSubmissionServiceTests
                     ct.ThrowIfCancellationRequested();
                     return Task.CompletedTask;
                 });
+        }
+
+        private Entity ReadSubmission(Guid id)
+        {
+            SubmissionReads.Add(id);
+            if (SubmissionReadFailure is { } failure)
+            {
+                throw failure;
+            }
+
+            return Submission!;
         }
 
         public IOptionsMonitor<EbillingOptions> Monitor => Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == Options);

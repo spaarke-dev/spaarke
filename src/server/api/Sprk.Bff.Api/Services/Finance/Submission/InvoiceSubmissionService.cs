@@ -44,6 +44,10 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <para><b>Only creator of submissions.</b> The row is created by <see cref="ITrackingNumberAllocator"/> with its number already set (D-87); the
 /// submission id is minted here once per request and is also the job's idempotency key. This service never creates <c>sprk_invoice</c> (task 049
 /// does).</para>
+/// <para><b>The existing-document entry (ebilling-r1 050a, D-134).</b> The review-confirm route calls <see cref="SubmitExistingDocumentAsync"/>:
+/// the same field, firm, core-record, firm-link and owner checks (<see cref="DecideAsync"/>), no file checks, no upload and no document create;
+/// the submission points at the confirmed document, its id is derived from the document (idempotent by document), and the job re-files the
+/// document under the invoice it creates (<see cref="InvoiceDocumentRefile"/>).</para>
 /// <para><b>Logging (ADR-015).</b> Ids and outcomes only; the firm invoice number, the tracking number and the file name are business data and are
 /// not logged above Debug.</para>
 /// </remarks>
@@ -146,63 +150,11 @@ public class InvoiceSubmissionService
         }
 
         // ── 2. Reads that decide whether anything may be written ──
-        switch (await IsActiveFirmAsync(request.FirmId, ct))
+        var decision = await DecideAsync(request, spaCaller, ct);
+        if (decision.Refusal is { } refused)
         {
-            case null:
-                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
-                    "The firm could not be checked right now. Try again shortly.");
-            case false:
-                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid,
-                    "The firm was not found or is not active.");
+            return refused;
         }
-
-        var row = new Entity(SubmissionEntity);
-        row[core.SubmissionColumn] = new EntityReference(core.EntityLogicalName, core.RecordId);
-        var decided = await InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync(
-            InvoiceFamilyCoreRecordGuard.Check(row), _entities, _recordTypes.QueryRecordTypeRefAsync, ct);
-        if (decided.IsRefused || decided.ResolverFields is null)
-        {
-            _logger.LogWarning("Invoice submission refused: the core record's fields could not be derived ({Code})", decided.RefusalCode);
-            return decided.RefusalCode == InvoiceFamilyCoreRecordGuard.ReadFailedCode
-                ? InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
-                    "The record could not be read right now. Try again shortly.")
-                : InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.CoreRecordUnavailable,
-                    "The record cannot take an invoice submission (it is missing or incomplete).");
-        }
-
-        // D-106 / D-110: the firm must be one of the core record's assigned law firms, on EVERY channel (the internal route names its firm in
-        // the query and is held to the same rule as an external contact). After the record's own fields (a missing record is 422 above) and
-        // before the owner is resolved and long before any write; the same codes whichever route called. The order matters: the link reader
-        // cannot tell a record that is not returned (deleted, not found) from a fault, so both come back unreadable, and asking it first would
-        // answer a deleted record 503 "try again shortly". The detail names no firm and no record.
-        switch (await CheckFirmLinkAsync(core, request.FirmId, ct))
-        {
-            case InvoiceFirmLink.Linked:
-                break;
-            case InvoiceFirmLink.NotLinked:
-                _logger.LogInformation(
-                    "Invoice submission refused: firm {FirmId} is not linked to {Entity} {RecordId} ({Channel})",
-                    request.FirmId, core.EntityLogicalName, core.RecordId, request.Channel);
-                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
-                    "The firm you chose is not linked to this record, so an invoice cannot be submitted for it.");
-            default:
-                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
-                    "The firm could not be checked right now. Try again shortly.");
-        }
-
-        var owner = await _ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(new RecordOwnershipParent?[] { new(core.EntityLogicalName, core.RecordId) }) with
-            {
-                RequestedBy = RecordRequester.Of(systemUserId: spaCaller?.SystemUserId, objectId: request.CallerObjectId),
-            },
-            ct);
-        if (!owner.IsOwned)
-        {
-            return InvoiceSubmissionOutcome.OwnerRefused(owner);
-        }
-
-        // The owner team and the creator person go on the row here, in the member that builds it (RecordOwnerAssignmentCensusTests).
-        owner.ApplyTo(row);
 
         ContainerDecision container;
         try
@@ -224,7 +176,337 @@ public class InvoiceSubmissionService
                 "This record has no storage container configured, so the invoice cannot be stored.");
         }
 
-        return await WriteAsync(request, number, file, row, decided.ResolverFields, owner, container.ContainerId!, ct);
+        return await WriteAsync(request, number, file, decision.Row!, decision.ResolverFields!, decision.Owner!, container.ContainerId!, ct);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // Submit an existing document (ebilling-r1 task 050a, D-134: the review-confirm route)
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// The submission id of the confirm of <paramref name="documentId"/>: deterministic, so the document has exactly one confirm submission.
+    /// It is the dedupe key of <see cref="SubmitExistingDocumentAsync"/> (D-134 "idempotent by document") and the marker by which the job knows
+    /// the submission's document was not created by intake and must be re-filed under the invoice (<see cref="InvoiceDocumentRefile"/>).
+    /// </summary>
+    public static Guid ExistingDocumentSubmissionIdFor(Guid documentId) => InvoiceSubmissionPersister.IdOf($"ebilling-confirm-submission-{documentId:D}");
+
+    /// <summary>The processing job id of that submission: deterministic too, so a retry answers with the same job id it was first given.</summary>
+    public static Guid ExistingDocumentJobIdFor(Guid documentId) => InvoiceSubmissionPersister.IdOf($"ebilling-confirm-job-{documentId:D}");
+
+    private static readonly string[] ExistingDocumentColumns = ["sprk_invoice", "sprk_graphdriveid", "sprk_graphitemid"];
+
+    /// <summary>
+    /// The existing-document entry (D-134): a reviewer confirms that a document already stored (an email attachment) is an invoice. It runs the
+    /// checks <see cref="SubmitAsync"/> runs on the request's fields, the firm, the core record, the firm link (D-106 / D-110) and the owner, and
+    /// SKIPS the file checks, the upload and the document create: the submission points at <see cref="InvoiceSubmissionRequest.ExistingDocumentId"/>,
+    /// so no second copy of the PDF is made. Never throws for a refusal.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Idempotent by document.</b> The submission id is <see cref="ExistingDocumentSubmissionIdFor"/> the document. A retry for the same
+    /// firm, record and firm invoice number gets the earlier submission back (no second submission, so no second invoice); one that names
+    /// another firm, record or number is 409 <see cref="InvoiceSubmissionErrors.DocumentAlreadySubmitted"/>. Two confirms racing cannot both
+    /// create: the second create of the same id is the allocator's <see cref="TrackingNumberOutcome.AlreadyCreated"/>.</para>
+    /// <para><b>Nothing is deleted.</b> The row is never compensated by a delete (it may be a concurrent confirm's). Instead the job is
+    /// (re)submitted whenever the submission is still Received: after the create, after <see cref="TrackingNumberOutcome.AlreadyCreated"/>,
+    /// and on a retry that finds it Received. The job handler runs one delivery per submission under its lock and skips a submission that is
+    /// already terminal (FR-20), so a second message for it is harmless; a lost reply or a failed enqueue is completed by the retry.</para>
+    /// <para><b>The document</b> must exist (404 <see cref="InvoiceSubmissionErrors.DocumentNotFound"/>), hold a stored file (422
+    /// <see cref="InvoiceSubmissionErrors.DocumentHasNoFile"/>) and not already be linked to an invoice (409
+    /// <see cref="InvoiceSubmissionErrors.DocumentAlreadyInvoiced"/>). The caller's rights on it are the route's (ADR-008).</para>
+    /// </remarks>
+    public virtual async Task<InvoiceSubmissionOutcome> SubmitExistingDocumentAsync(InvoiceSubmissionRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.ExistingDocumentId is not { } documentId || documentId == Guid.Empty)
+        {
+            throw new ArgumentException("The existing-document entry needs ExistingDocumentId.", nameof(request));
+        }
+
+        if (request.Channel != InvoiceSubmissionChannel.Internal || request.File is not null)
+        {
+            throw new ArgumentException("The existing-document entry is internal and carries no file.", nameof(request));
+        }
+
+        // ── 1. The request's own fields: D-91 first, so a confirm without a number is 400 before anything is read ──
+        if (ValidateFields(request) is { } invalid)
+        {
+            return invalid;
+        }
+
+        var number = request.FirmInvoiceNumber!.Trim();
+        var submissionId = ExistingDocumentSubmissionIdFor(documentId);
+        var jobId = ExistingDocumentJobIdFor(documentId);
+
+        // ── 2. The earlier submission for this document, if any: the retry's answer ──
+        InvoiceSubmissionView? earlier;
+        try
+        {
+            earlier = await GetAsync(submissionId, ct);
+        }
+        catch (SdapProblemException ex)
+        {
+            return InvoiceSubmissionOutcome.Refused(ex.StatusCode, ex.Code, ex.Detail ?? ex.Title);
+        }
+
+        if (earlier is not null)
+        {
+            return await AnswerWithEarlierAsync(request, number, earlier, documentId, jobId, ct);
+        }
+
+        // ── 3. The document: present, holding a file, not already an invoice's ──
+        if (await CheckExistingDocumentAsync(documentId, ct) is { } documentRefusal)
+        {
+            return documentRefusal;
+        }
+
+        // ── 4. The same checks as an upload (firm, record, firm link, owner) ──
+        var decision = await DecideAsync(request, spaCaller: null, ct);
+        if (decision.Refusal is { } refused)
+        {
+            return refused;
+        }
+
+        // ── 5. The submission, then its job ──
+        var row = decision.Row!;
+        foreach (var (column, value) in decision.ResolverFields!.ToFields())
+        {
+            row[column] = value;
+        }
+
+        row["sprk_name"] = number;
+        row["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Received);
+        row["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
+        row["sprk_document"] = new EntityReference(DocumentEntity, documentId);
+        row["sprk_receivedon"] = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(request.PoNumber))
+        {
+            row["sprk_ponumber"] = request.PoNumber.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.CorrelationId))
+        {
+            row["sprk_correlationid"] = request.CorrelationId.Length > 100 ? request.CorrelationId[..100] : request.CorrelationId;
+        }
+
+        if (InvoiceFamilyCoreRecordGuard.Check(row) is { IsRefused: true } guardRefusal)
+        {
+            throw new InvalidOperationException($"The submission payload failed the invoice-family guard ({guardRefusal.RefusalCode}).");
+        }
+
+        // A caller already gone writes nothing; from here on no write observes the caller's token (as SubmitAsync).
+        ct.ThrowIfCancellationRequested();
+        var write = CancellationToken.None;
+
+        TrackingNumberResult allocation;
+        try
+        {
+            allocation = await _allocator.CreateSubmissionAsync(submissionId, request.FirmId, number, row.Attributes.ToDictionary(), write);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The allocator's reconcile: the id exists for another firm or firm invoice number (a concurrent confirm that named them). Not
+            // ours, so not touched.
+            _logger.LogWarning(ex, "Invoice submission {SubmissionId}: the confirm of document {DocumentId} met a concurrent confirm with other details",
+                submissionId, documentId);
+            return DocumentAlreadySubmitted();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Invoice submission {SubmissionId}: the confirm of document {DocumentId} could not be created", submissionId, documentId);
+            return NotQueued();
+        }
+
+        if (!allocation.Succeeded)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: no tracking number could be allocated ({Reason})", submissionId, allocation.Reason);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, TrackingNumberReasons.Unavailable,
+                "A tracking number could not be assigned right now, so nothing was saved. Try again shortly.");
+        }
+
+        if (!await TrySubmitJobAsync(jobId, submissionId, request.CorrelationId))
+        {
+            return NotQueued();
+        }
+
+        _logger.LogInformation(
+            "Invoice submission {SubmissionId} received for existing document {DocumentId} ({Outcome}) for {Entity} {RecordId}; job {JobId} enqueued",
+            submissionId, documentId, allocation.Outcome, request.CoreRecord.EntityLogicalName, request.CoreRecord.RecordId, jobId);
+        return InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(submissionId, jobId, allocation.TrackingNumber!, documentId));
+    }
+
+    /// <summary>
+    /// A retry: the document's confirm submission exists. The same firm, record and firm invoice number get it back (re-queued while it is
+    /// still Received); anything else is 409 and names nothing about it.
+    /// </summary>
+    private async Task<InvoiceSubmissionOutcome> AnswerWithEarlierAsync(
+        InvoiceSubmissionRequest request, string number, InvoiceSubmissionView earlier, Guid documentId, Guid jobId, CancellationToken ct)
+    {
+        var same = earlier.FirmId == request.FirmId
+            && earlier.CoreRecord == request.CoreRecord
+            && earlier.DocumentId == documentId
+            && string.Equals(earlier.FirmInvoiceNumber?.Trim(), number, StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrEmpty(earlier.TrackingNumber);
+        if (!same)
+        {
+            _logger.LogInformation("Invoice submission {SubmissionId}: document {DocumentId} was already confirmed with other details; refused (409)",
+                earlier.SubmissionId, documentId);
+            return DocumentAlreadySubmitted();
+        }
+
+        if (earlier.Status == nameof(InvoiceSubmissionStatus.Received))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!await TrySubmitJobAsync(jobId, earlier.SubmissionId, request.CorrelationId))
+            {
+                return NotQueued();
+            }
+        }
+
+        _logger.LogInformation("Invoice submission {SubmissionId}: the confirm of document {DocumentId} was retried; answering with it ({Status})",
+            earlier.SubmissionId, documentId, earlier.Status);
+        return InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(earlier.SubmissionId, jobId, earlier.TrackingNumber!, documentId));
+    }
+
+    /// <summary>Null when the document can be submitted; otherwise the refusal. A read fault is 503 (never "not found").</summary>
+    private async Task<InvoiceSubmissionOutcome?> CheckExistingDocumentAsync(Guid documentId, CancellationToken ct)
+    {
+        Entity? document;
+        try
+        {
+            document = await _entities.RetrieveAsync(DocumentEntity, documentId, ExistingDocumentColumns, ct);
+        }
+        catch (Exception ex) when (IsNotFound(ex))
+        {
+            document = null;
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning(ex, "Invoice submission refused: document {DocumentId} could not be read", documentId);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                "The document could not be read right now. Try again shortly.");
+        }
+
+        if (document is null)
+        {
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status404NotFound, InvoiceSubmissionErrors.DocumentNotFound,
+                "The document no longer exists. Nothing was saved.");
+        }
+
+        if (document.GetAttributeValue<EntityReference>("sprk_invoice") is { Id: var linked } && linked != Guid.Empty)
+        {
+            // The invoice is never named: the caller was authorized against the document, not against that invoice.
+            _logger.LogInformation("Invoice submission refused: document {DocumentId} is already linked to invoice {InvoiceId}", documentId, linked);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentAlreadyInvoiced,
+                "The document is already linked to an invoice. Nothing was saved.");
+        }
+
+        if (string.IsNullOrWhiteSpace(document.GetAttributeValue<string>("sprk_graphdriveid"))
+            || string.IsNullOrWhiteSpace(document.GetAttributeValue<string>("sprk_graphitemid")))
+        {
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.DocumentHasNoFile,
+                "The document has no stored file, so it cannot be submitted as an invoice.");
+        }
+
+        return null;
+    }
+
+    /// <summary>Submits the job (ADR-004, the submission id as idempotency key); false when the queue refused it (logged).</summary>
+    private async Task<bool> TrySubmitJobAsync(Guid jobId, Guid submissionId, string? correlationId)
+    {
+        try
+        {
+            await _jobs.SubmitJobAsync(BuildJob(jobId, submissionId, correlationId), CancellationToken.None);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Invoice submission {SubmissionId}: its job {JobId} could not be queued; a retry of the confirm queues it", submissionId, jobId);
+            return false;
+        }
+    }
+
+    private static InvoiceSubmissionOutcome DocumentAlreadySubmitted() =>
+        InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentAlreadySubmitted,
+            "The document was already confirmed as an invoice with a different firm, record or invoice number. Nothing was saved.");
+
+    /// <summary>
+    /// The confirm's submission may have been saved but its job was not queued. Not "nothing saved": a retry of the same confirm finds the
+    /// submission and queues it (see <see cref="SubmitExistingDocumentAsync"/>).
+    /// </summary>
+    private static InvoiceSubmissionOutcome NotQueued() =>
+        InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.Failed,
+            "The invoice could not be queued for processing right now. Retry the confirmation; it completes the same submission.");
+
+    /// <summary>What <see cref="DecideAsync"/> found: a refusal, or the submission row (core lookup and owner set), its resolver fields and owner.</summary>
+    private sealed record IntakeDecision(
+        InvoiceSubmissionOutcome? Refusal, Entity? Row = null, InvoiceFamilyResolverFields? ResolverFields = null, RecordOwnerResolution? Owner = null);
+
+    /// <summary>
+    /// The checks every entry runs before it writes (D-24: the same checks on every channel; D-134: the existing-document entry too), in this
+    /// order: the firm is active, the core record's fields derive (013), the firm is one of the record's assigned law firms (D-106 / D-110), and
+    /// an owner team resolves. Reads only; nothing is written.
+    /// </summary>
+    private async Task<IntakeDecision> DecideAsync(InvoiceSubmissionRequest request, CallerPrincipal? spaCaller, CancellationToken ct)
+    {
+        var core = request.CoreRecord;
+        switch (await IsActiveFirmAsync(request.FirmId, ct))
+        {
+            case null:
+                return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
+                    "The firm could not be checked right now. Try again shortly."));
+            case false:
+                return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid,
+                    "The firm was not found or is not active."));
+        }
+
+        var row = new Entity(SubmissionEntity);
+        row[core.SubmissionColumn] = new EntityReference(core.EntityLogicalName, core.RecordId);
+        var decided = await InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync(
+            InvoiceFamilyCoreRecordGuard.Check(row), _entities, _recordTypes.QueryRecordTypeRefAsync, ct);
+        if (decided.IsRefused || decided.ResolverFields is null)
+        {
+            _logger.LogWarning("Invoice submission refused: the core record's fields could not be derived ({Code})", decided.RefusalCode);
+            return new(decided.RefusalCode == InvoiceFamilyCoreRecordGuard.ReadFailedCode
+                ? InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                    "The record could not be read right now. Try again shortly.")
+                : InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                    "The record cannot take an invoice submission (it is missing or incomplete)."));
+        }
+
+        // D-106 / D-110: the firm must be one of the core record's assigned law firms, on EVERY channel (the internal route names its firm in
+        // the query and is held to the same rule as an external contact). After the record's own fields (a missing record is 422 above) and
+        // before the owner is resolved and long before any write; the same codes whichever route called. The order matters: the link reader
+        // cannot tell a record that is not returned (deleted, not found) from a fault, so both come back unreadable, and asking it first would
+        // answer a deleted record 503 "try again shortly". The detail names no firm and no record.
+        switch (await CheckFirmLinkAsync(core, request.FirmId, ct))
+        {
+            case InvoiceFirmLink.Linked:
+                break;
+            case InvoiceFirmLink.NotLinked:
+                _logger.LogInformation(
+                    "Invoice submission refused: firm {FirmId} is not linked to {Entity} {RecordId} ({Channel})",
+                    request.FirmId, core.EntityLogicalName, core.RecordId, request.Channel);
+                return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
+                    "The firm you chose is not linked to this record, so an invoice cannot be submitted for it."));
+            default:
+                return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
+                    "The firm could not be checked right now. Try again shortly."));
+        }
+
+        var owner = await _ownership.ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new RecordOwnershipParent?[] { new(core.EntityLogicalName, core.RecordId) }) with
+            {
+                RequestedBy = RecordRequester.Of(systemUserId: spaCaller?.SystemUserId, objectId: request.CallerObjectId),
+            },
+            ct);
+        if (!owner.IsOwned)
+        {
+            return new(InvoiceSubmissionOutcome.OwnerRefused(owner));
+        }
+
+        // The owner team and the creator person go on the row here, in the member that builds it (RecordOwnerAssignmentCensusTests).
+        owner.ApplyTo(row);
+        return new(null, row, decided.ResolverFields, owner);
     }
 
     /// <summary>The container of the core record (D-44: secure when secure; fail closed). Virtual so a test can stand in for the resolver.</summary>
@@ -232,6 +514,34 @@ public class InvoiceSubmissionService
         _containers.ResolveForRecordAsync(core.EntityLogicalName, core.RecordId, ct);
 
     private InvoiceSubmissionOutcome? Validate(InvoiceSubmissionRequest request)
+    {
+        if (ValidateFields(request) is { } invalid)
+        {
+            return invalid;
+        }
+
+        if (request.File is not { Content.Length: > 0 } file)
+        {
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FileRequired,
+                "A non-empty PDF file is required.");
+        }
+
+        if (file.Content.LongLength > MaxFileBytes)
+        {
+            return TooLarge();
+        }
+
+        if (!IsPdf(file))
+        {
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.NotPdf,
+                "Only PDF invoices are accepted.");
+        }
+
+        return null;
+    }
+
+    /// <summary>The checks of the request's own fields every entry runs first: the number (D-91), its length, the PO, the firm and record ids.</summary>
+    private static InvoiceSubmissionOutcome? ValidateFields(InvoiceSubmissionRequest request)
     {
         // D-91 first: the number is required, so a request without one never costs an upload.
         var number = request.FirmInvoiceNumber?.Trim();
@@ -262,23 +572,6 @@ public class InvoiceSubmissionService
         {
             return InvoiceSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.CoreRecordUnavailable,
                 "A record is required.");
-        }
-
-        if (request.File is not { Content.Length: > 0 } file)
-        {
-            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FileRequired,
-                "A non-empty PDF file is required.");
-        }
-
-        if (file.Content.LongLength > MaxFileBytes)
-        {
-            return TooLarge();
-        }
-
-        if (!IsPdf(file))
-        {
-            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.NotPdf,
-                "Only PDF invoices are accepted.");
         }
 
         return null;
