@@ -1610,20 +1610,7 @@ public sealed class DecisionRecordWriter
     {
         try
         {
-            var query = new QueryExpression(Table)
-            {
-                ColumnSet = new ColumnSet("sprk_confirmedby", "sprk_actioncode", "sprk_steps"),
-                // Sequential use leaves at most one billing row per key; only a concurrent pair (see WriteBillingDecisionAsync) adds another.
-                // Bounded, never a scan.
-                TopCount = BillingLookupTop,
-                NoLock = true,
-            };
-            query.Criteria.AddCondition(SubjectLookupByEntity[subject.Entity], ConditionOperator.Equal, subject.Id);
-            query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"reviewId\":\"{key:D}\"%");
-            query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
-            // K4 (ontology-r1): only billing records count against the cap. Signals reviews that reused the id would otherwise fill the 10
-            // rows and hide this decision's record, and a second record would be written.
-            query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.In, BillingLookupCodes);
+            var query = await BillingRecordsQueryAsync(subject, key, ["sprk_confirmedby", "sprk_actioncode", "sprk_steps"], ct).ConfigureAwait(false);
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
 
             var found = new List<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>();
@@ -1645,6 +1632,176 @@ public sealed class DecisionRecordWriter
                 DecisionRecordRefusalReason.BillingRecordLookupFailed,
                 "Whether the billing decision's Decision Record already exists could not be checked, so nothing was written.",
                 innerException: ex);
+        }
+    }
+
+    /// <summary>The "already recorded" lookup's query (<see cref="FindBillingRecordsAsync"/>), shared UNCHANGED with
+    /// <see cref="FindBillingDecisionResolvedSetAsync"/>: the subject's regarding lookup, the key in <c>sprk_steps</c>, created by the writer
+    /// identity, billing codes only, at most <see cref="BillingLookupTop"/> rows. Only the columns differ.</summary>
+    private async Task<QueryExpression> BillingRecordsQueryAsync(DecisionRecordRef subject, Guid key, string[] columns, CancellationToken ct)
+    {
+        var query = new QueryExpression(Table)
+        {
+            ColumnSet = new ColumnSet(columns),
+            // Sequential use leaves at most one billing row per key; only a concurrent pair (see WriteBillingDecisionAsync) adds another.
+            // Bounded, never a scan.
+            TopCount = BillingLookupTop,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(SubjectLookupByEntity[subject.Entity], ConditionOperator.Equal, subject.Id);
+        query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"reviewId\":\"{key:D}\"%");
+        query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
+        // K4 (ontology-r1): only billing records count against the cap. Signals reviews that reused the id would otherwise fill the 10
+        // rows and hide this decision's record, and a second record would be written.
+        query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.In, BillingLookupCodes);
+        return query;
+    }
+
+    /// <summary>
+    /// The fact (in <c>sprk_factsnapshot</c>'s <c>facts</c>) under which a human billing decision stores the D-122 set it read before its
+    /// record (ebilling-r1 tasks 100 and 105): <c>{ "setReadAtUtc": "...Z", "signals": [ { "id": ..., "policyCode": ... } ] }</c>. The ids
+    /// themselves are the record's <c>resolvedSignalIds</c> (covered by the hash); this fact adds only what the close needs.
+    /// </summary>
+    internal const string BillingResolvedSetFact = "resolvedSignalSet";
+
+    /// <summary>The D-122 set a recorded billing decision stored (<see cref="FindBillingDecisionResolvedSetAsync"/>): ids, the instant the
+    /// set was read and each Signal's policy code. Never record text.</summary>
+    /// <param name="SetReadAtUtc">Null when the record lists no Signal and stored no set (a record written before the set was stored).</param>
+    internal sealed record BillingStoredResolvedSet(
+        Guid RecordId, DateTime? SetReadAtUtc, IReadOnlyList<(Guid SignalId, string PolicyCode)> Signals);
+
+    /// <summary>
+    /// ebilling-r1 tasks 100 and 105 (D-122, additive; ontology-r1 approved): the set the billing decision <paramref name="decisionId"/> on
+    /// <paramref name="subject"/> stored with its Decision Record, so a retry closes EXACTLY that set (the record's hash covers its
+    /// <c>resolvedSignalIds</c>; a fresh read would differ once the first attempt closed any). Read only, through
+    /// <see cref="BillingRecordsQueryAsync"/> (the "already recorded" lookup's query, unchanged: a row a person created with the key is never
+    /// trusted). Null: no record, so this is a first attempt. Writes nothing; <see cref="WriteBillingDecisionAsync"/> and its hash are unchanged.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ReviewInvalid"/>: more than one record
+    /// matches the key (never one is picked), or the record lists Signals whose stored set cannot be read.
+    /// <see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the lookup faulted. Nothing is written.</exception>
+    internal async Task<BillingStoredResolvedSet?> FindBillingDecisionResolvedSetAsync(
+        DecisionRecordRef subject, Guid decisionId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        if (!SubjectLookupByEntity.ContainsKey(subject.Entity) || subject.Id == Guid.Empty || decisionId == Guid.Empty)
+        {
+            throw new DecisionRecordRefusedException(DecisionRecordRefusalReason.ReviewInvalid, "A billing subject and a decision id are required.");
+        }
+
+        var key = BillingDecisionKey.IdOf(subject.Entity, subject.Id, decisionId);
+        List<Entity> rows;
+        try
+        {
+            var query = await BillingRecordsQueryAsync(subject, key, ["sprk_actioncode", "sprk_steps", "sprk_factsnapshot"], ct).ConfigureAwait(false);
+            rows = ((await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities ?? Enumerable.Empty<Entity>())
+                .Where(r => r.Id != Guid.Empty && r.GetAttributeValue<string>("sprk_actioncode") is { } code && BillingSubjectByCode.ContainsKey(code))
+                .ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.BillingRecordLookupFailed,
+                "Whether the billing decision's Decision Record already exists could not be checked, so nothing was written.",
+                innerException: ex);
+        }
+
+        if (rows.Count == 0)
+        {
+            return null;
+        }
+
+        if (rows.Count > 1)
+        {
+            // Fail closed: two records under one key (a concurrent pair) may store different sets; picking one could close the wrong set.
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.ReviewInvalid,
+                "More than one Decision Record matches this billing decision, so its stored Signal set is ambiguous; nothing was written.");
+        }
+
+        var row = rows[0];
+        var ids = StoredResolvedSignalIdsOf(row);
+        var stored = StoredResolvedSetFactOf(row);
+        if (ids is null || (ids.Count > 0 && (stored is null || ids.Any(id => !stored.Value.Codes.ContainsKey(id)))))
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.ReviewInvalid,
+                "The recorded billing decision lists Signals whose stored set cannot be read; nothing was written.");
+        }
+
+        return new BillingStoredResolvedSet(
+            row.Id,
+            stored?.ReadAt,
+            ids.Select(id => (id, stored!.Value.Codes[id])).ToList());
+    }
+
+    /// <summary>The record's <c>resolvedSignalIds</c> from <c>sprk_steps</c>; null when unreadable.</summary>
+    private static IReadOnlyList<Guid>? StoredResolvedSignalIdsOf(Entity row)
+    {
+        try
+        {
+            using var steps = JsonDocument.Parse(row.GetAttributeValue<string>("sprk_steps") ?? "{}");
+            if (steps.RootElement.ValueKind != JsonValueKind.Object
+                || !steps.RootElement.TryGetProperty("resolvedSignalIds", out var list) || list.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var ids = new List<Guid>();
+            foreach (var item in list.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.String || !Guid.TryParse(item.GetString(), out var id) || id == Guid.Empty)
+                {
+                    return null;
+                }
+
+                ids.Add(id);
+            }
+
+            return ids;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The <see cref="BillingResolvedSetFact"/> fact from <c>sprk_factsnapshot</c>: when the set was read and each id's policy
+    /// code; null when absent or unreadable.</summary>
+    private static (DateTime ReadAt, Dictionary<Guid, string> Codes)? StoredResolvedSetFactOf(Entity row)
+    {
+        try
+        {
+            using var snapshot = JsonDocument.Parse(row.GetAttributeValue<string>("sprk_factsnapshot") ?? "{}");
+            if (snapshot.RootElement.ValueKind != JsonValueKind.Object
+                || !snapshot.RootElement.TryGetProperty("facts", out var facts) || facts.ValueKind != JsonValueKind.Object
+                || !facts.TryGetProperty(BillingResolvedSetFact, out var set) || set.ValueKind != JsonValueKind.Object
+                || !set.TryGetProperty("setReadAtUtc", out var at) || at.ValueKind != JsonValueKind.String
+                || !DateTime.TryParseExact(at.GetString(), "O", CultureInfo.InvariantCulture,
+                    DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var readAt)
+                || !set.TryGetProperty("signals", out var signals) || signals.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var codes = new Dictionary<Guid, string>();
+            foreach (var signal in signals.EnumerateArray())
+            {
+                if (signal.ValueKind != JsonValueKind.Object
+                    || !signal.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String || !Guid.TryParse(id.GetString(), out var signalId)
+                    || !signal.TryGetProperty("policyCode", out var code) || code.ValueKind != JsonValueKind.String || code.GetString() is not { Length: > 0 } policyCode)
+                {
+                    return null;
+                }
+
+                codes[signalId] = policyCode;
+            }
+
+            return (DateTime.SpecifyKind(readAt, DateTimeKind.Utc), codes);
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

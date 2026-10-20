@@ -167,6 +167,17 @@ public sealed class BillingDecisionRecorder
         "The deciding user's linked contact could not be read, so the decision was not recorded; nothing was written.",
         innerException: innerException);
 
+    /// <summary>
+    /// The D-122 set a decision already recorded under <paramref name="decisionId"/> stored with its record (ebilling-r1 task 100: a retry
+    /// closes exactly that set); null when no record exists yet (a first attempt). The subject table follows the code, as for
+    /// <see cref="RecordAsync"/>. Read only (<see cref="DecisionRecordWriter.FindBillingDecisionResolvedSetAsync"/>).
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException">More than one record matches, the stored set cannot be read, or the lookup faulted.</exception>
+    internal Task<DecisionRecordWriter.BillingStoredResolvedSet?> FindStoredResolvedSetAsync(
+        string actionCode, Guid subjectId, Guid decisionId, CancellationToken ct = default) =>
+        _writer.FindBillingDecisionResolvedSetAsync(
+            new DecisionRecordRef(DecisionRecordWriter.BillingSubjectEntityOf(actionCode) ?? string.Empty, subjectId), decisionId, ct);
+
     /// <summary>Every refusal <see cref="RecordAsync"/> can give without I/O. Reads and writes nothing.</summary>
     /// <exception cref="DecisionRecordRefusedException">The decision as given would be refused.</exception>
     public void Preflight(BillingDecision decision) => _writer.PreflightBillingDecision(ToRequest(decision));
