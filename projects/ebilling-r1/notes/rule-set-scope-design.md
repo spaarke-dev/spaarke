@@ -1,7 +1,7 @@
 # Rule set scope: client default, firm, core record, firm + core record, business-unit filter
 
 > **Status**: DESIGN NOTE, draft for review (2026-10-20). Nothing here is built, and nothing in it is decided except the owner's own words, which are quoted in section 1. Every other statement marked **Proposal** needs a decision first: from the owner, ontology-r1 or uac-r2, as named in section 9.
-> **Source**: GitHub #2129, ontology decision **D-171** (owner, 2026-10-20). It extends ebilling D-39. The ebilling decisions log has no entry for it yet; the next free number is **D-135**.
+> **Source**: GitHub #2129, ontology decision **D-171** (owner, 2026-10-20). It extends ebilling D-39. Recorded in the ebilling decisions log as **D-136**.
 > **Branch read**: `work/ebilling-r1` at `b046154af`. File and line references are to that commit.
 > **Schema items are marked "needs owner approval before running".** None of them has run.
 
@@ -16,7 +16,7 @@
 | Ownership (Q3) | Route the `sprk_ruleset` / `sprk_policy` / `sprk_policyversion` creates through `IRecordOwnershipResolver` with the core record as parent. The census moves to Routed. |
 | Firm visibility (Q4), re-own on a Secure change (Q5) | Unchanged from the issue body. |
 
-**Census state today.** The waiver is `WaiverKind.Permanent`, not Pending: `tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs:265-266`, with its text at `:127-139`. **Proposal:** change it to `Pending` now, naming #2129 / D-171, in a test-only change, so the waiver no longer reads as permanent. Section 4.4 moves it to Routed.
+**Census state today.** The waiver is `WaiverKind.Pending` on #2129 (4d51138e9, uac-r2 conditions: the open decision is named, the end of the waiver is stated, and the guard tests are kept until the routing change). Section 4.4 moves it to Routed.
 
 ## 2. Schema (needs owner approval before running)
 
@@ -289,5 +289,4 @@ A follow-up for Q8 (rate-card inheritance), if the owner agrees, is a separate S
 ## 11. Things found while reading (not part of D-171)
 
 - **Rate card core lookups use RemoveLink** (`Deploy-EbillingTimekeeperRateCardSchema.ps1:431-436`, which passes no `-DeleteBehavior`; the module default at `EbillingSchema.psm1:337` is `RemoveLink`). A matter deleted outside uac-r2's delete path would clear the card's lookup and turn a matter card into a **firm-wide** card. This is unverified live. The main session should check `RelationshipDefinitions(SchemaName='sprk_matter_ratecard_matter')` and file it if it is confirmed.
-- **The census waiver is `Permanent`, not Pending** (section 1).
 - **Rate card authorization checks Read, not AppendTo**, on its core record (Q12).
