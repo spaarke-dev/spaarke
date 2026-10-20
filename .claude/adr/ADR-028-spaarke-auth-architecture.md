@@ -374,7 +374,8 @@ teams and shares. Conditions:
 - fail closed: a fault, a missing systemuser id or an unreadable answer adds no rights (both `Spaarke.Dataverse` calls
   refuse `Guid.Empty`);
 - a 404 is re-asked on `CallerRecordAccessProbe.NotFoundRetryDelay`'s schedule; a 403 that is not an access answer
-  (e.g. `0x8004A110`) is UNKNOWN and logged as a Warning; each question is bounded at 15 s;
+  (e.g. `0x8004A110`, or `0x80040220` whose message names `prvActOnBehalfOfAnotherUser`) is UNKNOWN and logged as a
+  Warning; each question is bounded at 15 s;
 - uncached, and logged with the path that answered (no tokens, no PII);
 - the same deployment prerequisite as the read (E-2, `prvActOnBehalfOfAnotherUser`).
 
