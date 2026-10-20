@@ -212,3 +212,23 @@ which folds in team roles): one entry, **Deep** at BU1 — no Organization depth
 The inversion check is one-time (§8, 2026-10-03) and the canary code is unchanged since; not repeated.
 **Consequence:** the NFR-04 live half of the 036 merge gate is satisfied for `c7ad7b65a`. Re-run before an
 FR-20 rollout in any environment, or if the impersonation primitive changes before merge.
+
+## 10. Manual live gate: RE-RUN 2026-10-20 on the DEPLOYED master commit 4f5f22694 (before the FR-20 flip)
+
+**Result: PASS.** Both runs passed 20 of 20 in `ImpersonationNegativeCanaryTests`, all four live tests included, with `SPAARKE_CANARY_REQUIRED=true` and none NOT RUN.
+
+- **Runs:** 23:37:51Z and 23:38:53Z, from a detached worktree at `4f5f22694c`. That is the commit R3 deployed to the dev BFF at 23:34:36Z, with `ExternalAccess__ImpersonatedRootSets__Enabled` absent (flag OFF).
+- **Read-only:** no record, role, user, flag or app setting was written. No Key Vault was read.
+- **Canary:** the same user and role shape as §9, unchanged.
+  - 2 direct roles and 1 team role, all with `prvReadsprk_matter` at Deep; none at Organization depth.
+  - Its business unit has no descendants.
+  - Hierarchy security is off.
+  - Depth was read with `RetrieveRolePrivilegesRole`, because `roleprivilegescollection` returns no rows for business-unit role copies.
+- **Expected set (derived app-only):** 58 Deep matters plus 0 POA Read rows = **58 of 62**. The impersonated read equals that set exactly. The expected ids went through `SPAARKE_CANARY_SEEDED_MATTER_IDS` and are not reproduced here.
+- **Code coverage:** there is no diff in `tests/integration/auth/UnifiedAccessControl/` or `src/server/shared/Spaarke.Dataverse/` between §9's head `30fb8ce9db` and `4f5f22694c`. This run therefore exercises the same canary and impersonation primitive as §9, now at the deployed commit.
+- **Tripwire:** the flag stays off in every checked-in config (`false` in `appsettings.template.json`, absent from `appsettings.json`).
+- **Inversion check:** not repeated (the §8 one-time check stands).
+
+**Flag-off sanity, same deploy.** App Insights from 23:34Z: 6 requests answered 200 and 1 anonymous `/api/me` answered 401, as expected. There were no 5xx, no 403s and no `sdap.access.dataverse_unavailable` faults. The only errors had started before the deploy: #1830 (SPE JIT-grant revocation sweep) and #2163 (identity-link reconciliation aborts for spaarke-acme, filed now).
+
+**Consequence:** the NFR-04 gate is satisfied for flipping the FR-20 flag on dev at `4f5f22694`. The flip needs the owner's direct yes to R3.
