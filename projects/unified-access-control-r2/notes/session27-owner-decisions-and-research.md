@@ -1699,3 +1699,12 @@ The full record is in `notes/185-invite-code-design.md` §11.
    - *Open for build planning:* does any guard or ArchTest pin "the BFF never deletes a DR" (the append-only invariant)? If so, it is narrowed to "only the core-record delete operation deletes DRs", not removed.
 2. **186:** the owner reports the Tracy guest account is verified. The server-side gate was commissioned (results in `batch7-live-gates-2026-10-17.md`).
 3. The owner asked for details of the #2121 options, the 036 options and #2119 (answered in chat; decisions pending).
+
+## Round 108 (owner, 2026-10-20)
+
+1. **#2121: option (b).** For a Secure record reached only through an Assigned lookup, the server asks Dataverse, app-only and naming the systemuser (RetrievePrincipalAccess), and keeps the record with Read only if Dataverse admits it. PR #2122. This is security code: owner sign-off before merge.
+2. **036: option C.** App-only named-principal confirmation for every systemuser on `/api/v1/external`, and no OBO on that plane. The critique conditions apply: 404-only re-ask, fault vs denial, a no-OBO ArchTest, the CA note, and a live disabled/unlicensed check. ADR-028 A5 B1 is widened to every systemuser. Follow-up issue: impersonated writes.
+3. **#2119: Manage Access PCF on ALL record forms, for consistency.** Standalone Document, To Do and Event records (no parent) need their own access management. "We do not want to over complicate it." No stop-gap (dev only). A design check is commissioned (`notes/2119-manage-access-all-forms-design.md`).
+4. **Round 107 deletion confirmed ("correct").**
+5. **186:** the owner will sign in as Tracy when told. R3 059 E/F made the A9 SPA live (1908696a8).
+6. **#2128: option (1), remove the guest route** (the FR-15 auto-create for customer-tenant B2B guests). Question: how does self-registration put the contact in the correct BU? Answered in chat: `ExternalAccess:CustomerBusinessUnitId` → that BU's default team. A missing value, or the Secure BU, means nothing is created. It is one value per environment.
