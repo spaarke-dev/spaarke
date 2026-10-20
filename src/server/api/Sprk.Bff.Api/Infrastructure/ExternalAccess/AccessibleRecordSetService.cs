@@ -834,8 +834,16 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         {
             _logger.LogInformation(
                 "[WF-AUTHZ] Systemuser {SystemUserId}: {Count} Secure {EntityType} record(s) reached only through a registry " +
-                "lookup column keep no membership-term access (FR-22, #2121): {RecordIds}. Ownership-derived membership is kept.",
-                systemUserId, lookupOnly.Count, entityType, string.Join(",", lookupOnly));
+                "lookup column keep no membership-term access (FR-22, #2121). Ownership-derived membership is kept.",
+                systemUserId, lookupOnly.Count, entityType);
+
+            if (_logger.IsEnabled(LogLevel.Debug))
+            {
+                _logger.LogDebug(
+                    "[WF-AUTHZ] Systemuser {SystemUserId}: the Secure {EntityType} record(s) dropped from the membership term " +
+                    "(#2121): {RecordIds}.",
+                    systemUserId, entityType, string.Join(",", lookupOnly));
+            }
         }
 
         if (ownership.Capped && lookupOnly.Count > 0)
@@ -2003,12 +2011,20 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // term never consults isDirectOnly.
         //
         // #2121 (FR-22): Secure DOES act on half of this term. The walk unions two kinds of match:
-        //   - OWNERSHIP (ownerid / owningteam / owningbusinessunit): the user owns the record or is in the owning
-        //     team. That is Dataverse access, which the model-driven app grants too, so it survives Secure.
+        //   - OWNERSHIP (ownerid / owningteam / owningbusinessunit): the user owns the record, is in the owning team,
+        //     or is in the owning business unit. It survives Secure. The user and team legs are Dataverse ownership,
+        //     which the model-driven app honours as well. The business-unit leg is an approximation that ignores
+        //     security-role depth (a BU-level read right is assumed, never checked), so the model-driven app is not
+        //     guaranteed to grant it. That approximation predates #2121 and stays until the FR-20 impersonated read
+        //     (task 036) replaces it.
         //   - REGISTRY LOOKUP columns ("Assigned …", matched through the linked contact or its organization): derived
-        //     access that Dataverse knows nothing about. The Secure BU blocks this user in the model-driven app, so
-        //     on an effectively Secure record (folded flags, IsSecure — not IsDirectOnly) it is suppressed here, as
-        //     the contact plane's membership walk is. An id matched both ways keeps its membership.
+        //     access that Dataverse knows nothing about. When the user holds no Dataverse share on the record, the
+        //     Secure BU blocks them in the model-driven app, so on an effectively Secure record (folded flags,
+        //     IsSecure — not IsDirectOnly) this match is suppressed here, as the contact plane's membership walk is.
+        //     An id matched both ways keeps its membership.
+        // This plane does NOT read Dataverse shares (K1; the impersonated Dataverse answer is task 036). So a Secure
+        // record that a user can reach only through a share plus an Assigned lookup is dropped here until 036, even
+        // though the model-driven app opens it for them.
         var secureLookupOnly = await SecureLookupOnlyMembershipAsync(systemUserId, entityType, walk.Ids, flags, ct)
             .ConfigureAwait(false);
         var membershipTerm = walk.Ids

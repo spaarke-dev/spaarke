@@ -859,8 +859,9 @@ public class AccessibleRecordSetServiceTests
 
     // ─────────────────────────────────────────────────────────────────────
     // #2121 — Secure suppresses a systemuser's LOOKUP-derived membership (Term 1) on the SPA/Teams plane.
-    // A user whose linked contact is named in a registry "Assigned …" column of a Secure record is denied by
-    // the model-driven app (the Secure BU blocks them); the membership term must not open it here either.
+    // A user whose linked contact is named in a registry "Assigned …" column of a Secure record, and who holds no
+    // Dataverse share on it, is denied by the model-driven app (the Secure BU blocks them); the membership term must
+    // not open it here either. (This plane does not read shares — K1, task 036.)
     // Ownership-derived membership (the user owns it, or is in the owning team) is Dataverse access and stays.
     // ─────────────────────────────────────────────────────────────────────
 
@@ -871,18 +872,18 @@ public class AccessibleRecordSetServiceTests
             && o.AccessConferringOnly && o.IdentityTypes == null);
 
     /// <summary>
-    /// The OWNERSHIP walk (#2121): the same access-conferring walk narrowed to the platform ownership identity types
-    /// (SystemUser / Team / BusinessUnit) and to nothing a registry "Assigned …" column can carry (Contact / Organization).
+    /// The OWNERSHIP walk (#2121): the same access-conferring walk narrowed to EXACTLY the platform ownership identity
+    /// types {SystemUser, Team, BusinessUnit} — set equality, so dropping one (a business-unit-owned Secure record would
+    /// then lose its membership) or adding one a registry "Assigned …" column can carry (Contact / Organization) leaves
+    /// the setup unmatched and the test red.
     /// </summary>
     private static MembershipResolveOptions? OwnershipMembershipWalk =>
         It.Is<MembershipResolveOptions?>(o =>
             o != null && o.Limit == AccessibleRecordSetService.MembershipPageSize
             && o.AccessConferringOnly
             && o.IdentityTypes != null
-            && o.IdentityTypes.Contains("SystemUser", StringComparer.OrdinalIgnoreCase)
-            && o.IdentityTypes.Contains("Team", StringComparer.OrdinalIgnoreCase)
-            && !o.IdentityTypes.Contains("Contact", StringComparer.OrdinalIgnoreCase)
-            && !o.IdentityTypes.Contains("Organization", StringComparer.OrdinalIgnoreCase));
+            && new HashSet<string>(o.IdentityTypes, StringComparer.OrdinalIgnoreCase)
+                .SetEquals(new[] { "SystemUser", "Team", "BusinessUnit" }));
 
     private static Mock<IMembershipResolverService> MembershipWith(
         string entityType, Guid[] membershipIds, Guid[] ownershipIds)
@@ -1022,6 +1023,112 @@ public class AccessibleRecordSetServiceTests
             "an id matched by ownership AND a lookup column keeps its membership");
         set.RightsFor(owned).Should().Be(AccessibleRecordSetService.MembershipTermRights);
         set.Rights.Should().NotContainKey(assignedOnly);
+    }
+
+    private static readonly RootRecordFlags SecureAndRestricted = new(IsSecure: true, IsRestricted: true);
+
+    /// <summary>The linked contact's OWN (direct, by-name) ViewOnly grant on a matter.</summary>
+    private static FakeParticipationService DirectViewOnlyMatterGrant(Guid matterId) => new(
+        Array.Empty<ExternalParticipation>(),
+        matterGrants: new[]
+        {
+            new ExternalRootGrant
+            {
+                RecordId = matterId,
+                AccessLevel = ExternalAccessLevel.ViewOnly,
+                DirectAccessLevel = ExternalAccessLevel.ViewOnly,
+            },
+        });
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_SecureLookupOnlyRecordWithLinkedContactDirectGrant_CarriesExactlyTheGrantLevel()
+    {
+        // #2121 × term 2: the lookup-derived membership is suppressed BEFORE the max, so the linked contact's own by-name
+        // ViewOnly grant (which FR-22 keeps on a Secure record) is what the user holds — exactly Read. Not absent (the
+        // suppression must not remove the key after the max, taking the direct grant with it) and not MembershipTermRights
+        // (the lookup-derived membership must not win the max).
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
+        var participations = DirectViewOnlyMatterGrant(secure);
+        participations.Flags[secure] = SecureOnly;
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().ContainKey(secure, "the linked contact's own by-name grant survives Secure (FR-22)");
+        set.RightsFor(secure).Should().Be(AccessRights.Read,
+            "the direct ViewOnly grant is the only contribution left once lookup-derived membership is suppressed");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_SecureRestrictedLookupOnlyRecordWithLinkedContactDirectGrant_IsNotInTheSet()
+    {
+        // #2121 × Restricted: Restricted removes the contact-sourced grant and keeps only the Restricted SURVIVOR, which is
+        // the systemuser's membership term. That survivor must be the SUPPRESSED term: the lookup-only Secure id is not in
+        // it, so nothing survives and the record goes. Fed the unfiltered walk, the survivor would write
+        // MembershipTermRights back onto a record the user reaches only through an Assigned lookup.
+        var secure = MemberRecordA;
+        var membership = MembershipWith(MatterEntity, membershipIds: new[] { secure }, ownershipIds: Array.Empty<Guid>());
+        var participations = DirectViewOnlyMatterGrant(secure);
+        participations.Flags[secure] = SecureAndRestricted;
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(secure,
+            "Restricted removes the contact grant, and suppressed lookup-derived membership is not a Restricted survivor");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_OwnershipWalkThrows_ComposeThrowsAndReturnsNoSet()
+    {
+        // Fail closed (ADR-003): a fault in the ownership walk propagates and the caller denies wholesale, as for the
+        // main walk. Swallowing it into "nothing to suppress" would keep lookup-derived membership on a Secure record.
+        var secure = MemberRecordA;
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, MatterEntity, MainMembershipWalk, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(MatterEntity, secure));
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, MatterEntity, OwnershipMembershipWalk, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("ownership walk faulted"));
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[secure] = SecureOnly;
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding());
+        var act = () => sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("ownership walk faulted");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_OwnershipWalkCapped_LookupOnlySecureIdIsDropped_OwnedIdKept()
+    {
+        // Fail closed when the ownership walk is INCOMPLETE: the resolver claims a further page but returns nothing new
+        // (WalkMembershipPagesAsync's non-advancing-cursor exit), so the walk is capped. An id the walk did return is
+        // ownership and keeps its membership; a Secure id it did not return is dropped — a capped walk is never read
+        // as "keep everything".
+        var owned = MemberRecordA;
+        var assignedOnly = MemberRecordB;
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, MatterEntity, MainMembershipWalk, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(MatterEntity, owned, assignedOnly));
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, MatterEntity, OwnershipMembershipWalk, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(MatterEntity, owned) with { ContinuationToken = "more" });
+        var participations = (FakeParticipationService)NoParticipations();
+        participations.Flags[owned] = participations.Flags[assignedOnly] = SecureOnly;
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(assignedOnly,
+            "a capped ownership walk did not show ownership of this Secure id, so its lookup-derived membership is dropped");
+        set.RightsFor(owned).Should().Be(AccessibleRecordSetService.MembershipTermRights,
+            "an id the (capped) ownership walk did return is ownership");
+        membership.Verify(m => m.ResolveAsync(SystemUserId, MatterEntity, OwnershipMembershipWalk, It.IsAny<CancellationToken>()),
+            Times.Exactly(2), "the second page added nothing new, which is what capped the walk");
     }
 
     /// <summary>
