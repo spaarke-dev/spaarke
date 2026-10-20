@@ -51,8 +51,8 @@ The planner classifies every row it reaches as Delete, Keep, Block or Unlink. Ta
 
 | Disposition | Tables | Decision |
 |---|---|---|
-| **Delete** | `sprk_document` (+ `sprk_fileversion`, `sprk_emailartifact`, `sprk_attachmentartifact`), `sprk_analysis` (+ `sprk_analysisoutput`, which cascades), `sprk_communication`, `sprk_communicationthread`, `sprk_communicationattachment`, `sprk_communicationparticipant`, `sprk_emailreviewlog`, `sprk_event`, `sprk_eventlog`, `sprk_todo`, `sprk_memo`, `sprk_signal`, `sprk_kpiassessment`, `sprk_reportcard`, `sprk_agreement`, `sprk_communicationrule`, `sprk_ratecard` scoped to R (+ `sprk_ratecardrate`, parental), R's own `sprk_ruleset` **when nothing that survives cites it** (+ its `sprk_policy` and `sprk_policyversion`, deepest first) | inventory §4.1, D8; Signals per round 103; rate cards per D-120 (§10); rule sets per D-137 (§11) |
-| **Keep** (RemoveLink unlinks) | `sprk_decisionrecord`, `sprk_externalrecordaccess`, `sprk_assignedaccess`, `sprk_budget` (+ `sprk_budgetbucket`, `sprk_budgetrevision`), `sprk_spendsnapshot`, `sprk_spendsignal`, R's own `sprk_ruleset` **when a surviving row cites it** (unlinked; under S2 it then applies to nothing) | D2, D4; budgets and spend per D-120 (§10); rule sets per D-137 (§11). The operation itself clears the core lookup when the relationship is not RemoveLink. |
+| **Delete** | `sprk_document` (+ `sprk_fileversion`, `sprk_emailartifact`, `sprk_attachmentartifact`), `sprk_analysis` (+ `sprk_analysisoutput`, which cascades), `sprk_communication`, `sprk_communicationthread`, `sprk_communicationattachment`, `sprk_communicationparticipant`, `sprk_emailreviewlog`, `sprk_event`, `sprk_eventlog`, `sprk_todo`, `sprk_memo`, `sprk_signal`, `sprk_kpiassessment`, `sprk_reportcard`, `sprk_agreement`, `sprk_communicationrule` | inventory §4.1, D8; Signals per round 103; rate cards per D-120 (§10); rule sets per D-137 (§11) |
+| **Keep** (RemoveLink unlinks) | `sprk_decisionrecord`, `sprk_externalrecordaccess`, `sprk_assignedaccess`, `sprk_budget` (+ `sprk_budgetbucket`, `sprk_budgetrevision`), `sprk_spendsnapshot`, `sprk_spendsignal`, R's own `sprk_ruleset` (+ its `sprk_policy` / `sprk_policyversion`) and R's own `sprk_ratecard` (+ `sprk_ratecardrate`), **always**: unlinked, cited or not, and applying to nothing afterwards (ebilling D-146, §12) | D2, D4; budgets and spend per D-120 (§10); rule sets and rate cards per D-146 (§12, superseding D-137 and D-120's card row). The operation itself clears the core lookup when the relationship is not RemoveLink. |
 | **Block** (the whole delete is refused) | `sprk_invoice`, `sprk_billingevent`, `sprk_invoicesubmission`, `sprk_invoiceapproval`, `sprk_invoicecorrection`, `sprk_externalidentifier` | D3 as settled by ebilling D-120 (§10). Rate cards are now deleted with the record, and budgets (with their buckets and revisions) are kept and unlinked. Neither blocks. |
 | **Platform cascade** (counted, not deleted by the BFF) | `sprk_policy` (matter; `Cascade`, D9) | — |
 | **Hard deny** (never Delete, whatever the walk says) | the four core tables, `contact`, `account`, `systemuser`, `team`, `businessunit`, `sprk_organization`, `email`, every `*_ref` table, `sprk_analysisaction/knowledge/skill/tool`, `sprk_policyversion`, `sprk_ruleset`, `sprk_billingcodeset` (the one exception: R's own uncited rule set, §11) | Owner rule; inventory §1.2, §4.3 |
@@ -382,7 +382,7 @@ Model per the UAC standing rule: Opus pinned; effort as given.
 
 ---
 
-## 10. ebilling D-120 (owner, 2026-10-19, relayed by ebilling-r1)
+## 10. ebilling D-120 (owner, 2026-10-19, relayed by ebilling-r1) — card row superseded by D-146 (§12)
 
 This settles Q6 and replaces the earlier "rate cards and budget revisions block" default.
 
@@ -396,7 +396,7 @@ This settles Q6 and replaces the earlier "rate cards and budget revisions block"
 
 **Before relying on any platform cascade:** read the live relationship metadata (`CascadeConfiguration.Delete`) for the `sprk_invoiceapproval` and rate-card core lookups. ebilling's docs do not state them. The delete operation never depends on a cascade it has not verified. The task 1 preview reads these relationships, so it does that check.
 
-## 11. ebilling D-137: a record's own rule set (owner, 2026-10-20, relayed by ebilling-r1)
+## 11. ebilling D-137: a record's own rule set (owner, 2026-10-20, relayed by ebilling-r1) — SUPERSEDED by D-146 (§12)
 
 This replaces §10's "untouched" for a rule set **scoped to R** (its core lookup names R). Firm-scoped and business-unit-scoped sets stay untouched. UAC recommended this rule in its review of `projects/ebilling-r1/notes/rule-set-scope-design.md` @ d42ae3c40f, and the owner chose it.
 
@@ -414,7 +414,22 @@ This replaces §10's "untouched" for a rule set **scoped to R** (its core lookup
 
 ebilling 081 adds `sprk_ruleset` (and the edge `sprk_policy` → `sprk_ruleset`), and 086 adds `sprk_ratecard` and `sprk_ratecardrate`, to the secure lineage. After that, the §1.2 walk reaches rule sets, their policies and versions, and rate cards and their rates. The planner must not treat them as ordinary lineage children:
 
-- **Own claim.** §1.4's own-claim rule reads `CoreAncestorLookups` + `IntermediateRootColumns`. Neither names a core lookup on `sprk_ruleset` or `sprk_ratecard`. Read as-is, R's own set would show "no own claim" and be deleted, skipping §11's citation check. Task 1 classifies these tables explicitly: `sprk_ruleset` per §11, and `sprk_ratecard` per §10 / D-120 (deleted when scoped 1:1 to R).
+- **Own claim.** §1.4's own-claim rule reads `CoreAncestorLookups` + `IntermediateRootColumns`. Neither names a core lookup on `sprk_ruleset` or `sprk_ratecard`. Read as-is, R's own set would show "no own claim" and be deleted, skipping §11's citation check. Task 1 classifies these tables explicitly, per §12 (D-146): unlink-only, never Delete.
 - **Billing policies.** §1.3's `sprk_policy` row ("platform cascade", via matter) describes matter policies only. A billing policy reached through `sprk_ruleset` follows its set's §11 outcome: deleted deepest first with the set, or kept when the set is kept.
 - **Sets not scoped to R.** A firm-scoped or business-unit-scoped set reached through the walk is never deleted (§10).
 - **Tests.** Task 1 adds one must-fire test per case (R's own uncited set is deleted; R's own cited set is unlinked; a firm-scoped set is untouched) and a must-not-fire control: the generic own-claim path never decides a billing row.
+
+## 12. ebilling D-146: never delete billing configuration (owner, 2026-10-20, relayed by ebilling-r1)
+
+Supersedes §11 (D-137) and §10's `sprk_ratecard` row (D-120). The owner re-answered Q10 in ebilling's session: core-record delete **never deletes** a record-scoped rule set or rate card.
+
+| Case | Behaviour |
+|---|---|
+| R's own `sprk_ruleset` (its core lookup names R), cited or not | **Kept and unlinked** (the core lookup is cleared). Under S2 it then applies to nothing. Its `sprk_policy` and `sprk_policyversion` rows stay with it, untouched. |
+| R's own `sprk_ratecard` (scoped 1:1 to R) | **Kept and unlinked**. Its `sprk_ratecardrate` lines stay with it, untouched. |
+| Firm-scoped or business-unit-scoped sets and cards | Untouched (as before). |
+
+- **No citation check is needed any more.** Nothing is deleted, so §11's "a failed citation read → 503" no longer applies to these tables. The citing-lookup handoff from ebilling 081 step 10 is not needed for delete.
+- **Ownership after unlinking.** The delete job **never re-owns** these rows. A set or card that was Secure-owned (under a Secure R) stays Secure-owned after the unlink, because it holds that matter's terms and rates. It never moves to an ordinary owner. This is a deliberate held state, not the #2157 race residual. Billing admins reach such rows only through the Secure team or an admin. ebilling decides whether a retire or re-scope path is needed (ebilling's lifecycle writer, not the delete job).
+- **§11.1 now reads:** once 081/086 put these tables in the secure lineage, the planner classifies `sprk_ruleset`, `sprk_policy` (billing), `sprk_policyversion`, `sprk_ratecard` and `sprk_ratecardrate` reached through R as **unlink-only (the set and card) / untouched (their children)**, never Delete, and never by the generic own-claim rule.
+- **Tests (task 1).** Must-fire tests: R's own uncited set is unlinked and not deleted; R's own cited set is unlinked; R's own card is unlinked and its lines are untouched; a Secure R's set stays Secure-owned after the unlink. Must-not-fire tests: a firm-scoped set or card is untouched; no `Delete` request is ever issued for these five tables (a guard over the plan).
