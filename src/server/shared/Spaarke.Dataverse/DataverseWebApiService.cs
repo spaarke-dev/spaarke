@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Configuration;
@@ -1747,6 +1748,19 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// <summary>The privilege the calling application user needs to impersonate (<c>MSCRMCallerID</c>).</summary>
     public const string ImpersonationPrivilegeName = "prvActOnBehalfOfAnotherUser";
 
+    /// <summary><see cref="ImpersonationPrivilegeName"/> as a whole token (any casing): not preceded or followed by a letter,
+    /// digit or underscore, so a longer privilege name that merely contains it does not match (task 036 fix round 4).</summary>
+    private static readonly Regex ImpersonationPrivilegeToken = new(
+        $"(?<![A-Za-z0-9_]){ImpersonationPrivilegeName}(?![A-Za-z0-9_])",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Whether a Dataverse error message names <see cref="ImpersonationPrivilegeName"/> as a whole token — the K5 reading
+    /// of an access-check 403 as the application user's fault (task 036 fix round 3, anchored in fix round 4).
+    /// </summary>
+    internal static bool NamesImpersonationPrivilege(string? message) =>
+        message is not null && ImpersonationPrivilegeToken.IsMatch(message);
+
     /// <summary>
     /// Dataverse's error code for "the principal does not have ReadAccess right(s)" on the target record — what an
     /// impersonated <c>RetrievePrincipalAccess</c> answers for a user who has LOST all access to the record (seen live
@@ -1777,8 +1791,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// 404 → <see cref="AccessRights.None"/> (Dataverse's report of a record the principal cannot read). 403 →
     /// <see cref="AccessRights.None"/> ONLY when the error code is one of <see cref="AccessDeniedErrorCodes"/>
     /// (<see cref="AccessCheckDeniedErrorCode"/>, <see cref="NoReadAccessErrorCode"/>) and the message does not name
-    /// <see cref="ImpersonationPrivilegeName"/> (task 036 fix round 3, K5); any other 403 code, a 403 naming that privilege,
-    /// or a 403 whose body cannot be read, is <see langword="null"/>. Any other failure (throttling, a 5xx) throws, as in
+    /// <see cref="ImpersonationPrivilegeName"/> as a whole token (task 036 fix round 3, K5; anchored in fix round 4); any
+    /// other 403 code, a 403 naming that privilege, or a 403 whose body cannot be read, is <see langword="null"/>. Any
+    /// other failure (throttling, a 5xx) throws, as in
     /// <see cref="RetrievePrincipalRightsAsync"/>.</para>
     /// <para><b>Re-asking a 404</b> (unified-access-control-r2 task 036, option C). A 404 is also how Dataverse answers for a
     /// record created seconds earlier that has not replicated yet. A caller that confirms a write right after a create
@@ -1824,8 +1839,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             var (code, message) = await TryReadErrorAsync(response, ct).ConfigureAwait(false);
             // K5 (task 036 fix round 3): an access-check code whose message names the impersonation privilege is the
             // application user's fault, not an answer about the principal (AccessCheckDeniedErrorCode's remarks).
-            var namesImpersonationPrivilege =
-                message?.Contains(ImpersonationPrivilegeName, StringComparison.OrdinalIgnoreCase) == true;
+            var namesImpersonationPrivilege = NamesImpersonationPrivilege(message);
             if (code is not null && AccessDeniedErrorCodes.Contains(code.Trim()) && !namesImpersonationPrivilege)
                 return AccessRights.None;
 

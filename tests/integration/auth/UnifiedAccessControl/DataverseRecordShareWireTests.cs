@@ -411,6 +411,10 @@ public class DataverseRecordShareWireTests
     [InlineData("SecLib::CheckPrivilege failed. PrivilegeName: PRVACTONBEHALFOFANOTHERUSER", "unknown")]
     [InlineData("Principal user (Id=1, type=8) is missing prvReadsprk_Matter privilege (Id=2)", "None")]   // about the user
     [InlineData("SecLib::AccessCheckEx failed", "None")]
+    // Fix round 4: the privilege must be named as a whole token — a longer name that merely contains it is about the user.
+    [InlineData("Principal user (Id=1, type=8) is missing prvActOnBehalfOfAnotherUserTeam privilege (Id=2)", "None")]
+    [InlineData("Principal user (Id=1, type=8) is missing xprvActOnBehalfOfAnotherUser privilege (Id=2)", "None")]
+    [InlineData("missing privilege 'prvActOnBehalfOfAnotherUser'.", "unknown")]
     public async Task RetrievePrincipalRightsOrUnknownAsync_AnAccessCheckCodeNamingTheImpersonationPrivilege_IsUnknown(
         string message, string expected)
     {
