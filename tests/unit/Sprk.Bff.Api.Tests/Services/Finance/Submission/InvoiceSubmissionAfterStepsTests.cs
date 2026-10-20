@@ -2102,4 +2102,70 @@ public class InvoiceSubmissionAfterStepsTests
         world.Jobs.Should().ContainSingle();
         world.Status.Should().Be(InvoiceSubmissionStatus.Rejected);
     }
+
+    // -- F2 (ontology F1-3 re-check): a transient core-ancestor fault is not a permanent refusal --
+
+    /// <summary>A REAL <see cref="SignalWriter"/> over a REAL <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver"/> whose column probe and
+    /// row read are the test's: the resolver's own Failed() (a fault) and Refused() (the row is gone) reach the writer's Error case.</summary>
+    private static SignalWriter RealWriterOverResolver(Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.EntityColumnProbe probe, IGenericEntityService entities) =>
+        new(new OntologyWriterDataverseClient(() => throw new InvalidOperationException("no Dataverse in this test"), NullLogger<OntologyWriterDataverseClient>.Instance),
+            new Mock<IGenericEntityService>(MockBehavior.Strict).Object,
+            new Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver(entities, probe, NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
+            new Mock<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(MockBehavior.Strict).Object,
+            new Mock<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(MockBehavior.Strict).Object,
+            TimeProvider.System,
+            NullLogger<SignalWriter>.Instance);
+
+    private static readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.EntityColumnProbe LineColumns = (_, _) =>
+        Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(["sprk_project", "sprk_matter", "sprk_regardingworkassignment"], StringComparer.OrdinalIgnoreCase));
+
+    private static IGenericEntityService RowReadFails(Exception fault)
+    {
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>())).ThrowsAsync(fault);
+        return entities.Object;
+    }
+
+    [Theory(DisplayName = "049 F2 (real SignalWriter): a transient core-ancestor fault is NOT recorded as permanent - it propagates (retry): no refusal, no record, no terminal")]
+    [InlineData("column-probe")]
+    [InlineData("row-read")]
+    public async Task TransientCoreAncestorFault_RealWriter_IsRetried_NotRecordedAsPermanent(string where)
+    {
+        var outcome = await AutoRejected();
+        var writer = where == "column-probe"
+            ? RealWriterOverResolver((_, _) => throw new TimeoutException("metadata unavailable"), new Mock<IGenericEntityService>(MockBehavior.Strict).Object)
+            : RealWriterOverResolver(LineColumns, RowReadFails(new HttpRequestException("503 Service Unavailable")));
+        var world = new World(outcome) { RealWriter = writer };
+        world.RealWriterPolicies.Add("BILL-AGE");
+
+        var act = () => world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        var thrown = (await act.Should().ThrowAsync<SignalWriterEscalationException>()).Which;
+        thrown.Reason.Should().Be(Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.CoreRecordUnresolved);
+        thrown.InnerException.Should().NotBeNull();
+        InvoiceSubmissionAfterSteps.PermanentWriteRefusal(world.Writes[0], thrown).Should().BeNull("the classifier reads the inner exception");
+        StoredWriteRefusals(world).Should().BeEmpty("nothing is recorded as permanent: the Signal is written on the retry");
+        world.RecordCreates.Should().Be(0);
+        world.TerminalWrites.Should().BeEmpty();
+        world.Status.Should().Be(InvoiceSubmissionStatus.Processing);
+    }
+
+    [Fact(DisplayName = "049 F2 (real SignalWriter): a permanent core-ancestor Error (the line is gone) is recorded as core_record_unresolved and the run continues to the record")]
+    public async Task PermanentCoreAncestorError_RealWriter_IsRecorded_TheRecordStillHappens()
+    {
+        var outcome = await AutoRejected();
+        var gone = new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217) }, "Does Not Exist");
+        var world = new World(outcome) { RealWriter = RealWriterOverResolver(LineColumns, RowReadFails(gone)) };
+        world.RealWriterPolicies.Add("BILL-AGE");
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        result.SignalsRefused.Should().Be(1);
+        StoredWriteRefusals(world).Should().ContainSingle().Which!["code"]!.GetValue<string>()
+            .Should().Be(Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.CoreRecordUnresolved);
+        world.RecordCreates.Should().Be(1);
+        world.Status.Should().Be(InvoiceSubmissionStatus.Rejected);
+    }
 }

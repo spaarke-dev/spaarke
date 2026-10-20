@@ -2338,6 +2338,9 @@ public partial class SignalWriterTests
         /// <summary>A retrieve of this table faults (a Dataverse read failure).</summary>
         public string? ThrowOnRetrieveOf { get; set; }
 
+        /// <summary>What a faulting retrieve throws (default: an <see cref="InvalidOperationException"/>, a fault a retry may clear).</summary>
+        public Exception? RetrieveFault { get; set; }
+
         /// <summary>Task 143: a retrieve that asks for this column faults (the D-134 Assigned To read of the To Do).</summary>
         public string? ThrowOnRetrieveWithColumn { get; set; }
 
@@ -2368,7 +2371,7 @@ public partial class SignalWriterTests
             Retrieved.Add((entityLogicalName, columns));
             if (ThrowOnRetrieveOf == entityLogicalName || (ThrowOnRetrieveWithColumn is { } column && columns.Contains(column)))
             {
-                throw new InvalidOperationException("simulated Dataverse read failure");
+                throw RetrieveFault ?? new InvalidOperationException("simulated Dataverse read failure");
             }
 
             var entity = new Entity(entityLogicalName, id);

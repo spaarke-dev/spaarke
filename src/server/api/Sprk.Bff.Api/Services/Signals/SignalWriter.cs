@@ -1385,9 +1385,17 @@ public sealed partial class SignalWriter
                 return new CorePlan(stamp.EntityType, stamp.RecordId, result.Stamps);
 
             case CoreAncestorStatus.Error:
-                throw new SignalWriterEscalationException(
-                    $"Cannot derive the core record of {subjectEntity} {subjectId:D}: {result.Error}",
-                    OntologyWriterFailureReason.CoreRecordUnresolved);
+                // ebilling-r1 task 049 (ontology F1-3 re-check F2): a FAULT (a throttle, a 503, a metadata or row read that failed;
+                // CoreAncestorResult.IsPermanent false) is not a refusal of the subject, so the escalation wraps it. A caller that
+                // classifies by the inner exception (InvoiceSubmissionAfterSteps.PermanentWriteRefusal) then retries instead of
+                // dropping the Signal for good. A permanent Error (the row is gone, it names two roots) carries none. The reason,
+                // the log and the metric are the same either way; the evaluator, the re-evaluation job and WriteAsync's catch read
+                // only the type and Reason.
+                var unresolvedMessage = $"Cannot derive the core record of {subjectEntity} {subjectId:D}: {result.Error}";
+                throw result.IsPermanent
+                    ? new SignalWriterEscalationException(unresolvedMessage, OntologyWriterFailureReason.CoreRecordUnresolved)
+                    : new SignalWriterEscalationException(
+                        unresolvedMessage, OntologyWriterFailureReason.CoreRecordUnresolved, new InvalidOperationException(result.Error));
 
             case CoreAncestorStatus.NoAncestor:
                 return NoCorePlan(subjectEntity, subjectId, lane);
