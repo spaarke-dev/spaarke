@@ -79,15 +79,15 @@ public static class ChildRecordEndpoints
     /// unit it is isolated in (provisioning, <c>SecureRecordRoot</c>) and its Access Permission (the cascade, task 175).
     /// None is field-secured (live, spaarkedev1 2026-10-10), so the G5 check would let an app-only create carry a caller's
     /// value: refused here. The secure flag and the access
-    /// record are field-secured and refused by the G5 check and the secure-create plan (task 175).
+    /// record are field-secured and refused by the G5 check and the secure-create plan (task 175). D-113 / task 175: a filed
+    /// work assignment takes its Access Permission from its parent; the column is form-locked but NOT field-secured, and
+    /// nothing on the create path sets it from the parent, so a caller's value is refused.
     /// </summary>
-    internal static readonly IReadOnlySet<string> RootServerOwnedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "sprk_containerid", "sprk_securitybu",
-        // D-113 / task 175: a filed work assignment takes its Access Permission from its parent; the column is form-locked
-        // but NOT field-secured, and nothing on the create path sets it from the parent, so a caller's value is refused.
-        "sprk_accesspermission",
-    };
+    /// <remarks>Field-mapping-server-write-path-r1 task 012: a view over the work assignment's
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRule.TableServerOwnedColumns"/> in the registry, the one
+    /// source (the only root this route creates); deleted when task 013 switches this route to the registry.</remarks>
+    internal static readonly IReadOnlySet<string> RootServerOwnedColumns =
+        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Get(SecureRootInheritance.WorkAssignment).TableServerOwnedColumns;
 
     /// <summary>
     /// The tables a browser writer re-files through <c>PATCH /api/v1/child-records/{table}/{id}</c> (note §2b). An event
