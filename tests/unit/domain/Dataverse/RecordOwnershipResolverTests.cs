@@ -2138,6 +2138,399 @@ public class RecordOwnershipResolverTests
         log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains("No sweep releases it"));
     }
 
+    // ---- #2143 round 3 ----
+
+    private static readonly Guid SecureThreadMatterId = Guid.Parse("21430000-0000-4000-8000-000000000031");
+    private static readonly Guid SecureThreadId = Guid.Parse("21430000-0000-4000-8000-000000000032");
+    private static readonly Guid OrdinaryThreadId = Guid.Parse("21430000-0000-4000-8000-000000000033");
+
+    /// <summary>
+    /// #2143 round 3 (F1): a message (<c>sprk_communication</c>) owned in <paramref name="owningBu"/> by
+    /// <paramref name="owningTeam"/>, regarding <paramref name="regardingMatterId"/>, in <paramref name="threadId"/> when given.
+    /// Seeded beside it: the ordinary matter (<see cref="MatterId"/>), the secure matter (<see cref="OtherSecureMatterId"/>),
+    /// and two threads — one regarding a SECURE matter of its own (<see cref="SecureThreadId"/>, the thread a join makes the
+    /// message inherit), one ordinary (<see cref="OrdinaryThreadId"/>).
+    /// </summary>
+    private static (FakeDirectory Directory, Guid MessageId) MessageWorld(
+        Guid regardingMatterId, Guid owningBu, Guid owningTeam, Guid? threadId = null)
+    {
+        var messageId = Guid.NewGuid();
+        var columns = new Dictionary<string, object>
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", regardingMatterId),
+            ["createdby"] = new EntityReference("systemuser", SomeoneElse),
+        };
+        if (threadId is { } thread)
+            columns["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread);
+
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_matter", OtherSecureMatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_matter", SecureThreadMatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_communicationthread", SecureThreadId, SecureBu, owningTeam: SecureNamedTeam, extra: new()
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureThreadMatterId),
+            })
+            .WithRecord("sprk_communicationthread", OrdinaryThreadId, ChildBu, owningTeam: ChildTeam, extra: new()
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            })
+            .WithRecord("sprk_communication", messageId, owningBu, owningTeam: owningTeam, extra: columns);
+        return (directory, messageId);
+    }
+
+    private static Guid? MessageOwnerOf(FakeDirectory directory, Guid messageId) =>
+        directory.Row("sprk_communication", messageId).GetAttributeValue<EntityReference>("owningteam")?.Id;
+
+    /// <summary>
+    /// #2143 round 3 (F1): A re-files the message into the secure matter; every conditional owner write meets a changed row,
+    /// and before the LAST one M moves the message back to the ordinary matter and settles its ordinary owner. A's attempts
+    /// run out toward the Secure team, so its unconditional Secure write lands after M's.
+    /// </summary>
+    private static void MessageMovedOutBeforeTheLastOwnerWrite(FakeDirectory directory, Guid messageId)
+    {
+        var ownerWrites = 0;
+        directory.BeforeWrite = (world, fields) =>
+        {
+            if (!fields.ContainsKey("ownerid") || ++ownerWrites > RecordOwnershipResolver.MaxOwnerWriteAttempts)
+                return;
+            world.Write("sprk_communication", messageId, ownerWrites < RecordOwnershipResolver.MaxOwnerWriteAttempts
+                ? new() { ["sprk_name"] = $"edit {ownerWrites}" }
+                : new()
+                {
+                    ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+                    ["ownerid"] = new EntityReference("team", ChildTeam),
+                });
+        };
+    }
+
+    private static RecordReparent MoveMessageIntoTheSecureMatter(Guid messageId) => new()
+    {
+        EntityLogicalName = "sprk_communication",
+        RecordId = messageId,
+        ParentChanges = new Dictionary<string, EntityReference?>
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OtherSecureMatterId),
+        },
+    };
+
+    [Fact]
+    public async Task Reparent_WhenAThreadJoinLandsOnAMessageAfterItsUnconditionalSecureWrite_ItsSecureOwnerIsHeld_NeverReleased()
+    {
+        // Must-fire (F1, the release): A re-files a message into the secure matter and exhausts toward Secure; M moves it back to
+        // the ordinary matter and settles ordinary; A writes the Secure team unconditionally; then W joins the message to a thread
+        // regarding ANOTHER secure matter (a ThreadResolver join: that matter is W's inherited parent, never A's) — W's settle
+        // finds the Secure team already there and writes nothing. A's fresh read resolves only the ordinary matter column. The
+        // thread changed since A's last read: the Secure owner is held (over-restricted), never put back to the ordinary team —
+        // that would leave a message in a secure thread owned by an ordinary team.
+        var (directory, messageId) = MessageWorld(MatterId, ChildBu, ChildTeam);
+        MessageMovedOutBeforeTheLastOwnerWrite(directory, messageId);
+        var joined = false;
+        directory.AfterWrite = (world, fields) =>
+        {
+            if (joined || fields.GetValueOrDefault("ownerid") is not EntityReference { Id: var team } || team != SecureNamedTeam)
+                return;
+            joined = true;
+            world.Write("sprk_communication", messageId, new()
+            {
+                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", SecureThreadId),
+            });
+        };
+        var log = new ResolverLog();
+        var request = MoveMessageIntoTheSecureMatter(messageId);
+
+        var act = () => directory.Resolver(logger: log).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        await act.Should().ThrowAsync<RecordOwnerUnsettledException>();
+        joined.Should().BeTrue("the join landed after the unconditional Secure write");
+        directory.Assignments.Should().Equal(new[] { ("sprk_communication", messageId, SecureNamedTeam) },
+            "only the unconditional Secure write — no ordinary owner over the secure thread join");
+        MessageOwnerOf(directory, messageId).Should().Be(SecureNamedTeam, "held, never exposed");
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains("No sweep releases it"));
+    }
+
+    [Fact]
+    public async Task Reparent_WhenAMessagesThreadIsUnchangedAcrossItsUnconditionalSecureWrite_TheOrdinaryOwnerIsPutBack()
+    {
+        // Must-NOT-fire control for F1 (the release): the same interleaving, but the message sits in an ordinary thread at
+        // every read and nobody joins it anywhere. Its lineage-only lookup is unchanged, so the release proceeds as in round 2:
+        // the owner the fresh parents give is written back and the call throws.
+        var (directory, messageId) = MessageWorld(MatterId, ChildBu, ChildTeam, threadId: OrdinaryThreadId);
+        MessageMovedOutBeforeTheLastOwnerWrite(directory, messageId);
+        var request = MoveMessageIntoTheSecureMatter(messageId);
+
+        var act = () => Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnsettledException>())
+            .WithMessage("*moved out from under its secure record by another writer*");
+        directory.Assignments.Should().Equal(
+            new[] { ("sprk_communication", messageId, SecureNamedTeam), ("sprk_communication", messageId, ChildTeam) });
+        MessageOwnerOf(directory, messageId).Should().Be(ChildTeam);
+    }
+
+    [Fact]
+    public async Task Reparent_WhenAThreadJoinMakesAPermittedMoveOutsRowSecure_TheF3ExemptionIsNotTaken_AndNoOrdinaryOwnerIsWritten()
+    {
+        // Must-fire (F1, the guard's F3 arm): this call (Full Access on the secure matter) moves a message out of it to the
+        // ordinary matter; its F3 check permits that. The message was not yet in the Secure Record business unit (its first
+        // Secure write still in flight). Before this call's owner write, W joins it to a thread regarding another secure matter
+        // and W's settle writes the Secure team. The filing is this call's (only the regarding column decides here), the row is
+        // held in the Secure unit, and the owner the fresh parents give is ordinary — but the thread changed since this call's
+        // read, so the permission (computed over the secure matter it left) does not cover the secure record W's join made it
+        // inherit: no ordinary owner is written, it stays held, and the call throws.
+        var (directory, messageId) = MessageWorld(OtherSecureMatterId, ChildBu, ChildTeam);
+        var asked = new List<Guid>();
+        var request = MoveMessageTo(messageId, MatterId, CallerHolding(FullAccess, asked: asked));
+
+        var act = () => Build(directory).ReparentAsync(
+            request,
+            async ct =>
+            {
+                directory.Write("sprk_communication", messageId, new()
+                {
+                    ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", SecureThreadId),
+                    ["ownerid"] = new EntityReference("team", SecureNamedTeam),
+                });
+                await Applies(directory, request)(ct);
+            },
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnsettledException>())
+            .WithMessage("*would take it out of the Secure Record business unit on a filing this re-file did not make*");
+        asked.Should().Equal(new[] { OtherSecureMatterId }, "the F3 check was asked and permitted the move out");
+        directory.ConditionalWrites.Should().BeEmpty("no ordinary owner is ever sent");
+        directory.Assignments.Should().BeEmpty();
+        MessageOwnerOf(directory, messageId).Should().Be(SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task Reparent_WhenThisCallsOwnChangeMovesTheThreadOfAPermittedMoveOut_TheF3ExemptionStillApplies()
+    {
+        // Must-NOT-fire control for F1 (the guard): the thread lookup this call's OWN change sets is not another writer's move.
+        // A permitted move out of the secure matter that also files the message into an ordinary thread, while another writer's
+        // Secure write lands, still takes the ordinary owner its parents give (round 2 behaviour).
+        var (directory, messageId) = MessageWorld(OtherSecureMatterId, ChildBu, ChildTeam);
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_communication",
+            RecordId = messageId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", OrdinaryThreadId),
+            },
+            SecureExitCaller = CallerHolding(FullAccess),
+        };
+
+        var resolution = await Build(directory).ReparentAsync(
+            request,
+            async ct =>
+            {
+                directory.Write("sprk_communication", messageId, new() { ["ownerid"] = new EntityReference("team", SecureNamedTeam) });
+                await Applies(directory, request)(ct);
+            },
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam);
+        MessageOwnerOf(directory, messageId).Should().Be(ChildTeam);
+    }
+
+    [Fact]
+    public async Task Reparent_WhenAPermittedMoveOutsParentsAreChangedByAnotherWriter_ARowHeldInTheSecureUnitIsNotGivenAnOrdinaryOwner()
+    {
+        // Must-fire (the guard's conjunction): this call's F3 check permitted the move out of the secure project, and another
+        // writer's Secure write holds the row in the Secure Record business unit — but ANOTHER writer then re-files it to a
+        // different ordinary matter, so the filing is not this call's. The permission does not travel to that filing: no ordinary
+        // owner is written (a precedence slip `!(parentsAsResolved && beforeHeld || permitted)` would write one).
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_matter", OtherOrdinaryMatterId, GeneralBu, owningTeam: GeneralTeam)
+            .WithRecord("sprk_document", documentId, GeneralBu, owningTeam: GeneralTeam, extra: new()
+            {
+                ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId),
+                ["createdby"] = new EntityReference("systemuser", SomeoneElse),
+            });
+        var request = MoveToOrdinaryMatter(documentId, CallerHolding(FullAccess));
+
+        var act = () => Build(directory).ReparentAsync(
+            request,
+            async ct =>
+            {
+                directory.Write("sprk_document", documentId, new() { ["ownerid"] = new EntityReference("team", SecureNamedTeam) });
+                await Applies(directory, request)(ct);
+                directory.Write("sprk_document", documentId, new()
+                {
+                    ["sprk_matter"] = new EntityReference("sprk_matter", OtherOrdinaryMatterId),
+                });
+            },
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnsettledException>())
+            .WithMessage("*would take it out of the Secure Record business unit on a filing this re-file did not make*");
+        directory.ConditionalWrites.Should().BeEmpty();
+        OwnerOf(directory, documentId).Should().Be(SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task Reparent_WhenAnotherWriterReOwnsTheRowAfterTheUnconditionalSecureWrite_TheReleaseWritesNothing()
+    {
+        // Must-fire (the release's "the Secure owner is this call's own" conjunct): after this call's unconditional Secure write,
+        // another writer gives the row an owner of its own. The fresh parents give the child unit's team; the row holds neither
+        // that nor this call's Secure team: the release writes nothing and the row is logged as held. (The recovery's re-check
+        // then settles the owner the row's parents give, as for any re-file whose filing a newer writer superseded.)
+        var (directory, documentId) = MoveIntoSecureWorld();
+        var secureProject = new EntityReference("sprk_project", SecureProjectId);
+        MovedOutBeforeTheLastOwnerWrite(directory, documentId, moverOwner: null);
+        directory.AfterWrite = (world, fields) =>
+        {
+            if (fields.GetValueOrDefault("ownerid") is EntityReference { Id: var team } && team == SecureNamedTeam)
+                world.Write("sprk_document", documentId, new() { ["ownerid"] = new EntityReference("team", GeneralTeam) });
+        };
+        var log = new ResolverLog();
+
+        var act = () => directory.Resolver(logger: log).ReparentAsync(
+            MoveUnder(documentId, "sprk_relatedproject", secureProject),
+            Writes(directory, documentId, "sprk_relatedproject", secureProject),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<RecordOwnerUnsettledException>();
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains("No sweep releases it"),
+            "the release held: it never wrote over another writer's owner");
+        log.Entries.Should().NotContain(e => e.Message.Contains("This re-file did not stand"), "no release is reported");
+        OwnerOf(directory, documentId).Should().Be(ChildTeam, "the recovery's re-check settles the owner its parents give");
+    }
+
+    [Fact]
+    public async Task Reparent_WhenTheReleaseMeetsAChangedRow_ItIsHeld_NeverRetriedOrReportedReleased()
+    {
+        // Must-fire (the release's 412 arm): the mover settles its ordinary owner, this call's unconditional Secure write lands,
+        // and the release's conditional write meets a row changed again. Nothing is written: the row is held (logged for
+        // repair), never reported as released.
+        var (directory, documentId) = MoveIntoSecureWorld();
+        var secureProject = new EntityReference("sprk_project", SecureProjectId);
+        MovedOutBeforeTheLastOwnerWrite(directory, documentId, moverOwner: ChildTeam);
+        var mover = directory.BeforeWrite!;
+        var ownerWrites = 0;
+        directory.BeforeWrite = (world, fields) =>
+        {
+            mover(world, fields);
+            if (fields.ContainsKey("ownerid") && ++ownerWrites == RecordOwnershipResolver.MaxOwnerWriteAttempts + 2)
+                world.Write("sprk_document", documentId, new() { ["sprk_name"] = "edit during the release" });
+        };
+        var log = new ResolverLog();
+
+        var act = () => directory.Resolver(logger: log).ReparentAsync(
+            MoveUnder(documentId, "sprk_relatedproject", secureProject),
+            Writes(directory, documentId, "sprk_relatedproject", secureProject),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<RecordOwnerUnsettledException>();
+        directory.ConditionalWrites.Should().HaveCount(RecordOwnershipResolver.MaxOwnerWriteAttempts + 2)
+            .And.OnlyContain(w => !w.Applied, "the attempts, the release, and the recovery's put-back all met a changed row");
+        directory.Assignments.Should().Equal(new[] { ("sprk_document", documentId, SecureNamedTeam) });
+        OwnerOf(directory, documentId).Should().Be(SecureNamedTeam, "held, over-restricted");
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains("No sweep releases it"));
+    }
+
+    [Fact]
+    public async Task Reparent_WhenItsSecureParentIsUnsecuredAfterTheUnconditionalSecureWrite_ItsOwnFilingSettles_AndTheCallSucceeds()
+    {
+        // Must-fire (K4): a move into the secure project exhausts toward Secure (every conditional write meets an unrelated
+        // edit); after the unconditional Secure write, the project is un-secured (the F3-checked unsecure flow). The row is still
+        // filed exactly as this call left it, so the release writes the owner those parents now give — and the re-file is
+        // settled: it answers that owner, never "moved out by another writer".
+        var (directory, documentId) = MoveIntoSecureWorld();
+        var secureProject = new EntityReference("sprk_project", SecureProjectId);
+        var contended = 0;
+        directory.BeforeWrite = (world, fields) =>
+        {
+            if (fields.ContainsKey("ownerid") && ++contended <= RecordOwnershipResolver.MaxOwnerWriteAttempts)
+                world.Write("sprk_document", documentId, new() { ["sprk_name"] = $"edit {contended}" });
+        };
+        var unsecured = false;
+        directory.AfterWrite = (world, fields) =>
+        {
+            if (unsecured || fields.GetValueOrDefault("ownerid") is not EntityReference { Id: var team } || team != SecureNamedTeam)
+                return;
+            unsecured = true;
+            world.WithRecord("sprk_project", SecureProjectId, ChildBu, isSecure: false, owningTeam: ChildTeam);
+        };
+
+        var resolution = await Build(directory).ReparentAsync(
+            MoveUnder(documentId, "sprk_relatedproject", secureProject),
+            Writes(directory, documentId, "sprk_relatedproject", secureProject),
+            CancellationToken.None);
+
+        unsecured.Should().BeTrue();
+        resolution.IsOwned.Should().BeTrue();
+        resolution.OwningTeamId.Should().Be(ChildTeam);
+        directory.Assignments.Should().Equal(
+            new[] { ("sprk_document", documentId, SecureNamedTeam), ("sprk_document", documentId, ChildTeam) });
+        directory.Row("sprk_document", documentId).GetAttributeValue<EntityReference>("sprk_relatedproject")
+            .Should().Be(secureProject, "the filing is this call's own and stands");
+        OwnerOf(directory, documentId).Should().Be(ChildTeam);
+    }
+
+    [Fact]
+    public async Task Reparent_ReadsEveryParentFactCommitted_TheF3WalkAndTheSettleAlike()
+    {
+        // K1: the settle and put-back decisions are taken from the parents' facts (owning business unit, sprk_issecure, a parent's
+        // own filing), so on the re-file path they are committed reads. An analysis moves from one un-team-owned document to
+        // another — the F3 walk reads the document it leaves and the matter above it; the settle reads the new document, its
+        // filing and its matter.
+        var analysisId = Guid.NewGuid();
+        var oldDocumentId = Guid.NewGuid();
+        var newDocumentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_matter", OtherOrdinaryMatterId, GeneralBu, owningTeam: GeneralTeam)
+            .WithRecord("sprk_document", oldDocumentId, GeneralBu,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", OtherOrdinaryMatterId) })
+            .WithRecord("sprk_document", newDocumentId, GeneralBu,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) })
+            .WithRecord("sprk_analysis", analysisId, GeneralBu, owningTeam: GeneralTeam,
+                extra: new() { ["sprk_documentid"] = new EntityReference("sprk_document", oldDocumentId) });
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_analysis",
+            RecordId = analysisId,
+            ParentChanges = new Dictionary<string, EntityReference?>
+            {
+                ["sprk_documentid"] = new EntityReference("sprk_document", newDocumentId),
+            },
+        };
+
+        var resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(GeneralTeam, "an ordinary analysis takes its primary parent's unit");
+        var parentReads = directory.RecordQueries.Where(q => q.EntityName is "sprk_document" or "sprk_matter").ToList();
+        parentReads.Where(q => q.EntityName == "sprk_document" && q.ColumnSet.AllColumns)
+            .Select(q => (Guid)q.Criteria.Conditions.Single().Values.Single())
+            .Should().Contain(new[] { oldDocumentId, newDocumentId }, "the F3 walk's and the settle's filing reads");
+        parentReads.Where(q => q.EntityName == "sprk_matter").Should().NotBeEmpty();
+        parentReads.Should().OnlyContain(q => !q.NoLock, "every parent fact on the re-file path is a committed read");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_OnACreatePath_KeepsItsNoLockParentReads()
+    {
+        // Must-NOT-fire control for K1: the create paths (hot, shared) are unchanged — their parent reads stay NoLock.
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_document", documentId, GeneralBu,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
+
+        await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { Parents = new[] { new RecordOwnershipParent("sprk_document", documentId) } },
+            CancellationToken.None);
+
+        var parentReads = directory.RecordQueries.Where(q => q.EntityName is "sprk_document" or "sprk_matter").ToList();
+        parentReads.Should().NotBeEmpty().And.OnlyContain(q => q.NoLock);
+    }
+
     [Fact]
     public async Task Reparent_ReadsTheRowCommitted_NeverWithNoLock()
     {

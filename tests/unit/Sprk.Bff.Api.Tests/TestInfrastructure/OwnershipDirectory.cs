@@ -115,6 +115,7 @@ internal sealed class OwnershipDirectory
             {
                 BeforeWrite?.Invoke(this, fields);
                 Update(entity, id, fields);
+                AfterWrite?.Invoke(this, fields);
                 return Task.CompletedTask;
             });
         entities
@@ -125,6 +126,7 @@ internal sealed class OwnershipDirectory
             {
                 BeforeWrite?.Invoke(this, fields);
                 UpdateIfVersion(entity, id, version, fields);
+                AfterWrite?.Invoke(this, fields);
                 return Task.CompletedTask;
             });
         entities
@@ -194,6 +196,12 @@ internal sealed class OwnershipDirectory
     /// read and its write.
     /// </summary>
     public Action<OwnershipDirectory, Dictionary<string, object>>? BeforeWrite { get; set; }
+
+    /// <summary>
+    /// #2143 round 3: runs after a write the resolver sent has been APPLIED to the row (a refused conditional write never
+    /// reaches it) — so a test lands another writer's change between the resolver's write and its next read.
+    /// </summary>
+    public Action<OwnershipDirectory, Dictionary<string, object>>? AfterWrite { get; set; }
 
     /// <summary>
     /// #2143: an <see cref="IGenericEntityService.UpdateIfRowVersionMatchesAsync"/> — applied as <see cref="Update"/> only
