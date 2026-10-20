@@ -14,6 +14,7 @@
 
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
 import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
@@ -315,8 +316,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
         return jsonResponse({});
       });
 
-      const confirmButtons = screen.getAllByRole('button', { name: 'Revoke' });
-      fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+      await confirmRevoke();
 
       const init = await findPostInit(authenticatedFetch as jest.Mock, '/api/v1/external-access/unshare-user');
       expect(JSON.parse(init.body as string)).toMatchObject({
@@ -474,8 +474,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
       fireEvent.click(revokeButtons[revokeButtons.length - 1]);
       expect(await screen.findByText('Revoke access?')).toBeInTheDocument();
-      const confirmButtons = screen.getAllByRole('button', { name: 'Revoke' });
-      fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+      await confirmRevoke();
 
       expect(await screen.findByText(/may still open those/)).toBeInTheDocument();
       await waitFor(() => expect(screen.queryByText('Shared Sam')).not.toBeInTheDocument());
@@ -513,7 +512,9 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
 
       expect(await screen.findByText('Write and Share required')).toBeInTheDocument();
       expect(
-        screen.getByText('To change who else can access this record you need Write access to it and the Share privilege on its table (set in your security role).')
+        screen.getByText(
+          'To change who else can access this record you need Write access to it and the Share privilege on its table (set in your security role).'
+        )
       ).toBeInTheDocument();
 
       // Actions are now disabled — server truth, not a client-side pre-check.
@@ -599,7 +600,11 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       const authenticatedFetch = jest.fn(async (url: string) =>
         url.includes('/user-shares')
           ? jsonResponse(
-              { title: 'Forbidden', detail: 'Write required.', reasonCode: 'sdap.access.deny.delegation_write_required' },
+              {
+                title: 'Forbidden',
+                detail: 'Write required.',
+                reasonCode: 'sdap.access.deny.delegation_write_required',
+              },
               false,
               403
             )
@@ -651,8 +656,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       await screen.findByText('Prior Grantee');
       fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
       await screen.findByText('Revoke access?');
-      const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
-      fireEvent.click(revokeButtons[revokeButtons.length - 1]);
+      await confirmRevoke();
 
       expect(await screen.findByText(/file access could not be confirmed removed/)).toBeInTheDocument();
       expect(screen.getByText(/may still be able to open files/)).toBeInTheDocument();
@@ -691,13 +695,94 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       await screen.findByText('Prior Grantee');
       fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
       await screen.findByText('Revoke access?');
-      const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
-      fireEvent.click(revokeButtons[revokeButtons.length - 1]);
+      await confirmRevoke();
 
       // The SAME message text the 200-Failed path renders — never a generic "please try again".
       expect(await screen.findByText(/file access could not be confirmed removed/)).toBeInTheDocument();
       expect(screen.getByText(/may still be able to open files/)).toBeInTheDocument();
       expect(screen.queryByText(/Failed to revoke access/)).not.toBeInTheDocument();
+    });
+
+    it('#2103: an organization too large to sweep shows the server sentence for an administrator, never "please try again"', async () => {
+      const detail =
+        'Deactivated 1 Dataverse access grant(s). The organization has more than 200 active members, more than one ' +
+        "revoke may sweep, so no member's SPE container permission was removed and members may RETAIN file access. " +
+        "Retrying will not change this. An administrator must remove those members' permissions from the record's " +
+        "container in the SPE admin app (the container's Permissions).";
+      const authenticatedFetch = baseAuthenticatedFetch(url =>
+        url.includes('/revoke')
+          ? jsonResponse(
+              {
+                title: 'External access revoke incomplete',
+                detail,
+                reasonCode: 'sdap.revoke.incomplete.organization_too_large',
+                deactivatedCount: 1,
+                speContainerOutcome: 'Failed',
+              },
+              false,
+              500
+            )
+          : null
+      );
+      const props = makeProps({
+        authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Prior Grantee');
+      expect(props.fetchExistingGrants).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+      await screen.findByText('Revoke access?');
+      await confirmRevoke();
+
+      expect(await screen.findByText(/Retrying will not change this/)).toBeInTheDocument();
+      expect(screen.queryByText(/Please try again/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Retry the revoke/)).not.toBeInTheDocument();
+      // #2104: a WARNING (the grant WAS deactivated; an administrator finishes the container) — the notice's warning
+      // title, never the error one — and the list reloads so the revoked grant leaves it.
+      expect(screen.getByText('Notice')).toBeInTheDocument();
+      expect(screen.queryByText('Error')).not.toBeInTheDocument();
+      await waitFor(() => expect(props.fetchExistingGrants).toHaveBeenCalledTimes(2));
+    });
+
+    it('#2104 round 3: an ambiguous container permission match shows the server sentence as a warning and reloads, never "please try again"', async () => {
+      const detail =
+        "Deactivated 1 Dataverse access grant(s). More than one permission on the record's SPE container matches the " +
+        "revoked grantee, or the matching permission's holder cannot be verified, so none was removed and the grantee " +
+        "may RETAIN file access. Retrying will not change this. An administrator must resolve the container's " +
+        "permissions in the SPE admin app (the record's container, its Permissions).";
+      const authenticatedFetch = baseAuthenticatedFetch(url =>
+        url.includes('/revoke')
+          ? jsonResponse(
+              {
+                title: 'External access revoke incomplete',
+                detail,
+                reasonCode: 'sdap.revoke.incomplete.permission_ambiguous',
+                deactivatedCount: 1,
+                speContainerOutcome: 'Failed',
+              },
+              false,
+              500
+            )
+          : null
+      );
+      const props = makeProps({
+        authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Prior Grantee');
+      expect(props.fetchExistingGrants).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+      await screen.findByText('Revoke access?');
+      await confirmRevoke();
+
+      expect(await screen.findByText(detail)).toBeInTheDocument();
+      expect(screen.queryByText(/Please try again/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Failed to revoke access/)).not.toBeInTheDocument();
+      expect(screen.getByText('Notice')).toBeInTheDocument();
+      expect(screen.queryByText('Error')).not.toBeInTheDocument();
+      await waitFor(() => expect(props.fetchExistingGrants).toHaveBeenCalledTimes(2));
     });
 
     it('deactivatedCount 0 reports "already had no active access record" rather than a plain success', async () => {
@@ -718,8 +803,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       await screen.findByText('Prior Grantee');
       fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
       await screen.findByText('Revoke access?');
-      const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
-      fireEvent.click(revokeButtons[revokeButtons.length - 1]);
+      await confirmRevoke();
 
       expect(await screen.findByText(/already had no active access record to revoke/)).toBeInTheDocument();
     });
@@ -772,8 +856,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
       fireEvent.click(revokeButtons[revokeButtons.length - 1]);
       await screen.findByText('Revoke access?');
-      const confirmButtons = screen.getAllByRole('button', { name: 'Revoke' });
-      fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+      await confirmRevoke();
 
       expect(await screen.findByText(/Failed to revoke access for Shared Sam/)).toBeInTheDocument();
       // Row still present — not silently dropped. (The confirm dialog also
@@ -870,7 +953,11 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
     });
   });
   describe('task 114 — owner test feedback 2026-10-07', () => {
-    const EXTERNAL_PICK: IUserPick = { id: 'systemuser-ext', name: 'Ralph Schroeder', email: 'ralph.schroeder@hotmail.com' };
+    const EXTERNAL_PICK: IUserPick = {
+      id: 'systemuser-ext',
+      name: 'Ralph Schroeder',
+      email: 'ralph.schroeder@hotmail.com',
+    };
 
     function refusingFetch(reasonCode: string, detail: string): jest.Mock {
       return baseAuthenticatedFetch(url =>
@@ -946,14 +1033,24 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       );
       await pickAndAdd('Uma Userton');
       expect(
-        await screen.findByText(/System user Uma Userton: This user is disabled, so the record was not shared with them\./)
+        await screen.findByText(
+          /System user Uma Userton: This user is disabled, so the record was not shared with them\./
+        )
       ).toBeInTheDocument();
       expect(screen.queryByText(/Please try again/)).not.toBeInTheDocument();
     });
 
     it.each([
-      ['sdap.access.user_share.subject_no_access', 403, 'This person is on the No Access list for this record, so it was not shared with them.'],
-      ['sdap.access.user_share.no_access_unverifiable', 500, 'Whether this person is on the No Access list could not be checked, so nothing was shared. Try again.'],
+      [
+        'sdap.access.user_share.subject_no_access',
+        403,
+        'This person is on the No Access list for this record, so it was not shared with them.',
+      ],
+      [
+        'sdap.access.user_share.no_access_unverifiable',
+        500,
+        'Whether this person is on the No Access list could not be checked, so nothing was shared. Try again.',
+      ],
     ])('a %s refusal names the person instead of the generic retry message', async (reasonCode, status, detail) => {
       const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
       const authenticatedFetch = baseAuthenticatedFetch(url =>

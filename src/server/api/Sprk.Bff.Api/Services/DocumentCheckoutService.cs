@@ -972,7 +972,8 @@ public class DocumentCheckoutService
     {
         try
         {
-            var url = $"systemusers?$filter=azureactivedirectoryobjectid eq '{azureAdObjectId}'&$select=systemuserid";
+            // Issue #1576: active users only — a disabled systemuser keeps its oid and must not check out or in.
+            var url = $"systemusers?$filter=azureactivedirectoryobjectid eq '{azureAdObjectId}' and isdisabled eq false&$select=systemuserid";
             var response = await _httpClient.GetAsync(url, ct);
 
             if (!response.IsSuccessStatusCode)

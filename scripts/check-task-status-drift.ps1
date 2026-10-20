@@ -129,7 +129,9 @@ function Get-IndexMarkers {
     # all live in the SAME first cell. An earlier revision added a pattern that allowed a `|`
     # between marker and id; it then matched rows whose first cell is a WAVE LABEL (`**P0-W0**`)
     # and reported a phantom drift on task 001. Do not reintroduce a cell-spanning pattern.
-    $rowPattern = '^\|\s*([^\s|]+(?:\s*\[[a-z]+\])?)\s*\*{0,2}(\d{3})\*{0,2}\s*\|'
+    # The id takes the same grammar as the id-first layout below (`102a`, `081.5`); before 2026-10-17
+    # it took three digits only, so a suffixed task in a status-first index read as "no row".
+    $rowPattern = '^\|\s*([^\s|]+(?:\s*\[[a-z]+\])?)\s*\*{0,2}(\d{3}(?:\.\d+)?[a-z]?)\*{0,2}\s*\|'
 
     # SECOND LAYOUT — id first, status in a LATER cell (added 2026-10-01,
     # customer-provisioning-orchestration-r1 T245a follow-up). This is the layout task-create

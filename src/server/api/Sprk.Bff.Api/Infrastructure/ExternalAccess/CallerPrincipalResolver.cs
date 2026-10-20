@@ -390,9 +390,16 @@ public sealed class CallerPrincipalResolver : ICallerPrincipalResolver
     /// the tenant (<c>tid</c>) equals the configured CIAM tenant; otherwise workforce. Deterministic —
     /// a token validates against exactly one authority (the multi-scheme policy authenticated whichever
     /// one matched), so exactly one plane applies.
+    /// A principal authenticated by the WorkforceHome scheme (ADR-028 A9, task 046) is ALWAYS the workforce plane, decided
+    /// by the scheme before any iss/tid test: a home principal never resolves on the CIAM plane.
     /// </summary>
     internal CallerPrincipalPlane DeterminePlane(ClaimsPrincipal user)
     {
+        if (WorkforcePrincipalResolver.IsWorkforceHomePrincipal(user))
+        {
+            return CallerPrincipalPlane.Workforce;
+        }
+
         var issuer = user.FindFirst("iss")?.Value;
         if (!string.IsNullOrEmpty(issuer) &&
             issuer.Contains("ciamlogin.com", StringComparison.OrdinalIgnoreCase))
@@ -627,6 +634,14 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
     internal const string MatterEntity = "sprk_matter";
     internal const string WorkAssignmentEntity = "sprk_workassignment";
 
+    /// <summary>
+    /// The ProblemDetails detail for <see cref="WorkforceMembershipTest.DenyGuestUseHomeSignin"/> (#2128). It names no
+    /// tenant, id or address, and reads the same inside Teams, where the person cannot pick another account in place.
+    /// </summary>
+    internal const string GuestUseHomeSignInDetail =
+        "You're signed in as a guest of the Spaarke directory. Sign in with your own organization's work account instead: "
+        + "open the portal in a browser and choose your work or school account.";
+
     private readonly IWorkforcePrincipalResolver _resolver;
     private readonly IAccessibleRecordSetService _accessibleSet;
     private readonly ILogger<WorkforcePrincipalStrategy> _logger;
@@ -664,6 +679,35 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                         detail: "Identity token is missing required user identity claims",
                         type: "https://tools.ietf.org/html/rfc7235#section-3.1",
                         extensions: new Dictionary<string, object?> { ["reasonCode"] = resolution.DenyCode }));
+
+                case WorkforceDenyReason.PrincipalNotResolved
+                    when resolution.DenyCode == WorkforcePrincipalResolver.DenyRegistrationRequired:
+                    // ADR-028 A9 (task 046): the registration form's prefill, from the home token. Display data only —
+                    // nothing here is trusted for authorization, and nothing is written.
+                    _logger.LogInformation("[WF-AUTH] Denying request: {DenyCode}", resolution.DenyCode);
+                    var home = WorkforcePrincipalResolver.WorkforceHomeIdentity(httpContext.User) is { } homeIdentity
+                        ? new ClaimsPrincipal(homeIdentity)
+                        : httpContext.User;
+                    var prefill = WorkforceCallerClaims.From(home);
+                    return CallerPrincipalResolution.Denied(Results.Problem(
+                        statusCode: StatusCodes.Status403Forbidden,
+                        title: "Forbidden",
+                        detail: "Registration is required before this account can sign in.",
+                        extensions: new Dictionary<string, object?>
+                        {
+                            ["reasonCode"] = resolution.DenyCode,
+                            ["givenName"] = prefill.GivenName,
+                            ["familyName"] = prefill.FamilyName,
+                            ["email"] = prefill.Email,
+                        }));
+
+                case WorkforceDenyReason.PrincipalNotResolved
+                    when resolution.DenyCode == WorkforceMembershipTest.DenyGuestUseHomeSignin:
+                    // #2128: the customer-tenant guest is told where to sign in instead. Same shape as the CIAM plane's
+                    // contact_not_invited (ProblemDetailsHelper.Forbidden with a detail).
+                    _logger.LogWarning("[WF-AUTH] Denying request: {DenyCode}", resolution.DenyCode);
+                    return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(
+                        WorkforceMembershipTest.DenyGuestUseHomeSignin, GuestUseHomeSignInDetail));
 
                 case WorkforceDenyReason.PrincipalNotResolved:
                 default:

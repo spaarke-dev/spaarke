@@ -885,3 +885,165 @@ rows.** Both tables hold 0 rows in total after the run.
   statement about 049 and not a regression.
 - Impersonation proves the privilege model; it does not drive the Console UI. Any Dataverse update on a Decision Record
   from the Console would see the same 403. The BFF commit route is the only writer (FR-18).
+
+## 12. 2026-10-14 — Read on `sprk_policy` for Spaarke Basic User (D-110, DI-83 #1882)
+
+- **Why**: the worklist FetchXML (task 050) outer-links `sprk_policy`; Dataverse refuses the whole query (0x80040220) when the
+  caller lacks table Read on a linked table, so a Basic + Core user without Spaarke Console User got an empty worklist (task 038 live seam).
+- **Before** (live query, spaarkedev1): Spaarke Basic User held `prvReadsprk_Signal` (Basic) but no `prvReadsprk_Policy`;
+  Spaarke Console User holds `prvReadsprk_Policy` at Deep.
+- **Change**: `AddPrivilegesRole` on the root-BU Spaarke Basic User (`11f93c04-ddf6-f011-8406-7c1e520aa4df`):
+  `prvReadsprk_Policy` (`eda1df58-8428-4b7a-827c-d9c9ebf6140f`) at **Deep**, matching Console User and the house convention.
+- **After**: read-back `privilegedepthmask = 4`. Repo role XML `Roles/Spaarke Basic User.xml` updated to match.
+- **Still to do**: re-run `SignalReadRouteLiveTests` as the non-Console user after the 035 deploy, then close #1882.
+  Other environments need the same grant when ontology is provisioned there.
+
+## 13. 2026-10-15 — AppendTo on contact for Spaarke Ontology Service (owner-approved, 146 K-c)
+
+- **Why**: on dev, every decision commit failed with `record_write_failed` (500): the writer lacked `AppendToAccess` on the
+  person's `contact` when the Decision Record write set its contact lookups (146 live gate, K-c; seen for three different contacts).
+- **Approval**: owner, 2026-10-15 (writer-role changes are outside D-110 and need the owner).
+- **Change**: `AddPrivilegesRole` on the root copy of **Spaarke Ontology Service** `b1fb7ee0-bfbe-f111-aaaf-0022482913fc`
+  (BU `06fbf21c-…`) at 2026-10-15T17:38:31Z (HTTP 204): `prvAppendToContact` (`158327b5-f4c1-448e-93d1-5f135126665b`) at
+  **Global**, matching the role's other AppendTo privileges.
+- **Read-back** (`RetrieveRolePrivilegesRole`, before and after): **50 → 51; added exactly** `prvAppendToContact|Global`;
+  nothing removed, no depth changed. No other role touched. Repo `SpaarkeMaster/Roles/Spaarke Ontology Service.xml` updated.
+- **Next**: re-run 146 items 1, 2, 3, 9 and 11 (commit-route Decision Records) on dev. Other environments need the same grant.
+
+## 14. 2026-10-16 — Task 049 PREPARED, not applied (D-17, D-62, D-147; uac-r2 K-A)
+
+Status: repo role XML and the live-apply script are in the task 049 PR; **nothing has been changed on spaarkedev1**. The main
+session applies after uac-r2's check on the PR and appends the dated result below this section.
+
+**The three removals (and nothing else; a fourth, Ontology Administrator Signal Write, was added by owner Q6 on 2026-10-17, see below):** Console User `prvWritesprk_Signal` (D-17), Console User
+`prvCreatesprk_DecisionRecord` (D-62), Ontology Administrator `prvCreatesprk_DecisionRecord` (D-147), each on the **ROOT copy
+of the role only: 3 `RemovePrivilegeRole` calls** (uac-r2 review F2/Q2, 2026-10-16). The five child-BU copies of each role are
+inherited and read-only (Dataverse rejects an edit with `0x80044152` "Inherited roles cannot be modified",
+`scripts/provisioning/Grant-ControlPlaneIdentity.ps1:451`), and `RetrieveRolePrivilegesRole` on a child reports the root's set.
+Live `roleprivilegescollection` rows for `prvWritesprk_Signal` and `prvCreatesprk_DecisionRecord` exist only on root records
+(2026-10-16). The script reads every inherited copy back and fails the run (`DIVERGENT`) if one differs from its root; it never
+edits a copy. The two Create removals run before the Signal Write (uac-r2 K-A: Write on `sprk_signal` never goes without
+Create on `sprk_decisionrecord` in the same change). K-A also covers a declined or failed call: Console User's Signal Write is
+removed only if its Decision Record Create was removed in the same run or is already absent; otherwise the script skips it,
+prints why and exits non-zero. Everything from the apply loop to the end of the run (removals, the AFTER read, member reads, the union check) sits in one `try/catch/finally`, so a run that fails there (for example a 503 after the removals) still writes its evidence file, listing the removals made before the failure, and exits 1; a failure in the BEFORE read happens before any write and leaves no file. The K-A check for the Signal Write is by read-back: it re-reads Console User's root and requires Create on `sprk_decisionrecord` to be absent (a 204 is not trusted). Repo: `Roles/Spaarke Console User.xml` (-2 lines) and
+`Roles/Spaarke Ontology Administrator.xml` (-1 line). Source guard: `tests/Spaarke.ArchTests/SpaarkeRoleLedgerPrivilegeGuardTests.cs`.
+
+**Client-write grep (POML constraint 2), 2026-10-16, branch `db1e7daf9` and `origin/master` `0ccc75b4c`:** no client write to
+`sprk_signal` or `sprk_decisionrecord`. Searched `src/` (ts, tsx, js, jsx, html, ps1, bundles) for `sprk_signal(s)` and
+`sprk_decisionrecord(s)`: every hit is a comment, a type or a display-name map (`WorklistWorkspaceWidget.tsx:10`,
+`consoleStatus.ts:77,82`, `decisionDisplay.ts:161`, `Worklist/types.ts`, `worklistService.ts`, `WorklistWidget.tsx:7`,
+`worklistWizardItem.ts:4`, `worklist.registration.ts:15`). No `Xrm.WebApi` update/create/delete, no `child-records` and no PATCH
+reaches either table. The only Signal write route the Console calls is `POST /api/v1/signals/{id}/decision`
+(`decisionWizardService.ts:7`, `DecisionCommitEndpoints.cs:31`). BFF side: every `sprk_signal` update is through the writer MI
+(`OntologyWriterDataverseClient`: `DecisionCommitService.cs:2027`, `SignalSuppressionService.cs:1296,1305,1325`,
+`SignalWriter.cs:650,907,1038,1079`); the only caller-identity access to `sprk_signals` is a read (`SignalCoreRecordAccess.cs:165`).
+The commit route's caller preflight asks for the caller's Write on each Signal's **subject** and AppendTo on the core record
+(`DecisionCommitService.cs:1462-1500`), never Write on the Signal. **No hit, so the escalation does not fire.**
+
+**uac-r2 re-read (POML constraint 4), `origin/master` `0ccc75b4c` fetched 2026-10-16.** Last commit per file:
+`SecureChildLineage.cs` `c1e16b784`; `config/secure-record-owner-role.json` `b2fc3fb78`; `RecordOwnershipResolver.cs` `ba9945149`;
+`CoreAncestorResolver.cs` `6a00d1c47`; `RecordRouteAccessAuthorizationFilter.cs` `c5f71487f`; `CallerRecordAccessProbe.cs` `c5f71487f`;
+`ExternalCallerContext.cs` `d254d7166`; `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs` `720200e64`;
+`.claude/adr/ADR-034-user-record-membership.md` `97d6e0be3`; `.claude/adr/ADR-003-authorization-seams.md` `8c5c517a1`;
+`scripts/Set-SecureRecordOwnerRolePrivileges.ps1` `9fee1e8e2`. Against `7315b3e85` (the D-147 basis) the only change in any of
+them is `720200e64`, ledger prose and line cites for the Do-lane "mine" read (D-141/D-145a). The owner-role config lists
+**Reads only** for `sprk_signal` / `sprk_decisionrecord` (lines 233-245), so it names neither privilege being removed. No
+`config/*.json` role config lists any of the three. Open uac-r2 PRs #2016 (unshare-owner) and #2017 (demo SPE grant marker)
+touch neither. uac-r2's `current-task.md` lists "Task 049: confirm the Ontology Administrator change to ontology directly" as an
+open owner item. **Nothing changed in a way that invalidates the plan.**
+
+**Before (read-only, 2026-10-16, `-Verify`):** each of the 6 BU copies of Console User reports 23 privileges, of Ontology
+Administrator 38, of Ontology Service 50, identical per role. `RetrieveRolePrivilegesRole` on an inherited copy reports the
+root's set. What a child copy returns is call-dependent: `roleprivileges_association` on a child returns 0 (the rows live on the
+root, which is the "0 on child copies" of §10.1 and §7.3), while `RetrieveRolePrivilegesRole` returns the root's set. The child
+copies are inherited and cannot be edited, so the script plans and applies on the root only (3 calls, not 18) and checks the
+other five copies of each role by read-back. That `DIVERGENT` check is therefore defence in depth, not independent evidence (the
+call reads through to the root); the live union check (A1 to A5) is the real guard. Union:
+
+| Privilege | Holders at preparation | After the removals (incl. Q6) |
+|---|---|---|
+| Write on `sprk_decisionrecord` | System Administrator, System Customizer, Service Writer | unchanged |
+| Delete on `sprk_decisionrecord` | System Administrator, System Customizer, Service Deleter | unchanged |
+| Create on `sprk_decisionrecord` | System Administrator, System Customizer, Service Writer, **Console User (Deep)**, **Ontology Administrator (Deep)**, Ontology Service | System Administrator, System Customizer, Service Writer, Ontology Service |
+| Write on `sprk_signal` | System Administrator, System Customizer, Service Writer, **Console User (Deep)**, **Ontology Administrator (Deep)**, Ontology Service | System Administrator, System Customizer, Service Writer, Ontology Service |
+
+**Ontology Administrator Signal Write: removed live 2026-10-17 (owner Q6), see §17.** The owner approved removing
+`prvWritesprk_Signal` (Deep) from Spaarke Ontology Administrator; it was removed from the ROOT role by a one-off
+`RemovePrivilegeRole` (privilege `8df17c8f-8796-4e7c-9d32-3c0d7c9cd082`), and the script now carries it as a fourth closed-list
+removal (decision `Q6`, K-A gated on that role's Decision Record Create being read back absent). Union assertion A5 therefore has
+no waiver (`$A5Waiver = $null`): only platform roles, admin roles (System Administrator, System Customizer) and Spaarke Ontology
+Service may hold Write on `sprk_signal`, and any other holder fails the run.
+
+**Evidence and commands.** `049-role-removal-evidence-whatif-*.md` (plan, projected union) and `-verify-*.md` (live before
+picture) in this folder carry the full `RetrieveRolePrivilegesRole` listing per copy. Script:
+`scripts/Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1` (`-WhatIf`, `-Verify`, `-Apply`).
+**Rollback (not run; exact commands).** Each removal is restored with one `AddPrivilegesRole` on the ROOT role, at the original
+depth (Deep, `privilegedepthmask` 4), taking the ids from the 2026-10-16 live reads. Root BU `06fbf21c-1872-f011-b4cb-7c1e52671ad0`.
+
+| Removal | Root role id | Privilege | Privilege id | Depth |
+|---|---|---|---|---|
+| D-17 | Console User `51c924e2-bdbe-f111-a05b-3833c5e9614d` | `prvWritesprk_Signal` | `8df17c8f-8796-4e7c-9d32-3c0d7c9cd082` | Deep |
+| D-62 | Console User `51c924e2-bdbe-f111-a05b-3833c5e9614d` | `prvCreatesprk_DecisionRecord` | `38366142-e133-4978-9a46-e6d1d598ce1f` | Deep |
+| D-147 | Ontology Administrator `2f2b2137-bfbe-f111-aaaf-0022482913fc` | `prvCreatesprk_DecisionRecord` | `38366142-e133-4978-9a46-e6d1d598ce1f` | Deep |
+| Q6 | Ontology Administrator `2f2b2137-bfbe-f111-aaaf-0022482913fc` | `prvWritesprk_Signal` | `8df17c8f-8796-4e7c-9d32-3c0d7c9cd082` | Deep |
+
+```powershell
+$base = 'https://spaarkedev1.crm.dynamics.com'
+$t = az account get-access-token --resource $base --query accessToken -o tsv
+$h = @{ Authorization = "Bearer $t"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0'; 'Content-Type' = 'application/json; charset=utf-8' }
+$bu = '06fbf21c-1872-f011-b4cb-7c1e52671ad0'
+function Restore($roleId, $privName, $privId) {
+  $body = @{ Privileges = @(@{ '@odata.type' = 'Microsoft.Dynamics.CRM.RolePrivilege'; Depth = 'Deep'; PrivilegeId = $privId; PrivilegeName = $privName; BusinessUnitId = $bu }) } | ConvertTo-Json -Depth 5
+  Invoke-RestMethod -Uri "$base/api/data/v9.2/roles($roleId)/Microsoft.Dynamics.CRM.AddPrivilegesRole" -Headers $h -Method Post -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+}
+# Restore D-17 (Signal Write) before D-62 (DR Create): the reverse of removal (K-A).
+Restore '51c924e2-bdbe-f111-a05b-3833c5e9614d' 'prvWritesprk_Signal'            '8df17c8f-8796-4e7c-9d32-3c0d7c9cd082'   # D-17
+Restore '51c924e2-bdbe-f111-a05b-3833c5e9614d' 'prvCreatesprk_DecisionRecord'   '38366142-e133-4978-9a46-e6d1d598ce1f'   # D-62
+Restore '2f2b2137-bfbe-f111-aaaf-0022482913fc' 'prvCreatesprk_DecisionRecord'   '38366142-e133-4978-9a46-e6d1d598ce1f'   # D-147
+Restore '2f2b2137-bfbe-f111-aaaf-0022482913fc' 'prvWritesprk_Signal'            '8df17c8f-8796-4e7c-9d32-3c0d7c9cd082'   # Q6 (after D-147, so K-A holds)
+```
+
+After restoring:
+1. `RetrieveRolePrivilegesRole` on both roots shows **23** (Console User) and **38** (Ontology Administrator) privileges, and the
+   diff against the BEFORE listing in `049-role-removal-evidence-whatif-*.md` / `-verify-*.md` is empty (same names, same depths).
+2. `pwsh -File scripts/Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1 -Verify` shows the inherited copies matching their
+   roots again and the before-removal state (A2, A3, A5 fail).
+3. Revert the repo role XML as well (`Roles/Spaarke Console User.xml`, `Roles/Spaarke Ontology Administrator.xml`), or the next
+   SpaarkeMaster import removes the privileges again; the ArchTest `SpaarkeRoleLedgerPrivilegeGuardTests` then fails until the
+   guard is changed with the decision.
+4. `AddPrivilegesRole` may also add the four SharePoint privileges it is known to re-inject (setup guide §5.4; see the
+   Secure Record Owner strip above); that is a no-op here because both roles already hold all four at Global (BEFORE evidence). The 23 / 38 counts in step 1 confirm it.
+
+Still to do by the main session after uac-r2's check: `-Apply`, `-Verify`, the live negatives (non-admin update of a
+`sprk_signal` row, and create of a `sprk_decisionrecord`, both refused: task 008 §10.4 method), and one decision recorded in
+the deployed dev Console.
+
+## 15. 2026-10-17 — AppendTo on the Signal/Decision Record lookup targets for Spaarke Ontology Service (owner-approved; ebilling 026 F1, DI-107 #2046)
+
+- **Why**: the writer (`mi-ontology-writer-dev`, systemuser `3121bf1b-…`) sets lookups on `sprk_signal` / `sprk_decisionrecord` to tables
+  its own role held no AppendTo on. `sprk_billingevent` (ebilling 026's invoice-line subject) had no route at all, so every line-subject
+  Signal or Decision Record would fail 0x80040220. Matter, project, invoice, record-type catalog and the rest worked only through the root
+  team "Spaarke" Basic User role (#2046).
+- **Approval**: owner, 2026-10-16 ("yes grant 'append to'; also for other records").
+- **Change**: `AddPrivilegesRole` on the root **Spaarke Ontology Service** `b1fb7ee0-bfbe-f111-aaaf-0022482913fc` (BU `06fbf21c-…`),
+  all at **Global**: `prvAppendTosprk_AnalysisAction`, `prvAppendTosprk_BillingEvent`, `prvAppendTosprk_Document`,
+  `prvAppendTosprk_Invoice`, `prvAppendTosprk_Matter`, `prvAppendTosprk_Project`, `prvAppendTosprk_RecordType_Ref`,
+  `prvAppendTosprk_ServiceRequest`. The set is every `ReferencedEntity` of a ManyToOne on the two tables that the role lacked, apart from
+  the ownership lookups (businessunit, owner, team).
+- **Read-back**: 50 → 58, all 8 at Global, nothing unrequested, nothing removed. Child BU copy `0d5642b7-…` holds 58. The writer
+  resolves `prvAppendTosprk_BillingEvent`, `_Matter`, `_RecordType_Ref` at Global via BU `06fbf21c-…`. uac-r2 notified before and after.
+- **Repo**: `SpaarkeMaster/Roles/Spaarke Ontology Service.xml` + a guard test follow in an ontology PR. Other environments need the same grant.
+
+## 16. 2026-10-17 — Append on `sprk_policy` / `sprk_policyversion` for Spaarke Ontology Administrator (owner-approved, D-150)
+
+- **Why**: saving or publishing a rule links rule rows (Append on the referencing row). The role had AppendTo but not Append, so only System Administrators could author.
+- **Change**: `AddPrivilegesRole` on the root `2f2b2137-bfbe-f111-aaaf-0022482913fc`: `prvAppendsprk_Policy`, `prvAppendsprk_PolicyVersion` at **Deep**.
+- **Read-back**: 38 → 40 on the root and all 5 copies (`4f6a91ff`, `2c4541b2`, `675098f9`, `efca5b32`, `d785bc47`), both Deep; nothing unrequested. uac-r2 notified before and after. Repo XML already on master.
+
+## 17. 2026-10-17 — Task 049 APPLIED (D-17, D-62, D-147, D-159)
+
+- **03:17Z `-Apply`** (evidence `049-role-removal-evidence-apply-20261017T031742Z.md`): root-only `RemovePrivilegeRole` in K-A order — Ontology Administrator `prvCreatesprk_DecisionRecord` (40 → 39); Console User `prvCreatesprk_DecisionRecord`, then `prvWritesprk_Signal` (23 → 21). All 6 copies of each role read back with no divergence; Ontology Service unchanged (58). A1–A5 PASS.
+- **Owner Q6, same window**: root-only `RemovePrivilegeRole` of `prvWritesprk_Signal` (Deep) on Ontology Administrator; all 6 copies 39 → 38, nothing else changed.
+- **03:24Z `-Verify` with `$A5Waiver = $null`** (PR #2050 branch): PASS; no non-platform, non-admin, non-writer role holds Write on `sprk_signal`.
+- **Still held — KEPT by owner decision D-160 (2026-10-17, "not a risk; we can remove later")**: Ontology Administrator keeps `prvDeletesprk_Signal` and `prvAssignsprk_Signal` (Deep). No shipped flow deletes or assigns a Signal as the caller (2026-10-17 search; test cleanups run as the operator or the writer). Console User holds neither. No Spaarke human role holds Write, Delete or Assign on `sprk_decisionrecord`.
+- **Rollback**: §14.

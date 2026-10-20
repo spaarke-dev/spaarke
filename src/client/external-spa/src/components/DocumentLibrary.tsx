@@ -276,6 +276,91 @@ function canUploadOrDownload(accessLevel: AccessLevel): boolean {
   return accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess;
 }
 
+// ---------------------------------------------------------------------------
+// Download (shared with the record detail's document view, R3 task 066)
+// ---------------------------------------------------------------------------
+
+/**
+ * Downloads one document through the content route of the record it is filed to and hands the bytes to the browser under
+ * the document's name. The BFF streams the file itself (application/octet-stream) from the record-scoped route; it
+ * deliberately never returns a signed URL or an SPE pointer, so this reads the bytes and uses an object URL.
+ *
+ * Fixed 2026-09-01: this previously called `/api/v1/external/documents/{id}/download` expecting `{ downloadUrl }`. That
+ * route does not exist (guaranteed 404) and the response shape it assumed is one the server is designed never to produce.
+ *
+ * Throws on any failure (an `ApiError` for a refused or failed read): the caller shows it (`downloadFailureMessage`).
+ */
+export async function downloadDocumentFile(
+  root: DocumentRoot,
+  recordId: string,
+  documentId: string,
+  fileName: string
+): Promise<void> {
+  let objectUrl: string | undefined;
+  try {
+    const blob = await bffApiBlob(documentContentPath(root, recordId, documentId));
+
+    objectUrl = window.URL.createObjectURL(blob);
+
+    // Trigger browser download via a temporary anchor element
+    const anchor = window.document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = fileName;
+    anchor.style.display = 'none';
+    window.document.body.appendChild(anchor);
+    anchor.click();
+    window.document.body.removeChild(anchor);
+  } finally {
+    // Revoke on the next tick - revoking synchronously can cancel the in-flight navigation the anchor click just started.
+    if (objectUrl) {
+      const toRevoke = objectUrl;
+      window.setTimeout(() => window.URL.revokeObjectURL(toRevoke), 0);
+    }
+  }
+}
+
+/**
+ * Downloads a document filed to several records (record detail, task 066): asks each parent's content route in order and
+ * moves to the next ONLY when the server refuses with 403 (that parent is not readable by the caller, or does not hold the
+ * document). Any other failure stops at once (a 5xx on one parent says nothing about the next, and retrying hides it).
+ * When every parent refuses, the last 403 is thrown. An empty list is a programming error: the host offers no Download then.
+ */
+export async function downloadDocumentFromParents(
+  parents: ReadonlyArray<{ root: DocumentRoot; id: string }>,
+  documentId: string,
+  fileName: string
+): Promise<void> {
+  let lastRefusal: unknown = new Error('No parent record to download the document through.');
+  for (const parent of parents) {
+    try {
+      await downloadDocumentFile(parent.root, parent.id, documentId, fileName);
+      return;
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.statusCode !== 403) throw err;
+      lastRefusal = err;
+    }
+  }
+  throw lastRefusal;
+}
+
+/**
+ * What a failed download says. By status, never the server's detail text (it names the record and rule, and a download
+ * refusal must not be usable to tell whether a document exists): 403 access, 404 no file, 5xx try later, else generic.
+ */
+export function downloadFailureMessage(err: unknown): string {
+  const status = err instanceof ApiError ? err.statusCode : undefined;
+  if (status === 403) return 'You do not have access to download this document.';
+  if (status === 404) return "This document's file is not available.";
+  if (status !== undefined && status >= 500)
+    return 'The document could not be downloaded just now. Please try again later.';
+  return 'The document could not be downloaded. Please try again.';
+}
+
+/** What a failed download logs: the status only, never the error body (task 066 review K3). */
+export function downloadFailureLogText(err: unknown): string {
+  return err instanceof ApiError ? `HTTP ${err.statusCode}` : 'no HTTP status (network or client error)';
+}
+
 // AiSummaryCell is now rendered inline using AiSummaryPopover from @spaarke/ui-components.
 
 // ---------------------------------------------------------------------------
@@ -653,6 +738,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const [uploadDialogOpen, setUploadDialogOpen] = React.useState<boolean>(false);
   const [versionHistoryDoc, setVersionHistoryDoc] = React.useState<ODataDocument | null>(null);
   const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
+  // Task 066: why the last download failed (null = none); cleared when the next download starts.
+  const [downloadError, setDownloadError] = React.useState<string | null>(null);
 
   const showUpload = canUpload ?? listCanCreate ?? canUploadOrDownload(accessLevel);
   const canActOnDocuments = canDownload ?? canUploadOrDownload(accessLevel);
@@ -714,38 +801,17 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       if (!canActOnDocuments) return;
 
       setDownloadingId(doc.sprk_documentid);
+      setDownloadError(null);
 
-      let objectUrl: string | undefined;
       try {
-        // The BFF streams the file itself (application/octet-stream) from the
-        // project-scoped route; it deliberately never returns a signed URL or an
-        // SPE pointer. So read the bytes and hand the browser an object URL.
-        //
-        // Fixed 2026-09-01: this previously called
-        // `/api/v1/external/documents/{id}/download` expecting `{ downloadUrl }`.
-        // That route does not exist (guaranteed 404) and the response shape it
-        // assumed is one the server is designed never to produce.
-        const blob = await bffApiBlob(documentContentPath(root, recordId, doc.sprk_documentid));
-
-        objectUrl = window.URL.createObjectURL(blob);
-
-        // Trigger browser download via a temporary anchor element
-        const anchor = window.document.createElement('a');
-        anchor.href = objectUrl;
-        anchor.download = doc.sprk_name;
-        anchor.style.display = 'none';
-        window.document.body.appendChild(anchor);
-        anchor.click();
-        window.document.body.removeChild(anchor);
+        await downloadDocumentFile(root, recordId, doc.sprk_documentid, doc.sprk_name);
       } catch (err) {
-        console.error(`[DocumentLibrary] Download failed for document ${doc.sprk_documentid}:`, err);
+        console.error(
+          `[DocumentLibrary] Download failed for document ${doc.sprk_documentid}: ${downloadFailureLogText(err)}`
+        );
+        // Task 066: a failed download is shown, not only logged.
+        setDownloadError(downloadFailureMessage(err));
       } finally {
-        // Revoke on the next tick — revoking synchronously can cancel the
-        // in-flight navigation the anchor click just started.
-        if (objectUrl) {
-          const toRevoke = objectUrl;
-          window.setTimeout(() => window.URL.revokeObjectURL(toRevoke), 0);
-        }
         setDownloadingId(null);
       }
     },
@@ -930,6 +996,13 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
       <div className={styles.root}>
         <TruncatedListNotice truncated={truncated} shown={0} noun="documents" />
         <DeleteFailureNotice del={del} />
+        {/* Same slot as in the list render, so the children below keep their positions (and the delete confirmation its
+            state) when the last document is removed: React matches siblings by index. */}
+        {downloadError && (
+          <MessageBar intent="error" data-testid="document-download-error">
+            <MessageBarBody>{downloadError}</MessageBarBody>
+          </MessageBar>
+        )}
         {/* Toolbar — show upload button even when empty so users can add their first doc */}
         {showUpload && (
           <div className={styles.toolbar}>
@@ -982,6 +1055,11 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     <div className={styles.root}>
       <TruncatedListNotice truncated={truncated} shown={documents.length} noun="documents" />
       <DeleteFailureNotice del={del} />
+      {downloadError && (
+        <MessageBar intent="error" data-testid="document-download-error">
+          <MessageBarBody>{downloadError}</MessageBarBody>
+        </MessageBar>
+      )}
 
       {/* Toolbar */}
       <div className={styles.toolbar}>

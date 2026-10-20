@@ -1,6 +1,6 @@
 # Current Task State — sdap-SPE-admin-app-r2
 
-> **Last Updated**: 2026-10-07 (by context-handoff, before /compact)
+> **Last Updated**: 2026-10-15 (Add Permission fix + #1908)
 > **Recovery**: read Quick Recovery, then the project [`CLAUDE.md`](CLAUDE.md) **Standing directives & gotchas**.
 > Prior state (verbatim): [`notes/handoff-history/current-task-archive-2026-10-07.md`](notes/handoff-history/current-task-archive-2026-10-07.md) — grep only for a specific past detail.
 
@@ -35,7 +35,9 @@ SPE Admin no longer uses owning-app secrets: container work runs as the BFF mana
 | # | Item | Owner | State |
 |---|---|---|---|
 | 1 | Grant the BFF MI on **Spaarke Model 1** (Consuming Apps tab) | Operator | ✅ done 2026-10-07 (app `full`, delegated none — fine, MI is app-only) |
-| 1b | UAT fixes `641fb5e72` (Permissions tab 403 → delegated read; detail "Billing: Unknown" → no `$select`; config-form labels). Page **deployed + read back**; BFF part needs PR → master → **operator BFF deploy**. Publish-size not yet measured (do at PR) | Claude → Operator | ⏳ PR not opened |
+| 1b | UAT fixes (Permissions tab 403 → delegated read; detail "Billing: Unknown" → no `$select`; config-form labels). PR **#1362 merged** (`e6218e5ba`); BFF **deployed 2026-10-07** from fresh master worktree on top of uac-r2 task 114's `d437b9738` (clobber-checked), live DLL = `e6218e5ba`, hashes + healthz OK. Publish 36.19 vs 36.19 MB | Operator | ⏳ retest Permissions tab + billing badge |
+| 1c | **Add Permission 400** ("'userPrincipalName' is required"): container grants must name the user by UPN, not id. Fixed in `73ead280e` (single + bulk grant paths; contract tests). PR **#1910 merged** (`3ee84cf6d`, includes uac-r2 #1909); BFF **deployed 2026-10-15** from fresh master worktree, clobber-checked, live DLL = `3ee84cf6d`, hashes + healthz OK. Publish 37.1 vs 37.1 MB | Operator | ⏳ retest Add Permission |
+| 1d | **503 "scope unverifiable" on container open** — already fixed on master by uac-r2 PR **#1666** (merged 2026-10-12, after the 2026-10-11 503s); live in `3ee84cf6d`. **#1908 closed** by uac-r2; Graph-400 diagnostics follow-up **#1914**. Unrelated: Scheduling tests red on master → **#1912** | uac-r2 | ✅ |
 | 2 | `SecurityEvents.Read.All` on `mi-bff-api-dev` | Operator | ✅ **done 2026-10-07 15:06Z** (verified). MI token cache may delay Secure Score up to ~24 h. Alerts will still say "not provisioned" (tenant licensing) |
 | 3 | Model 1 config Key Vault field blank | Operator | ✅ already blank (verified) |
 | 4 | **UAT** — Model 1 containers + item search on the MI (MI lacks `Files.ReadWrite.All` the owning app had — watch search); Security tab; Add Property (first must survive a second); **Add Permission** (skipped before, not passed); 9 container-type settings save; **029** billing status renders on Container Types | Operator | ⏳ |

@@ -3,7 +3,7 @@
 //
 // The first handler in the provisioning pipeline (task 041, wave C4). Validates
 // run parameters + queries the quota / readiness sources — Azure OpenAI
-// regional TPM, Dataverse env-creation rate, subscription vCPU, SPE owning-app
+// regional TPM, OpenAI pin freshness, SPE owning-app
 // credential (task 248) — and BLOCKS the run before H1 starts if any headroom is
 // insufficient.
 //
@@ -24,8 +24,8 @@
 //   - projects/customer-provisioning-orchestration-r1/design.md § 15 north-star:
 //       lead-time items surfaced by H0 BEFORE the 30-min Bicep step, not
 //       after.
-//   - scripts/preflight/README.md § Purpose: 4 checks + shared return
-//       contract; H0 orchestrates all four in parallel.
+//   - scripts/preflight/README.md § Purpose: the script-backed checks + shared
+//       return contract; H0 orchestrates all three probes in parallel.
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-34 (Wave G-8
 //       Batch 10 — upgrade-mode version-compat gate): when `provisionedOn` is
 //       populated (upgrade of an already-provisioned customer), H0 queries the
@@ -42,22 +42,25 @@
 //       supplies the target versions.
 //
 // ROLLBACK CLASSIFICATION (§ 4C):
-//   H0 writes NO external side effect — the four probes are pure read-only
+//   H0 writes NO external side effect — the three probes are pure read-only
 //   quota queries. On any failure, the ProvisioningRun transitions to
 //   Status = Failed with a distinct RejectionCode per failing check, but no
 //   quarantine is warranted. Operator addresses the missing precondition
 //   (quota bump / SPE owner setup) then invokes POST /api/runs/{id}/resume,
-//   which re-dispatches H0 with the same envelope.
+//   which (Core/Rollback/RunControlService.cs) dispatches a fresh-attempt
+//   reconciler envelope for H0 — not a replay of the original envelope.
 //
-// DOWNSTREAM ENQUEUE (WAVE C4 TEMPORARY BRIDGE):
-//   The IHandlerEnqueuer contract note (Enqueue/IHandlerEnqueuer.cs § NOT
-//   CONSUMED BY) states that handler bodies should NOT re-enqueue via L2 —
-//   handler-to-handler chaining is the wave-C5 reconciler's job. In wave C4
-//   the reconciler does not exist yet, so H0 enqueues H0.5 directly here
-//   as a TEMPORARY BRIDGE. When the wave-C5 reconciler ships, this
-//   handler's enqueue call moves out to the reconciler + the enqueuer
-//   contract note applies unchanged. Documented in the H0 report-back for
-//   task 041 + tracked in project notes for wave C5 follow-up.
+// DOWNSTREAM CHAINING (NOT THIS HANDLER'S JOB):
+//   H0 does not enqueue any downstream handler. Handler-to-handler chaining is
+//   owned by the state reconciler (Core/Reconciler/StateReconcilerService.cs +
+//   DagAdvancer.HandlerDependencies: H1 follows H0); the IHandlerEnqueuer
+//   contract note (Enqueue/IHandlerEnqueuer.cs § NOT CONSUMED BY) forbids
+//   handler bodies from re-enqueuing. H0.5 is a Model 2 ENTRY point dispatched
+//   by the BFF consent callback (it chains INTO H0, never out of it). The
+//   wave-C4 handler-side enqueue of H0.5 was removed (T186 L19, 2026-10-15): it
+//   dispatched H0.5 with an empty ParametersJson, so H0.5 (which needs a
+//   ConsentCapturePayload) failed [consent-malformed-payload] and failed every
+//   run. On success H0 only records itself complete (CurrentPhase = H0).
 //
 // IDEMPOTENCY:
 //   Level 1 (wire): ServiceBusHandlerEnqueuer sets a deterministic
@@ -91,9 +94,6 @@ public sealed class H0PreflightHandler : IProvisioningHandler
 {
     /// <summary>Handler identifier — matches design.md § 4.1 catalog verbatim.</summary>
     public const string HandlerIdentifier = HandlerIds.H0;
-
-    /// <summary>Handler identifier of the downstream handler H0 chains to on success.</summary>
-    public const string DownstreamHandlerId = "H0.5";
 
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§ 4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
@@ -146,7 +146,6 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     };
 
     private readonly IProvisioningRunRepository _repository;
-    private readonly IHandlerEnqueuer _enqueuer;
     private readonly IEnumerable<IPreflightQuotaProbe> _probes;
     private readonly IVersionCompatMatrix _versionCompatMatrix;
     private readonly H0Options _options;
@@ -159,27 +158,23 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     /// Constructs the H0 preflight handler.
     /// </summary>
     /// <param name="repository">Cosmos-backed run state store (task 037).</param>
-    /// <param name="enqueuer">Service Bus enqueuer used to dispatch H0.5 on success (wave-C4 temporary bridge — see file header).</param>
-    /// <param name="probes">The four preflight probes. Registration order does not matter; the handler orchestrates all four in parallel and aggregates results.</param>
+    /// <param name="probes">The three preflight probes. Registration order does not matter; the handler orchestrates all three in parallel and aggregates results.</param>
     /// <param name="versionCompatMatrix">Version-compat matrix queried in upgrade mode ONLY (spec.md FR-34; Wave G-8 Batch 10).</param>
     /// <param name="options">COMP-10 (SESSION 17): H0 options — cost-envelope gate configuration. Optional (defaults to <see cref="H0Options"/> defaults when null so the handler stays constructible in ad-hoc tests without an Options.Create wrapper).</param>
     /// <param name="logger">Structured logger.</param>
     public H0PreflightHandler(
         IProvisioningRunRepository repository,
-        IHandlerEnqueuer enqueuer,
         IEnumerable<IPreflightQuotaProbe> probes,
         IVersionCompatMatrix versionCompatMatrix,
         IOptions<H0Options>? options,
         ILogger<H0PreflightHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
-        ArgumentNullException.ThrowIfNull(enqueuer);
         ArgumentNullException.ThrowIfNull(probes);
         ArgumentNullException.ThrowIfNull(versionCompatMatrix);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
-        _enqueuer = enqueuer;
         _probes = probes;
         _versionCompatMatrix = versionCompatMatrix;
         // options may be null (test scaffolding) — fall back to defaults so
@@ -347,7 +342,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
             return new HandlerResult.Failure(FailureClass.Resumable, rejectionCode, failed.Diagnostic);
         }
 
-        // (6) All probes passed — mark H0 complete + enqueue H0.5 (wave-C4 bridge — see file header).
+        // (6) All probes passed — mark H0 complete; the reconciler dispatches H1 (see file header).
         stopwatch.Stop();
         _logger.LogInformation(
             "H0 preflight succeeded: runId={RunId} customerId={CustomerId} durationMs={DurationMs} probeCount={ProbeCount}",
@@ -618,7 +613,6 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     private static string BuildRejectionCode(string checkName) => checkName switch
     {
         PreflightCheckNames.AzureOpenAiTpmHeadroom => "quota-openai-tpm",
-        PreflightCheckNames.SubscriptionVCpuQuota => "quota-subscription-vcpu",
         // HANDLER-03 (pre-dispatch audit 2026-08-27) — F1 verbatim rejection
         // code the punchlist mandates so operators can filter for the
         // specific fast-fail without string-matching the diagnostic.
@@ -682,7 +676,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1); // Approximate; probe start not tracked separately.
 
         run.Status = RunStatus.Running;
-        run.CurrentPhase = DownstreamHandlerId; // The reconciler observes this + knows to dispatch H0.5 next.
+        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,
@@ -717,37 +711,6 @@ public sealed class H0PreflightHandler : IProvisioningHandler
                 Class: FailureClass.Resumable,
                 RejectionCode: "run-deleted-during-preflight",
                 Diagnostic: $"ProvisioningRun '{run.RunId}' was deleted while H0 preflight was in flight.");
-        }
-
-        // Enqueue H0.5 — TEMPORARY WAVE-C4 BRIDGE (see file header). When
-        // the wave-C5 reconciler ships, this call moves to the reconciler
-        // + the enqueuer contract note (Enqueue/IHandlerEnqueuer.cs § NOT
-        // CONSUMED BY) applies unchanged.
-        var downstreamEnvelope = new HandlerEnvelope
-        {
-            HandlerId = DownstreamHandlerId,
-            RunId = envelope.RunId,
-            CustomerId = envelope.CustomerId,
-            ParametersJson = "{}", // H0.5 reads its own parameters from Cosmos.
-            EnqueuedAt = completedAt,
-        };
-        try
-        {
-            await _enqueuer.EnqueueAsync(downstreamEnvelope, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // The Cosmos state already records H0 complete + CurrentPhase =
-            // H0.5. Enqueue failure is recoverable — the reconciler's
-            // background scan (wave C5, design.md § crash recovery I6) will
-            // re-emit the H0.5 job. Log + return success so the handler
-            // outcome accurately reflects the H0 completion; the enqueue
-            // failure is a downstream concern.
-            _logger.LogError(
-                ex,
-                "H0 succeeded but H0.5 downstream enqueue failed — reconciler scan will re-emit: " +
-                "runId={RunId} customerId={CustomerId}",
-                run.RunId, run.CustomerId);
         }
 
         return new HandlerResult.Success(idempotencyKey);

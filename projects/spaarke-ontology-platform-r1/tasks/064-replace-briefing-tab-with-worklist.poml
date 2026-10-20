@@ -4,7 +4,7 @@
     <title>Replace the Daily Briefing tab with the worklist</title>
     <phase>6 Do lane and Briefing fold-in</phase>
     <gate>062, 063, 055, 059, 065 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Replaces a shipped user surface; premature replacement leaves users worse off.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -125,4 +125,5 @@
   <notes>spec.md FR-35, FR-54, FR-55, FR-61. design.md BR-4, BR-5. Amended 2026-10-07 for D-15, D-26, D-27 and reconciliation B.6.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion date="2026-10-17">PR #2055 merged into docs `640794bf2`, on master with sync #2073 `88b3ecb1f` (Console deployed 07:32Z). Owner approved the switch (D-164); run 14:38Z by `Set-DefaultWorkspaceLayout.ps1 -To Worklist`, verified (Worklist the only system default). The §6.1 non-admin checks and the POML UI tests move to 105 UAT. Follow-ups DI-109 #2058, DI-110 #2057, DI-111 #2059; new-customer default is #2006.</completion>
 </task>

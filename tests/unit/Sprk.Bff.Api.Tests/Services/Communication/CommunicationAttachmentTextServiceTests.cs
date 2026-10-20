@@ -11,7 +11,9 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Services.Identity;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Communication;
@@ -40,6 +42,10 @@ public class CommunicationAttachmentTextServiceTests
     private static readonly Guid CallerSystemUserId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private const string AttachmentSet = "sprk_communicationattachments";
     private const string DocumentSet = "sprk_documents";
+    private const string CommunicationSet = "sprk_communications";
+    private const string ThreadSet = "sprk_communicationthreads";
+    private const int PrivacyOpen = 100000000;
+    private const int PrivacyPrivate = 100000001;
     private const string DriveId = "b!drive-000";
     private const string ItemId = "item-000";
 
@@ -73,12 +79,47 @@ public class CommunicationAttachmentTextServiceTests
         public Mock<ISpeFileOperations> Spe { get; } = new(MockBehavior.Loose);
         public Mock<ITextExtractor> Extractor { get; } = new(MockBehavior.Loose);
 
+        // Task 065 fix round 6 (F1): the communication's own visibility, decided before any attachment is listed. The default is
+        // an internal caller reading a shareable email in an Open thread (the case every pre-existing test is about).
+        public Mock<ISystemUserIdentityResolver> Identity { get; } = new();
+        public bool CommunicationExists { get; set; } = true;
+        public bool CommunicationInternalOnly { get; set; }
+        public int? ThreadPrivacy { get; set; } = PrivacyOpen;
+        public Guid ThreadId { get; } = Guid.NewGuid();
+
         public Harness()
         {
             // Default: a resolvable caller. Individual tests override for the fail-closed case.
             Resolver
                 .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(CallerSystemUserResolution.Resolved(CallerSystemUserId.ToString()));
+
+            Query
+                .Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => CommunicationExists
+                    ? new List<Dictionary<string, JsonElement>>
+                    {
+                        Row(
+                            ("sprk_communicationid", CommunicationId.ToString()),
+                            ("sprk_isinternalonly", CommunicationInternalOnly),
+                            ("_sprk_communicationthread_value", ThreadId.ToString())),
+                    }
+                    : new List<Dictionary<string, JsonElement>>());
+            Query
+                .Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => new List<Dictionary<string, JsonElement>>
+                {
+                    ThreadPrivacy is { } privacy
+                        ? Row(("sprk_communicationthreadid", ThreadId.ToString()), ("sprk_privacystate", privacy))
+                        : Row(("sprk_communicationthreadid", ThreadId.ToString())),
+                });
+        }
+
+        /// <summary>The caller is a systemuser flagged <c>sprk_isexternal</c> (a licensed partner).</summary>
+        public Harness CallerIsExternal()
+        {
+            Identity.Setup(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+            return this;
         }
 
         public Harness CallerUnresolved()
@@ -149,7 +190,11 @@ public class CommunicationAttachmentTextServiceTests
             TestRecordContainerResolver.ForBusinessUnitContainers(c => c.StartsWith("b!", StringComparison.Ordinal));
 
         public CommunicationAttachmentTextService Build() =>
-            new(Query.Object, Resolver.Object, Spe.Object, ContainerResolver, Extractor.Object,
+            new(Query.Object, Resolver.Object,
+                new CommunicationThreadReadService(
+                    Query.Object, new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
+                    Resolver.Object, Identity.Object, Mock.Of<ILogger<CommunicationThreadReadService>>()),
+                Spe.Object, ContainerResolver, Extractor.Object,
                 Mock.Of<ILogger<CommunicationAttachmentTextService>>());
     }
 
@@ -338,5 +383,94 @@ public class CommunicationAttachmentTextServiceTests
         harness.Query.Verify(
             q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+    // ── Task 065 fix round 6 (F1): the communication must be visible before its attachments are listed ──
+
+    private static Harness WithOneExtractableAttachment(Harness h)
+    {
+        var doc = Guid.NewGuid();
+        return h
+            .Attachments(AttachmentRow(Guid.NewGuid(), doc, "brief.pdf"))
+            .Documents(DocumentRow(doc, "brief.pdf"))
+            .Supported()
+            .DownloadReturns(() => Bytes())
+            .Extracts(TextExtractionResult.Succeeded("Privileged strategy memo.", TextExtractionMethod.DocumentIntelligence));
+    }
+
+    private static void ShouldHaveReadNoAttachment(Harness h)
+    {
+        h.Query.Verify(
+            q => q.QueryAsync(AttachmentSet, It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the communication is not visible to this caller, so its attachments are not even listed");
+        h.Spe.Verify(
+            s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "F1: an external caller gets NO attachment text for an internal-only email")]
+    public async Task GetAttachmentText_ExternalCaller_InternalOnlyEmail_ReturnsNothing()
+    {
+        var h = WithOneExtractableAttachment(new Harness().CallerIsExternal());
+        h.CommunicationInternalOnly = true;
+
+        var result = await Run(h);
+
+        result.Attachments.Should().BeEmpty();
+        ShouldHaveReadNoAttachment(h);
+    }
+
+    [Fact(DisplayName = "F1: an external caller gets NO attachment text for an email in a Private thread (D7)")]
+    public async Task GetAttachmentText_ExternalCaller_PrivateThread_ReturnsNothing()
+    {
+        var h = WithOneExtractableAttachment(new Harness().CallerIsExternal());
+        h.ThreadPrivacy = PrivacyPrivate;
+
+        var result = await Run(h);
+
+        result.Attachments.Should().BeEmpty();
+        ShouldHaveReadNoAttachment(h);
+    }
+
+    [Fact(DisplayName = "F1: an external caller gets NO attachment text for an email whose thread has no privacy value")]
+    public async Task GetAttachmentText_ExternalCaller_ThreadWithNoPrivacyValue_ReturnsNothing()
+    {
+        var h = WithOneExtractableAttachment(new Harness().CallerIsExternal());
+        h.ThreadPrivacy = null;
+
+        (await Run(h)).Attachments.Should().BeEmpty();
+        ShouldHaveReadNoAttachment(h);
+    }
+
+    [Fact(DisplayName = "F1 control: an external caller DOES get the text of a shareable email in an Open thread")]
+    public async Task GetAttachmentText_ExternalCaller_ShareableEmailInOpenThread_ReturnsTheText()
+    {
+        var h = WithOneExtractableAttachment(new Harness().CallerIsExternal());
+
+        var item = (await Run(h)).Attachments.Should().ContainSingle().Subject;
+
+        item.Extractable.Should().BeTrue();
+        item.Text.Should().Be("Privileged strategy memo.");
+    }
+
+    [Fact(DisplayName = "F1: an internal caller still gets the text, even of an internal-only email in a Private thread")]
+    public async Task GetAttachmentText_InternalCaller_InternalOnlyEmailInPrivateThread_ReturnsTheText()
+    {
+        var h = WithOneExtractableAttachment(new Harness());
+        h.CommunicationInternalOnly = true;
+        h.ThreadPrivacy = PrivacyPrivate;
+
+        var item = (await Run(h)).Attachments.Should().ContainSingle().Subject;
+
+        item.Extractable.Should().BeTrue();
+        item.Text.Should().Be("Privileged strategy memo.");
+    }
+
+    [Fact(DisplayName = "F1: a communication the caller cannot read answers like one with no attachments")]
+    public async Task GetAttachmentText_CommunicationNotReadable_ReturnsNothing()
+    {
+        var h = WithOneExtractableAttachment(new Harness());
+        h.CommunicationExists = false;
+
+        (await Run(h)).Attachments.Should().BeEmpty();
+        ShouldHaveReadNoAttachment(h);
     }
 }

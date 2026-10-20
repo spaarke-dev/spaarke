@@ -18,14 +18,17 @@
 
   "instruction": {
     "role": "notification summarizer",
-    "task": "Generate a TL;DR summary of the user's daily notification briefing. The structured input below (## Input) contains DETERMINISTICALLY-COMPUTED ground-truth facts assembled by the platform — totalNotificationCount, categoryCounts[], priorityItemCount, keyDates[] (recordName + date), and recordNames[] (the exact set of record names you may reference). Your job is ONLY to compose prose and prioritize over these provided facts: write a one-sentence overall summary, 2-4 short key-takeaway bullets, one suggested top action, plus the integer counts. You are a writer, not a counter — every number, date, and name you use MUST come verbatim from the input; you must never count, calculate, estimate, or invent one yourself.",
+    "task": "Generate a TL;DR summary of the user's daily notification briefing. The structured input below (## Input) contains DETERMINISTICALLY-COMPUTED ground-truth facts assembled by the platform — totalNotificationCount, categoryCounts[], priorityItemCount, keyDates[] (recordName + date), and recordNames[] (the exact set of record names you may reference). Your job is ONLY to compose prose over these provided facts: write a one-sentence overall summary and 2-4 short key-takeaway bullets that SUMMARISE the volume (how many, in which categories), plus the integer counts. Do NOT list individual items and do NOT choose, rank or recommend which item or action comes first: ordering and priority are computed by the platform, never by you. You are a writer, not a counter — every number, date, and name you use MUST come verbatim from the input; you must never count, calculate, estimate, or invent one yourself.",
     "constraints": [
       "R5 GROUNDING RULE: use ONLY the counts in totalNotificationCount/categoryCounts/priorityItemCount, the dates in keyDates[], and the names in recordNames[]. Do not compute, estimate, or infer any count, date, or name that is not literally present in one of these fields.",
       "Introduce NO fact of your own. If you want to reference a record, category, or date not present in the input, omit it instead — do not approximate or generalize into a fabricated specific.",
       "Reference record names by their exact spelling as given in recordNames[] — do not paraphrase or shorten names.",
       "Do NOT fabricate matter names, firm names, case names, person names, or dates that are not present in the input.",
-      "Keep summary to a single sentence (max 30 words). Keep each keyTakeaway bullet to one sentence (max 20 words). Keep topAction to one action verb + object phrase (max 15 words).",
-      "If totalNotificationCount is 0, return summary='No notifications today', keyTakeaways=[], topAction='', categoryCount=0, priorityItemCount=0.",
+      "Keep summary to a single sentence (max 30 words). Keep each keyTakeaway bullet to one sentence (max 20 words).",
+      "Summarise VOLUME: state counts per category (for example how many items to do and how many of them are past due). Never enumerate items, and never name a record unless it appears in recordNames[].",
+      "Do NOT choose a top action, a first step or a priority, and do not say what to do first. A person decides; the list order is computed by the platform.",
+      "Call the counted things by their category names (for example 'items to do'). Say 'notifications' only when a category is itself named for notifications.",
+      "If totalNotificationCount is 0, return summary='Nothing to report today', keyTakeaways=[], categoryCount=0, priorityItemCount=0.",
       "Output MUST be valid JSON conforming to the output schema. Do not include markdown fences or explanatory prose outside the JSON."
     ],
     "context": "This summary appears at the top of the user's Daily Briefing widget in Spaarke. The user is a legal-operations professional reviewing the day's matter activity. Brevity, accuracy, and groundedness are critical — a fabricated firm or matter name, or an invented count, destroys user trust immediately. The structured input is the ONLY source of truth; it was computed deterministically by the platform, not estimated."
@@ -45,20 +48,14 @@
       {
         "name": "summary",
         "type": "string",
-        "description": "One-sentence overall summary of the day's notifications. Must reference only entities present in the input. Example shape (do NOT use these names): '<N> notifications across <M> categories, with focus on <category-name> activity.'",
+        "description": "One-sentence overall summary of the day's notifications. Must reference only entities present in the input. Example shape (do NOT use these names): '<N> notifications across <M> categories, <K> of them in <category-name>.'",
         "maxLength": 300
       },
       {
         "name": "keyTakeaways",
         "type": "array",
-        "description": "Array of 2-4 short bullet strings highlighting the most important takeaways. Each bullet is a single sentence. Use entity names from the input verbatim. Empty array if no notifications.",
+        "description": "Array of 2-4 short bullet strings that summarise the volume per category, in the order the categories appear in the input. Each bullet is a single sentence. Use entity names from the input verbatim. Empty array if no notifications.",
         "maxLength": 4
-      },
-      {
-        "name": "topAction",
-        "type": "string",
-        "description": "Single suggested next action for the user, as a short verb-phrase. Empty string if no notifications. Examples of SHAPE (do not use these names): 'Review priority items in <category-name>', 'Respond to <channel-name> messages'.",
-        "maxLength": 200
       },
       {
         "name": "categoryCount",
@@ -82,9 +79,8 @@
         "summary": "5 notifications across 2 categories, with 1 priority item on <matter-name-1>.",
         "keyTakeaways": [
           "3 items in <category-A>; 2 items in <category-B>.",
-          "Priority item on <matter-name-1> needs attention."
+          "1 priority item, on <matter-name-1>."
         ],
-        "topAction": "Review priority item on <matter-name-1>",
         "categoryCount": 2,
         "priorityItemCount": 1
       }
@@ -92,9 +88,8 @@
     {
       "input": "{ \"totalNotificationCount\": 0, \"categoryCounts\": [], \"priorityItemCount\": 0, \"keyDates\": [], \"recordNames\": [] }",
       "output": {
-        "summary": "No notifications today",
+        "summary": "Nothing to report today",
         "keyTakeaways": [],
-        "topAction": "",
         "categoryCount": 0,
         "priorityItemCount": 0
       }
@@ -105,8 +100,8 @@
     "author": "spaarke-daily-update-service-r5",
     "authorLevel": 0,
     "createdAt": "2026-06-25T00:00:00Z",
-    "updatedAt": "2026-07-08T00:00:00Z",
-    "description": "TL;DR narration step of the Daily Briefing coded composite (R5). Produces a TldrResult { summary, keyTakeaways[], topAction, categoryCount, priorityItemCount } by composing prose OVER a deterministically-computed TldrFactsDto input — no baked example names (R4 anti-hallucination measure per FR-13 / AC-2b / AC-13a), no self-computed facts (R5 task 013 / FR-A4 determinism contract). R5 task 014 (FR-A5): TldrResult also carries itemRefs[] (anchorText + itemId) for widget-side click-through grounding — this Action's OUTPUT SCHEMA IS UNCHANGED and does NOT ask the model to emit itemRefs, because this Action's input payload (TldrFactsDto) never carries item ids (only aggregated names/dates, by FR-A4 design) — the model has no id to report and would have to fabricate one. itemRefs[] is computed entirely server-side, AFTER this call returns, by DailyBriefingNarrator.BuildTldrItemRefs: it matches each channel item's RegardingName/Title verbatim against the model's own summary/keyTakeaways/topAction text (same candidate-name universe as BuildAllowList's scrub allow-list) and pairs a match with that item's id. Deterministic, never LLM-authored — consistent with the project's 'determinism is the contract' rule. See DailyBriefingNarrator.cs BuildTldrItemRefs + DailyBriefingEndpoints.cs TldrItemRefDto.",
+    "updatedAt": "2026-10-16T00:00:00Z",
+    "description": "TL;DR narration step of the Daily Briefing coded composite (R5). Produces a TldrResult { summary, keyTakeaways[], categoryCount, priorityItemCount } (task 062 / FR-32 REMOVED the model-chosen topAction: the first worklist row is the top action because rank is deterministic) by composing prose OVER a deterministically-computed TldrFactsDto input — no baked example names (R4 anti-hallucination measure per FR-13 / AC-2b / AC-13a), no self-computed facts (R5 task 013 / FR-A4 determinism contract). R5 task 014 (FR-A5): TldrResult also carries itemRefs[] (anchorText + itemId) for widget-side click-through grounding — this Action's OUTPUT SCHEMA IS UNCHANGED and does NOT ask the model to emit itemRefs, because this Action's input payload (TldrFactsDto) never carries item ids (only aggregated names/dates, by FR-A4 design) — the model has no id to report and would have to fabricate one. itemRefs[] is computed entirely server-side, AFTER this call returns, by DailyBriefingNarrator.BuildTldrItemRefs: it matches each channel item's RegardingName/Title verbatim against the model's own summary/keyTakeaways text (same candidate-name universe as BuildAllowList's scrub allow-list) and pairs a match with that item's id. Deterministic, never LLM-authored — consistent with the project's 'determinism is the contract' rule. See DailyBriefingNarrator.cs BuildTldrItemRefs + DailyBriefingEndpoints.cs TldrItemRefDto.",
     "tags": [
       "daily-briefing",
       "narrate",

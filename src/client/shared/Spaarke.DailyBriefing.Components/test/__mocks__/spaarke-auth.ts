@@ -64,7 +64,7 @@ export const authenticatedFetch: jest.Mock = jest.fn(() =>
   Promise.resolve(
     new Response(
       JSON.stringify({
-        tldr: { summary: '', keyTakeaways: [], topAction: '', categoryCount: 0, priorityItemCount: 0 },
+        tldr: { summary: '', keyTakeaways: [], categoryCount: 0, priorityItemCount: 0 },
         channelNarratives: [],
         generatedAtUtc: new Date().toISOString(),
       }),

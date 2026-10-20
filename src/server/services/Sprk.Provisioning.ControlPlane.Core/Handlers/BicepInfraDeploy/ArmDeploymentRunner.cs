@@ -176,7 +176,10 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
             Template = BinaryData.FromString(templateJson),
             Parameters = parameters,
         };
-        var content = new ArmDeploymentContent(properties);
+        // A SUBSCRIPTION-scope deployment must name the region its metadata lives in; without it ARM refuses with
+        // 400 InvalidDeployment "The 'location' property must be specified" (T186 L20 — `az deployment sub create`
+        // always required --location, and the SDK port dropped it).
+        var content = new ArmDeploymentContent(properties) { Location = new AzureLocation(request.Location) };
         var deploymentName = $"customer-{request.CustomerId}-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}";
 
         ArmOperation<ArmDeploymentResource> deployOperation;

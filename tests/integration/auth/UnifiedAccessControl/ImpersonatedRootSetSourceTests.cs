@@ -256,7 +256,8 @@ public sealed class ImpersonatedRootSetSourceTests
         var source = BuildFor(query, cache, TenantA);
 
         await source.GetAsync(User, "sprk_matter");
-        await ImpersonatedRootSetSource.InvalidateAsync(cache, Principal(TenantA), User, "sprk_matter", NullLogger.Instance);
+        await ImpersonatedRootSetSource.InvalidateAsync(
+            cache, Principal(TenantA), User, "sprk_matter", new HashSet<Guid>(), NullLogger.Instance);
         await source.GetAsync(User, "sprk_matter");
 
         query.CallCount.Should().Be(2, "the second read found no cached set, so it asked Dataverse again");
@@ -278,6 +279,7 @@ public sealed class ImpersonatedRootSetSourceTests
             Principal(variant == "other-tenant" ? TenantB : TenantA),
             variant == "other-user" ? OtherUser : User,
             variant == "other-type" ? "sprk_project" : "sprk_matter",
+            new HashSet<Guid>(),
             NullLogger.Instance);
         await source.GetAsync(User, "sprk_matter");
 
@@ -288,7 +290,8 @@ public sealed class ImpersonatedRootSetSourceTests
     public async Task InvalidateAsync_WhenTheCacheFaults_DoesNotThrow()
     {
         var act = () => ImpersonatedRootSetSource.InvalidateAsync(
-            new StubTenantCache { FaultOnRemove = true }, Principal(TenantA), User, "sprk_matter", NullLogger.Instance);
+            new StubTenantCache { FaultOnRemove = true }, Principal(TenantA), User, "sprk_matter",
+            new HashSet<Guid>(), NullLogger.Instance);
 
         await act.Should().NotThrowAsync(
             "the share has already been written; a cache fault must not turn it into an error");

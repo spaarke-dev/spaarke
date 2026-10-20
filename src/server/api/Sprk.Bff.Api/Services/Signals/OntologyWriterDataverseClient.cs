@@ -1,4 +1,6 @@
+using System.Runtime.CompilerServices;
 using Azure.Core;
+using Microsoft.Crm.Sdk.Messages;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
@@ -208,6 +210,34 @@ public sealed class OntologyWriterDataverseClient : IDisposable
         return client;
     }
 
+    /// <summary>Task 153 (adversarial pass 2 F1): this connection's own <c>systemuserid</c>, cached once it has been read. A reference, so a
+    /// concurrent reader sees either nothing or the whole id (a <see cref="Guid"/> field is not written atomically).</summary>
+    private StrongBox<Guid>? _writerUserId;
+
+    /// <summary>
+    /// Task 153 (adversarial pass 2 F1): the <c>systemuserid</c> of the identity this connection authenticates as (the ontology writer's own
+    /// application user), from <c>WhoAmI</c> on this connection. Every row the writer creates is created through this connection with no
+    /// impersonation, so Dataverse stamps exactly this id in the row's <c>createdby</c>; the writer's "already recorded" lookups match only
+    /// rows created by it. Cached after the first answer (an identity does not change for a connection's life); a fault, or an empty id, is
+    /// thrown and never cached, so the caller fails closed and a later call asks again.
+    /// </summary>
+    public async Task<Guid> GetWriterUserIdAsync(CancellationToken ct = default)
+    {
+        if (Volatile.Read(ref _writerUserId) is { } cached)
+        {
+            return cached.Value;
+        }
+
+        var response = (WhoAmIResponse)await GetOrganizationService().ExecuteAsync(new WhoAmIRequest(), ct).ConfigureAwait(false);
+        if (response.UserId == Guid.Empty)
+        {
+            throw new InvalidOperationException("WhoAmI on the Signal writer's connection named no user, so the writer's identity is unknown.");
+        }
+
+        Volatile.Write(ref _writerUserId, new StrongBox<Guid>(response.UserId));
+        return response.UserId;
+    }
+
     public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default) =>
         GetOrganizationService().CreateAsync(entity, ct);
 
@@ -232,6 +262,16 @@ public sealed class OntologyWriterDataverseClient : IDisposable
         var response = (RetrieveResponse)await GetOrganizationService().ExecuteAsync(request, ct).ConfigureAwait(false);
         return response.Entity;
     }
+
+    /// <summary>
+    /// Ontology task 042b (D-169): gives the row a new owner with the SDK's <see cref="AssignRequest"/>, which the platform checks against the
+    /// writer's Assign privilege (<c>prvAssignsprk_DecisionRecord</c>, Global, D-33c). The writer holds no Write on
+    /// <c>sprk_decisionrecord</c>, so an owner change through <see cref="UpdateAsync"/> is not this identity's to make. The caller decides the
+    /// owner (<see cref="GateDecisionRecordSharing"/> takes the ownership resolver's answer) and reads it back.
+    /// </summary>
+    public Task AssignAsync(string entityLogicalName, Guid id, EntityReference assignee, CancellationToken ct = default) =>
+        GetOrganizationService().ExecuteAsync(
+            new AssignRequest { Target = new EntityReference(entityLogicalName, id), Assignee = assignee }, ct);
 
     public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default)
     {

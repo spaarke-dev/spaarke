@@ -22,6 +22,7 @@
 
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
 import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
@@ -38,7 +39,11 @@ const CANDIDATE: IAccessGrantCandidate = {
 
 function jsonResponse(body: unknown, ok = true, status = ok ? 200 : 500): Response {
   // A BFF ProblemDetails always carries `status`.
-  return { ok, status, json: async () => (ok ? body : { status, ...(body as Record<string, unknown>) }) } as unknown as Response;
+  return {
+    ok,
+    status,
+    json: async () => (ok ? body : { status, ...(body as Record<string, unknown>) }),
+  } as unknown as Response;
 }
 
 function problem(status: number, reasonCode: string, detail: string): Response {
@@ -251,8 +256,7 @@ describe('AccessGrantModal — /grant and /invite-and-grant outcomes (task 139)'
       const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
       fireEvent.click(revokeButtons[revokeButtons.length - 1]);
       expect(await screen.findByText('Revoke access?')).toBeInTheDocument();
-      const confirmButtons = screen.getAllByRole('button', { name: 'Revoke' });
-      fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+      await confirmRevoke();
 
       expect(await screen.findByText(/last person who can open this secure record/)).toBeInTheDocument();
       await waitFor(() => expect(screen.getByText('Shared Sam')).toBeInTheDocument());

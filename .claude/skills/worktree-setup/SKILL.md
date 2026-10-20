@@ -11,8 +11,8 @@ last-reviewed: 2026-05-16
 # Worktree Setup
 
 > **Category**: Operations
-> **Last Reviewed**: 2026-05-16
-> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Last Reviewed**: 2026-10-15
+> **Reviewed By**: procedure / code-quality cleanup (safe worktree removal, FAILURE-MODES G-20)
 > **Exemplar rationale**: Worktrees target user-named ephemeral directories (`spaarke-wt-{project-name}`) — no stable reference to rebuild and compare. The `git worktree` commands themselves are the contract.
 
 ---
@@ -308,15 +308,19 @@ IF branch merged:
 #### Step 2: Remove Worktree
 
 ```powershell
-# Remove the worktree
-git worktree remove ..\spaarke-wt-{project-name}
+# Remove the worktree: unlinks junctions first, then runs git worktree remove (never rm -rf)
+pwsh scripts/worktree/Remove-WorktreeSafe.ps1 -Path ..\spaarke-wt-{project-name}
 ```
 
 **If worktree has uncommitted changes:**
 ```powershell
-# Force remove (use with caution)
-git worktree remove --force ..\spaarke-wt-{project-name}
+# Force remove: the uncommitted changes are discarded (use with caution)
+pwsh scripts/worktree/Remove-WorktreeSafe.ps1 -Path ..\spaarke-wt-{project-name} -Force
 ```
+
+A bare `git worktree remove` or `rm -rf` of a worktree root is refused by the `guard-worktree-links.py`
+hook: a delete follows NTFS junctions (e.g. a `node_modules` linked to another worktree) and empties the
+folder they point at ([FAILURE-MODES G-20](../../FAILURE-MODES.md#g-20-deleting-a-worktree-deletes-through-its-junctions-into-another-worktree)).
 
 #### Step 3: Delete Local Branch (Optional)
 
@@ -452,8 +456,8 @@ If you want the folder name to match the new project:
 # This requires removing and re-adding the worktree
 cd C:\code_files\spaarke
 
-# Remove worktree reference (keeps the branch)
-git worktree remove ../{old-worktree-name}
+# Remove worktree (keeps the branch)
+pwsh scripts/worktree/Remove-WorktreeSafe.ps1 -Path ../{old-worktree-name}
 
 # Re-add with new folder name
 git worktree add ../spaarke-wt-{new-project-name} work/{new-project-name}
@@ -739,6 +743,7 @@ Use `/conflict-check` skill to detect file overlap with active PRs before starti
 | Worktree commands operate on the wrong directory — accidentally modify main repo | Agent ran `git checkout master` in a worktree, OR used `cd` to change directory and didn't track which dir is which | Detect worktree vs main repo via `git rev-parse --git-dir` — `.git` = main repo, anything else = worktree. Refuse `git checkout master` in a worktree. |
 | Creating a new worktree but the branch already exists somewhere else | Branch was created previously and not cleaned up | Always `git fetch origin` BEFORE creating the worktree and create it from `origin/master` (`git fetch origin master:master` is refused while the main checkout has `master` checked out). Check `git branch -a` for the branch name first. |
 | Worktree directory deleted via `rm -rf` instead of `git worktree remove` | User cleaned up the directory directly | Git leaves an orphan worktree record. Run `git worktree prune` to clean up. Verify with `git worktree list`. |
+| Removing a worktree empties folders in ANOTHER worktree | The removed worktree held a junction (e.g. `node_modules` linked to another worktree's) and the delete went through it (2026-10-13: 70 tracked files under `Spaarke.Auth`/`Spaarke.SdapClient` lost) | Remove only with `scripts/worktree/Remove-WorktreeSafe.ps1`; never link `node_modules` across worktrees — run `npm install` in the worktree. Enforced by the `guard-worktree-links.py` hook. Recover with `git restore -- <paths>` in the damaged worktree, then reinstall/rebuild. [G-20](../../FAILURE-MODES.md#g-20-deleting-a-worktree-deletes-through-its-junctions-into-another-worktree) |
 | Main repo's `*.sln` edited while worktree session was active — Visual Studio confused | Multiple sessions touching the same root-level file | Avoid editing root `*.sln` in parallel worktrees. If unavoidable, designate one worktree as "owner" of the sln file. |
 
 ---
@@ -752,7 +757,7 @@ Use `/conflict-check` skill to detect file overlap with active PRs before starti
 **At end of skill** (after worktree scaffolded): check if a matching Project Issue exists on Project #2 (search by branch name or folder slug).
 
 - **If matching Issue found**: invoke `/devops-project-register` to link this worktree → populate `Worktree Path` field on the Issue.
-- **If no matching Issue**: prompt "Register this project on the portfolio? [Y/n]".
+- **If no matching Issue**: no prompt here. Registration is a MUST at `/project-pipeline` Step 4.2, and `task-execute` refuses to start a task in an unregistered project (2026-10-15).
 
 Silent on success. Failure degrades to ⚠️ warn.
 

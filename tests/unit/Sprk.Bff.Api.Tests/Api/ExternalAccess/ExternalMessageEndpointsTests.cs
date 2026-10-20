@@ -122,6 +122,15 @@ public class ExternalMessageEndpointsTests
         return services.BuildServiceProvider().GetRequiredService<ExternalModuleRegistry>();
     }
 
+    public ExternalMessageEndpointsTests()
+    {
+        SetupOpenThread();
+        // Task 187 x D7 (merge of master into r3): the thread is also a LIVE PARENT of every message (sprk_communicationthread is a
+        // lineage lookup of sprk_communication), so the live-parent walk reads it app-only and withholds the row when the thread
+        // does not come back (fail closed). The shared Open thread therefore exists in the filing world too, filed under nothing.
+        _roots.AddFilingRow("sprk_communicationthread", AppOnlySelectProjection.OpenThreadId);
+    }
+
     private CommunicationThreadReadService ReadService() => new(
         _impersonated.Object, // Strict: any impersonated call fails the test — this plane reads app-only.
         new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
@@ -139,7 +148,15 @@ public class ExternalMessageEndpointsTests
             // Each row is projected through the query's $select, so a column the query dropped is absent (r3 task 039, K3).
             .Returns<string, string?, CancellationToken>((_, odata, _) =>
                 Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>(AppOnlySelectProjection.Project(
-                    rows.OrderByDescending(r => r["createdon"].GetDateTimeOffset()), odata)));
+                    AppOnlySelectProjection.WithOpenThread(rows).OrderByDescending(r => r["createdon"].GetDateTimeOffset()), odata)));
+
+    // Owner decision D7: the thread read shows a row only when its thread reads Open. These cases are not about D7, so every
+    // row sits in one Open thread (SetupMessages seeds the lookup).
+    private void SetupOpenThread() =>
+        _appOnly
+            .Setup(q => q.QueryAsync("sprk_communicationthreads", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string?, CancellationToken>((_, odata, _) =>
+                Task.FromResult(AppOnlySelectProjection.OpenThreadAnswer(odata)));
 
     private Task<IReadOnlyDictionary<string, object?>> ReadRecord(
         string entity, Guid id, string[]? select, CancellationToken ct)
@@ -245,13 +262,16 @@ public class ExternalMessageEndpointsTests
             .And.Contain("$orderby=createdon desc");
         _lastOData.Should().NotContain("sprk_from").And.NotContain("sprk_to,");
         // Task 037 review K3: the thread read keeps its EXACT projection (body, format and subject included) — only the
-        // notification feed's read drops them.
+        // notification feed's read drops them. Task 187 appends the message's non-root parent lookups (ExternalMultiRootRule.
+        // LiveParentSelect("sprk_communication"), ordered by column) after the three root stamps; the thread lookup is one of them;
+        // ExternalSelect de-duplicates, so it is selected once, as D7's column.
         _lastOData.Should().StartWith(
             "$select=sprk_communicationid,sprk_body,sprk_bodyformat,sprk_subject,sprk_direction,_sprk_sentby_value," +
-            "_sprk_createdbycontact_value,createdon,sprk_isinternalonly,sprk_privilegeclassification,statuscode," +
-            "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value" +
-            // Task 187: the message's other parents, whose LIVE roots the rule takes in.
-            ",_sprk_communicationthread_value,_sprk_regardinganalysis_value,_sprk_regardingbudget_value,_sprk_regardingevent_value,_sprk_regardinginvoice_value,_sprk_regardingreportcard_value&");
+            "_sprk_createdbycontact_value,_createdby_value,createdon,sprk_isinternalonly,sprk_privilegeclassification,statuscode," +
+            "_sprk_communicationthread_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value," +
+            "_sprk_regardinganalysis_value,_sprk_regardingbudget_value,_sprk_regardingevent_value," +
+            "_sprk_regardinginvoice_value,_sprk_regardingreportcard_value&" +
+            "$expand=createdby($select=applicationid,accessmode)&");
         _impersonated.VerifyNoOtherCalls();
     }
 
@@ -515,6 +535,26 @@ public class ExternalMessageEndpointsTests
             .Should().Equal(id.ToString("D"));
     }
 
+    // Task 065 (D7) x task 187 (merge of master into r3): the two rules meet on the message's own thread. The thread reads
+    // explicitly OPEN, so the D7 gate admits the message; the thread is also a parent the live-parent rule walks, and this
+    // one is filed under secure matter X. The message is then behind X's wall: withheld from a reader of P alone, listed for a
+    // reader of P and X. (The gate alone would list it to both; the walk alone would not see a thread that is not Open.)
+    [Fact]
+    public async Task AMessageInAnOpenThreadFiledUnderSecureX_IsWithheld_FromAPOnlyReader_AndListed_ForAPAndXReader()
+    {
+        var project = Guid.NewGuid();
+        var secure = Guid.NewGuid();
+        _roots.AddSecureRoot(ExternalGrantRootType.Matter, secure);
+        _roots.AddFilingRow("sprk_communicationthread", AppOnlySelectProjection.OpenThreadId, ("sprk_regardingmatter", "sprk_matter", secure));
+        var id = Guid.NewGuid();
+        SetupMessages(MessageRow(id, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z"));
+
+        Messages(await Get("projects", project, Ciam(project: project))).Should().BeEmpty(
+            "the thread is Open, but it is filed under secure X, which the caller cannot read");
+        Messages(await Get("projects", project, Ciam(project: project, matter: secure))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(id.ToString("D"));
+    }
+
     [Fact]
     public async Task TheThreadQuery_AlwaysReadsAllThreeRootStamps_WhateverRecordItIsKeyedOn()
     {
@@ -665,7 +705,11 @@ public class ExternalMessageEndpointsTests
         SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"));
 
         Messages(await Get("invoices", invoice, CiamOnMatters(matter))).Should().HaveCount(1);
-        _roots.FilingReadLog.Should().BeEmpty("neither the gate (no agreement) nor the message filter has a parent to walk");
+        // Task 065 x 187 (merge): every message a non-internal caller can see sits in a thread, and the thread is itself a parent
+        // of the message (sprk_communicationthread is a lineage lookup of sprk_communication), so the filter's walk makes ONE read:
+        // the thread. The route invoice (the gate's decision) and its agreement are still never walked.
+        _roots.FilingReadLog.Should().Equal(new[] { "sprk_communicationthread" },
+            "the gate (no agreement) walks nothing, and the message filter walks only the message's thread, not the route invoice");
     }
 
     [Theory]

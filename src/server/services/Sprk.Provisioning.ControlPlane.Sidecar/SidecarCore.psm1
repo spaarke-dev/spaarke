@@ -327,6 +327,9 @@ function Get-MailboxAccessState {
 # ---------------------------------------------------------------------------------------------------------------------
 $script:MailboxNamePattern    = '^sprk-(?<cid>[a-z][a-z0-9]{2,7})-mail$'
 $script:ScopeGroupNamePattern = '^Spaarke-AppAccess-(?<cid>[a-z][a-z0-9]{2,7})$'
+# The write-authorization probe's mailbox name and its address domain (.invalid is reserved and never an accepted domain).
+$script:WriteProbeName   = 'sprk-authz-probe'
+$script:WriteProbeDomain = 'authz-probe.invalid'
 # Join retry for a freshly created mailbox (replication); 6 x 10 s stays well inside the Worker's 6-minute call timeout.
 $script:JoinAttempts = 6
 $script:JoinRetryDelaySeconds = 10
@@ -365,6 +368,22 @@ function Test-CustomerMailboxRequest {
 
 function ConvertTo-FilterLiteral([string]$Value) { return $Value.Replace("'", "''") }
 
+function Test-ScopeGroupName {
+    <#
+    .SYNOPSIS
+        True when the scope group's Exchange Name is this customer's: exactly Spaarke-AppAccess-{customerId}, or that
+        name followed by exactly 14 digits. T186 L59: a group created in the admin center gets its Exchange Name from the
+        alias plus the creation time (live: 'Spaarke-AppAccess-acme20261014194847' for a group created 2026-10-14
+        19:48:47 UTC), while New-DistributionGroup -Name keeps the name as given. The suffix cannot make another
+        customer's group match: a customerId is 3-8 characters, so no other id followed by 0 or 14 digits spells this
+        id followed by 14.
+    #>
+    param([string]$Actual, [string]$Expected)
+    if ([string]::IsNullOrEmpty($Actual) -or [string]::IsNullOrEmpty($Expected)) { return $false }
+    if ([string]::Equals($Actual, $Expected, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    return [regex]::IsMatch($Actual, '^' + [regex]::Escape($Expected) + '\d{14}$', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+}
+
 function Get-CustomerMailboxFacts {
     <#
     .SYNOPSIS
@@ -382,7 +401,7 @@ function Get-CustomerMailboxFacts {
     if (-not $group) { return @{ group = $null; mailbox = $null; conflicts = @(); whenCreated = '' } }
     $conflicts = @()
     $groupName = Get-PropertyText $group 'Name'
-    if (-not [string]::Equals($groupName, [string]$Request.expectedScopeGroupName, [StringComparison]::OrdinalIgnoreCase)) {
+    if (-not (Test-ScopeGroupName -Actual $groupName -Expected ([string]$Request.expectedScopeGroupName))) {
         $conflicts += "Scope group '$($Request.scopeGroupId)' is named '$groupName', expected '$($Request.expectedScopeGroupName)' — it is not this customer's group (a mailbox joining it would be reachable by another stamp)."
     }
     $name = [string]$Request.name
@@ -443,13 +462,88 @@ function Test-CustomerMailboxWritePermission {
     .SYNOPSIS
         Exchange Online loads only the cmdlets and parameters the caller's roles allow. Returns the missing ones (empty =
         both writes are possible), so an ensure without PRQ-E-16 fails BEFORE creating a mailbox it could not join.
+        Writes the names to the pipeline; the caller collects them with @(). T186 L60: `return , $missing` here, under
+        that @(), made a one-element array holding the array, so the count was always 1 and every ensure was refused
+        with "cannot run System.Object[]" even with PRQ-E-16 applied.
     #>
-    $missing = @()
     $create = Get-Command New-Mailbox -ErrorAction SilentlyContinue
-    if (-not $create -or -not $create.Parameters.ContainsKey('Shared')) { $missing += 'New-Mailbox -Shared' }
+    if (-not $create -or -not $create.Parameters.ContainsKey('Shared')) { 'New-Mailbox -Shared' }
     $join = Get-Command Add-DistributionGroupMember -ErrorAction SilentlyContinue
-    if (-not $join -or -not $join.Parameters.ContainsKey('BypassSecurityGroupManagerCheck')) { $missing += 'Add-DistributionGroupMember -BypassSecurityGroupManagerCheck' }
-    return , $missing
+    if (-not $join -or -not $join.Parameters.ContainsKey('BypassSecurityGroupManagerCheck')) { 'Add-DistributionGroupMember -BypassSecurityGroupManagerCheck' }
+}
+
+function Test-CustomerMailboxWriteAuthorization {
+    <#
+    .SYNOPSIS
+        Asks Exchange itself whether the two writes are authorized, with nothing created: each runs exactly as the ensure
+        will run it, on an address that cannot exist, so an authorized call fails validation and a refused one is denied.
+        Returns the refused writes (empty = both authorized). T186 L62: Get-Command lists every parameter the caller passes
+        — the common parameters included — while Exchange checks the common parameters against the role entry too, so
+        the Get-Command probe passed and the real `New-Mailbox … -ErrorAction Stop` got 403 CmdletAccessDeniedException,
+        which the module reports only as "A server side error has occurred".
+    #>
+    param([string]$GroupIdentity)
+    $probe = $script:WriteProbeName
+    $address = "$probe@$($script:WriteProbeDomain)"
+    try {
+        New-Mailbox -Shared -Name $probe -Alias $probe -DisplayName $probe -PrimarySmtpAddress $address -ErrorAction Stop | Out-Null
+        "New-Mailbox -Shared -ErrorAction (the probe on '$address' was not refused)"
+    }
+    catch {
+        if ("$($_.FullyQualifiedErrorId) $($_.Exception.Message)" -notmatch 'NotAcceptedDomain|not an accepted domain') {
+            "New-Mailbox -Shared -ErrorAction (role entry 'Spaarke Shared Mailbox Create\New-Mailbox' needs the common parameters; Exchange answered: $(Format-ExchangeError $_))"
+        }
+    }
+    $refusal = Get-ExchangeWriteErrors { Add-DistributionGroupMember -Identity $GroupIdentity -Member $address -BypassSecurityGroupManagerCheck } |
+        Where-Object { "$($_.FullyQualifiedErrorId) $($_.Exception.Message)" -notmatch "ManagementObjectNotFound|Couldn't find object" } |
+        Select-Object -First 1
+    if ($refusal) { "Add-DistributionGroupMember -BypassSecurityGroupManagerCheck (Exchange answered: $(Format-ExchangeError $refusal))" }
+}
+
+function Get-ExchangeWriteErrors {
+    <#
+    .SYNOPSIS
+        Runs one Exchange call WITHOUT any common parameter and returns its errors (empty = success). T186 L62: the parent
+        role of 'Spaarke Scope Group Membership' (Security Group Creation and Membership) grants no common parameter for
+        Add-DistributionGroupMember, so `-ErrorAction Stop` is refused there with 403 and cannot be granted; the module
+        writes the cmdlet's errors as non-terminating, so they are collected from the error stream instead.
+    #>
+    param([scriptblock]$Call)
+    try { @(& $Call 2>&1 | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }) }
+    catch { @($_) }
+}
+
+function Format-ExchangeError {
+    <#
+    .SYNOPSIS
+        One line for an Exchange failure: the command that threw, its message, the error id and category, and every inner
+        exception. T186 L61: the routes reported only the message, and Exchange's "A server side error has occurred …
+        Please try again after some time" named neither the cmdlet nor the cause, so H14m could not be diagnosed.
+    #>
+    param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+    if (-not $ErrorRecord) { return '(no error record)' }
+    $parts = [System.Collections.Generic.List[string]]::new()
+    # The call chain, innermost first, function names only (no paths): Exchange's generated cmdlets throw from helpers,
+    # and a script `throw` has no MyCommand, so the Verb-Noun frame is what names the cmdlet.
+    $frames = @(([string]$ErrorRecord.ScriptStackTrace -split "`n") |
+        ForEach-Object { if ($_ -match '^\s*at (?<fn>[^,]+),') { $Matches.fn.Trim() -replace '^(global|script|local|private):', '' } } |
+        Where-Object { $_ -and $_ -ne '<ScriptBlock>' } | Select-Object -First 4)
+    $command = if ($ErrorRecord.InvocationInfo -and $ErrorRecord.InvocationInfo.MyCommand) { $ErrorRecord.InvocationInfo.MyCommand.Name } else { '' }
+    if (-not $command) { $command = @($frames | Where-Object { $_ -match '^[A-Za-z]+-[A-Za-z]+$' } | Select-Object -First 1) -join '' }
+    $parts.Add(($(if ($command) { "${command}: " } else { '' }) + $ErrorRecord.Exception.Message))
+    if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message -and $ErrorRecord.ErrorDetails.Message -ne $ErrorRecord.Exception.Message) {
+        $parts.Add("details: $($ErrorRecord.ErrorDetails.Message)")
+    }
+    $parts.Add("id: $($ErrorRecord.FullyQualifiedErrorId); category: $($ErrorRecord.CategoryInfo.Category)/$($ErrorRecord.CategoryInfo.Reason)")
+    if ($frames.Count -gt 0) { $parts.Add("at: $($frames -join ' < ')") }
+    $inner = $ErrorRecord.Exception.InnerException
+    for ($depth = 0; $inner -and $depth -lt 3; $depth++) {
+        $parts.Add("inner $($inner.GetType().Name): $($inner.Message)")
+        $inner = $inner.InnerException
+    }
+    $text = ($parts -join ' | ') -replace '\s+', ' '
+    if ($text.Length -gt 1500) { $text = $text.Substring(0, 1500) + '…' }
+    return $text
 }
 
 function Invoke-CustomerMailboxEnsure {
@@ -476,6 +570,7 @@ function Invoke-CustomerMailboxEnsure {
     $created = $false
     if (-not $facts.mailbox) {
         $missing = @(Test-CustomerMailboxWritePermission)
+        if ($missing.Count -eq 0) { $missing = @(Test-CustomerMailboxWriteAuthorization -GroupIdentity (Get-PropertyText $facts.group 'DistinguishedName')) }
         if ($missing.Count -gt 0) {
             return @{ outcome = 'Failure'; created = $false; verified = $false; authorization = @(); conflicts = @()
                       diagnostic = "Spaarke Exchange Admin cannot run $($missing -join ' / ') — prerequisite PRQ-E-16 (owner decision D32) is not applied. Nothing was created." }
@@ -486,12 +581,15 @@ function Invoke-CustomerMailboxEnsure {
         # retried inside this request. A mailbox left outside the group is Drift on the next run (design note §8).
         $joined = $false; $lastError = ''
         for ($attempt = 1; $attempt -le $script:JoinAttempts -and -not $joined; $attempt++) {
-            try {
-                Add-DistributionGroupMember -Identity (Get-PropertyText $facts.group 'DistinguishedName') -Member (Get-PropertyText $new 'DistinguishedName') -BypassSecurityGroupManagerCheck -ErrorAction Stop | Out-Null
+            # No -ErrorAction: Exchange refuses it for this role (T186 L62); errors come back on the error stream.
+            $groupDn = Get-PropertyText $facts.group 'DistinguishedName'
+            $memberDn = Get-PropertyText $new 'DistinguishedName'
+            $errors = @(Get-ExchangeWriteErrors { Add-DistributionGroupMember -Identity $groupDn -Member $memberDn -BypassSecurityGroupManagerCheck })
+            if ($errors.Count -eq 0 -or @($errors | Where-Object { $_.Exception.Message -match 'already a member' }).Count -gt 0) {
                 $joined = $true
             }
-            catch {
-                $lastError = $_.Exception.Message
+            else {
+                $lastError = $errors[0].Exception.Message
                 if ($attempt -lt $script:JoinAttempts) { Start-Sleep -Seconds $script:JoinRetryDelaySeconds }
             }
         }
@@ -539,4 +637,4 @@ function Get-CustomerMailboxState {
 
 Export-ModuleMember -Function Get-SidecarSettings, Test-SecretEqual, Get-ExchangeConnectParameters, Test-ApplyRequest, Test-ReadRequest,
     Test-AssigneeIs, Test-AssignmentInScope, Invoke-MailboxAccessApply, Get-MailboxAccessState,
-    Test-CustomerMailboxRequest, Invoke-CustomerMailboxEnsure, Get-CustomerMailboxState
+    Test-CustomerMailboxRequest, Invoke-CustomerMailboxEnsure, Get-CustomerMailboxState, Format-ExchangeError

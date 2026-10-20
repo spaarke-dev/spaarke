@@ -16,8 +16,8 @@
 //   - ADR-028 MUST rules (UAMI-only server identity; no co-emitted SA-MI).
 //
 // OUT OF SCOPE (task 029)
-//   - `keyVaultReferenceIdentity` PATCH on the slot's site config is H4 handler
-//     work (spec.md § MUST rules). This module does NOT PATCH site config.
+//   - `keyVaultReferenceIdentity` = the UAMI is set HERE, as on the production site (T186 L21; see
+//     app-service.bicep). H4's PATCH remains as an idempotent re-assertion.
 //   - Slot-sticky app settings are configured in `deployment-slot.bicep` (the
 //     more comprehensive slot module) OR via post-deploy PATCH; this thin
 //     variant declares only the resource + identity + basic siteConfig.
@@ -82,6 +82,8 @@ resource slot 'Microsoft.Web/sites/slots@2023-01-01' = {
   properties: {
     serverFarmId: appServicePlanId
     httpsOnly: true
+    // T1: the slot resolves KV references with the same UAMI as production (see app-service.bicep; T186 L21).
+    keyVaultReferenceIdentity: userAssignedIdentityResourceId
     siteConfig: {
       linuxFxVersion: 'DOTNETCORE|10.0'
       alwaysOn: true

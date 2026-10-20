@@ -38,7 +38,7 @@ Topic-based pub/sub is used for fan-out events (multiple consumers on the same s
 
 Topic policies: 1 GB max, 14-day default TTL, non-partitioned, batched ops, no duplicate detection (idempotency at consumer side). Subscription policies: 10 max delivery, 5-min lock duration, dead-letter on expiration. Per FR-2P2.3 (D3 decision 2026-06-20): topic transport with subscription-per-consumer — explicitly NOT reusing the `sdap-jobs` queue — so future consumers (cache warmers, downstream indexers, Teams notify, VIP cache invalidator) can subscribe without infra migration.
 
-### Periodic Timer Services (7)
+### Periodic Timer Services (6)
 
 These workers execute on a recurring schedule using `PeriodicTimer` or delay-until-time patterns. They are existing hand-rolled timer services: new scheduled work uses `IScheduledJob` on `ScheduledJobHost` ([ADR-036](../../.claude/adr/ADR-036-background-job-infrastructure.md)), and these migrate when next touched ([ADR-052](../../.claude/adr/ADR-052-workload-placement.md) §1).
 
@@ -48,9 +48,14 @@ These workers execute on a recurring schedule using `PeriodicTimer` or delay-unt
 | GraphSubscriptionManager | `src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs` | 30 minutes | PeriodicTimer; creates/renews Graph webhook subscriptions for all receive-enabled mailboxes |
 | InboundPollingBackupService | `src/server/api/Sprk.Bff.Api/Services/Communication/InboundPollingBackupService.cs` | 5 minutes | PeriodicTimer; polls mailboxes for emails missed by webhooks; multi-layer deduplication |
 | DailySendCountResetService | `src/server/api/Sprk.Bff.Api/Services/Communication/DailySendCountResetService.cs` | Once daily at midnight UTC | Delay-until-midnight loop; resets `sprk_sendstoday` for all communication accounts |
-| DemoExpirationService | `src/server/api/Sprk.Bff.Api/Services/Registration/DemoExpirationService.cs` | Once daily at midnight UTC | Delay-until-midnight loop; expires demo accounts (disable Entra, revoke SPE access, notify) |
 | PlaybookSchedulerService | `src/server/api/Sprk.Bff.Api/Services/PlaybookSchedulerService.cs` | 1 hour | PeriodicTimer; executes notification-mode playbooks for all active users; 5 parallel users per playbook |
 | TodoGenerationService | `src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs` | 24 hours | PeriodicTimer; scans for deadline-approaching and budget-alert conditions, creates to-do records |
+
+> **Migrated (#1363, 2026-10-16):** `DemoExpirationService` is no longer a timer service. It is `DemoExpirationJob`, an
+> `IScheduledJob` (`demo-expiration`, cron `0 0 * * *` — midnight UTC) on `ScheduledJobHost`, registered inside the
+> demo-provisioning gate of `RegistrationModule`; one run per schedule across instances (distributed lease). A request is
+> marked Expired only once every cleanup step succeeded (Entra disable, team and group removal, the SPE grant); otherwise
+> it stays Provisioned and the next run repeats each step idempotently. The expired notice and each day's warning are sent once.
 
 > **Migrated (unified-access-control-r2 task 165, 2026-10-04):** `SpeDashboardSyncService` is no longer a timer service.
 > It is an `IScheduledJob` (`spe-dashboard-sync`) on `ScheduledJobHost` (ADR-036), its cron compiled from
@@ -100,7 +105,7 @@ These workers run once at startup (if enabled) and then exit.
 - Pattern: `using var timer = new PeriodicTimer(interval); while (await timer.WaitForNextTickAsync(ct)) { ... }`
 
 **Delay-until-time** (for wall-clock scheduling):
-- Used by: DailySendCountResetService, DemoExpirationService
+- Used by: DailySendCountResetService
 - Pattern: Calculate delay from now to next midnight UTC, `await Task.Delay(delay, ct)`, then execute
 
 **Channel consumer** (for event-driven processing):
@@ -150,7 +155,7 @@ These workers run once at startup (if enabled) and then exit.
 - **Startup ordering**: Workers start in DI registration order, not dependency order. Workers that depend on other workers being ready must use startup delays or feature flags.
 - **App Service auto-restart**: Azure App Service may recycle the process, stopping all workers. Long-running migrations (EmbeddingMigration) support `ResumeFromDocumentId` for this reason.
 - **Channel backpressure**: BulkOperationService uses an unbounded channel. Extremely large bulk operations could consume significant memory. The UI should limit batch sizes.
-- **Daily services at midnight**: DailySendCountResetService and DemoExpirationService both fire at midnight UTC. If the app restarts just before midnight, the delay calculation ensures they still fire at the next midnight rather than immediately.
+- **Daily services at midnight**: DailySendCountResetService fires at midnight UTC (as does the `demo-expiration` scheduled job). If the app restarts just before midnight, the delay calculation ensures it still fires at the next midnight rather than immediately. The timer service runs on every instance; the scheduled job runs once across instances.
 - **Graph subscription expiry**: Graph mail subscriptions expire after 3 days. If GraphSubscriptionManager is down for more than 3 days, subscriptions expire silently. InboundPollingBackupService provides fallback coverage.
 
 ## Related

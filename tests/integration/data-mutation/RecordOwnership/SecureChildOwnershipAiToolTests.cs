@@ -468,9 +468,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     [Fact]
     public async Task EmailDraft_RegardingASecureMatter_IsCreatedByTheAppOwnedByTheNamedTeam_WithTheDrafterAsSender()
     {
+        var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Mock.Of<IEmailDraftAi>(), CoreAncestorResolverFixtures.Inert(), CreateLogger<EmailDraftToolHandler>(),
-            _world.Resolver(), _appOnly.Object);
+            _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
         var args = JsonSerializer.Serialize(new
         {
             subject = "Settlement",
@@ -498,9 +499,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     {
         // An unfiled draft keeps its creator — the resolver's own answer for an unfiled communication (E1): a team-owned
         // draft would show one person's unsent email to their whole business unit.
+        var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Mock.Of<IEmailDraftAi>(), CoreAncestorResolverFixtures.Inert(), CreateLogger<EmailDraftToolHandler>(),
-            _world.Resolver(), _appOnly.Object);
+            _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
         var args = JsonSerializer.Serialize(new { subject = "Hello", body = "Draft.", to = new[] { "a@b.example" } });
 
         var result = await handler.ExecuteChatAsync(
@@ -703,6 +705,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_kpiassessment"] = "sprk_kpiassessments", ["sprk_billingevent"] = "sprk_billingevents",
             // Task 158 r1: the pair's type, and an org-typed lookup (a create's own No Access list).
             ["sprk_recordtype_ref"] = "sprk_recordtype_refs", ["sprk_organization"] = "sprk_organizations",
+            // Ontology task 126: the business-owned lookup targets.
+            ["team"] = "teams", ["businessunit"] = "businessunits",
+            // #2084 round 2: a Signal and the rule it cites.
+            ["sprk_signal"] = "sprk_signals", ["sprk_policy"] = "sprk_policies",
+            // #2110: a communication's thread.
+            ["sprk_communicationthread"] = "sprk_communicationthreads",
         };
 
         /// <summary>
@@ -711,6 +719,27 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         /// refuses RetrievePrincipalAccess on these (400 0x80040800); appending to one costs the table's AppendTo PRIVILEGE.
         /// </summary>
         private static readonly HashSet<string> OrganizationOwned = new() { "sprk_mattertype_ref", "sprk_recordtype_ref", "sprk_practicearea_ref" };
+
+        /// <summary>
+        /// Ontology task 126 (#1399): the tables whose metadata declares BUSINESS ownership — live, spaarkedev1 2026-10-08 and
+        /// 2026-10-16. Dataverse refuses RetrievePrincipalAccess on these too ("does not support entities of type
+        /// 'systemuser'"); appending to one costs the table's AppendTo privilege at a depth reaching the row's business unit.
+        /// </summary>
+        private static readonly HashSet<string> BusinessOwned = new() { "systemuser", "team", "businessunit" };
+
+        /// <summary>The privilege schema name of a table (live: <c>prvAppendToUser</c>, <c>prvAppendToTeam</c>,
+        /// <c>prvAppendToBusinessUnit</c>, <c>prvCreateActivity</c> for a task).</summary>
+        private static string PrivilegeSchemaOf(string table) => table switch
+        {
+            "task" => "Activity",
+            "systemuser" => "User",
+            "team" => "Team",
+            "businessunit" => "BusinessUnit",
+            _ => table,
+        };
+
+        private static string OwnershipOf(string table) =>
+            OrganizationOwned.Contains(table) ? "OrganizationOwned" : BusinessOwned.Contains(table) ? "BusinessOwned" : "UserOwned";
 
         /// <summary>table → (lookup column, target table, navigation property).</summary>
         private static readonly Dictionary<string, (string Column, string Target, string Navigation)[]> Lookups = new()
@@ -757,6 +786,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_sentby", "systemuser", "sprk_SentBy"),
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                // #2091 (b): a communication's project filing (SecureChildLineage: sprk_communication.sprk_regardingproject).
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                // #2110: a communication's thread — a lineage parent, not an ownership parent (SecureChildLineage).
+                ("sprk_communicationthread", "sprk_communicationthread", "sprk_CommunicationThread"),
             },
             ["sprk_document"] = new[]
             {
@@ -781,6 +814,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                // Ontology task 126: a caller-chosen systemuser lookup (live navigation property, spaarkedev1 2026-10-16).
+                ("sprk_reviewerby", "systemuser", "sprk_ReviewerBy"),
             },
             // Task 147 r1c (E2, the live inventory of every main form; read-only metadata, spaarkedev1, 2026-10-04): the
             // KPI assessment's and the billing event's lookups. The billing event's matter navigation property is
@@ -815,6 +850,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // A person the event is assigned to — not a column the pair's readers match the pair against.
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
             },
+            // #2084 round 2: a Signal's core matter (sprk_signal.sprk_matter) and the rule it CITES (sprk_signal.sprk_policy).
+            ["sprk_signal"] = new[]
+            {
+                ("sprk_matter", "sprk_matter", "sprk_Matter"),
+                ("sprk_policy", "sprk_policy", "sprk_Policy"),
+            },
             // Task 147 r1 E2 (the secure-record ribbon's "New Budget"): sprk_Matter_Budget_1n, live 2026-10-04.
             ["sprk_budget"] = new[]
             {
@@ -839,6 +880,45 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         };
 
         public HashSet<Guid> NoAppendTo { get; } = new();
+
+        /// <summary>Ontology task 126: the business unit a grant is anchored at unless <see cref="Anchors"/> or
+        /// <see cref="Grants"/> say otherwise — the caller's own (a role assigned to them; the fixture's caller sits in the
+        /// child business unit).</summary>
+        public Guid DefaultGrantAnchor { get; set; } = Directory.ChildBu;
+
+        /// <summary>Ontology task 126: the depth a held privilege is reported at (default Basic).</summary>
+        public Dictionary<string, string> Depths { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Ontology task 126: the business unit a held privilege is reported anchored at (default
+        /// <see cref="DefaultGrantAnchor"/>; <see cref="Guid.Empty"/> reports no anchor).</summary>
+        public Dictionary<string, Guid> Anchors { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Ontology task 126: several grants of one held privilege (depth, anchor), reported in this order — in place
+        /// of the single <see cref="Depths"/>/<see cref="Anchors"/> grant.</summary>
+        public Dictionary<string, List<(string Depth, Guid Anchor)>> Grants { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Ontology task 126: every <c>RetrieveUserSetOfPrivilegesByNames</c> question asked (the names).</summary>
+        public List<string[]> PrivilegeQuestions { get; } = new();
+
+        /// <summary>Ontology task 126 fault switch: a <c>RetrieveUserSetOfPrivilegesByNames</c> question naming this privilege
+        /// fails with this status (other privilege questions, e.g. the table's Create, still answer).</summary>
+        public (string Privilege, int Status)? PrivilegesFault { get; set; }
+
+        /// <summary>Ontology task 126 fault switch: the status the <c>UnderOrEqual</c> question fails with.</summary>
+        public int? HierarchyFault { get; set; }
+
+        /// <summary>Ontology task 126: the business unit a systemuser or team row reports (<c>_businessunitid_value</c>).</summary>
+        public Dictionary<Guid, Guid> BusinessUnitOf { get; } = new();
+
+        /// <summary>Ontology task 126: the business-unit tree (child → parent), as <c>UnderOrEqual</c> walks it.</summary>
+        public Dictionary<Guid, Guid> BusinessUnitParents { get; } = new()
+        {
+            [Directory.ChildBu] = Directory.GeneralBu,
+            [Directory.SecureBu] = Directory.GeneralBu,
+        };
+
+        /// <summary>Ontology task 126: every <c>UnderOrEqual</c> question asked (candidate, ancestor).</summary>
+        public List<(Guid Candidate, Guid Ancestor)> UnderQuestions { get; } = new();
 
         /// <summary>Task 147 r1: records that do not exist — RetrievePrincipalAccess on one fails (404).</summary>
         public HashSet<Guid> Missing { get; } = new();
@@ -972,6 +1052,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         [GeneratedRegex(@"LogicalName eq '(?<c>[a-z0-9_]+)'")]
         private static partial Regex AttributeNamed();
 
+        [GeneratedRegex(@"businessunitid eq (?<candidate>[0-9a-fA-F-]{36}) and Microsoft\.Dynamics\.CRM\.UnderOrEqual\(PropertyName='businessunitid',PropertyValue='(?<ancestor>[0-9a-fA-F-]{36})'\)")]
+        private static partial Regex UnderOrEqual();
+
         public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
             Task.FromResult(Get(Uri.UnescapeDataString(relativePath)));
 
@@ -984,7 +1067,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 var match = Target().Match(path);
                 var id = Guid.Parse(match.Groups["id"].Value);
-                if (TableOf(match.Groups["set"].Value) is { } targetTable && OrganizationOwned.Contains(targetTable))
+                if (TableOf(match.Groups["set"].Value) is { } targetTable
+                    && (OrganizationOwned.Contains(targetTable) || BusinessOwned.Contains(targetTable)))
                 {
                     // Live (spaarkedev1, 2026-10-07): the message refuses the table before looking at the row.
                     return DataverseUserResponse.Fail(400, DataverseUserClientErrorCodes.BadRequest,
@@ -1002,7 +1086,53 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             if (path.Contains("RetrieveUserSetOfPrivilegesByNames", StringComparison.Ordinal))
             {
                 var asked = JsonSerializer.Deserialize<string[]>(path[(path.IndexOf("@p1=", StringComparison.Ordinal) + 4)..])!;
-                return Ok(new { RolePrivileges = asked.Where(Held.Contains).Select(n => new { Depth = "Basic", PrivilegeName = n }) });
+                PrivilegeQuestions.Add(asked);
+                if (PrivilegesFault is { } privilegesFault && asked.Contains(privilegesFault.Privilege, StringComparer.OrdinalIgnoreCase))
+                    return DataverseUserResponse.Fail(privilegesFault.Status, DataverseUserClientErrorCodes.BadRequest, "Scripted fault.");
+
+                return Ok(new
+                {
+                    RolePrivileges = asked.Where(Held.Contains).SelectMany(n =>
+                        (Grants.TryGetValue(n, out var several)
+                            ? several
+                            : new List<(string Depth, Guid Anchor)>
+                            {
+                                (Depths.GetValueOrDefault(n, "Basic"), Anchors.TryGetValue(n, out var anchor) ? anchor : DefaultGrantAnchor),
+                            })
+                        .Select(g => g.Anchor == Guid.Empty
+                            ? (object)new { g.Depth, PrivilegeName = n }
+                            : new { g.Depth, BusinessUnitId = g.Anchor, PrivilegeName = n })),
+                });
+            }
+
+            // Ontology task 126: the business-unit hierarchy question, as the caller ("businessunits?$select=…&$filter=
+            // businessunitid eq X and Microsoft.Dynamics.CRM.UnderOrEqual(PropertyName='businessunitid',PropertyValue='Y')").
+            if (path.StartsWith("businessunits?", StringComparison.Ordinal))
+            {
+                var under = UnderOrEqual().Match(path);
+                if (!under.Success)
+                    return DataverseUserResponse.Fail(400, DataverseUserClientErrorCodes.BadRequest, "Unscripted business-unit query.");
+                var candidate = Guid.Parse(under.Groups["candidate"].Value);
+                var ancestor = Guid.Parse(under.Groups["ancestor"].Value);
+                UnderQuestions.Add((candidate, ancestor));
+                if (HierarchyFault is { } hierarchyFault)
+                    return DataverseUserResponse.Fail(hierarchyFault, DataverseUserClientErrorCodes.BadRequest, "Scripted fault.");
+                var reaches = false;
+                for (Guid? unit = candidate; unit is { } current; unit = BusinessUnitParents.TryGetValue(current, out var parent) ? parent : null)
+                {
+                    if (current == ancestor)
+                    {
+                        reaches = true;
+                        break;
+                    }
+                }
+
+                return Ok(new
+                {
+                    value = reaches && !InvisibleRows.Contains(candidate) && !UnreadableRows.Contains(candidate)
+                        ? new object[] { new { businessunitid = candidate } }
+                        : Array.Empty<object>(),
+                });
             }
 
             if (Definition().Match(path) is { Success: true } definition)
@@ -1017,11 +1147,11 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 }
                 if (rest.Contains("Privileges", StringComparison.Ordinal))
                 {
-                    var schema = table is "task" ? "Activity" : table;
+                    var schema = PrivilegeSchemaOf(table);
                     return Ok(new
                     {
                         LogicalName = table,
-                        OwnershipType = OrganizationOwned.Contains(table) ? "OrganizationOwned" : "UserOwned",
+                        OwnershipType = OwnershipOf(table),
                         PrimaryIdAttribute = table == "task" ? "activityid" : table + "id",
                         Privileges = new[]
                         {
@@ -1051,7 +1181,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 {
                     EntitySetName = EntitySets[table],
                     PrimaryIdAttribute = table == "task" ? "activityid" : table + "id",
-                    OwnershipType = OrganizationOwned.Contains(table) ? "OrganizationOwned" : "UserOwned",
+                    OwnershipType = OwnershipOf(table),
                 });
             }
 
@@ -1067,6 +1197,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             var rowBody = new Dictionary<string, object?> { ["id"] = rowId };
             if (OwningTeamOf.TryGetValue(rowId, out var owningTeam))
                 rowBody["_owningteam_value"] = owningTeam.ToString("D");
+            if (BusinessUnitOf.TryGetValue(rowId, out var businessUnit))
+                rowBody["_businessunitid_value"] = businessUnit.ToString("D");
+            if (path.StartsWith("businessunits(", StringComparison.Ordinal))
+                rowBody["businessunitid"] = rowId.ToString("D"); // a business unit is its own
             if (path.StartsWith("sprk_recordtype_refs(", StringComparison.Ordinal)
                 && (RecordTypes.TryGetValue(rowId, out var recordTypeTable) ? recordTypeTable : RecordTypeOf?.Invoke(rowId)) is { } named)
                 rowBody["sprk_recordlogicalname"] = named;

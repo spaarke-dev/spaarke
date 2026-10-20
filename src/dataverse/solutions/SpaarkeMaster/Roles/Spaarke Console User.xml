@@ -14,7 +14,6 @@
     <RolePrivilege name="prvAppendTosprk_PolicyVersion" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Signal" level="Deep" />
     <RolePrivilege name="prvCreateSharePointData" level="Global" />
-    <RolePrivilege name="prvCreatesprk_DecisionRecord" level="Deep" />
     <RolePrivilege name="prvReadPluginAssembly" level="Global" />
     <RolePrivilege name="prvReadPluginType" level="Global" />
     <RolePrivilege name="prvReadSdkMessage" level="Global" />
@@ -28,6 +27,5 @@
     <RolePrivilege name="prvReadsprk_PolicyVersion" level="Deep" />
     <RolePrivilege name="prvReadsprk_Signal" level="Deep" />
     <RolePrivilege name="prvWriteSharePointData" level="Global" />
-    <RolePrivilege name="prvWritesprk_Signal" level="Deep" />
   </RolePrivileges>
 </Role>

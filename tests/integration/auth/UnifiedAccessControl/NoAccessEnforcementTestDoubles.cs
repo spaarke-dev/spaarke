@@ -150,13 +150,27 @@ internal static class NoAccessEnforcementTestDoubles
                 (TeamMembers.TryGetValue(systemUserId, out var teams) ? teams : new HashSet<Guid>())
                 .Where(teamIds.Contains).ToHashSet());
 
-        internal override Task<Guid?> ReadOwningTeamAsync(string entitySet, string idColumn, Guid recordId, CancellationToken ct)
+        /// <summary>
+        /// #1620: the owner read returns a team (<see cref="OwningTeams"/>), else a user (<see cref="OwningUsers"/>), else
+        /// <see cref="DefaultOwningUserId"/> — a user no test walls or shares with.
+        /// </summary>
+        internal override Task<DataversePrincipalRef?> ReadOwnerAsync(string entitySet, string idColumn, Guid recordId, CancellationToken ct)
             => FailOwnerRead
                 ? throw new HttpRequestException("Simulated owner read failure.")
-                : Task.FromResult(OwningTeams.TryGetValue(recordId, out var t) ? t : (Guid?)null);
+                : Task.FromResult<DataversePrincipalRef?>(
+                    OwningTeams.TryGetValue(recordId, out var t) ? DataversePrincipalRef.Team(t)
+                    : OwningUsers.TryGetValue(recordId, out var u) ? DataversePrincipalRef.User(u)
+                    : DataversePrincipalRef.User(DefaultOwningUserId));
+
+        /// <summary>#1620: the records a user owns (see <see cref="ReadOwnerAsync"/>).</summary>
+        public ConcurrentDictionary<Guid, Guid> OwningUsers { get; } = new();
+
+        /// <summary>#1620: the owner of a record no test seeded an owner for.</summary>
+        public static readonly Guid DefaultOwningUserId = Guid.Parse("99999999-0000-0000-0000-00000000f620");
 
         internal override Task<AccessRights> GetPrincipalRightsAsync(
-            Guid systemUserId, string entitySet, Guid recordId, CancellationToken ct)
+            Guid systemUserId, string entitySet, Guid recordId, CancellationToken ct,
+            Microsoft.Extensions.Logging.LogLevel failureLogLevel = Microsoft.Extensions.Logging.LogLevel.Error)
         {
             RightsReads.Add((systemUserId, recordId));
             if (FailRightsRead)
@@ -231,7 +245,11 @@ internal static class NoAccessEnforcementTestDoubles
             DataMutation.ExternalAccess.SecureChildShareWorld.EntitiesOver(() => ChildWorld).Object;
 
         public NoAccessShareEnforcer Enforcer => new(
-            Store, Participations, Identities, Shares, Cache.Mock.Object, Lease, ChildShares(), Entities(),
+            Store, Participations, Identities, Shares, Cache.Mock.Object, Lease, ChildShares(), Entities(), WorkforceIdentity,
             NullLogger<NoAccessShareEnforcer>.Instance);
+
+        /// <summary>r3 task 048: the customer home directories the enforcer also clears root sets under (none by default).</summary>
+        public Microsoft.Extensions.Options.IOptionsMonitor<WorkforceIdentityOptions> WorkforceIdentity { get; set; } =
+            Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.IdentityBindingTestKit.Tenants();
     }
 }

@@ -266,6 +266,61 @@ public class SpeAdminIdentityAndGrantContractTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Container permission grant — the user is named by UPN (UAT 2026-10-07)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private const string ContainerPermissionsPath = "/storage/fileStorage/containers/b!c1/permissions";
+    private const string CreatedPermission =
+        """{"id":"p1","roles":["writer"],"grantedToV2":{"user":{"id":"u-1","displayName":"Ada"}}}""";
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task GrantContainerPermission_ResolvesTheObjectId_AndSendsTheUpn_NotTheId()
+    {
+        // Graph refused { user: { id } } with 400 "'userPrincipalName' is required" — Add Permission failed
+        // every time, because the page's user picker sends the object id.
+        using var graph = new GraphWireMockFixture();
+        graph.StubGet("/users/u-1", """{"userPrincipalName":"ada@contoso.com"}""");
+        graph.StubPost(ContainerPermissionsPath, CreatedPermission, statusCode: 201);
+
+        await CreateSut().GrantContainerPermissionAsync(graph.CreateGraphClient(), "b!c1", "u-1", null, "writer");
+
+        graph.SelectFieldsFor("/users/u-1").Should().BeEquivalentTo("userPrincipalName");
+        var user = graph.RequestsFor(ContainerPermissionsPath).Should().ContainSingle().Subject
+            .BodyAsJson().GetProperty("grantedToV2").GetProperty("user");
+        user.GetProperty("userPrincipalName").GetString().Should().Be("ada@contoso.com");
+        user.TryGetProperty("id", out _).Should().BeFalse(because: "Graph keys a container grant by UPN, not id");
+    }
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task GrantContainerPermission_GivenAUpn_SendsItAsIs_WithoutALookup()
+    {
+        using var graph = new GraphWireMockFixture();
+        graph.StubPost(ContainerPermissionsPath, CreatedPermission, statusCode: 201);
+
+        await CreateSut().GrantContainerPermissionAsync(graph.CreateGraphClient(), "b!c1", "ada@contoso.com", null, "writer");
+
+        graph.RequestsFor("/users").Should().BeEmpty();
+        graph.RequestsFor(ContainerPermissionsPath).Single().BodyAsJson()
+            .GetProperty("grantedToV2").GetProperty("user").GetProperty("userPrincipalName").GetString()
+            .Should().Be("ada@contoso.com");
+    }
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task GrantContainerPermission_ForAnIdNoUserHas_SaysSo_AndSendsNoGrant()
+    {
+        using var graph = new GraphWireMockFixture();
+        graph.StubGet("/users/u-gone", """{"error":{"code":"Request_ResourceNotFound","message":"not found"}}""", statusCode: 404);
+
+        var act = () => CreateSut().GrantContainerPermissionAsync(graph.CreateGraphClient(), "b!c1", "u-gone", null, "writer");
+
+        (await act.Should().ThrowAsync<SpeAdminGraphService.UserNotResolvedException>()).Which.UserKey.Should().Be("u-gone");
+        graph.RequestsFor(ContainerPermissionsPath).Should().BeEmpty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // The register endpoint's legacy permission names → Graph's
     // ─────────────────────────────────────────────────────────────────────────
 

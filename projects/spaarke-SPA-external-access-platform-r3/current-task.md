@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-13 (ADR-028 A9 applied; PR #1810 open with auto-merge)
+> **Last Updated**: 2026-10-20 16:50Z (dev BFF live 21184ecd4; interim merge-to-master in progress; R4 project to create after the merge)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,43 +9,45 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Cross-project: ADR-028 **A9** (workforce contacts sign in with their customer's home directory), owner-approved 2026-10-13. R3 owns it end to end (SPA client + BFF token acceptance + registration + stored link); UAC owns only baseline role access. 038: A+B done (R3 live on dev via `99ec749cd`); phase C-W done except C-W6 (intake 403, owner fix pending) and C-W8b; C-C waits on the SPA deploy. 040 SPA deploy HELD: superseded by the A9 re-plan |
-| **Step** | A9 applied to ADR-028 (+A1/A2/A8 notes), `.claude/adr/INDEX.md`, `.claude/constraints/auth.md`; coordination note + draft updated; project CLAUDE.md §2-§4 updated. Commit `7a1b8b4e2` pushed; **PR #1810** to master, auto-merge on (also carries `78e7b16d6` A8 CIAM-audience clarification + 038/040 records + research). Per-project messages sent 2026-10-13 to UAC `-1d`, word-add-in `-46`, provisioning `-b2`, asking each to record it in its notes + CLAUDE.md and confirm |
-| **Status** | PR #1810 waiting on CI. Uncommitted: project CLAUDE.md + this file (commit next). Main checkout `C:\code_files\spaarke` NOT synced (another session's work); leftover folders to delete by hand: `C:\code_files\spaarke\.claude\worktreesgent-af842f88050a4b5b9`, `...gent-ae8f4415f1670de13`, `C:\wt039bz` |
-| **Next Action** | Watch PR #1810 merge; collect the three confirmations; then re-plan tasks (040 multitenant browser client + DEF for Teams; 041 home directory id; 056 profile form; withdraw 012/060; new BFF tasks: token acceptance, registration endpoint, stored link) and a BFF design note for owner sign-off |
+| **Task** | No POML task in progress. Running the **merge-to-master skill (Single Merge, Path A)** for an interim R3 merge, owner request 2026-10-20 ("ensure all work committed and pushed; latest master; no conflicts"). |
+| **Step** | Step 2.5 done: branch merged with origin/master (`3ebb747d8`, pushed; build 0/0; master's 2 new commits were provisioning PS only). **Next: Step 3 Path A** — `gh pr create --base master --head work/spaarke-SPA-external-access-platform-r3` (body: R3 since #2086 = 058/075/076/077/078, 059 records, SPA #2128 detail, ISS-014..016 filings; verification: build 0/0, ArchTests 1152/1152, unit filter 6758/6758, deployed to dev as 21184ecd4), then `gh pr merge <N> --auto --merge`, Monitor until MERGED, gate on full `gh pr checks` (zero fail/pending; mergeStateStatus CLEAN), then A.6 (main checkout ff-only with HEAD guard; never reset/stash/checkout there). |
+| **Status** | **Dev BFF = `21184ecd4`** (deployed 16:32:41–16:35:10Z, owner "yes bff deploy"; read-back ProductVersion 1.0.0+21184ecd4…; healthz/dataverse 200; /api/me anon 401, v2 200; K1 nav-clause smoke 200; ontology smoke passed; rollback `Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T163210Z` = 00aba6d99). **Dev SPA = `1908696a8`**. Branch head `3ebb747d8`. |
+| **Next Action** | Finish the merge (above). Then create **R4 project** `spaarke-SPA-external-access-platform-r4` (own worktree `C:\code_files\spaarke-wt-SPA-external-access-platform-r4`, branch `work/spaarke-SPA-external-access-platform-r4` from master AFTER the R3 PR merges) — owner will provide idea/requirements + prototype reference; then `/design-to-spec` → `/project-pipeline` in that worktree. |
+
+### Uncommitted files
+- `.claude/agent-memory/researcher/MEMORY.md` (modified) and three untracked researcher files belong to the OWNER. Never commit or discard them. Commit by pathspec only.
 
 ### Critical Context
-- **Parallel pattern:** BFF tasks run in isolated worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-*` (`git reset --hard <R3 sha>` first), commit there, main session merges `--no-ff`; after a merge re-verify ledger line cites (the guard only checks format). SPA tasks run in this worktree, uncommitted; the main session commits by explicit path. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
-- **Review policy:** auth/security/tenant-isolation changes get two fable passes; other FULL tasks one. Fix rounds sonnet; a fix that changes approach gets a scoped re-check. Max 4 agents.
-- **Bookkeeping edits:** python via PowerShell here-strings (sed breaks on the status emoji). Check with `pwsh -NoProfile -File scripts/check-task-status-drift.ps1`.
-- **Do not run the full BFF unit suite under load**; use filtered runs. Bash is very slow on this machine: prefer PowerShell, Grep, Read.
+- **Deploy rule** (memory `shared-dev-bff-deploy-coordination`): read live DLL via Kudu VFS, ancestor check, every reachable session's OK, fresh DIRECT owner approval; snapshot via Kudu `api/zip/site/wwwroot/`.
+- **Parallel pattern:** BFF work in isolated worktrees; main session merges/cherry-picks. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
+- **Review policy:** auth/security/tenant-isolation → two top-tier passes; else one.
+- **Test runs:** filtered, absolute csproj paths; full unit filter has an intermittent failure that passes on re-run; SPA vitest files time out when run together under load — run them one at a time.
+- Leftovers for a human: deregistered empty folders `C:\code_files\spaarke\.claude\worktrees\agent-a4775c0edc08ac138`, `agent-aad40bdfd9712fba4` (Permission denied); `C:\wt078b` is an older non-git folder (not mine).
 
-## Owner answers 2026-10-12 (recorded in project CLAUDE.md §3)
-Option B; no delete after close; invoice upload = invoice rights only; team-access and renewal bell items wanted; contact owned by the customer's primary BU; intake (department from contact, Invention partners behind a flag, incidents simple, fixed lists, NDA review + issue); grid views from Dataverse views; 060 shared service OK if Model 1 allows; dev dispatch "ok"; 060 tenant-wide group permission approved if it cannot be scoped. Deferred: DEF-001 #1736 NDA generation, DEF-002 #1737 incident alerting.
-
-## Open owner questions
-1. **Intake 403 (038 C-W6):** BU1 owning team lacks `prvReadsprk_ServiceRequest`. Fix by role (Workforce role / UAC baseline), Basic User, or code-side ownership?
-2. **S0a:** has the CIAM API app `4a4d5126` got the `user_impersonation` scope? (instructions given)
-3. **Licensing approach** (6 questions in `notes/2026-10-13-option-a-identity-and-licensing-research.md` §2): not decided.
-4. **Mechanical guard** (coordination note §4.5): an ArchTest for `organizations`/`common` outside the A9 client: yes/no?
-5. **Grid views:** (a) "assigned resolver" = the shared membership resolver? (b) views per entity = External Active / My / Inactive? (c) log the internal "My" views as an issue?
-6. **Bell items:** team access A/B; renewals A/B.
-7. **ISS-005:** option A, `ExternalAccess:CustomerBusinessUnitId` from provisioning H4b.
-8. **052:** Service Requests as a partner default tab or library-only? Accept no intake idempotency key as a known limit?
-9. **053:** optional "classes" field on Trademark?
-(060's questions lapsed: 060 withdrawn under A9.)
-
-## Option B known limits (notes/task-039-notes.md §12.11) (notes/task-039-notes.md §12.11)
-Messages and feed give no "incomplete" signal; `Truncated` may over-report; a project pair naming a deleted matter stays secure permanently; `IGenericEntityService` filing seam is DI-supplied (drop = over-hide, not leak).
+## Owner decisions 2026-10-20 (this session)
+- **R4:** UI/UX changes go to a new project + worktree `SPA-external-access-platform-r4`; owner supplies requirements + prototype.
+- **ISS-015 #2126:** hide, broadened: if an email is internal-only, every document saved from it (.eml + attachments) is set internal; same for Secure records. `sprk_document` has NO internal-only column today → design point (new column set by writers vs derive from related communication). NOTE2 answered on #2126 from code: add-in docs inherit the record's owner team + container (Secure follows the secure root); no doc-level internal flag; non-secure matter docs visible to all partners on the matter. **Not yet scheduled as a task** (R3 or R4: propose).
+- **C-1:** revoke approved, low priority (dev only). Needs the owner's `az login --tenant bc3aa7f4…` or the portal: delete every oauth2 grant + app-role assignment whose client is SDAP-BFF-SPE-API in DC; keep the SP and the Workforce SPA → user_impersonation grant. Record §11 stage C.
+- **079 dropped:** the Assistant is internal; licensed users' writes are Dataverse-security's job (#1864 comment).
+- **BFF deploy:** done (above).
 
 ## Next actions (in order)
-1. PR #1810 merges (auto). Then sync: the worktree is current with master.
-2. Collect confirmations from UAC, word-add-in, provisioning; record any objection.
-3. A9 re-plan via task-create: 040, 041, 056, withdraw 012/060, new BFF tasks; DEF for Teams-for-workforce-contacts via `/project-defer-issue-tracking`.
-4. BFF design note (A9-cited) for owner sign-off (auth code; two adversarial passes).
-5. Grid views task once question 5 is answered.
+1. Finish merge-to-master (Quick Recovery).
+2. Create the R4 worktree/project after the PR merges; wait for the owner's requirements + prototype.
+3. Propose where ISS-015's document internal flag lands (R3 task vs R4) and its design options.
+4. C-1 revoke when the owner is ready (give exact commands).
+5. UAC: #2128 BFF change in PR #2138 (needs owner sign-off); SPA side done (`d4ea1b4a8`), ships with the next owner-approved SPA deploy. UAC runs the #2110 gate and 186 on the new builds.
+6. 074 → 070/071/072 → 090.
 
-## Dependencies tracked elsewhere
-- ISS-001 (#1623), ISS-002 (#1633), ISS-003 (#1636), ISS-004, ISS-005 (#1673).
-- Copilot agent still uses `access_as_user` on `1e40baad`.
-- Operator: `mailbox-central@spaarke.com` + Exchange RBAC scoping for the stamp UAMI (H14a); BFF app user needs `prvDelete` on `sprk_servicerequest` (verify live).
+## Open owner questions
+- ISS-015 implementation placement (R3 vs R4) and design (column vs derived).
+- Observation: `spaarke-bff-api-prod` has tenant-wide consent (`SDAP.Access`) to the DEV BFF app 1e40baad — intended? (059 R3)
+
+## Standing dependencies and gates
+- **059 rollback order:** F (SPA: tag `ebc74b331` + run workflow on the tag) → E (`gh variable delete` ×2) → D → C → B → A. Never roll the BFF back below 077 while 1e40baad is on v2.
+- **ebilling 015:** once ebilling deletes `sprk_invoicestatus`, every dev BFF candidate must pass the CONTENT check (FinanceBaseValues/FinanceRollupService/InvoiceReviewService contain no `sprk_invoicestatus`; FinanceBaseValues contains `InvoiceStatusCodeColumn`); delete blocked until a live BFF contains e0df77339.
+- **ebilling-r1 merge (later):** schema scripts (D-104, D-113, D-121, D-124, D-125, D-127) must run on dev before deploying a BFF built from that master.
+- **UAC:** tell UAC before any BFF change to external write routes, ExternalAccessModule.cs or AccessibleRecordSetService.cs. #2103 reason-code changes come to R3 first.
+- **036 live gate:** `ExternalAccess__ImpersonatedRootSets__Enabled=true` only after #2078 merged+deployed AND direct owner confirmation; show the command first.
+- **Ontology:** 042c reaches master via their docs→master sync; do NOT merge their docs branch into R3.
+- **Session names change on restart:** re-run ListAgents.

@@ -585,20 +585,19 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
 
         var authorized = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // SEQUENTIAL, deliberately — an earlier draft ran these 8-at-a-time and that was wrong.
+        // SEQUENTIAL, deliberately — an earlier draft ran these 8-at-a-time.
         //
-        // `GetCallerAccessAsync` reaches DataverseAccessDataSource.GetUserAccessAsync, which assigns
-        // `_httpClient.DefaultRequestHeaders.Authorization` before issuing its request. That instance is
-        // scoped per HTTP request, so concurrent CALLERS are safely isolated — but running this loop in
-        // parallel put several tasks inside ONE scope mutating that header while siblings were mid-send.
-        // `HttpHeaders` is not thread-safe. Since every iteration writes the same caller's token there is
-        // no identity bleed, but the collection can throw, the catch-all upstream would swallow it, and
-        // the caller would see an intermittent phantom denial. A flaky authorization result is worse than
-        // a slower one — it is the kind of failure that gets a gate disabled rather than debugged.
+        // The original reason is gone: `GetCallerAccessAsync` reaches
+        // DataverseAccessDataSource.GetUserAccessAsync, which used to assign
+        // `_httpClient.DefaultRequestHeaders.Authorization` (not thread-safe) before its reads. Since
+        // issue #1576 every read there carries its token on its own HttpRequestMessage, so the
+        // header race that made parallelism unsafe no longer exists.
         //
-        // Cost is bounded: repeat lookups are absorbed by CachedAccessDataSource, and real documentIds
-        // lists are short. Restoring parallelism requires giving this path the same explicit
-        // per-request-token shape GetRecordAccessAsync uses; it is not a matter of raising a number.
+        // It stays sequential because nothing else has been proven safe to run concurrently inside one
+        // request scope — the cache decorator and the authorization service above the data source were
+        // never reviewed for it — and the cost is bounded: repeat lookups are absorbed by
+        // CachedAccessDataSource, and real documentIds lists are short. A flaky authorization result is
+        // worse than a slower one. Parallelising this loop is a separate change with its own review.
         foreach (var documentId in candidates)
         {
             var snapshot = await _authorizationService.GetCallerAccessAsync(
