@@ -244,6 +244,35 @@ public static partial class ProblemDetailsHelper
             extensions: extensions);
     }
 
+    /// <summary>
+    /// The 409 for a re-file whose owner could not be settled against concurrent writers (#2143,
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException"/>): <c>reasonCode</c>
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException.ReasonCode"/>, and a detail telling the client to
+    /// reload the record and retry. Not <see cref="RecordOwnerRefused(string?, string?, string, string?)"/>: that answers "nothing
+    /// was written"; here the change was written and its filing put back or superseded (the exception's remarks), so the
+    /// client's copy is stale either way.
+    /// </summary>
+    /// <param name="noun">What was being re-filed ("document", "event", …), for the detail.</param>
+    /// <param name="traceId">Optional correlation id for support.</param>
+    public static IResult RecordOwnerUnsettled(string noun, string? traceId = null)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["reasonCode"] = Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException.ReasonCode,
+        };
+        if (!string.IsNullOrWhiteSpace(traceId))
+        {
+            extensions["traceId"] = traceId;
+        }
+
+        return Results.Problem(
+            title: "Record changed concurrently",
+            statusCode: StatusCodes.Status409Conflict,
+            detail: $"The {noun} was changed by someone else while it was being re-filed, so where it is filed and who owns it "
+                + "could not be settled. Reload it and try again.",
+            extensions: extensions);
+    }
+
     /// <inheritdoc cref="RecordOwnerRefused(string?, string?, string, string?)"/>
     /// <remarks>
     /// A refusal the F3 check made (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.IsForbidden"/>:

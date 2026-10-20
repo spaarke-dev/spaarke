@@ -92,8 +92,16 @@ public sealed class RecordOwnershipResolverDouble : IRecordOwnershipResolver
             return resolution;
 
         await applyChange(ct);
+        if (FaultAfterChange is { } fault)
+            throw fault;
         return resolution;
     }
+
+    /// <summary>
+    /// #2143: when set, <see cref="ReparentAsync"/> throws it AFTER running the change — the way the real resolver surfaces an
+    /// owner it could not settle (<see cref="RecordOwnerUnsettledException"/>) once the writer's change is written.
+    /// </summary>
+    public Exception? FaultAfterChange { get; set; }
 
     private RecordOwnerResolution Answer(bool hasParent, UnfiledOwnership whenUnfiled)
     {

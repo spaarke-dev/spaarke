@@ -494,9 +494,21 @@ public static class ChildRecordEndpoints
                 $"Column '{serverOwned}' is set by the server — omit it.");
         }
 
-        var outcome = await OwnedChildWrite.RefileAsync(
-            user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct)
-            .ConfigureAwait(false);
+        OwnedChildWrite.RefileOutcome outcome;
+        try
+        {
+            outcome = await OwnedChildWrite.RefileAsync(
+                user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct)
+                .ConfigureAwait(false);
+        }
+        catch (RecordOwnerUnsettledException)
+        {
+            // #2143: a concurrent writer kept the re-filed row's owner from settling. The caller's PATCH was written and its
+            // filing put back or superseded (RecordOwnerUnsettledException remarks): reload and retry — not the global 500.
+            logger.LogWarning("[CHILD-RECORD] re-file of {Entity} {Id}: its owner could not be settled against concurrent writers",
+                entity, id);
+            return ProblemDetailsHelper.RecordOwnerUnsettled(Noun(entity), httpContext.TraceIdentifier);
+        }
 
         if (outcome.NotARefile)
         {

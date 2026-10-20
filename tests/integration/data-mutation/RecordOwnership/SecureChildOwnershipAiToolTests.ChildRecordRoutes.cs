@@ -1602,6 +1602,28 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _world.Assignments.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task ChildRefile_WhenTheOwnerCannotBeSettledAgainstConcurrentWriters_Answers409RecordOwnerUnsettled_NotA500()
+    {
+        // #2143 F2: the shared re-file core (child records, event filing, communication filing) answers the resolver's typed
+        // "owner unsettled" as a 409 with a stable reason code — reload and retry — never the global 500.
+        _world.WithRecord("sprk_todo", Todo, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        var ownership = new RecordOwnershipResolverDouble
+        {
+            FaultAfterChange = new RecordOwnerUnsettledException("sprk_todo", Todo, "test: unsettled"),
+        };
+
+        var result = await ChildRecordEndpoints.RefileAsync(
+            "sprk_todo", Todo, Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" }),
+            _user, ownership, Restamper(), Children(), HttpContextOfCaller(), NullLogger<Program>.Instance,
+            CancellationToken.None);
+
+        Status(result).Should().Be(StatusCodes.Status409Conflict, Detail(result));
+        ReasonCode(result).Should().Be(RecordOwnerUnsettledException.ReasonCode);
+        Detail(result).Should().Contain("Reload it and try again").And.NotContain(Todo.ToString("D"));
+        ownership.Reparents.Should().ContainSingle("the re-file reached the resolver");
+    }
+
     // ── Task 147 r1c-v1 (verifier item 2, AC9): a row the caller may not READ answers exactly as a row that does not
     //    exist, on every route that runs the ONE re-file (Dataverse answers the first 403, the second 404) ─────────────
 

@@ -266,6 +266,13 @@ public static class DataverseDocumentsEndpoints
                 logger.LogWarning(ex, "Invalid document update request");
                 return ProblemDetailsHelper.ValidationError(ex.Message);
             }
+            catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException)
+            {
+                // #2143: a concurrent writer kept the re-filed document's owner from settling. The change was written and its
+                // filing put back or superseded (RecordOwnerUnsettledException remarks) — reload and retry, never a 500.
+                logger.LogWarning("Document {DocumentId} re-file: its owner could not be settled against concurrent writers", id);
+                return ProblemDetailsHelper.RecordOwnerUnsettled("document", traceId);
+            }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to update document {DocumentId}", id);
