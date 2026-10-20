@@ -778,6 +778,92 @@ All 11 killed.
 1. The brief named "unresolved subject pair" as permanent; the writer's own contract (`IsDeterministicPrivilegeRefusal` remarks) says an escalation wrapping a fault is retryable. Implemented: permanent only when the escalation wraps no fault or an argument error (K1). Confirm, or name the inner types to treat as permanent.
 2. The owner-refusal skip codes are treated as permanent within a job's retry window; a configuration fix (a default team added) does not re-raise the Signal for an invoice that already completed. Confirm.
 
+### 13e. Held presentation
+
+Ontology-r1's part D item: a Blocked submission (the rejection rule would reject, but an Internal submission is held for review instead) showed the same Signal as an automatic rejection. Files: `BillingFindingSignalMapper.cs` (the presentation), `InvoiceSubmissionPersister.cs` (passes the outcome; one argument), `BillingRuleCatalogue.cs` (a comment). `InvoiceSubmissionAfterSteps`, `SignalWriter` and `SignalWriterTests*` are unchanged.
+
+**Behaviour.** `BillingFindingSignalMapper.MapAll(..., decisions, outcome)` takes the outcome kind as part of its decision input (new optional last parameter `SubmissionEvaluationKind? outcome`). For `Blocked`, a group that holds a deciding finding (its group decision was `Rejects`) becomes group decision `Blocked`:
+
+| Part of the Signal | Value |
+|---|---|
+| Headline (`sprk_name`) | `Invoice held for review` (`HeldHeadline`) |
+| Sentence | `The rejection rule would reject this invoice: <deciding reason>` (`HeldSentenceTemplate`; the reason is the fact `decidingReason`) |
+| `<deciding reason>` | the deciding (primary) finding's existing rendered reason, the text its own `billing.reason` evidence line carries (`ReasonText`); never its code |
+| Evidence | one `billing.decision` line, `Ref` = `Held`, `Text` = `ebilling.submission.blocked`; the other lines (fingerprint, one reason line per reason, values read) are as before |
+| Lane, severity, fingerprint, reason codes, consequence | unchanged (the policy's; the lifecycle fingerprint does not depend on the decision) |
+| Message source / group decision | `BillingMessageSource.HeldForReview` / `BillingGroupDecision.Blocked` (stored in the plan as `"Blocked"`) |
+
+- Not touched under a Blocked outcome: a group 073 held throughout (still `Held`, with its hold-reason text) and a non-Reject group.
+- The after-steps do nothing special: the persister passes `outcome.Kind`, stores the mapper's output in the plan, and part D writes the stored plan as it is.
+- A `Blocked` outcome with no decisions is refused (`ArgumentException`), so it can never silently show as a rejection.
+- Withheld Duplicate (D-112): the reason is the token-free withheld text; no value reaches the sentence.
+
+**Length limits.**
+- The headline is a constant of 23 characters (limit 200).
+- The sentence is checked by the writer's own I/O-free checks (`SignalWriter.PreflightRefusal`, the same ones the persisted plan is held to; notes 13d part 2). If the held sentence is refused (it would pass 2,000 characters, or its template would not render), the Signal gets `HeldSentenceNoValue`, `The rejection rule would reject this invoice.`, with the headline and the Held line unchanged. The reason is left out whole, never cut; it stays in its `billing.reason` evidence line.
+- Boundary tests: a reason of exactly 1,954 characters (sentence 2,000) is cited; 1,955 falls back. In both cases the plain rejection sentence of the same reason is within the limit, so the persister keeps the Signal rather than recording a `signalPlanRefusals` entry.
+
+**K4 (the planner): what the stored plan holds for Blocked.**
+- The note's K4 in 13a is the reviewer race, not the planner; I read "the planner" as the stored `signalPlan` (`SignalPlanJson`). Owner to confirm.
+- One entry per (policy, subject) group, as before. For a deciding group: `headline` = the held headline; `template` = the held template; `facts` = the finding's facts plus `decidingReason` (the rendered text, as a string); `sentence` = the rendered held sentence; `evidence` as in the table; `decision` = `Blocked`; `consequence` = `Reject`; `fingerprint` unchanged.
+- A group 073 held keeps `decision` = `Held`; a Flag group keeps `NotRejecting`.
+- With the no-value fallback: `template` = `HeldSentenceNoValue`, `facts` = the finding's own facts, no `decidingReason`.
+- A stored plan from before this change keeps the rejection wording. Nothing is deployed, so no such plan exists.
+- Several deciding groups on one invoice each get the held headline and sentence with their own reason (one Signal per policy and subject, as for a rejection). Owner to confirm that is wanted rather than one invoice-level Signal.
+
+**The Held reason is stripped on read (actual behaviour).**
+- The writer stores the evidence array as written, including `text`. The Signal read route (`SignalReadService.ApplyWitnessRuleAsync`, D-123 / D-142) keeps `text` and `source` on a line only when the line's `ref` names a witness row (`{table}:{id}` of a secure-family child, `SignalSuppressionService.WitnessOf`) that the caller can read in the Signal's own family.
+- `Held` is not such a reference, so on read the line comes back as `{ kind: "billing.decision", ref: "Held", tier: "Fact", withheld: true }` with no `text`. The code `ebilling.submission.blocked` is stored but not returned. The same holds for the existing 073 hold-reason text and for every `billing.reason` / `billing.field` line.
+- What a reader does get: the headline, the sentence (with the deciding reason; `sprk_sentence` is not stripped) and the presence of the Held line. That is why the reason is in the sentence and not only in evidence.
+- I did not change the read path (`SignalReadService` belongs to the ontology work). If the code must reach a reader, the line needs a different carrier (for example the code as the `ref`).
+
+**K2: raw codes for screens 130 and 133 (a later UI task, not done here).**
+- Both screens read the stored `sprk_findingsjson`. For a Blocked submission they will receive codes, not text:
+  - root `kind` = `Blocked`, root `reasonCode` = `ebilling.submission.blocked`;
+  - `findings[].reasonCode` (rule reason codes, for example `invoice_age.too_old`), `findings[].rejects` and `findings[].heldBecause` (hold codes such as `read_field_below_threshold`);
+  - `pipelineFindings[]` and `codingFindings[]` codes;
+  - `signalPlan[]` with the rendered `headline` and `sentence` (text), `decision` = `Blocked`, `reasonCodes[]`, and the Held evidence line with the blocked code.
+- The submission row itself is Rejected with `sprk_outcomereasoncode` = `ebilling.submission.blocked`, and the invoice is In Review. Task 130's own rule ("an invoice still In Review projects status and billed total only") means a firm gets none of this; the internal screens do.
+- The code-to-wording map (reason code, hold reason, blocked code) belongs to that UI task. Use the plan's `headline` / `sentence` where text is wanted; they are already firm-safe by F1-3.
+
+**CODE_PATTERN decision.**
+- `BillingRuleCatalogue.CodePattern` (read from the ExpenseRule schema's `$defs.code.pattern`) is `^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$`. The NonBillableActivity schema and `src/solutions/RuleReview/src/services/ruleTypes.ts:63` (`CODE_PATTERN`) hold the same string. They already agree, so **no TypeScript change** and no RuleReview typecheck was needed. In JavaScript, as in JSON Schema, `$` without the `m` flag matches only at the very end, which is what the schema means; only .NET's `$` also matches before a final newline, which `IsCodeShaped` already guards.
+- The server schema is the enforced one (the rule body validator); the client copy only gives an administrator the same answer before a save. The C# comment claimed "pinned equal by a test" but only the two schemas were pinned. The comment is now accurate and the missing pin is added.
+- New `BillingCodePatternTests` (15 cases): the server string is pinned to a literal; both schemas carry it; the `ruleTypes.ts` literal (read from its source) equals it with no flags; `IsCodeShaped` accepts and refuses (20/21 characters, trailing newline, injected text).
+
+**Docs.** `docs/data-model/sprk_ruleset.md` lists the two F1-3 reasons, `coding.firm_code_mismatch_not_shown` and `submission.invoice_number_mismatch_not_shown`. The doc lists no sentence templates, so the Held text is not added there.
+
+**Tests.**
+- `BillingFindingSignalMapperHeldTests` (8): the presentation; must-not-fire for AutoRejected, no outcome, Accepted and AcceptedUncoded; a group 073 held and a Flag group untouched; the deciding reason (not another reason) in the sentence; withheld Duplicate; the length boundary and the no-value fallback; the headline limit; the Blocked-without-decisions refusal.
+- `InvoiceSubmissionPersisterTests` (+2): the stored Blocked plan entry (and the AutoRejected control); the overflow case keeps its Signal with the no-value wording and records no refusal.
+- `InvoiceSubmissionAfterStepsTests` (+1, REAL `SignalWriter` over the writer test harness's Dataverse doubles, not the fake writer): a Blocked submission creates one `sprk_signal` row with `sprk_name` = `Invoice held for review`, `sprk_sentence` starting `The rejection rule would reject this invoice: ` followed by the reason line's own text (no raw code), and `sprk_evidencerefs` holding the `billing.decision` / `Held` line with `ebilling.submission.blocked`; no record, no close, indexed, terminal Rejected.
+- Two existing after-steps tests changed because the behaviour they pinned is the one that changed on purpose: `Blocked_HeldSignal_Indexed_NotifiedRejectedBlocked` asserted "no Held line" for a Blocked Signal and now asserts the held headline and the blocked Held line; `AHeldPlanEntry_IsWrittenWithItsHeldLine` built its Held entry on a Blocked outcome (which now carries its own Held line) and uses an AutoRejected outcome instead (same intent: a stored Held entry is written with its text).
+
+**Fail-before evidence.** Mutations (non-constant expressions), each applied, the 26 new tests run (8 + 2 + 1 + 15), the source restored from git after each:
+
+| Mutation | New tests failing |
+|---|---|
+| Mapper ignores the Blocked outcome (`blocked: ... && groups.Count < 0`) | 7 (4 mapper, 2 persister, the real-writer test) |
+| Persister does not pass the outcome (`invoiceId == Guid.Empty ? outcome.Kind : null`) | 3 (2 persister, the real-writer test) |
+| No no-value fallback (`PreflightRefusal(...) is null \|\| facts.Count >= 0`) | 2 (boundary, persister overflow) |
+| Raw reason code in the sentence (`facts.Count >= 0 ? ReasonCode : ReasonText(...)`) | 7 |
+| Held line text = the hold reason instead of the blocked code | 5 |
+| Headline not replaced (`held && headline.Length < 0`) | 5 |
+| Blocked-without-decisions guard off | 1 |
+| Held applied to every decided group, not only deciding ones | 1 |
+| `ruleTypes.ts` `{0,19}` changed to `{0,20}` | 1 (the client-pattern test) |
+| ExpenseRule schema `{0,19}` changed to `{0,20}` | 3 of the pattern tests (the pre-existing `TheCodePattern_IsTheSchemasDefinition` fails too) |
+
+All killed.
+
+**Verification.** `dotnet build src/server/api/Sprk.Bff.Api/` 0 warnings / 0 errors. Filtered unit run 8,276 passed / 0 failed / 11 skipped. `InvoiceSubmission*` 436 passed. `Spaarke.ArchTests` 1,214 passed. No new interface, registration or package; the ADR-010 census is unchanged. No TypeScript was touched.
+
+**Open questions.**
+1. Which note is "K4 (the planner)"? Read here as the stored Signal plan. Confirm.
+2. Each deciding group on a held invoice gets its own held Signal. Confirm, or ask for one invoice-level Signal.
+3. If the blocked code must reach a reader of the Signal, the evidence line needs another carrier; `SignalReadService` is ontology's.
+4. A later Override or Return (task 105) closes or supersedes these Signals; whether their "held for review" wording should change then is 105's call.
+
 ## 14. Part E - the handler (2026-10-19)
 
 **Files.**
