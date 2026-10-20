@@ -373,7 +373,7 @@ public class InvoiceSubmissionAfterStepsTests
         /// <summary>050a: the re-file step (null: the production default for a test seam, "no existing document").</summary>
         public Func<Guid, Guid?, Guid, CancellationToken, Task<InvoiceDocumentRefileResult>>? Refile { get; set; }
 
-        /// <summary>The writer's rule (SignalWriter.CloseActedByAutomatedDecisionAsync), over the in-memory table.</summary>
+        /// <summary>The writer's rule (SignalWriter.CloseActedByDecisionAsync), over the in-memory table.</summary>
         private Task<SignalAutomatedCloseOutcome> CloseActedAsync(Guid id, Guid recordId, DateTime setReadAt, string policyCode, CancellationToken _)
         {
             setReadAt.Kind.Should().Be(DateTimeKind.Utc);

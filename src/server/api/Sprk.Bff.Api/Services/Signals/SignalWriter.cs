@@ -165,7 +165,7 @@ public enum SignalCloseOutcome
     ChangedSinceRead,
 }
 
-/// <summary>What <see cref="SignalWriter.CloseActedByAutomatedDecisionAsync"/> did (ebilling-r1 task 049, D-122).</summary>
+/// <summary>What <see cref="SignalWriter.CloseActedByDecisionAsync"/> did (ebilling-r1 tasks 049, 100 and 105; D-122).</summary>
 public enum SignalAutomatedCloseOutcome
 {
     /// <summary>The Signal was closed as Acted and linked to the Decision Record.</summary>
@@ -992,10 +992,14 @@ public sealed partial class SignalWriter
         ["sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon", "sprk_decisionrecord", "versionnumber"];
 
     /// <summary>
-    /// ebilling-r1 task 049 (D-122): closes ONE Signal as <see cref="ResolutionActed"/>, resolved by an AUTOMATED decision's Decision Record
-    /// <paramref name="decisionRecordId"/> (the automatic rejection of an invoice resolves every open Signal on it). A separate entry from
-    /// <see cref="CloseAsync"/>, whose system-only guard stays (FR-16), and from the commit route's close, which stamps the person who decided:
-    /// an automated decider has no person, so <c>sprk_resolvedby</c> is never written (none is invented), nor <c>sprk_resolutionnotes</c>.
+    /// ebilling-r1 task 049 (D-122): closes ONE Signal as <see cref="ResolutionActed"/>, resolved by the Decision Record
+    /// <paramref name="decisionRecordId"/> of a billing decision: an AUTOMATED one (the automatic rejection of an invoice resolves every open
+    /// Signal on it), or, with <paramref name="decidedByUserId"/>, a HUMAN one (a line accept / reduce / disallow, task 100; an override or a
+    /// return of a blocked submission, task 105). A separate entry from <see cref="CloseAsync"/>, whose system-only guard stays (FR-16). The
+    /// writer (app identity) does the close, with no impersonation, so a human decision's caller is authorized BEFORE any write (AppendTo on
+    /// the core record and Write on each Signal's subject: the commit route's rule, <see cref="DecisionCallerRights"/>). An automated decider
+    /// has no person, so <c>sprk_resolvedby</c> is written only when <paramref name="decidedByUserId"/> is given (none is invented);
+    /// <c>sprk_resolutionnotes</c> is never written.
     /// <para><b>Reads, then decides</b> (the commit route's rule, as <c>DecisionCommitService.CloseSignalAsync</c> applies it):
     /// already Resolved and naming this record → <see cref="SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord"/>, no write; Open or
     /// Acknowledged → closed; closed by the SYSTEM (ConditionCleared, Superseded, PolicyRetired) at or after <paramref name="setReadAtUtc"/>,
@@ -1003,14 +1007,18 @@ public sealed partial class SignalWriter
     /// Acted or Dismissed, another record, a system close before the set was read) → <see cref="SignalAutomatedCloseOutcome.LeftAsIs"/> and one
     /// Information line (ids and the policy code only).</para>
     /// <para><b>One write</b>, conditional on the row version just read: status Resolved, resolution Acted, <c>sprk_resolvedon</c> and
-    /// <c>sprk_lastevaluated</c> the same instant (D-120), <c>sprk_decisionrecord</c>. A version mismatch re-reads once and decides again; a
+    /// <c>sprk_lastevaluated</c> the same instant (D-120), <c>sprk_decisionrecord</c>, and <c>sprk_resolvedby</c> (the systemuser
+    /// <paramref name="decidedByUserId"/>) only when it is given. A version mismatch re-reads once and decides again; a
     /// second one is <see cref="SignalAutomatedCloseOutcome.ChangedSinceRead"/>. A Signal that no longer exists (ObjectDoesNotExist) is
     /// rethrown unchanged, logged at Debug only and not metered: the caller treats it as "nothing to close". Any other failure is logged
     /// at Error (<see cref="OntologyWriterEvents.WriteRefused"/>), metered and rethrown, as <see cref="CloseAsync"/> does.</para>
     /// </summary>
-    /// <exception cref="ArgumentException">An id is empty, or <paramref name="setReadAtUtc"/> is not UTC.</exception>
-    internal async Task<SignalAutomatedCloseOutcome> CloseActedByAutomatedDecisionAsync(
-        Guid signalId, Guid decisionRecordId, DateTime setReadAtUtc, string policyCode, CancellationToken ct = default)
+    /// <param name="decidedByUserId">The deciding person's <c>systemuserid</c> for a human decision, resolved by the caller from the
+    /// on-behalf-of identity (never from request input); null for an automated decision, which writes no <c>sprk_resolvedby</c>.</param>
+    /// <exception cref="ArgumentException">An id is empty (<paramref name="decidedByUserId"/> included, when given), or
+    /// <paramref name="setReadAtUtc"/> is not UTC.</exception>
+    internal async Task<SignalAutomatedCloseOutcome> CloseActedByDecisionAsync(
+        Guid signalId, Guid decisionRecordId, DateTime setReadAtUtc, string policyCode, Guid? decidedByUserId = null, CancellationToken ct = default)
     {
         if (signalId == Guid.Empty)
             throw new ArgumentException("signalId must not be Guid.Empty.", nameof(signalId));
@@ -1018,6 +1026,8 @@ public sealed partial class SignalWriter
             throw new ArgumentException("decisionRecordId must not be Guid.Empty.", nameof(decisionRecordId));
         if (setReadAtUtc.Kind != DateTimeKind.Utc)
             throw new ArgumentException("setReadAtUtc must be a UTC time (DateTimeKind.Utc).", nameof(setReadAtUtc));
+        if (decidedByUserId == Guid.Empty)
+            throw new ArgumentException("decidedByUserId must be null (an automated decision) or a user id, never Guid.Empty.", nameof(decidedByUserId));
 
         try
         {
@@ -1059,13 +1069,19 @@ public sealed partial class SignalWriter
                     ["sprk_lastevaluated"] = nowUtc,
                     ["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", decisionRecordId),
                 };
+                if (decidedByUserId is { } person)
+                {
+                    // A human decision names its decider in the SAME conditional write; an automated one never does.
+                    fields["sprk_resolvedby"] = new EntityReference("systemuser", person);
+                }
 
                 try
                 {
                     await _writerClient.UpdateIfRowVersionMatchesAsync(SignalEntity, signalId, version, fields, ct).ConfigureAwait(false);
                     _logger.LogInformation(
-                        "Signal {SignalId} closed as Acted for policy {PolicyCode} by automated Decision Record {RecordId}{Reclosed}.",
-                        signalId, policyCode, decisionRecordId, open ? string.Empty : " (re-closed after a system resolution)");
+                        "Signal {SignalId} closed as Acted for policy {PolicyCode} by {Decider} Decision Record {RecordId}{Reclosed}.",
+                        signalId, policyCode, decidedByUserId is null ? "automated" : "human", decisionRecordId,
+                        open ? string.Empty : " (re-closed after a system resolution)");
                     return SignalAutomatedCloseOutcome.Closed;
                 }
                 catch (Exception ex) when (IsConcurrencyVersionMismatch(ex))

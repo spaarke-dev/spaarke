@@ -13,9 +13,10 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Domain.Signals;
 
 /// <summary>
-/// ebilling-r1 task 049 (D-122): <see cref="SignalWriter.CloseActedByAutomatedDecisionAsync"/>, the close of a Signal resolved by an AUTOMATED
+/// ebilling-r1 task 049 (D-122): <see cref="SignalWriter.CloseActedByDecisionAsync"/>, the close of a Signal resolved by an AUTOMATED
 /// decision's Decision Record (the automatic rejection of an invoice). Closes only an open Signal, or one the system closed after the caller
-/// read its set; never a person's resolution; one row-version conditional write with no person in <c>sprk_resolvedby</c>.
+/// read its set; never a person's resolution; one row-version conditional write with no person in <c>sprk_resolvedby</c>. Tasks 100 and 105
+/// (the HumanClose_ tests): with a decider, the same write also names the person in <c>sprk_resolvedby</c>.
 /// </summary>
 /// <remarks>Every option value asserted here is read from the SpaarkeMaster solution source by its label (<see cref="SchemaOption"/>), and
 /// <see cref="AutomatedClose_TheWritersOptionConstants_MatchTheSolutionSource"/> pins the writer's constants to the same source (ADR-038
@@ -80,7 +81,7 @@ public partial class SignalWriterTests
     }
 
     private static Task<SignalAutomatedCloseOutcome> Close(SignalWriter writer) =>
-        writer.CloseActedByAutomatedDecisionAsync(ClosedSignalId, AutoRecordId, SetReadAt, "BILL-AGE");
+        writer.CloseActedByDecisionAsync(ClosedSignalId, AutoRecordId, SetReadAt, "BILL-AGE");
 
     // ── Closes ──
 
@@ -123,6 +124,65 @@ public partial class SignalWriterTests
         var fields = org.ConditionalUpdates.Should().ContainSingle().Subject.Fields;
         fields["sprk_resolutiontype"].Should().Be(new OptionSetValue(Resolution("Acted")));
         fields["sprk_decisionrecord"].Should().Be(new EntityReference("sprk_decisionrecord", AutoRecordId));
+    }
+
+    // ── Human decisions (tasks 100 and 105): the same close, naming the person ──
+
+    private static readonly Guid DeciderUserId = Guid.Parse("10000000-0000-4000-8000-0000000c1d5e");
+
+    [Theory(DisplayName = "100/105 D-122: a human decision's close carries sprk_resolvedby = the systemuser in the ONE conditional write; never notes")]
+    [InlineData("Open")]
+    [InlineData("Acknowledged")]
+    public async Task HumanClose_AnOpenSignal_IsClosedActed_NamingThePerson_InTheOneConditionalWrite(string status)
+    {
+        var (writer, org, _) = AutomatedCloseRig(status);
+
+        var outcome = await writer.CloseActedByDecisionAsync(ClosedSignalId, AutoRecordId, SetReadAt, "BILL-AGE", DeciderUserId);
+
+        outcome.Should().Be(SignalAutomatedCloseOutcome.Closed);
+        var (id, fields) = org.ConditionalUpdates.Should().ContainSingle().Subject;
+        id.Should().Be(ClosedSignalId);
+        fields.Keys.Should().BeEquivalentTo(
+            "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon", "sprk_lastevaluated", "sprk_decisionrecord", "sprk_resolvedby");
+        fields["sprk_resolutiontype"].Should().Be(new OptionSetValue(Resolution("Acted")), "every human outcome closes as Acted, never Dismissed");
+        fields["sprk_resolvedby"].Should().Be(new EntityReference("systemuser", DeciderUserId));
+        fields["sprk_decisionrecord"].Should().Be(new EntityReference("sprk_decisionrecord", AutoRecordId));
+        fields.Should().NotContainKey("sprk_resolutionnotes");
+        org.UpdateCalls.Should().BeEmpty("the person is stamped in the same conditional write, never a second one");
+    }
+
+    [Fact(DisplayName = "100/105 D-122: a null decider (the automated caller, 049) writes no sprk_resolvedby - byte-identical to before")]
+    public async Task HumanClose_NullDecider_WritesNoResolvedBy()
+    {
+        var (writer, org, _) = AutomatedCloseRig("Open");
+
+        (await writer.CloseActedByDecisionAsync(ClosedSignalId, AutoRecordId, SetReadAt, "BILL-AGE", decidedByUserId: null))
+            .Should().Be(SignalAutomatedCloseOutcome.Closed);
+
+        org.ConditionalUpdates.Should().ContainSingle().Which.Fields.Should().NotContainKey("sprk_resolvedby");
+    }
+
+    [Fact(DisplayName = "100/105 D-122: a person's earlier resolution is still left as it is by a human decision's close (same read-then-decide rules)")]
+    public async Task HumanClose_APersonsResolution_IsLeftAsIs()
+    {
+        var (writer, org, _) = AutomatedCloseRig("Resolved", "Dismissed", SetReadAt.AddMinutes(1));
+
+        (await writer.CloseActedByDecisionAsync(ClosedSignalId, AutoRecordId, SetReadAt, "BILL-AGE", DeciderUserId))
+            .Should().Be(SignalAutomatedCloseOutcome.LeftAsIs);
+
+        org.ConditionalUpdates.Should().BeEmpty();
+        org.UpdateCalls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "100/105 D-122: an empty decider id is refused before any read (null is the automated form, never Guid.Empty)")]
+    public async Task HumanClose_EmptyDecider_IsRefused()
+    {
+        var (writer, org, _) = AutomatedCloseRig("Open");
+
+        var act = () => writer.CloseActedByDecisionAsync(ClosedSignalId, AutoRecordId, SetReadAt, "BILL-AGE", Guid.Empty);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        org.RetrievedColumns.Should().BeEmpty();
     }
 
     // ── Leaves ──
@@ -370,10 +430,10 @@ public partial class SignalWriterTests
     {
         var (writer, org, _) = AutomatedCloseRig("Open");
 
-        var noSignal = () => writer.CloseActedByAutomatedDecisionAsync(Guid.Empty, AutoRecordId, SetReadAt, "BILL-AGE");
-        var noRecord = () => writer.CloseActedByAutomatedDecisionAsync(ClosedSignalId, Guid.Empty, SetReadAt, "BILL-AGE");
-        var local = () => writer.CloseActedByAutomatedDecisionAsync(ClosedSignalId, AutoRecordId, DateTime.SpecifyKind(SetReadAt, DateTimeKind.Local), "BILL-AGE");
-        var unspecified = () => writer.CloseActedByAutomatedDecisionAsync(ClosedSignalId, AutoRecordId, DateTime.SpecifyKind(SetReadAt, DateTimeKind.Unspecified), "BILL-AGE");
+        var noSignal = () => writer.CloseActedByDecisionAsync(Guid.Empty, AutoRecordId, SetReadAt, "BILL-AGE");
+        var noRecord = () => writer.CloseActedByDecisionAsync(ClosedSignalId, Guid.Empty, SetReadAt, "BILL-AGE");
+        var local = () => writer.CloseActedByDecisionAsync(ClosedSignalId, AutoRecordId, DateTime.SpecifyKind(SetReadAt, DateTimeKind.Local), "BILL-AGE");
+        var unspecified = () => writer.CloseActedByDecisionAsync(ClosedSignalId, AutoRecordId, DateTime.SpecifyKind(SetReadAt, DateTimeKind.Unspecified), "BILL-AGE");
 
         await noSignal.Should().ThrowAsync<ArgumentException>();
         await noRecord.Should().ThrowAsync<ArgumentException>();

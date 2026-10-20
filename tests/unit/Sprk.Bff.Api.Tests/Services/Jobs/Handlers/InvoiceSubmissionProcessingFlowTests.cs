@@ -309,7 +309,7 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 return Task.CompletedTask;
             });
 
-        /// <summary>D-122: SignalWriter.CloseActedByAutomatedDecisionAsync's rule over the in-memory table (open -> Acted + the record).</summary>
+        /// <summary>D-122: SignalWriter.CloseActedByDecisionAsync's rule over the in-memory table (open -> Acted + the record).</summary>
         private Task<SignalAutomatedCloseOutcome> CloseActedAsync(Guid id, Guid recordId, DateTime setReadAt, string policyCode, CancellationToken _)
         {
             Closes.Add((id, recordId));

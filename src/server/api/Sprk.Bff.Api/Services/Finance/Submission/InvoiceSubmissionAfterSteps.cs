@@ -132,7 +132,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             logger,
             (signals ?? throw new ArgumentNullException(nameof(signals))).WriteAsync,
             (id, rowVersion, policyCode, ct) => signals.CloseAsync(id, rowVersion, SignalWriter.ResolutionSuperseded, policyCode, ct),
-            signals.CloseActedByAutomatedDecisionAsync,
+            // An automated decision: no person, so no sprk_resolvedby (decidedByUserId null).
+            (id, recordId, setReadAtUtc, policyCode, ct) => signals.CloseActedByDecisionAsync(id, recordId, setReadAtUtc, policyCode, decidedByUserId: null, ct),
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
             recorder.Preflight,
             (jobs ?? throw new ArgumentNullException(nameof(jobs))).SubmitJobAsync,
@@ -433,7 +434,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             var set = stored.ResolvedSet;
             if (set is null)
             {
-                set = await ReadOpenSignalSetAsync(invoiceId, ct).ConfigureAwait(false);
+                set = await ReadOpenSignalSetAsync(_entities, _time, invoiceId, ct).ConfigureAwait(false);
                 findingsJson = await StoreResolvedSetAsync(submissionId, findingsJson!, set, ct).ConfigureAwait(false);
                 rowVersion = null; // our own write moved the row version
             }
@@ -710,33 +711,69 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// in-scope subject is listed, not the latest episode per (policy, subject): two open episodes of one (policy, subject) are both
     /// resolved (K1, notes 13c). A row whose dedupe key does not parse, or names a subject outside the invoice and its lines, is skipped
     /// (fails closed). Never the write results (a skipped or refreshed write returns no id). The clock is read BEFORE the query, so a
-    /// system close after the read is at or after it.
+    /// system close after the read is at or after it. Shared with 105's override and return (<see cref="SubmissionOverrideService"/>), which
+    /// resolve the same set.
     /// </summary>
-    private async Task<ResolvedSignalSet> ReadOpenSignalSetAsync(Guid invoiceId, CancellationToken ct)
+    internal static async Task<ResolvedSignalSet> ReadOpenSignalSetAsync(
+        IGenericEntityService entities, TimeProvider time, Guid invoiceId, CancellationToken ct) =>
+        (await ReadOpenSignalSetWithSubjectsAsync(entities, time, invoiceId, ct).ConfigureAwait(false)).Set;
+
+    /// <summary><see cref="ReadOpenSignalSetAsync"/> with the distinct subjects (the invoice and the lines) its Signals are on, which a
+    /// human decision's caller must be able to Write (105, FR-51).</summary>
+    internal static async Task<(ResolvedSignalSet Set, IReadOnlyList<(string Entity, Guid Id)> Subjects)> ReadOpenSignalSetWithSubjectsAsync(
+        IGenericEntityService entities, TimeProvider time, Guid invoiceId, CancellationToken ct)
     {
-        var setReadAt = _time.GetUtcNow().UtcDateTime;
+        var setReadAt = time.GetUtcNow().UtcDateTime;
 
         // K2 (notes 13c): a single RetrieveMultiple with no paging, fine below 5,000 lines per invoice.
         var lineQuery = new QueryExpression(InvoiceSubmissionPersister.LineEntity) { ColumnSet = new ColumnSet(false), NoLock = true };
         lineQuery.Criteria.AddCondition(InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, ConditionOperator.Equal, invoiceId);
-        var lineIds = (await _entities.RetrieveMultipleAsync(lineQuery, ct).ConfigureAwait(false)).Entities
+        var lineIds = (await entities.RetrieveMultipleAsync(lineQuery, ct).ConfigureAwait(false)).Entities
             .Select(r => r.Id).Where(id => id != Guid.Empty).Distinct().ToList();
+
+        var open = await ReadOpenSignalsAsync(entities, invoiceId, lineIds, ct).ConfigureAwait(false);
+
+        // Ordered by id so the record's hash is stable.
+        return (
+            new ResolvedSignalSet(setReadAt, open.Select(s => s.Signal).DistinctBy(s => s.Id).OrderBy(s => s.Id).ToList()),
+            open.Select(s => (s.SubjectEntity, s.SubjectId)).Distinct().ToList());
+    }
+
+    /// <summary>
+    /// D-122: every OPEN Signal (Open or Acknowledged), of every policy, whose subject is the invoice (when <paramref name="invoiceId"/> is
+    /// given) or one of <paramref name="lineIds"/>, with the subject its dedupe key names; one query, app-only. A row whose dedupe key does not
+    /// parse, or names a subject outside those, is skipped (fails closed). Used by <see cref="ReadOpenSignalSetAsync"/> (the invoice and every
+    /// line) and by 100's line decisions (the decided lines only, no invoice). The caller reads its clock BEFORE calling.
+    /// </summary>
+    internal static async Task<IReadOnlyList<(ResolvedSignal Signal, string SubjectEntity, Guid SubjectId)>> ReadOpenSignalsAsync(
+        IGenericEntityService entities, Guid? invoiceId, IReadOnlyCollection<Guid> lineIds, CancellationToken ct)
+    {
+        if (invoiceId is null && lineIds.Count == 0)
+        {
+            return [];
+        }
 
         // K2 (notes 13c): a single RetrieveMultiple with no paging, fine below 5,000 Signals per invoice.
         var query = new QueryExpression(SignalEntity) { ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_signalstatus"), NoLock = true };
         query.Criteria.FilterOperator = LogicalOperator.Or;
-        query.Criteria.AddCondition(SignalWriter.RegardingLookupByEntity[InvoiceReviewService.InvoiceEntity], ConditionOperator.Equal, invoiceId);
+        if (invoiceId is { } invoice)
+        {
+            query.Criteria.AddCondition(SignalWriter.RegardingLookupByEntity[InvoiceReviewService.InvoiceEntity], ConditionOperator.Equal, invoice);
+        }
+
         if (lineIds.Count > 0)
         {
             query.Criteria.AddCondition(SignalWriter.RegardingLookupByEntity[InvoiceSubmissionPersister.LineEntity], ConditionOperator.In, lineIds.Cast<object>().ToArray());
         }
 
-        var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-        var subjects = new HashSet<(string Entity, Guid Id)>(lineIds.Select(id => (InvoiceSubmissionPersister.LineEntity, id)))
+        var rows = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        var subjects = new HashSet<(string Entity, Guid Id)>(lineIds.Select(id => (InvoiceSubmissionPersister.LineEntity, id)));
+        if (invoiceId is { } own)
         {
-            (InvoiceReviewService.InvoiceEntity, invoiceId),
-        };
-        var open = new List<ResolvedSignal>();
+            subjects.Add((InvoiceReviewService.InvoiceEntity, own));
+        }
+
+        var open = new List<(ResolvedSignal Signal, string SubjectEntity, Guid SubjectId)>();
         foreach (var row in rows.Entities)
         {
             if (row.Id == Guid.Empty
@@ -747,11 +784,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 continue;
             }
 
-            open.Add(new ResolvedSignal(row.Id, code));
+            open.Add((new ResolvedSignal(row.Id, code), entity, id));
         }
 
-        // Ordered by id so the record's hash is stable.
-        return new ResolvedSignalSet(setReadAt, open.DistinctBy(s => s.Id).OrderBy(s => s.Id).ToList());
+        return open;
     }
 
     /// <summary>Writes <paramref name="set"/> into <c>sprk_findingsjson</c> (<see cref="ResolvedSetMember"/>) and returns the JSON written.</summary>
@@ -837,7 +873,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     }
 
     /// <summary>
-    /// Closes every Signal of the set as Acted by <paramref name="recordId"/> (<see cref="SignalWriter.CloseActedByAutomatedDecisionAsync"/>).
+    /// Closes every Signal of the set as Acted by <paramref name="recordId"/> (<see cref="SignalWriter.CloseActedByDecisionAsync"/>, no person).
     /// Closed and AlreadyClosedByThisRecord are done; LeftAsIs (a person or another record resolved it) stays listed in the record, one
     /// Information line; a Signal that no longer exists has nothing to close, one Warning; ChangedSinceRead is a retry (every Signal is still
     /// attempted). Any other exception propagates (transient, as a Signal write's). Returns the retry code, or null.
