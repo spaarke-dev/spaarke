@@ -47,7 +47,8 @@
 ## Queue (start when an agent slot frees; max 4 running)
 1. **#2128 option (1)**: retire FR-15 guest auto-create in `ContactIdentityBinder.ResolveWorkforceCallerAsync` (acct=1 + customer idp). Deny 403 on /me, reasonCode `sdap.access.deny.workforce_guest_use_home_signin`, ProblemDetails shaped like contact_not_invited (reasonCode + detail). The detail must work from Teams too ("open the portal in a browser; sign in with your organization's work account"), with no tenant ids or emails. Count the existing Workforce-plane app-owned guest contacts on dev first (read-only); R3 relies on none. Send R3 the final code and detail (R3 adds deniedDetailOf + test, then an owner-gated SPA deploy).
 2. **ebilling rule-set scope design review**: `projects/ebilling-r1/notes/rule-set-scope-design.md` @ 71d28f319 (work/ebilling-r1), §5.2/Q1 (sprk_homebusinessunit), §5.1/Q11 (ruleset joins the secure family), Q10 (delete with a record-scoped set), §3.1 (FilingParentOf chain).
-3. After the 036 implementer: apply the concise ADR edits in `.claude/adr/` (main session), then 2 adversarial passes.
+3. **ebilling 050a (D-134) secure re-file review**: diff `0a47a82d0~1..4266b5789` (code eb04455c9; ask for the pushed sha), notes `projects/ebilling-r1/notes/050a-confirm-redirect.md`. Points: existing-doc ownership/firm/read proof, doc already filed elsewhere, concurrent confirms, Refused leaving a doc half-moved. Review the post-fix head after ebilling's own Opus review.
+4. After the 036 implementer: apply the concise ADR edits in `.claude/adr/` (main session), then 2 adversarial passes.
 
 ## Next actions
 1. On the #2121 implementer result: adversarial review (Opus, ×2 for security), fix rounds, then ask owner sign-off.
