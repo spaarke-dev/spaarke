@@ -945,3 +945,19 @@ Each restamps afterwards, but none refuses any of these:
 **UAC context (2026-10-20, also on #2132)**: the UAC delete design D1 keeps RemoveLink deliberately. D6 removes `prvDelete` on the core tables from Core User and replaces the model-driven app's Delete with the BFF flow. After UAC delete task 1 ships, only admins and holders of the named delete role can delete a core record outside the BFF. That narrows the defect but does not close it: a D-120 preview check or a sweep is still worth having, and (b) remains the structural fix.
 
 ---
+
+### DEF-028 — Rate-card import does not check AppendTo on the scoped core record
+
+| Field | Value |
+|---|---|
+| **Status** | Open (separate fix, owner D-172 Q12) |
+| **Urgency** | medium (a card can be scoped to a record the admin cannot file under) |
+| **Filed** | 2026-10-20 |
+| **Source** | rule-set scope design for #2129 (Q12) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2135 |
+
+**Description**: `RateCardImportService.cs:173` checks only that the scoped matter, project or work assignment exists. It does not check that the caller holds AppendTo on it. The rule-set scope work (081) requires AppendTo on the core record for a record-scoped set.
+
+**Suggested fix**: before any write, probe AppendTo on the core record as the caller. A caller without it gets a 403 and nothing is written. Add a must-fire and a must-not-fire test.
+
+---
