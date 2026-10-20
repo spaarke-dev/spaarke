@@ -44,6 +44,11 @@
 - Verify that the Workforce-role export includes ebilling's prvCreatesprk_InvoiceSubmission (Basic) + prvReadsprk_InvoiceSubmission (Deep). ebilling applies them on dev under the owner approval given in its session, 2026-10-20.
 - Gate blocked on R3 059 stages E/F (A9 SPA). The owner signs in as Tracy at her HOME directory, not as the guest.
 
+## Queue (start when an agent slot frees; max 4 running)
+1. **#2128 option (1)**: retire FR-15 guest auto-create in `ContactIdentityBinder.ResolveWorkforceCallerAsync` (acct=1 + customer idp). Deny 403 on /me, reasonCode `sdap.access.deny.workforce_guest_use_home_signin`, ProblemDetails shaped like contact_not_invited (reasonCode + detail). The detail must work from Teams too ("open the portal in a browser; sign in with your organization's work account"), with no tenant ids or emails. Count the existing Workforce-plane app-owned guest contacts on dev first (read-only); R3 relies on none. Send R3 the final code and detail (R3 adds deniedDetailOf + test, then an owner-gated SPA deploy).
+2. **ebilling rule-set scope design review**: `projects/ebilling-r1/notes/rule-set-scope-design.md` @ 71d28f319 (work/ebilling-r1), §5.2/Q1 (sprk_homebusinessunit), §5.1/Q11 (ruleset joins the secure family), Q10 (delete with a record-scoped set), §3.1 (FilingParentOf chain).
+3. After the 036 implementer: apply the concise ADR edits in `.claude/adr/` (main session), then 2 adversarial passes.
+
 ## Next actions
 1. On the #2121 implementer result: adversarial review (Opus, ×2 for security), fix rounds, then ask owner sign-off.
 2. After R3 deploys #2110: run its server gate.
