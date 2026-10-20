@@ -922,3 +922,19 @@ Each restamps afterwards, but none refuses any of these:
 **Suggested fix (owner options)**: (a) re-check on a Secure transition and redact or close the affected Duplicate Signals; (b) re-check on read in `SignalReadService`; (c) accept as a known limit (a tracking number plus one line's date and timekeeper).
 
 ---
+
+### DEF-027 — Rate card becomes firm-wide when its matter, project or work assignment is deleted outside the BFF
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner picks the fix: schema) |
+| **Urgency** | medium (wrong rates applied to a whole firm's invoices) |
+| **Filed** | 2026-10-20 |
+| **Source** | rule-set scope design for #2129 (`notes/rule-set-scope-design.md`); relationships checked live on dev |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2132 |
+
+**Description**: The rate card's core-record lookups (`sprk_matter_ratecard_matter`, `sprk_project_ratecard_project`, `sprk_workassignment_ratecard_workassignment`) are RemoveLink on dev. `RateCardResolver.cs:13/:138` treats a card with no core-record scope as firm-wide. A matter deleted outside the D-120 BFF delete path (for example in the model-driven app) clears the link, and its matter-specific card silently becomes the firm's general card.
+
+**Suggested fix (owner options)**: (a) make the three relationships Restrict, a dev schema change with the owner's OK; (b) add an explicit scope column, so a cleared lookup applies to nothing; (c) both.
+
+---

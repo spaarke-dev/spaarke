@@ -144,7 +144,7 @@ public class RecordOwnerAssignmentCensusTests
         + "entries. "
         + "Known limit: a matter set on a Billing policy outside the BFF (form edit) is not seen here; the next edit-path version is "
         + "re-owned by SecureChildReconciliationJob. "
-        + "Agreed as Pending: ontology-r1 2026-10-20; uac-r2 re-check pending.";
+        + "Agreed as Pending: ontology-r1 2026-10-20; uac-r2 re-checked 2026-10-20.";
 
     private static readonly IReadOnlyList<CensusEntry> Census = new[]
     {
