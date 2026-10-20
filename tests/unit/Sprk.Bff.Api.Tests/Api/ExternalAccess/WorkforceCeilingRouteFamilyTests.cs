@@ -98,6 +98,25 @@ public sealed class WorkforceCeilingRouteFamilyTests : IClassFixture<ExternalDel
         { "GET", $"/contact-grants?recordType=project&recordId={Project}", None, "sprk_externalrecordaccess", AccessRights.Read },
         { "GET", $"/contact-grants?recordType=project&recordId={Project}", None, "contact", AccessRights.Read },
         { "POST", "/contact-grants/revoke", "revoke", "sprk_externalrecordaccess", AccessRights.Write },
+        // Invoice submissions (ebilling-r1 task 044): one submit set per core table, the read set, the firm-records set
+        { "POST", $"/matters/{Matter}/invoice-submissions", File, "sprk_invoicesubmission", AccessRights.Create },
+        { "POST", $"/matters/{Matter}/invoice-submissions", File, "sprk_document", AccessRights.Create },
+        { "POST", $"/matters/{Matter}/invoice-submissions", File, "sprk_document", AccessRights.AppendTo },
+        { "POST", $"/matters/{Matter}/invoice-submissions", File, "sprk_matter", AccessRights.AppendTo },
+        { "POST", $"/projects/{Project}/invoice-submissions", File, "sprk_invoicesubmission", AccessRights.Create },
+        { "POST", $"/projects/{Project}/invoice-submissions", File, "sprk_document", AccessRights.Create },
+        { "POST", $"/projects/{Project}/invoice-submissions", File, "sprk_document", AccessRights.AppendTo },
+        { "POST", $"/projects/{Project}/invoice-submissions", File, "sprk_project", AccessRights.AppendTo },
+        { "POST", $"/workassignments/{WorkAssignment}/invoice-submissions", File, "sprk_invoicesubmission", AccessRights.Create },
+        { "POST", $"/workassignments/{WorkAssignment}/invoice-submissions", File, "sprk_document", AccessRights.Create },
+        { "POST", $"/workassignments/{WorkAssignment}/invoice-submissions", File, "sprk_document", AccessRights.AppendTo },
+        { "POST", $"/workassignments/{WorkAssignment}/invoice-submissions", File, "sprk_workassignment", AccessRights.AppendTo },
+        { "GET", $"/invoice-submissions/{Item}", None, "sprk_invoicesubmission", AccessRights.Read },
+        { "GET", "/invoice-submissions", None, "sprk_invoicesubmission", AccessRights.Read },
+        { "GET", "/invoice-submissions/firm-records", None, "sprk_matter", AccessRights.Read },
+        { "GET", "/invoice-submissions/firm-records", None, "sprk_project", AccessRights.Read },
+        { "GET", "/invoice-submissions/firm-records", None, "sprk_workassignment", AccessRights.Read },
+        { "GET", "/invoice-submissions/firm-records", None, "sprk_invoicesubmission", AccessRights.Create },
     };
 
     /// <summary>Each distinct route once.</summary>

@@ -7,6 +7,9 @@
 // Mounted UNDER the shared /api/v1/external group (ExternalAccessEndpoints), so every route inherits the ExternalCollaboration
 // policy and the group-level CallerPrincipalAuthorizationFilter. Each route then carries ExternalInvoiceSubmissionAuthorizationFilter
 // (the core record and the firm, ADR-008) and, after it, RequireEbillingEnabled (ADR-018: the flag never replaces authorization).
+// Workforce ceiling (uac-r2 task 186): each route declares its set with RequireWorkforceCeiling (WorkforceRoleCeilingGate). The group's
+// ceiling filter runs BEFORE RequireEbillingEnabled, so with the flag off a workforce contact whose role lacks a privilege gets the
+// ceiling's 403 instead of the flag's answer (known limit; the order is not changed).
 // The write itself is InvoiceSubmissionService — the same operation the internal route calls (D-24).
 
 using Microsoft.AspNetCore.Mvc;
@@ -29,6 +32,7 @@ public static class ExternalInvoiceSubmissionEndpoints
         // Three literal chains (not a loop): the RouteAuthorizationGuard scanner reads each route's path and attachments from its own chain.
         externalGroup.MapPost("/matters/{id:guid}/invoice-submissions", SubmitAsync)
             .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.Submit, InvoiceCoreRecordKind.Matter)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.SubmitInvoiceToMatter)
             .RequireEbillingEnabled()
             .DisableAntiforgery() // multipart upload; auth is the bearer token + the caller's record rights, not a form token
             .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionEndpoints.MaxRequestBodyBytes))
@@ -38,6 +42,7 @@ public static class ExternalInvoiceSubmissionEndpoints
 
         externalGroup.MapPost("/projects/{id:guid}/invoice-submissions", SubmitAsync)
             .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.Submit, InvoiceCoreRecordKind.Project)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.SubmitInvoiceToProject)
             .RequireEbillingEnabled()
             .DisableAntiforgery()
             .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionEndpoints.MaxRequestBodyBytes))
@@ -47,6 +52,7 @@ public static class ExternalInvoiceSubmissionEndpoints
 
         externalGroup.MapPost("/workassignments/{id:guid}/invoice-submissions", SubmitAsync)
             .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.Submit, InvoiceCoreRecordKind.WorkAssignment)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.SubmitInvoiceToWorkAssignment)
             .RequireEbillingEnabled()
             .DisableAntiforgery()
             .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionEndpoints.MaxRequestBodyBytes))
@@ -56,6 +62,7 @@ public static class ExternalInvoiceSubmissionEndpoints
 
         externalGroup.MapGet("/invoice-submissions/{id:guid}", GetAsync)
             .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.ReadOne)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceSubmissions)
             .RequireEbillingEnabled()
             .WithName("GetExternalInvoiceSubmission")
             .WithSummary("Read one of the caller's firm's invoice submissions")
@@ -66,6 +73,7 @@ public static class ExternalInvoiceSubmissionEndpoints
 
         externalGroup.MapGet("/invoice-submissions", ListAsync)
             .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.List)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ReadInvoiceSubmissions)
             .RequireEbillingEnabled()
             .WithName("ListExternalInvoiceSubmissions")
             .WithSummary("List the caller's firms' invoice submissions on records the caller can read, newest first")
@@ -76,6 +84,7 @@ public static class ExternalInvoiceSubmissionEndpoints
         // D-106 (task 051): the picker's link read. The guid constraint on {id} keeps "firm-records" from matching the read-one route.
         externalGroup.MapGet("/invoice-submissions/firm-records", FirmRecordsAsync)
             .AddExternalInvoiceSubmissionAuthorizationFilter(ExternalInvoiceSubmissionAccess.FirmRecords)
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ListInvoiceFirmRecords)
             .RequireEbillingEnabled()
             .RequireRateLimiting("dataverse-query")
             .WithName("ListExternalInvoiceFirmRecords")
