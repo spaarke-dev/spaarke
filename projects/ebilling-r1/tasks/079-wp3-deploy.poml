@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Writes to the shared dev environment (BFF app service, Dataverse rows and web resources).</parallel-reason>
-    <deps>070, 071, 072, 073, 074, 075, 076, 077, 078, 053</deps>
+    <deps>070, 071, 072, 073, 074, 075, 076, 077, 078, 053, 080, 081, 082, 083, 084, 085</deps>
     <tags>deploy, bff, code-page</tags>
     <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
@@ -37,6 +37,7 @@
     <dependencies>
       <dependency task="070-078" status="pending">All WP3 tasks complete and merged to the branch</dependency>
       <dependency task="053" status="pending">WP2 deployed to dev</dependency>
+      <dependency task="080-085" status="pending">Rule-set scope (D-136 / D-137; notes/rule-set-scope-design.md section 10): 080 schema on dev, 081-085 code merged. Folded into this deploy because 079 had not run.</dependency>
     </dependencies>
   </context>
 
@@ -48,6 +49,7 @@
     <constraint source="project">Never delete the owner-created containers or evaluation-set documents.</constraint>
     <constraint source="D-114 (owner)">The Rule Review page (web resource sprk_rulereviewpage, from 077) gets two entry points: a "Rule Review" subarea in the Spaarke Administration app's sitemap, and a command on the sprk_ruleset main form that opens the page for that rule set (pass the rule set id). Both go in solution-scoped through scripts/Import-SolutionScoped.ps1. Verify both open the page on dev.</constraint>
     <constraint source="D-113 (owner)">Before the BFF that reads it is deployed, run the 077 follow-up's idempotent schema script for the rejection-reason column (WhatIf first). 053 must already have synced it into SpaarkeMaster.</constraint>
+    <constraint source="D-137 / ontology D-172, tasks 080-085 (rule-set scope)">SpaarkeMaster sync (029 export-to-temp, additive only) of 080's schema: sprk_ruleset sprk_matter / sprk_project / sprk_workassignment lookups (RemoveLink), the Record and FirmRecord sprk_scope options, sprk_allbusinessunits, the sprk_ruleset_businessunit N:N (subgrid on the rule set main form), and sprk_ratecard.sprk_scope (on the rate card main form and its views). Two admin system views: "Rule sets whose record was deleted" (sprk_ruleset: scope Record or FirmRecord, all three core lookups empty) and "Rate cards whose record was deleted" (sprk_ratecard: scope CoreRecord, all three core lookups empty). Immediately before deploying the BFF, re-run the S6 backfill section of scripts/ebilling/Deploy-EbillingRuleSetScopeSchema.ps1 (WhatIf first; idempotent, fills only empty scopes) so no card the old import created in between applies to nothing.</constraint>
     <constraint source="076 re-check K2">Before relying on 076's conditional publish, make one probe on dev, with the owner's OK for the live write. It confirms that IfRowVersionMatches inside ExecuteTransactionRequest is honoured per inner request and that the mismatch fault carries 0x80060882.</constraint>
   </constraints>
 
@@ -66,8 +68,10 @@
     <step order="2">Rule-type options: run Deploy-EbillingRuleTypeOptions.ps1 with -WhatIf, then for real if anything is missing; verify the 11 billing values by metadata read.</step>
     <step order="3">Action and Binding: run Deploy-ActionMirrors.ps1 for billing-rule-draft and Seed-PlaybookConsumers.ps1; verify both rows with a Dataverse read query (actioncode, consumer type, environment).</step>
     <step order="4">BFF: run scripts/Deploy-BffApi.ps1 against spaarke-bff-dev; confirm hash verification passed and /healthz is healthy; confirm the eBilling flag is on in dev.</step>
+    <step order="3a">Rule-set scope schema: confirm 080's items on dev by metadata read; sync them and the two "record deleted" views into SpaarkeMaster (export-to-temp, Import-SolutionScoped.ps1 -PlanOnly first); then re-run the S6 backfill section (WhatIf, then for real) and record the cards it filled, if any.</step>
     <step order="5">Code page: in src/solutions/RuleReview run npm install --legacy-peer-deps --no-audit --no-fund and npm run build; deploy the single HTML file with Deploy-WebResourceInline.ps1 (web resource name from 077's notes); publish customizations.</step>
     <step order="6">Route smoke: for every route added by 075, 076 and 078 call once unauthenticated (expect 401) and once as a billing admin (expect 200 or 202); call one write route as a non-admin (expect 403). Record status codes.</step>
+    <step order="6a">Rule-set scope smoke: create a matter-scoped Draft rule set from the Rule Review page (record picker), publish it, and submit or re-evaluate one invoice on that matter and one on a project filed directly under it: its rule judges both (findings cite its policy). Confirm a change of scope on the Published set returns 409 ruleset.scope_locked. Confirm a firm-wide rate card still resolves for an invoice of its firm.</step>
     <step order="7">End-to-end: create a rule set from a real OCG in the evaluation set (Guideline, client default); trigger drafting; when the job completes open the Rule Review page, accept at least three proposals and edit one, publish with an effective date. Verify each published version has clause quote and location, the rule set flag is on, and editing a published rule creates a new version.</step>
     <step order="8">Rate card: download the template, import a sample card (one deliberately bad row first: expect per-row error and nothing written), import the corrected workbook, publish; verify the workbook is in the Procedure Library container.</step>
     <step order="9">Run the 077 ui-tests against dev (including dark mode) and record the results.</step>
@@ -101,6 +105,8 @@
     <criterion testable="true">One real OCG rule set is published in dev with every published rule carrying a clause quote and location; editing a published rule created a new version.</criterion>
     <criterion testable="true">A rate card import with a bad row returned per-row errors and wrote nothing; the corrected import and publish succeeded with the workbook stored in the Procedure Library container.</criterion>
     <criterion testable="true">077 ui-tests pass in dev, including dark mode.</criterion>
+    <criterion testable="true">080's schema and the two "record deleted" views are in SpaarkeMaster (PlanOnly evidence); the S6 backfill re-run left no card with an empty scope except those with two or more core lookups.</criterion>
+    <criterion testable="true">The step 6a smoke passed: the matter-scoped set judged the matter's and its direct project's invoices; the Published set's scope change returned 409; a firm-wide rate card resolved.</criterion>
     <criterion testable="true">Evidence recorded in notes/079-wp3-deploy.md.</criterion>
   </acceptance-criteria>
 

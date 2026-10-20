@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="083" project="ebilling-r1">
+  <metadata>
+    <title>Firm clause applicability: GetFirmClauseAsync takes the invoice's core record; 130-135 POML constraints (Q15)</title>
+    <phase>3 Rules (WP3) — rule-set scope (D-171, D-172), wave W3-9; must land before 130</phase>
+    <gate>082 done; before 130 starts</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One existing method changes signature and reuses 082's predicate; no caller exists yet. The rest is POML constraint edits. Firm visibility is fail-closed today and stays so.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A scoped change with an exact reference (082's RuleSetApplicability) and a closed list of POML edits.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>082</deps>
+    <tags>bff, rules, external-access</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Change RuleSetService.GetFirmClauseAsync so that it also takes the invoice's core record and shows a clause to a firm exactly when RuleSetApplicability.AppliesTo (082) says the rule could have judged that invoice, then add the matching constraints to the POMLs of tasks 130, 131, 133, 134 and 135 (and the Q15 general / per-record view rule to 135), before task 130 starts.</prompt>
+
+  <role>SPAARKE platform developer. Expert in RuleSetService (task 076) and the firm-visibility rules D-66 and D-79.</role>
+
+  <goal>A firm sees a record-scoped set's clause only on invoices whose direct chain contains the set's record (and, for FirmRecord, only as that firm); ClientDefault and Firm behaviour is unchanged; the visible-to-firms flag still decides on top; the five downstream POMLs cite the new signature.</goal>
+
+  <context>
+    <background>Design note section 6. Decisions: D-66, D-79, D-136 / ontology D-171, D-137 / ontology D-172 (direct association only; Q15 a general view plus a per-record view). Today GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct) (RuleSetService.cs:2013-2063, caller contract :2006-2012) returns None for any scope other than ClientDefault or Firm (:2052-2056). No caller exists yet. Planned callers cite the current signature: tasks/130-firm-findings-projection.poml:55, 131-firm-notice-action.poml:58, 133-adjustment-report-pdf.poml:50, 134-spa-invoice-detail.poml:49, 135-spa-billing-guidelines.poml:53; 135's content rule is at :47 ("client default or assigned to one of the caller's firms").</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/RuleSetService.cs (GetFirmClauseAsync and its caller contract)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RuleSetServiceTests.cs</file>
+      <file role="modify">projects/ebilling-r1/tasks/130-firm-findings-projection.poml, 131-firm-notice-action.poml, 133-adjustment-report-pdf.poml, 134-spa-invoice-detail.poml, 135-spa-billing-guidelines.poml (constraints only)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/RuleSetApplicability.cs, CoreRecordChain.cs (082)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="082" status="pending">RuleSetApplicability and CoreRecordChain</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design note 6, D-172">GetFirmClauseAsync(policyVersionId, invoiceFirmId, invoiceCoreRecord, ct): it builds the chain with 082's CoreRecordChain and decides with RuleSetApplicability.AppliesTo; it never has its own scope switch. The business-unit part of the predicate uses the same home-BU rule as 082. The sprk_visibletofirms flag (D-79) still decides on top.</constraint>
+    <constraint source="076 review round 2 item 5 (kept)">invoiceFirmId and invoiceCoreRecord are read server-side from the invoice the finding belongs to, after the route's own firm-membership check; never from the request and never from the SPA identity. Guid.Empty firm or a missing core record: no text for a record-scoped set (ClientDefault / Firm sets unchanged).</constraint>
+    <constraint source="fail closed">A chain that cannot be read returns no clause text (a firm-facing read never widens on a fault); it does not throw to the firm.</constraint>
+    <constraint source="D-172 Q15">135: the general Billing Guidelines view lists all-BU ClientDefault and Firm sets only; a per-record view (coreRecordId, a record the CIAM caller holds an external grant on) returns the post-precedence list for that record, including Record, FirmRecord and BU-restricted sets. Without a record the firm sees no record-scoped set.</constraint>
+    <constraint source="project CLAUDE.md">POML edits are constraint lines only (the five cited lines and 135's content rule); do not change those tasks' goals, deps or acceptance criteria beyond the new signature and Q15.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/rule-set-scope-design.md (section 6)</file>
+      <file>projects/ebilling-r1/notes/076-ruleset-endpoints.md (section 8)</file>
+    </files>
+    <patterns>
+      <pattern name="Shared applicability predicate" location="src/server/api/Sprk.Bff.Api/Services/Signals/Billing/RuleSetApplicability.cs">Call it; do not re-implement scope logic.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Change the signature and the caller contract comment; replace the two-scope switch with RuleSetApplicability.</step>
+    <step order="2">Tests (below).</step>
+    <step order="3">Edit the five POML constraint lines to the new signature (invoiceCoreRecord read server-side from the invoice), and 135's content rule to Q15.</step>
+    <step order="4">dotnet build and dotnet test.</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="6">Record deviations in projects/ebilling-r1/notes/083-firm-clause-applicability.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of 130, 131, 133, 134 or 135 has already started (not 🔲 in TASK-INDEX.md), STOP and raise it with the main session instead of editing its POML.</trigger>
+    <trigger>Q1 open: the home-BU rule is 082's (interim B until uac-r2 answers Q1); if 082 changed it, follow 082, do not add a second rule.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/RuleSetService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RuleSetServiceTests.cs</output>
+    <output type="docs">tasks 130, 131, 133, 134, 135 POML constraints; projects/ebilling-r1/notes/083-firm-clause-applicability.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With the flag on, MAT's (Record = M) clause is returned for any firm on M's invoice and on P's (P directly under M); it is NOT returned on W1's (W1 under P under M) or on M2's.</criterion>
+    <criterion testable="true">F+M's (FirmRecord) clause is returned to F on M's invoice and never to F2.</criterion>
+    <criterion testable="true">A Record set whose lookup was cleared returns no text on any invoice.</criterion>
+    <criterion testable="true">ClientDefault and Firm sets behave exactly as before (existing tests unchanged and passing); with the flag off nothing is returned (existing control kept).</criterion>
+    <criterion testable="true">A chain read fault returns no clause text.</criterion>
+    <criterion testable="true">The five POMLs cite GetFirmClauseAsync(policyVersionId, invoiceFirmId, invoiceCoreRecord, ct) with both values read server-side; 135 states the Q15 general and per-record view rule.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>No caller exists yet, so the signature change breaks nothing. Parallel group P3-E with 085: no file overlap.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

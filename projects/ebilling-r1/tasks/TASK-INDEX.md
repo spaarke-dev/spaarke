@@ -78,7 +78,13 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 076 | ✅ [done] | Rule set endpoints: proposals, edit, publish, visibility | FULL | sonnet / high | P3-B | 019, 070 |
 | 077 | ✅ [done] | Rule Review code page | STANDARD | sonnet / high | P3-C | 076 |
 | 078 | ✅ [done] | Rate card and timekeeper import and publish | STANDARD | sonnet / high | P2-B | 017, 028, 029 |
-| 079 | 🔲 [open] | Deploy WP3 to dev | STANDARD | sonnet / high | none (deploy) | 070, 071, 072, 073, 074, 075, 076, 077, 078, 053 |
+| 079 | 🔲 [open] | Deploy WP3 to dev (includes the rule-set scope schema sync, views and backfill re-run) | STANDARD | sonnet / high | none (deploy) | 070, 071, 072, 073, 074, 075, 076, 077, 078, 053, 080, 081, 082, 083, 084, 085 |
+| 080 | 🔲 [open] | Rule set and rate card scope schema: core lookups (RemoveLink), scope options, all-BU flag, BU N:N, rate card scope + backfill (owner approval before running) | STANDARD | sonnet / high | none (p-safe false: live schema, owner gate) | 019, 017, 029 |
+| 081 | 🔲 [open] | RuleSetService scope validation, scope lock, BU writes, routed ownership; census Waived → Routed; guard + twin guard; sprk_ruleset lineage | FULL | opus / high | none (p-safe false: uac-r2 files, shared census) | 080 |
+| 082 | 🔲 [open] | Rule selection by scope: direct core-record chain, eligibility + BU filter, Replace / Additive precedence, unknown-BU finding | FULL | opus / high | P3-D | 080, 081 |
+| 083 | 🔲 [open] | Firm clause applicability (`GetFirmClauseAsync` + core record); 130-135 POML constraints (Q15) — before 130 | STANDARD | sonnet / high | P3-E | 082 |
+| 084 | 🔲 [open] | Rule Review page: scope, record and BU pickers, list columns, publish notices | FULL | sonnet / high | P3-F | 081, 082, 083 |
+| 085 | 🔲 [open] | Rate card explicit scope and direct inheritance (#2132, DEF-027, Q8) | FULL | sonnet / xhigh | P3-E | 080, 082 |
 
 ### Phase 4 — Review and approval (WP4)
 
@@ -102,7 +108,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 130 | 🔲 [open] | Firm-visible findings projection (clause quotes, visibility filtering) | FULL | sonnet / high | none | 019, 049, 100 |
+| 130 | 🔲 [open] | Firm-visible findings projection (clause quotes, visibility filtering) | FULL | sonnet / high | none | 019, 049, 100, 083 |
 | 131 | 🔲 [open] | Firm notice Action `INVOICE-FIRM-NOTICE@v1` with template fallback | STANDARD | sonnet / high | P5-B | 041, 130 |
 | 132 | 🔲 [open] | Notifications: email, SPA feed, approver in-app | STANDARD | sonnet / high | none | 131, 133, 024, 103, 104 |
 | 133 | 🔲 [open] | Adjustment report PDF | STANDARD | sonnet / high | P5-B | 130, 028 |
@@ -162,7 +168,12 @@ Phase 3
   W3-2 (parallel, 4): 071, 074, 075, 076 — prereq 070                — goal-eligible: NO (074 open owner question F-9)
   W3-3 (parallel, 2): 072, 077
   W3-4 (single):      073
-  W3-5 (single):      079 deploy WP3 (after 053)                     — goal-eligible: NO (deploy)
+  W3-6 (single):      080 rule-set scope schema — owner approval of the final script before it runs — goal-eligible: NO (live schema, owner gate)
+  W3-7 (single):      081 — prereq 080; p-safe false (uac-r2 files)   — goal-eligible: NO (auth, tenant isolation; Q11 open)
+  W3-8 (single):      082 (P3-D) — prereq 080, 081                    — goal-eligible: NO (tenant isolation; Q1 open)
+  W3-9 (parallel, 2): 083, 085 (P3-E) — prereq 082                    — goal-eligible: NO (two tasks; 083 must land before 130)
+  W3-10 (single):     084 (P3-F) — prereq 081, 082, 083; may overlap 085 (no shared files) — goal-eligible: NO
+  W3-5 (single):      079 deploy WP3 (after 053 and 080-085)          — goal-eligible: NO (deploy)
 
 Phase 4 (108, 109 have no deps and may start any time)
   W4-1 (parallel, 5; batches of 4): 100, 106, 107, 108, 109          — goal-eligible: NO (100 authorization)
@@ -207,4 +218,6 @@ joined at 049 by `029 → 070 → 071 → 072 → 073 → 049`, and WP1 `029` ga
 | 103 | F-2 — approve with undecided Clean lines (assumed: allowed, implicitly Accepted in bulk) |
 | 104, 105 | F-7 — non-privileged Return of a blocked internal submission |
 | 162 | Any missed NFR-04 – NFR-06 target needs a recorded owner decision |
+| 080 | Owner approval of the final rule-set / rate-card scope schema script (and its backfill list) before it runs |
+| 081, 082 | Q11 and Q1 (uac-r2): 081 leaves the role row and the admin list filter out until Q11 is answered; 082 uses interim B for the home business unit until Q1 is answered |
 | 163 | UAT sign-off |

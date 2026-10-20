@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="085" project="ebilling-r1">
+  <metadata>
+    <title>Rate card explicit scope and direct inheritance: RateCardResolver, rate query, import writes the scope (#2132, DEF-027, Q8)</title>
+    <phase>3 Rules (WP3) — rule-set scope (D-171, D-172), wave W3-9</phase>
+    <gate>080 (S6 column and backfill on dev) and 082 (CoreRecordChain) done</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Fixes a fail-open defect (a matter's rate card widening to the whole firm, DEF-027) in the rate resolution every fee line uses; changes .cs files and precedence.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A complete spec with an exact reference (the existing resolver tiers and 082's chain); depth is in the precedence and fail-closed cases, not in open design.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P3-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>080, 082</deps>
+    <tags>bff, rules, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Make rate-card scope explicit and fail-closed, and apply a record's rate card to its direct children's invoices (notes/rule-set-scope-design.md section 3.5): RateCardResolver uses sprk_ratecard.sprk_scope and the invoice's direct core-record chain, the rate query in InvoiceResolutionService reads the chain's cards, and RateCardImportService writes the scope on create.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the invoice resolution step (task 046), the rate card import (078) and pure resolver testing.</role>
+
+  <goal>A card whose core record was deleted applies to nothing and never widens to firm-wide; a card with an empty scope is not used; a matter's card applies to invoices on the matter and on records filed directly under it, never further; the nearer card wins; every card the import creates carries its scope.</goal>
+
+  <context>
+    <background>Design note sections 2 (S6), 3.5 and 4.5. Decisions: D-137 / ontology D-172 (#2132: no delete-Restrict; explicit scope; resolver requires the lookup; Q8 direct inheritance), D-120 (rate card deleted with its record), DEF-027 (notes/defer-issues.md). Today: RateRow.CardScopes (RateCardResolver.cs:10-31); Applies (:119-145; switch on CardScopes.Count at :133-142, no lookup = firm-wide); Tier (:113-114; core-record card before firm card, timekeeper before classification); Ambiguous on different amounts in the deciding tier. InvoiceResolutionService.ReadRatesAsync (:269-305) and BuildRateQuery (:307-347; firm-wide = all three lookups null, plus cards scoped to the invoice's core record exactly; ScopeColumns :33-38). RateCardImportService card create (:294-313). 080 notes give the live option values and the backfill result.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Resolution/RateCardResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Resolution/InvoiceResolutionService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Resolution/InvoiceResolutionModels.cs (RateCardScope, if a distance-aware value is needed)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/RateCardImportService.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Resolution/RateCardResolverTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Resolution/InvoiceResolutionServiceTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RateCardImportServiceTests.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/CoreRecordChain.cs (082)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="080" status="pending">sprk_ratecard.sprk_scope and the backfill on dev</dependency>
+      <dependency task="082" status="pending">CoreRecordChain (direct chain)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="D-137 / ontology D-172 (#2132, DEF-027)">A row applies only when (sprk_scope = Firm AND no core lookup) OR (sprk_scope = CoreRecord AND exactly one core lookup AND that record is on the invoice's chain), in addition to today's firm, Published, active and in-force checks. Every other row is not used: empty scope, CoreRecord with no lookup (the record was deleted, RemoveLink), Firm with a lookup, two or more lookups. No row ever widens to firm-wide. No delete-Restrict and no delete code.</constraint>
+    <constraint source="D-172 Q8, Q5">The chain is 082's CoreRecordChain (the invoice's core record at distance 0, its direct parents at distance 1; no second hop, no intermediate). Tiers, first with any rate decides: (CoreRecord d0, timekeeper) > (CoreRecord d0, classification) > (CoreRecord d1, timekeeper) > (CoreRecord d1, classification) > (Firm, timekeeper) > (Firm, classification). Different amounts in the deciding tier stay Ambiguous (no rate used); equal amounts are one rate.</constraint>
+    <constraint source="design note 3.5">BuildRateQuery reads Firm-scoped cards plus CoreRecord cards whose lookup is any chain record (at most three ids), and the resolver re-checks every row. The chain read faults propagate (fail closed, as the loader's contract); the job retries.</constraint>
+    <constraint source="design note S6">RateCardImportService sets sprk_scope on create: CoreRecord when request.Core is set, else Firm. The 078 rule "at most one core lookup" is unchanged.</constraint>
+    <constraint source="D-172 Q12">Not in this task: the import's AppendTo check on its core record (a separate fix). RateCardImportEndpoints is not changed.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: no new service or registration (CoreRecordChain is 082's); publish-size delta; no package; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/rule-set-scope-design.md (sections 2 S6, 3.5, 4.5)</file>
+      <file>projects/ebilling-r1/notes/defer-issues.md (DEF-027)</file>
+      <file>docs/data-model/sprk_ratecard.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Resolver tiers and ambiguity" location="src/server/api/Sprk.Bff.Api/Services/Finance/Resolution/RateCardResolver.cs">Extend Tier with distance; keep Applies pure.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read notes/080-ruleset-scope-schema.md: option values and the backfill result on dev. Confirm every dev card has a scope or is listed.</step>
+    <step order="1">RateRow gains the card's scope; ReadRatesAsync reads sprk_scope; BuildRateQuery reads the chain's cards.</step>
+    <step order="2">RateCardResolver.Applies and Tier with scope and distance; resolver tests.</step>
+    <step order="3">InvoiceResolutionService gets the chain from CoreRecordChain; service tests.</step>
+    <step order="4">RateCardImportService writes sprk_scope; import tests.</step>
+    <step order="5">Seeding proof: let Applies treat a CoreRecord card with no lookup as firm-wide; the "deleted record applies to nothing" test must fail. Restore and re-run.</step>
+    <step order="6">dotnet build and dotnet test; publish-size delta.</step>
+    <step order="7">Update DEF-027 in notes/defer-issues.md: status "Fixed in code by 085; live after 079". Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations in projects/ebilling-r1/notes/085-ratecard-scope-inheritance.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 080's backfill left any dev card without a scope (other than cards with two or more lookups), STOP: deploying this resolver would make that card apply to nothing. Report the cards.</trigger>
+    <trigger>If 082's CoreRecordChain cannot be called from the resolution step without a new registration or a change to its contract, STOP and ask the main session; do not copy the chain logic.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">RateCardResolver.cs, InvoiceResolutionService.cs, InvoiceResolutionModels.cs (if needed), RateCardImportService.cs</output>
+    <output type="test">RateCardResolverTests.cs, InvoiceResolutionServiceTests.cs, RateCardImportServiceTests.cs</output>
+    <output type="docs">projects/ebilling-r1/notes/085-ratecard-scope-inheritance.md; DEF-027 status line</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Firm card with no core lookup applies to the firm's invoices on any record.</criterion>
+    <criterion testable="true">A CoreRecord card with no core lookup (record deleted) applies to nothing; a card with an empty scope is not used; a Firm card that carries a lookup is not used; a card with two lookups is not used.</criterion>
+    <criterion testable="true">M's CoreRecord card applies to invoices on M, on P (P directly under M) and on W2 (W2 typed under M); it does NOT apply on W1 (W1 typed under P under M) or on a W filed only under an invoice or event of M.</criterion>
+    <criterion testable="true">W1's own card beats P's card; P's card beats the firm card; within a tier a timekeeper rate beats a classification rate; two parent cards in the deciding tier with different amounts give Ambiguous.</criterion>
+    <criterion testable="true">A chain read fault propagates from the resolution step (no rate resolved on a partial chain).</criterion>
+    <criterion testable="true">The import writes sprk_scope CoreRecord for a card created with a core record and Firm otherwise.</criterion>
+    <criterion testable="true">Seeding proof recorded; publish-size delta recorded; no package; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Task of its own (not folded into 080 or 082): it changes a different service (Services/Finance/Resolution, 046 / 078 code) with its own tests. The chain is read once in the resolution step and once in the rule loader: one extra single-row read per submission, accepted. Parallel group P3-E with 083: no file overlap.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

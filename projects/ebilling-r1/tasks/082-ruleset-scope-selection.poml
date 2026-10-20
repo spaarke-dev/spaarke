@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="082" project="ebilling-r1">
+  <metadata>
+    <title>Rule selection by scope: direct core-record chain, eligibility and BU filter, per-type Replace / Additive precedence, unknown-BU finding</title>
+    <phase>3 Rules (WP3) — rule-set scope (D-171, D-172), wave W3-8</phase>
+    <gate>080 and 081 done; Q1 (uac-r2) decides the BU column, interim B until then</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes which billing rules judge every invoice (eligibility, precedence, inheritance) and reads core records across the secure wall app-only; a widening or a silently dropped rule is a wrong judgement of a firm's invoice.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-relevant selection logic (fail-closed scope and chain) over ontology-owned and uac-r2-owned contracts, with review conditions from both.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>080, 081</deps>
+    <tags>bff, rules, tenant-isolation, testing</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Implement rule-set selection by scope (notes/rule-set-scope-design.md sections 3.1-3.4 and 5.2): a CoreRecordChain reader (the invoice's core record plus its direct parents only), the pure RuleSetApplicability predicate, eligibility and the business-unit filter in BillingFactLoader, the per-type BillingRuleCatalogue.IsAdditive flag, and the lexicographic precedence for Replace types in InvoiceComplianceEvaluator, plus the interim unknown-business-unit finding.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the billing evaluator (tasks 070-073), Dataverse query batching and the uac-r2 filing maps.</role>
+
+  <goal>Every MF / MNF control of design note section 8 rows Precedence, Combination, B2 / F1-b, Inheritance (direct only), BU filter and Fail-safe scope (rule sets) passes; a record-scoped set applies exactly to its record's invoices and its direct children's; nothing widens; the evaluator stays deterministic and inside NFR-01 on a 150-line invoice.</goal>
+
+  <context>
+    <background>Design note sections 3 and 5.2; ontology-r1 conditions in section 12 (condition 4 and the non-blocking items). Decisions: D-39, D-116, D-136 / ontology D-171 (levels, BU filter, point 6 tie-break), D-137 / ontology D-172 (direct association only, no inheritance through an invoice or event; Q5 nearer wins; Q7 limits replace, checklists add; Q13 exact BU). Current code: BillingEvaluationRequest.CoreRecord (BillingFactLoader.cs:26-27); BillingRuleCandidate.Scope (:76); LoadAsync fault contract (:243-245); LoadRulesAsync (:280-379); evaluator D-39 block (InvoiceComplianceEvaluator.cs:264-299); system policy candidate (Services/Finance/Submission/InvoiceSubmissionAfterSteps.cs:1256); D-115 pattern (BillingEvaluationReasons in InvoiceComplianceEvaluator.cs:9-25 and :415; ReasonTemplate / ReasonHeadline in BillingRuleCatalogue.cs:234-236, :325, :357). uac-r2 maps: SecureRootInheritance.TypedFilingColumns (Services/Access/SecureRootInheritance.cs:401) and the project pair rule (:482).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/CoreRecordChain.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/RuleSetApplicability.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFactLoader.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/InvoiceComplianceEvaluator.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingRuleCatalogue.cs (IsAdditive; the unknown-BU reason template and headline)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionAfterSteps.cs (:1256, Level = ClientDefault)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (CoreRecordChain registration; shared append point)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/Billing/CoreRecordChainTests.cs</file>
+      <file role="new">tests/unit/domain/Signals/Billing/RuleSetApplicabilityTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/Billing/BillingFactLoaderTests.cs</file>
+      <file role="modify">tests/unit/domain/Signals/Billing/InvoiceComplianceEvaluatorTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="080" status="pending">S1-S4 on dev</dependency>
+      <dependency task="081" status="pending">RuleSetScope Record / FirmRecord values; validated record-scoped sets</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="D-137 / ontology D-172 (direct association only)">CoreRecordChain returns the invoice's core record at distance 0 and its DIRECT parents at distance 1, never more. Matter: itself only. Project: itself plus the matter or project its BFF-managed pair names. Work assignment: itself plus each record its typed sprk_regardingmatter / sprk_regardingproject names. It never reads a parent's parent, never follows IntermediateFilingColumns (#1630: a work assignment under an invoice or event has a chain of itself only), and ignores a W pair no typed lookup repeats (#1616). One app-only row read, which also returns the business-unit column.</constraint>
+    <constraint source="design note 3.1, ontology-r1 condition 4">CoreRecordChain lives in Services/Signals/Billing/ and reuses SecureRootInheritance.TypedFilingColumns and the project-pair rule; it does not copy them and does not call FindFilingParentsAsync. ontology-r1 does the owner review; uac-r2 reviews the reuse of its maps.</constraint>
+    <constraint source="design note 3.1, BillingFactLoader.cs:243-244">Fail closed: a chain row that cannot be read propagates as a Dataverse fault (the job retries). The invoice is never judged on a shortened chain.</constraint>
+    <constraint source="D-172 S2, design note 3.2">Eligibility: ClientDefault; Firm with sprk_firm = invoice firm; Record with exactly one core lookup whose record is on the chain; FirmRecord with both. A Record / FirmRecord set with no lookup (cleared by a delete) or two lookups is never eligible; a set whose firm was cleared never matches. Query filter plus a re-check of every row, as :304-315 does. One pure function RuleSetApplicability.AppliesTo(set, firmId, chain, homeBu) holds the predicate (083 reuses it).</constraint>
+    <constraint source="D-171 points 3 and 6, D-172 Q13">BU filter is eligibility: a set with sprk_allbusinessunits No applies only when the home BU is on its list, exact match only (no parent / child match). One link-entity query for all sets, chunked at MaxInValues.</constraint>
+    <constraint source="D-172 Q7, design note 3.3">BillingRuleCatalogue.IsAdditive(RuleType): one exhaustive switch, throws on a non-billing type. Additive: ApprovedTimekeeper, NonBillableActivity, RequiredData, AiObservation, SubmissionIntegrity. Replace: ApprovedRate, TimeIncrement, DailyHoursCap, ExpenseRule, InvoiceAge, CoreRecordWindow, Duplicate. A test pins the full list (D-27: closed, reviewed as code).</constraint>
+    <constraint source="D-171, D-172 Q5, design note 3.3">Replace types: rank = (Level, -Distance, BuSpecific) with Level ClientDefault 0, Firm 1, Record 2, FirmRecord 3 and Distance 0 or 1; only a gate-accepted, handler-accepted, not-downgraded version sets D(t); keep v iff accepted and rank(v) ≥ D(t). Additive types: keep every gate- and handler-accepted version (no displacement, the BU tie-break does not apply). B2 and F1-b behaviour unchanged. Ties apply. Order of output unchanged (policy code, then id).</constraint>
+    <constraint source="design note 5.2 (Q1 open), ontology-r1 non-blocking item">Home BU: until uac-r2 answers Q1, a core record owned in the Secure Record business unit has an unknown home BU: only all-BU sets are eligible and the evaluator raises ONE invoice-level, flag-only finding with a new defined reason code (BillingEvaluationReasons, copying the D-115 currency pattern), never a free-text Signal. The Secure Record BU never matches a list.</constraint>
+    <constraint source="project">BillingRuleCandidate.Scope is replaced by Level, Distance and BuSpecific; InvoiceSubmissionAfterSteps.cs:1256 sets Level = ClientDefault for the system policy (D-125). No change to the Signals readers, SignalWriter or any sprk_policy column. Task 102 (if landed) and 101 reuse this loader; do not add a second scope filter anywhere.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement (billing evaluator, existing Services/Signals/Billing), publish-size delta, no package, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/rule-set-scope-design.md (sections 3, 5.2, 8, 12)</file>
+      <file>projects/ebilling-r1/tasks/072-invoice-compliance-evaluator.poml</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Loader rule-set read with re-check" location="src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFactLoader.cs:280-379">Query filter, then every row re-checked; Dataverse faults propagate.</pattern>
+      <pattern name="D-39 displacement" location="src/server/api/Sprk.Bff.Api/Services/Signals/Billing/InvoiceComplianceEvaluator.cs:264-299">Generalise in place from two ranks to the lexicographic rank.</pattern>
+      <pattern name="Flag-only evaluation finding" location="InvoiceComplianceEvaluator.cs:9-25, :415; BillingRuleCatalogue.cs:234-236, :325, :357">The D-115 currency-skip finding: reason code, template, headline.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">git merge-base --is-ancestor 3c83d48cf HEAD. Dev data check (read-only): count sprk_workassignment rows with BOTH sprk_regardingmatter and sprk_regardingproject set, and for those, whether the matter equals the project's own matter. Record the counts.</step>
+    <step order="1">CoreRecordChain and its tests (each table's chain; no second hop; intermediate ignored; untrusted pair ignored; unreadable row propagates).</step>
+    <step order="2">RuleSetApplicability (pure) and its tests, one per eligibility row plus the cleared-lookup and two-lookup cases.</step>
+    <step order="3">Loader: scope query, re-check through RuleSetApplicability, BU link query, Level / Distance / BuSpecific on the candidate; InvoiceSubmissionAfterSteps :1256.</step>
+    <step order="4">BillingRuleCatalogue.IsAdditive with the pinned-list test.</step>
+    <step order="5">Evaluator precedence (Replace rank, Additive keep-all) and the unknown-BU finding.</step>
+    <step order="6">Worked example of design note 3.4 as one seeded test (invoices on P, W1, W2); determinism test; NFR-01 timing on a 150-line invoice recorded.</step>
+    <step order="7">Seeding proofs: (a) let CoreRecordChain add the parent's parent: the "M's set does not apply on W1" test must fail; (b) let a Record set with no lookup be eligible: the cleared-lookup test must fail. Restore and re-run.</step>
+    <step order="8">dotnet build and dotnet test; publish-size delta.</step>
+    <step order="9">Reviews: ontology-r1 (owner review of CoreRecordChain and the evaluator change), uac-r2 (reuse of TypedFilingColumns and the pair rule). Record both.</step>
+    <step order="10">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="11">Record deviations in projects/ebilling-r1/notes/082-ruleset-scope-selection.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Q1 open: if uac-r2 has answered Q1 with a home-BU column, read it (sprk_homebusinessunit ?? owningbusinessunit, or as answered) instead of interim B; if the answer needs a column that does not exist yet on dev, keep interim B and report. Do not create the column (uac-r2 schema).</trigger>
+    <trigger>If step 0 finds work assignments that carry both typed lookups where the matter is only the project's matter, STOP and raise 🔔 Human Input Required: the data cannot express "under P only", so the owner's direct-only rule needs a decision (for example: when the W pair repeats one typed lookup, only that one is direct).</trigger>
+    <trigger>If reusing TypedFilingColumns or the pair rule requires changing SecureRootInheritance (visibility or shape), STOP and ask uac-r2; do not copy the maps.</trigger>
+    <trigger>If NFR-01 on a 150-line invoice is exceeded, STOP and report the measurement before optimising.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>BillingFactLoader (rule sets, policies, versions) and the D-39 block are extended in place. Core-record parents are known only to uac-r2's SecureRootInheritance (maps reused) and FindFilingParentsAsync (needs the provisioning graph, multi-hop and #1630-following, so it does not fit). No existing pure predicate decides rule-set applicability (GetFirmClauseAsync has its own two-scope switch at RuleSetService.cs:2052-2056).</existing>
+    <extension>The loader and evaluator are extended. CoreRecordChain is new because the existing parent walk follows more than the direct parent and intermediates, which D-172 forbids for billing. RuleSetApplicability is new so the loader and the firm-clause check (083) cannot disagree.</extension>
+    <cost-of-doing-nothing>A record-scoped rule set is never evaluated, so a matter's negotiated terms (D-171) never judge its invoices; without the per-type flag a matter's RequiredData rule would silently remove the client default's required fields (Q7).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="dataverse-mcp">read-only step 0 count</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">CoreRecordChain.cs, RuleSetApplicability.cs, BillingFactLoader.cs, InvoiceComplianceEvaluator.cs, BillingRuleCatalogue.cs, InvoiceSubmissionAfterSteps.cs, FinanceModule.cs</output>
+    <output type="test">CoreRecordChainTests.cs, RuleSetApplicabilityTests.cs, BillingFactLoaderTests.cs, InvoiceComplianceEvaluatorTests.cs</output>
+    <output type="docs">projects/ebilling-r1/notes/082-ruleset-scope-selection.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CoreRecordChain: M → [M]; P under M → [P 0, M 1]; W typed under P → [W 0, P 1]; W typed under M → [W 0, M 1]; W under an invoice or event only → [W 0]; a W pair with no typed lookup adds nothing; an unreadable row throws (no partial chain).</criterion>
+    <criterion testable="true">M's Record set applies to P's invoice and to W2's (W2 under M); P's set applies to W1's (W1 under P); M's set does NOT apply to W1's; P's set does NOT apply to M's own invoice; M2's set never applies under M1.</criterion>
+    <criterion testable="true">A Record or FirmRecord set with no core lookup, or with two, is never eligible; a FirmRecord set of firm F2 never applies to F's invoice; a Firm set whose firm was cleared applies to nothing.</criterion>
+    <criterion testable="true">Replace types: on P's invoice PRJ beats MAT and CD (ApprovedRate) and F+M beats CD (TimeIncrement); a FirmRecord set on the parent beats a Record set on the invoice's own record; uncovered types fall through; a refused MAT version leaves CD / FIRM in force; a downgraded MAT version runs as Flag beside CD.</criterion>
+    <criterion testable="true">Additive types: RequiredData of CD and MAT both apply; NonBillableActivity of CD and CD-Lit both apply; an Additive type is never displaced; IsAdditive returns the listed mode for each of the 12 billing types and throws on Threshold.</criterion>
+    <criterion testable="true">BU filter: a Litigation-listed set applies for a Litigation home BU and not for Corporate; a parent BU on the list does not match a child BU; at the same level and distance a BU-listed Replace set beats an all-BU one; with the home BU unknown (Secure Record BU) only all-BU sets apply and exactly one flag-only invoice-level finding with the new reason code is raised; the Secure Record BU never matches a list.</criterion>
+    <criterion testable="true">The design note 3.4 worked example passes as one seeded test; output order is deterministic across runs; NFR-01 timing on a 150-line invoice recorded in notes.</criterion>
+    <criterion testable="true">Seeding proofs (a) and (b) recorded: each named test failed with the guard broken and passed when restored.</criterion>
+    <criterion testable="true">ontology-r1 and uac-r2 reviews recorded; publish-size delta recorded; no package; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>One adversarial-review pass by default; a second one because of the tenant-isolation tag (root CLAUDE.md section 8.5). Runs alone in P3-D (084 waits for 083, which edits RuleSetService.cs). The rate-card side of the chain is 085's; it reuses CoreRecordChain.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
