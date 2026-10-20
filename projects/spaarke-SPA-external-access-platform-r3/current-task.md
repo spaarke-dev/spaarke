@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **078** — ISS-010 quick fix (task-execute, FULL, Opus; POML `tasks/078-read-query-internal-only-guard.poml`) |
-| **Step** | 9.5. Implemented (`ef87f6edc`, notes `a33c17652`). 2 Opus adversarial passes done. Review round 1 fixed by implementer and cherry-picked: `7d23af15b` (code) + `e7ddca3ae` (notes). Build 0 errors on branch. **Running: scoped Sonnet re-check of `git diff 06b867a6b 7d23af15b`** (adversarial-reviewer). |
-| **Status** | Dev BFF = `00aba6d99` (unchanged). **Dev SPA = `1908696a8`** (run 39442677693, 2026-10-20 14:48:58Z; A9 registration live; bundle check passed). Branch head `42061494e`, pushed. |
-| **Next Action** | When the re-check reports: fix any F-class (implementer or main session), then code-review + adr-check (Step 9.5), POML status completed + TASK-INDEX ✅ + `pwsh scripts/check-task-status-drift.ps1`, remove `C:\wt078m` and `C:\wtr3b` with `scripts/worktree/Remove-WorktreeSafe.ps1` (and the stale non-git `C:\wt078b` after a look), tell UAC (ISS-010 is shared). |
+| **Task** | **078 done 2026-10-20** (`c935c70e1`): ISS-010 quick fix; not deployed (goes into the next owner-approved dev BFF deploy, with the K1 live smoke). UAC told. |
+| **Step** | No R3 task in progress. |
+| **Status** | Dev BFF = `00aba6d99` (unchanged). **Dev SPA = `1908696a8`** (run 39442677693, 2026-10-20 14:48:58Z; A9 registration live; bundle check passed). Branch head `c935c70e1`, pushed. |
+| **Next Action** | Wait for: UAC's 186 result and #2128 reasonCode (then the SPA `deniedDetailOf` change); owner answers (ISS-015, C-1, next BFF deploy). Then 074 → 070/071/072 → 090. Leftovers for a human: empty, deregistered folders `C:\code_files\spaarke\.claude\worktrees\agent-a4775c0edc08ac138` and `agent-aad40bdfd9712fba4` (Permission denied on delete); `C:\wt078b` is an older non-git folder (not mine; my `pub` output removed). |
 
 ### Task 078 state
 - Guard: `Services/Ai/Handlers/Dataverse/ExternalCallerCommunicationGuard.cs`; handlers read_query / search_data / describe. External = systemuser `sprk_isexternal` or unresolved (no principal/oid/systemuser); **lookup fault ("lookup-failed") → tool error** (round 1).
@@ -31,7 +31,7 @@
 - **Test runs:** filtered runs, absolute csproj paths; rebuild before trusting results.
 
 ## Next actions (in order)
-1. Finish 078 (above).
+1. (078 done.)
 2. **UAC #2128** (owner chose option 1: retire the Spaarke-tenant guest auto-create). UAC builds it with a new 403 reasonCode on /me (recommended `sdap.access.deny.workforce_guest_use_home_signin` + actionable `detail`). **R3 follow-up:** add that code to `deniedDetailOf()` in `src/client/external-spa/src/components/auth/BffAccessState.tsx` (+ test, optional browser "sign in with company account" action) once UAC sends the final string; ships in the next owner-approved dev SPA deploy. UAC is counting existing guest-bound contacts (read-only).
 3. UAC runs the 186 gate (Tracy home sign-in) on the new SPA; owner browser checks (CIAM, DC profile form, licensed link) hand over to 074.
 4. 074 → 070/071/072 → final R3 PR (090).
