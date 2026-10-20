@@ -2,13 +2,14 @@
 
 > **Format:** this file holds the CURRENT state only. Rewrite it at each checkpoint (never prepend), and keep it at or under 10 KB.
 > - **Standing rules:** the project `CLAUDE.md`.
-> - **Decisions:** `notes/session27-owner-decisions-and-research.md`, now at **round 109 (2026-10-20)**.
+> - **Decisions:** `notes/session27-owner-decisions-and-research.md`, now at **round 110 (2026-10-20)**.
 > - **Defer list:** `notes/defer-issues.md`.
-> - **Delete design:** `notes/core-record-delete-design.md` (§11 = ebilling D-137).
+> - **Delete design:** `notes/core-record-delete-design.md` (§12 = ebilling D-146; supersedes §10/§11).
+> - **D7 design:** `notes/2119-manage-access-all-forms-design.md` §6.
 > - **Gates:** `notes/batch7-live-gates-2026-10-17.md`.
 > - **Narrative:** the commit messages.
 
-> **Last Updated**: 2026-10-20 (checkpoint #55).
+> **Last Updated**: 2026-10-20 (checkpoint #56).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -17,52 +18,52 @@
 | **Mode** | Final push. Fix-round loop; merge only when BOTH required checks (Router + "Client lint (type-aware ratchet)") are green; one background merge job at a time; `--squash --match-head-commit`, no `--delete-branch`, after `git merge-tree`. Deploy via R3. A task closes on merge + deploy + a server-side gate. |
 | **Fix bar** | The most technically correct fix; no complexity without value. Every defect found is fixed or filed. |
 | **Agents** | Opus for executors and verifiers. Helper scripts get a unique prefix in a private folder; the scratchpad is shared (memory `agent-scratch-script-names`). |
-| **Dev live** | BFF `1.0.0+c3ec5d6e5` (18:12:51Z; rollback `deploy/rollback/wwwroot-20261020T180912Z` = 21184ecd4, in R3's worktree). SPA from master 28274e04e (has d4ea1b4a8, `workforce_guest_use_home_signin`); rollback tag `external-spa-dev-rollback-1908696a8`. |
+| **Dev live** | BFF `1.0.0+0b976628e` (#2122) since 20:36Z; rollback `deploy/rollback/wwwroot-20261020T203441Z` (= c3ec5d6e5), in R3's worktree. |
+| **Merged today** | #2138 83d360ec8, #2133 c3ec5d6e5, #2122 0b976628e, #2078 (036) 4f5f22694 — 036 is NOT yet deployed. |
 
 ## OWNER items outstanding
-1. **#2122** (#2121 option b): two adversarial passes and the re-check are clean → awaiting **"2122: approved"**, then a green Router, then merge.
-2. **#1864**: "1864: B/A/C" (B recommended).
-3. **186**: the owner signs in as Tracy at her HOME directory (a guest sign-in now gets `workforce_guest_use_home_signin`), submits one intake, and says "Tracy done". Then the server gate and the remove/restore Create step (5b approved).
-4. **#2119 D1–D6**: "2119: as recommended".
-5. **Census**: a/b/c. **Provisioning**: may `CustomerBusinessUnitId` be set automatically? **#2139**: member contacts, owner or retire.
-6. **Q1/Q10** (ebilling rule sets): relayed by ebilling and not yet confirmed by the owner directly → awaiting "Q1/Q10 confirmed".
-7. **Sign-offs still to come**: #2078 (036) and #2143, each after its adversarial passes.
+1. **#1864**: "1864: B/A/C" (B recommended).
+2. **#2119 D1–D6**: "2119: as recommended". (D7 accepted in round 110.)
+3. **Census** a/b/c (a recommended). **Provisioning**: may `CustomerBusinessUnitId` be set automatically (yes recommended)? **#2139**: (2) recommended. **#2157**: (a) recommended.
+4. **186**: the owner signs in as Tracy, submits one intake, and tells me first → check 3 + 5b remove/restore of `prvCreatesprk_ServiceRequest` (fd03f48f…) on role 9deaac9c…, at Basic. Check 6 needs a licensed internal sign-in.
+5. **Sign-offs to come**: #2150 (#2143) and #2153 (#2152), each after its passes.
+6. **036 flag flip**: the owner confirms directly to R3, after my canary result.
 
 ## In flight (agents; cap 4)
-- **#2143 fix** (agent a743a53c95f234ff5, option A): `RecordOwnershipResolver.ReparentAsync`.
-  - SDK conditional update (`IfRowVersionMatches` → `DBConcurrencyException`); re-read the version and parents after `applyChange`, then re-resolve; at most 3 retries; fail closed; compensation is conditional too.
-  - Next: draft PR → 2 adversarial passes (security) → owner sign-off → merge → deploy → gate. Tell ebilling when it lands (050a re-file).
-- **036 / #2078 round 4** (agent a5f1a15baba6d9e6e, C:/wt036): null/unknown → 503, not 403; route-census guard control; K3 doc; K6 token test; #2147/#2148 links.
-  - Next: apply its "Round 4" ADR drafts (`036-adr-edits-owner-a-f.md`) to C:/wt036/.claude/adr in the main session → re-check the fix diff → owner sign-off.
-  - Run the 034 negative canary (NFR-04 merge gate). Merge after #2122: merge master in and keep the #2121 filter on the flag-off `else` path, with per-id rights.
-  - Then R3 deploys and flips the flag → gates (i)–(v) plus the disabled/unlicensed check → close #1074 and #1567.
-- **#2130/#2128 live gates** (agent a19cc19d9ad468d00): it appends "## #2130 / #2128 live gates (2026-10-20)" to the batch7 gates note (uncommitted).
-  - On PASS: commit the note and close #2130, #2131 and #2128.
-  - B3 (a live guest refusal) may be NOT-RUN; the owner can see it by signing in as Tracy's guest.
+- **#2150 (#2143) round 4** (agent a89d69914b839a4f1, C:/wt2143): add the lineage-unchanged conjunct to the guard's `beforeBuSecure` arm (same gap as F1). Round 3 = c3483933b7 + 82224df95f (10/10 mutants killed).
+  - Next: scoped re-check of the r3+r4 diff (fix diff + direct callers/callees) → owner sign-off → merge → R3 deploy → live gate. Tell ebilling the final exception name (`RecordOwnerUnsettledException` → 409 `record_owner_unsettled`) when merged.
+  - Known limits (round 3, accepted): K4 counts only an owner this call wrote (others' correct write → accurate 409, retry-able); recovery after a held release ends with the parents' owner; `ResolveSecureBusinessUnitAsync` / owner-team queries keep NoLock (not parent facts).
+- **ebilling 050a round 2 review** (agent a7ae539be21181008) → send the findings to ebilling, with the email-activity answer.
+- **036 dev deploy (flag OFF)**: requested from R3. When live: flag-off sanity check → re-run the 034 negative canary against the deployed build → tell R3 the result → owner flips → gates (i)–(v) + disabled/unlicensed → close #1074, #1567. Then UAC builds D7 T7.
 
-## Done 2026-10-20
-- **#2138** (#2128, guest auto-create retired) merged as 83d360ec8, after owner sign-off in round 109. The dev data step was a no-op: all 3 guest contacts have enabled systemusers.
-- **#2133** (#2130, PII logs and census) merged as c3ec5d6e5 and deployed.
-- **#2110**: gate PASS, closed.
-- Filed: #2142, #2143, #2147, #2148.
-- ADR-034 and ADR-028 036 edits applied in C:/wt036 (cd258fead, c2e8e9b2f8).
-- Delete design §11 (D-137): a record's own rule set is deleted when uncited, otherwise unlinked (86cba5a00).
-- ebilling `sprk_ebillingoverride` pre-notice answered: no UAC collision; not a census-guarded privilege. Asked ebilling for: fail-closed confirmation, the privilege in the 112 export, and a read-back after-notice.
+## Next after those
+- **#2153 (#2152)** (C:/wt2152, draft, head 863326f0b): owner sign-off → merge → R3 deploy → gate.
+- **D7 T7** (UAC, after 036 is live): one predicate (root grants ∧ own Access Permission ≠ Restricted ∧ not from internal-only/non-Open communication, via `_sprk_relatedcommunication_value` → ParentDocumentLookup ≤ 3 hops, cycles fail closed; reuse `ExternalCallerCommunicationGuard.ReadVisibleCommunicationIdsAsync`) wired on list, download, versions, preview, SPE routes and AI tools; secure `sprk_relatedcommunication` for BFF-only writes; I-14 + ADR amendment. ebilling 081.5/086.4 and word-add-in T8 depend on it.
+- **word-add-in task 130 (T8)**: review its PR with two security passes when it arrives.
+- **field-mapping 017**: review when sent.
+- **ebilling 081/082/086/087 revision**: review when sent.
+
+## Done 2026-10-20 (since checkpoint #55)
+- #2121 option (b): merged (#2122) and deployed; live gate PASS (b48c0bd87); closed.
+- #2130/#2131/#2128 live gates PASS (aa84f4e40); closed.
+- Task 186 gate: Tracy registration PASS (47fded389); intake + 5b NOT-RUN.
+- 036 merged after round 4 (fault → 503 `sdap.access.dataverse_unavailable`, not 403); ADR-028 A5 + ADR-034 A2 edits.
+- D7 designed and accepted (§6; 6bd15c51e). D-145 (file under the record; internal-only → Restricted) and D-146 (rule sets / rate cards always unlinked, never deleted; ownership never downgraded) recorded (3fbf650fb).
+- #2152 fixed in #2153 (MUST field exclusions always unioned; CacheVersions 3/7).
+- Filed: #2151, #2152, #2154, #2156, #2157, #2158.
 
 ## Task 186 close-out checklist
-- Verify that the Workforce-role export includes prvCreatesprk_InvoiceSubmission (Basic) and prvReadsprk_InvoiceSubmission (Deep).
+- Export the Workforce role into SpaarkeMaster (package-scope.json:128-131 currently excludes it); verify it includes prvCreatesprk_InvoiceSubmission (Basic) and prvReadsprk_InvoiceSubmission (Deep).
 
 ## Peers (state)
 | Peer | Pipe | State |
 |---|---|---|
-| R3 | `cc-msg-a429112bc6eaf3b995ac0fa16833f543` | Deploys with owner approval. Next: #2122, then 036 + flag flip. 186 email-claim result is owed to R3. |
-| ebilling | `cc-msg-83e4fded6c95d56e40d08aa57052bd98` | Expect: the 050a revision; the D-137 citing lookups; the snapshot-column diff (ProvisionProjectEndpoint, child-create) to review under (a)–(f); the rule-set design revision; the override after-notice. |
-| field-mapping | `cc-msg-8bd2a30b7c3f35dc7941d072ffd53ebb` | 011 OK. Review 017 when sent. |
-| Ontology | `cc-msg-7848627ab2b6296a8e63ee2cbf37cde6` | #2113 OK; #2102 PASS. |
+| R3 | `cc-msg-a429112bc6eaf3b995ac0fa16833f543` | Deploying 036 flag-off on request; flip waits for the canary + the owner. |
+| ebilling | `cc-msg-83e4fded6c95d56e40d08aa57052bd98` | Accepted D-145/D-146; 081.5/086.4 depend on T7 (STOP trigger). Expect the 081/082/086/087 revision. Owes the override after-notice. |
+| word-add-in | — | T8 = task 130; depends on T7. |
+| field-mapping | `cc-msg-8bd2a30b7c3f35dc7941d072ffd53ebb` | Review 017 when sent. |
 | Provisioning | `cc-msg-dc6f397f8149c1443ce9df2440ac85fc` | Awaiting the owner's answer on CustomerBusinessUnitId. |
 
-## Next actions
-1. Process agent results as they land (#2143, 036 r4, the gates).
-2. Merge #2122 on "2122: approved" + green checks → R3 deploy → live gate → close #2121.
-3. Worktrees to remove when idle: C:/wt099b, C:/wt2103, C:/wt2091b, C:/wt2130, C:/wt2128 (all merged).
-4. Wrap-up 090: the 058 docs and the UAT checklist.
+## Cleanup / wrap-up
+- Worktrees to remove when idle: C:/wt099b, C:/wt2103, C:/wt2091b, C:/wt2130, C:/wt2128, C:/wt036 (all merged).
+- Wrap-up 090: the 058 docs and the UAT checklist.
