@@ -92,20 +92,26 @@ All dated 2026-10-19 unless noted; rationale in design.md §7 and spec "Owner Cl
 
 ## 4. Coordination
 
-- **unified-access-control-r2**: owns `OwnedChildWrite.cs` (re-file half), the census, re-file and route-authorization
-  guards, and roles.
-  - Open PRs **#2110** (`OwnedChildWrite.cs`, `ChildRecordEndpoints.cs`, `CommunicationService.cs`,
-    `RefileWriterAfterRefileGuardTests`, `DATAVERSE-WRITE-PATH-ARCHITECTURE.md`) and **#2078**
-    (`RouteAuthorizationGuardTests.*`).
-  - Task 010 records sign-off and timing. Run `/conflict-check` before every W2 task. `RefileAsync` stays theirs.
-  - Re-owning non-secure rows (repair pass) and the `prvAssign` audit are coordinated with them.
-- **spaarke-ontology-platform-r1**: chat tools, decision route cores, `SignalWriter`, `DecisionRecordWriter`. Re-point,
-  don't redesign. Open ontology PRs #1493/#1494/#1507 are in the notification area.
-- **PR #1501** (`fix/136-create-analysis-hub-404`): edits `CreateAnalysisWizardWidget.tsx` and
-  `ChildRecordEndpoints.cs`. Rebase before 028/020.
-- **PR #2104** (UAC-r2): edits `CreateProjectWizard/closureService.ts` + `CloseProjectDialog.tsx`. Task 022 must not
-  touch the closure files.
-- **PR #1911** (ebilling-r1): edits `DATAVERSE-WRITE-PATH-ARCHITECTURE.md`. Merge-aware in 060/062.
+**Authoritative, per file and per task: [`notes/w2-coordination.md`](notes/w2-coordination.md)** (task 010, updated
+2026-10-20). Summary:
+
+- **Every W2–W4 task:** rebase onto master and run `/conflict-check`. Whoever merges second rebases.
+- **unified-access-control-r2:**
+  - owns the `OwnedChildWrite.RefileAsync` half, the census, re-file and route guards, and roles;
+  - conditional no-objection to W2, conditions (a)–(d);
+  - reviews the 011 and 017 diffs before merge, and gets a ping before merge on refusal-code, owner or
+    post-create-order changes;
+  - #2110 and #2104 are merged. Task 022 still must not touch the closure files.
+- **ebilling-r1** (#1911, draft, no date):
+  - the invoice-family guard sits in `OwnedChildWrite` Create/Refile and in push;
+  - the second lander reconciles: the create half goes to the registry (012), the refile half stays in RefileAsync;
+  - single invoice creator; `InvoiceSubmissionPersister` uses fixed ids and one transaction;
+  - reviews 025, 032 and the registry rule.
+- **spaarke-ontology-platform-r1:**
+  - #1501 is superseded;
+  - 033 needs an ontology design-note review and must keep the writer invariants; no field mapping into Signal or
+    Decision Record rows;
+  - leaving those writers out of the service is valid.
 - **external-access-r3**: `ExternalDataService` creates are an inventory exception; they adopt the mapping step
   themselves.
 

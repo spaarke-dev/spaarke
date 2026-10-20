@@ -111,6 +111,17 @@ ebilling-r1 branch changes to W2-W4 files (merge-base 1473b34c6):
   - §11: 033 must state the cost of doing nothing for the two writers specifically. **Leaving them out of the
     service (a named exception in 060) is a valid outcome; the ontology owner decides.**
 
+## ebilling-r1 heads-up (2026-10-20): SignalWriter / DecisionRecordWriter range in flight
+
+ebilling has a range in flight that adds no creates:
+- `SignalWriter.CloseActedByAutomatedDecisionAsync` gains a `decidedByUserId` written as `sprk_resolvedby` inside its
+  conditional update. It may be renamed `CloseActedByDecisionAsync`.
+- `DecisionRecordWriter` gains a read-only `FindBillingDecisionResolvedSetAsync`.
+- `DecisionCommitService.CallerMayDecideAsync` may move to a shared helper as a pure move.
+
+**No collision** with 033, which covers creates only; closes are row-version updates and out of scope. W2/017 do not
+touch DecisionCommitService. ebilling sends the shas when the range lands; rebase before 033.
+
 ## Shared rules (agreed with UAC-r2, ebilling-r1 and ontology-r1)
 
 1. Before each W2/W3/W4 task: rebase onto `origin/master` and run `/conflict-check`. Whoever merges second rebases.
