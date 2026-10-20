@@ -1,0 +1,1393 @@
+using System.ServiceModel;
+using System.Text.Json.Nodes;
+using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
+using Microsoft.Xrm.Sdk;
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Finance;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Tests.Api.Finance;
+using Sprk.Bff.Api.Tests.Services.Signals;
+using Xunit;
+using ProcessorTests = Sprk.Bff.Api.Tests.Services.Finance.Submission.InvoiceSubmissionProcessorTests;
+using ProcessorHarness = Sprk.Bff.Api.Tests.Services.Finance.Submission.InvoiceSubmissionProcessorTests.Harness;
+
+namespace Sprk.Bff.Api.Tests.Services.Finance;
+
+/// <summary>
+/// ebilling-r1 task 105: Override and Return of a blocked internal submission (<see cref="SubmissionOverrideService"/>), security-sensitive.
+/// The blocked outcome comes from the real processor and the stored findings from the real persister builder; the Decision Record is
+/// written by the REAL <see cref="BillingDecisionRecorder"/> over the writer's test harness, so "exactly one Decision Record" is the
+/// writer's own exactly-once. Every refusal asserts that nothing changed (no record, no submission update, no invoice move, no notice).
+/// </summary>
+public class SubmissionOverrideServiceTests
+{
+    private const string Reason = "Negotiated rate is not yet in the rate card.";
+
+    // ── The world ──
+
+    internal sealed class World
+    {
+        public static readonly Guid SubmissionId = Guid.Parse("10500000-0000-4000-8000-0000000000b1");
+        public static readonly Guid Matter = Guid.Parse("10500000-0000-4000-8000-0000000000a1");
+        public static readonly Guid Caller = Guid.Parse("10500000-0000-4000-8000-0000000000c1");
+        public static readonly Guid CallerContact = Guid.Parse("10500000-0000-4000-8000-0000000000c2");
+        public static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId);
+        public const string Token = "caller-token";
+
+        public Entity Submission { get; }
+        public Entity? Invoice { get; set; }
+
+        /// <summary>What happened, in order: lock, record, transition, update, notify, unlock.</summary>
+        public List<string> Order { get; } = [];
+
+        public List<BillingDecision> Recorded { get; } = [];
+        public List<Dictionary<string, object>> Updates { get; } = [];
+        public List<InvoiceLifecycleStatus> Transitions { get; } = [];
+        public List<SubmissionDecidedNotification> Notified { get; } = [];
+        public List<string> LockKeys { get; } = [];
+        public HashSet<string> HeldKeys { get; } = new(StringComparer.Ordinal);
+
+        public Exception? ReadFault { get; set; }
+        public Exception? InvoiceReadFault { get; set; }
+        public Exception? LockFault { get; set; }
+        public Exception? ReleaseFault { get; set; }
+        public Exception? RecordFault { get; set; }
+        public Exception? UpdateFault { get; set; }
+        public Exception? SinkFault { get; set; }
+        public Exception? TransitionFault { get; set; }
+        public string? TransitionRefusal { get; set; }
+        public bool SubmissionAbsent { get; set; }
+
+        /// <summary>Called inside the conditional submission write, before the row version is compared (a concurrent writer).</summary>
+        public Action? OnUpdate { get; set; }
+
+        public Mock<IGenericEntityService> Entities { get; } = new(MockBehavior.Strict);
+        public Mock<IInvoiceLifecycleService> Lifecycle { get; } = new(MockBehavior.Strict);
+        public Mock<IIdempotencyService> Idempotency { get; } = new(MockBehavior.Strict);
+        public Mock<IEbillingNotificationSink> Sink { get; } = new(MockBehavior.Strict);
+        public ScriptedProbe Probe { get; } = new();
+        public DecisionRecordWriterTests.Harness Records { get; }
+        public BillingDecisionRecorder Recorder { get; }
+        public FakeTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 10, 20, 9, 0, 0, TimeSpan.Zero));
+        public CapturedLogger Log { get; } = new();
+        public SubmissionOverrideService Service { get; }
+
+        private readonly string _initialJson;
+
+        public static async Task<World> CreateAsync(Func<JsonObject, JsonObject>? editFindings = null)
+        {
+            var harness = new ProcessorHarness { Rules = [ProcessorTests.InvoiceAgeReject()], Channel = InvoiceSubmissionChannel.Internal };
+            harness.Lines = [ProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20))];
+            var outcome = await harness.RunAsync();
+            outcome.Kind.Should().Be(SubmissionEvaluationKind.Blocked, "the fixture must be a real blocked outcome");
+            return new World(outcome, editFindings);
+        }
+
+        private World(SubmissionEvaluationOutcome outcome, Func<JsonObject, JsonObject>? editFindings)
+        {
+            var json = JsonNode.Parse(InvoiceSubmissionPersister.BuildFindingsJson(outcome, InvoiceId))!.AsObject();
+            json = editFindings?.Invoke(json) ?? json;
+            _initialJson = json.ToJsonString();
+
+            // The held state task 049 leaves (D-101): the submission Rejected with the blocked code, its invoice In Review.
+            Submission = new Entity(FinanceBaseValues.SubmissionEntity, SubmissionId)
+            {
+                ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal),
+                [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Rejected),
+                [InvoiceSubmissionPersister.SubmissionReasonCode] = SubmissionReasonCodes.Blocked,
+                [InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference("sprk_invoice", InvoiceId),
+                [InvoiceSubmissionPersister.SubmissionFindingsJson] = _initialJson,
+                ["sprk_trackingnumber"] = "INV-100.1",
+                ["sprk_firminvoicenumber"] = "INV-100",
+                ["versionnumber"] = 100L,
+            };
+            SetInvoiceStatus(InvoiceLifecycleStatus.InReview);
+
+            Entities.Setup(e => e.RetrieveAsync(FinanceBaseValues.SubmissionEntity, SubmissionId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .Returns((string _, Guid _, string[] columns, CancellationToken _) =>
+                {
+                    if (ReadFault is { } fault)
+                    {
+                        return Task.FromException<Entity>(fault);
+                    }
+
+                    return SubmissionAbsent ? Task.FromException<Entity>(NotFound()) : Task.FromResult(Copy(Submission, columns));
+                });
+            Entities.Setup(e => e.RetrieveAsync("sprk_invoice", InvoiceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .Returns((string _, Guid _, string[] columns, CancellationToken _) =>
+                {
+                    if (InvoiceReadFault is { } fault)
+                    {
+                        return Task.FromException<Entity>(fault);
+                    }
+
+                    return Invoice is null ? Task.FromException<Entity>(NotFound()) : Task.FromResult(Copy(Invoice, columns));
+                });
+            Entities.Setup(e => e.BulkUpdateIfRowVersionsMatchAsync(FinanceBaseValues.SubmissionEntity,
+                    It.IsAny<List<(Guid id, Dictionary<string, object> fields, long rowVersion)>>(), It.IsAny<CancellationToken>()))
+                .Returns((string _, List<(Guid id, Dictionary<string, object> fields, long rowVersion)> updates, CancellationToken _) =>
+                {
+                    Order.Add("update");
+                    OnUpdate?.Invoke();
+                    if (UpdateFault is { } fault)
+                    {
+                        return Task.FromException(fault);
+                    }
+
+                    var (id, fields, rowVersion) = updates.Single();
+                    id.Should().Be(SubmissionId);
+                    if (rowVersion != Submission.GetAttributeValue<long>("versionnumber"))
+                    {
+                        throw new System.Data.DBConcurrencyException("row version mismatch");
+                    }
+
+                    Updates.Add(fields);
+                    foreach (var (key, value) in fields)
+                    {
+                        Submission[key] = value;
+                    }
+
+                    Submission["versionnumber"] = Submission.GetAttributeValue<long>("versionnumber") + 1;
+                    return Task.CompletedTask;
+                });
+
+            Lifecycle.Setup(l => l.TransitionAsync(InvoiceId, It.IsAny<InvoiceLifecycleStatus>(), It.IsAny<CancellationToken>()))
+                .Returns((Guid _, InvoiceLifecycleStatus target, CancellationToken _) =>
+                {
+                    Order.Add("transition");
+                    Transitions.Add(target);
+                    if (TransitionFault is { } fault)
+                    {
+                        return Task.FromException<InvoiceTransitionResult>(fault);
+                    }
+
+                    if (TransitionRefusal is { } reason)
+                    {
+                        return Task.FromResult(InvoiceTransitionResult.Refuse(target, InvoiceLifecycleStatus.InReview, reason));
+                    }
+
+                    SetInvoiceStatus(target);
+                    return Task.FromResult(InvoiceTransitionResult.Moved(InvoiceLifecycleStatus.InReview, target));
+                });
+
+            Idempotency.Setup(i => i.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
+                .Returns((string key, string _, TimeSpan? _, CancellationToken _) =>
+                {
+                    Order.Add("lock");
+                    LockKeys.Add(key);
+                    if (LockFault is { } fault)
+                    {
+                        return Task.FromException<bool>(fault);
+                    }
+
+                    return Task.FromResult(HeldKeys.Add(key));
+                });
+            Idempotency.Setup(i => i.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns((string key, string _, CancellationToken _) =>
+                {
+                    Order.Add("unlock");
+                    HeldKeys.Remove(key);
+                    return ReleaseFault is { } fault ? Task.FromException(fault) : Task.CompletedTask;
+                });
+
+            Sink.Setup(s => s.SubmissionDecidedAsync(It.IsAny<SubmissionDecidedNotification>(), It.IsAny<CancellationToken>()))
+                .Returns((SubmissionDecidedNotification n, CancellationToken _) =>
+                {
+                    Order.Add("notify");
+                    if (SinkFault is { } fault)
+                    {
+                        return Task.FromException(fault);
+                    }
+
+                    Notified.Add(n);
+                    return Task.CompletedTask;
+                });
+
+            Records = DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness());
+            Records.Rows[("sprk_invoice", InvoiceId)] = new Entity("sprk_invoice", InvoiceId) { ["sprk_matter"] = new EntityReference("sprk_matter", Matter) };
+            foreach (var version in (outcome.Evaluation?.Findings ?? []).Select(f => f.PolicyVersionId).Distinct())
+            {
+                Records.Rows[("sprk_policyversion", version)] = new Entity("sprk_policyversion", version);
+            }
+
+            var identity = new Mock<IIdentityNormalizationService>();
+            identity.Setup(i => i.ResolveAsync(Caller, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PersonIdentity(Caller, ContactId: CallerContact));
+            Recorder = new BillingDecisionRecorder(Records.Writer, identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
+
+            Probe.CallerSystemUserId = Caller;
+            Probe.Hold(EbillingOverridePrivilege.PrivilegeName);
+
+            Service = new SubmissionOverrideService(
+                Entities.Object, Lifecycle.Object, Idempotency.Object, Sink.Object, Probe, Log,
+                (decision, ct) =>
+                {
+                    Order.Add("record");
+                    Recorded.Add(decision);
+                    return RecordFault is { } fault ? Task.FromException<BillingDecisionRecordResult>(fault) : Recorder.RecordAsync(decision, ct);
+                },
+                Recorder.Preflight,
+                Clock);
+        }
+
+        public int RecordCreates => Records.Created.Count(e => e.LogicalName == "sprk_decisionrecord");
+
+        public InvoiceSubmissionStatus Status =>
+            (InvoiceSubmissionStatus)Submission.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus).Value;
+
+        public string? Code => Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode);
+
+        public string FindingsJson => Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
+
+        public InvoiceLifecycleStatus InvoiceStatus
+        {
+            get
+            {
+                InvoiceStatusCodes.TryFromStatusCode(Invoice!.GetAttributeValue<OptionSetValue>("statuscode").Value, out var status).Should().BeTrue();
+                return status;
+            }
+        }
+
+        public void SetInvoiceStatus(InvoiceLifecycleStatus status) =>
+            Invoice = new Entity("sprk_invoice", InvoiceId) { ["statuscode"] = new OptionSetValue(InvoiceStatusCodes.StatusCodeOf(status)) };
+
+        public void SetSubmission(InvoiceSubmissionStatus status, string? code)
+        {
+            Submission[InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)status);
+            Submission[InvoiceSubmissionPersister.SubmissionReasonCode] = code;
+        }
+
+        public Task<BlockedDecisionResult> OverrideAsync(string? reason = Reason, string? token = Token) =>
+            Service.OverrideAsync(SubmissionId, reason, token, CancellationToken.None);
+
+        public Task<BlockedDecisionResult> ReturnAsync(string? reason = Reason, string? token = Token) =>
+            Service.ReturnAsync(SubmissionId, reason, token, CancellationToken.None);
+
+        /// <summary>Nothing was recorded, moved, written or announced, and the submission is exactly as it was.</summary>
+        public void AssertNothingChanged()
+        {
+            RecordCreates.Should().Be(0, "no Decision Record");
+            Recorded.Should().BeEmpty("the recorder was never reached");
+            Updates.Should().BeEmpty("no submission write");
+            Transitions.Should().BeEmpty("no invoice move");
+            Notified.Should().BeEmpty("no notice");
+            FindingsJson.Should().Be(_initialJson);
+        }
+
+        public static Entity Copy(Entity source, string[] columns)
+        {
+            var copy = new Entity(source.LogicalName, source.Id) { RowVersion = source.RowVersion };
+            foreach (var (k, v) in source.Attributes)
+            {
+                if (columns.Contains(k, StringComparer.Ordinal))
+                {
+                    copy[k] = v;
+                }
+            }
+
+            return copy;
+        }
+
+        public static FaultException<OrganizationServiceFault> NotFound() =>
+            new(new OrganizationServiceFault { ErrorCode = -2147220969 }, new FaultReason("does not exist"));
+    }
+
+    /// <summary>
+    /// The caller-rights probe at its virtual seams: which privileges the caller holds, who the caller is, and a fault for the privilege
+    /// question ALONE (<see cref="PrivilegeFault"/>) or for every question (<see cref="IdentityFault"/>), so each fail-closed path is
+    /// reached on its own. Like the real probe, a missing token answers "not held" and "unknown caller".
+    /// </summary>
+    internal sealed class ScriptedProbe : Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe
+    {
+        private readonly HashSet<string> _held = new(StringComparer.Ordinal);
+
+        public ScriptedProbe()
+            : base(new HttpClient(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(), NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance)
+        {
+        }
+
+        public List<FinanceEndpointsAuthorizationContractTests.PrivilegeCall> Calls { get; } = [];
+        public Exception? PrivilegeFault { get; set; }
+        public Exception? IdentityFault { get; set; }
+        public Guid? CallerSystemUserId { get; set; }
+
+        public void Hold(string privilege) => _held.Add(privilege);
+
+        public void Release(string privilege) => _held.Remove(privilege);
+
+        public override Task<bool> CallerHoldsPrivilegeAsync(string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        {
+            Calls.Add(new FinanceEndpointsAuthorizationContractTests.PrivilegeCall(privilegeName, !string.IsNullOrEmpty(callerBearerToken)));
+            return PrivilegeFault is { } fault
+                ? Task.FromException<bool>(fault)
+                : Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && _held.Contains(privilegeName));
+        }
+
+        public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default) =>
+            IdentityFault is { } fault
+                ? Task.FromException<Guid?>(fault)
+                : Task.FromResult(string.IsNullOrEmpty(callerBearerToken) ? null : CallerSystemUserId);
+    }
+
+    internal sealed class CapturedLogger : ILogger<SubmissionOverrideService>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception) + (exception is null ? string.Empty : " | " + exception.Message)));
+    }
+
+    private static bool IsHeld(Entity submission)
+    {
+        var status = submission.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus)?.Value;
+        var code = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode);
+        var conditions = FinanceBaseValues.HeldSubmissionConditions;
+        return conditions.Single(c => c.Column == FinanceBaseValues.SubmissionStatusColumn).Values.Contains(status!)
+            && conditions.Single(c => c.Column == FinanceBaseValues.SubmissionReasonColumn).Values.Contains(code!);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // Override: the happy path
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Override_WithThePrivilegeAndAReason_AcceptsTheSubmission_RecordsOnce_AndReleasesTheHold()
+    {
+        var w = await World.CreateAsync();
+        IsHeld(w.Submission).Should().BeTrue("the fixture starts in the held set");
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        result.Outcome.Should().Be("Overridden");
+        result.InvoiceId.Should().Be(World.InvoiceId);
+        result.RecordId.Should().NotBeNull();
+        w.RecordCreates.Should().Be(1, "exactly one Decision Record (D-100)");
+        w.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+        w.Code.Should().Be(SubmissionReasonCodes.Overridden);
+        IsHeld(w.Submission).Should().BeFalse("Accepted leaves the held set, which releases the invoice (D-101)");
+        w.InvoiceStatus.Should().Be(InvoiceLifecycleStatus.InReview, "an override releases the hold; the invoice stays In Review for approval");
+        w.Transitions.Should().BeEmpty();
+        w.Notified.Should().ContainSingle().Which.Should().Be(
+            new SubmissionDecidedNotification(World.SubmissionId, SubmissionDecisionOutcome.Accepted, InvoiceSubmissionChannel.Internal, World.InvoiceId, null));
+    }
+
+    [Fact]
+    public async Task Override_RecordsBeforeAnythingChanges_AndHoldsThePerInvoiceLockAroundTheWholeDecision()
+    {
+        var w = await World.CreateAsync();
+
+        await w.OverrideAsync();
+
+        w.Order.Should().Equal("lock", "record", "update", "notify", "unlock");
+        w.LockKeys.Should().Equal(SubmissionOverrideService.LockKey(World.InvoiceId));
+        w.HeldKeys.Should().BeEmpty("the lock is released");
+    }
+
+    [Fact]
+    public async Task Override_StoresWhoWhenAndWhyOnTheSubmission_AndKeepsEveryFindingUntouched()
+    {
+        var w = await World.CreateAsync();
+        var before = JsonNode.Parse(w.FindingsJson)!.AsObject();
+
+        var result = await w.OverrideAsync();
+
+        var after = JsonNode.Parse(w.FindingsJson)!.AsObject();
+        after["override"]!["recordId"]!.GetValue<string>().Should().Be(result.RecordId!.Value.ToString("D"));
+        after["override"]!["bySystemUserId"]!.GetValue<string>().Should().Be(World.Caller.ToString("D"));
+        after["override"]!["reason"]!.GetValue<string>().Should().Be(Reason);
+        after["override"]!["on"]!.GetValue<string>().Should().StartWith("2026-10-20T09:00:00");
+        foreach (var (name, value) in before)
+        {
+            after[name]!.ToJsonString().Should().Be(value!.ToJsonString(), $"the stored member '{name}' is unchanged: an override never rewrites a finding");
+        }
+    }
+
+    [Fact]
+    public async Task Override_TheDecisionRecordIsBuiltOnlyFromTheCallerAndTheStoredFindings()
+    {
+        var w = await World.CreateAsync();
+
+        await w.OverrideAsync("  " + Reason + "  ");
+
+        var decision = w.Recorded.Should().ContainSingle().Which;
+        decision.ActionCode.Should().Be("override-submission");
+        decision.DecisionId.Should().Be(SubmissionOverrideService.OverrideDecisionIdFor(World.SubmissionId), "derived server-side from the submission");
+        decision.SubjectId.Should().Be(World.InvoiceId, "an override is recorded under the invoice (D-101)");
+        decision.Decider.SystemUserId.Should().Be(World.Caller, "the decider is the authenticated caller");
+        decision.Decider.Role.Should().Contain("eBilling Override");
+        decision.Outcome.Should().Be("Overridden");
+        decision.Reason.Should().Be(Reason, "trimmed");
+        decision.ResolvedSignalIds.Should().BeNull("an override resolves no Signal");
+        decision.PolicyVersionId.Should().NotBeNull().And.NotBe(Guid.Empty, "the first deciding finding's policy version, from the stored findings");
+        decision.Values!.Values.Should().OnlyContain(v => v is string, "Values are strings only (074)");
+        decision.Written.Should().ContainSingle().Which.Id.Should().Be(World.InvoiceId);
+    }
+
+    [Fact]
+    public async Task Override_TheSameCallTwice_IsOneDecision_AndTheRepeatWritesNothing()
+    {
+        var w = await World.CreateAsync();
+        var first = await w.OverrideAsync();
+        var updates = w.Updates.Count;
+
+        var second = await w.OverrideAsync();
+
+        second.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        second.Outcome.Should().Be("Overridden");
+        w.RecordCreates.Should().Be(1, "a repeat writes no second record");
+        w.Updates.Should().HaveCount(updates);
+        w.Notified.Should().HaveCount(1, "a repeat announces nothing");
+        first.Kind.Should().Be(BlockedDecisionKind.Decided);
+    }
+
+    [Fact]
+    public async Task Override_WhenTheNoticeFails_TheOverrideStands()
+    {
+        var w = await World.CreateAsync();
+        w.SinkFault = new InvalidOperationException("sink down");
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // Override: the privilege (D-76), fail closed
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Override_WithoutThePrivilege_Is403NotPermitted_AndNothingIsReadOrWritten()
+    {
+        var w = await World.CreateAsync();
+        w.Probe.Release(EbillingOverridePrivilege.PrivilegeName);
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Refused);
+        result.StatusCode.Should().Be(403);
+        result.ErrorCode.Should().Be("ebilling.override.not_permitted");
+        w.AssertNothingChanged();
+        w.Order.Should().BeEmpty("refused before the lock, before any read");
+        w.Entities.Invocations.Should().BeEmpty("a refusal says nothing about the submission");
+        IsHeld(w.Submission).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Override_WhenThePrivilegeCheckFaults_RefusesLikeNoPrivilege()
+    {
+        var w = await World.CreateAsync();
+        w.Probe.PrivilegeFault = new HttpRequestException("dataverse down");
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(403);
+        result.ErrorCode.Should().Be("ebilling.override.not_permitted");
+        w.AssertNothingChanged();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Override_WithoutACallerToken_Is403_AndNothingChanges(string? token)
+    {
+        var w = await World.CreateAsync();
+
+        var result = await w.OverrideAsync(token: token);
+
+        result.StatusCode.Should().Be(403);
+        result.ErrorCode.Should().Be("ebilling.override.not_permitted");
+        w.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task Override_WhenTheCallerCannotBeIdentified_Is403_EvenWithThePrivilege()
+    {
+        var w = await World.CreateAsync();
+        w.Probe.CallerSystemUserId = null;
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(403);
+        result.ErrorCode.Should().Be("ebilling.override.not_permitted");
+        w.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task Override_AsksTheOverridePrivilege_OfDataverse_AsTheCaller_OnEveryCall()
+    {
+        var w = await World.CreateAsync();
+
+        await w.OverrideAsync();
+        await w.OverrideAsync();
+
+        w.Probe.Calls.Should().HaveCount(2).And.OnlyContain(c => c.Privilege == "prvWritesprk_ebillingoverride" && c.HasToken);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // The reason
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   \t ")]
+    public async Task Override_WithoutAReason_Is400ReasonRequired_AndNothingChanges(string? reason)
+    {
+        var w = await World.CreateAsync();
+
+        var result = await w.OverrideAsync(reason);
+
+        result.StatusCode.Should().Be(400);
+        result.ErrorCode.Should().Be("ebilling.reason_required");
+        w.AssertNothingChanged();
+        w.Order.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("  ")]
+    public async Task Return_WithoutAReason_Is400ReasonRequired_AndNothingChanges(string? reason)
+    {
+        var w = await World.CreateAsync();
+
+        var result = await w.ReturnAsync(reason);
+
+        result.StatusCode.Should().Be(400);
+        result.ErrorCode.Should().Be("ebilling.reason_required");
+        w.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task Override_WithAReasonLongerThanTheColumn_Is400_AndNothingChanges()
+    {
+        var w = await World.CreateAsync();
+
+        var result = await w.OverrideAsync(new string('x', 2001));
+
+        result.StatusCode.Should().Be(400);
+        result.ErrorCode.Should().Be("ebilling.reason_too_long");
+        w.AssertNothingChanged();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // Override: what may be overridden
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Override_OfAMissingSubmission_Is404()
+    {
+        var w = await World.CreateAsync();
+        w.SubmissionAbsent = true;
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(404);
+        result.ErrorCode.Should().Be("ebilling.blocked.not_found");
+        w.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task Override_WhenTheSubmissionCannotBeRead_Is503_AndNothingChanges()
+    {
+        var w = await World.CreateAsync();
+        w.ReadFault = new TimeoutException("dataverse");
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(503);
+        result.ErrorCode.Should().Be("ebilling.blocked.unavailable");
+        w.AssertNothingChanged();
+    }
+
+    [Theory]
+    [InlineData("spa", "ebilling.blocked.not_internal")]
+    [InlineData("failed", "ebilling.blocked.submission_failed")]
+    [InlineData("accepted-by-processing", "ebilling.blocked.already_accepted")]
+    [InlineData("still-processing", "ebilling.blocked.still_processing")]
+    [InlineData("rejected-other-reason", "ebilling.blocked.not_blocked")]
+    [InlineData("received", "ebilling.blocked.not_blocked")]
+    [InlineData("returned", "ebilling.blocked.already_returned")]
+    public async Task Override_OfASubmissionThatIsNotBlocked_Is409_AndNothingChanges(string shape, string expected)
+    {
+        var w = await World.CreateAsync();
+        Shape(w, shape);
+        w.Updates.Clear();
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(expected);
+        w.RecordCreates.Should().Be(0);
+        w.Updates.Should().BeEmpty();
+        w.Transitions.Should().BeEmpty();
+        w.Notified.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("spa", "ebilling.blocked.not_internal")]
+    [InlineData("failed", "ebilling.blocked.submission_failed")]
+    [InlineData("accepted-by-processing", "ebilling.blocked.already_accepted")]
+    [InlineData("still-processing", "ebilling.blocked.still_processing")]
+    [InlineData("rejected-other-reason", "ebilling.blocked.not_blocked")]
+    [InlineData("overridden", "ebilling.blocked.already_overridden")]
+    public async Task Return_OfASubmissionThatIsNotBlocked_Is409_AndNothingChanges(string shape, string expected)
+    {
+        var w = await World.CreateAsync();
+        Shape(w, shape);
+
+        var result = await w.ReturnAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(expected);
+        w.RecordCreates.Should().Be(0);
+        w.Updates.Should().BeEmpty();
+        w.Transitions.Should().BeEmpty();
+        w.Notified.Should().BeEmpty();
+    }
+
+    private static void Shape(World w, string shape)
+    {
+        switch (shape)
+        {
+            case "spa":
+                w.Submission["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Spa);
+                break;
+            case "failed":
+                w.SetSubmission(InvoiceSubmissionStatus.Failed, SubmissionReasonCodes.ProcessingFailed);
+                break;
+            case "accepted-by-processing":
+                w.SetSubmission(InvoiceSubmissionStatus.Accepted, null);
+                break;
+            case "still-processing":
+                w.SetSubmission(InvoiceSubmissionStatus.Processing, SubmissionReasonCodes.Blocked);
+                break;
+            case "rejected-other-reason":
+                w.SetSubmission(InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.ReadNoInvoice);
+                break;
+            case "received":
+                w.SetSubmission(InvoiceSubmissionStatus.Received, null);
+                break;
+            case "returned":
+                w.SetSubmission(InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Returned);
+                break;
+            case "overridden":
+                w.SetSubmission(InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(shape));
+        }
+    }
+
+    [Theory]
+    [InlineData(InvoiceLifecycleStatus.Approved)]
+    [InlineData(InvoiceLifecycleStatus.SentToAp)]
+    [InlineData(InvoiceLifecycleStatus.Paid)]
+    [InlineData(InvoiceLifecycleStatus.Rejected)]
+    [InlineData(InvoiceLifecycleStatus.Cancelled)]
+    public async Task Override_WhenTheInvoiceIsNoLongerInReview_Is409InvoiceNotHeld_AndNothingChanges(InvoiceLifecycleStatus status)
+    {
+        var w = await World.CreateAsync();
+        w.SetInvoiceStatus(status);
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be("ebilling.blocked.invoice_not_held");
+        w.AssertNothingChanged();
+        w.Status.Should().Be(InvoiceSubmissionStatus.Rejected);
+    }
+
+    [Fact]
+    public async Task Override_WhenTheInvoiceWasReturnedToTheFirm_Is409AlreadyReturned()
+    {
+        var w = await World.CreateAsync();
+        w.SetInvoiceStatus(InvoiceLifecycleStatus.ReturnedToFirm);
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be("ebilling.blocked.already_returned");
+        w.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task Override_WhenTheInvoiceIsGone_Is409InvoiceNotHeld()
+    {
+        var w = await World.CreateAsync();
+        w.Invoice = null;
+
+        var result = await w.OverrideAsync();
+
+        result.ErrorCode.Should().Be("ebilling.blocked.invoice_not_held");
+        w.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task Override_WhenTheSubmissionLinksNoInvoice_Is409_AndNothingChanges()
+    {
+        var w = await World.CreateAsync();
+        w.Submission[InvoiceSubmissionPersister.SubmissionInvoice] = null;
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be("ebilling.blocked.invoice_not_held");
+        w.Order.Should().BeEmpty("no lock is taken for a submission with no invoice");
+    }
+
+    [Fact]
+    public async Task Override_WhenTheInvoiceCannotBeRead_Is503_AndNothingChanges()
+    {
+        var w = await World.CreateAsync();
+        w.InvoiceReadFault = new TimeoutException("dataverse");
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(503);
+        result.ErrorCode.Should().Be("ebilling.blocked.unavailable");
+        w.AssertNothingChanged();
+        w.HeldKeys.Should().BeEmpty("the lock taken for the decision is released");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // Override: the stored findings fail closed
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("garbage")]
+    [InlineData("not-an-object")]
+    [InlineData("other-invoice")]
+    [InlineData("not-blocked-kind")]
+    [InlineData("no-deciding-finding")]
+    public async Task Override_WhenTheStoredFindingsCannotBuildTheDecision_Is409_AndNothingChanges(string defect)
+    {
+        var w = await World.CreateAsync();
+        switch (defect)
+        {
+            case "missing":
+                w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = null;
+                break;
+            case "garbage":
+                w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = "{not json";
+                break;
+            case "not-an-object":
+                w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = "[1,2]";
+                break;
+            case "other-invoice":
+                var json = JsonNode.Parse(w.FindingsJson)!.AsObject();
+                json["invoiceId"] = Guid.NewGuid().ToString("D");
+                w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = json.ToJsonString();
+                break;
+            case "not-blocked-kind":
+                var kind = JsonNode.Parse(w.FindingsJson)!.AsObject();
+                kind["kind"] = "Accepted";
+                w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = kind.ToJsonString();
+                break;
+            case "no-deciding-finding":
+                var none = JsonNode.Parse(w.FindingsJson)!.AsObject();
+                none["decision"]!["deciding"] = new JsonArray();
+                w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = none.ToJsonString();
+                break;
+        }
+
+        var json0 = w.FindingsJson;
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be("ebilling.blocked.findings_unreadable");
+        w.RecordCreates.Should().Be(0);
+        w.Updates.Should().BeEmpty();
+        w.Notified.Should().BeEmpty();
+        w.FindingsJson.Should().Be(json0);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // Serialisation, record-before-mutate, retries (074 caller obligations)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Override_WhenAnotherDecisionHoldsTheInvoiceLock_Is409InProgress_AndNothingChanges()
+    {
+        var w = await World.CreateAsync();
+        w.HeldKeys.Add(SubmissionOverrideService.LockKey(World.InvoiceId));
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be("ebilling.blocked.in_progress");
+        w.AssertNothingChanged();
+        w.HeldKeys.Should().Contain(SubmissionOverrideService.LockKey(World.InvoiceId), "a lock this call did not take is not released");
+    }
+
+    [Fact]
+    public async Task Override_WhenTheLockCannotBeTaken_Is503_AndNothingChanges()
+    {
+        var w = await World.CreateAsync();
+        w.LockFault = new TimeoutException("redis");
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(503);
+        result.ErrorCode.Should().Be("ebilling.blocked.unavailable");
+        w.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task Override_WhenTheLockCannotBeReleased_TheFinishedDecisionStillSucceeds()
+    {
+        var w = await World.CreateAsync();
+        w.ReleaseFault = new TimeoutException("redis");
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+    }
+
+    [Fact]
+    public async Task Override_WhenTheDecisionRecordCannotBeWritten_Is503_AndTheSubmissionIsStillHeld()
+    {
+        var w = await World.CreateAsync();
+        w.RecordFault = new TimeoutException("dataverse");
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(503);
+        result.ErrorCode.Should().Be("ebilling.blocked.record_unavailable");
+        w.Updates.Should().BeEmpty("record before mutate: a failed record changes nothing");
+        w.Notified.Should().BeEmpty();
+        IsHeld(w.Submission).Should().BeTrue();
+        w.HeldKeys.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("ReviewInvalid", "ebilling.blocked.decision_conflict", 409)]
+    [InlineData("SubjectUnfileable", "ebilling.blocked.record_refused", 409)]
+    [InlineData("OwnerRefused", "ebilling.blocked.record_refused", 409)]
+    [InlineData("BillingRecordLookupFailed", "ebilling.blocked.record_unavailable", 503)]
+    public async Task Override_WhenTheRecordWriterRefuses_TheRefusalIsMapped_AndNothingChanges(string reasonName, string code, int status)
+    {
+        var w = await World.CreateAsync();
+        var reason = (string)typeof(DecisionRecordRefusalReason).GetField(reasonName)!.GetRawConstantValue()!;
+        w.RecordFault = new DecisionRecordRefusedException(reason, "refused");
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(status);
+        result.ErrorCode.Should().Be(code);
+        w.Updates.Should().BeEmpty();
+        w.Notified.Should().BeEmpty();
+        IsHeld(w.Submission).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Override_ARetryAfterTheSubmissionWriteFailed_FindsTheSameRecordAndFinishes()
+    {
+        var w = await World.CreateAsync();
+        w.UpdateFault = new TimeoutException("dataverse");
+        var failed = await w.OverrideAsync();
+        failed.StatusCode.Should().Be(503);
+        w.RecordCreates.Should().Be(1, "the record was written before the write that failed");
+        IsHeld(w.Submission).Should().BeTrue("the submission is unchanged, so the retry is allowed");
+
+        w.UpdateFault = null;
+        var retried = await w.OverrideAsync();
+
+        retried.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.RecordCreates.Should().Be(1, "the retry found the first attempt's record instead of writing another");
+        w.Recorded.Should().HaveCount(2);
+        w.Recorded.Select(d => d.DecisionId).Distinct().Should().ContainSingle();
+        w.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+    }
+
+    [Fact]
+    public async Task Override_WhenAConcurrentWriterOverrodeItFirst_ThisCallIsAnAlreadyDecidedNoOp()
+    {
+        var w = await World.CreateAsync();
+        w.OnUpdate = () =>
+        {
+            // Another writer finishes the same override between this call's read and its conditional write.
+            w.OnUpdate = null;
+            w.SetSubmission(InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden);
+            w.Submission["versionnumber"] = 101L;
+        };
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        w.RecordCreates.Should().Be(1);
+        w.Notified.Should().BeEmpty("the call that wrote the state announces it, not the one that lost the race");
+    }
+
+    [Fact]
+    public async Task Override_WhenTheSubmissionChangedUnderIt_Is409ConcurrentChange_AndOverwritesNothing()
+    {
+        var w = await World.CreateAsync();
+        w.OnUpdate = () =>
+        {
+            // A reprocess rewrites the submission (a different state, not an override).
+            w.OnUpdate = null;
+            w.SetSubmission(InvoiceSubmissionStatus.Processing, SubmissionReasonCodes.Blocked);
+            w.Submission["versionnumber"] = 101L;
+        };
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be("ebilling.blocked.concurrent_change");
+        w.Updates.Should().BeEmpty("the conditional write did not land");
+        w.Status.Should().Be(InvoiceSubmissionStatus.Processing, "the other writer's state is not overwritten");
+        w.Notified.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Override_WhenTheDecisionCannotBeAddedToTheFindings_Is409_AndTheSubmissionIsNotAccepted()
+    {
+        var w = await World.CreateAsync(json =>
+        {
+            json["padding"] = new string('p', InvoiceSubmissionPersister.FindingsJsonMaxLength);
+            return json;
+        });
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be("ebilling.blocked.findings_too_large");
+        w.Updates.Should().BeEmpty();
+        IsHeld(w.Submission).Should().BeTrue("the submission is not released without its decision stored");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // Return (D-73: no privilege)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Return_NeedsNoPrivilege_RecordsOnce_ReturnsTheInvoice_AndLeavesTheHeldSet()
+    {
+        var w = await World.CreateAsync();
+        w.Probe.Release(EbillingOverridePrivilege.PrivilegeName);
+
+        var result = await w.ReturnAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        result.Outcome.Should().Be("Returned");
+        w.Probe.Calls.Should().BeEmpty("Return never asks the override privilege (D-73)");
+        w.RecordCreates.Should().Be(1);
+        w.Recorded.Single().ActionCode.Should().Be("return-to-firm");
+        w.Recorded.Single().DecisionId.Should().Be(SubmissionOverrideService.ReturnDecisionIdFor(World.SubmissionId));
+        w.Recorded.Single().Decider.SystemUserId.Should().Be(World.Caller);
+        w.Transitions.Should().Equal(InvoiceLifecycleStatus.ReturnedToFirm);
+        w.InvoiceStatus.Should().Be(InvoiceLifecycleStatus.ReturnedToFirm);
+        w.Status.Should().Be(InvoiceSubmissionStatus.Rejected, "a returned submission stays Rejected");
+        w.Code.Should().Be(SubmissionReasonCodes.Returned);
+        IsHeld(w.Submission).Should().BeFalse();
+        w.Notified.Should().BeEmpty("a return is not an acceptance");
+        w.Order.Should().Equal("lock", "record", "transition", "update", "unlock");
+    }
+
+    [Fact]
+    public async Task Return_StoresWhoWhenAndWhy_AndTheOverrideDecisionIdIsNotTheReturnDecisionId()
+    {
+        var w = await World.CreateAsync();
+
+        var result = await w.ReturnAsync();
+
+        var after = JsonNode.Parse(w.FindingsJson)!.AsObject();
+        after["return"]!["recordId"]!.GetValue<string>().Should().Be(result.RecordId!.Value.ToString("D"));
+        after["return"]!["bySystemUserId"]!.GetValue<string>().Should().Be(World.Caller.ToString("D"));
+        after["return"]!["reason"]!.GetValue<string>().Should().Be(Reason);
+        after.ContainsKey("override").Should().BeFalse();
+        SubmissionOverrideService.ReturnDecisionIdFor(World.SubmissionId).Should().NotBe(SubmissionOverrideService.OverrideDecisionIdFor(World.SubmissionId));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task Return_WhenTheCallerCannotBeIdentified_Is403_AndNothingChanges(string? token)
+    {
+        var w = await World.CreateAsync();
+
+        var result = await w.ReturnAsync(token: token);
+
+        result.StatusCode.Should().Be(403);
+        result.ErrorCode.Should().Be("ebilling.blocked.decider_unverified");
+        w.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task Return_WhenTheCallerIdentityIsUnknownOrFaults_Is403_AndNothingChanges()
+    {
+        var unknown = await World.CreateAsync();
+        unknown.Probe.CallerSystemUserId = null;
+        var faulted = await World.CreateAsync();
+        faulted.Probe.IdentityFault = new HttpRequestException("dataverse down");
+
+        foreach (var w in new[] { unknown, faulted })
+        {
+            var result = await w.ReturnAsync();
+
+            result.StatusCode.Should().Be(403);
+            result.ErrorCode.Should().Be("ebilling.blocked.decider_unverified");
+            w.AssertNothingChanged();
+        }
+    }
+
+    [Fact]
+    public async Task Override_WhenTheCallerIdentityFaults_Is403NotPermitted_AndNothingChanges()
+    {
+        var w = await World.CreateAsync();
+        w.Probe.IdentityFault = new HttpRequestException("dataverse down");
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(403);
+        result.ErrorCode.Should().Be("ebilling.override.not_permitted");
+        w.AssertNothingChanged();
+    }
+
+    [Fact]
+    public async Task Return_RecordsBeforeItMovesTheInvoice_AndAFailedRecordMovesNothing()
+    {
+        var w = await World.CreateAsync();
+        w.RecordFault = new TimeoutException("dataverse");
+
+        var result = await w.ReturnAsync();
+
+        result.StatusCode.Should().Be(503);
+        w.Transitions.Should().BeEmpty("the invoice is not moved without its record");
+        w.Updates.Should().BeEmpty();
+        w.InvoiceStatus.Should().Be(InvoiceLifecycleStatus.InReview);
+    }
+
+    [Theory]
+    [InlineData(InvoiceTransitionReasons.ConcurrentChange, "ebilling.blocked.concurrent_change")]
+    [InlineData(InvoiceTransitionReasons.NotAllowed, "ebilling.blocked.invoice_not_held")]
+    [InlineData(InvoiceTransitionReasons.NotFound, "ebilling.blocked.invoice_not_held")]
+    public async Task Return_WhenTheLifecycleRefusesTheMove_IsRefused_AndTheSubmissionStaysHeld(string reason, string code)
+    {
+        var w = await World.CreateAsync();
+        w.TransitionRefusal = reason;
+
+        var result = await w.ReturnAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(code);
+        w.Updates.Should().BeEmpty("the submission is not marked returned while its invoice was not");
+        IsHeld(w.Submission).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Return_WhenTheLifecycleFaults_Is503_AndARetryFinishesWithOneRecord()
+    {
+        var w = await World.CreateAsync();
+        w.TransitionFault = new TimeoutException("dataverse");
+        (await w.ReturnAsync()).StatusCode.Should().Be(503);
+
+        w.TransitionFault = null;
+        var retried = await w.ReturnAsync();
+
+        retried.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.RecordCreates.Should().Be(1);
+        w.InvoiceStatus.Should().Be(InvoiceLifecycleStatus.ReturnedToFirm);
+        w.Code.Should().Be(SubmissionReasonCodes.Returned);
+    }
+
+    [Fact]
+    public async Task Return_AnInterruptedReturn_WhereTheInvoiceWasAlreadyMoved_FinishesWithoutMovingItAgain()
+    {
+        var w = await World.CreateAsync();
+        w.SetInvoiceStatus(InvoiceLifecycleStatus.ReturnedToFirm);
+
+        var result = await w.ReturnAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.Transitions.Should().BeEmpty("the invoice is already Returned to Firm");
+        w.Code.Should().Be(SubmissionReasonCodes.Returned);
+        w.RecordCreates.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Return_TheSameCallTwice_IsOneDecision()
+    {
+        var w = await World.CreateAsync();
+        await w.ReturnAsync();
+
+        var second = await w.ReturnAsync();
+
+        second.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        w.RecordCreates.Should().Be(1);
+        w.Transitions.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task Return_ThenOverride_IsRefused_AndOverrideThenReturn_IsRefused()
+    {
+        var returned = await World.CreateAsync();
+        await returned.ReturnAsync();
+        var overrideAfterReturn = await returned.OverrideAsync();
+        overrideAfterReturn.ErrorCode.Should().Be("ebilling.blocked.already_returned");
+        returned.RecordCreates.Should().Be(1);
+
+        var overridden = await World.CreateAsync();
+        await overridden.OverrideAsync();
+        var returnAfterOverride = await overridden.ReturnAsync();
+        returnAfterOverride.ErrorCode.Should().Be("ebilling.blocked.already_overridden");
+        overridden.RecordCreates.Should().Be(1);
+        overridden.Transitions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Return_WhenTheInvoiceIsAlreadyApprovedOrGone_Is409_AndNothingChanges()
+    {
+        var w = await World.CreateAsync();
+        w.SetInvoiceStatus(InvoiceLifecycleStatus.Approved);
+
+        var result = await w.ReturnAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be("ebilling.blocked.invoice_not_held");
+        w.AssertNothingChanged();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // Read
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Get_OfABlockedSubmission_ShowsTheBlockingFindings_AndCanOverrideForAPrivilegedCaller()
+    {
+        var w = await World.CreateAsync();
+
+        var view = await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None);
+
+        view.Should().NotBeNull();
+        view!.State.Should().Be("Blocked");
+        view.InvoiceId.Should().Be(World.InvoiceId);
+        view.CanOverride.Should().BeTrue();
+        view.CanReturn.Should().BeTrue();
+        view.Findings.Should().NotBeEmpty();
+        view.Findings.Should().Contain(f => f.Blocking && !f.Overridden && !string.IsNullOrEmpty(f.ReasonCode));
+        view.Override.Should().BeNull();
+        view.Return.Should().BeNull();
+        w.Updates.Should().BeEmpty("a read writes nothing");
+    }
+
+    [Fact]
+    public async Task Get_ForACallerWithoutThePrivilege_CannotOverride_ButCanReturn()
+    {
+        var w = await World.CreateAsync();
+        w.Probe.Release(EbillingOverridePrivilege.PrivilegeName);
+
+        var view = await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None);
+
+        view!.CanOverride.Should().BeFalse();
+        view.CanReturn.Should().BeTrue("Return needs no privilege (D-73)");
+    }
+
+    [Fact]
+    public async Task Get_WhenThePrivilegeCheckFaults_CanOverrideIsFalse()
+    {
+        var w = await World.CreateAsync();
+        w.Probe.PrivilegeFault = new HttpRequestException("down");
+
+        var view = await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None);
+
+        view!.CanOverride.Should().BeFalse();
+        view.State.Should().Be("Blocked");
+    }
+
+    [Fact]
+    public async Task Get_WithoutAToken_CanOverrideIsFalse()
+    {
+        var w = await World.CreateAsync();
+
+        var view = await w.Service.GetAsync(World.SubmissionId, null, CancellationToken.None);
+
+        view!.CanOverride.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(InvoiceLifecycleStatus.Approved)]
+    [InlineData(InvoiceLifecycleStatus.Paid)]
+    public async Task Get_WhenTheInvoiceIsNoLongerInReview_CannotOverrideOrReturn(InvoiceLifecycleStatus status)
+    {
+        var w = await World.CreateAsync();
+        w.SetInvoiceStatus(status);
+
+        var view = await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None);
+
+        view!.CanOverride.Should().BeFalse();
+        view.CanReturn.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Get_AfterAnOverride_MarksTheBlockingFindingsOverridden_WithoutRemovingThem()
+    {
+        var w = await World.CreateAsync();
+        var before = await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None);
+        await w.OverrideAsync();
+
+        var view = await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None);
+
+        view!.State.Should().Be("Overridden");
+        view.CanOverride.Should().BeFalse();
+        view.CanReturn.Should().BeFalse();
+        view.Findings.Should().HaveCount(before!.Findings.Count, "an override never deletes a finding");
+        view.Findings.Where(f => f.Blocking).Should().NotBeEmpty().And.OnlyContain(f => f.Overridden);
+        view.Override.Should().NotBeNull();
+        view.Override!.BySystemUserId.Should().Be(World.Caller);
+        view.Override.Reason.Should().Be(Reason);
+    }
+
+    [Fact]
+    public async Task Get_AfterAReturn_ShowsReturned()
+    {
+        var w = await World.CreateAsync();
+        await w.ReturnAsync();
+
+        var view = await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None);
+
+        view!.State.Should().Be("Returned");
+        view.Return.Should().NotBeNull();
+        view.Findings.Should().OnlyContain(f => !f.Overridden);
+    }
+
+    [Fact]
+    public async Task Get_OfAnSpaSubmission_IsNotBlocked_AndNeverAsksThePrivilege()
+    {
+        var w = await World.CreateAsync();
+        Shape(w, "spa");
+
+        var view = await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None);
+
+        view!.State.Should().Be("NotBlocked");
+        view.CanOverride.Should().BeFalse();
+        view.CanReturn.Should().BeFalse();
+        w.Probe.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Get_OfAMissingSubmission_IsNull_AndOfAnEmptyId_IsNull()
+    {
+        var w = await World.CreateAsync();
+        w.SubmissionAbsent = true;
+
+        (await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None)).Should().BeNull();
+        (await w.Service.GetAsync(Guid.Empty, World.Token, CancellationToken.None)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Get_WhenTheReadFaults_Throws503_NeverNotFound()
+    {
+        var w = await World.CreateAsync();
+        w.ReadFault = new TimeoutException("dataverse");
+
+        var act = () => w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(503);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // Pins
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void ThePrivilegeName_IsWriteOnTheCarrierTable_TheDeployScriptCreates()
+    {
+        EbillingOverridePrivilege.CarrierTable.Should().Be("sprk_ebillingoverride");
+        EbillingOverridePrivilege.PrivilegeName.Should().Be("prvWritesprk_ebillingoverride");
+        EbillingOverridePrivilege.RoleName.Should().Be("eBilling Override");
+
+        var script = File.ReadAllText(FindFromRepoRoot("scripts", "ebilling", "Deploy-EbillingOverridePrivilegeSchema.ps1"));
+        script.Should().Contain("sprk_ebillingoverride", "the privilege's table is the one the script creates");
+        script.Should().Contain("prvWritesprk_ebillingoverride", "the script verifies the exact privilege the service asks for");
+        script.Should().Contain("eBilling Override", "the script creates the role the service documents");
+    }
+
+    [Fact]
+    public void TheOverrideReasonCodes_AreThoseTheHeldPredicateAndTheSpendPathsExpect()
+    {
+        SubmissionReasonCodes.Overridden.Should().Be("ebilling.submission.overridden");
+        SubmissionReasonCodes.Returned.Should().Be("ebilling.submission.returned");
+        SubmissionReasonCodes.Overridden.Should().NotBe(FinanceBaseValues.BlockedReasonCode);
+        SubmissionReasonCodes.Returned.Should().NotBe(FinanceBaseValues.BlockedReasonCode);
+        SubmissionOverrideService.LockKey(World.InvoiceId).Should().Be($"ebilling-invoice-decision:{World.InvoiceId:N}");
+    }
+
+    [Fact]
+    public void TheErrorCodes_AreAStableContract()
+    {
+        BlockedSubmissionErrors.NotPermitted.Should().Be("ebilling.override.not_permitted");
+        BlockedSubmissionErrors.ReasonRequired.Should().Be("ebilling.reason_required");
+        BlockedSubmissionErrors.AlreadyOverridden.Should().Be("ebilling.blocked.already_overridden");
+        BlockedSubmissionErrors.AlreadyReturned.Should().Be("ebilling.blocked.already_returned");
+        BlockedSubmissionErrors.NotInternal.Should().Be("ebilling.blocked.not_internal");
+    }
+
+    [Fact]
+    public async Task Logs_CarryIdsAndCodesOnly_NeverTheReason()
+    {
+        var w = await World.CreateAsync();
+        const string secret = "CONFIDENTIAL-negotiation-note-7731";
+        w.Probe.Release(EbillingOverridePrivilege.PrivilegeName);
+        await w.OverrideAsync(secret);
+        w.Probe.Hold(EbillingOverridePrivilege.PrivilegeName);
+        w.RecordFault = new TimeoutException("dataverse " + secret);
+        await w.OverrideAsync(secret);
+        w.RecordFault = null;
+        await w.OverrideAsync(secret);
+        await w.ReturnAsync(secret);
+
+        w.Log.Entries.Should().NotBeEmpty();
+        w.Log.Entries.Where(e => e.Message.Contains("CONFIDENTIAL", StringComparison.Ordinal))
+            .Where(e => !e.Message.Contains("dataverse CONFIDENTIAL", StringComparison.Ordinal))
+            .Should().BeEmpty("the reason text is never logged by this service");
+    }
+
+    [Fact]
+    public async Task BuildDecision_IsDeterministic_SoEveryAttemptBuildsTheSameDecision()
+    {
+        var w = await World.CreateAsync();
+        var stored = InvoiceSubmissionAfterSteps.StoredFindings.Parse(w.FindingsJson)!;
+
+        var a = SubmissionOverrideService.BuildDecision(SubmissionOverrideService.Verb.Override, stored, World.SubmissionId, World.InvoiceId, World.Caller, Reason);
+        var b = SubmissionOverrideService.BuildDecision(SubmissionOverrideService.Verb.Override, stored, World.SubmissionId, World.InvoiceId, World.Caller, Reason);
+
+        a.DecisionId.Should().Be(b.DecisionId);
+        a.Facts.Keys.Should().BeEquivalentTo(b.Facts.Keys);
+        a.Values.Should().BeEquivalentTo(b.Values);
+        a.Facts.Keys.Should().NotContain("findings", "the facts carry the scrubbed plan, never the raw findings (D-112)");
+    }
+
+    private static string FindFromRepoRoot(params string[] parts)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine([dir.FullName, .. parts]);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new FileNotFoundException(Path.Combine(parts));
+    }
+}
