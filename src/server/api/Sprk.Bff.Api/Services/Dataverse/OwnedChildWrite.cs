@@ -62,13 +62,11 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 internal static class OwnedChildWrite
 {
     /// <summary>Columns the server owns on the app-only path; a request that sets one is refused, never honoured.</summary>
-    internal static readonly IReadOnlySet<string> ServerOwnedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "ownerid", "owninguser", "owningteam", "owningbusinessunit",
-        "createdby", "createdon", "createdonbehalfby",
-        "modifiedby", "modifiedon", "modifiedonbehalfby",
-        "overriddencreatedon", "importsequencenumber",
-    };
+    /// <remarks>Field-mapping-server-write-path-r1 task 012: a view over
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.CommonServerOwnedColumns"/>, the one source; deleted
+    /// when task 013 switches its readers to the registry.</remarks>
+    internal static readonly IReadOnlySet<string> ServerOwnedColumns =
+        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.CommonServerOwnedColumns;
 
     /// <summary>
     /// Task 158: every column a mapped write sets, as <see cref="SecureRootFilingGate.CheckAsync"/> reads them — each lookup
@@ -184,16 +182,16 @@ internal static class OwnedChildWrite
     /// matter/project precedent. Its extra <c>sprk_assignedto</c> is left to the model (b2-r2, verifier b2-r1 item 4; task
     /// note §15b). A table not listed has no "for" column.
     /// </summary>
+    /// <remarks>Field-mapping-server-write-path-r1 task 012: a view over the registry's
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRule.ForPerson"/> entries, the one source; deleted when
+    /// task 013 switches its readers to the registry.</remarks>
     internal static readonly IReadOnlyDictionary<string, ForPersonColumn> ForPersonColumns =
-        new Dictionary<string, ForPersonColumn>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["sprk_todo"] = new(AssignedToDefaults.AssignedToAttribute, "contact"),
-            ["sprk_event"] = new(AssignedToDefaults.AssignedToAttribute, "contact"),
-            ["sprk_matter"] = new("sprk_assignedtointernal", "contact"),
-            ["sprk_project"] = new("sprk_assignedtointernal", "contact"),
-            ["sprk_workassignment"] = new("sprk_assignedtointernal", "contact"),
-            ["sprk_communication"] = new("sprk_sentby", "systemuser"),
-        };
+        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.All
+            .Where(rule => rule.ForPerson is not null)
+            .ToDictionary(
+                rule => rule.Table,
+                rule => new ForPersonColumn(rule.ForPerson!.Column, rule.ForPerson.RelatedTable),
+                StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// <paramref name="item"/> with <paramref name="column"/> set to a lookup of <paramref name="relatedTable"/>

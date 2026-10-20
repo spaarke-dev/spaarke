@@ -246,12 +246,13 @@ public sealed class RecordCreationService
     /// Task 133 (unified-access-control-r2, owner round 7 item 2) adds <c>sprk_createdbyperson</c>: the
     /// person who created the record is the caller, stamped by this service — a Copy rule from a source record would
     /// otherwise name that record's creator as this one's.
+    /// <para>Field-mapping-server-write-path-r1 task 012: a view over the matter's
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRule.MappingProtectedColumns"/> in the registry, the one
+    /// source; deleted when task 018 makes this path an adapter over the unified service. <c>internal</c> (was private) so
+    /// its content is asserted against the pre-registry list (ADR-038 A2).</para>
     /// </remarks>
-    private static readonly IReadOnlySet<string> MatterProtectedAttributes =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            MatterNumberAttribute, OwnerAttribute, ContainerAttribute, Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column
-        };
+    internal static readonly IReadOnlySet<string> MatterProtectedAttributes =
+        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Get(MatterEntity).MappingProtectedColumns;
 
     /// <summary>
     /// The same three protections for a PROJECT, with <see cref="ProjectNumberAttribute"/> in place of the matter
@@ -261,15 +262,15 @@ public sealed class RecordCreationService
     /// The sets are deliberately PER ENTITY rather than one merged set. A merged set would newly skip-and-warn a rule
     /// targeting <c>sprk_projectnumber</c> on a MATTER create — a behaviour change to the path task 030 shipped,
     /// which task 031's acceptance criteria forbid.
+    /// <para>Task 158 r1: <see cref="SecureFlagAttribute"/> is the BFF's own (task 150 locks it; owner round 31 item 2 sets
+    /// it IN the create of a project filed under a secure record) — never a value a mapping rule copies.</para>
+    /// <para>Field-mapping-server-write-path-r1 task 012: a view over the project's
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRule.MappingProtectedColumns"/> in the registry, the one
+    /// source; deleted when task 018 makes this path an adapter over the unified service. <c>internal</c> (was private) so
+    /// its content is asserted against the pre-registry list (ADR-038 A2).</para>
     /// </remarks>
-    private static readonly IReadOnlySet<string> ProjectProtectedAttributes =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ProjectNumberAttribute, OwnerAttribute, ContainerAttribute, Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column,
-            // Task 158 r1: sprk_issecure is the BFF's own (task 150 locks it; owner round 31 item 2 sets it IN the create of a
-            // project filed under a secure record) — never a value a mapping rule copies.
-            SecureFlagAttribute,
-        };
+    internal static readonly IReadOnlySet<string> ProjectProtectedAttributes =
+        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Get(ProjectEntity).MappingProtectedColumns;
 
     /// <summary>The secure flag (task 150: written only by the BFF).</summary>
     internal const string SecureFlagAttribute = "sprk_issecure";
