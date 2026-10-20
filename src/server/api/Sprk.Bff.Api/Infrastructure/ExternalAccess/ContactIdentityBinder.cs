@@ -270,16 +270,22 @@ public sealed class ContactIdentityBinder
     // ── Workforce token plane ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Resolves a workforce caller with no systemuser (Type 2). A MEMBER of a configured customer tenant may be
-    /// email-bound on first sign-in, or have a contact created keyed by the oid; everyone else resolves only
-    /// through an existing oid binding. A registered workforce-contact guest (R3 FR-15: <c>acct = 1</c>,
-    /// <c>tid</c> = <paramref name="stampTenantId"/>, home tenant from <c>idp</c> on the customer list) is a
-    /// member here and is treated exactly like one.
+    /// Resolves a workforce caller with no systemuser (Type 2). A MEMBER (<c>acct = 0</c>) of a configured customer
+    /// tenant may be email-bound on first sign-in, or have a contact created keyed by the oid; everyone else resolves
+    /// only through an existing oid binding.
     /// </summary>
+    /// <remarks>
+    /// #2128 (owner 2026-10-20, option 1) retires the FR-15 guest auto-create. A customer-tenant guest — the member test's
+    /// FR-15 conjunction (<c>acct = 1</c>, <c>tid</c> = <paramref name="stampTenantId"/>, home tenant from <c>idp</c> on
+    /// the customer list), which still answers <see cref="WorkforceMembership.Member"/> — is refused
+    /// <see cref="WorkforceMembershipTest.DenyGuestUseHomeSignin"/> BEFORE any read: no contact is created, none is
+    /// email-bound, and a contact already bound to the guest's Spaarke-tenant oid is not resolved either. Under ADR-028 A9
+    /// customer staff sign in at their home directory and register there; that is the one door, and one contact shape.
+    /// A guest whose home tenant is not listed is unchanged (its member-test deny, or an existing oid binding).
+    /// </remarks>
     /// <param name="stampTenantId">
     /// The stamp's own tenant id (<c>AzureAd:TenantId</c>), never a token value. REQUIRED — there is deliberately no
-    /// overload without it, so no caller can skip FR-15 by omission; pass <c>null</c> to say "no stamp tenant" (a
-    /// guest is then never admitted).
+    /// overload without it, so no caller can skip the guest test by omission; pass <c>null</c> to say "no stamp tenant".
     /// </param>
     public async Task<ContactBindingResult> ResolveWorkforceCallerAsync(
         ClaimsPrincipal user, Guid callerOid, string? stampTenantId, CancellationToken ct)
@@ -289,6 +295,23 @@ public sealed class ContactIdentityBinder
         var membership = WorkforceMembershipTest.Evaluate(
             claims.Kind, claims.TenantId, claims.Acct, _options.CurrentValue.ParsedCustomerTenantIds(),
             stampTenantId, claims.Idp);
+
+        // #2128: Member with acct = 1 is exactly the FR-15 customer-tenant guest (the member test admits acct = 1 only
+        // through that conjunction). Refused here, before the oid lookup, so neither a create, an email bind nor an
+        // existing guest binding can admit it.
+        if (membership == WorkforceMembership.Member && claims.Acct?.Trim() == "1")
+        {
+            var refused = ContactBindingResult.Denied(WorkforceMembershipTest.DenyGuestUseHomeSignin);
+            var homeTenant = WorkforceMembershipTest.TryParseHomeTenant(claims.Idp, out var home)
+                ? home.ToString("D")
+                : "unparsed";
+            _logger.LogWarning(
+                "[ID-BIND] {Plane} caller oid={OidPrefix}… DENIED ({DenyCode}) via {Action} ({Facts})",
+                BindingPlane.WorkforceToken, callerOid.ToString("D")[..8], refused.DenyCode, refused.Action,
+                $"{membership} (customer-tenant guest, homeTenant={homeTenant}); nothing read, bound or created, "
+                + "directed to home sign-in (#2128)");
+            return refused;
+        }
 
         var request = new BindingRequest(
             BindingPlane.WorkforceToken,
@@ -304,10 +327,7 @@ public sealed class ContactIdentityBinder
 
         var result = await RunUnlinkedAsync(request, details, ct).ConfigureAwait(false);
 
-        // The audit line tells a registered guest (FR-15) from a home-tenant member: both are Member.
-        Log(request, result, membership == WorkforceMembership.Member && claims.Acct?.Trim() == "1"
-            ? $"{membership} (registered guest, idp={claims.Idp})"
-            : membership.ToString());
+        Log(request, result, membership.ToString());
         return result;
     }
 

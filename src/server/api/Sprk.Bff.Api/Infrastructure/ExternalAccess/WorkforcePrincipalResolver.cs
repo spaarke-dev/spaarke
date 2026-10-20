@@ -18,11 +18,12 @@
 //                               A DISABLED systemuser (R3 task 012 review) is denied here and never reaches (b).
 //   (b) AAD oid → contact     : ContactIdentityBinder.ResolveWorkforceCallerAsync — the contact BOUND to the
 //                               caller's oid (contact.sprk_externalobjectid). A first sign-in by a MEMBER of a
-//                               configured customer workforce tenant (acct = 0) — or a registered workforce-contact
-//                               guest (R3 FR-15: acct = 1, tid = AzureAd:TenantId, idp home tenant on the customer
-//                               list) — may bind by email (exactly one
-//                               active, unbound match) or create a contact keyed by the oid. Everyone else
-//                               resolves only through an existing oid binding. Collisions are refused AND flagged.
+//                               configured customer workforce tenant (acct = 0) may bind by email (exactly one
+//                               active, unbound match) or create a contact keyed by the oid. A customer-tenant guest
+//                               (R3 FR-15: acct = 1, tid = AzureAd:TenantId, idp home tenant on the customer list) is
+//                               refused workforce_guest_use_home_signin since #2128 — nothing created, bound or
+//                               resolved. Everyone else resolves only through an existing oid binding. Collisions
+//                               are refused AND flagged.
 //   (c) neither                : explicit DENY with the binding decision's own deny code — never a silent fallback
 //                               to an unscoped/anonymous principal.
 //   (H) home principal         : external-access-platform-r3 task 046 (ADR-028 A9). An identity authenticated by the
@@ -85,13 +86,14 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
     /// <summary>
     /// The oid names a systemuser that is DISABLED. Such a user is "no longer a valid principal"
     /// (as in <c>MembershipEndpoints.ResolveSystemUserIdAsync</c>), so it must not fall through to the contact branch,
-    /// where a registered-guest (FR-15) or member token would otherwise be admitted as a contact.
+    /// where a member token would otherwise be admitted as a contact.
     /// </summary>
     internal const string DenySystemUserDisabled = "sdap.access.deny.systemuser_disabled";
 
     /// <summary>
-    /// The stamp's own tenant (the workforce JwtBearer scheme's tenant): a registered workforce-contact guest's
-    /// <c>tid</c> must equal it (R3 FR-15). Absent or unparseable = the guest branch never applies.
+    /// The stamp's own tenant (the workforce JwtBearer scheme's tenant): a customer-tenant guest's <c>tid</c> must equal
+    /// it for the FR-15 branch (since #2128, refused with "use home sign-in"). Absent or unparseable = the branch never
+    /// applies and the guest gets its plain member-test deny.
     /// </summary>
     internal const string StampTenantConfigKey = "AzureAd:TenantId";
 
@@ -248,9 +250,9 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
         }
 
         // ── (a-disabled) a DISABLED systemuser is not a valid principal — it must not fall through to (b) ──
-        // A disabled licensed user (including a licensed B2B guest whose home tenant FR-15 would now admit as a
-        // registered guest) would otherwise be admitted by the binder as a Member and handed a contact. This also
-        // closes the pre-existing Model-2 analogue: a disabled systemuser carrying an acct = 0 member token.
+        // A disabled licensed user would otherwise reach the binder: a disabled systemuser carrying an acct = 0 member
+        // token would be handed a contact (a licensed B2B guest is refused there since #2128, but this deny comes first
+        // and keeps its own code).
         if (lookup.Kind == SystemUserLookupKind.Disabled)
         {
             _logger.LogWarning(
@@ -291,7 +293,7 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
 
         if (binding.IsResolved)
         {
-            // A registered guest (FR-15) is told from a home-tenant member by its parsed home tenant.
+            // An acct = 1 caller (an unlisted guest resolving through an existing oid binding) logs its parsed home tenant.
             _logger.LogInformation(
                 "[WF-AUTH] Resolved workforce caller oid={CallerOid} to contact-only principal {ContactId} via {Action} " +
                 "(homeTenant: {HomeTenant})",
