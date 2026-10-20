@@ -117,3 +117,24 @@ nothing; missing AppendTo / Write / token is 403 with nothing written; a failed 
 after a failed close; a Signal read fault) and `DecisionRecordWriterTests` `Billing_StoredSet_*` (no record is null through the lookup's
 filter; round trip; empty set; two records fail closed; a person-created lookalike is never trusted; a set-less record listing Signals
 fails closed; a lookup fault; bad input refused without a read).
+
+### 9.1 ontology-r1 independent review, round 1 (2026-10-20)
+
+- **Ruling, amending the binding shape: "ontology-r1 2026-10-20: line subject → Write on the parent invoice (D-90)".** Core User and Basic
+  User hold only Read on `sprk_billingevent` (the application writes lines, D-90), so asking Write on a line refused every ordinary
+  reviewer with an open line Signal (F1-2; the test doubles granted Write everywhere, which hid it). `HumanDecisionSignalClose.AuthorizeAsync`
+  now maps every `sprk_billingevent` subject to (`sprk_invoice`, the decided lines' invoice) before the rights check; AppendTo on the core
+  and Write on any other subject are unchanged. The decided lines are read by the invoice, so the parent is the command's invoice. The
+  commit route's `DecisionCallerRights` is not changed (its tests pass unedited). The test doubles now model the real roles: Read only on
+  `sprk_billingevent`, Write on `sprk_invoice`, AppendTo on the core.
+- **"Verify with a real Core User on dev before 100/105 ship."** The unit tests model the roles; only a live Core User proves them.
+- **K2:** the stored sets of all decided lines are found in ONE query (`DecisionRecordWriter.FindBillingDecisionResolvedSetsAsync`: subject
+  `In` the line ids, the single lookup's writer filter unchanged, keys matched in memory, paged; the writer's IN lists are not chunked, so
+  neither is this one). More than one record under a line's key still fails closed (`decision_invalid`, nothing written).
+- **K3:** an open Signal whose dedupe-key subject differs from its regarding row is skipped with one Warning (shared
+  `StoredSignalSetCheck.RowSubjectOf`), so no row is closed whose rights were not asked.
+
+Tests: `InvoiceLineDecisionServiceTests` `ARealReviewer_DecidesALine_WithAnOpenLineSignal`, `MissingWriteOnASubject_Is403_AndNothingIsWritten`
+(Write denied on the invoice), `TheRights_AreAskedAsTheCaller_OnTheCoreAndEachLineWithASignal`, `StoredSets_OfEveryLine_AreOneQuery`,
+`StoredSets_TwoRecordsUnderOneKey_FailClosed`, `ASignalWhoseKeyAndRowDisagree_IsSkipped_AndWarned`; `DecisionRecordWriterTests`
+`Billing_StoredSets_*`. Seeded mutations: 105 notes section 9.1.

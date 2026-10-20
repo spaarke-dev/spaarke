@@ -193,3 +193,46 @@ written; no Signal asks nothing; a read fault is 503; a failed close warns; a re
 failed closes exactly the stored set and finds its record; the store race; no core record). Seeded mutation (authorization disabled in
 `HumanDecisionSignalClose.AuthorizeAsync`): 12 tests failed, among them
 `Decision_WithoutAppendToOnTheMatter_Is403_AndNothingIsWritten`.
+
+### 9.1 ontology-r1 independent review, round 1 (2026-10-20)
+
+- **F1-1 (security): nothing read back from `sprk_findingsjson` is trusted.** Core User holds Write Deep on `sprk_invoicesubmission`, the
+  column has no field security and the decision id is computable, so a stored set, its subjects and the stamp are claims. Now:
+  - the stored `subjects` are never read; each Signal of a stored set is read app-only (`StoredSignalSetCheck`) and its subject taken from
+    the ROW (the subject lookup repeating the pair id, with the dedupe key agreeing). Every subject must be the invoice itself or one of
+    ITS lines (one query by the invoice and the ids); otherwise 409 `ebilling.blocked.findings_unreadable` and nothing is written. The
+    rights check runs on those row-derived subjects. A listed Signal that no longer exists is passed over (nothing to close or authorize).
+  - `setReadAtUtc` is bounded: not after now + 1 minute (`StoredSignalSetCheck.FutureSkew`), and not before the submission's `createdon`
+    (Dataverse-set when the BFF creates the submission, never updatable; processing starts after it). Out of bounds: 409
+    `findings_unreadable`.
+  - a repeat (`AlreadyDecided`) takes the record id, the decider (`sprk_confirmedby`) and the set from the WRITER-CREATED Decision Record
+    (`FindBillingDecisionResolvedSetAsync`); the stamp is never read for it. No writer-created record: nothing is re-closed.
+  - 049's `resolvedSignalSet` gets the same row-derived subject check and bounded read time on resume; untrusted is a permanent Refused
+    (`ebilling.submission.findings_unreadable`), nothing recorded or closed.
+- **K1:** a retry whose writer-created record exists uses that record's stored set (as 100 does), so a decision in flight across a deploy
+  is not `decision_conflict` forever; the set fact is left out of the facts when the record stored none, so its hash still matches.
+- **F1-2 ruling: "ontology-r1 2026-10-20: line subject → Write on the parent invoice (D-90)".** Details in 100 notes 9.1; the test
+  doubles model the real roles (Read only on `sprk_billingevent`, Write on `sprk_invoice`).
+- **"Verify with a real Core User on dev before 100/105 ship."**
+
+Tests: `SubmissionOverrideServiceTests` region "F1-1": a planted set naming another invoice's Signal or its line's is refused (F3 c); the
+invoice's own Signal is trusted from its row; out-of-bounds read times; an edited stamp is ignored; no writer-created record re-closes
+nothing; a repeat whose caller lacks the rights closes nothing (F3 a); the set-store race lost to a Return is 409 (F3 b); K1. Plus
+`Decision_WithAnOpenLineSignal_*` (F1-2) and `InvoiceSubmissionAfterStepsTests` `AutoRejected_APlanted*`,
+`AutoRejected_AStoredSetOfItsOwnSignal_IsTrusted`.
+
+Seeded mutations (each applied alone, the filtered suites run, the source restored; every one caught):
+
+| Mutation | Caught by |
+|---|---|
+| 105 trusts the findings' set (no row check, no bounds) | 105 F1-1 (c) foreign Signal ×2; F1-1 (3) read time ×2; F1-1 own Signal trusted |
+| repeat takes record id and decider from the stamp | 105 F1-1 (2) "never from an edited stamp" |
+| no writer-created record → fall back to the findings' set and stamp | 105 F1-1 (2) "NO writer-created record re-closes nothing" |
+| read-time bounds removed | 049 and 105 F1-1 (3) read time ×2 each |
+| 049 resumes a stored set unchecked | 049 F1-1 foreign Signal; 049 read time ×2 |
+| a line subject asks Write on the line (F1-2 reverted) | 27 tests in 100 and 105, incl. `Decision_WithAnOpenLineSignal_*` |
+| `RecloseAsync`'s rights check deleted | 105 F3 (a) "a repeat whose caller lacks the rights closes nothing" |
+| `AfterConflictAsync`'s verb match loosened | 105 F3 (b) "losing the set-store race to a RETURN is 409" |
+| the writer-created record's set ignored on a retry | 105 K1 |
+| one stored-set lookup per line | 100 K2 "ONE query" |
+| the dedupe-key subject taken without the row's agreement | 100 K3 "skipped with a warning" |
