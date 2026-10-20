@@ -236,3 +236,55 @@ Seeded mutations (each applied alone, the filtered suites run, the source restor
 | the writer-created record's set ignored on a retry | 105 K1 |
 | one stored-set lookup per line | 100 K2 "ONE query" |
 | the dedupe-key subject taken without the row's agreement | 100 K3 "skipped with a warning" |
+
+### 9.2 ontology-r1 independent review, round 2 (2026-10-20)
+
+- **F1-a (security), fixed: the submission's `sprk_invoice` is not trusted.** It is user-writable: a Core User with Write on submission S
+  and only AppendTo on invoice B could point S at B, make the findings name B, and (with no open Signal on B, or a planted empty set)
+  POST `/return`, so a Return Decision Record was written under B and B moved to Returned to Firm without Write on B. Now `DecideAsync`
+  refuses any invoice other than `InvoiceSubmissionPersister.InvoiceIdFor(submissionId)` (the only id the persister writes; 049 already
+  requires it) with 409 `ebilling.blocked.invoice_not_held`, before the lock and any read or write. A repeat (`RecloseAsync`) of such a
+  submission returns at once: no record lookup, nothing closed.
+- **F1-b (integrity), fixed: a planted policy code never reaches the record.** `StoredSignalSetCheck.SubjectsAsync` now compares each
+  Signal's claimed policy code with its row's (the dedupe key's, `RowSubjectOf`); a difference is `subject_unreadable`, so 105 answers 409
+  `findings_unreadable` and 049's resume is the permanent Refused `ebilling.submission.findings_unreadable`. Before, the claimed code flowed
+  into the append-only record's `resolvedSignalSet` fact and into the close.
+- **K1, done:** the lower read-time bound allows the same skew as the upper one (`setReadAtUtc < createdon - FutureSkew` is refused), since
+  `createdon` is Dataverse's clock and the read time the BFF's; a BFF running behind Dataverse no longer refuses a 049 resume permanently.
+- **K2, done:** one test runs the second page of `DecisionRecordWriter.FindBillingDecisionResolvedSetsAsync` (`MoreRecords` plus the paging
+  cookie). The code was correct; the test pins it. `DecisionRecordWriter.cs` is unchanged.
+- **K3, done:** a repeat whose writer-created record has signals but no `sprk_confirmedby` logs one Warning (submission, record, verb,
+  count) and closes nothing.
+
+Known limits judged K by ontology-r1 (to be filed as issues by the operator, except (4)):
+
+- **(2)** A planted EMPTY set: the Signals stay open and the record names the real caller. Its harmful use (deciding another invoice) is
+  gone with F1-a.
+- **(3a)** A Signal deleted between the set's store and the record write leaves a 105 decision stuck at 409 `record_refused`: 105 has no
+  shrink path like 049's.
+- **(3b)** Anyone with Write on the submission can block its decision by planting a junk set (409 `findings_unreadable` until it is
+  removed).
+- **(4)** A record-derived set with no read time (`SetReadAtUtc` null) is always empty: no defect.
+
+Tests: `SubmissionOverrideServiceTests` region "ontology-r1 round 2":
+`Decision_OfASubmissionLinkingAnInvoiceItDidNotCreate_IsRefused_AndNothingIsWritten` (override, return; F1-a decide must-fire),
+`Repeat_OfASubmissionLinkingAnInvoiceItDidNotCreate_ClosesNothing` (F1-a repeat must-fire),
+`Override_WithAStoredSetClaimingAnotherPolicyCode_IsRefused` (F1-b; stored "EB-AGE", row EB-RATE),
+`Override_WithAStoredReadTimeJustBeforeCreatedOn_IsTrustedWithinTheSkew` (K1: -30 s and -60 s trusted, -61 s refused),
+`Repeat_WhoseRecordNamesNoDecider_ClosesNothing_AndWarns` (K3). `InvoiceSubmissionAfterStepsTests`
+`AutoRejected_AStoredSetClaimingAnotherPolicyCode_IsRefused` (049 F1-b) and `AutoRejected_AStoredReadTimeJustBeforeCreatedOn_IsTrustedWithinTheSkew`
+(049 K1). `DecisionRecordWriterTests.Billing` `Billing_StoredSets_ARecordOnTheSecondPage_IsFound_ThroughThePagingCookie` (K2). F1-a's
+must-not-fire is every existing decision and repeat test (the world's invoice is `InvoiceIdFor(SubmissionId)`), e.g.
+`Decision_ClosesEveryOpenSignalOnTheInvoiceAndItsLines_*` and `Decision_ARepeatAfterAFailedClose_*`. The two round-1 "read time before
+createdon" cases moved from -1 to -2 minutes (-1 minute is now inside the skew).
+
+Fail-before: with the round-1 sources the 10 new must-fire cases fail (the F1-a decide answers 200 and records under B; the F1-a repeat
+closes B's Signal); the K2 test passes (it pins correct code).
+
+Seeded mutations (each applied alone, the filtered suites run, the source restored; every one caught):
+
+| Mutation | Caught by |
+|---|---|
+| `DecideAsync`'s `InvoiceIdFor` check removed | F1-a decide ×2 (override, return) |
+| `RecloseAsync`'s `InvoiceIdFor` check removed | F1-a repeat |
+| `SubjectsAsync`'s policy-code comparison removed | 105 F1-b; 049 F1-b |
