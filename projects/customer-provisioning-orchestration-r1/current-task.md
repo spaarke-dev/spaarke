@@ -2,24 +2,23 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2/§3/§6. Decisions → `notes/model1-dedicated-remediation-plan.md` D-table. Session narrative → commit messages.
 
-> **Last Updated**: 2026-10-20 SESSION 50. T186 ACME run `b6941254-ac1b-42a6-8b12-dec7587090fc` is at H14 (H14m). L62 root cause found and fixed (role entries + sidecar); waiting on Exchange propagation and PR #2136. HEAD = the L62 docs commit on top of `4c724b807`, pushed.
+> **Last Updated**: 2026-10-20 SESSION 50. T186 ACME run `b6941254-ac1b-42a6-8b12-dec7587090fc` **Completed** 16:24:26 UTC (all H13 gates). Post-run Steps 6a/6b/6e/7 done; 6f (Copilot agent) waits on the owner. HEAD `1a3743843`+, pushed.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | T186: first live E2E via `/provision-environment acme` ("ACME Corporation", DEMO sub `2ff9ee48-6f1d-4664-865c-f11868dd1b50`, dev L2 control plane, managed SpaarkeMaster 1.2.3.1). Run log: `notes/t186-acme-run-log.md` (lessons L1–L62 + timeline), kept current AS THINGS HAPPEN. |
-| **Status** | Run **Failed @ H14** (Resumable, `h14m-mailbox-ensure-failed`). Done: H0 H1 H2a H2b H3 H4 H4b H5 H6 H7 H7b H8 H9 H10 H11 H12a H12b H12c H14a. Remaining: H14 (H14m), then H13. Nothing created in Exchange. |
-| **L62 (root cause, fixed)** | The narrowed D32 role entries dropped the PowerShell common parameters, so Exchange refused `New-Mailbox … -ErrorAction Stop` (403; the module shows "server side error"). Owner 2026-10-20: common parameters added to `Spaarke Shared Mailbox Create\New-Mailbox`; the join entry cannot take them (its parent refuses) → sidecar fix PR #2136 (branch `fix/sidecar-l62-join-without-erroraction`, worktree `C:\code_files\spaarke-wt-sidecar-l62`; the same change is on this branch as `4c724b807`). Owner removed the role group and set the override back to False. Documented: guide §4.2.1 step 5, T263 §5 (M4 corrected, M8 added), PRQ-E-16, FAILURE-MODES G-23, project CLAUDE.md §6, skill Troubleshooting. |
-| **Next Action** | 1) PR #2136: when every check is terminal and green → `gh pr merge 2136 --merge`. 2) CI image tag (`build-provisioning-sidecar.yml`) → ARM PUT the Worker sitecontainer → `Verify-Sidecar-Live.ps1 -Environment dev` → bump `acrImageTag` in `platform-controlplane-dev.bicepparam` on this branch. 3) M8 raw probe (`scratchpad/t186-l62-wait2.ps1`; still 403 at 15:47 UTC) must show 400 for `New-Mailbox -ErrorAction Stop`. 4) `POST /resume?customerId=acme` → poll through H14 and H13. |
+| **Task** | T186: first live E2E via `/provision-environment acme` ("ACME Corporation", DEMO sub `2ff9ee48-6f1d-4664-865c-f11868dd1b50`, dev L2 control plane, managed SpaarkeMaster 1.2.3.1). Run log: `notes/t186-acme-run-log.md` (lessons L1–L63 + timeline). |
+| **Status** | Run **Completed** (H14m mailbox `sprk-acme-mail@demo.spaarke.com` in `Spaarke-AppAccess-acme`; H13 8/8 gates; cost drift −74.7 % advisory). 6a: registry already Ready, nothing reconciled. 6b: `runs/b6941254-….md`. 6e: secure-record §7 15/15 PASS (probes deleted). 7: `provisioning-runs/acme-b6941254-…/lessons-learned.md` + INDEX row. |
+| **Next Action** | 1) **6f Copilot gate** (owner, Teams developer portal): pre-check passed (BFF app pre-authorizes `3a36eac4-…`; `sprk_bffappid` set). Owner creates auth config `spaarke-copilot-acme` → gives the OAuth client registration ID → PATCH `sprk_copilotauthconfigid` (confirm first) → render package (`scripts/copilot-agent/Render-CopilotAgentPackage.ps1`). 2) Carry the open lessons into the guide + prereqs (run log rows not yet `applied`: L1–L3, L5–L8, L11, L13–L16, L22, L30, L49, L56; many "fixed in code" rows still need their status column set to applied with the doc). 3) Merge the branch to master (`Closes #2034`, `#2040`, `#2027`), then redeploy the control plane. |
 
 ## Live state
 
-- Exchange (Spaarke tenant): `Spaarke Exchange Admin` holds only the two direct `-App` D32 assignments; no role group; override False.
-- Worker sidecar `exchange-policy-sidecar` = `provisioning-sidecar:2026.10.16-38` (L61 diagnostic, master `292c33f46`; lacks the L62 fix); dev bicepparam pin matches (guarded by `SidecarImagePinTests`). Roll forward: ARM GET/PUT `.../sites/spaarke-provisioning-controlplane-worker-dev/sitecontainers/exchange-policy-sidecar?api-version=2024-04-01` (`az webapp sitecontainers update` crashes), then `Verify-Sidecar-Live.ps1 -Environment dev`.
-- Control plane API/Worker code: last deployed before L54/L55/L57 were proven; the #2034 fix (246f6f166) is on the branch only — redeploy the control plane before the next customer run.
-- In-tenant diagnostics as the app: scratchpad scripts `t186-h14m-*.ps1` create/delete ACI `sprk-sidecar-*-dev` in `rg-spaarke-platform-dev` (Worker UAMI → MI-FIC → `Spaarke Exchange Admin`). EXO 3.5.1 reads 403 bodies as zero bytes in both 10-13 and 10-16 images — use the `X-ExceptionType` header.
-- Local Pester: on this Windows machine Pester 6.2.0 fails the sidecar suite at import (HEAD too); run under the saved Pester 5.7.1 (`scratchpad/psmods`). CI (Linux, Pester 6.2.0) passes.
+- Exchange (Spaarke tenant): `Spaarke Exchange Admin` holds only the two direct `-App` D32 assignments (New-Mailbox entry carries the common parameters since 2026-10-20); no role group; override False.
+- Worker sidecar `exchange-policy-sidecar` = `provisioning-sidecar:2026.10.20-40` (master `05bcdeee6`, L62 fix); dev bicepparam pin matches (`SidecarImagePinTests`). Roll forward: ARM GET/PUT `.../sites/spaarke-provisioning-controlplane-worker-dev/sitecontainers/exchange-policy-sidecar?api-version=2024-04-01`, then `Verify-Sidecar-Live.ps1 -Environment dev [-InTenant]`.
+- Control plane API/Worker code: the #2034 fix (246f6f166) and #2027 (c28d9dc48) are on the branch only — redeploy the control plane before the next customer run (verify what is live first).
+- Stamp job status without a BFF token: App Insights heartbeat query in `SECURE-PROJECT-ENVIRONMENT-SETUP.md` §7 (L63); ACME App Insights appId `2479293f-fe03-4c29-8f19-3ee1feb52b13`.
+- Local Pester: Pester 6.2.0 fails the sidecar suite at import on this machine; run under the saved Pester 5.7.1 (`scratchpad/psmods`). CI (Linux) passes.
 
 ## 🔔 Waiting on the owner
 
@@ -32,12 +31,12 @@
 ## 📋 Remaining
 
 - **When this branch merges to master**: PR body must say `Closes #2034`, `Closes #2040` and `Closes #2027` (UAC offered a review of the isdisabled check — send them the PR number).
-- **After T186 completes**: Step 6a registry reconcile; handoff `runs/{runId}.md`; 6e/6f; Step 7; carry lessons L1–L62 into the guide + prereqs; fix L15 and L30; remove the old broad L2 Graph roles; track the S18 columns.
+- **T186 close-out**: 6f (above); carry the open lessons into the guide + prereqs; fix L15 and L30; remove the old broad L2 Graph roles; track the S18 columns.
 - **Report to the owner**: S1 plan cost; L49 ComposeIdentityKey DEGRADED on the ACME BFF; task 264 ordering vs task 047; registry table shipping in SpaarkeMaster (does the BFF need it per environment?).
-- **T186 live proofs still open**: ISS-008 (second POST refused); H14m route-level M4; H13 census (T260); PRQ-C-14.
+- **T186 live proofs still open**: ISS-008 (second POST refused); PRQ-C-14. (H14m route-level M4 and the H13 census proved 2026-10-20.)
 - **Repo cleanup of old-demo references**: `config/environments.json:77-115`, `config/spaarke-resources.yaml:601-630`, `spaarke-constants.yaml:79`, `scripts/Reconcile-DemoEnvironment.ps1`, `redis-demo.bicepparam`, `DocumentOperations.js:164`, docs.
 - **Builds**: D36 (H4b keyless SignalR + `Rag__ApiKey` note); D37 (`appRoleAssignmentRequired` after A9); T240c (D38); T240d; A9 H3 changes (wait on SPA-r3 task 059); 203d; wrap-up 090.
-- Leftovers for the user to delete: `C:\code_files\spaarke-wt-spaarkemaster-1231`, `C:\code_files\spaarke\.claude\worktrees\agent-aaff1644fa899f03b`; worktrees `C:\code_files\spaarke-wt-sidecar-l59` (merged; holds local researcher-memory edits) and `C:\code_files\spaarke-wt-sidecar-l62` (after #2136 merges) — remove only with `scripts/worktree/Remove-WorktreeSafe.ps1`.
+- Leftovers for the user to delete: `C:\code_files\spaarke-wt-spaarkemaster-1231`, `C:\code_files\spaarke\.claude\worktrees\agent-aaff1644fa899f03b`; worktrees `C:\code_files\spaarke-wt-sidecar-l59` (merged; holds local researcher-memory edits) and `C:\code_files\spaarke-wt-sidecar-l62` (#2136 merged) — remove only with `scripts/worktree/Remove-WorktreeSafe.ps1`.
 
 ## 🐞 Open defects
 
