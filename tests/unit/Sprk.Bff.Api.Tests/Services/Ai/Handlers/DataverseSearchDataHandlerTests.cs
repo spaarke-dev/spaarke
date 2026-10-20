@@ -667,6 +667,38 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
     }
 
     [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerDocumentHitWithUnreadableRelatedCommunicationLink_Dropped()
+    {
+        AsExternalCaller();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson($$"""
+            {
+              "value": [
+                { "entityname": "sprk_document", "objectid": "{{DocNoComm:D}}" },
+                { "entityname": "sprk_document", "objectid": "{{DocShared:D}}" }
+              ]
+            }
+            """)));
+        CaptureGets("sprk_documents?", $$"""
+            {
+              "value": [
+                { "sprk_documentid": "{{DocNoComm:D}}", "_sprk_relatedcommunication_value": null },
+                { "sprk_documentid": "{{DocShared:D}}", "_sprk_relatedcommunication_value": "not-a-guid" }
+              ]
+            }
+            """);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("results").EnumerateArray()
+            .Select(r => r.GetProperty("recordId").GetString())
+            .Should().Equal(new[] { DocNoComm.ToString("D") },
+                because: "a link that is present but not a usable id hides the hit (fail closed)");
+        _dataverse.Verify(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communications?")), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task ExecuteChatAsync_ExternalCallerDocumentRelatedReadFails_ErrorWithNoData()
     {
         AsExternalCaller();

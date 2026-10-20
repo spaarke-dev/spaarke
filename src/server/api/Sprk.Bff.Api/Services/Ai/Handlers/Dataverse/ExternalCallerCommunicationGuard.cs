@@ -185,7 +185,7 @@ internal static class ExternalCallerCommunicationGuard
     internal static async Task<HashSet<Guid>> ReadVisibleCommunicationIdsAsync(
         IDataverseUserClient dataverse, IEnumerable<Guid> communicationIds, CancellationToken ct)
     {
-        var distinct = communicationIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        var distinct = communicationIds.Where(id => id != Guid.Empty && id != UnreadableLink).Distinct().ToList();
         var threadOf = new Dictionary<Guid, Guid>();
         foreach (var chunk in distinct.Chunk(ChunkSize))
         {
@@ -216,7 +216,8 @@ internal static class ExternalCallerCommunicationGuard
 
     /// <summary>
     /// The related communication id of each of <paramref name="documentIds"/> (search_data: hits carry no columns). A
-    /// document with no related communication maps to <see cref="Guid.Empty"/>; a document that does not come back is
+    /// document with no related communication maps to <see cref="Guid.Empty"/>, an unreadable link to
+    /// <see cref="UnreadableLink"/> (hidden); a document that does not come back is
     /// absent from the map (the caller hides it, fail closed). A failed read THROWS.
     /// </summary>
     internal static async Task<Dictionary<Guid, Guid>> ReadRelatedCommunicationIdsAsync(
@@ -233,7 +234,7 @@ internal static class ExternalCallerCommunicationGuard
             foreach (var row in rows)
             {
                 if (GuidOf(row, DocumentPkField) is not { } id || !chunk.Contains(id)) continue;
-                related[id] = GuidOf(row, RelatedCommunicationLookupValue) ?? Guid.Empty;
+                related[id] = row.TryGetValue(RelatedCommunicationLookupValue, out var link) ? LinkOf(link) : Guid.Empty;
             }
         }
 
@@ -247,12 +248,26 @@ internal static class ExternalCallerCommunicationGuard
             ? id
             : Guid.Empty;
 
-    /// <summary>The related communication id of one OData document row (raw <c>_sprk_relatedcommunication_value</c>), or empty.</summary>
+    /// <summary>
+    /// Stands for a related-communication link that is present but unreadable (not null, not a GUID). It is never read
+    /// and never in a visible set, so the document it belongs to stays hidden (fail closed).
+    /// </summary>
+    internal static readonly Guid UnreadableLink = Guid.AllBitsSet;
+
+    /// <summary>
+    /// The related communication id of one OData document row (raw <c>_sprk_relatedcommunication_value</c>):
+    /// <see cref="Guid.Empty"/> when absent or null (no related communication), <see cref="UnreadableLink"/> when present
+    /// but unreadable.
+    /// </summary>
     internal static Guid RelatedCommunicationIdOf(JsonElement record) =>
-        record.TryGetProperty(RelatedCommunicationLookupValue, out var v)
-        && v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var id)
-            ? id
-            : Guid.Empty;
+        record.TryGetProperty(RelatedCommunicationLookupValue, out var v) ? LinkOf(v) : Guid.Empty;
+
+    private static Guid LinkOf(JsonElement v) => v.ValueKind switch
+    {
+        JsonValueKind.Null or JsonValueKind.Undefined => Guid.Empty,
+        JsonValueKind.String when Guid.TryParse(v.GetString(), out var id) && id != Guid.Empty => id,
+        _ => UnreadableLink,
+    };
 
     /// <summary>True only when the row's <c>sprk_isinternalonly</c> reads explicitly <c>false</c>.</summary>
     internal static bool IsExplicitlyShareable(JsonElement record) =>

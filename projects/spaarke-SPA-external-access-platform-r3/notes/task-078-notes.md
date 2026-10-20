@@ -195,3 +195,20 @@ Two adversarial passes (pass 1: F1, K1, K1, K4, K4; pass 2: F4, F2, F2, K4). The
 | K1 | TOP oracle: the Open-thread half was a post-filter, so TOP and the row count depended on hidden rows | **Fixed** for `sprk_communication`: the navigation-property clause rides in the query (navigation property and Open value confirmed from solution XML); the post-read check stays. Remains a known limit for `sprk_document` and search_data counts. |
 | K4a | describe: a hidden record's answer differed from a real not-found (Dataverse's own 404 text), and the comment and test claimed otherwise | **Fixed.** A guarded 404 and a hidden record share `DATAVERSE_NOT_FOUND` + `RecordNotVisibleMessage`; the comment and the test's `because:` are now true, and a test compares the two answers. |
 | K4b | read_query relied on the query filter alone for the flag | **Fixed.** `sprk_isinternalonly` injected (stripped if injected) and `IsExplicitlyShareable` required per row. |
+
+## Re-check of review round 1 (scoped, Sonnet adversarial-reviewer, `06b867a6b..7d23af15b`)
+
+No F1, no fail-open. Fixed in the main session (this commit):
+
+| Finding | Disposition |
+|---|---|
+| F2: no test crossed the 50-id chunk boundary of the batched communication read (`read_query` allows TOP 200) | **Fixed.** `…RelatedCommunicationsSpanTwoChunks_RuleAppliedInEachChunk`: 60 documents, two communication reads (`$top=50`, `$top=10`), and the rule holds on both sides of the boundary. |
+| K2: a related-communication link that is present but not a usable GUID read as "no related communication" (visible) | **Hardened.** `LinkOf` maps null or absent to empty (no link), and any other unusable value to `UnreadableLink` (`Guid.AllBitsSet`). That value is never sent to Dataverse and never visible, so the document stays hidden. This applies to `read_query`, `describe` and `search_data` (`ReadRelatedCommunicationIdsAsync`). Tests: the `read_query` theory (not a GUID, the empty GUID, a number) and one `search_data` test. **Seeding proof S20:** mapping the unusable case back to empty fails all 4. |
+| K1: `sprk_document` TOP and count can reveal that hidden documents exist (no content) | Known limit (above). |
+| K3: Outlook add-in saves write `sprk_emailbody`, `sprk_emailfrom`, `sprk_emailto` and `sprk_emailsubject` onto `sprk_document` with no `sprk_relatedcommunication` (`UploadFinalizationWorker.cs:681`, `OfficeDocumentPersistence.cs:323`), so those rows stay visible | Known limit. It follows the stated rule (no related communication, so the document is unaffected). It is the same owner question as ISS-015: a document deliberately saved to a record. |
+| K4: the K1 navigation clause has not run against live Dataverse | **Deploy checklist:** run one external-caller `read_query` on `sprk_communication` after the next dev BFF deploy. A wrong name would fail closed (400, no data). |
+| K5: `describe` normalises only the NotFound error; a native 403 text passes through | Known limit; the caller cannot read the record either way. |
+
+Availability note: internal callers on `sprk_document` now resolve externality (two cached lookups). A lookup fault now fails those calls with no data.
+
+Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes, `CommunicationOpenThreadGate`, `CallerSystemUserResolver` and `DiGraphValidation`: **192/192**.

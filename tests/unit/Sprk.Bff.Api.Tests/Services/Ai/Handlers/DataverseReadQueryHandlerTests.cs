@@ -988,6 +988,63 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
     }
 
     [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnDocument_RelatedCommunicationsSpanTwoChunks_RuleAppliedInEachChunk()
+    {
+        AsExternalCaller();
+        SetupDocumentMetadata();
+        // 60 documents, each with its own communication: even index = shareable on an Open thread, odd = internal-only.
+        var docs = Enumerable.Range(0, 60).Select(i => (Doc: new Guid(i + 1, 0xD0C, 0, new byte[8]), Comm: new Guid(i + 1, 0xC0, 0, new byte[8]))).ToList();
+        CaptureDocumentQueries("{ \"value\": [ " + string.Join(", ", docs.Select(d => DocRow(d.Doc, d.Comm))) + " ] }");
+        var communicationReads = new List<string>();
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communications?")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((p, _) => communicationReads.Add(p))
+            .ReturnsAsync((string path, CancellationToken _) => DataverseUserResponse.Ok(200, ParseJson(
+                "{ \"value\": [ " + string.Join(", ", docs
+                    .Select((d, i) => (d.Comm, Shareable: i % 2 == 0))
+                    .Where(c => path.Contains(c.Comm.ToString("D")))
+                    .Select(c => $$"""{ "sprk_communicationid": "{{c.Comm:D}}", "sprk_isinternalonly": {{(c.Shareable ? "false" : "true")}}, "_sprk_communicationthread_value": "{{ThreadOpen:D}}" }""")) +
+                " ] }")));
+        CaptureThreadReads($$"""{ "value": [ { "sprk_communicationthreadid": "{{ThreadOpen:D}}", "sprk_privacystate": {{OpenState}} } ] }""");
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT TOP 100 sprk_documentname FROM sprk_document"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        communicationReads.Should().HaveCount(2, because: "60 related communications are read in chunks of 50");
+        communicationReads[0].Should().EndWith("&$top=50");
+        communicationReads[1].Should().EndWith("&$top=10");
+        communicationReads[1].Should().Contain(docs[50].Comm.ToString("D")).And.NotContain(docs[49].Comm.ToString("D"));
+        result.Data!.Value.GetProperty("rows").EnumerateArray()
+            .Select(r => r.GetProperty("sprk_documentid").GetString())
+            .Should().Equal(docs.Where((_, i) => i % 2 == 0).Select(d => d.Doc.ToString("D")),
+                because: "the rule holds on both sides of the chunk boundary (48 and 50 visible, 49 and 51 hidden)");
+    }
+
+    [Theory]
+    [InlineData("\"not-a-guid\"")]
+    [InlineData("\"00000000-0000-0000-0000-000000000000\"")]
+    [InlineData("42")]
+    public async Task ExecuteChatAsync_ExternalCallerOnDocumentWithUnreadableRelatedCommunicationLink_Hidden(string rawLink)
+    {
+        AsExternalCaller();
+        SetupDocumentMetadata();
+        CaptureDocumentQueries("{ \"value\": [ " + DocRow(DocNoComm, null) + ", " +
+            $$"""{ "sprk_documentid": "{{DocShared:D}}", "sprk_documentname": "Doc", "_sprk_relatedcommunication_value": {{rawLink}} }""" + " ] }");
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_documentname FROM sprk_document"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("rows").EnumerateArray()
+            .Select(r => r.GetProperty("sprk_documentid").GetString())
+            .Should().Equal(new[] { DocNoComm.ToString("D") },
+                because: "a link that is present but not a usable id is never read as 'no related communication' (fail closed)");
+        _dataverse.Verify(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communications?")), It.IsAny<CancellationToken>()), Times.Never,
+            "an unreadable link is never sent to Dataverse as an id");
+    }
+
+    [Fact]
     public async Task ExecuteChatAsync_InternalCallerOnDocument_RequestUrlUnchangedAndNoExtraRead()
     {
         SetupDocumentMetadata();
