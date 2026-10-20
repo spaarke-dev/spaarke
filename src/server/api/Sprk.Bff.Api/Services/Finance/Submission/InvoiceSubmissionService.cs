@@ -199,16 +199,26 @@ public class InvoiceSubmissionService
     /// </summary>
     /// <remarks>Both families (D-140): the unprefixed lookups and their <c>sprk_related*</c> twins are both live filing links on a document
     /// (<c>DocumentLinkFields.All</c>; <c>SecureChildLineage</c> reads both as parents, and <c>DocumentLinkFieldMap.SupersededBy</c> only
-    /// RECORDS the mapping for a future migration), so a document filed through either one is filed.</remarks>
+    /// RECORDS the mapping for a future migration), so a document filed through either one is filed.
+    /// <para>A named projection of the one vocabulary, <see cref="DocumentLinkFields.All"/> (DocumentLinkVocabularyGuardTests): every link whose
+    /// target is a matter, project or work assignment. Excluded, on purpose: the invoice links (a document re-filed under an invoice is what
+    /// this confirm produces, and the persister checks <c>sprk_invoice</c> itself); the communication link (followed as the chain's next hop,
+    /// <see cref="DocumentRelatedCommunication"/>); and every other target (agreement, contact, event, organization, service request, to-do,
+    /// vendor, the OOB email activity), none of which is an invoice core record.</para></remarks>
     private static readonly (string Column, InvoiceCoreRecordKind Kind)[] DocumentCoreColumns =
     [
-        ("sprk_matter", InvoiceCoreRecordKind.Matter),
-        ("sprk_relatedmatter", InvoiceCoreRecordKind.Matter),
-        ("sprk_project", InvoiceCoreRecordKind.Project),
-        ("sprk_relatedproject", InvoiceCoreRecordKind.Project),
-        ("sprk_workassignment", InvoiceCoreRecordKind.WorkAssignment),
-        ("sprk_relatedworkassignment", InvoiceCoreRecordKind.WorkAssignment),
+        .. DocumentLinkFields.All
+            .Where(f => CoreRecordKindOfTable(f.TargetEntityLogicalName) is not null)
+            .Select(f => (f.LogicalName, CoreRecordKindOfTable(f.TargetEntityLogicalName)!.Value)),
     ];
+
+    private static InvoiceCoreRecordKind? CoreRecordKindOfTable(string table) => table switch
+    {
+        "sprk_matter" => InvoiceCoreRecordKind.Matter,
+        "sprk_project" => InvoiceCoreRecordKind.Project,
+        "sprk_workassignment" => InvoiceCoreRecordKind.WorkAssignment,
+        _ => null,
+    };
 
     /// <summary>D-140: the communication's core-record lookups (the regarding columns <c>CommunicationService</c> files an email under).</summary>
     private static readonly (string Column, InvoiceCoreRecordKind Kind)[] CommunicationCoreColumns =
@@ -219,7 +229,8 @@ public class InvoiceSubmissionService
     ];
 
     /// <summary>D-140: a document's link to the communication it came from (every email archive / attachment writer stamps it).</summary>
-    private const string DocumentRelatedCommunication = "sprk_relatedcommunication";
+    private static readonly string DocumentRelatedCommunication =
+        DocumentLinkFields.All.Single(f => f.TargetEntityLogicalName == "sprk_communication").LogicalName;
 
     /// <summary>D-140: a document's link to the document it was extracted from (an attachment's parent).</summary>
     private const string DocumentParentDocument = "sprk_parentdocument";
