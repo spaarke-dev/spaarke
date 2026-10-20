@@ -121,6 +121,7 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 - `SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` is authoritative; never merge an SPE owning app with a BFF app registration (2026-08-30).
 - Demo is the next environment for testing the orchestration (D27).
 - The prod L2 control plane goes into `rg-spaarke-shared-prod` from its first deploy (D23).
+- **Do not upgrade the ACME stamp BFF (`sprk-acme-prod-api`, build 2026.10.16-2) to a build containing UAC #2128 until A9 home sign-in is in place for ACME** (R3, 2026-10-20). Today ACME's users are B2B guests in the Spaarke tenant. #2128 refuses a guest whose home tenant is in `WorkforceIdentity__CustomerTenantIds` (`78195073-…`) unless the guest has an enabled systemuser (`workforce_guest_use_home_signin`). First: v2 tokens on the stamp app, the production workforce SPA client pre-authorized (id not final; never the dev `5859e812…`), `ExternalAccess__CustomerBusinessUnitId` on both slots, and customer-tenant consent for the workforce client only (never v1 `/adminconsent` — R3 C-1). Check with UAC before any ACME BFF upgrade (2026-10-20).
 
 ## 4. Coordination
 

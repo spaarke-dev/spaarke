@@ -14,6 +14,8 @@
 
 ## Live state
 
+- **ACME BFF upgrade is gated** (project CLAUDE.md §3, R3 2026-10-20): no build with UAC #2128 on `sprk-acme-prod-api` until A9 home sign-in is in place for ACME. R3 tracks the production-SPA gate in `projects/spaarke-SPA-external-access-platform-r3/notes/task-073-gate-acme.md`. In progress: H4b writes `ExternalAccess__CustomerBusinessUnitId` from H10 (implementer agent, uncommitted).
+
 - Exchange (Spaarke tenant): `Spaarke Exchange Admin` holds only the two direct `-App` D32 assignments (New-Mailbox entry carries the common parameters since 2026-10-20); no role group; override False.
 - Worker sidecar `exchange-policy-sidecar` = `provisioning-sidecar:2026.10.20-40` (master `05bcdeee6`, L62 fix); dev bicepparam pin matches (`SidecarImagePinTests`). Roll forward: ARM GET/PUT `.../sites/spaarke-provisioning-controlplane-worker-dev/sitecontainers/exchange-policy-sidecar?api-version=2024-04-01`, then `Verify-Sidecar-Live.ps1 -Environment dev [-InTenant]`.
 - Control plane API/Worker code: the #2034 fix (246f6f166) and #2027 (c28d9dc48) are on the branch only — redeploy the control plane before the next customer run (verify what is live first).
