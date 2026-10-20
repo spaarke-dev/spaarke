@@ -231,3 +231,27 @@ trust as the read), and the 404 re-ask is lost.
    confirmed on `/api/v1/external`.
 
 Until the owner rules, nothing changes, as directed.
+
+## Independent long-term critique (2026-10-20, adversarial reviewer, Opus)
+
+**Verdict: C is the best long-term choice of A, B and C.** It is also the base for a stronger end state later.
+
+**Reasons:**
+1. **On this plane OBO enforces nothing.** The write is always app-only (§2.3 of the implementation note); OBO only changes who answers the question. The OBO token is cached per inbound token (`CallerRecordAccessProbe.cs:690-694`, no ForceRefresh), so Entra session and Conditional Access checks run at most once per inbound token. B would protect only some writes, only for Spaarke-tenant users, and never the A5 reads.
+2. **C covers every systemuser** (WorkforceHome users can never use OBO), so reads, write confirmation and attribution all rest on one resolved SystemUserId. B keeps two mechanisms for ever. B's one gain, identity taken from the credential, is moot, because a resolver bug already exposes the read set.
+3. **Same Dataverse answer, fewer moving parts.** There is no token exchange and no new consent. Field security is ignored by RetrievePrincipalAccess either way. The blast radius of prvActOnBehalfOfAnotherUser is no larger than the BFF app user's own app-only reach.
+
+**A fourth option: impersonated writes** (the BFF writes with MSCRMCallerID instead of checking and then writing app-only). This is better long-term: Dataverse enforces exactly what the model-driven app does, with native audit. It reuses C's mechanism and is incompatible with B. **Follow-up, not 036.**
+
+**Conditions C must meet** (paths in C:/wt036):
+- **F (fix now): replication-lag retry.** `DataverseWebApiService.cs:1613` maps 404 and 403 to None immediately, so under C every systemuser loses the OBO path's 404 re-ask (`CallerRecordAccessProbe.cs:108-113, 816-826`). A create followed by an immediate toggle would be refused. Re-ask on 404 only, on the same schedule.
+- **Fault vs denial.** An impersonation fault (e.g. 0x8004A110) is read as "no rights" and logged at Information. Use RetrieveRightsOrUnknown (`:1754`) and log at Warning.
+- **Disabled and unlicensed users, proven live.** At the 036 dev gate, app-only RetrievePrincipalAccess for one disabled and one unlicensed systemuser must be refused. If Dataverse answers with rights instead, add an isdisabled re-read. The resolver's identity cache is 2 minutes (`WorkforcePrincipalResolver.cs:101, 250`).
+- **Never OBO on /api/v1/external, enforced mechanically.** Widen AppOnlyConfirmationPrincipal (`ExternalProjectDataEndpoints.cs:1066-1067`) with Guid.Empty still failing closed. Add a source-scan ArchTest: no token-taking GetCallerRightsAsync / CallerHoldsPrivilegeAsync calls in `Api/ExternalAccess/External*.cs`.
+- **Conditional Access on the right resource.** Record in ADR-028 A5's deployment prerequisites that CA and sign-in-risk policies for SPA/Teams users must target the BFF API app and the SPA client.
+
+**What would change the verdict:**
+- a live OBO vs app-only comparison giving different answers (likeliest cause: `restrictGuestUserAccess`);
+- impersonated calls counting against the app user's service-protection limits at SPA volume;
+- an owner requirement for Dataverse-targeted CA or CAE (which would argue for OBO on reads too, reversing A1–A3, not for B);
+- Microsoft retiring MSCRMCallerID.
