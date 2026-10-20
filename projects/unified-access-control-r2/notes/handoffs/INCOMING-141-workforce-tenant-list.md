@@ -25,7 +25,7 @@
   creation** only when their token is a user token, their `tid` is in this list, AND their `acct` claim is `0`
   (member).
 - **Empty or absent = DENY** every first-sign-in email bind and every contact creation, for everyone. The caller
-  gets `sdap.access.deny.workforce_tenant_list_empty`. People already bound by oid still resolve; licensed
+  gets `sdap.access.deny.workforce_tenant_list_empty`. People already bound by oid are denied too (#2128 round 1, 2026-10-20); licensed
   systemusers still authorize through Dataverse. Nothing fails at startup for an empty list — it fails closed at
   sign-in, which is why provisioning must write it.
 - **Never** a fallback to `AzureAd:TenantId`. **Not** `TenantRouting:Tenants[]` (that map is not configured in
