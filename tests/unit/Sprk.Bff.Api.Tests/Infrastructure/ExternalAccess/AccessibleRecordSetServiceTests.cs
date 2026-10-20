@@ -2832,18 +2832,18 @@ public class AccessibleRecordSetServiceTests
             [RecordY] = AccessRights.Read | AccessRights.Write,
             [RecordZ] = AccessRights.Read | AccessRights.Write | AccessRights.AppendTo | AccessRights.Delete,
         };
-        Task<AccessRights> Read(string entitySet, Guid id, CancellationToken _) => Task.FromResult(dataverse[id]);
+        Task<AccessRights?> Read(string entitySet, Guid id, CancellationToken _) => Task.FromResult<AccessRights?>(dataverse[id]);
         // A child create (here a to-do under the matter) also needs the child table's Create privilege (fix round 1, F1):
         // AppendTo on Z becomes Create only when the caller holds it; otherwise Z keeps exactly Read|Write|Delete.
-        Task<bool> Holds(string privilege, CancellationToken _) => Task.FromResult(holdsChildCreate);
+        Task<bool?> Holds(string privilege, CancellationToken _) => Task.FromResult<bool?>(holdsChildCreate);
 
         var confirmed = new Dictionary<Guid, AccessRights>();
         foreach (var id in new[] { RecordX, RecordY, RecordZ })
         {
-            confirmed[id] = await Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.WithDataverseRightsAsync(
+            confirmed[id] = (await Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.WithDataverseRightsAsync(
                 principal, principal.GetMatterRights(id), "sprk_matters", id, Read,
                 NullLogger.Instance, CancellationToken.None,
-                childCreatePrivilege: "prvCreatesprk_Todo", readCallerPrivilege: Holds);
+                childCreatePrivilege: "prvCreatesprk_Todo", readCallerPrivilege: Holds)).Rights;
         }
 
         confirmed.Should().BeEquivalentTo(new Dictionary<Guid, AccessRights>

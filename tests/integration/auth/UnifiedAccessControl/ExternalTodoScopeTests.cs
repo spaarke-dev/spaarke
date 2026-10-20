@@ -13,6 +13,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
+using WireShape = Sprk.Bff.Api.Tests.TestInfrastructure.CallerRecordAccessProbeDouble.WireShape;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
@@ -1142,8 +1143,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Data.CreateCallCount.Should().Be(0);
     }
 
-    [Fact(DisplayName = "Task 036 F1 (NFR-01): flag ON, a privilege read that FAILS denies the to-do create")]
-    public async Task Fr20_CreateTodo_PrivilegeReadFault_Is403_AndWritesNothing()
+    [Fact(DisplayName = "Task 036 F1 (NFR-01) + fix round 4: flag ON, a privilege read that FAILS refuses the to-do create as a retry-able 503")]
+    public async Task Fr20_CreateTodo_PrivilegeReadFault_Is503_AndWritesNothing()
     {
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(
@@ -1154,7 +1155,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldBeUnavailable(response, DataverseUnavailableReasonCode);
         _fixture.Data.CreateCallCount.Should().Be(0);
     }
 
@@ -1176,8 +1177,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Probe.AppOnlyCalls.Should().BeEmpty("flag off, no write consults Dataverse — the routes are unchanged");
     }
 
-    [Fact(DisplayName = "Task 036 (NFR-01): flag ON, a probe that FAILS denies the write — no fallback to a constant")]
-    public async Task Fr20_CreateTodo_ProbeFault_Is403_AndWritesNothing()
+    [Fact(DisplayName = "Task 036 (NFR-01) + fix round 4: flag ON, a probe that FAILS refuses the write as a retry-able 503 — no fallback to a constant")]
+    public async Task Fr20_CreateTodo_ProbeFault_Is503_AndWritesNothing()
     {
         _fixture.Reset();
         _fixture.Principal = SystemUserHolding(
@@ -1187,8 +1188,139 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldBeUnavailable(response, DataverseUnavailableReasonCode);
         _fixture.Data.CreateCallCount.Should().Be(0);
+    }
+
+    // ── Task 036 fix round 4 (F1): over the production probe and a scripted Dataverse, a question Dataverse gives no answer
+    //    to (a timeout, an UNKNOWN 403, a 5xx) is a retry-able 503 and writes nothing; a real denial stays a 403. ─────────
+
+    private const string DataverseUnavailableReasonCode = "sdap.access.dataverse_unavailable";
+    private const string TodoWriteUnavailableReasonCode = "sdap.access.todo_write_unavailable";
+
+    /// <summary>Each way Dataverse can fail to answer: the rights question, then the child-create privilege question after
+    /// Dataverse answered AppendTo.</summary>
+    public static TheoryData<string, string> UnansweredShapes() => new()
+    {
+        { WireShape.Timeout, WireShape.Held },
+        { WireShape.Unknown, WireShape.Held },
+        { WireShape.ServerFault, WireShape.Held },
+        { WireShape.AppendTo, WireShape.Timeout },
+        { WireShape.AppendTo, WireShape.Unknown },
+        { WireShape.AppendTo, WireShape.ServerFault },
+    };
+
+    [Theory(DisplayName = "Task 036 fix round 4 (F1): flag ON, a to-do create Dataverse gives no answer for is a 503 and writes nothing")]
+    [MemberData(nameof(UnansweredShapes))]
+    public async Task Fr20_CreateTodo_DataverseGivesNoAnswer_OverTheWire_Is503_AndWritesNothing(string rights, string privilege)
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.UseAppOnlyWire(rights, privilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
+
+        await ShouldBeUnavailable(response, DataverseUnavailableReasonCode);
+        _fixture.Data.CreateCallCount.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "Task 036 fix round 4 (F1): flag ON, an event create Dataverse gives no answer for is a 503 and writes nothing")]
+    [MemberData(nameof(UnansweredShapes))]
+    public async Task Fr20_CreateEvent_DataverseGivesNoAnswer_OverTheWire_Is503_AndWritesNothing(string rights, string privilege)
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.UseAppOnlyWire(rights, privilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/external/projects/{InScopeProject}/events", new { sprk_name = "Kickoff" });
+
+        await ShouldBeUnavailable(response, DataverseUnavailableReasonCode);
+        _fixture.Data.CreateEventCallCount.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "Task 036 fix round 4 (F1): flag ON, a real denial over the wire stays a 403 on the to-do and event creates")]
+    [InlineData("todos", WireShape.Denial, WireShape.Held)]
+    [InlineData("todos", WireShape.AppendTo, WireShape.NotHeld)]
+    [InlineData("events", WireShape.Denial, WireShape.Held)]
+    [InlineData("events", WireShape.AppendTo, WireShape.NotHeld)]
+    public async Task Fr20_ChildCreate_ARealDenial_OverTheWire_StaysA403_AndWritesNothing(
+        string route, string rights, string privilege)
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.UseAppOnlyWire(rights, privilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = route == "todos"
+            ? await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate())
+            : await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/events", new { sprk_name = "Kickoff" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        _fixture.Data.CreateCallCount.Should().Be(0);
+        _fixture.Data.CreateEventCallCount.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "Task 036 fix round 4 (F1): flag ON, a to-do PATCH Dataverse gives no answer for is the PATCH's own 503 and changes nothing")]
+    [InlineData(WireShape.Timeout)]
+    [InlineData(WireShape.Unknown)]
+    [InlineData(WireShape.ServerFault)]
+    public async Task Fr20_PatchTodo_DataverseGivesNoAnswer_OverTheWire_Is503_AndChangesNothing(string shape)
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
+        _fixture.Probe.UseAppOnlyWire(shape);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        await ShouldBeUnavailable(response, TodoWriteUnavailableReasonCode, "nothing was changed");
+        _fixture.Data.UpdateCallCount.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 036 fix round 4 (F1): flag ON, a real denial on the to-do PATCH over the wire stays a 403")]
+    public async Task Fr20_PatchTodo_ARealDenial_OverTheWire_StaysA403_AndChangesNothing()
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
+        _fixture.Probe.UseAppOnlyWire(WireShape.Denial);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        _fixture.Data.UpdateCallCount.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 036 fix round 4 (F1): flag ON, the to-do list still lists with canCreate=false when Dataverse gives no answer")]
+    public async Task Fr20_TodoList_DataverseGivesNoAnswer_OverTheWire_ReportsCanCreateFalse()
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.UseAppOnlyWire(WireShape.ServerFault);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var json = await ListJsonAsync(client, $"/api/v1/external/projects/{InScopeProject}/todos");
+
+        json.GetProperty("canCreate").GetBoolean().Should().BeFalse("canCreate is a UI affordance; an unanswered question offers no create");
+    }
+
+    private static async Task ShouldBeUnavailable(HttpResponseMessage response, string reasonCode, string nothing = "nothing was written")
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("reasonCode").GetString().Should().Be(reasonCode);
+        body.Should().Contain(nothing).And.Contain("Try again");
     }
 
     [Fact(DisplayName = "Task 036 (B-17): flag ON, a contact-grant Collaborate on the root still allows the create when Dataverse grants nothing more")]
@@ -1276,9 +1408,10 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
 
         var rights = await Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.WithDataverseRightsAsync(
             principal, AccessRights.Read, "sprk_todos", TodoId,
-            (_, _, _) => Task.FromResult(dataverse), log, CancellationToken.None);
+            (_, _, _) => Task.FromResult<AccessRights?>(dataverse), log, CancellationToken.None);
 
-        rights.Should().Be(dataverse & (AccessRights.Read | AccessRights.Write | AccessRights.Delete));
+        rights.Rights.Should().Be(dataverse & (AccessRights.Read | AccessRights.Write | AccessRights.Delete));
+        rights.Unanswered.Should().Be(AccessRights.None, "Dataverse answered");
         log.Levels.Should().NotContain(Microsoft.Extensions.Logging.LogLevel.Warning,
             "a route that creates nothing is not refused anything — the warning is for a real Create refusal");
         log.Levels.Should().NotContain(Microsoft.Extensions.Logging.LogLevel.Error);
@@ -1293,10 +1426,11 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
 
         var rights = await Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.WithDataverseRightsAsync(
             principal, AccessRights.Read, "sprk_projects", InScopeProject,
-            (_, _, _) => Task.FromResult(AccessRights.Read | AccessRights.AppendTo), log, CancellationToken.None,
+            (_, _, _) => Task.FromResult<AccessRights?>(AccessRights.Read | AccessRights.AppendTo), log, CancellationToken.None,
             childCreatePrivilege: "prvCreatesprk_Todo", readCallerPrivilege: null);
 
-        rights.Should().Be(AccessRights.Read);
+        rights.Rights.Should().Be(AccessRights.Read);
+        rights.Unanswered.Should().Be(AccessRights.None, "no privilege reader is a wiring defect, answered as a denial");
         log.Levels.Should().Contain(Microsoft.Extensions.Logging.LogLevel.Warning);
     }
 
@@ -1584,7 +1718,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty();
     }
 
-    [Theory(DisplayName = "Task 036 (a) (NFR-01): a fault on the app-only rights or privilege call refuses — no fallback to OBO or a constant")]
+    [Theory(DisplayName = "Task 036 (a) (NFR-01) + fix round 4: a fault on the app-only rights or privilege call refuses as a retry-able 503 — no fallback to OBO or a constant")]
     [InlineData("rights")]
     [InlineData("privilege")]
     public async Task Fr20a_HomeLinkedSystemUser_AnAppOnlyFault_Refuses(string faulting)
@@ -1607,7 +1741,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldBeUnavailable(response, DataverseUnavailableReasonCode);
         _fixture.Data.CreateCallCount.Should().Be(0);
         _fixture.Probe.Calls.Should().BeEmpty("a fault on the app-only path is never retried OBO");
         _fixture.Probe.PrivilegeCalls.Should().BeEmpty();

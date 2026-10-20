@@ -396,8 +396,9 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
     [Theory]
     [MemberData(nameof(AllKinds))]
-    public async Task Fr20_AProbeThatFaults_Is403_AndNothingIsDeleted(string segment)
+    public async Task Fr20_AProbeThatFaults_Is503_AndNothingIsDeleted(string segment)
     {
+        // Fix round 4 (F1): AuthorizeDeleteOwnAsync's own contract — a read that FAILED is the 503, never a 403.
         var id = _fixture.Seed(KindOf(segment), contact: CallerContact, parents: Project(RecordA));
         _fixture.Principal = DataverseDecidedSystemUserOn(RecordA, linkedContact: CallerContact);
         _fixture.Probe.AnswerAppOnly(CallerUser, DeletableSetOf(segment), id, AccessRights.Read | AccessRights.Delete);
@@ -405,8 +406,50 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
         using var response = await Delete(segment, id);
 
-        await ShouldBeTheUniformDenial(response);
+        await ShouldBeDeleteOwnUnavailable(response);
         _fixture.Exists(KindOf(segment), id).Should().BeTrue("a failed confirmation adds no rights (NFR-01)");
+    }
+
+    /// <summary>Task 036 fix round 4 (F1): every kind, against each way Dataverse can fail to answer.</summary>
+    public static TheoryData<string, string> KindsByUnansweredShape()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var segment in new[] { "documents", "todos", "events" })
+        {
+            data.Add(segment, CallerRecordAccessProbeDouble.WireShape.Timeout);
+            data.Add(segment, CallerRecordAccessProbeDouble.WireShape.Unknown);
+            data.Add(segment, CallerRecordAccessProbeDouble.WireShape.ServerFault);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(KindsByUnansweredShape))]
+    public async Task Fr20_DataverseGivesNoAnswer_OverTheWire_Is503_AndNothingIsDeleted(string segment, string shape)
+    {
+        var id = _fixture.Seed(KindOf(segment), contact: CallerContact, parents: Project(RecordA));
+        _fixture.Principal = DataverseDecidedSystemUserOn(RecordA, linkedContact: CallerContact);
+        _fixture.Probe.UseAppOnlyWire(shape);
+
+        using var response = await Delete(segment, id);
+
+        await ShouldBeDeleteOwnUnavailable(response);
+        _fixture.Exists(KindOf(segment), id).Should().BeTrue("nothing is deleted on a question Dataverse did not answer");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllKinds))]
+    public async Task Fr20_ARealDenial_OverTheWire_StaysTheUniform403_AndNothingIsDeleted(string segment)
+    {
+        var id = _fixture.Seed(KindOf(segment), contact: CallerContact, parents: Project(RecordA));
+        _fixture.Principal = DataverseDecidedSystemUserOn(RecordA, linkedContact: CallerContact);
+        _fixture.Probe.UseAppOnlyWire(CallerRecordAccessProbeDouble.WireShape.Denial);
+
+        using var response = await Delete(segment, id);
+
+        await ShouldBeTheUniformDenial(response);
+        _fixture.Exists(KindOf(segment), id).Should().BeTrue();
     }
 
     [Theory]
@@ -780,7 +823,8 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     {
         var document = JsonSerializer.Serialize(new ExternalDocumentDto
         {
-            SprkCreatedbypersonValue = CallerUser.ToString(), SprkCreatedbycontactValue = CallerContact.ToString(),
+            SprkCreatedbypersonValue = CallerUser.ToString(),
+            SprkCreatedbycontactValue = CallerContact.ToString(),
         });
         var todo = JsonSerializer.Serialize(new ExternalTodoDto { SprkCreatedbycontactValue = CallerContact.ToString() });
         var evt = JsonSerializer.Serialize(new ExternalEventDto { SprkCreatedbypersonValue = CallerUser.ToString() });
@@ -799,6 +843,14 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     {
         using var client = _fixture.CreateAuthenticatedClient();
         return await client.DeleteAsync($"/api/v1/external/{segment}/{id}");
+    }
+
+    private static async Task ShouldBeDeleteOwnUnavailable(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        ProblemCode(body).Should().Be("sdap.access.delete_own_unavailable");
+        body.Should().Contain("nothing was deleted").And.Contain("Try again");
     }
 
     private static async Task ShouldBeTheUniformDenial(HttpResponseMessage response)
@@ -845,14 +897,14 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         IReadOnlyList<CallerProjectAccess>? projects = null,
         IReadOnlyDictionary<Guid, AccessRights>? matters = null,
         IReadOnlyDictionary<Guid, AccessRights>? workAssignments = null) => new()
-    {
-        Plane = CallerPrincipalPlane.CiamContact,
-        ContactId = CallerContact,
-        Email = "external.user@example.test",
-        ProjectAccess = projects ?? Array.Empty<CallerProjectAccess>(),
-        MatterAccess = matters ?? new Dictionary<Guid, AccessRights>(),
-        WorkAssignmentAccess = workAssignments ?? new Dictionary<Guid, AccessRights>(),
-    };
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = CallerContact,
+            Email = "external.user@example.test",
+            ProjectAccess = projects ?? Array.Empty<CallerProjectAccess>(),
+            MatterAccess = matters ?? new Dictionary<Guid, AccessRights>(),
+            WorkAssignmentAccess = workAssignments ?? new Dictionary<Guid, AccessRights>(),
+        };
 
     private static CallerPrincipal ContactOn(Guid project, ExternalAccessLevel level) =>
         Contact(projects: new[] { CallerProjectAccess.FromLevel(project, level) });

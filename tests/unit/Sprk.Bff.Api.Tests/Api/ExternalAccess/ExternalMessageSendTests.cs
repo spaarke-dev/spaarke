@@ -104,20 +104,20 @@ public class ExternalMessageSendTests
         Guid? workAssignment = null,
         AccessRights workAssignmentRights = AccessRights.Read | AccessRights.Create | AccessRights.Write,
         Guid? contactId = null) => new()
-    {
-        Plane = CallerPrincipalPlane.CiamContact,
-        ContactId = contactId ?? Guid.NewGuid(),
-        Email = "partner@outside.test",
-        ProjectAccess = project is { } p
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = contactId ?? Guid.NewGuid(),
+            Email = "partner@outside.test",
+            ProjectAccess = project is { } p
             ? new[] { CallerProjectAccess.FromLevel(p, projectLevel) }
             : Array.Empty<CallerProjectAccess>(),
-        MatterAccess = matter is { } m
+            MatterAccess = matter is { } m
             ? new Dictionary<Guid, AccessRights> { [m] = matterRights }
             : new Dictionary<Guid, AccessRights>(),
-        WorkAssignmentAccess = workAssignment is { } w
+            WorkAssignmentAccess = workAssignment is { } w
             ? new Dictionary<Guid, AccessRights> { [w] = workAssignmentRights }
             : new Dictionary<Guid, AccessRights>(),
-    };
+        };
 
     private static CallerPrincipal WorkforceContact(Guid? project = null, Guid? contactId = null) => new()
     {
@@ -216,8 +216,8 @@ public class ExternalMessageSendTests
     /// round 1, F1) its privilege reader.</summary>
     private Task<IResult> Post(
         string root, Guid id, CallerPrincipal caller,
-        Func<string, Guid, CancellationToken, Task<AccessRights>>? readCallerRights,
-        Func<string, CancellationToken, Task<bool>>? readCallerPrivilege = null)
+        Func<string, Guid, CancellationToken, Task<AccessRights?>>? readCallerRights,
+        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null)
     {
         var data = _roots.NewService();
         return ExternalMessageEndpoints.PostMessageCoreAsync(
@@ -681,15 +681,27 @@ public class ExternalMessageSendTests
     }
 
     [Fact]
-    public async Task Fr20_APrivilegeReaderThatThrows_OrNoPrivilegeReader_Is403_AndCreatesNoRow()
+    public async Task Fr20_APrivilegeReaderThatThrows_OrAnswersNothing_Is503_AndCreatesNoRow()
+    {
+        // Fix round 4 (F1): a privilege read that could not run is not "not held" — the post is unavailable, not refused.
+        var (caller, record) = SystemUserReading("projects", dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        ShouldBeUnavailable(
+            await Post("projects", record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked),
+                (_, _) => throw new HttpRequestException("RetrieveUserSetOfPrivilegesByNames failed")));
+        ShouldBeUnavailable(
+            await Post("projects", record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked),
+                (_, _) => Task.FromResult<bool?>(null)));
+        ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    public async Task Fr20_NoPrivilegeReader_Is403_AndCreatesNoRow()
     {
         var (caller, record) = SystemUserReading("projects", dataverseDecides: true);
         var asked = new List<(string EntitySet, Guid RecordId)>();
 
-        ShouldBeForbidden(
-            await Post("projects", record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked),
-                (_, _) => throw new HttpRequestException("RetrieveUserSetOfPrivilegesByNames failed")),
-            ExternalMessageEndpoints.DenyInsufficientRights);
         ShouldBeForbidden(
             await Post("projects", record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked)),
             ExternalMessageEndpoints.DenyInsufficientRights);
@@ -702,16 +714,81 @@ public class ExternalMessageSendTests
             "the name the SpaarkeMaster roles carry; a wrong name is never held, so every post would deny");
 
     [Fact]
-    public async Task Fr20_AReaderThatThrows_OrNoReader_Is403_AndCreatesNoRow()
+    public async Task Fr20_AReaderThatThrows_OrAnswersNothing_Is503_AndCreatesNoRow()
+    {
+        // Fix round 4 (F1): a rights read that could not run is a retry-able 503, never "you may not post here".
+        var (caller, record) = SystemUserReading("projects", dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        ShouldBeUnavailable(
+            await Post("projects", record, caller, (_, _, _) => throw new HttpRequestException("Dataverse unreachable")));
+        ShouldBeUnavailable(await Post("projects", record, caller, Dataverse(null, asked)));
+        ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    public async Task Fr20_NoReader_Is403_AndCreatesNoRow()
     {
         var (caller, record) = SystemUserReading("projects", dataverseDecides: true);
 
-        ShouldBeForbidden(
-            await Post("projects", record, caller, (_, _, _) => throw new HttpRequestException("Dataverse unreachable")),
-            ExternalMessageEndpoints.DenyInsufficientRights);
         ShouldBeForbidden(await Post("projects", record, caller, readCallerRights: null),
             ExternalMessageEndpoints.DenyInsufficientRights);
         ShouldHaveWrittenNothing();
+    }
+
+    // ── Task 036 fix round 4 (F1): over the production probe and a scripted Dataverse, a question Dataverse gives no answer
+    //    to (a timeout, an UNKNOWN 403, a 5xx) is a 503 and writes nothing; a real denial stays a 403 ─────────────────────
+
+    public static TheoryData<string, string, string> WireCases()
+    {
+        var data = new TheoryData<string, string, string>();
+        foreach (var root in new[] { "projects", "matters", "workassignments", "invoices" })
+        {
+            data.Add(root, CallerRecordAccessProbeDouble.WireShape.Timeout, CallerRecordAccessProbeDouble.WireShape.Held);
+            data.Add(root, CallerRecordAccessProbeDouble.WireShape.Unknown, CallerRecordAccessProbeDouble.WireShape.Held);
+            data.Add(root, CallerRecordAccessProbeDouble.WireShape.ServerFault, CallerRecordAccessProbeDouble.WireShape.Held);
+        }
+
+        // The child-create privilege question, after Dataverse answered AppendTo on the record.
+        data.Add("projects", CallerRecordAccessProbeDouble.WireShape.AppendTo, CallerRecordAccessProbeDouble.WireShape.Timeout);
+        data.Add("projects", CallerRecordAccessProbeDouble.WireShape.AppendTo, CallerRecordAccessProbeDouble.WireShape.Unknown);
+        data.Add("projects", CallerRecordAccessProbeDouble.WireShape.AppendTo, CallerRecordAccessProbeDouble.WireShape.ServerFault);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(WireCases))]
+    public async Task Fr20_DataverseGivesNoAnswer_OverTheWire_Is503_AndCreatesNoRow(string root, string rights, string privilege)
+    {
+        var (caller, record) = SystemUserReading(root, dataverseDecides: true);
+        var probe = new CallerRecordAccessProbeDouble().UseAppOnlyWire(rights, privilege);
+
+        ShouldBeUnavailable(await PostOverTheWire(root, record, caller, probe));
+        ShouldHaveWrittenNothing();
+    }
+
+    [Theory]
+    [InlineData("projects", CallerRecordAccessProbeDouble.WireShape.Denial, CallerRecordAccessProbeDouble.WireShape.Held)]
+    [InlineData("invoices", CallerRecordAccessProbeDouble.WireShape.Denial, CallerRecordAccessProbeDouble.WireShape.Held)]
+    [InlineData("projects", CallerRecordAccessProbeDouble.WireShape.AppendTo, CallerRecordAccessProbeDouble.WireShape.NotHeld)]
+    public async Task Fr20_ARealDenial_OverTheWire_StaysA403_AndCreatesNoRow(string root, string rights, string privilege)
+    {
+        var (caller, record) = SystemUserReading(root, dataverseDecides: true);
+        var probe = new CallerRecordAccessProbeDouble().UseAppOnlyWire(rights, privilege);
+
+        ShouldBeForbidden(await PostOverTheWire(root, record, caller, probe), ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    public async Task Fr20_AppendToAndTheCreatePrivilege_OverTheWire_Is201()
+    {
+        var (caller, record) = SystemUserReading("projects", dataverseDecides: true);
+        var probe = new CallerRecordAccessProbeDouble().UseAppOnlyWire(
+            CallerRecordAccessProbeDouble.WireShape.AppendTo, CallerRecordAccessProbeDouble.WireShape.Held);
+
+        Created(await PostOverTheWire("projects", record, caller, probe));
+        TheRow();
     }
 
     [Fact]
@@ -807,21 +884,41 @@ public class ExternalMessageSendTests
     };
 
     /// <summary>Task 036 fix round 1 (F1): the caller holds exactly <paramref name="held"/>; every question is recorded.</summary>
-    private static Func<string, CancellationToken, Task<bool>> Holds(List<string> asked, params string[] held) =>
+    private static Func<string, CancellationToken, Task<bool?>> Holds(List<string> asked, params string[] held) =>
         (privilege, _) =>
         {
             asked.Add(privilege);
-            return Task.FromResult(held.Contains(privilege, StringComparer.Ordinal));
+            return Task.FromResult<bool?>(held.Contains(privilege, StringComparer.Ordinal));
         };
 
-    /// <summary>Dataverse's answer for the caller, recording every question.</summary>
-    private static Func<string, Guid, CancellationToken, Task<AccessRights>> Dataverse(
-        AccessRights answer, List<(string EntitySet, Guid RecordId)> asked) =>
+    /// <summary>Dataverse's answer for the caller, recording every question; <see langword="null"/> is "no answer".</summary>
+    private static Func<string, Guid, CancellationToken, Task<AccessRights?>> Dataverse(
+        AccessRights? answer, List<(string EntitySet, Guid RecordId)> asked) =>
         (entitySet, recordId, _) =>
         {
             asked.Add((entitySet, recordId));
             return Task.FromResult(answer);
         };
+
+    /// <summary>Task 036 fix round 4 (F1): the route's own readers (<see cref="ExternalProjectDataEndpoints.CallerRightsReader"/>,
+    /// <see cref="ExternalProjectDataEndpoints.CallerPrivilegeReader"/>) over the production probe and a scripted Dataverse.</summary>
+    private Task<IResult> PostOverTheWire(string root, Guid record, CallerPrincipal caller, CallerRecordAccessProbeDouble probe)
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.Items[CallerPrincipal.HttpContextItemsKey] = caller;
+        return Post(root, record, caller,
+            ExternalProjectDataEndpoints.CallerRightsReader(probe, httpContext),
+            ExternalProjectDataEndpoints.CallerPrivilegeReader(probe, httpContext));
+    }
+
+    private static void ShouldBeUnavailable(IResult result)
+    {
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable,
+            "Dataverse gave no answer: a retry-able fault, never shown as a permission denial");
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ExternalProjectDataEndpoints.DataverseUnavailableReasonCode);
+        problem.ProblemDetails.Detail.Should().Contain("nothing was written").And.Contain("Try again");
+    }
 
     // ── AC 3: the stored sender is the caller, whatever the request names ────────────────────────────────────────
 

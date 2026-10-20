@@ -238,7 +238,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
 
     [Theory]
     [MemberData(nameof(RootParents))]
-    public async Task Fr20_Upload_APrivilegeReadThatFaults_Is403_AndWritesNothing(string segment)
+    public async Task Fr20_Upload_APrivilegeReadThatFaults_Is503_AndWritesNothing(string segment)
     {
         _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
         _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo)
@@ -248,14 +248,15 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         using var client = _fixture.CreateAuthenticatedClient();
         using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
 
-        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden, "a failed privilege read adds no Create (NFR-01)");
+        // Fix round 4 (F1): a failed privilege read adds no Create (NFR-01), and is a retry-able 503, not a denial.
+        await ShouldBeDataverseUnavailable(upload);
         _fixture.Uploads.Should().BeEmpty();
         _fixture.Data.Documents.Should().BeEmpty();
     }
 
     [Theory]
     [MemberData(nameof(RootParents))]
-    public async Task Fr20_Upload_AProbeThatFaults_Is403_AndWritesNothing(string segment)
+    public async Task Fr20_Upload_AProbeThatFaults_Is503_AndWritesNothing(string segment)
     {
         _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
         _fixture.Probe.AnswerAppOnly(CallerUser, EntitySetOf(segment), RecordA, AccessRights.Read | AccessRights.AppendTo);
@@ -264,9 +265,90 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         using var client = _fixture.CreateAuthenticatedClient();
         using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
 
-        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden, "a failed confirmation adds no rights (NFR-01)");
+        // Fix round 4 (F1): a failed confirmation adds no rights (NFR-01), and is a retry-able 503, not a denial.
+        await ShouldBeDataverseUnavailable(upload);
         _fixture.Uploads.Should().BeEmpty();
         _fixture.Data.Documents.Should().BeEmpty();
+    }
+
+    /// <summary>Task 036 fix round 4 (F1): every confirmed parent, against each way Dataverse can fail to answer — the rights
+    /// question, and the sprk_document Create privilege after Dataverse answered AppendTo.</summary>
+    public static TheoryData<string, string, string> ParentsByUnansweredShape()
+    {
+        var data = new TheoryData<string, string, string>();
+        foreach (var segment in new[] { "projects", "matters", "workassignments", "invoices" })
+        {
+            foreach (var shape in new[]
+                     {
+                         CallerRecordAccessProbeDouble.WireShape.Timeout, CallerRecordAccessProbeDouble.WireShape.Unknown,
+                         CallerRecordAccessProbeDouble.WireShape.ServerFault,
+                     })
+            {
+                data.Add(segment, shape, CallerRecordAccessProbeDouble.WireShape.Held);
+                data.Add(segment, CallerRecordAccessProbeDouble.WireShape.AppendTo, shape);
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(ParentsByUnansweredShape))]
+    public async Task Fr20_Upload_DataverseGivesNoAnswer_OverTheWire_Is503_AndWritesNothing(
+        string segment, string rights, string privilege)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.UseAppOnlyWire(rights, privilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        await ShouldBeDataverseUnavailable(upload);
+        _fixture.Uploads.Should().BeEmpty("nothing reaches SPE on a question Dataverse did not answer");
+        _fixture.Data.Documents.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("projects", CallerRecordAccessProbeDouble.WireShape.Denial, CallerRecordAccessProbeDouble.WireShape.Held)]
+    [InlineData("invoices", CallerRecordAccessProbeDouble.WireShape.Denial, CallerRecordAccessProbeDouble.WireShape.Held)]
+    [InlineData("matters", CallerRecordAccessProbeDouble.WireShape.AppendTo, CallerRecordAccessProbeDouble.WireShape.NotHeld)]
+    public async Task Fr20_Upload_ARealDenial_OverTheWire_StaysA403_AndWritesNothing(string segment, string rights, string privilege)
+    {
+        _fixture.Principal = SystemUserReading(segment, RecordA, dataverseDecides: true);
+        _fixture.Probe.UseAppOnlyWire(rights, privilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.Forbidden, await upload.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.Documents.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(CallerRecordAccessProbeDouble.WireShape.Timeout)]
+    [InlineData(CallerRecordAccessProbeDouble.WireShape.Unknown)]
+    [InlineData(CallerRecordAccessProbeDouble.WireShape.ServerFault)]
+    public async Task Fr20_List_DataverseGivesNoAnswer_OverTheWire_StillLists_WithCanCreateFalse(string shape)
+    {
+        // The list's canCreate is a UI affordance: an unanswered question offers no upload, and the list is still served.
+        _fixture.Principal = SystemUserReading("projects", RecordA, dataverseDecides: true);
+        _fixture.Probe.UseAppOnlyWire(shape);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.GetAsync($"/api/v1/external/projects/{RecordA}/documents");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadFromJsonAsync<ExternalDocumentListResponse>())!.CanCreate.Should().BeFalse();
+    }
+
+    private static async Task ShouldBeDataverseUnavailable(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be("sdap.access.dataverse_unavailable");
+        body.Should().Contain("nothing was written").And.Contain("Try again");
     }
 
     [Theory]

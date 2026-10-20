@@ -34,10 +34,139 @@ public sealed class CallerRecordAccessProbeAppOnlyTests
     private static readonly Guid Project = Guid.Parse("0e036a00-0000-4000-8000-0000000000b2");
 
     private static TestProbe Probe(
-        HttpMessageHandler? handler, ILogger<CallerRecordAccessProbe>? logger = null, TimeSpan? timeout = null) => new(
+        HttpMessageHandler? handler, ILogger<CallerRecordAccessProbe>? logger = null, TimeSpan? timeout = null,
+        bool waitOnDelay = false) => new(
         handler is null ? null : new OfflineService(handler),
         logger ?? NullLogger<CallerRecordAccessProbe>.Instance,
-        timeout);
+        timeout)
+        {
+            WaitOnDelay = waitOnDelay,
+        };
+
+    // ── Task 036 fix round 4 (K6): the 404 re-ask waits on the BOUNDED token, so the 15 s bound cuts a re-ask short.
+
+    [Fact(DisplayName = "Task 036 fix round 4 (K6): a 404 re-ask that would outlast the bound is cut off by it — unanswered, never a hang")]
+    public async Task GetPrincipalRightsAppOnly_AReaskThatOutlastsTheBound_IsCutOffByIt()
+    {
+        var logs = new CollectingLoggerProvider();
+        var handler = new ScriptedHandler(_ => Status(HttpStatusCode.NotFound));
+        var probe = Probe(handler, LoggerFor(logs), timeout: TimeSpan.FromMilliseconds(100), waitOnDelay: true);
+
+        // The caller's own token never fires: only the probe's bound can end the re-ask's wait.
+        var rights = await probe.GetPrincipalRightsAppOnlyOrUnknownAsync(SystemUser, "sprk_projects", Project)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        rights.Should().BeNull("a question the bound cut short is unanswered, not 'no rights'");
+        probe.Delays.Should().ContainSingle("the first re-ask was waiting when the bound fired");
+        logs.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("did not answer within"));
+    }
+
+    // ── Task 036 fix round 4 (F1): the nullable answers a write gate asks for. An ANSWER about the user is a value; a
+    //    timeout, an UNKNOWN 403, a 5xx or a transport fault is null — never "no rights" / "not held".
+
+    [Theory(DisplayName = "Task 036 fix round 4 (F1): a rights question Dataverse gives no answer to is null, never None")]
+    [InlineData("timeout")]
+    [InlineData("unknown-403")]
+    [InlineData("empty-403")]
+    [InlineData("throttled")]
+    [InlineData("server-fault")]
+    [InlineData("unreadable")]
+    [InlineData("transport")]
+    [InlineData("no-client")]
+    public async Task GetPrincipalRightsAppOnlyOrUnknown_NoAnswer_IsNull(string shape)
+    {
+        var logs = new CollectingLoggerProvider();
+        HttpMessageHandler handler = shape == "timeout"
+            ? new HangingHandler()
+            : new ScriptedHandler(_ => shape switch
+            {
+                "unknown-403" => Error(HttpStatusCode.Forbidden, "0x8004A110"),
+                "empty-403" => Status(HttpStatusCode.Forbidden),
+                "throttled" => Status(HttpStatusCode.TooManyRequests),
+                "server-fault" => Status(HttpStatusCode.ServiceUnavailable),
+                "unreadable" => Json("{not json"),
+                _ => throw new HttpRequestException("connection reset"),
+            });
+        var probe = Probe(shape == "no-client" ? null : handler, LoggerFor(logs), timeout: TimeSpan.FromMilliseconds(100));
+
+        var rights = await probe.GetPrincipalRightsAppOnlyOrUnknownAsync(SystemUser, "sprk_projects", Project)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        rights.Should().BeNull("a write gate answers this with a retry-able 503, not a permission denial");
+        logs.Entries.Should().NotContain(e => e.Message.Contains("[DELEGATION] Rights of systemuser"),
+            "no answer is never logged as the user's rights");
+        (await probe.GetPrincipalRightsAppOnlyAsync(SystemUser, "sprk_projects", Project).WaitAsync(TimeSpan.FromSeconds(10)))
+            .Should().Be(AccessRights.None, "the old shape still fails closed for a caller with no 'try again' to offer");
+    }
+
+    [Theory(DisplayName = "Task 036 fix round 4 (F1): an answer about the user is a value — a denial is None, not null")]
+    [InlineData(DataverseWebApiService.NoReadAccessErrorCode, AccessRights.None)]
+    [InlineData(DataverseWebApiService.AccessCheckDeniedErrorCode, AccessRights.None)]
+    [InlineData("granted", AccessRights.Read | AccessRights.AppendTo)]
+    [InlineData("not-found", AccessRights.None)]
+    public async Task GetPrincipalRightsAppOnlyOrUnknown_AnAnswer_IsAValue(string shape, AccessRights expected)
+    {
+        var handler = new ScriptedHandler(_ => shape switch
+        {
+            "granted" => Json("{\"AccessRights\":\"ReadAccess, AppendToAccess\"}"),
+            "not-found" => Status(HttpStatusCode.NotFound),
+            _ => Error(HttpStatusCode.Forbidden, shape),
+        });
+
+        var rights = await Probe(handler).GetPrincipalRightsAppOnlyOrUnknownAsync(SystemUser, "sprk_projects", Project);
+
+        rights.Should().Be(expected);
+    }
+
+    [Fact(DisplayName = "Task 036 fix round 4 (F1): no systemuser or no entity set is an answer (None): there is nothing to ask about")]
+    public async Task GetPrincipalRightsAppOnlyOrUnknown_NothingToAskAbout_IsNone()
+    {
+        var handler = new ScriptedHandler(_ => Json("{\"AccessRights\":\"ReadAccess\"}"));
+        var probe = Probe(handler);
+
+        (await probe.GetPrincipalRightsAppOnlyOrUnknownAsync(Guid.Empty, "sprk_projects", Project)).Should().Be(AccessRights.None);
+        (await probe.GetPrincipalRightsAppOnlyOrUnknownAsync(SystemUser, " ", Project)).Should().Be(AccessRights.None);
+        handler.Requests.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "Task 036 fix round 4 (F1): a privilege question Dataverse gives no answer to is null, never 'not held'")]
+    [InlineData("timeout")]
+    [InlineData("forbidden")]
+    [InlineData("server-fault")]
+    [InlineData("unreadable")]
+    [InlineData("transport")]
+    [InlineData("no-client")]
+    public async Task PrincipalHoldsPrivilegeAppOnlyOrUnknown_NoAnswer_IsNull(string shape)
+    {
+        HttpMessageHandler handler = shape == "timeout"
+            ? new HangingHandler()
+            : new ScriptedHandler(_ => shape switch
+            {
+                "forbidden" => Error(HttpStatusCode.Forbidden, "0x8004A110"),
+                "server-fault" => Status(HttpStatusCode.InternalServerError),
+                "unreadable" => Json("{not json"),
+                _ => throw new HttpRequestException("connection reset"),
+            });
+        var probe = Probe(shape == "no-client" ? null : handler, timeout: TimeSpan.FromMilliseconds(100));
+
+        var holds = await probe.PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync(SystemUser, "prvCreatesprk_Todo")
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        holds.Should().BeNull();
+        (await probe.PrincipalHoldsPrivilegeAppOnlyAsync(SystemUser, "prvCreatesprk_Todo").WaitAsync(TimeSpan.FromSeconds(10)))
+            .Should().BeFalse("the old shape still fails closed");
+    }
+
+    [Theory(DisplayName = "Task 036 fix round 4 (F1): a privilege answer is a value — held or not held")]
+    [InlineData("""{"RolePrivileges":[{"PrivilegeName":"prvCreatesprk_Todo"}]}""", true)]
+    [InlineData("""{"RolePrivileges":[]}""", false)]
+    public async Task PrincipalHoldsPrivilegeAppOnlyOrUnknown_AnAnswer_IsAValue(string body, bool expected)
+    {
+        var holds = await Probe(new ScriptedHandler(_ => Json(body)))
+            .PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync(SystemUser, "prvCreatesprk_Todo");
+
+        holds.Should().Be(expected);
+    }
 
     // ── Task 036 option C (owner 2026-10-20): the app-only path is now EVERY systemuser's write confirmation on
     //    /api/v1/external, so it carries the OBO question's replication-lag re-ask, tells a fault from a denial, and is
@@ -286,12 +415,21 @@ public sealed class CallerRecordAccessProbeAppOnlyTests
     {
         public List<TimeSpan> Delays { get; } = new();
 
+        /// <summary>Fix round 4 (K6): when set, each re-ask delay really waits — as long as its token allows — so a re-ask
+        /// the bound must cut short is cut short only if the probe hands the delay the bounded token.</summary>
+        public bool WaitOnDelay { get; init; }
+
         protected override TimeSpan AppOnlyTimeout => timeout ?? base.AppOnlyTimeout;
 
-        protected override Task DelayAsync(TimeSpan delay, CancellationToken ct)
+        protected override async Task DelayAsync(TimeSpan delay, CancellationToken ct)
         {
+            // Fix round 4 (K6): the delay honours its token, as the production Task.Delay does.
+            ct.ThrowIfCancellationRequested();
             Delays.Add(delay);
-            return Task.CompletedTask;
+            if (WaitOnDelay)
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct).ConfigureAwait(false);
+            }
         }
     }
 

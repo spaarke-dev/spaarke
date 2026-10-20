@@ -163,7 +163,8 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status409Conflict); // task 146: no owner resolvable from the root
+            .ProducesProblem(StatusCodes.Status409Conflict) // task 146: no owner resolvable from the root
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable); // task 036 fix round 4: Dataverse gave no answer
 
         // ---------------------------------------------------------------------------------------
         // To-do parity for the other two accessible roots (task 029 / FR-08).
@@ -195,7 +196,8 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status409Conflict); // task 146
+            .ProducesProblem(StatusCodes.Status409Conflict) // task 146
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable); // task 036 fix round 4: Dataverse gave no answer
 
         group.MapGet("/workassignments/{id:guid}/todos", GetWorkAssignmentTodos)
             .WithName("GetExternalWorkAssignmentTodos")
@@ -213,7 +215,8 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status409Conflict); // task 146
+            .ProducesProblem(StatusCodes.Status409Conflict) // task 146
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable); // task 036 fix round 4: Dataverse gave no answer
 
         // POST /api/v1/external/projects/{id}/documents — upload a file and create its document row.
         // Container is SERVER-DERIVED from the project (never client-named) and the upload uses
@@ -229,7 +232,8 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // GET /api/v1/external/projects/{id}/documents/{documentId}/versions — SPE version history
         group.MapGet("/projects/{id:guid}/documents/{documentId:guid}/versions", GetDocumentVersions)
@@ -281,7 +285,8 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapGet("/matters/{id:guid}/documents/{documentId:guid}/versions", GetMatterDocumentVersions)
             .WithName("GetExternalMatterDocumentVersions")
@@ -321,7 +326,8 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         group.MapGet("/workassignments/{id:guid}/documents/{documentId:guid}/versions", GetWorkAssignmentDocumentVersions)
             .WithName("GetExternalWorkAssignmentDocumentVersions")
@@ -455,7 +461,8 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status409Conflict); // task 146
+            .ProducesProblem(StatusCodes.Status409Conflict) // task 146
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable); // task 036 fix round 4: Dataverse gave no answer
 
         // GET /api/v1/external/projects/{id}/contacts
         group.MapGet("/projects/{id:guid}/contacts", GetContacts)
@@ -483,7 +490,8 @@ public static class ExternalProjectDataEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden);
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // ---------------------------------------------------------------------------------------
         // Delete-own (spaarke-SPA-external-access-platform-r3 task 032, FR-26) — the first DELETE routes on this plane.
@@ -606,7 +614,8 @@ public static class ExternalProjectDataEndpoints
         // `canCreate` is the upload route's own answer for a caller whose access Dataverse decided (one probe for the record
         // in hand, plus the sprk_document Create privilege when Dataverse answers AppendTo). Read is unchanged: Dataverse
         // only widens a parent that already holds Read. Every other caller is asked nothing (WithDataverseRightsAsync).
-        var (rights, upstreamFault) = await RightsForDocumentParentAsync(
+        // An unanswered Dataverse question offers no upload (canCreate: false, a UI affordance only; fix round 4, F1).
+        var (rights, upstreamFault, _) = await RightsForDocumentParentAsync(
             callerContext, parentKind, parentId, dataService, modules, ct, CallerRightsReader(probe, httpContext), logger,
             CallerPrivilegeReader(probe, httpContext));
         if (upstreamFault is not null) return upstreamFault;
@@ -652,7 +661,7 @@ public static class ExternalProjectDataEndpoints
         // (1) Read on the parent (task 136 · C2). Presence in the caller's map is NOT enough: a Secure
         //     project reached only through an organization grant used to sit there with no rights, and this
         //     route then streamed its documents app-only.
-        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        var (rights, upstreamFault, _) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
         if (upstreamFault is not null) return upstreamFault;
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
@@ -756,7 +765,8 @@ public static class ExternalProjectDataEndpoints
         {
             Value = todos.Value,
             Truncated = todos.Truncated,
-            CanCreate = createRights.HasFlag(Spaarke.Dataverse.AccessRights.Create),
+            // An unanswered Dataverse question offers no create (a UI affordance only; fix round 4, F1).
+            CanCreate = createRights.Rights.HasFlag(Spaarke.Dataverse.AccessRights.Create),
         });
     }
 
@@ -791,10 +801,13 @@ public static class ExternalProjectDataEndpoints
         // check, and a root type added to one branch cannot be forgotten in the other.
         // Task 036 (FR-20): a caller whose access Dataverse decided is confirmed against Dataverse on the root (AppendTo) AND,
         // since fix round 1 (F1), on their own Create privilege on sprk_todo — the to-do is written app-only.
-        var rights = await RightsForRootWriteAsync(
+        // Fix round 4 (F1): Create missing only because Dataverse gave no answer is a retry-able 503, not a denial.
+        var confirmed = await RightsForRootWriteAsync(
             callerContext, rootKind, rootId, CallerRightsReader(probe, httpContext), logger, ct,
             TodoSourceAccessFilter.CreateTodoPrivilege, CallerPrivilegeReader(probe, httpContext));
-        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
+        if (confirmed.IsUnavailableFor(Spaarke.Dataverse.AccessRights.Create))
+            return DataverseRightsUnavailable();
+        if (!confirmed.Rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "Your access level does not permit creating to-dos on this record",
                 extensions: new Dictionary<string, object?>
@@ -905,11 +918,14 @@ public static class ExternalProjectDataEndpoints
     /// <para><b>Read first.</b> Nothing is asked unless <paramref name="composed"/> holds Read: a record outside the caller's
     /// accessible set, or removed by the deny list or the Restricted veto, is refused by the route without a Dataverse
     /// call, so the vetoes stay in force.</para>
-    /// <para><b>Fail closed (NFR-01).</b> The probe answers None when it cannot ask (no systemuser id, no app-only client, a
-    /// refused, faulted or timed-out call, or an answer that is not about the user's access); a reader that throws, or no
-    /// reader, also adds None. The route then refuses the write unless the
-    /// grants alone allow it. There is no fallback to membership, an app-only read or a constant. The caller's own
-    /// cancellation is rethrown.</para>
+    /// <para><b>Fail closed (NFR-01), and a fault is not a denial</b> (fix round 4, F1). Dataverse's "no access" answer adds
+    /// None, and the route refuses the write (403) unless the grants alone allow it. When Dataverse gives NO answer — the
+    /// reader answers <see langword="null"/> (a timeout, a throttle or 5xx, an answer that is not about the user's access,
+    /// no app-only client) or throws — it also adds None, and the rights it could not confirm are returned as
+    /// <see cref="ConfirmedRights.Unanswered"/>: a gate that then lacks the right it needs answers a retry-able 503
+    /// (<see cref="ConfirmedRights.IsUnavailableFor"/>) and writes nothing, rather than telling the user they have no
+    /// access. No reader at all (a wiring defect) adds None as an answer. There is no fallback to membership, an app-only
+    /// read or a constant. The caller's own cancellation is rethrown.</para>
     /// <para><b>A child create needs the child table's Create privilege too</b> (task 036 fix round 1, F1). The BFF writes
     /// the child app-only, so Dataverse never checks the caller's own Create privilege on the CHILD table. Dataverse adds
     /// <see cref="Spaarke.Dataverse.AccessRights.Create"/> here only when it answers AppendTo on the parent AND the caller
@@ -917,8 +933,9 @@ public static class ExternalProjectDataEndpoints
     /// app-only naming the systemuser, uncached — the rule of the task 166 / G5 pairing of <c>TodoSourceAccessFilter</c> and
     /// <c>CommunicationRecordAuthorizationFilter</c>). The privilege is asked only when it can change the answer: Dataverse
     /// answered AppendTo and <paramref name="composed"/> does not already carry Create. No privilege named (a route that
-    /// creates nothing — not a refusal, so nothing is logged), no reader, a false answer or a fault: Dataverse adds no
-    /// Create (NFR-01). Read, Write and Delete are unaffected, so the PATCH and
+    /// creates nothing — not a refusal, so nothing is logged), no reader or a false answer: Dataverse adds no Create
+    /// (NFR-01). An unanswered privilege (<see langword="null"/> or a throw) adds no Create either, and marks Create
+    /// <see cref="ConfirmedRights.Unanswered"/> (fix round 4, F1). Read, Write and Delete are unaffected, so the PATCH and
     /// delete-own confirmations (which name no child table) are unchanged.</para>
     /// <para>One Dataverse round trip per confirmed write (NFR-02), for the single record in hand; a child create that
     /// Dataverse answers with AppendTo adds the privilege read (<c>RetrieveUserSetOfPrivilegesByNames</c> on the
@@ -937,21 +954,22 @@ public static class ExternalProjectDataEndpoints
     /// that creates nothing (Dataverse then adds no Create).</param>
     /// <param name="readCallerPrivilege">Asks Dataverse whether the caller holds a named privilege
     /// (<see cref="CallerPrivilegeReader"/>).</param>
-    internal static async Task<Spaarke.Dataverse.AccessRights> WithDataverseRightsAsync(
+    internal static async Task<ConfirmedRights> WithDataverseRightsAsync(
         CallerPrincipal caller,
         Spaarke.Dataverse.AccessRights composed,
         string entitySet,
         Guid recordId,
-        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>>? readCallerRights,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>>? readCallerRights,
         ILogger logger,
         CancellationToken ct,
         string? childCreatePrivilege = null,
-        Func<string, CancellationToken, Task<bool>>? readCallerPrivilege = null)
+        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null)
     {
         if (!caller.DataverseConfirmsWrites || !composed.HasFlag(Spaarke.Dataverse.AccessRights.Read))
-            return composed;
+            return new ConfirmedRights(composed, Spaarke.Dataverse.AccessRights.None);
 
         var dataverse = Spaarke.Dataverse.AccessRights.None;
+        var unanswered = Spaarke.Dataverse.AccessRights.None;
         if (readCallerRights is null)
         {
             logger.LogError(
@@ -961,17 +979,34 @@ public static class ExternalProjectDataEndpoints
         }
         else
         {
+            Spaarke.Dataverse.AccessRights? answer;
             try
             {
-                dataverse = await readCallerRights(entitySet, recordId, ct).ConfigureAwait(false);
+                answer = await readCallerRights(entitySet, recordId, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
             {
                 logger.LogError(ex,
                     "[WF-AUTHZ] Dataverse's rights for systemuser {SystemUserId} on {EntitySet} {RecordId} could not be read: " +
-                    "the write adds no rights (fail closed, NFR-01, task 036).",
+                    "the write adds no rights and is unavailable, not refused (NFR-01, task 036 fix round 4, F1).",
                     caller.SystemUserId, entitySet, recordId);
-                dataverse = Spaarke.Dataverse.AccessRights.None;
+                answer = null;
+            }
+
+            if (answer is { } rights)
+            {
+                dataverse = rights;
+            }
+            else
+            {
+                // Fix round 4 (F1): no answer is not "no access". Nothing is granted, and the rights Dataverse could have
+                // added are marked unanswered, so a gate that lacks one answers "try again" (503), not a denial.
+                unanswered = SurfaceWriteRights;
+                logger.LogWarning(
+                    "[WF-AUTHZ] Dataverse gave no answer for systemuser {SystemUserId} on {EntitySet} {RecordId} (a timeout, " +
+                    "a fault, or an answer not about the user): the write adds no rights and is unavailable, not refused " +
+                    "(task 036 fix round 4, F1).",
+                    caller.SystemUserId, entitySet, recordId);
             }
         }
 
@@ -981,28 +1016,79 @@ public static class ExternalProjectDataEndpoints
             // A route that creates nothing (PATCH to-do, delete-own) names no child privilege: Dataverse's AppendTo simply
             // adds no Create there, and that is not a refusal worth a warning (fix round 2, F2).
             if (childCreatePrivilege is null)
+            {
                 surface &= ~Spaarke.Dataverse.AccessRights.Create;
-            else if (!await CallerHoldsChildCreateAsync(caller, childCreatePrivilege, readCallerPrivilege, logger, ct).ConfigureAwait(false))
-                surface &= ~Spaarke.Dataverse.AccessRights.Create;
+            }
+            else
+            {
+                var holds = await CallerHoldsChildCreateAsync(caller, childCreatePrivilege, readCallerPrivilege, logger, ct)
+                    .ConfigureAwait(false);
+                if (holds != true)
+                    surface &= ~Spaarke.Dataverse.AccessRights.Create;
+                if (holds is null)
+                    unanswered |= Spaarke.Dataverse.AccessRights.Create;
+            }
         }
 
         logger.LogInformation(
             "[WF-AUTHZ] Dataverse-confirmed write rights for systemuser {SystemUserId} on {EntitySet} {RecordId}: Dataverse " +
-            "{Dataverse} -> {Surface} (composed {Composed}; answered via {Path}).",
-            caller.SystemUserId, entitySet, recordId, dataverse, surface, composed,
+            "{Dataverse} -> {Surface} (composed {Composed}; unanswered {Unanswered}; answered via {Path}).",
+            caller.SystemUserId, entitySet, recordId, dataverse, surface, composed, unanswered,
             CallerRecordAccessProbe.AppOnlyNamedPrincipalPath);
-        return composed | surface;
+        return new ConfirmedRights(composed | surface, unanswered);
+    }
+
+    /// <summary>The rights a Dataverse answer can add on this surface (<see cref="SurfaceRightsFromDataverse"/>).</summary>
+    private const Spaarke.Dataverse.AccessRights SurfaceWriteRights =
+        Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Write
+        | Spaarke.Dataverse.AccessRights.Delete | Spaarke.Dataverse.AccessRights.Create;
+
+    /// <summary>
+    /// <see cref="WithDataverseRightsAsync"/>'s answer (task 036 fix round 4, F1): the rights the write may use, and the
+    /// rights Dataverse was asked about but gave no answer for.
+    /// </summary>
+    /// <param name="Rights">The composed rights widened by Dataverse's answer. Nothing unanswered is ever in here.</param>
+    /// <param name="Unanswered">The rights Dataverse could have added but did not answer for (a timeout, a throttle or 5xx,
+    /// an answer that is not about the user, no app-only client). Never a grant; only the reason a refusal is a 503.</param>
+    internal readonly record struct ConfirmedRights(
+        Spaarke.Dataverse.AccessRights Rights, Spaarke.Dataverse.AccessRights Unanswered)
+    {
+        /// <summary>
+        /// Whether a gate that needs <paramref name="needed"/> must answer "try again" (a 503, nothing written) rather than
+        /// "no access" (403): the right is missing, and only because Dataverse did not answer for it. A real denial, or a
+        /// right the caller holds, is <c>false</c>.
+        /// </summary>
+        public bool IsUnavailableFor(Spaarke.Dataverse.AccessRights needed) =>
+            !Rights.HasFlag(needed) && Unanswered.HasFlag(needed);
     }
 
     /// <summary>
-    /// Whether the caller holds the child table's Create privilege (task 036 fix round 1, F1), for
-    /// <see cref="WithDataverseRightsAsync"/>, on a route that names one. Fail closed: a blank name, no reader, a false
-    /// answer or a fault is <c>false</c>; only the caller's own cancellation is rethrown.
+    /// The reason code of a write refused because Dataverse could not confirm the caller's rights right now (task 036 fix
+    /// round 4, F1): a timeout, a throttle or 5xx, or an answer that is not about the user. Retry-able; nothing was written.
+    /// The PATCH and delete-own routes keep their own 503s (<see cref="TodoWriteUnavailableReasonCode"/>,
+    /// <see cref="DeleteOwnUnavailableReasonCode"/>).
     /// </summary>
-    private static async Task<bool> CallerHoldsChildCreateAsync(
+    internal const string DataverseUnavailableReasonCode = "sdap.access.dataverse_unavailable";
+
+    /// <summary>
+    /// The 503 of a create (to-do, event, document upload, message) whose rights Dataverse could not confirm right now
+    /// (<see cref="ConfirmedRights.IsUnavailableFor"/>): the user is told to try again, never that they lack access.
+    /// </summary>
+    internal static IResult DataverseRightsUnavailable() =>
+        Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Access check unavailable",
+            detail: "Your access could not be confirmed right now, and nothing was written. Try again shortly.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = DataverseUnavailableReasonCode });
+
+    /// <summary>
+    /// Whether the caller holds the child table's Create privilege (task 036 fix round 1, F1), for
+    /// <see cref="WithDataverseRightsAsync"/>, on a route that names one. A blank name, no reader or a false answer is
+    /// <c>false</c>; an unanswered read (<see langword="null"/> or a throw) is <see langword="null"/> (fix round 4, F1).
+    /// Neither grants. Only the caller's own cancellation is rethrown.
+    /// </summary>
+    private static async Task<bool?> CallerHoldsChildCreateAsync(
         CallerPrincipal caller,
         string childCreatePrivilege,
-        Func<string, CancellationToken, Task<bool>>? readCallerPrivilege,
+        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege,
         ILogger logger,
         CancellationToken ct)
     {
@@ -1015,7 +1101,7 @@ public static class ExternalProjectDataEndpoints
             return false;
         }
 
-        bool holds;
+        bool? holds;
         try
         {
             holds = await readCallerPrivilege(childCreatePrivilege, ct).ConfigureAwait(false);
@@ -1023,10 +1109,19 @@ public static class ExternalProjectDataEndpoints
         catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             logger.LogError(ex,
-                "[WF-AUTHZ] Whether systemuser {SystemUserId} holds {Privilege} could not be read: Dataverse adds no Create " +
-                "(fail closed, NFR-01, task 036 F1).",
+                "[WF-AUTHZ] Whether systemuser {SystemUserId} holds {Privilege} could not be read: Dataverse adds no Create, " +
+                "and the create is unavailable, not refused (NFR-01, task 036 fix round 4, F1).",
                 caller.SystemUserId, childCreatePrivilege);
-            return false;
+            return null;
+        }
+
+        if (holds is null)
+        {
+            logger.LogWarning(
+                "[WF-AUTHZ] Dataverse gave no answer whether systemuser {SystemUserId} holds {Privilege}: Dataverse adds no " +
+                "Create, and the create is unavailable, not refused (task 036 fix round 4, F1).",
+                caller.SystemUserId, childCreatePrivilege);
+            return null;
         }
 
         logger.LogInformation(
@@ -1060,7 +1155,8 @@ public static class ExternalProjectDataEndpoints
     /// <summary>
     /// The Dataverse rights reader for <see cref="WithDataverseRightsAsync"/>: the question asked APP-ONLY, naming the
     /// caller's resolved systemuser (<see cref="AppOnlyConfirmationPrincipal"/>,
-    /// <see cref="CallerRecordAccessProbe.GetPrincipalRightsAppOnlyAsync"/>) — for every systemuser on this plane.
+    /// <see cref="CallerRecordAccessProbe.GetPrincipalRightsAppOnlyOrUnknownAsync"/>) — for every systemuser on this plane.
+    /// <see langword="null"/> when Dataverse gave no answer (fix round 4, F1).
     /// </summary>
     /// <remarks>
     /// <para><b>No OBO on <c>/api/v1/external</c></b> (task 036 option C, owner 2026-10-20; ADR-028 A1–A3, A5). The
@@ -1071,24 +1167,25 @@ public static class ExternalProjectDataEndpoints
     /// exchange or caller-token read in <c>Api/ExternalAccess/External*.cs</c> or in any filter or handler file the
     /// <c>/api/v1/external</c> mappings bind).</para>
     /// </remarks>
-    internal static Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>> CallerRightsReader(
+    internal static Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>> CallerRightsReader(
         CallerRecordAccessProbe probe, HttpContext httpContext)
     {
         var systemUserId = AppOnlyConfirmationPrincipal(GetCallerPrincipal(httpContext));
-        return (entitySet, recordId, ct) => probe.GetPrincipalRightsAppOnlyAsync(systemUserId, entitySet, recordId, ct);
+        return (entitySet, recordId, ct) => probe.GetPrincipalRightsAppOnlyOrUnknownAsync(systemUserId, entitySet, recordId, ct);
     }
 
     /// <summary>
     /// The privilege reader for <see cref="WithDataverseRightsAsync"/> (task 036 fix round 1, F1): the privilege asked
     /// APP-ONLY, naming the caller's resolved systemuser
-    /// (<see cref="CallerRecordAccessProbe.PrincipalHoldsPrivilegeAppOnlyAsync"/>) — for every systemuser on this plane,
-    /// never OBO (task 036 option C; see <see cref="CallerRightsReader"/>).
+    /// (<see cref="CallerRecordAccessProbe.PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync"/>) — for every systemuser on this
+    /// plane, never OBO (task 036 option C; see <see cref="CallerRightsReader"/>). <see langword="null"/> when Dataverse gave
+    /// no answer (fix round 4, F1).
     /// </summary>
-    internal static Func<string, CancellationToken, Task<bool>> CallerPrivilegeReader(
+    internal static Func<string, CancellationToken, Task<bool?>> CallerPrivilegeReader(
         CallerRecordAccessProbe probe, HttpContext httpContext)
     {
         var systemUserId = AppOnlyConfirmationPrincipal(GetCallerPrincipal(httpContext));
-        return (privilege, ct) => probe.PrincipalHoldsPrivilegeAppOnlyAsync(systemUserId, privilege, ct);
+        return (privilege, ct) => probe.PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync(systemUserId, privilege, ct);
     }
 
     /// <summary>
@@ -1108,12 +1205,12 @@ public static class ExternalProjectDataEndpoints
     /// A root's rights for a write route: <see cref="RightsForRoot"/>, confirmed against Dataverse (task 036). A route that
     /// creates a child under the root names the child table's Create privilege (fix round 1, F1).
     /// </summary>
-    private static Task<Spaarke.Dataverse.AccessRights> RightsForRootWriteAsync(
+    private static Task<ConfirmedRights> RightsForRootWriteAsync(
         CallerPrincipal caller, ExternalDataService.TodoRootKind rootKind, Guid rootId,
-        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>> readCallerRights,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>> readCallerRights,
         ILogger logger, CancellationToken ct,
         string? childCreatePrivilege = null,
-        Func<string, CancellationToken, Task<bool>>? readCallerPrivilege = null) =>
+        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null) =>
         WithDataverseRightsAsync(
             caller, RightsForRoot(caller, rootKind, rootId),
             ExternalDataService.TryGetRootBinding(rootKind)?.EntitySet ?? string.Empty, rootId, readCallerRights, logger, ct,
@@ -1161,60 +1258,68 @@ public static class ExternalProjectDataEndpoints
     /// <param name="readCallerPrivilege">Fix round 1 (F1): with <paramref name="confirmWrites"/>, Dataverse's Create also
     /// needs the caller's <see cref="CommunicationRecordAuthorizationFilter.CreateDocumentPrivilege"/> (the document is
     /// written app-only).</param>
-    private static async Task<(Spaarke.Dataverse.AccessRights Rights, IResult? Fault)> RightsForDocumentParentAsync(
+    /// <returns>The rights; a fault to answer instead (a 503); and, with <paramref name="confirmWrites"/>, the rights
+    /// Dataverse gave no answer for (<see cref="ConfirmedRights.Unanswered"/>, fix round 4 F1: the upload answers a 503 when
+    /// Create is missing only for that reason). Without <paramref name="confirmWrites"/> it is always None.</returns>
+    private static async Task<(Spaarke.Dataverse.AccessRights Rights, IResult? Fault, Spaarke.Dataverse.AccessRights Unanswered)>
+        RightsForDocumentParentAsync(
         CallerPrincipal caller,
         ExternalDataService.DocumentParentKind parentKind,
         Guid parentId,
         ExternalDataService dataService,
         ExternalModuleRegistry modules,
         CancellationToken ct,
-        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>>? confirmWrites = null,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>>? confirmWrites = null,
         ILogger? logger = null,
-        Func<string, CancellationToken, Task<bool>>? readCallerPrivilege = null)
+        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null)
     {
+        const Spaarke.Dataverse.AccessRights none = Spaarke.Dataverse.AccessRights.None;
         switch (parentKind)
         {
             case ExternalDataService.DocumentParentKind.Project:
-                return (await RootRightsForParentAsync(ExternalDataService.TodoRootKind.Project), null);
+                return WithoutFault(await RootRightsForParentAsync(ExternalDataService.TodoRootKind.Project));
             case ExternalDataService.DocumentParentKind.Matter:
-                return (await RootRightsForParentAsync(ExternalDataService.TodoRootKind.Matter), null);
+                return WithoutFault(await RootRightsForParentAsync(ExternalDataService.TodoRootKind.Matter));
             case ExternalDataService.DocumentParentKind.WorkAssignment:
-                return (await RootRightsForParentAsync(ExternalDataService.TodoRootKind.WorkAssignment), null);
+                return WithoutFault(await RootRightsForParentAsync(ExternalDataService.TodoRootKind.WorkAssignment));
             case ExternalDataService.DocumentParentKind.ServiceRequest:
                 try
                 {
-                    return ((await RightsForServiceRequestAsync(caller, parentId, dataService, modules, withState: false, ct)).Rights, null);
+                    return ((await RightsForServiceRequestAsync(caller, parentId, dataService, modules, withState: false, ct)).Rights, null, none);
                 }
                 catch (ExternalDataService.DataverseUnavailableException)
                 {
                     // The requester could not be READ — a fault, not an answer. "Could not tell" must never read as
                     // "no access" (a throttle would 403 the real requester), and it must not read as access either.
                     // Nothing has touched SPE or been written. The detail is generic, so it leaks nothing.
-                    return (Spaarke.Dataverse.AccessRights.None, ServiceRequestUnreadableProblem());
+                    return (none, ServiceRequestUnreadableProblem(), none);
                 }
             case ExternalDataService.DocumentParentKind.Invoice:
                 try
                 {
-                    return (await RightsForInvoiceAsync(
-                        caller, parentId, dataService, modules, ct, confirmWrites, logger, readCallerPrivilege), null);
+                    return WithoutFault(await RightsForInvoiceAsync(
+                        caller, parentId, dataService, modules, ct, confirmWrites, logger, readCallerPrivilege));
                 }
                 catch (ExternalDataService.DataverseUnavailableException)
                 {
                     // Same posture as the service request: an unreadable invoice is a fault (503), never "no access" and
                     // never access. Nothing has touched SPE or been written.
-                    return (Spaarke.Dataverse.AccessRights.None, Results.Problem(
+                    return (none, Results.Problem(
                         statusCode: StatusCodes.Status503ServiceUnavailable,
                         title: "Invoice unavailable",
                         detail: "The invoice could not be checked right now. Try again shortly.",
-                        extensions: new Dictionary<string, object?> { ["reasonCode"] = InvoiceUnreadableReasonCode }));
+                        extensions: new Dictionary<string, object?> { ["reasonCode"] = InvoiceUnreadableReasonCode }), none);
                 }
             default:
-                return (Spaarke.Dataverse.AccessRights.None, null);
+                return (none, null, none);
         }
 
-        Task<Spaarke.Dataverse.AccessRights> RootRightsForParentAsync(ExternalDataService.TodoRootKind rootKind) =>
+        static (Spaarke.Dataverse.AccessRights, IResult?, Spaarke.Dataverse.AccessRights) WithoutFault(ConfirmedRights confirmed) =>
+            (confirmed.Rights, null, confirmed.Unanswered);
+
+        Task<ConfirmedRights> RootRightsForParentAsync(ExternalDataService.TodoRootKind rootKind) =>
             confirmWrites is null
-                ? Task.FromResult(RightsForRoot(caller, rootKind, parentId))
+                ? Task.FromResult(new ConfirmedRights(RightsForRoot(caller, rootKind, parentId), none))
                 : RightsForRootWriteAsync(caller, rootKind, parentId, confirmWrites,
                     logger ?? throw new ArgumentNullException(nameof(logger)), ct,
                     CommunicationRecordAuthorizationFilter.CreateDocumentPrivilege, readCallerPrivilege);
@@ -1257,22 +1362,23 @@ public static class ExternalProjectDataEndpoints
     /// which <see cref="RightsForDocumentParentAsync"/> answers with the <see cref="InvoiceUnreadableReasonCode"/> 503.
     /// A caller without Create causes no gate read.</para>
     /// </remarks>
-    private static async Task<Spaarke.Dataverse.AccessRights> RightsForInvoiceAsync(
+    private static async Task<ConfirmedRights> RightsForInvoiceAsync(
         CallerPrincipal caller,
         Guid invoiceId,
         ExternalDataService dataService,
         ExternalModuleRegistry modules,
         CancellationToken ct,
-        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>>? confirmWrites = null,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>>? confirmWrites = null,
         ILogger? logger = null,
-        Func<string, CancellationToken, Task<bool>>? readCallerPrivilege = null)
+        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null)
     {
+        var denied = new ConfirmedRights(Spaarke.Dataverse.AccessRights.None, Spaarke.Dataverse.AccessRights.None);
         if (caller.GetAccessibleMatterIds().Count == 0 && !caller.GetAccessibleProjectIds().Any())
-            return Spaarke.Dataverse.AccessRights.None;
+            return denied;
 
         var parents = await dataService.GetInvoiceParentsAsync(invoiceId, ct);
         if (parents is not { } invoiceParents)
-            return Spaarke.Dataverse.AccessRights.None;
+            return denied;
 
         var rights = Spaarke.Dataverse.AccessRights.None;
         if (invoiceParents.MatterId is { } matterId)
@@ -1282,15 +1388,19 @@ public static class ExternalProjectDataEndpoints
 
         // Task 036 (FR-20): the upload confirms against Dataverse on the INVOICE itself (the target record), BEFORE the
         // secure-roots gate below, so a Dataverse-confirmed Create is put to that gate exactly as a grant-derived one is.
+        var unanswered = Spaarke.Dataverse.AccessRights.None;
         if (confirmWrites is not null)
-            rights = await WithDataverseRightsAsync(
+        {
+            var confirmed = await WithDataverseRightsAsync(
                 caller, rights,
                 ExternalDataService.GetDocumentParentBinding(ExternalDataService.DocumentParentKind.Invoice).EntitySet,
                 invoiceId, confirmWrites, logger ?? throw new ArgumentNullException(nameof(logger)), ct,
                 CommunicationRecordAuthorizationFilter.CreateDocumentPrivilege, readCallerPrivilege);
+            (rights, unanswered) = (confirmed.Rights, confirmed.Unanswered);
+        }
 
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
-            return rights;
+            return new ConfirmedRights(rights, unanswered);
 
         var (gate, undecided) = await ExternalMessageEndpoints.GetRecordRightsDecisionAsync(
                 ExternalMessageEndpoints.Roots["invoices"], invoiceId, caller, modules,
@@ -1300,9 +1410,12 @@ public static class ExternalProjectDataEndpoints
         if (undecided)
             throw new ExternalDataService.DataverseUnavailableException("The invoice's secure roots could not be read.");
 
+        // A secure-roots refusal is an ANSWER: Create is removed and is not "unanswered" (fix round 4, F1), so the upload is a
+        // 403, never a 503.
         return gate.HasFlag(Spaarke.Dataverse.AccessRights.Read)
-            ? rights
-            : rights & ~Spaarke.Dataverse.AccessRights.Create;
+            ? new ConfirmedRights(rights, unanswered)
+            : new ConfirmedRights(
+                rights & ~Spaarke.Dataverse.AccessRights.Create, unanswered & ~Spaarke.Dataverse.AccessRights.Create);
     }
 
     /// <summary>
@@ -1647,7 +1760,7 @@ public static class ExternalProjectDataEndpoints
         // ── AUTHORIZATION FIRST — nothing below touches SPE, or writes Dataverse, until both checks pass ──
         // (A service request's rights need one app-only read of its requester; nothing is written.)
         // Task 036 (FR-20): the rights are confirmed against Dataverse for a caller whose access Dataverse decided.
-        var (rights, upstreamFault) = await RightsForDocumentParentAsync(
+        var (rights, upstreamFault, unanswered) = await RightsForDocumentParentAsync(
             callerContext, parentKind, id, dataService, modules, ct, CallerRightsReader(probe, httpContext), logger,
             CallerPrivilegeReader(probe, httpContext));
         if (upstreamFault is not null) return upstreamFault;
@@ -1656,6 +1769,15 @@ public static class ExternalProjectDataEndpoints
             logger.LogWarning("[EXT-UPLOAD] Contact {ContactId} denied — no access to {ParentKind} {ParentId}",
                 callerContext.ContactId, parentKind, id);
             return DenyDocumentParent(parentKind);
+        }
+
+        // Fix round 4 (F1): Create missing only because Dataverse gave no answer is a retry-able 503 — nothing touches SPE.
+        if (new ConfirmedRights(rights, unanswered).IsUnavailableFor(Spaarke.Dataverse.AccessRights.Create))
+        {
+            logger.LogWarning(
+                "[EXT-UPLOAD] Upload to {ParentKind} {ParentId} unavailable: Dataverse gave no answer for the caller's Create",
+                parentKind, id);
+            return DataverseRightsUnavailable();
         }
 
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
@@ -1956,7 +2078,7 @@ public static class ExternalProjectDataEndpoints
         if (callerContext is null) return MissingContextResult();
 
         // ── AUTHORIZATION FIRST — nothing below reads SPE/Graph until BOTH checks pass ──
-        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        var (rights, upstreamFault, _) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
         if (upstreamFault is not null) return upstreamFault;
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
@@ -2066,7 +2188,8 @@ public static class ExternalProjectDataEndpoints
         {
             Value = events.Value,
             Truncated = events.Truncated,
-            CanCreate = createRights.HasFlag(Spaarke.Dataverse.AccessRights.Create),
+            // An unanswered Dataverse question offers no create (a UI affordance only; fix round 4, F1).
+            CanCreate = createRights.Rights.HasFlag(Spaarke.Dataverse.AccessRights.Create),
         });
     }
 
@@ -2116,10 +2239,13 @@ public static class ExternalProjectDataEndpoints
         // Require Create on THIS project (see CreateTodo — effective as of task 033). Task 036 (FR-20): confirmed against
         // Dataverse (AppendTo on the project, and since fix round 1 the caller's prvCreatesprk_Event) for a caller whose
         // access Dataverse decided.
-        var rights = await RightsForRootWriteAsync(
+        // Fix round 4 (F1): Create missing only because Dataverse gave no answer is a retry-able 503, not a denial.
+        var confirmed = await RightsForRootWriteAsync(
             callerContext, ExternalDataService.TodoRootKind.Project, id, CallerRightsReader(probe, httpContext), logger, ct,
             Sprk.Bff.Api.Api.Events.EventEndpoints.CreateEventPrivilege, CallerPrivilegeReader(probe, httpContext));
-        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
+        if (confirmed.IsUnavailableFor(Spaarke.Dataverse.AccessRights.Create))
+            return DataverseRightsUnavailable();
+        if (!confirmed.Rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "Your access level does not permit creating events on this project",
                 extensions: new Dictionary<string, object?>
@@ -2240,16 +2366,22 @@ public static class ExternalProjectDataEndpoints
         // Task 036 (FR-20): for a caller whose access Dataverse decided, the write is confirmed against Dataverse on the
         // TARGET record — this to-do (Write on it), not its root. The root's Read (above) is still the scope check, so a
         // to-do under a root outside the set, or vetoed, asks Dataverse nothing.
-        rights = await WithDataverseRightsAsync(
+        var confirmed = await WithDataverseRightsAsync(
             callerContext, rights,
             ExternalDataService.GetDeletableBinding(ExternalDataService.DeletableKind.Todo).EntitySet, id,
             CallerRightsReader(probe, httpContext), logger, ct);
+
+        // Fix round 4 (F1): Write missing only because Dataverse gave no answer is the to-do PATCH's own retry-able 503
+        // (nothing was changed), not a denial. Only an in-scope caller (Read on the root) ever asks Dataverse, so the 503
+        // says nothing about a to-do outside the caller's set.
+        if (confirmed.IsUnavailableFor(Spaarke.Dataverse.AccessRights.Write))
+            return TodoWriteUnavailable();
 
         // Out-of-scope and insufficient-rights are ONE check: every accessor above returns None for a
         // record the caller cannot reach, so an absent record can never satisfy Write. Keeping them as
         // one expression means a future root type cannot be added to the scope branch while being
         // forgotten in the rights branch.
-        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Write))
+        if (!confirmed.Rights.HasFlag(Spaarke.Dataverse.AccessRights.Write))
             return DenyTodoWrite();
 
         // Task 187 (owner round 99, D-123; #1857): the to-do's root is its STAMP, a copy. A to-do whose live parent (the
@@ -2278,7 +2410,8 @@ public static class ExternalProjectDataEndpoints
         return Results.NoContent();
     }
 
-    /// <summary>The reason code when a to-do PATCH could not be checked right now (nothing was written).</summary>
+    /// <summary>The reason code when a to-do PATCH could not be checked right now (nothing was written): a live-parent read
+    /// that could not decide (task 187), or Dataverse giving no answer for the caller's Write (task 036 fix round 4, F1).</summary>
     internal const string TodoWriteUnavailableReasonCode = "sdap.access.todo_write_unavailable";
 
     /// <summary>The ONE refusal of a to-do PATCH: out of scope, too few rights, or (task 187) behind a live parent's secure root.</summary>
@@ -2346,7 +2479,7 @@ public static class ExternalProjectDataEndpoints
         Guid id,
         ExternalDataService dataService,
         ExternalModuleRegistry modules,
-        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>> readCallerRights,
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>> readCallerRights,
         ILogger logger,
         CancellationToken ct)
     {
@@ -2376,7 +2509,7 @@ public static class ExternalProjectDataEndpoints
 
         foreach (var parent in target.Parents)
         {
-            var (rights, fault) = await RightsForDocumentParentAsync(caller, parent.Kind, parent.Id, dataService, modules, ct);
+            var (rights, fault, _) = await RightsForDocumentParentAsync(caller, parent.Kind, parent.Id, dataService, modules, ct);
             if (fault is not null)
                 return fault;
             if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
@@ -2389,13 +2522,21 @@ public static class ExternalProjectDataEndpoints
 
         // (2b) Task 036 (FR-20, owner round 59 item 2): a caller whose access Dataverse decided must ALSO hold Delete on the
         //      row itself in Dataverse, asked as the caller. The creator stamp stays required (FR-26): Dataverse adds its own
-        //      answer, it never stands in for the stamp. A probe that fails answers None, so nothing is deleted.
+        //      answer, it never stands in for the stamp. A question Dataverse gave no answer to (a timeout, a fault, an answer
+        //      not about the user) is the 503 — a read that FAILED, never a 403 (fix round 4, F1) — and nothing is deleted.
         if (caller.DataverseConfirmsWrites)
         {
             var confirmed = await WithDataverseRightsAsync(
                 caller, Spaarke.Dataverse.AccessRights.Read, ExternalDataService.GetDeletableBinding(kind).EntitySet, id,
                 readCallerRights, logger, ct);
-            if (!confirmed.HasFlag(Spaarke.Dataverse.AccessRights.Delete))
+            if (confirmed.IsUnavailableFor(Spaarke.Dataverse.AccessRights.Delete))
+            {
+                logger.LogWarning(
+                    "[EXT-DELETE] {Kind} {Id}: Dataverse gave no answer for the caller's Delete on it; nothing deleted", kind, id);
+                return DeleteOwnUnavailable();
+            }
+
+            if (!confirmed.Rights.HasFlag(Spaarke.Dataverse.AccessRights.Delete))
             {
                 logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: Dataverse does not grant the caller Delete on it", kind, id);
                 return DenyDeleteOwn();

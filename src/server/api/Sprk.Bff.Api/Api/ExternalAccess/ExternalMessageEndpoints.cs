@@ -139,7 +139,8 @@ public static class ExternalMessageEndpoints
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
-            .ProducesProblem(StatusCodes.Status502BadGateway);
+            .ProducesProblem(StatusCodes.Status502BadGateway)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return externalGroup;
     }
@@ -216,8 +217,8 @@ public static class ExternalMessageEndpoints
         CancellationToken ct,
         NonSecureRootReader? readNonSecureRoots = null,
         LiveParentRootReader? readLiveParents = null,
-        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights>>? readCallerRights = null,
-        Func<string, CancellationToken, Task<bool>>? readCallerPrivilege = null)
+        Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>>? readCallerRights = null,
+        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null)
     {
         if (string.IsNullOrWhiteSpace(root) || !Roots.TryGetValue(root, out var messageRoot))
         {
@@ -273,12 +274,22 @@ public static class ExternalMessageEndpoints
             // Task 036 (FR-20, owner round 59 item 2): a caller whose access Dataverse decided is confirmed against Dataverse
             // on the record (AppendTo, read as Create) AND, since fix round 1 (F1), on their own Create privilege on
             // sprk_communication — the message row is written app-only. No reader (a test drive of the core) adds nothing:
-            // fail closed.
+            // fail closed. A question Dataverse gave no answer to is a retry-able 503, not a denial (fix round 4, F1).
             if (DataverseConfirmedEntitySet(messageRoot) is { } entitySet)
             {
-                rights = await ExternalProjectDataEndpoints.WithDataverseRightsAsync(
+                var confirmed = await ExternalProjectDataEndpoints.WithDataverseRightsAsync(
                     principal, rights, entitySet, id, readCallerRights, logger, ct,
                     CreateMessagePrivilege, readCallerPrivilege).ConfigureAwait(false);
+                if (confirmed.IsUnavailableFor(Spaarke.Dataverse.AccessRights.Create))
+                {
+                    logger.LogWarning(
+                        "[EXT-MESSAGES] Post on {Entity} {RecordId} for systemuser {SystemUserId} unavailable: Dataverse gave no " +
+                        "answer for the caller's Create; nothing posted.",
+                        messageRoot.EntityLogicalName, id, principal.SystemUserId);
+                    return ExternalProjectDataEndpoints.DataverseRightsUnavailable();
+                }
+
+                rights = confirmed.Rights;
             }
 
             if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
