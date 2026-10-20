@@ -1712,3 +1712,11 @@ The full record is in `notes/185-invite-code-design.md` §11.
 ## Round 109 (2026-10-20)
 
 - **#2138 (#2128, retire the FR-15 guest auto-create): owner "proceed with #2138".** This is the security sign-off after two adversarial passes; the second found no bypass. Merge when Router and Client lint are green. Deploy only after R3's SPA with `d4ea1b4a8` (merged to master as 28274e04e via #2141) is live on dev. At that deploy, run the PR-body data step on the 3 dev guest-bound contacts: clear `sprk_externalobjectid`, `sprk_identityplane` and `sprk_externalobjectidkey`, after checking each email domain.
+
+## Round 110 (owner, 2026-10-20)
+
+1. **D7 (#2126 / R3 ISS-015): accepted.** In the owner's words: "document access follows its parent (unless more restricted)." A child document may narrow partner visibility (its own Access Permission = Restricted, or derived from an internal-only / non-Open communication), never widen it. Design: `notes/2119-manage-access-all-forms-design.md` §6. The T8 fallback (an unidentifiable email → own Restricted) is approved with it.
+2. **036 / #2078: proceed** (sign-off), on confirmation that the design is fully agreed. The merge gates remain: the 034 negative canary (NFR-04), #2122 merges first, and master is merged in with the #2121 filter kept on the flag-off path.
+3. **#2122 (#2121 option b): approved.** This is the security sign-off.
+4. **186: Tracy access confirmed** by the owner (home-directory sign-in). Next is the server gate.
+5. Q1/Q10, #1864, #2119 D1–D6, census a/b/c, CustomerBusinessUnitId and #2139: the owner asked for more information. The explanations were given in chat; these remain open.
