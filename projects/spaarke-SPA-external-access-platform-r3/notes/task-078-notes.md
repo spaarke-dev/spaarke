@@ -21,7 +21,9 @@ An external caller sees a `sprk_communication` only when all three hold:
 - its thread lookup `_sprk_communicationthread_value` is set (`CommunicationOpenThreadGate.MessageThreadLookupValue`);
 - that thread reads Open now (`CommunicationOpenThreadGate.ReadOpenThreadIdsAsync`, which uses the floor's `IsConfirmedOpen`).
 
-**Who is external.** The request principal (`IHttpContextAccessor`) goes to `ICallerSystemUserResolver.ResolveAsync`, then to `ISystemUserIdentityResolver.IsExternalAsync`. An unresolved caller (no principal, no oid, no active systemuser, lookup failed) is **external** (fail closed). Externality is decided **only** when the request touches the communication family (a logical name starting `sprk_communication`, OrdinalIgnoreCase). Every other request is byte-identical and resolves nothing.
+**Who is external.** The request principal (`IHttpContextAccessor`) goes to `ICallerSystemUserResolver.ResolveAsync`, then to `ISystemUserIdentityResolver.IsExternalAsync`. An unresolved caller (no principal, no oid, no active systemuser) is **external** (fail closed). A caller whose lookup **failed** (`UnresolvedReason = "lookup-failed"`, a Dataverse or cache fault the resolver swallows) makes the tool call **fail with no data** (review round 1, F2), and so does a throwing `IsExternalAsync`. Externality is decided **only** when the request touches the communication family (a logical name starting `sprk_communication`, or one of the content tables listed under "Inventory", OrdinalIgnoreCase) or `sprk_document`. Every other request is byte-identical and resolves nothing.
+
+**Documents (review round 1, F1).** An external caller does not see a `sprk_document` whose `_sprk_relatedcommunication_value` points at a communication that fails the rule above (flag true or null, no thread, thread not Open, or the communication cannot be read or does not exist). A document with no related communication is unaffected.
 
 ## What changed
 
@@ -36,6 +38,18 @@ An external caller sees a `sprk_communication` only when all three hold:
 | `tests/unit/.../DataverseSearchDataHandlerTests.cs` | 7 new tests. |
 | `tests/unit/.../DataverseDescribeHandlerTests.cs` | 6 new tests (10 cases). |
 | `tests/unit/.../DataverseToolNameFreezeTests.cs` | Constructor call sites updated (5 sites). |
+
+### Review round 1 changes (commit `8012c9341`)
+
+| File | Change |
+|---|---|
+| `ExternalCallerCommunicationGuard.cs` | `RefusedContentTables` (`sprk_emailartifact`, `sprk_attachmentartifact`, `sprk_emailreviewlog`, `sprk_affinity`) joins the prefix in the one `IsCommunicationFamily` predicate; `sprk_document` stays out (`IsDocumentTable`, row-filtered). `IsExternalCallerAsync` throws on `lookup-failed`. `FilterClause` adds `sprk_CommunicationThread/sprk_privacystate eq 100000000` (K1). New `ReadVisibleCommunicationIdsAsync` (one batched `sprk_communications?$select=sprk_communicationid,sprk_isinternalonly,_sprk_communicationthread_value&$filter=… or …` read in chunks of 50, then `CommunicationOpenThreadGate.ReadOpenThreadIdsAsync` over `ThreadQueryOver`), `ReadRelatedCommunicationIdsAsync` (one batched `sprk_documents?$select=sprk_documentid,_sprk_relatedcommunication_value` read, for search hits), `RelatedCommunicationIdOf` and `RecordNotVisibleMessage`. Every read throws on `!IsSuccess`. |
+| `DataverseReadQueryHandler.cs` | External caller on `sprk_document`: `_sprk_relatedcommunication_value` added to `$select` if absent (stripped from rows under the key it lands on if injected), one visibility read of the related communications after the read, failing documents dropped; a communication that does not come back hides its document. External caller on `sprk_communication`: `sprk_isinternalonly` also injected/stripped and every row must pass `IsExplicitlyShareable` (K4). Internal callers: no injection, no extra read. |
+| `DataverseSearchDataHandler.cs` | Hits are collected first; for an external caller with `sprk_document` hits, one batched document read, one communication visibility read, and failing (or not-returned) documents are dropped silently. Count and summary are post-filter; no warning. |
+| `DataverseDescribeHandler.cs` | Record path on `sprk_document` for an external caller: the record's related communication is checked the same way. On a guarded path (external caller, `sprk_communication` or `sprk_document`), a hidden record and a real 404 both answer `DATAVERSE_NOT_FOUND` with `RecordNotVisibleMessage` (K4); the comment now says so. |
+| The three handler test classes | 39 new test cases (below). Existing ISS-010 URL assertions updated for the K1 clause and the injected flag column. |
+
+**Behaviour change for internal callers on `sprk_document`.** The request URLs and results are byte-identical, but externality is now resolved (one cached systemuser lookup through `ISystemUserIdentityResolver`, not the user client). If that lookup faults, the tool call fails with no data (F2), for internal callers too.
 
 The read_query and describe tests set up a resolved internal caller by default; `AsExternalCaller()` switches it. They assert on the exact request URLs captured from the `IDataverseUserClient` mock, and on the returned rows.
 
@@ -63,6 +77,22 @@ The refusal code is `DataverseUserClientErrorCodes.AccessDenied` (`DATAVERSE_ACC
 
 The whole prefix is treated as the family. No table qualified for the "no content and no Private-thread name" exception, because threads carry the name and attachments and participants carry content and identities. A future family table is refused by default.
 
+### Communication content OUTSIDE the prefix (review round 1, F1)
+
+Found by grepping `Services/Communication`, `Services/Office`, `Services/Email` and `Workers` for every table they create or write (`new Entity(...)`, `new DataverseEntity(...)`, entity-name constants):
+
+| Table | What it holds (evidence) | Disposition |
+|---|---|---|
+| `sprk_document` with `_sprk_relatedcommunication_value` set | The archived .eml (`sprk_isemailarchive = true`; subject in `sprk_documentname` / `sprk_emailsubject`, `sprk_emailfrom`, `sprk_emailto`, AI `sprk_filesummary`) and attachment documents. Writers: `IncomingCommunicationProcessor` (~:1122, ~:1341), `CommunicationService` (~:519, ~:2725, ~:3016), `MessageAttachmentMaterializer` (~:276), `OfficeDocumentPersistence` (~:336, ~:832). | **Row-filtered** by the related communication's rule. |
+| `sprk_emailartifact` | Outlook add-in save: name = subject + date, sender, recipients JSON, `sprk_bodypreview` (first 2,000 body chars). `UploadFinalizationWorker` ~:754. | **Refused.** |
+| `sprk_attachmentartifact` | The same save's attachment records: original file names, content type, size. `UploadFinalizationWorker` ~:782. Found by the grep (not in the review list). | **Refused** (file names of an internal-only email are content, as for `sprk_communicationattachment`). |
+| `sprk_emailreviewlog` | AI suggestions (`sprk_aisuggestion`) and source refs derived from the email; carries a `sprk_communication` lookup. `CommunicationEnrichmentService` ~:1247, `CommunicationCreateTaskApplyService`. | **Refused** (simpler than a per-row link filter, as the brief prefers). |
+| `sprk_affinity` | Per-tenant learning rows: full sender address, sender domain, **subject keywords** and participant sets (from + to + cc) of filed email, mapped to a record. `Services/Communication/Engine/AffinityStore.cs` (:54, :188). No communication link. Found by the grep. | **Refused.** |
+| `sprk_event` (task created from an email) | Name/description the user confirms in the "create task from email" flow. `CommunicationCreateTaskApplyService` ~:386. | **Not refused**: a user-authored record created by an explicit action, and a core table refusal would break normal use. Known limit. |
+| `sprk_todo` (Outlook add-in "create To Do") | Name/description the user types, optional `sprk_regardingcommunication`. `OfficeService.CreateTodoAsync` ~:2107. | **Not refused**: user-authored by explicit action. Known limit. |
+
+Not in the grep scope but the same class (reported, not changed here): an AI analysis run on an archived .eml document (`sprk_analysis`, with its `sprk_analysisoutput` rows) holds output derived from that email. `sprk_analysis` carries `sprk_documentid` and `sprk_regardingcommunication` lookups (solution `Entities/sprk_analysis/Entity.xml`), so a row filter like the document one is possible; it is created by an explicit analysis run. Left for the main session to file. (`sprk_analysisemailmetadata` holds the recipients of an analysis the user mails out, not inbound email content, and has no BFF writer.)
+
 ### Chat tools that can read them through a generic path
 
 | Tool | Path | Status |
@@ -87,6 +117,8 @@ The whole prefix is treated as the family. No table qualified for the "no conten
 - Failing first: the handler constructors changed, so the old handlers cannot compile against the new tests. The seeding proofs below stand in for "fails before". Each guard was disabled on the committed code and the matching tests failed.
 - Internal byte-identity: the internal-caller tests assert literal URLs equal to the pre-078 translation, on a communication table and on a non-communication table. The non-guard code path in `read_query` is textually unchanged (the guard is a new first branch). Describe's internal record path asserts the exact two requests.
 
+**Review round 1 re-run (commit `8012c9341`).** `dotnet build src/server/api/Sprk.Bff.Api/ --no-incremental`: 0 errors, 0 warnings. The four handler classes: **142/142** (39 new cases). The brief's filter (the four handler classes + `CommunicationOpenThreadGate | CallerSystemUserResolver | ToolFramework | DiGraphValidation`): **188/188**. `Services.Ai.Handlers` + `CommunicationThreadRead`: **856/856**. `Spaarke.ArchTests`: **1152/1152**. Publish-size delta not re-measured: the round adds no file, package or registration (code in four existing files).
+
 ### Seeding proofs (each restored with `git checkout`; runs over the three handler classes, 88 tests)
 
 | # | Guard disabled | Failed |
@@ -100,9 +132,27 @@ The whole prefix is treated as the family. No table qualified for the "no conten
 | S7 | describe record-visibility check skipped | 5: the hidden-record theory (4 cases), `…UnresolvedCallerOnCommunicationRecord_TreatedAsExternal` |
 | S8 | thread-read fault returns no rows instead of throwing | 2: read_query and describe `…ThreadPrivacyReadFails…` |
 
+Review round 1 (on commit `8012c9341`; the same three classes, now 127 tests; each mutation applied to the committed file, the suite run, the file restored, `git status` clean afterwards):
+
+| # | Guard disabled | Failed |
+|---|---|---|
+| S9 | `RefusedContentTables` ignored by `IsCommunicationFamily` | 13: the content-table theories in read_query (4), search_data (4), describe (4), and `…ScopeNamesOnlyContentTable_NoSearchCall` |
+| S10 | `lookup-failed` treated as external (no throw) | 4: read_query `…CallerLookupFailed…` and `…RealResolverLookupFault…`, search_data and describe `…CallerLookupFailed…` |
+| S11 | K1 navigation clause dropped from `FilterClause` | 2: read_query `…WithOr_GuardIsAndedAroundWholePredicate`, `…HidesRowsWhoseThreadIsNotOpen` |
+| S12 | read_query per-row `IsExplicitlyShareable` re-check skipped | 1: `…RowWhoseFlagIsNotFalseHiddenAfterRead` |
+| S13 | read_query document post-filter skipped | 1: `…OnDocument_HidesDocumentsWhoseRelatedCommunicationFailsRule` |
+| S14 | read_query injected `_sprk_relatedcommunication_value` not stripped | 1: `…OnDocument_HidesDocumentsWhoseRelatedCommunicationFailsRule` |
+| S15 | search_data: a document the document read did not return treated as visible | 1: `…DocumentHits_DropsDocumentsWhoseRelatedCommunicationFailsRule` |
+| S16 | search_data document drop skipped | 1: `…DocumentHits_DropsDocumentsWhoseRelatedCommunicationFailsRule` |
+| S17 | describe document check skipped | 7: the hidden-document theory (5 cases), `…DocumentRelatedReadFails…`, `…DocumentWithShareableRelatedCommunication…` (no communication read made) |
+| S18 | describe guarded 404 not normalised | 1: `…ExternalCallerMissingRecord_AnswersExactlyLikeHiddenRecord` |
+| S19 | related communication's flag check skipped in `ReadVisibleCommunicationIdsAsync` | 4: describe hidden-document theory (2 cases: flag true, flag null), read_query and search_data document tests |
+
+**Failing first (round 1).** With the round-1 guard file and the three handler files reverted to `06b867a6b`, 15 of the 127 tests fail: all the document tests that hide or read (read_query 2, search_data 2, describe 7 cases), the K1/K4 URL and flag tests (read_query 3) and the describe missing-record test. The content-table and F2 tests pass in that set-up because those behaviours live in the guard file itself; S9 and S10 prove them.
+
 ### Logs (ADR-015)
 
-Every new log line is `[dataverse.<tool>] sdap.ai.tool.external_communication_guard entity=… reason=…` (plus `decisionId` where the handler has it). The reason codes are `family_table_refused`, `thread_not_open`, `family_filter_removed`, `family_hits_dropped` and `record_hidden`. The entity is a translator-validated logical name, or `sprk_communication*`. No line carries query text, a filter, a body or row content. The read_query and search_data telemetry tests assert the guard line and run `AssertTelemetryRespectsAdr015` with a sensitive literal, row value and highlight.
+Every new log line is `[dataverse.<tool>] sdap.ai.tool.external_communication_guard entity=… reason=…` (plus `decisionId` where the handler has it). The reason codes are `family_table_refused`, `thread_not_open`, `family_filter_removed`, `family_hits_dropped`, `record_hidden` and (round 1) `related_communication_hidden` (entity `sprk_document`). The entity is a translator-validated logical name, or `sprk_communication*`. No line carries query text, a filter, a body or row content. The read_query and search_data telemetry tests assert the guard line and run `AssertTelemetryRespectsAdr015` with a sensitive literal, row value and highlight.
 
 ### Not run
 
@@ -125,8 +175,23 @@ An inbound tool guard inside the existing AI chat handlers (`Services/Ai/Handler
 
 - **The model-driven app and the direct Web API remain open.** The real fix is the owner/UAC Dataverse security decision (ISS-010 stays open for it).
 - **`spaarke.grid_overview` over the Communications/Messages grid is not covered** (inventory above). Filed as ISS-014 (#2125).
-- **Fewer rows than TOP.** The Open-thread half is a post-filter, because thread privacy lives on another table. A page can return fewer rows than `TOP` while the row-cap warning still keys off the returned count. The flag and thread-set halves ride in the query, so TOP stays honest for them.
-- **search_data counts.** The Search API's own `top` (25) is applied before the drop, so an external caller can see fewer than 25 hits. By design, nothing says so.
+- **Fewer rows than TOP, `sprk_document` only.** On `sprk_communication` the whole rule now rides in the query (round 1, K1: `sprk_CommunicationThread/sprk_privacystate eq 100000000`, navigation property and Open value confirmed from `src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_CommunicationThread.xml` and the `sprk_privacystate` option set in `Entities/sprk_CommunicationThread/Entity.xml`), so TOP counts only visible rows; the post-read flag and thread checks stay as defence in depth. On `sprk_document` the related-communication check is a post-filter, so a page can return fewer rows than `TOP` while the row-cap warning keys off the returned count. The K1 clause has not been exercised against live Dataverse (no live change in this task); a live smoke of an external caller's read_query on `sprk_communication` belongs to the deploy round.
+- **search_data counts.** The Search API's own `top` (25) is applied before the drops (family hits and hidden documents), so an external caller can see fewer than 25 hits. By design, nothing says so.
+- **Derived, user-authored records.** `sprk_event` (task created from an email) and `sprk_todo` (Outlook "create To Do") carry what the user typed or confirmed and are not refused. An AI analysis of an archived .eml (`sprk_analysis` / `sprk_analysisoutput`) is not covered; reported to the main session to file (see the inventory).
+- **RAG retrieval and chat archive ingest** can surface communication content through other paths; filed separately by the main session.
 - **Parenthesis safety** rests on the translator. It emits only balanced parentheses: a stray `)` at top level fails with "Unexpected token", so `ApplyFilter`'s wrapping cannot be escaped.
 - **Externality cache.** `IsExternalAsync` caches for 10 minutes, so a newly flagged user stays internal for up to 10 minutes (the existing limit on `ISystemUserIdentityResolver`).
-- **Write paths.** `dataverse.update_record` can change `sprk_isinternalonly` on a row the user can write. This is a write-side or Dataverse-security matter, not part of this read-side quick fix.
+- **Write paths.** `dataverse.update_record` (and other write tools) can change `sprk_isinternalonly` or the thread lookup on a row the user can write. Out of scope per the POML (no change to any other tool); filed by the main session.
+
+## Review round 1
+
+Two adversarial passes (pass 1: F1, K1, K1, K4, K4; pass 2: F4, F2, F2, K4). The main session consolidated them into the fix brief's items below; the brief does not record which pass label maps to which item, so none is claimed here. Fixed in commit `8012c9341` unless stated.
+
+| Brief item | Finding | Disposition |
+|---|---|---|
+| F1 | Internal-only email content copied outside `sprk_communication*`: `sprk_document` .eml archive and attachments, `sprk_emailartifact`, `sprk_emailreviewlog` | **Fixed.** Documents row-filtered by the related communication in all three tools; the content tables refused through the one family predicate; the grep added `sprk_attachmentartifact` and `sprk_affinity` (inventory). |
+| F2a | `lookup-failed` (a Dataverse or cache fault the resolver swallows) was treated as external, so a fault decided who the caller is | **Fixed.** `IsExternalCallerAsync` throws on `lookup-failed`; the tool returns an error with no data. No principal, no oid and no active systemuser stay "external" (fail closed), as the POML requires. |
+| F2b | No test proved that a throwing externality read leaves no data | **Fixed.** One test per handler (`…ExternalityReadThrows_ErrorWithNoData`; search_data returns a communication hit so the lazy check runs), plus `lookup-failed` tests per handler and one against the real `CallerSystemUserResolver` that pins the reason string. |
+| K1 | TOP oracle: the Open-thread half was a post-filter, so TOP and the row count depended on hidden rows | **Fixed** for `sprk_communication`: the navigation-property clause rides in the query (navigation property and Open value confirmed from solution XML); the post-read check stays. Remains a known limit for `sprk_document` and search_data counts. |
+| K4a | describe: a hidden record's answer differed from a real not-found (Dataverse's own 404 text), and the comment and test claimed otherwise | **Fixed.** A guarded 404 and a hidden record share `DATAVERSE_NOT_FOUND` + `RecordNotVisibleMessage`; the comment and the test's `because:` are now true, and a test compares the two answers. |
+| K4b | read_query relied on the query filter alone for the flag | **Fixed.** `sprk_isinternalonly` injected (stripped if injected) and `IsExplicitlyShareable` required per row. |
