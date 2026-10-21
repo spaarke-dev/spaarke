@@ -141,6 +141,10 @@
         - Tests for each. UAC-r2 reviews.
       - Projects/matters caller-refused columns: owner decision before this task (#1608 related).</criterion>
     <criterion testable="true">BLOCKING (DI-004 / #2188, 2026-10-21): before any caller is re-pointed, create-time mapping must not copy a source column the caller cannot read under field security. Read the source columns as the caller, or check field-security read per column. A denied column is dropped with a warning, timing-equalised and failing closed. Must-fire test: a field-secured source column the caller cannot read is not copied. Must-not-fire test: a readable column is copied. UAC-r2 reviews.</criterion>
+    <criterion testable="true">From UAC-r2's re-check of 014 (2026-10-21):
+      - R3-1: normalise ServerSetLookupColumns once (trimmed, case-insensitive) where the request is built, and have both the K-2/F-B guards and the existing AppendTo check read that normalised set. Test it.
+      - R3-2: if it falls out naturally, move step 6's AppendTo for server-set root filing lookups (work assignment, project) to before step 3, so a refused create reads no mapping source. This is not a blocker; record the outcome.
+    </criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-13 part 1, FR-12, NFR-07, NFR-08. Office quick-create is task 018; widening the route to sprk_matter and sprk_project is task 020. Release note: chat-created children now get the I-1 stamp, I-16 and sharee mirror.</notes>

@@ -107,3 +107,16 @@ seam tests (re-checked 27bac15a42: no objection, 2026-10-21).
   6. Must-fire and must-not-fire tests, plus mutants.
 - **Sequence:** the Office hotfix PR to master first. Task 014's mapping step reuses the helper after master is merged
   in.
+
+## 2026-10-21 — UAC-r2 no-objection to 014 (fix rounds 1–3)
+
+- **Re-check:** UAC-r2 re-checked `58d1a3548d..405a9b4f90`. F-A and F-B are closed, and the union definition of
+  "filing" is kept.
+- **Known limits:** R3-1 (normalisation) and R3-2 (the implicit mapping source read before step 6) are accepted. Both
+  are carried to 017.
+- **Sequence:** the step-3 mapping read stays app-only only until the shared `MappingSourceCallerMask` from the #2188
+  Office hotfix lands. Order:
+  1. the hotfix PR merges to master;
+  2. master is merged into the work branch;
+  3. 014's step 3 is routed through the mask (the hotfix's bypass guard forces it);
+  4. then the PR to master.
