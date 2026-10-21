@@ -1283,6 +1283,11 @@ public partial class RouteAuthorizationGuardTests
             "Task 186 (review round 1 F1): endpoint METADATA, not a filter — the route's table x operation set for the "
             + "workforce privilege ceiling, read by the group's AddWorkforceCeilingFilter (NonDecidingAttachments). It narrows "
             + "what a workforce contact may do and decides nothing about any record."),
+        new NotAuthorizationForm("RequireInternalFinanceCaller",
+            "ebilling-r1 task 099 (procedure-and-file-model section 5.3): endpoint METADATA on every /api/finance route group, not a "
+            + "filter. It switches on step 0 inside the route's own AddFinanceAuthorizationFilter (CreditedForms), which refuses a "
+            + "flagged-external, row-less or unreadable caller before its record checks. It only narrows that filter and decides "
+            + "nothing itself; FinanceStepZeroCoverageGuardTests pins it on every /api/finance route."),
         new NotAuthorizationForm("AddEndpointFilter(ValidateFilingRequestAsync)",
             "Task 147 r1c: PATCH /api/v1/events/{id}/filing request SHAPE only (EventEndpoints.cs:172-177, "
             + "ChildRecordEndpoints.FilingShapeProblem, no I/O), before the route's RecordRouteAccessAuthorizationFilter(\"write\")."),

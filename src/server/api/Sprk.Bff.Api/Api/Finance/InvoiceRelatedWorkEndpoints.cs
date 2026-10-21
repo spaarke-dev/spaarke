@@ -24,6 +24,7 @@ public static class InvoiceRelatedWorkEndpoints
     {
         var group = app.MapGroup("/api/finance")
             .RequireAuthorization()
+            .RequireInternalFinanceCaller() // step 0 on every /api/finance route (section 5.3, task 099)
             .WithTags("Finance");
 
         // GET /api/finance/invoices/{invoiceId}/lines/{lineId}/related-work - the Related work pane for one fee line

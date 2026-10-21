@@ -40,7 +40,8 @@ public static class FinanceRollupEndpoints
         var matterGroup = app.MapGroup("/api/finance/matters")
             .WithTags("FinanceRollup")
             .RequireRateLimiting("dataverse-query")
-            .RequireAuthorization();
+            .RequireAuthorization()
+            .RequireInternalFinanceCaller(); // step 0 on every /api/finance route (section 5.3, task 099)
 
         matterGroup.MapPost("/{matterId:guid}/recalculate", RecalculateMatterAsync)
             .AddFinanceAuthorizationFilter(
@@ -62,7 +63,8 @@ public static class FinanceRollupEndpoints
         var projectGroup = app.MapGroup("/api/finance/projects")
             .WithTags("FinanceRollup")
             .RequireRateLimiting("dataverse-query")
-            .RequireAuthorization();
+            .RequireAuthorization()
+            .RequireInternalFinanceCaller(); // step 0 on every /api/finance route (section 5.3, task 099)
 
         projectGroup.MapPost("/{projectId:guid}/recalculate", RecalculateProjectAsync)
             .AddFinanceAuthorizationFilter(

@@ -85,6 +85,65 @@ public class FinanceEndpointsAuthorizationContractTests
     }
 
     // =========================================================================================
+    // Step 0 (ebilling-r1 task 099; owner 2026-10-21: every /api/finance route)
+    // =========================================================================================
+
+    private static readonly object[][] FinanceRoutes =
+    [
+        ["summary", false], ["search", false], ["confirm", false], ["reject", false],
+        ["finance-matter-recalculate", true], ["finance-project-recalculate", true],
+    ];
+
+    public static IEnumerable<object[]> FinanceRoutesRefused => FinanceStepZeroCaller.Cross(FinanceRoutes, FinanceStepZeroCaller.RefusedKinds);
+
+    public static IEnumerable<object[]> FinanceRoutesInternal => FinanceStepZeroCaller.Cross(FinanceRoutes, FinanceStepZeroCaller.InternalKinds);
+
+    [Theory(DisplayName = "Task 099 must-fire: every /api/finance route of this host refuses a flagged-external, row-less or unreadable caller with its own denial, before any rights call")]
+    [MemberData(nameof(FinanceRoutesRefused))]
+    public async Task EveryFinanceRoute_StepZero_RefusesBeforeAnyRightsCall(string route, bool uniformNotFound, StepZeroCallerKind kind)
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        host.StepZero.Kind = kind;
+
+        var response = await host.SendAsync(BuildRequest(route, Guid.NewGuid()));
+
+        await host.StepZero.AssertRefusedAsync(response, kind, uniformNotFound);
+        host.Access.Calls.Should().BeEmpty("step 0 runs before any record check");
+        host.Probe.Calls.Should().BeEmpty("step 0 runs before any privilege check");
+        host.VerifyNoServiceWasInvoked();
+    }
+
+    [Theory(DisplayName = "Task 099 must-not-fire: on every /api/finance route of this host a flag that reads false or blank reaches the route's own checks as before")]
+    [MemberData(nameof(FinanceRoutesInternal))]
+    public async Task EveryFinanceRoute_StepZero_AdmitsAnInternalCaller(string route, bool uniformNotFound, StepZeroCallerKind kind)
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        host.StepZero.Kind = kind;
+
+        var response = await host.SendAsync(BuildRequest(route, Guid.NewGuid()));
+
+        response.StatusCode.Should().Be(uniformNotFound ? HttpStatusCode.NotFound : HttpStatusCode.Forbidden);
+        host.Access.Calls.Should().NotBeEmpty("an internal caller reaches the route's own record checks");
+        host.StepZero.Queries.Should().HaveCount(2);
+        host.VerifyNoServiceWasInvoked();
+    }
+
+    [Theory(DisplayName = "Task 099: the scorecard recalculate routes are not /api/finance routes, so they run no step-0 lookup even for a flagged-external caller")]
+    [InlineData("scorecard-matter-recalculate")]
+    [InlineData("scorecard-project-recalculate")]
+    public async Task ScorecardRoutes_RunNoStepZero(string route)
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        host.StepZero.Kind = StepZeroCallerKind.FlagTrue;
+
+        var response = await host.SendAsync(BuildRequest(route, Guid.NewGuid()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        host.Access.Calls.Should().NotBeEmpty("the route's own record check ran, unchanged");
+        host.StepZero.Queries.Should().BeEmpty();
+    }
+
+    // =========================================================================================
     // Recalculate (finance + scorecard)
     // =========================================================================================
 
@@ -996,6 +1055,9 @@ public class FinanceEndpointsAuthorizationContractTests
     /// <summary>A minimal host over the three REAL endpoint mappers.</summary>
     internal sealed class FinanceAuthHost : IAsyncDisposable
     {
+        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="FinanceStepZeroCaller.Kind"/>.</summary>
+        public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+
         private WebApplication? _app;
         private HttpClient? _client;
 
@@ -1034,6 +1096,7 @@ public class FinanceEndpointsAuthorizationContractTests
                 .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(
                     FinanceAuthzTestAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
+            StepZero = FinanceStepZeroCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
             builder.Services.AddRateLimiter(opt =>
                 opt.AddPolicy("dataverse-query", _ => RateLimitPartition.GetNoLimiter("dataverse-query-test")));
 

@@ -59,6 +59,7 @@ public static class RuleSetEndpoints
     {
         var group = app.MapGroup(Route)
             .RequireAuthorization()
+            .RequireInternalFinanceCaller() // step 0 on every /api/finance route (section 5.3, task 099)
             .WithTags("Finance");
 
         // POST /api/finance/rulesets?name=&sourceKind=&scope=&firmId= (multipart file) — create a Draft rule set from a source document

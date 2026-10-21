@@ -33,6 +33,7 @@ public static class InvoiceSubmissionEndpoints
     {
         var group = app.MapGroup(Route)
             .RequireAuthorization()
+            .RequireInternalFinanceCaller() // step 0 on every /api/finance route (section 5.3, task 099)
             .WithTags("Finance");
 
         // POST /api/finance/{matters|projects|workassignments}/{id}/invoice-submissions. Three literal chains (not a loop): the

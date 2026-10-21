@@ -79,6 +79,65 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
         host.World.AssertNothingChanged();
     }
 
+    // ── Step 0 (ebilling-r1 task 099; section 5.3) ──
+
+    private static readonly object[][] AllRoutes = [["GET", "blocked", true], ["POST", "override", false], ["POST", "return", false]];
+
+    public static IEnumerable<object[]> RoutesRefused => FinanceStepZeroCaller.Cross(AllRoutes, FinanceStepZeroCaller.RefusedKinds);
+
+    public static IEnumerable<object[]> RoutesInternal => FinanceStepZeroCaller.Cross(AllRoutes, FinanceStepZeroCaller.InternalKinds);
+
+    [Theory(DisplayName = "Task 099 must-fire: /blocked, /override and /return refuse a flagged-external, row-less or unreadable caller with their own denial, before any rights call, privilege question or read")]
+    [MemberData(nameof(RoutesRefused))]
+    public async Task StepZero_RefusesBeforeAnyRightsCallOrRead(string method, string verb, bool uniformNotFound, StepZeroCallerKind kind)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+        host.StepZero.Kind = kind;
+
+        var response = await host.SendAsync(Request(method, Url(verb), method == "POST" ? ReasonBody() : null));
+
+        await host.StepZero.AssertRefusedAsync(response, kind, uniformNotFound);
+        host.Access.Calls.Should().BeEmpty();
+        host.World.Probe.Calls.Should().BeEmpty();
+        host.World.Entities.Invocations.Should().BeEmpty();
+        host.World.AssertNothingChanged();
+    }
+
+    [Theory(DisplayName = "Task 099 must-not-fire: /blocked, /override and /return with a flag that reads false or blank reach the record check as before")]
+    [MemberData(nameof(RoutesInternal))]
+    public async Task StepZero_AdmitsAnInternalCaller(string method, string verb, bool uniformNotFound, StepZeroCallerKind kind)
+    {
+        await using var host = await Host.StartAsync();
+        host.StepZero.Kind = kind;
+
+        var response = await host.SendAsync(Request(method, Url(verb), method == "POST" ? ReasonBody() : null));
+
+        response.StatusCode.Should().Be(uniformNotFound ? HttpStatusCode.NotFound : HttpStatusCode.Forbidden);
+        host.Access.Calls.Should().ContainSingle().Which.Should().Be(new FinAuth.AccessCall(FinAuth.AccessPath.Record, Set, SubmissionId, HasToken: true));
+        host.World.AssertNothingChanged();
+    }
+
+    [Theory(DisplayName = "Task 099: a refused flagged-external caller gets a byte-identical /blocked body for an existing and a non-existent submission id")]
+    [InlineData(StepZeroCallerKind.FlagTrue)]
+    [InlineData(StepZeroCallerKind.NoSystemUserRow)]
+    [InlineData(StepZeroCallerKind.FlagReadFault)]
+    public async Task StepZero_Blocked_IsTheSameForAnExistingAndAnAbsentId(StepZeroCallerKind kind)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantRights();
+        host.StepZero.Kind = kind;
+
+        var existing = await host.SendAsync(Request("GET", Url("blocked")));
+        var absent = await host.SendAsync(Request("GET", Url("blocked", Guid.NewGuid())));
+
+        existing.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        absent.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        Sprk.Bff.Api.Tests.Api.Filters.FinanceStepZeroTests.WithoutTraceId(await absent.Content.ReadAsStringAsync())
+            .Should().Be(Sprk.Bff.Api.Tests.Api.Filters.FinanceStepZeroTests.WithoutTraceId(await existing.Content.ReadAsStringAsync()));
+        host.World.Entities.Invocations.Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData("override")]
     [InlineData("return")]
@@ -398,6 +457,9 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
 
     private sealed class Host : IAsyncDisposable
     {
+        /// <summary>The step-0 caller (task 099); internal unless a test changes <see cref="FinanceStepZeroCaller.Kind"/>.</summary>
+        public FinanceStepZeroCaller StepZero { get; private set; } = null!;
+
         private WebApplication _app = null!;
         private HttpClient _client = null!;
 
@@ -417,6 +479,7 @@ public sealed class SubmissionOverrideEndpointsAuthorizationContractTests
                 })
                 .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(FinanceAuthzTestAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
+            host.StepZero = FinanceStepZeroCaller.Register(builder.Services); // task 099: every /api/finance route runs step 0
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
 
             // The REAL authorization stack, substituted only at the access-data boundary.

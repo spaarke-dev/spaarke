@@ -4,6 +4,8 @@ using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -74,6 +76,10 @@ public static class FinanceAuthorizationFilterExtensions
     {
         ArgumentNullException.ThrowIfNull(resolveTargets);
 
+        // The marker lets FinanceStepZeroCoverageGuardTests see, from the route table, that this route runs the filter that
+        // honours FinanceInternalCallersOnly (a flag on a route without the filter would be inert).
+        builder.WithMetadata(FinanceAuthorizationFilterAttached.Instance);
+
         return builder.AddEndpointFilter(async (context, next) =>
         {
             var services = context.HttpContext.RequestServices;
@@ -85,6 +91,51 @@ public static class FinanceAuthorizationFilterExtensions
             return await filter.InvokeAsync(context, next);
         });
     }
+
+    /// <summary>
+    /// Switches on step 0 (procedure-and-file-model section 5.3; ebilling-r1 task 099) for every route of
+    /// <paramref name="builder"/>: <see cref="FinanceAuthorizationFilter"/> refuses a caller whose systemuser is flagged
+    /// <c>sprk_isexternal</c>, has no row, or whose flag cannot be read, BEFORE the route's target declaration runs and
+    /// before any record check, answering with the route's own denial. Set once per <c>/api/finance</c> route group
+    /// (owner 2026-10-21: every <c>/api/finance</c> route); FinanceStepZeroCoverageGuardTests fails a route without it.
+    /// </summary>
+    public static TBuilder RequireInternalFinanceCaller<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder =>
+        builder.WithMetadata(FinanceInternalCallersOnly.Instance);
+}
+
+/// <summary>
+/// Endpoint metadata: the route admits internal callers only, so <see cref="FinanceAuthorizationFilter"/> runs step 0
+/// (procedure-and-file-model section 5.3). Add it with
+/// <see cref="FinanceAuthorizationFilterExtensions.RequireInternalFinanceCaller{TBuilder}"/>.
+/// </summary>
+public sealed class FinanceInternalCallersOnly
+{
+    public static readonly FinanceInternalCallersOnly Instance = new();
+
+    private FinanceInternalCallersOnly()
+    {
+    }
+}
+
+/// <summary>Endpoint metadata: the route runs <see cref="FinanceAuthorizationFilter"/> (read by the step-0 coverage guard).</summary>
+public sealed class FinanceAuthorizationFilterAttached
+{
+    public static readonly FinanceAuthorizationFilterAttached Instance = new();
+
+    private FinanceAuthorizationFilterAttached()
+    {
+    }
+}
+
+/// <summary>
+/// The step-0 verdict for the request, under <see cref="FinanceAuthorizationFilter.StepZeroVerdictKey"/>. Only
+/// <see cref="Internal"/> is ever stored, and only when step 0 ran and passed and the filter let the request through; a
+/// refused request and an unflagged route carry no item. Read by task 113 (the banner is computed only for internal callers).
+/// </summary>
+public enum FinanceStepZeroVerdict
+{
+    Internal = 1,
 }
 
 /// <summary>How a <see cref="FinanceAuthorizationFilter"/> denial is rendered.</summary>
@@ -267,6 +318,19 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     /// </summary>
     public const string RecordUnavailableReasonCode = ProblemDetailsHelper.RecordUnavailableReasonCode;
 
+    /// <summary>
+    /// Step 0 refused the caller: its systemuser is flagged <c>sprk_isexternal</c> or has no active row (section 5.3). A
+    /// fault reading either is <see cref="SystemFailureReasonCode"/>. On a UniformNotFound route neither reaches the body.
+    /// </summary>
+    public const string InternalCallersOnlyReasonCode = "sdap.access.deny.internal_callers_only";
+
+    /// <summary>The <see cref="HttpContext.Items"/> key of the request's <see cref="FinanceStepZeroVerdict"/>.</summary>
+    public static readonly object StepZeroVerdictKey = new();
+
+    /// <summary>True only when step 0 ran on this request and classed the caller internal (task 113 reads it).</summary>
+    public static bool StepZeroClassedInternal(HttpContext httpContext) =>
+        httpContext.Items.TryGetValue(StepZeroVerdictKey, out var verdict) && verdict is FinanceStepZeroVerdict.Internal;
+
     private readonly AuthorizationService _authorizationService;
     private readonly Func<EndpointFilterInvocationContext, FinanceAuthorizationTargets> _resolveTargets;
     private readonly FinanceDenial _denial;
@@ -309,6 +373,20 @@ public class FinanceAuthorizationFilter : IEndpointFilter
                 title: "Unauthorized",
                 detail: "User identity not found",
                 type: "https://tools.ietf.org/html/rfc7235#section-3.1");
+        }
+
+        // Step 0 (section 5.3; task 099): on a route flagged internal-callers-only, refuse a flagged-external caller, a
+        // caller with no systemuser row and a caller whose flag cannot be read — BEFORE the target declaration runs (it may
+        // read records) and before any check, with the route's own Deny(). The log carries the reason only.
+        var stepZero = httpContext.GetEndpoint()?.Metadata.GetMetadata<FinanceInternalCallersOnly>() is not null;
+        if (stepZero)
+        {
+            var refusal = await RunStepZeroAsync(httpContext, userId, logger, httpContext.RequestAborted);
+            if (refusal is not null)
+            {
+                logger?.LogWarning("Finance authorization DENIED at step 0 for caller {UserId}: reason {Reason}", userId, refusal);
+                return Deny(httpContext, refusal);
+            }
         }
 
         FinanceAuthorizationTargets targets;
@@ -366,7 +444,42 @@ public class FinanceAuthorizationFilter : IEndpointFilter
             }
         }
 
+        if (stepZero)
+        {
+            httpContext.Items[StepZeroVerdictKey] = FinanceStepZeroVerdict.Internal;
+        }
+
         return await next(context);
+    }
+
+    /// <summary>
+    /// Step 0 over the one definition (<see cref="CallerExternality.IsExternalCallerAsync"/>). Returns <c>null</c> when the
+    /// caller is internal (<c>sprk_isexternal</c> false or blank), otherwise the deny reason. Fails closed: a missing
+    /// resolver, a lookup fault or a flag-read fault is <see cref="SystemFailureReasonCode"/>, never internal.
+    /// </summary>
+    private static async Task<string?> RunStepZeroAsync(
+        HttpContext httpContext, string userId, ILogger? logger, CancellationToken ct)
+    {
+        try
+        {
+            var services = httpContext.RequestServices;
+            var callerResolver = services.GetService<ICallerSystemUserResolver>();
+            var identityResolver = services.GetService<ISystemUserIdentityResolver>();
+            if (callerResolver is null || identityResolver is null)
+            {
+                logger?.LogError("Finance authorization step 0: the caller resolvers are not registered; denying caller {UserId}", userId);
+                return SystemFailureReasonCode;
+            }
+
+            return await CallerExternality.IsExternalCallerAsync(httpContext.User, callerResolver, identityResolver, ct)
+                ? InternalCallersOnlyReasonCode
+                : null;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "Finance authorization step 0 faulted for caller {UserId}; denying (fail closed)", userId);
+            return SystemFailureReasonCode;
+        }
     }
 
     /// <summary>Returns <c>null</c> when allowed, otherwise the deny reason code.</summary>
