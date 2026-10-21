@@ -20,13 +20,14 @@ namespace Spaarke.ArchTests;
 /// <para><b>Crude by design</b>, like every <see cref="SourceScan"/> rule: it reads comment-stripped text, not a compilation. Each
 /// rule has a must-fire control (a seeded violation is reported) and a must-not-fire control (the sanctioned shape and the reads
 /// that name the same columns are not).</para>
-/// <para><b>One create site, every entry point (task 042).</b> The writer has three public entry points that create a record,
-/// <c>WriteAsync</c> (a human review), <c>WriteGateDecisionAsync</c> (an automated communications-gate decision) and, task 153,
-/// <c>WriteConditionClearedAsync</c> (a Do-lane ConditionCleared closure). All must reach
+/// <para><b>One create site, every entry point (task 042).</b> The writer's public entry points that create a record are every entry
+/// point listed in <see cref="CreateEntryPoints"/> (today a human review, an automated communications-gate decision, a Do-lane
+/// ConditionCleared closure and a billing decision). All must reach
 /// the SAME private <c>CreateAsync</c> (the only <c>_writerClient.CreateAsync</c> call, which builds the payload from
 /// <c>Content</c> and files and owns it through <c>FiledAndOwnedAsync</c>), so a new entry point cannot grow a second create that
 /// skips the filing, the owner answer or the D-34 context rule. <see cref="OneCreateSiteReachedByEveryEntryPoint"/> pins it, with
-/// must-fire and must-not-fire controls.</para>
+/// must-fire and must-not-fire controls. <see cref="EveryPublicWriteResultMemberIsAListedEntryPoint"/> keeps the list complete: a public
+/// member returning <c>DecisionRecordWriteResult</c> that is not listed fails (a new entry point cannot dodge the check by not being named).</para>
 /// <para><b>MAINTENANCE.</b> A new create builder of a table that carries these columns joins <see cref="SanctionedWriters"/> with
 /// its reason. A path that needs to change a recorded decision's context does not exist by design (D-34): raise it with the owner,
 /// never add it here.</para>
@@ -193,8 +194,11 @@ public class DecisionRecordContextImmutabilityTests
     }
 
     /// <summary>The entry points that create a Decision Record (public members of the writer), each of which must reach <see cref="SharedCreate"/>.</summary>
-    /// <remarks>Task 153 adds <c>WriteConditionClearedAsync</c> (the Routine record of a Do-lane ConditionCleared closure).</remarks>
-    private static readonly string[] CreateEntryPoints = ["WriteAsync", "WriteGateDecisionAsync", "WriteConditionClearedAsync"];
+    /// <remarks>Task 153 adds <c>WriteConditionClearedAsync</c> (the Routine record of a Do-lane ConditionCleared closure). Issue #2212 adds
+    /// <c>WriteBillingDecisionAsync</c>, whose public overload is a forwarder: the overload that reaches <see cref="SharedCreate"/> is the
+    /// one the check judges (see <see cref="CreateSiteProblems"/>). Completeness of this list is pinned by
+    /// <see cref="EveryPublicWriteResultMemberIsAListedEntryPoint"/>.</remarks>
+    private static readonly string[] CreateEntryPoints = ["WriteAsync", "WriteGateDecisionAsync", "WriteConditionClearedAsync", "WriteBillingDecisionAsync"];
 
     private const string SharedCreate = "CreateAsync";
 
@@ -213,7 +217,16 @@ public class DecisionRecordContextImmutabilityTests
     [Fact(DisplayName = "Task 042 / D-34: create-site detector controls — a second create, a missing entry point and a bypassing entry point fire")]
     public void OneCreateSite_Controls()
     {
-        static string Writer(string gateBody, string extra = "", string clearedBody = "        return await CreateAsync(review, plan, null, ct);") => SourceScan.CodeText(new[]
+        // Issue #2212: WriteBillingDecisionAsync has a forwarding public overload (request, ct) => the internal overload (request, supplier, ct).
+        const string billingForwarder = "    public Task<R> WriteBillingDecisionAsync(B request, CancellationToken ct = default) =>\n        WriteBillingDecisionAsync(request, deciderContact: null, ct);\n";
+        const string billingReaching = billingForwarder
+            + "    internal async Task<R> WriteBillingDecisionAsync(B request, Func<Task<Guid>>? deciderContact, CancellationToken ct)\n"
+            + "    {\n        return await CreateAsync(review, plan, null, ct);\n    }";
+        const string billingNotReaching = billingForwarder
+            + "    internal async Task<R> WriteBillingDecisionAsync(B request, Func<Task<Guid>>? deciderContact, CancellationToken ct)\n"
+            + "    {\n        return new R();\n    }";
+
+        static string Writer(string gateBody, string extra = "", string clearedBody = "        return await CreateAsync(review, plan, null, ct);", string billing = billingReaching) => SourceScan.CodeText(new[]
         {
             "public sealed class DecisionRecordWriter",
             "{",
@@ -231,6 +244,8 @@ public class DecisionRecordContextImmutabilityTests
             "    {",
             clearedBody,
             "    }",
+            "",
+            billing,
             "",
             "    private async Task<R> CreateAsync(A request, Plan plan, DecisionRecordOwner? o, CancellationToken ct)",
             "    {",
@@ -261,6 +276,91 @@ public class DecisionRecordContextImmutabilityTests
         Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);",
             clearedBody: "        return await _writerClient.CreateAsync(new Entity(\"sprk_decisionrecord\"), ct);")));
         Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);", clearedBody: "        return new R();")));
+
+        // Must NOT fire (#2212): the billing forwarder's target is the overload that reaches the shared create.
+        Assert.Empty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);", billing: billingReaching)));
+
+        // Must fire (#2212): the forwarder's target never reaches the shared create (the forward alone is not a create).
+        Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);", billing: billingNotReaching)));
+
+        // Must fire (#2212): the billing entry point is renamed away (the list must move with it).
+        Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);",
+            billing: billingReaching.Replace("WriteBillingDecisionAsync", "WriteBillingAsync"))));
+    }
+
+    [Fact(DisplayName = "Issue #2212 / D-34: every public Decision Record write-result member of the writer is a listed entry point")]
+    public void EveryPublicWriteResultMemberIsAListedEntryPoint()
+    {
+        var unlisted = UnlistedEntryPoints(ServerFiles()["DecisionRecordWriter.cs"]);
+
+        Assert.True(unlisted.Count == 0,
+            "Every public DecisionRecordWriter member returning DecisionRecordWriteResult creates a record and must be listed in "
+            + $"{nameof(CreateEntryPoints)} so {nameof(OneCreateSiteReachedByEveryEntryPoint)} judges it:\n  "
+            + string.Join("\n  ", unlisted.Select(n => $"unlisted Decision Record entry point {n}")));
+    }
+
+    [Fact(DisplayName = "Issue #2212 / D-34: entry-point completeness controls — an unlisted public write-result member fires; the sanctioned shape does not")]
+    public void EntryPointCompleteness_Controls()
+    {
+        static string Writer(params string[] members) => SourceScan.CodeText(new[]
+        {
+            "public sealed record DecisionRecordWriteResult(Guid Id);",
+            "public sealed class DecisionRecordWriter",
+            "{",
+            "    public DecisionRecordWriter(IX x) { }",
+            "    public Task<DecisionRecordWriteResult> WriteAsync(A request, CancellationToken ct = default) => WriteAsync(request, null, ct);",
+            "    public async Task<DecisionRecordWriteResult> WriteAsync(A request, DecisionRecordOwner? o, CancellationToken ct) { return await CreateAsync(request, o, ct); }",
+            "    public async Task<DecisionRecordWriteResult> WriteGateDecisionAsync(G request, CancellationToken ct = default) { return await CreateAsync(request, null, ct); }",
+            "    public async Task<DecisionRecordWriteResult> WriteConditionClearedAsync(C request, CancellationToken ct = default) { return await CreateAsync(request, null, ct); }",
+            "    public Task<DecisionRecordWriteResult> WriteBillingDecisionAsync(B request, CancellationToken ct = default) => WriteBillingDecisionAsync(request, null, ct);",
+            "    internal async Task<DecisionRecordWriteResult> WriteInternalAsync(B request, CancellationToken ct) { return await CreateAsync(request, null, ct); }",
+            "    public string Describe(DecisionRecordWriteResult result) => result.ToString();",
+            "    public Task<int> Count(CancellationToken ct) => Task.FromResult(0);",
+            "    private async Task<DecisionRecordWriteResult> CreateAsync(A request, DecisionRecordOwner? o, CancellationToken ct) { return await _writerClient.CreateAsync(e, ct); }",
+        }.Concat(members).Append("}").ToArray());
+
+        // Must NOT fire: the sanctioned shape. The listed entry points and their overloads, a constructor, an internal and a private
+        // member that return the type, and public members that only TAKE it or do not mention it, are all fine.
+        Assert.Empty(UnlistedEntryPoints(Writer()));
+
+        // Must fire: an extra public entry point that returns the write result and is not listed.
+        Assert.Equal(new[] { "WriteXAsync" }, UnlistedEntryPoints(Writer(
+            "    public async Task<DecisionRecordWriteResult> WriteXAsync(X request, CancellationToken ct = default) { return await CreateAsync(request, null, ct); }")));
+
+        // Must fire: the return type wrapped in a nullable / collection generic, and a second unlisted member.
+        Assert.Equal(new[] { "WriteYAsync", "WriteZAsync" }, UnlistedEntryPoints(Writer(
+            "    public ValueTask<DecisionRecordWriteResult?> WriteYAsync(Y request) => default;",
+            "    public static Task<IReadOnlyList<DecisionRecordWriteResult>> WriteZAsync(Z request) => default;")));
+    }
+
+    /// <summary>The public members of <c>DecisionRecordWriter</c> whose return type mentions <c>DecisionRecordWriteResult</c> and whose name is not in
+    /// <see cref="CreateEntryPoints"/>. Only the text before the member's first <c>(</c> is judged (modifiers, return type, name), so a member that only
+    /// TAKES the type as a parameter is not an entry point; the scan starts at the writer class, so the result record's own declaration is not read.</summary>
+    private static List<string> UnlistedEntryPoints(string code)
+    {
+        var writer = Regex.Match(code, @"\bclass\s+DecisionRecordWriter\b");
+        if (!writer.Success)
+        {
+            return new List<string> { "(DecisionRecordWriter class not found)" };
+        }
+
+        var unlisted = new List<string>();
+        foreach (Match declaration in MemberDeclaration.Matches(code, writer.Index))
+        {
+            var head = declaration.Value;
+            if (!Regex.IsMatch(head, @"^\s*public\b") || !head.Contains("DecisionRecordWriteResult", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var name = Regex.Match(head, @"\b(?<name>\w+)\s*(?:<[^>()]*>)?\s*\($").Groups["name"].Value;
+            if (!CreateEntryPoints.Contains(name) && !unlisted.Contains(name))
+            {
+                unlisted.Add(name);
+            }
+        }
+
+        return unlisted;
     }
 
     /// <summary>Problems with the writer's create shape: not exactly one <c>_writerClient.CreateAsync</c> call, that call outside
