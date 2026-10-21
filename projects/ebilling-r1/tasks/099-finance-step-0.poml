@@ -4,7 +4,7 @@
     <title>Finance step 0: refuse flagged-external callers on every /api/finance route (5.3; owner 2026-10-21)</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-A</phase>
     <gate>startable once 100 and 105 are merged into the branch (this task adds the route-group flag to their endpoint files); uac-r2 reviews the diff before merge (auth)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include auth: a new refusal inside the shared Finance authorization filter, on routes that expose invoices, submissions, overrides and Procedure content.</rigor-reason>
     <model-tier>opus</model-tier>
