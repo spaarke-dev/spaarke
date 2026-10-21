@@ -359,3 +359,25 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
 - **Read-back** (18:04:37Z): `1.0.0+583f90c1d91198f810b18d60c86f86c130c751d1`. healthz and healthz/dataverse 200; `/api/me` anonymous 401.
 - **30 minutes** (to 18:34Z): no new exception class (only the Graph "Invalid hostname" noise ×6). T8 refusals 0; #2191 refusal codes 0, because no Office quick-create has run yet. Reconciliation runs 18:16–18:34Z Succeeded. Ontology smoke PASS.
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T180216Z` (= `84291ecea8`).
+
+## Dev BFF deploy of master f1b3dadcf5 (2026-10-21 21:44Z; owner: "yes, deploy f1b3dadcf5")
+
+- **Contents:** UAC task 188, D7 T7 (#2170: one predicate narrows external document reads; this is the fix for ISS-015 together with word-add-in T8 #2177, live since 84291ecea8). Slice D (#2186: document links Delete=Restrict; a parent's delete is refused with 409 `document_has_child_documents`). Field-mapping #2214 (inert on dev).
+- **Peer OKs:** UAC, field-mapping, ontology, SPE admin, ebilling and word-add-in. Provisioning has a standing OK. No dev prerequisites (UAC).
+- **Effect UAC measured:** 11 partner-reachable documents disappear for partners, all own-Restricted, all on matter b68299c6. Internal users still see them.
+- **Partner baseline:** no one can sign in as the partner contacts, R3 or UAC. UAC recorded the pre-swap state from Dataverse data instead (grants and reachable documents on b68299c6 and 86335ce3).
+- **Pre-checks:** live DLL `583f90c1d9`, an ancestor. No e0df77339.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261021T214302Z` (222 files, DLL `583f90c1d9`).
+- **Deploy:** detached `C:/wtbffe-f1b`. Package 37.68 MB; 4 critical files SHA-256 verified; CORS OK. No settings changed.
+- **Read-back** (21:45:37Z): `1.0.0+f1b3dadcf59fae5ff5142ac670a3860391c57c46`. healthz and healthz/dataverse 200; `/api/me` anonymous 401.
+- **UAC's post-swap steps** (owner-approved in UAC's session), all verified:
+  - `Set-DocumentLinkDeleteRestrict.ps1 -Apply`.
+  - `Set-DocumentNarrowingFieldSecurity.ps1 -Apply` (columns masked about 17 s each around 21:5xZ; BFF reads are app-only).
+  - `sprk_DocumentOperations.js` 1.28.2 published.
+- **30 minutes (to 22:16Z):**
+  - No new exception class (only the Graph "Invalid hostname" noise ×7).
+  - No narrowing exceptions; 0x80040227 / `document_has_child_documents` 0; no 409s or 403s; no field-security errors.
+  - Reconciliation runs Succeeded.
+  - Ontology smoke PASS.
+- **Not exercised:** no partner document reads and no document creates in the window. D7 narrowing and the BFF-writer path under the new field security are unproven live until real traffic, or the owner's optional partner check (a contact 8e9918a9/2e419a4f sign-in: b68299c6 lists empty, 86335ce3 lists its 3, aadbb740 download refused as not-under-parent).
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T214302Z` (= `583f90c1d9`). Rolling back the BFF does NOT undo UAC's Restrict, field-security or web-resource changes; those are UAC's to reverse.

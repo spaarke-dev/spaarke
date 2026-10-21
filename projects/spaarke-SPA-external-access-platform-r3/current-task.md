@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-21 18:40Z. Dev BFF 583f90c1d9 (deployed 18:03Z: #2191 leak fix + #2182, on top of 84291ecea8) + 036 flag ON; dev SPA 3531ed65e; R4 design.md drafted.
+> **Last Updated**: 2026-10-21 22:20Z. Dev BFF f1b3dadcf5 (deployed 21:44Z: UAC D7 T7 #2170 + slice D #2186 + #2214) + 036 flag ON; dev SPA 3531ed65e; R4 design.md drafted.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,7 +10,7 @@
 | Field | Value |
 |-------|-------|
 | **Task** | No task mid-implementation. Open, owner-driven: 070/071 (Teams), 074 (A9 probes), 002 (grid columns). R4 `design.md` drafted, waiting for owner review. |
-| **Status** | **Dev BFF = `583f90c1d9`**, deployed 2026-10-21 18:03Z; owner-approved here. It adds #2191 and #2182 to 84291ecea8, which had added #2161, #2177 and #2205. Record: `notes/task-078-notes.md`, last section. Flag `ExternalAccess__ImpersonatedRootSets__Enabled` has been **ON since 2026-10-20 23:51Z**; rollback is to delete the setting. BFF rollback is `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T180216Z`, which returns to 84291ecea8. **Dev SPA = `3531ed65e`**: run 39536100531, 2026-10-21 03:02Z, with the #2166 fix and the UAC #2078/#2122 SPA changes. Rollback tag: `external-spa-dev-rollback-28274e04e`. UAC's 036 flag-on gates passed (uac-r2 0a4fbaa38). |
+| **Status** | **Dev BFF = `f1b3dadcf5`**, deployed 2026-10-21 21:44Z; owner-approved here. It adds D7 T7 (#2170, the ISS-015 fix with T8 #2177), slice D (#2186) and #2214 to 583f90c1d9. UAC then applied Restrict, field security and sprk_DocumentOperations.js 1.28.2 on dev. Record: `notes/task-078-notes.md`, last section. Flag `ExternalAccess__ImpersonatedRootSets__Enabled` has been **ON since 2026-10-20 23:51Z**; rollback is to delete the setting. BFF rollback is `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T214302Z`, which returns to 583f90c1d9. **Dev SPA = `3531ed65e`**: run 39536100531, 2026-10-21 03:02Z, with the #2166 fix and the UAC #2078/#2122 SPA changes. Rollback tag: `external-spa-dev-rollback-28274e04e`. UAC's 036 flag-on gates passed (uac-r2 0a4fbaa38). |
 | **Next Action** | Wait for the owner: (1) smoke of SPA 3531ed65e (list in `notes/task-070-deploy-record.md`, last section), then close #2166; (2) answers to R4 design §9; (3) Teams package upload in the **Dewey Cheatham** tenant (the Spaarke tenant gets "not set up" by design), then 071; (4) 002 columns. |
 
 ### Uncommitted files
@@ -51,7 +51,7 @@
   - Awaiting UAC's answer.
 - **UAC D7 T7 (task 188)** and word-add-in task 130 (T8) will need an R3-coordinated dev BFF deploy later.
 - **ebilling:** will send its PR when ready (after D-148). Deploy it paired with the R4/R3 SPA change.
-- **84291ecea8 follow-up:** UAC gate item 4: the owner does two .eml saves, or it relies on real saves. word-add-in reads the rows back. Ontology re-checks its logs at the 02:30Z nightly run. #2182 and #2191 are live (583f90c1d9). Nothing is queued for the next deploy.
+- **84291ecea8 follow-up:** UAC gate item 4: the owner does two .eml saves, or it relies on real saves. word-add-in reads the rows back. Ontology re-checks its logs at the 02:30Z nightly run. D7 is live but not exercised: no partner document reads yet. The optional owner partner check is in task-078-notes (f1b3dadcf5 section). ISS-015 can close once D7 is proven live. Next deploy: ebilling 015 (e0df77339) when ebilling asks.
 
 ## Next actions (in order)
 1. Owner smoke of SPA 3531ed65e, then close #2166.
