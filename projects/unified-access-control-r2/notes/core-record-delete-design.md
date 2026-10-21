@@ -448,3 +448,26 @@ They are enforced by `scripts/Set-DocumentLinkDeleteRestrict.ps1 -Verify`. These
 - **Communication "delete" through the BFF only deactivates the row**, so Restrict does not affect it. A hard delete outside the BFF is refused while documents link to it.
 - **Archive cascade** stays RemoveLink. Long-term retention is not enabled; see the slice D issue.
 
+
+## 14. ebilling EB-D-148: Procedures (O-17; agreed with ebilling-r1, 2026-10-21)
+
+EB-D-148 re-plans billing configuration around Procedures (ebilling `notes/procedure-and-file-model.md` §5.2, O-17, D-146 at :719). It keeps §12's rule: **the delete job retires nothing**.
+- The delete only unlinks a record-scoped rule set (RemoveLink).
+- ebilling's no-plugin sweep (their task 117) later retires sets whose record is gone.
+
+So the rule-set lifecycle keeps one writer, ebilling's. ebilling's "deleting a core record … retires its record-scoped rule set" means **through that sweep**, not through the delete job.
+
+Additions to §1.3 (proposed by ebilling from model §5.2, accepted here):
+
+| Table | Link to R | Disposition |
+|---|---|---|
+| `sprk_procedureassignment` | typed `sprk_matter` / `sprk_project` / `sprk_workassignment`, exactly one set | **Delete** with R, through the planner (a secure child). |
+| `sprk_ruleset`, record-scoped (`sprk_scope` Record or Firm record) | typed lookup per core type, RemoveLink | **Kept, unlinked** (§12). Retired later by ebilling's sweep, never by the delete job. |
+| `sprk_policy` / `sprk_policyversion` of a record-scoped set | none (via the set) | Follow the set; untouched by the delete. Record rules live only in the record-scoped set. |
+| `sprk_storedfile`, invoice purposes | none (via `sprk_invoice`) | Covered: `sprk_invoice` **blocks** first. |
+| `sprk_storedfile`, export and Procedure-source purposes; `sprk_procedure`; `sprk_procedureversion` | none | Unaffected. |
+| `sprk_billingfirm` / `sprk_billingresponsible` | columns on R itself | Go with R; no other effect. |
+
+**Task 1 tests**:
+- must-fire: R's assignment rows are deleted;
+- must-not-fire: no `Delete` is issued for `sprk_ruleset`, `sprk_policy`, `sprk_policyversion`, `sprk_procedure` or `sprk_procedureversion`, and the plan writes no rule-set status.
