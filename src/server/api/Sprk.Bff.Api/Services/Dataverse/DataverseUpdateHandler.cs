@@ -76,7 +76,8 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // clear (verifier item 8). This handler cannot tell a lookup from a text column; the resolver reads the row and
         // treats a null for a column that holds no parent as no parent change (the write then decides no owner).
         // #2110 (ontology K3): with the lineage lookups it sets that are no ownership parent (a message's thread), so the reparent
-        // can tell whether it moved one (ParentsUnchanged); they never make a write a reparent on their own.
+        // can tell whether it moved one (ParentsUnchanged); but for a message's thread (#2143 round 7c, a re-file on its own)
+        // they never make a write a reparent on their own.
         var parentChanges = RecordOwnershipResolver.IsReparentableChild(entityLogicalName)
             ? RecordReparent.WithLineageLookupsIn(
                 entityLogicalName, RecordReparent.ParentChangesWithClearsIn(entityLogicalName, fields), fields)

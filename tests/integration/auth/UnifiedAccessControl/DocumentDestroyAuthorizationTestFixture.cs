@@ -56,6 +56,12 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
     /// <summary>Every document id that reached <c>IDocumentDataverseService.UpdateDocumentAsync</c> (H2's PUT).</summary>
     public ConcurrentBag<string> UpdatedDataverseDocumentIds { get; } = new();
 
+    /// <summary>
+    /// #2143: called with every <c>UpdateDocumentAsync</c> after it is recorded — a derived fixture lands the update on its
+    /// own rows (the ownership resolver reads the row after the change). Null: recorded only.
+    /// </summary>
+    public Action<string, UpdateDocumentRequest>? OnDocumentUpdated { get; set; }
+
     /// <summary>Every SPE item id whose BYTES were fetched (C1's bulk-download path).</summary>
     public ConcurrentBag<string> DownloadedItemIds { get; } = new();
 
@@ -124,7 +130,7 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
             services.RemoveAll<IDocumentDataverseService>();
             services.AddSingleton<IDocumentDataverseService>(
                 new RecordingDocumentDataverseService(
-                    DeletedDataverseDocumentIds, UpdatedDataverseDocumentIds));
+                    DeletedDataverseDocumentIds, UpdatedDataverseDocumentIds, (id, request) => OnDocumentUpdated?.Invoke(id, request)));
 
             // C1's byte source. Substituted so a bulk-download test can assert WHICH documents' bytes
             // reached the zip — the only assertion that actually distinguishes "excluded by
@@ -360,12 +366,14 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
     {
         private readonly ConcurrentBag<string> _deleted;
         private readonly ConcurrentBag<string> _updated;
+        private readonly Action<string, UpdateDocumentRequest> _onUpdated;
 
         public RecordingDocumentDataverseService(
-            ConcurrentBag<string> deleted, ConcurrentBag<string> updated)
+            ConcurrentBag<string> deleted, ConcurrentBag<string> updated, Action<string, UpdateDocumentRequest> onUpdated)
         {
             _deleted = deleted;
             _updated = updated;
+            _onUpdated = onUpdated;
         }
 
         public Task DeleteDocumentAsync(string id, CancellationToken ct = default)
@@ -377,6 +385,7 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
         public Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default)
         {
             _updated.Add(id);
+            _onUpdated(id, request);
             return Task.CompletedTask;
         }
 

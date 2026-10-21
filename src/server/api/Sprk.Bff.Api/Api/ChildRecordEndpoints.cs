@@ -494,9 +494,21 @@ public static class ChildRecordEndpoints
                 $"Column '{serverOwned}' is set by the server — omit it.");
         }
 
-        var outcome = await OwnedChildWrite.RefileAsync(
-            user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct)
-            .ConfigureAwait(false);
+        OwnedChildWrite.RefileOutcome outcome;
+        try
+        {
+            outcome = await OwnedChildWrite.RefileAsync(
+                user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct)
+                .ConfigureAwait(false);
+        }
+        catch (RecordOwnerUnsettledException)
+        {
+            // #2143: a concurrent writer kept the re-filed row's owner from settling. The caller's PATCH was written and its
+            // filing put back or superseded (RecordOwnerUnsettledException remarks): reload and retry — not the global 500.
+            logger.LogWarning("[CHILD-RECORD] re-file of {Entity} {Id}: its owner could not be settled against concurrent writers",
+                entity, id);
+            return ProblemDetailsHelper.RecordOwnerUnsettled(Noun(entity), httpContext.TraceIdentifier);
+        }
 
         if (outcome.NotARefile)
         {
@@ -547,10 +559,12 @@ public static class ChildRecordEndpoints
             // the caller before the write, rides along on `row`), then task 148's pass over everything filed under it when
             // it moved under, out of or between secure records. One implementation for every re-file writer (it also lets a
             // re-filed communication's thread follow the filing — spaarkeai-word-add-in-r1 task 129).
+            // #2143 round 7 (F1): with the caller the re-file's F3 check acted for, so the thread that follows moves on it.
             await children.AfterRefileAsync(
                 entity, id,
                 async () => GetString(row.Body, "_owningteam_value") is { } before && Guid.TryParse(before, out var beforeTeam)
                             && await children.IsSecureOwnerTeamAsync(beforeTeam, CancellationToken.None).ConfigureAwait(false),
+                RefileThreadStep.Reconcile, outcome.SecureExitCaller,
                 CancellationToken.None).ConfigureAwait(false);
         }
 

@@ -55,6 +55,9 @@ internal sealed class SecureChildShareWorld
     /// <summary>Every table queried, in order.</summary>
     public List<string> QueriedTables { get; } = new();
 
+    /// <summary>#2143 round 7 (R7e): every query asked, in order (one entry per page read).</summary>
+    public List<QueryExpression> Queries { get; } = new();
+
     /// <summary>
     /// The NAMED owner team of THIS world (task 148): <see cref="SecureTeam"/> unless the world was built to match another
     /// harness's ids (<see cref="Standard(Guid, Guid)"/>). <see cref="SecureRoot"/> and <see cref="SecureChild"/> use it.
@@ -181,6 +184,28 @@ internal sealed class SecureChildShareWorld
         _failingRowReads.Add((table, id));
         return this;
     }
+
+    private readonly Dictionary<(string Table, Guid Id), (Func<int, bool> Fails, int Reads)> _transientRowReadFaults = new();
+
+    /// <summary>
+    /// #2143 round 9: a TRANSIENT fault on the query reads of ONE row by its id (<c>&lt;table&gt;id = id</c>): the reads, counted
+    /// from 1 in the order they are asked, for which <paramref name="fails"/> answers <c>true</c> throw; every other read answers.
+    /// </summary>
+    public SecureChildShareWorld TransientRowReadFaultsOf(string table, Guid id, Func<int, bool> fails)
+    {
+        _transientRowReadFaults[(table, id)] = (fails, 0);
+        _transientRowReadFaultsFired[(table, id)] = 0;
+        return this;
+    }
+
+    private readonly Dictionary<(string Table, Guid Id), int> _transientRowReadFaultsFired = new();
+
+    /// <summary>
+    /// #2143 round 10: how many of <see cref="TransientRowReadFaultsOf"/>'s faults on that row actually fired — so a test that
+    /// relies on one cannot pass vacuously when a read is added earlier and the fault lands on another step.
+    /// </summary>
+    public int TransientRowReadFaultsFired(string table, Guid id) =>
+        _transientRowReadFaultsFired.TryGetValue((table, id), out var fired) ? fired : 0;
 
     private readonly HashSet<(string Table, Guid Id)> _failingIdListReads = new();
 
@@ -474,6 +499,21 @@ internal sealed class SecureChildShareWorld
         MoveOwner(table, id, principal);
     }
 
+    /// <summary>
+    /// #2143: an <see cref="IGenericEntityService.UpdateIfRowVersionMatchesAsync"/> of this world — <see cref="Update"/>'s rules,
+    /// applied only while the row's <c>versionnumber</c> (a column, as the Web API doubles here read it; <see cref="Add"/>
+    /// starts it at 1) is still <paramref name="version"/>, then bumped; otherwise Dataverse's version mismatch
+    /// (<see cref="System.Data.DBConcurrencyException"/>) and nothing is written.
+    /// </summary>
+    public void UpdateIfVersion(string table, Guid id, string version, Dictionary<string, object> fields)
+    {
+        var current = ValueOf<long?>(table, id, "versionnumber")?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (!string.Equals(current, version, StringComparison.Ordinal))
+            throw new System.Data.DBConcurrencyException($"Test: {table} {id} is at version {current}, not {version}.");
+        Update(table, id, fields);
+        Set(table, id, "versionnumber", (ValueOf<long?>(table, id, "versionnumber") ?? 0L) + 1);
+    }
+
     /// <summary>Ontology task 144: every core-ancestor stamp write (<see cref="RestamperOver"/>), in order, as sent.</summary>
     public List<(string Table, Guid Id, Dictionary<string, object> Fields)> StampWrites { get; } = new();
 
@@ -535,6 +575,9 @@ internal sealed class SecureChildShareWorld
         // column as no match), so the user must say "enabled" unless the test marked it disabled.
         if (table == "systemuser" && !row.Attributes.ContainsKey("isdisabled"))
             row["isdisabled"] = false;
+        // #2143: every Dataverse row carries a versionnumber; the re-file's conditional owner write is conditioned on it.
+        if (!row.Attributes.ContainsKey("versionnumber"))
+            row["versionnumber"] = 1L;
         _rows[(table, id)] = row;
         return this;
     }
@@ -588,6 +631,15 @@ internal sealed class SecureChildShareWorld
                 return Task.CompletedTask;
             });
         entities
+            .Setup(e => e.UpdateIfRowVersionMatchesAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string version, Dictionary<string, object> fields, CancellationToken _) =>
+            {
+                current().UpdateIfVersion(table, id, version, fields);
+                return Task.CompletedTask;
+            });
+        entities
             .Setup(e => e.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns((string table, Guid id, CancellationToken _) =>
             {
@@ -607,16 +659,19 @@ internal sealed class SecureChildShareWorld
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
         Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
         Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
-        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null)
+        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null,
+        Microsoft.Extensions.Logging.ILogger<SecureChildReconciler>? logger = null,
+        Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? sharesLogger = null)
     {
         var entities = EntitiesOver(current).Object;
         var configuration = Configuration();
         var resolver = new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver(
             entities, configuration, NullLogger<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver>.Instance);
         var synchronizer = new SecureChildShareSynchronizer(
-            entities, shares, noAccessGuard ?? NobodyWalled(), configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
+            entities, shares, noAccessGuard ?? NobodyWalled(), configuration,
+            sharesLogger ?? NullLogger<SecureChildShareSynchronizer>.Instance);
         return new SecureChildReconciler(
-            entities, resolver, synchronizer, webApi, configuration, NullLogger<SecureChildReconciler>.Instance,
+            entities, resolver, synchronizer, webApi, configuration, logger ?? NullLogger<SecureChildReconciler>.Instance,
             gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
             accessCacheInvalidator, threads, ownerPrivileges);
     }
@@ -702,6 +757,7 @@ internal sealed class SecureChildShareWorld
     public EntityCollection Answer(QueryExpression query)
     {
         QueriedTables.Add(query.EntityName);
+        Queries.Add(query);
         RefuseMissingAccessRecordColumn(query.EntityName, query.ColumnSet.Columns);
         foreach (var hook in _beforeAccessRecordReads.Where(h =>
                      string.Equals(h.Table, query.EntityName, StringComparison.OrdinalIgnoreCase)
@@ -718,6 +774,20 @@ internal sealed class SecureChildShareWorld
                 c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.Equal
                 && c.Values.Single() is Guid id && _failingRowReads.Contains((query.EntityName, id))))
             throw new InvalidOperationException($"Test: this {query.EntityName} row cannot be read.");
+        if (query.Criteria.Conditions.FirstOrDefault(c =>
+                c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.Equal) is { } byId
+            && byId.Values.Single() is Guid readId
+            && _transientRowReadFaults.TryGetValue((query.EntityName, readId), out var transient))
+        {
+            var read = transient.Reads + 1;
+            _transientRowReadFaults[(query.EntityName, readId)] = (transient.Fails, read);
+            if (transient.Fails(read))
+            {
+                _transientRowReadFaultsFired[(query.EntityName, readId)] =
+                    _transientRowReadFaultsFired.GetValueOrDefault((query.EntityName, readId)) + 1;
+                throw new InvalidOperationException($"Test: read {read} of this {query.EntityName} row faulted (transient).");
+            }
+        }
 
         if (query.Criteria.Conditions.Any(c =>
                 c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.In

@@ -1116,6 +1116,7 @@ public static class FieldMappingEndpoints
                         targetEntity, childRecordId, updatePayload, token, impersonateSystemUserId: callerSystemUserId);
                     Func<Task<bool>>? wasIsolated = null;
                     var refiled = false;
+                    Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller = null;
                     if (!mayRefile)
                     {
                         await Write(ct);
@@ -1143,7 +1144,7 @@ public static class FieldMappingEndpoints
                                 ParentChanges = parentChanges,
                                 CallerSystemUserId = callerSystemUserId,
                                 // A move out of a secure root (owner round 10 item 7) is asked of the person this push acts as.
-                                SecureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
+                                SecureExitCaller = secureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
                                     callerSystemUserId,
                                     refileScope!.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>()),
                             },
@@ -1181,8 +1182,10 @@ public static class FieldMappingEndpoints
                     // Never throws; the child's update stands.
                     if (refiled && children is not null && wasIsolated is not null)
                     {
+                        // #2143 round 7 (F1): with the person the re-file's F3 check acted for.
                         await children.AfterRefileAsync(
-                            targetEntity.Trim().ToLowerInvariant(), childRecordId, wasIsolated, CancellationToken.None);
+                            targetEntity.Trim().ToLowerInvariant(), childRecordId, wasIsolated,
+                            Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile, secureExitCaller, CancellationToken.None);
                     }
 
                     // Task 142 (L1): a push that wrote a ROOT's "Assigned *" column (a project/matter/work assignment
@@ -1197,6 +1200,23 @@ public static class FieldMappingEndpoints
                 }
 
                 fieldResults.AddRange(recordFieldResults);
+            }
+            catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException)
+            {
+                // #2143 round 2 (K4): a concurrent writer kept the re-filed child's owner from settling. The response names
+                // the row by id only, in a fixed string — never the exception's message (table, id and ownership detail); the
+                // log names the table and the id. No step after the re-file ran for this row.
+                logger.LogWarning(
+                    "Field-mapping push: the re-filed child's owner could not be settled against concurrent writers. "
+                    + "TargetEntity={TargetEntity}, RecordId={RecordId}",
+                    targetEntity, childRecordId);
+
+                failed++;
+                errors.Add(new PushFieldMappingsError
+                {
+                    RecordId = childRecordId,
+                    Error = "Not settled: the record was changed by someone else while this push re-filed it. Reload it and push again.",
+                });
             }
             catch (Exception ex)
             {

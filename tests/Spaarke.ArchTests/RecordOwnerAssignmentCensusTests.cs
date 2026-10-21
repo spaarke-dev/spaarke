@@ -447,8 +447,16 @@ public class RecordOwnerAssignmentCensusTests
     {
         new OwnerWriteEntry("RecordOwnershipResolver.cs", "ApplyTo", 1, OwnerWriteKind.Resolver,
             "Writes the resolved team onto a row about to be created; refuses to apply a refusal."),
-        new OwnerWriteEntry("RecordOwnershipResolver.cs", "ReparentAsync", 1, OwnerWriteKind.Resolver,
-            "The re-file's separate owner assignment, read back."),
+        new OwnerWriteEntry("RecordOwnershipResolver.cs", "SettleOwnerAsync", 2, OwnerWriteKind.Resolver,
+            "The re-file's separate owner assignment (ReparentAsync), read back. #2143: written conditionally at the row "
+            + "version read after the change, from the owner its parents give at that version (re-derived every attempt); "
+            + "re-read on a mismatch (bounded); a refused re-derivation writes none. The second write (F1-b): attempts "
+            + "that run out toward the Secure team end in one unconditional write of the Secure team (fail closed)."),
+        new OwnerWriteEntry("RecordOwnershipResolver.cs", "ReleaseOwnSecureWriteAsync", 1, OwnerWriteKind.Resolver,
+            "#2143 round 2 (F2): after the F1-b unconditional Secure write, a fresh read whose parents no longer resolve to the "
+            + "Secure team (a mover took the row out first) gets back the owner those parents give — conditionally at the fresh "
+            + "version, only when the Secure owner is this call's own write and the row was outside the Secure Record business "
+            + "unit at this call's last read; read back; the call then throws RecordOwnerUnsettledException."),
 
         new OwnerWriteEntry("DataverseServiceClientImpl.cs", "CreateDocumentAsync", 1, OwnerWriteKind.Seam,
             "CreateDocumentRequest.OwningTeamId — throws without it."),

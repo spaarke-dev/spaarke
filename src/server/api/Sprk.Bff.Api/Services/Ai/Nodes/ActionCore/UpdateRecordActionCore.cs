@@ -215,6 +215,7 @@ internal sealed class UpdateRecordActionCore
         // #2091 round 4: the reparent reads the row; a change that moves none of its parents (a rebind onto the parent it
         // holds) is written and is no re-file, so the step does not run.
         var refiled = false;
+        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller = null;
         if (parentChanges.Count == 0)
         {
             await Patch(cancellationToken);
@@ -234,7 +235,7 @@ internal sealed class UpdateRecordActionCore
                     // update IMPERSONATES — the person it acts for — with RetrievePrincipalAccess asked as that user. An
                     // update that impersonates nobody (a playbook node acting for no person) passes no caller and is
                     // refused such a move.
-                    SecureExitCaller = input.ImpersonateSystemUserId is { } person
+                    SecureExitCaller = secureExitCaller = input.ImpersonateSystemUserId is { } person
                         ? Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
                             person, scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>())
                         : null,
@@ -261,14 +262,17 @@ internal sealed class UpdateRecordActionCore
         {
             if (refiled)
             {
-                await children.AfterRefileAsync(refiledTable, input.RecordId, wasIsolated, CancellationToken.None).ConfigureAwait(false);
+                // #2143 round 7 (F1): with the person the re-file's F3 check acted for, so the thread that follows moves on it.
+                await children.AfterRefileAsync(
+                    refiledTable, input.RecordId, wasIsolated, Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile,
+                    secureExitCaller, CancellationToken.None).ConfigureAwait(false);
             }
         }
         // Spaarkeai-word-add-in-r1 task 129: a re-file that could not run the step above (a host without the reconciler, logged
         // above) still lets a re-filed communication's thread follow the filing — once. Never throws.
         else if (mayRefile && refiled)
         {
-            await ReconcileThreadAfterRefileAsync(input.EntityLogicalName, input.RecordId).ConfigureAwait(false);
+            await ReconcileThreadAfterRefileAsync(input.EntityLogicalName, input.RecordId, secureExitCaller).ConfigureAwait(false);
         }
 
         // Task 142 (L1, owner Q5 + A4): a PATCH that wrote a root's "Assigned *" column (as a value or an @odata.bind)
@@ -287,7 +291,8 @@ internal sealed class UpdateRecordActionCore
     /// outside the after-re-file step, so it reconciles as <c>Standalone</c>: a join it makes under another record runs that
     /// step itself (#2110 re-check K2).
     /// </summary>
-    private async Task ReconcileThreadAfterRefileAsync(string entityLogicalName, Guid recordId)
+    private async Task ReconcileThreadAfterRefileAsync(
+        string entityLogicalName, Guid recordId, Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller)
     {
         if (!string.Equals(entityLogicalName?.Trim(), "sprk_communication", StringComparison.OrdinalIgnoreCase))
             return;
@@ -295,7 +300,8 @@ internal sealed class UpdateRecordActionCore
         using var scope = _scopeFactory.CreateScope();
         if (scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IThreadResolver>() is { } threads)
             await threads.ReconcileThreadForFilingAsync(
-                recordId, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.Standalone, CancellationToken.None).ConfigureAwait(false);
+                recordId, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.Standalone, secureExitCaller,
+                beforeMessageGrant: null, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>

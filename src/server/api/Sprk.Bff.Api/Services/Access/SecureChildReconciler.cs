@@ -305,7 +305,9 @@ public sealed record OrdinaryRowReownResult(OrdinaryRowReownOutcome Outcome, str
 /// neither it nor its own children are reached. An unfiled row is never reached.</para>
 /// <para><b>The rule is the resolver's, with 146's inputs.</b> Each row's parents are every ownership-parent lookup it
 /// carries (<see cref="RecordOwnershipContext.ParentsOf"/> over all its columns — the reparent's input), plus, for a message,
-/// its record thread's filing (S6, as <c>AssignToThreadReconcilingOwnerAsync</c> passes it); a row that names no parent keeps
+/// its record thread's filing (S6, <c>RecordThreadFiling</c> — the re-file path's rule, by the thread's type (round 7d: a Direct
+/// thread adds nothing; an unset or unknown type counts as a record thread); #2143 round 6: a thread outside the
+/// pass is read, and a message whose thread cannot be read is left undecided); a row that names no parent keeps
 /// its owner (<see cref="UnfiledOwnership.KeepCreator"/>). Rows are decided shallowest first and
 /// REPEATED TO A FIXPOINT (task 148 r1; report-only too since r2, over planned owners): a row whose parent sits at its own level (an FR-26-stamped analysis of a document, a
 /// stamped communication regarding an event) may be decided before that parent moves, so every row a move could change —
@@ -352,7 +354,6 @@ public sealed class SecureChildReconciler
     private const string OwnerColumn = "ownerid";
     private const string IsSecureColumn = "sprk_issecure";
     private const string CommunicationTable = "sprk_communication";
-    private const string ThreadLookupOnCommunication = "sprk_communicationthread";
 
     /// <summary>
     /// UAC task 099b review round 2: the grant table. Its rows of the root, in EVERY state (review round 3, F1), are owned by
@@ -855,10 +856,24 @@ public sealed class SecureChildReconciler
     /// thread follows the filing (#2091): a writer that placed the message in its thread passes
     /// <see cref="RefileThreadStep.PlacedByWriter"/> and every other step runs.
     /// </summary>
+    public Task<SecureChildReconcileReport?> AfterRefileAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread, CancellationToken ct) =>
+        AfterRefileAsync(childLogicalName, childId, wasIsolated, thread, secureExitCaller: null, ct);
+
+    /// <summary>
+    /// <see cref="AfterRefileAsync(string, Guid, Func{Task{bool}}, RefileThreadStep, CancellationToken)"/> for a re-file a PERSON
+    /// made (#2143 round 7, F1): <paramref name="secureExitCaller"/> is that re-file's
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordReparent.SecureExitCaller"/>, carried into the thread reconcile
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync(Guid, Sprk.Bff.Api.Services.Communication.FilingReconcileHost, SecureRemovalCaller?, Func{CancellationToken, Task}?, CancellationToken)"/>),
+    /// so a re-filed communication's move off a secure record's thread is decided on the rights the re-file was checked
+    /// against. Every user-initiated re-file writer calls this overload; <c>null</c> acts for nobody.
+    /// </summary>
     public async Task<SecureChildReconcileReport?> AfterRefileAsync(
-        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread, CancellationToken ct)
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread,
+        SecureRemovalCaller? secureExitCaller, CancellationToken ct)
     {
-        var report = await RefileStepsAsync(childLogicalName, childId, wasIsolated, thread, ct).ConfigureAwait(false);
+        var report = await RefileStepsAsync(childLogicalName, childId, wasIsolated, thread, secureExitCaller, ct)
+            .ConfigureAwait(false);
 
         // Ontology task 042b (D-169, uac-r2 choice A): after UAC's own steps, on EVERY communication re-file, its gate Decision Records
         // still owned by a user are re-owned to the resolver's team (a Secure answer is left to this engine). Never thrown.
@@ -879,7 +894,8 @@ public sealed class SecureChildReconciler
     }
 
     private async Task<SecureChildReconcileReport?> RefileStepsAsync(
-        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread, CancellationToken ct)
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread,
+        SecureRemovalCaller? secureExitCaller, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
         ArgumentNullException.ThrowIfNull(wasIsolated);
@@ -907,22 +923,39 @@ public sealed class SecureChildReconciler
         // re-owns the email to that record's owner, a Secure one included.
         var reconcilesThread = table == CommunicationTable && _threads is not null && thread == RefileThreadStep.Reconcile;
         var mirrorTakenOff = false;
+        var aGrantFollowedTheHook = false;
+
+        // The one thing the mirror did first that must stay first: a row that LEFT isolation loses every direct share it holds
+        // (SecureChildShareSynchronizer.RemoveMirrorAsync), so taken off after the reconcile it would also take off the #1629
+        // read grant the reconcile gives the record the email now sits under. Once, before the reconcile when the re-file
+        // itself took the row out; else (#2143 round 8, F1-A) inside the reconcile, between the join that took it out and
+        // that grant — a re-file off S while the email sits in S's thread keeps it Secure until its thread follows the filing.
+        // Round 9 (F2): latched only by a removal that COMPLETED — a read that faulted, a row still isolated (mirrored again)
+        // or a removal that did not finish leaves it open, so the next chance (the hook, then the last step) tries again.
+        async Task TakeTheMirrorOffIfItLeftIsolationAsync()
+        {
+            if (mirrorTakenOff || before != true || !await LeftIsolationAsync(table, childId, ct).ConfigureAwait(false))
+                return;
+            // #2143 round 11 (F2-1): not the last try — the last step below retries — so an exhausted removal is a Warning here.
+            mirrorTakenOff = await _shares.AfterRefileAsync(table, childId, isolatedBefore, LogLevel.Warning, ct).ConfigureAwait(false);
+        }
+
         if (reconcilesThread)
         {
-            // The one thing the mirror did first that must stay first: a row that LEFT isolation in this re-file loses every
-            // direct share it holds (SecureChildShareSynchronizer.RemoveMirrorAsync), so taken off after the reconcile it would
-            // also take off the #1629 read grant the reconcile gives the record the email now sits under.
-            if (before == true && await LeftIsolationAsync(table, childId, ct).ConfigureAwait(false))
-            {
-                await _shares.AfterRefileAsync(table, childId, isolatedBefore, ct).ConfigureAwait(false);
-                mirrorTakenOff = true;
-            }
+            await TakeTheMirrorOffIfItLeftIsolationAsync().ConfigureAwait(false);
 
             // Guarded (#2110 ontology re-check K3): it now runs before the mirror, the pass and the gate step, so a fault here
             // must not skip them. The resolver is best-effort and does not throw today; a fault leaves the thread for the sweep.
             try
             {
-                await _threads!.ReconcileThreadForFilingAsync(childId, CancellationToken.None).ConfigureAwait(false);
+                await _threads!.ReconcileThreadForFilingAsync(
+                    childId, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.AfterRefileStep, secureExitCaller,
+                    _ =>
+                    {
+                        aGrantFollowedTheHook = true;
+                        return TakeTheMirrorOffIfItLeftIsolationAsync();
+                    },
+                    CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -933,8 +966,18 @@ public sealed class SecureChildReconciler
 
         // (1) The row's own mirror, on the owner and thread the reconcile left — one implementation (task 149's synchronizer);
         // it logs a fault reading `before`. After the removal above it only mirrors a row a join took back into isolation.
-        await _shares.AfterRefileAsync(
+        var removedNow = await _shares.AfterRefileAsync(
             table, childId, mirrorTakenOff ? static () => Task.FromResult(false) : isolatedBefore, ct).ConfigureAwait(false);
+        if (removedNow && aGrantFollowedTheHook)
+        {
+            // #2143 round 9 (F2): the removal could not be made before the thread move's #1629 grant, so it came off here —
+            // and, as it revokes every direct share, the grant with it. Fail closed: an under-share, never a secure share left.
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} left isolation, but its secure-child mirror could not be taken off before " +
+                "its thread reconcile's read grant, so it was taken off after it: every direct share on it was REVOKED, including " +
+                "any read grant that move gave. The record's members cannot read it until it is granted again (#2143).",
+                table, childId);
+        }
 
         if (!SecureChildLineage.IsChild(table))
             return null;
@@ -1066,6 +1109,11 @@ public sealed class SecureChildReconciler
 
         private readonly List<(int Level, Entity Row)> _descendants = new();
         private readonly Dictionary<(string Table, Guid Id), Entity> _byRef = new();
+
+        // #2143 round 6: the record threads this pass's messages sit in that are NOT rows of the pass (a thread regarding a
+        // root outside it), read once by RecordThreadFiling, and the ones whose read faulted (thread id -> why).
+        private readonly Dictionary<Guid, Entity> _threadsOutsidePass = new();
+        private readonly Dictionary<Guid, string> _threadReadFaults = new();
         private readonly Dictionary<string, int[]> _counts = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<SecureChildRowChange> _changes = new();
 
@@ -1158,6 +1206,55 @@ public sealed class SecureChildReconciler
             }
 
             await LoadGrantRowsAsync().ConfigureAwait(false);
+            await LoadThreadsOutsidePassAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// #2143 round 6: every record thread a message of this pass sits in that is not itself a row of the pass, read the way
+        /// the re-file path reads it (<see cref="RecordThreadFiling.ReadThreadAsync"/>: committed, every column) — so a message in
+        /// a thread regarding a secure root OUTSIDE this pass is still filed under that root (<see cref="ContextFor"/>). A
+        /// preloaded thread is never read again. A read that faults is recorded, not thrown: its messages are left undecided
+        /// (<see cref="DecideRowAsync"/> reports them failed and writes nothing), never decided as if the thread filed nothing.
+        /// Round 7 (R7e): read in batches like <see cref="LoadDescendantsAsync"/> — one paged <c>id IN (…)</c> query per chunk of
+        /// <see cref="SecureChildShareSynchronizer.DescendantConditionsPerQuery"/> ids, not one query per thread. A chunk whose
+        /// read faults records every thread of it as faulted (none of them is known); a thread the chunk does not return
+        /// (deleted, or not readable) is recorded as faulted too, as the single read did.
+        /// </summary>
+        private async Task LoadThreadsOutsidePassAsync()
+        {
+            var threadIds = _descendants
+                .Select(d => RecordThreadFiling.ThreadOf(d.Row))
+                .OfType<Guid>()
+                .Distinct()
+                .Where(id => !_byRef.ContainsKey((RecordThreadFiling.ThreadTable, id)))
+                .ToArray();
+
+            foreach (var chunk in threadIds.Chunk(SecureChildShareSynchronizer.DescendantConditionsPerQuery))
+            {
+                var query = new QueryExpression(RecordThreadFiling.ThreadTable) { ColumnSet = new ColumnSet(true), NoLock = false };
+                query.Criteria.AddCondition(
+                    $"{RecordThreadFiling.ThreadTable}id", ConditionOperator.In, chunk.Select(id => (object)id).ToArray());
+                try
+                {
+                    foreach (var thread in await ReadAllPagesAsync(RecordThreadFiling.ThreadTable, query).ConfigureAwait(false))
+                        _threadsOutsidePass[thread.Id] = thread;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+                {
+                    Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Count} record threads (first {ThreadId}): they could not be read, "
+                        + "so the messages in them are left as they are (#2143).", chunk.Length, chunk[0]);
+                    foreach (var threadId in chunk)
+                        _threadReadFaults[threadId] = "its record thread could not be read";
+                    continue;
+                }
+
+                foreach (var threadId in chunk.Where(id => !_threadsOutsidePass.ContainsKey(id)))
+                {
+                    Log.LogWarning("[SECURE-CHILD-RECONCILE] record thread {ThreadId}: it could not be read, so the messages in "
+                        + "it are left as they are (#2143).", threadId);
+                    _threadReadFaults[threadId] = "its record thread could not be read";
+                }
+            }
         }
 
         /// <summary>
@@ -1638,6 +1735,12 @@ public sealed class SecureChildReconciler
         private async Task<RowDecision> DecideRowAsync(Entity row, DataversePrincipalRef? current, DataversePrincipalRef? start)
         {
             var table = row.LogicalName;
+            if (RecordThreadFiling.ThreadOf(row) is { } threadId && _threadReadFaults.TryGetValue(threadId, out var threadFault))
+            {
+                // #2143 round 6: its record thread's filing is not known — undecided, written nothing, left for the next pass.
+                return new(RowMove.None, SecureChildRowOutcome.Failed, null, threadFault);
+            }
+
             RecordOwnerResolution resolution;
             try
             {
@@ -1813,11 +1916,15 @@ public sealed class SecureChildReconciler
             var parents = IsGrant(row.LogicalName)
                 ? GrantRootParent(row)
                 : RecordOwnershipContext.ParentsOf(row).ToList();
-            if (string.Equals(row.LogicalName, CommunicationTable, StringComparison.OrdinalIgnoreCase)
-                && row.GetAttributeValue<EntityReference>(ThreadLookupOnCommunication) is { Id: var threadId } && threadId != Guid.Empty
-                && _byRef.TryGetValue(("sprk_communicationthread", threadId), out var thread))
+            // #2143 round 6: the ONE rule for a message's thread parents (RecordThreadFiling — round 7d: by the thread's type, a
+            // Direct thread adding nothing), from the pass's preloaded row or,
+            // for a thread outside the pass, the one LoadThreadsOutsidePassAsync read (a faulted read decides nothing here:
+            // DecideRowAsync never resolves such a row).
+            if (RecordThreadFiling.ThreadOf(row) is { } threadId
+                && (_byRef.TryGetValue((RecordThreadFiling.ThreadTable, threadId), out var thread)
+                    || _threadsOutsidePass.TryGetValue(threadId, out thread)))
             {
-                parents.AddRange(RecordOwnershipContext.ParentsOf(thread));
+                parents.AddRange(RecordThreadFiling.ParentsOf(thread));
             }
 
             return new RecordOwnershipContext

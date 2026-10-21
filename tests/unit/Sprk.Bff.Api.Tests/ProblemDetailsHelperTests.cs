@@ -66,4 +66,23 @@ public class ProblemDetailsHelperTests
         status.Should().Be(403);
         json.Should().NotContain("Authorization_RequestDenied");
     }
+
+    [Theory]
+    [InlineData(null, "traceId")]
+    [InlineData("correlationId", "correlationId")]
+    public async Task RecordOwnerUnsettled_CarriesTheIdUnderTheNamedExtension_TraceIdByDefault(
+        string? extension, string expectedKey)
+    {
+        // #2143 round 3 (K3): every route but Finance keeps traceId; Finance names correlationId, as its other problems do.
+        var result = extension is null
+            ? ProblemDetailsHelper.RecordOwnerUnsettled("document", "id-1")
+            : ProblemDetailsHelper.RecordOwnerUnsettled("document", "id-1", traceIdExtension: extension);
+        var (status, json) = await ExecuteResultAsync(result);
+
+        status.Should().Be(409);
+        using var body = System.Text.Json.JsonDocument.Parse(json);
+        body.RootElement.GetProperty(expectedKey).GetString().Should().Be("id-1");
+        var otherKey = expectedKey == "traceId" ? "correlationId" : "traceId";
+        body.RootElement.TryGetProperty(otherKey, out _).Should().BeFalse();
+    }
 }
