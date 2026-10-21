@@ -101,8 +101,8 @@ internal static class BillingRuleDraftTranslator
         RuleType.Duplicate => "An invoice or line may not duplicate an earlier one from the same firm; the parameter names the fields that must match.",
         RuleType.RequiredData => "Each invoice and line must carry certain data fields, for example the firm's invoice number or the task code.",
         RuleType.AiObservation => "A line may not show a billing-practice observation (block billing or vague description) at or above a stated confidence.",
-        RuleType.AddedFee => "An added fee (a late fee, an administrative fee, interest or another added fee) billed on expense lines may total at most a cap: an amount, or a percent of the invoice's other lines. Only allowance 'cap' with the fee's expense codes can be checked; a clause that forbids an added fee or allows it only after a number of days goes to notConverted.",
-        RuleType.Discount => "A fee line's billed rate must reflect an agreed discount off the timekeeper's standard (rack) rate, in percent, with an optional tolerance in percent. It only flags a discount that was not applied.",
+        RuleType.AddedFee => "An added fee (a late fee, an administrative fee, interest or another added fee) billed on expense lines may total at most a cap: an amount, or a percent of the invoice's other lines. Only allowance 'cap' with the fee's expense codes can be checked; a clause that forbids an added fee or allows it only after a number of days goes to notConverted, and so does a rate charged on an overdue balance over time (for example '1.5% per month'), which is not a percent of the other lines.",
+        RuleType.Discount => "A fee line's billed rate must reflect an agreed discount off the timekeeper's standard (rack) rate, in percent, with an optional tolerance in percent. It flags a fee line whose rate is above the discounted rate plus the tolerance; a discount given at invoice level is not checked.",
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
@@ -148,10 +148,10 @@ internal static class BillingRuleDraftTranslator
             "The line dated {{line.date}} shows {{observation}} (confidence {{observationConfidence}}; the rule applies from {{rule.minConfidence}})."),
         RuleType.AddedFee => (
             "Added fees over the agreed limit",
-            "The {{rule.feeKind}} charges on this invoice total {{feeTotal}}, more than the agreed limit of {{feeLimit}}."),
+            "The {{rule.feeKind}} charges matched by their expense codes total {{feeTotal}}, more than the agreed limit of {{feeLimit}}."),
         RuleType.Discount => (
-            "Agreed discount not applied",
-            "{{line.timekeeperName}} billed {{line.rate}} on {{line.date}}; with the agreed discount of {{rule.discountPercent}} percent off the standard rate of {{rackRate}}, the rate is {{discountedRate}}."),
+            "Rate above the agreed discounted rate",
+            "{{line.timekeeperName}} billed {{line.rate}} on {{line.date}}, above the limit of {{discountLimit}}: the agreed discount of {{rule.discountPercent}} percent off the standard rate of {{rackRate}} gives {{discountedRate}}."),
         // D-125: never offered or authored; every SubmissionIntegrity reason has its own message, so this is only the closed switch's answer.
         RuleType.SubmissionIntegrity => (
             "Submission check",

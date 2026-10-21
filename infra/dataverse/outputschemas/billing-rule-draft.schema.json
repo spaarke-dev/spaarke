@@ -131,7 +131,7 @@
               },
               "capPercent": {
                 "type": ["number", "null"],
-                "description": "AddedFee: the most the fee may total, as a percent (more than 0, at most 100) of the invoice's other charges. Null when the cap is an amount."
+                "description": "AddedFee: the most the fee may total, as a percent (more than 0, at most 100) of the invoice's other charges. Null when the cap is an amount. A rate on an overdue balance over time ('1.5% per month') is not this: that clause goes to notConverted."
               },
               "afterDays": {
                 "type": ["integer", "null"],

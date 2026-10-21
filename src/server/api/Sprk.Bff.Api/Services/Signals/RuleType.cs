@@ -104,8 +104,8 @@ public enum RuleType
     AddedFee = 100000015,
 
     /// <summary>
-    /// 13. A fee line's billed rate reflects the agreed discount off the rack rate, plus an optional tolerance. A check only ("agreed
-    /// discount not applied"): Flag, never an adjustment, never reject-eligible (FR-26).
+    /// 13. A fee line's billed rate reflects the agreed discount off the rack rate, plus an optional tolerance. A check only ("rate above the
+    /// agreed discounted rate"; per line, so an invoice-level discount is not seen): Flag, never an adjustment, never reject-eligible (FR-26).
     /// </summary>
     Discount = 100000016,
 }

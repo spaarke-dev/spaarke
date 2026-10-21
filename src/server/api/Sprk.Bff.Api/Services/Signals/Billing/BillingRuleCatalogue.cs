@@ -227,8 +227,11 @@ public static class BillingRuleCatalogue
             "submission.invoiceNumber", "invoice.invoiceNumber", "line.codeKind", "line.refusedCode", "line.firmCode", "line.suggestedCode",
             "codeSet.name"),
         // Task 115: AddedFee's cap form only (the other two allowances are refused before evaluation); feeTotal / feeLimit are amounts.
-        RuleType.AddedFee => Fields("line.date", "feeTotal", "feeLimit", "rule.feeKind"),
-        RuleType.Discount => Fields("line.date", "line.timekeeperName", "line.rate", "rackRate", "discountedRate", "rule.discountPercent"),
+        // AddedFee's finding is invoice level (ontology-r1 115 review F3-6), so it has no line token; rule.feeKind is the kind's label.
+        RuleType.AddedFee => Fields("feeTotal", "feeLimit", "rule.feeKind"),
+        // discountedRate is rack x (1 - discount); discountLimit adds the tolerance and is what the rate is compared with (review F2-1).
+        RuleType.Discount => Fields(
+            "line.date", "line.timekeeperName", "line.rate", "rackRate", "discountedRate", "discountLimit", "rule.discountPercent"),
         _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
     };
 
@@ -287,8 +290,26 @@ public static class BillingRuleCatalogue
         BillingEvaluationReasons.CurrencyMissing => RatesNotCheckedPrefix + "missing.",
         BillingEvaluationReasons.CurrencyUnreliable => RatesNotCheckedPrefix + "unclear.",
         BillingEvaluationReasons.CurrencyNotUsd => RatesNotCheckedPrefix + "not USD.",
+        BillingReasonCodes.DiscountNotCheckedNoRackRate => DiscountNotCheckedTemplate,
+        BillingReasonCodes.AddedFeeNotChecked => AddedFeeNotCheckedTemplate,
         _ => null,
     };
+
+    // ── Task 115 "not checked" reasons (ontology-r1 115 review F2-3, F2-4; the D-115 pattern): flag only, invoice level, no token. ──
+
+    /// <summary>The message of <see cref="BillingReasonCodes.DiscountNotCheckedNoRackRate"/>.</summary>
+    public const string DiscountNotCheckedTemplate =
+        "The agreed discount was not checked on every fee line: at least one line has no standard (rack) rate on the rate card.";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.DiscountNotCheckedNoRackRate"/>'s Signal.</summary>
+    public const string DiscountNotCheckedHeadline = "Discount not checked: no rack rate";
+
+    /// <summary>The message of <see cref="BillingReasonCodes.AddedFeeNotChecked"/>.</summary>
+    public const string AddedFeeNotCheckedTemplate =
+        "The added-fee limit was not checked: it is a percent of the invoice's other lines, and their total is zero or less or a line has no amount.";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.AddedFeeNotChecked"/>'s Signal.</summary>
+    public const string AddedFeeNotCheckedHeadline = "Added-fee limit not checked";
 
     // ── System reasons (D-125). Each claims only what was compared, never that a document is "invalid". ───────────────────────────
 
@@ -408,6 +429,8 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CodingUnavailable => CodingUnavailableHeadline,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd
             => RatesNotCheckedHeadline,
+        BillingReasonCodes.DiscountNotCheckedNoRackRate => DiscountNotCheckedHeadline,
+        BillingReasonCodes.AddedFeeNotChecked => AddedFeeNotCheckedHeadline,
         _ => null,
     };
 
@@ -429,6 +452,8 @@ public static class BillingRuleCatalogue
             or BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown or BillingReasonCodes.CodingFirmCodeMismatchNotShown
             or BillingReasonCodes.CodingNoCodeSet or BillingReasonCodes.CodingUnavailable => true,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd => true,
+        // Task 115: "not checked" is a fact about the invoice's data, not a breach (as D-115).
+        BillingReasonCodes.DiscountNotCheckedNoRackRate or BillingReasonCodes.AddedFeeNotChecked => true,
         _ => false,
     };
 
@@ -503,7 +528,7 @@ public static class BillingRuleCatalogue
             RuleType.AiObservation => "an AI observation never rejects a submission (I-5)",
             RuleType.SubmissionIntegrity => "a submission-integrity finding holds the invoice for review and never rejects or adjusts it (D-125)",
             RuleType.AddedFee => "an added fee over its allowance is flagged for review, never rejected or adjusted (FR-26)",
-            RuleType.Discount => "a discount rule is a check only: it flags an agreed discount that was not applied and never rejects or adjusts",
+            RuleType.Discount => "a discount rule is a check only: it flags a line rate above the agreed discounted rate and never rejects or adjusts",
             RuleType.ApprovedTimekeeper when chosen == BillingConsequence.Reject => "an unapproved timekeeper holds the invoice for review and never rejects it (D-89)",
             _ when chosen == BillingConsequence.Reject => "this rule type may not reject a submission (FR-26)",
             _ => "this rule type does not suggest adjustments (design.md 6.1)",
@@ -634,7 +659,8 @@ public static class BillingRuleCatalogue
         }
     }
 
-    private static string FeeKindLabel(string? feeKind) => feeKind switch
+    /// <summary>The words for an AddedFee <c>feeKind</c> (the schema's closed vocabulary): what a description or a finding shows, never the raw value.</summary>
+    internal static string FeeKindLabel(string? feeKind) => feeKind switch
     {
         "lateFee" => "late fee",
         "administrativeFee" => "administrative fee",

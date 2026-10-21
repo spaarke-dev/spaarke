@@ -175,7 +175,16 @@ public static class BillingReasonCodes
 
     // Task 115 (procedure model 6.3). Flag only: neither type is reject-eligible and neither suggests an adjustment.
     public const string AddedFeeOverCap = "added_fee.over_cap";
-    public const string DiscountNotApplied = "discount.not_applied";
+
+    /// <summary>A percent cap could not be judged: the other lines total 0 or less, or one of them has no amount. Flag only, invoice level.</summary>
+    public const string AddedFeeNotChecked = "added_fee.not_checked";
+
+    /// <summary>A line's billed rate is above the agreed discounted rate plus the tolerance. Per line only: an invoice-level discount, or a
+    /// discount applied in part elsewhere on the invoice, is not seen, so the reason claims only the rate comparison.</summary>
+    public const string DiscountRateAboveDiscounted = "discount.rate_above_discounted";
+
+    /// <summary>At least one fee line in scope has no resolved rack rate, so its discount was not checked. One per invoice, Flag only (as D-115).</summary>
+    public const string DiscountNotCheckedNoRackRate = "discount.not_checked_no_rack_rate";
 
     // SubmissionIntegrity (D-125): findings task 049 creates directly, never from a rule body. Flag only.
     public const string SubmissionInvoiceNumberMismatch = "submission.invoice_number_mismatch";

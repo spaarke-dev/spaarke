@@ -606,7 +606,7 @@ public class InvoiceComplianceEvaluatorTests
 
         byPolicy["FEE-PERCENT"].Should().ContainSingle("a percent cap compares the invoice's own amounts, in any currency")
             .Which.ReasonCode.Should().Be(BillingReasonCodes.AddedFeeOverCap);
-        byPolicy["DISCOUNT"].Any(f => f.ReasonCode == BillingReasonCodes.DiscountNotApplied).Should().Be(judged);
+        byPolicy["DISCOUNT"].Any(f => f.ReasonCode == BillingReasonCodes.DiscountRateAboveDiscounted).Should().Be(judged);
         byPolicy["FEE-AMOUNT"].Any(f => f.ReasonCode == BillingReasonCodes.AddedFeeOverCap).Should().Be(judged);
         result.Skips.Select(s => s.PolicyCode).Should().BeEquivalentTo(judged ? [] : new[] { "DISCOUNT", "FEE-AMOUNT" });
         result.Findings.Count(f => f.ReasonCode == BillingEvaluationReasons.CurrencyNotUsd).Should().Be(judged ? 0 : 1, "D-115: one 'not checked' finding");
