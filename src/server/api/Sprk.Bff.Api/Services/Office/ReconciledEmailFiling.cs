@@ -50,8 +50,11 @@ public enum ReconciledFilingResult
 /// the communication as the caller (<c>CommunicationRecordAuthorizationFilter</c>, <c>Refile</c>) and AppendTo on the record
 /// it is filed under. The save route's <c>EntityAccessFilter</c> has already required AppendTo on the save's record
 /// (<c>entity.associate_document</c>); Write on the communication is asked here, through the same
-/// <see cref="CallerRecordAccessProbe"/>, with the caller's own token. The F3 rule (a move OUT of a secure record) cannot
-/// arise: only an unfiled communication is filed.</para>
+/// <see cref="CallerRecordAccessProbe"/>, with the caller's own token. The F3 rule (a move OUT of a secure record) CAN arise
+/// although only an unfiled communication is filed: an unfiled email may still sit in a secure record's thread (an unlink
+/// leaves it there, #2165), and the filing moves it out of that thread (#2143 round 7b asks F3 at the filing). So the filing
+/// and the thread move after it act for the caller (<see cref="SecureRemovalCaller.ForBearerToken"/>, #2143 round 8 F1-B):
+/// a Full Access holder on that record is permitted; anyone else is refused, and the communication is left unfiled.</para>
 /// <para><b>Never fails the save.</b> A refusal or a failure leaves the communication as it was and is logged; the document
 /// still saves and links. The outcome is returned in <see cref="SaveResponse.EmailFiling"/> (task 131), so the client can tell
 /// the user the email was not filed.</para>
@@ -133,8 +136,10 @@ public sealed class ReconciledEmailFiling
             if ((await ReadFilingAsync(communicationId, ct).ConfigureAwait(false)).Filed)
                 return ReconciledFilingResult.AlreadyFiled; // filed by someone else since the first read — never moved
 
+            // #2143 round 8 (F1-B): the person who saved — the reparent asks F3 for them, and the thread move after it acts for them.
+            var caller = SecureRemovalCaller.ForBearerToken(_accessProbe, callerBearerToken);
             await _associationResolver
-                .ApplyToExistingRecordAsync(communicationId, capture.Decision, target.EntityId, ct)
+                .ApplyToExistingRecordAsync(communicationId, capture.Decision, target.EntityId, caller, ct)
                 .ConfigureAwait(false);
 
             // Ontology task 144: the rows filed under the communication (to-dos, events, Signals, Decision Records) copy its
@@ -173,7 +178,7 @@ public sealed class ReconciledEmailFiling
                 () => before.OwningTeam is { } team
                     ? _children.IsSecureOwnerTeamAsync(team, CancellationToken.None)
                     : Task.FromResult(false),
-                CancellationToken.None).ConfigureAwait(false);
+                RefileThreadStep.Reconcile, caller, CancellationToken.None).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "Office save filed the unfiled communication {CommunicationId} it reconciled to under {EntityType} {EntityId} " +

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Delete bffDataServiceAdapter and LegalWorkspace matterService; close or update #1614 #1617 #1318 #1437; file #2098 and prvAssign follow-ups (FR-28)</title>
+    <phase>6 W6 Standard, guards, docs, retirement</phase>
+    <gate>035 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deletes dead client files (tags include refactor, cleanup, deletion override: code-review + adr-check run) and updates GitHub issues.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Importer verification, deletion and issue bookkeeping; no design judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>035</deps>
+    <tags>refactor, github, cleanup</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Delete `bffDataServiceAdapter.ts` and the LegalWorkspace `CreateMatter/matterService.ts` after verifying nothing imports them. Close or update issues #1614, #1617, #1318 and #1437 with evidence. File follow-ups for #2098 (push performance) and the `prvAssign` audit (UAC-r2) via `/project-defer-issue-tracking`.</prompt>
+  <role>SPAARKE platform developer; repository hygiene; issue tracking.</role>
+  <goal>Both dead files are gone with builds green, and every named issue is closed or updated with a link to the proving task or test, with the two follow-ups filed.</goal>
+
+  <context>
+    <background>spec.md FR-28 (rest). `bffDataServiceAdapter` currently shows textual hits in several files (adapters index, BffDataverseClient.ts, bffChildWriteAdapter.ts, bffUploadServiceAdapter.ts, FilePreviewDialog.tsx, an external-spa test): distinguish real imports from comments before deleting; a real importer means a prior task is incomplete. The LegalWorkspace matterService is superseded by the shared CreateMatterWizard path (task 021).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffDataServiceAdapter.ts (delete)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/utils/adapters/index.ts (remove its export)</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts (delete, with any test or barrel that only served it)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/ (evidence per issue: tests/PRs from tasks 014, 005/004, 040)</file>
+      <file role="new">projects/field-mapping-server-write-path-r1/notes/defer-issues.md (written by /project-defer-issue-tracking)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="035" status="pending">Client engine deleted; wizards no longer use legacy services.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: deletion. Delete only after a repo-wide grep (exclude node_modules) shows no real import or dynamic reference; list the grep output in the task notes. A remaining importer means STOP, not an alias.</constraint>
+    <constraint source="ADR-012">Scope: shared library exports. Remove the deleted symbols from barrels; no deprecated shims.</constraint>
+    <constraint source="project">Scope: issues. Close #1614/#1617 only with a link to the regression tests (task 014), #1318 with the seeder fix (task 004), #1437 with the push error-text test (task 040); if a fix is not yet merged or live, update the issue with status instead of closing. Never close without evidence.</constraint>
+    <constraint source="skill project-defer-issue-tracking">Scope: follow-ups. File #2098 (push performance) and the prvAssign audit through /project-defer-issue-tracking so both notes/defer-issues.md and a GitHub issue are written; do not fix either here.</constraint>
+    <constraint source="root CLAUDE.md §8">Scope: review. Deletion-tagged work runs code-review and adr-check regardless of rigor level.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dead code removal; issue hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Context for what the deleted adapter did.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare STANDARD rigor with the deletion override (code-review + adr-check); grep every importer of both files.</step>
+    <step order="1">Delete both files and barrel exports; remove tests that only covered them; build the shared library and LegalWorkspace.</step>
+    <step order="2">Run `gh issue view` for #1614, #1617, #1318, #1437; comment with evidence and close, or update status where the fix is not yet live.</step>
+    <step order="3">Run /project-defer-issue-tracking for the #2098 follow-up and the prvAssign audit (UAC-r2).</step>
+    <step order="4">Run code-review and adr-check on the diff.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If either file still has a real importer or a runtime-only reference (dynamic import, web resource), STOP and escalate per CLAUDE.md §6 rather than keeping an alias or partially deleting.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>defer-issues.md is the standard project deferral log written by /project-defer-issue-tracking; no overlap with any other project note.</existing>
+    <extension>The skill creates the file itself; no hand-built alternative is added (spec §11).</extension>
+    <cost-of-doing-nothing>Without the filed follow-ups, #2098 and the prvAssign audit (out of scope here) are lost when the project closes.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="npm">Build shared library and LegalWorkspace (--legacy-peer-deps)</tool><tool name="gh">Issue view / comment / close</tool></tools>
+
+  <outputs>
+    <output type="code">Deletion of bffDataServiceAdapter.ts and LegalWorkspace CreateMatter/matterService.ts</output>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/defer-issues.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both files are removed; a repo-wide grep (excluding node_modules) for their names and exported symbols returns no import or reference.</criterion>
+    <criterion testable="true">#1614, #1617, #1318 and #1437 each carry a comment linking evidence and are closed, or carry a status update stating why they stay open.</criterion>
+    <criterion testable="true">Follow-up GitHub issues exist for #2098 and the prvAssign audit, and notes/defer-issues.md lists both.</criterion>
+    <criterion testable="true">Negative: no issue was closed without a linked proving test or merged change; neither follow-up was fixed in this task.</criterion>
+    <criterion testable="true">Shared library and LegalWorkspace builds and tests pass; code-review and adr-check on the diff have no open F-class finding.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-28 (rest). Out of scope and only filed: #2098 push performance; prvAssign removal.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

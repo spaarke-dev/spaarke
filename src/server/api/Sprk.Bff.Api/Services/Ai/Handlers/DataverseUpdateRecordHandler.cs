@@ -244,7 +244,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             // the gate reads app-only, so a refusal of its own (an unreadable flag, a walled creator) would otherwise tell a
             // caller who may not file under the record that it exists and is secure.
             if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(tablename)
-                && await OwnedChildWrite.CheckCallerMayFileRootUnderAsync(
+                && await CallerWriteAuthorization.CheckCallerMayFileRootUnderAsync(
                         _dataverse, tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
                     .ConfigureAwait(false) is { } filingRefusal)
             {
@@ -339,7 +339,10 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             // reads): the re-filed row's mirror and task 148's pass over everything filed under it.
             if (refile.Written && children is not null && wasIsolated is not null)
             {
-                await children.AfterRefileAsync(tablename, recordId, wasIsolated, CancellationToken.None).ConfigureAwait(false);
+                // #2143 round 7 (F1): with the caller the re-file's F3 check acted for, so the thread that follows moves on it.
+                await children.AfterRefileAsync(
+                    tablename, recordId, wasIsolated, Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile,
+                    refile.SecureExitCaller, CancellationToken.None).ConfigureAwait(false);
             }
 
             // Ontology D-48 / #1659 (owner decision D-125, every server-side filing path): a communication this tool re-filed
@@ -423,7 +426,8 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 
     /// <summary>What the re-file step decided: a finished tool <c>Result</c> (a refusal or the caller's own error), or
     /// <c>Written</c> when the caller's PATCH already ran inside the re-file. Neither = an ordinary update.</summary>
-    private readonly record struct RefileStep(ToolResult? Result, bool Written);
+    private readonly record struct RefileStep(
+        ToolResult? Result, bool Written, Sprk.Bff.Api.Services.Access.SecureRemovalCaller? SecureExitCaller = null);
 
     /// <summary>
     /// Task 146 r2 (verifier item 2). The re-file itself is <see cref="OwnedChildWrite.RefileAsync"/> — since task 147 r1
@@ -442,7 +446,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         return outcome switch
         {
             { NotARefile: true } => default,
-            { Written: true } => new RefileStep(null, true),
+            { Written: true } => new RefileStep(null, true, outcome.SecureExitCaller),
             _ => new RefileStep(RefileRefusal(tool, tablename, outcome, startedAt), false),
         };
     }

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>/push applies Copy rules only on the canonical engine, selects by sync mode, returns fixed error text (FR-23)</title>
+    <phase>4 W4 /push</phase>
+    <gate>001+005+019 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api; adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-bounded replacement of one function's logic with the canonical engine plus a parity test; re-file behaviour is preserved, not redesigned.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001, 005, 019</deps>
+    <tags>bff-api, field-mapping, testing, deploy</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>In `FieldMappingEndpoints.cs`, make `/push` apply Copy rules only (rules whose `sprk_syncmode` is Manual Refresh) by calling the canonical engine's Copy logic, and delete `ApplyMappingRule`'s own Copy logic. Keep `ReparentAsync`, the root filing gate, restamp and `AfterRefileAsync` exactly as they are. Per-child failures return a fixed actionable message; detail goes to logs only. Add a parity test and a #1437 regression test.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse Web API, field mapping engine.</role>
+  <goal>Create-time Copy into an empty field and push Copy produce identical values for the same profile and source; push never runs Default/Concat/Template; push error text is fixed and leaks no detail; the existing push contract and re-file guard tests pass unchanged.</goal>
+
+  <context>
+    <background>spec.md FR-23; design.md §4 (W4). Push is the deliberate re-sync, so it overwrites (unlike create-time fill-only). `sprk_syncmode` is read on rules by task 005; the canonical engine lives at Services/Dataverse/FieldMapping/ (task 001). #1437 is the leaked-detail error text bug. #2098 (push performance) is OUT OF SCOPE.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs (push group.MapPost("push") ~:65, push body ~:442-1195, ApplyMappingRule ~:1207 Copy logic removed)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs (canonical engine from task 001; reuse its Copy logic, expose a Copy entry point there if none exists)</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/RefileWriterAfterRefileGuardTests.cs (must pass unchanged)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Api/FieldMappings/PushCopyParityTests.cs (create-time Copy vs push Copy; #1437 regression)</file>
+      <file role="canonical-reference">src/client/webresources/js/sprk_fieldmapping_push.js (unchanged unless error text surfaces there)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/design-review-2026-10-19.md §2 (push engine evidence)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Canonical engine location and semantics table.</dependency>
+      <dependency task="005" status="pending">SyncMode read on rules; Copy rules migrated to Manual Refresh.</dependency>
+      <dependency task="019" status="pending">W2 deployed and reviewed; the engine is live in the create path.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: re-file behaviour. `ReparentAsync`, the root filing gate, restamp and `AfterRefileAsync` are kept byte-for-byte in behaviour; only the per-rule value application and error text change. `RefileWriterAfterRefileGuardTests` must pass unchanged.</constraint>
+    <constraint source="project">Scope: rule selection. Only rules with `sprk_syncmode` = Manual Refresh and mapping type Copy run on push; push overwrites. Default/Concat/Template rules are skipped (and counted), never errored.</constraint>
+    <constraint source="ADR-019">Scope: error text (#1437). Per-child failures return one fixed actionable string; exception detail, Dataverse messages and ids go to structured logs with a correlation id, never to the response. Response shape is otherwise unchanged (NFR-07).</constraint>
+    <constraint source="ADR-008">Scope: endpoint. The push route keeps its existing filters and authorization; add none and remove none. No new route.</constraint>
+    <constraint source="project">Scope: out of scope work. #2098 (push performance) is not addressed here; if the parity work exposes a performance finding, file it, do not fix it.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. State Placement Justification in the PR (modification inside BFF); measure publish-size delta against a fresh master build per root CLAUDE.md §10.4; run `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="ADR-038">Scope: tests. Unit/contract tests at KEEP paths; no `Mock&lt;HttpMessageHandler&gt;`; no DI-registration tests; re-run the existing push contract tests unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Field mapping push; re-file writer; ProblemDetails text</topic>
+    <files>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Value shapes for lookups, option sets, dates.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-23, design §4, evidence notes §2; re-grep `ApplyMappingRule`, `PushFieldMappingsAsync`, `ReparentAsync`, `AfterRefileAsync`, `SyncMode`.</step>
+    <step order="1">Write the parity test first (create-time Copy into an empty field vs push Copy for one profile and source, across text, option set, date, lookup, money) and the #1437 regression test (a failing child returns the fixed text and no exception detail); confirm they fail or are not yet satisfiable.</step>
+    <step order="2">Add or expose a Copy entry point on the canonical engine, then call it from push; remove `ApplyMappingRule`'s Copy logic and the non-Copy branches; filter rules to Manual Refresh + Copy.</step>
+    <step order="3">Replace per-child failure messages with the fixed text; log detail with correlation id.</step>
+    <step order="4">Run `RefileWriterAfterRefileGuardTests`, the existing push contract tests and the new tests; measure publish size; run the CVE check.</step>
+    <step order="5">Deploy to dev with the bff-deploy skill only after tests pass; live check one push on a dev child (values overwritten, restamp and AfterRefile effects intact). Beyond dev needs explicit owner OK.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If push Copy and create-time Copy cannot produce identical values for the same input without changing an FR-01 semantic (for example date or option-set rendering), STOP and escalate per CLAUDE.md §6.</trigger>
+    <trigger>If removing the non-Copy branches changes the push response contract beyond error text, STOP and escalate (NFR-07 breaking-change rule).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Overlaps with FieldMappingEndpoints.cs (push) and the existing contract tests; the new test file covers the parity and #1437 cases that none of them asserts.</existing>
+    <extension>The parity assertion needs both the engine and the endpoint helper in one test class; adding it to an existing endpoint test file would couple unrelated tests (spec §11).</extension>
+    <cost-of-doing-nothing>Without the parity test the two Copy implementations can silently diverge again (FR-23 acceptance), and #1437 detail leakage has no regression guard.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build/test .NET</tool><tool name="bff-deploy">Deploy to dev (.claude/skills/bff-deploy/SKILL.md)</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/FieldMappings/PushCopyParityTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ApplyMappingRule` contains no Copy value-application logic of its own; push calls the canonical engine's Copy logic.</criterion>
+    <criterion testable="true">UAC-r2 #2169 (D7 T7a) is preserved: a push whose target table is sprk_document skips rules targeting sprk_accesspermission or sprk_accessinheritance, reports a per-rule skip reason, and applies the rest. The same columns on other target tables still apply. The skip moves with the Copy logic into the canonical engine's push path, never back into ApplyMappingRule. A test pins both the document case and a non-document case. sprk_document.sprk_accessinheritance is never a push target (UAC-r2 2026-10-21). If task 014 makes it a protected target, push must honour that same entry. UAC-r2 reviews this part of the diff before merge.</criterion>
+    <criterion testable="true">The parity test passes: create-time Copy into an empty field and push Copy give identical values for the same profile and source, across text, option set, date, lookup and money targets.</criterion>
+    <criterion testable="true">Push selects only Manual Refresh Copy rules; a Default/Concat/Template rule and a One-time Copy rule are not applied on push (tested).</criterion>
+    <criterion testable="true">The #1437 regression test passes: a failing child yields the fixed actionable text and the response contains no exception message, Dataverse error or id.</criterion>
+    <criterion testable="true">Negative: `ReparentAsync`, the root filing gate, restamp and `AfterRefileAsync` still run on push, and `RefileWriterAfterRefileGuardTests` plus existing push contract tests pass unchanged.</criterion>
+    <criterion testable="true">BFF build 0 errors; all tests green; publish-size delta and CVE result recorded in the task notes.</criterion>
+    <criterion testable="true">ebilling-r1 (2026-10-21): push writes stored rows with no pre-write step. When the invoice-family guard is on master (ebilling-r1 #1911), a push write to a sprk_invoice or sprk_billingevent child calls InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync (app-only, D-96) before writing. A refusal is a per-child Skipped/failed entry with a fixed message. Test it with a must-fire case and a must-not-fire case.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-23, NFR-07. #2098 out of scope. The push web resource is unchanged unless it displays the error text.
+DI-002 / #2137 (2026-10-20): replace AuthorizePushSourceAsync's own Read check with MappingSourceReadProbe.CheckCallerReadAsync (timing-equalised; task 003). Close the push part of #2137.
+UAC-r2 #2169 (2026-10-21): landed as c8c591777f on uac/189-own-narrowing (PR #2169; draft until the owner signs off). The skip is in ApplyMappingsToChildRecordsAsync's per-rule loop: InheritedAccessPermission.RefuseAppOnlyWrite(targetEntity, [rule.TargetField]) runs before ApplyMappingRule, and a refused rule becomes FieldMappingStatus.Skipped with the reason as ErrorMessage. Keep tests/integration/data-mutation/ChildAccessPermission/DocumentAccessPermissionPushTargetTests.cs (3 methods, 6 cases) green UNCHANGED. A RecordTableRules protected-target entry may replace the call only with the same normalisation (trimmed, case-insensitive) and the same per-rule Skipped shape.
+DI-003 / #2181 (2026-10-21): the provisioning seeder must set sprk_syncmode = Manual Refresh on seeded Copy rules, or /push skips them in new environments. Add a seeder test, and add a deployment-guide step to run Set-FieldMappingRuleSyncMode.ps1 after an upgrade.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

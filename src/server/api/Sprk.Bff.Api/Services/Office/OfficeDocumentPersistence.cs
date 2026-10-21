@@ -131,11 +131,16 @@ public class OfficeDocumentPersistence
         {
             create.RelatedCommunicationId = communicationId;
             create.AccessPermission = null;
+            create.AccessInheritanceRecord = null;
             return false;
         }
 
+        // UAC-r2 task 189 (D7 T7a): the Restricted is recorded as the document's OWN narrowing in the same create, so the
+        // reconciler keeps it when the document's parents are wider.
+        const int restricted = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Restricted;
         create.RelatedCommunicationId = null;
-        create.AccessPermission = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Restricted;
+        create.AccessPermission = restricted;
+        create.AccessInheritanceRecord = Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing(restricted).Serialize();
         return true;
     }
 

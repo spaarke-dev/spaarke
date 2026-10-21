@@ -249,3 +249,55 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
   - Private-state control → 200, 0 rows.
 - Ontology smoke passed on the new build.
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T163210Z` (= `00aba6d99`, which contains 077).
+
+## Dev redeploy from master c3ec5d6e5 (2026-10-20, owner "approved bff deploy"; requested by UAC)
+
+- **Candidate** master `c3ec5d6e5`. It adds UAC #2138 (#2128, guest auto-create retired) and #2133 (#2130/#2131, PII logs and census) to the live `21184ecd4`, which is an ancestor. Both PRs' CI was green with nothing failing.
+- **Coordination:** OK from UAC (requester), ontology, ebilling (`sprk_invoicestatus` still exists; `e0df77339` is not in the candidate), provisioning, field-mapping, word-add-in and spe-admin. The SPA precondition for #2138 was met (dev SPA `28274e04e`). No data step was needed (UAC: the 3 guest-bound contacts are licensed guests).
+- **Pre-checks:** the live DLL read `21184ecd4`; the last Kudu deployment was this project's 16:34Z deploy; healthz 200.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261020T180912Z` (222 files, DLL `21184ecd4`).
+- **Deploy:** `scripts/Deploy-BffApi.ps1` from a detached worktree `C:\wtbffc` at `c3ec5d6e5`. Package 37.47 MB; 4 critical files SHA-256 verified.
+- **Read-back** (18:12:51Z): ProductVersion `1.0.0+c3ec5d6e56f0074cf238b84bccf202cb1c0c84b7`; `/healthz` 200; `/healthz/dataverse` 200; `/api/me` anonymous 401.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T180912Z` (= `21184ecd4`).
+
+## Dev redeploy from master 0b976628e (2026-10-20, owner "yes deploy"; requested by UAC for #2121)
+
+- **Candidate:** master `0b976628e` = the live `c3ec5d6e5` + UAC #2122 (#2121: Secure suppresses a systemuser's lookup-derived membership on the SPA/Teams plane). #2122 CI was green, with nothing failing or pending. The ebilling content check matched the live build.
+- **Coordination:** OK from ontology, provisioning, field-mapping, word-add-in and spe-admin. ebilling did not answer; per the owner's 2026-10-16 rule a session that does not answer does not block, and its content was unchanged.
+- **Pre-checks:** the live DLL read `c3ec5d6e5`, which is an ancestor of the candidate; healthz 200.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261020T203441Z` (222 files, DLL `c3ec5d6e5`).
+- **Deploy:** `scripts/Deploy-BffApi.ps1` from a detached worktree `C:\wtbffd`. Package 37.48 MB; 4 critical files SHA-256 verified.
+- **Read-back** (20:37:26Z): ProductVersion `1.0.0+0b976628e48b0082c6235a40e9e3508603f5cd81`; `/healthz` and `/healthz/dataverse` 200; `/api/me` anonymous 401.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T203441Z` (= `c3ec5d6e5`).
+
+## Dev redeploy from master 4f5f22694 (2026-10-20, owner "deploy approved"; UAC #2078 / task 036, flag OFF)
+
+- **Candidate:** master `4f5f22694` = the live `0b976628e` + UAC #2078 (FR-20 flag-gated swap; 15 server files, including the shared `Spaarke.Dataverse/DataverseWebApiService.cs` +163, which only adds surface per spe-admin and ontology). #2078 CI was green.
+- **Flag:** `ExternalAccess__ImpersonatedRootSets__Enabled` is absent on dev (= OFF), re-checked right before the deploy. The deploy changes no app settings.
+- **Coordination:** OK from word-add-in, spe-admin, ontology and ebilling (`sprk_invoicestatus` exists; `e0df77339` not included), plus the standing OKs from provisioning and field-mapping.
+- **Pre-checks:** the live DLL read `0b976628e`, which is an ancestor; healthz 200. A `git fetch` failed once on DNS, so the local commit was used (it was already verified on origin/master).
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261020T233210Z` (222 files, DLL `0b976628e`).
+- **Deploy:** `Deploy-BffApi.ps1` from a detached worktree `C:/wtbffe`. Package 37.49 MB; 4 critical files SHA-256 verified.
+- **Read-back** (23:34:36Z): ProductVersion `1.0.0+4f5f22694c2965f4f0d6c78f9f322d3d5dfe1775`; `/healthz` and `/healthz/dataverse` 200; `/api/me` anonymous 401.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T233210Z` (= `0b976628e`).
+- **Next (UAC):** a flag-off sanity check and the 034 canary. The flip needs a direct owner yes in this session, with the command shown first.
+
+## UAC 036 flag ON on dev (2026-10-20 23:51Z, owner: "yes can turn on. i ran the command you provided")
+
+- **Preconditions:**
+  - UAC tasks 142 and 143 are in the live build (`d254d7166` is an ancestor of `4f5f22694`, verified here).
+  - The 034 canary passed on `4f5f22694`: impersonated 58 ⊂ app-only 62, strictly fewer, and equal to the role-derived expected set; 2×20/20.
+  - `prvActOnBehalfOfAnotherUser` is Global on both BFF app users (UAC read live).
+  - UAC's flag-off sanity check was clean.
+- **Change** (run by the owner): `az webapp config appsettings set -g rg-spaarke-dev -n spaarke-bff-dev --settings ExternalAccess__ImpersonatedRootSets__Enabled=true`.
+- **Read-back:** the setting = `true`; the site was modified at 23:51:26Z. At 23:52:36Z: ProductVersion `4f5f22694` (unchanged), `/healthz` and `/healthz/dataverse` 200, `/api/me` anonymous 401.
+- **Rollback:** `az webapp config appsettings delete -g rg-spaarke-dev -n spaarke-bff-dev --setting-names ExternalAccess__ImpersonatedRootSets__Enabled`. Never set it to an empty value; that fails startup.
+- **Next:** UAC gates (i)–(v) and the disabled/unlicensed check.
+
+## 036 flag-on live gates (UAC, 2026-10-20 23:55Z–00:13Z)
+
+- Result from uac-r2 (record `projects/unified-access-control-r2/notes/batch7-live-gates-2026-10-17.md`, commit 0a4fbaa38): passed, no STOP, no rollback. (i) negative canary 20/20 ×2; (vii) disabled / unlicensed / team-only users refused or limited exactly by their roles; access source `ImpersonatedRootSet` ×12, 0 `Membership`; 96 requests since the flip, 0 5xx, 0 403.
+- Not run: (iii)–(vi) (dev has no fixture that avoids a write); (ii) passed server-side. UAC's note gives the owner setup + SPA steps.
+- Filed by UAC, non-blocking: #2167 (privilege answer for unlicensed users lists Create; safe because asked after RPA), #2168 (disabled/unlicensed refusal reported as a fault, not 403; fails closed). #1567 closed.
+- Flag stays ON. Rollback unchanged: delete `ExternalAccess__ImpersonatedRootSets__Enabled`.
+

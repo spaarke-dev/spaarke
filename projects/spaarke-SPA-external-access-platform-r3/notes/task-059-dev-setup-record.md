@@ -346,6 +346,12 @@ R3 shows **`spaarke-bff-api-prod` with tenant-wide consent to the DEV BFF app** 
   2. `gh workflow run deploy-external-spa.yml --ref external-spa-dev-rollback-ebc74b331 -f environment=dev`.
   3. Then roll back stage E if needed. With `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID` set, the old build ignores it.
 
+### SPA redeploy from master — 2026-10-20 17:40:47Z (owner: "yes can deploy SPA")
+
+- **Deploy:** `deploy-external-spa.yml` run `39468172374`, ref `master` at **`28274e04e`** (PR #2141; contains `d4ea1b4a8`, the UAC #2128 guidance mapping). Conclusion: success. Only SPA change since `1908696a8`: `BffAccessState.tsx` and its test.
+- **Live check:** `/assets/app.js` contains `workforce_guest_use_home_signin`; `/auth-callback.html` returns 200. UAC was told (precondition for #2138).
+- **Rollback:** tag `external-spa-dev-rollback-1908696a8` (pushed); `gh workflow run deploy-external-spa.yml --ref external-spa-dev-rollback-1908696a8 -f environment=dev`.
+
 ### Side finding (owner-approved App Insights read, 2026-10-19): `IDX10214` and `IDX40001` on dev are log noise, not failures
 
 - App Insights `spe-insights-dev-67e2xz`, last 6 h.

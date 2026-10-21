@@ -4,7 +4,7 @@
     <title>Deploy R3 BFF changes to dev + live verification</title>
     <phase>3 BFF features</phase>
     <gate>after 010, 011, 012, 032, 035, 036, 037, 039 — owner approval to deploy</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment task (tags deploy) with live probes</rigor-reason>
     <model-tier>sonnet</model-tier>
