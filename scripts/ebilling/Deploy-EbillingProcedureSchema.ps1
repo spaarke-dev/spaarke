@@ -448,7 +448,7 @@ function Get-OtherParentalRelationships([string]$Column, $Relationships, [string
     foreach ($r in @($Relationships)) {
         if ($r.ReferencingAttribute -eq $Column -or $r.ReferencingAttribute -in $FixedColumns) { continue }
         $c = $r.CascadeConfiguration
-        if (@('Delete', 'Assign', 'Share', 'Unshare', 'Reparent' | Where-Object { [string]$c.$_ -in 'Cascade', 'UserOwned' }).Count -gt 0) { $out += $r }
+        if (@('Delete', 'Assign', 'Share', 'Unshare', 'Reparent' | Where-Object { [string]$c.$_ -in 'Cascade', 'Active', 'UserOwned' }).Count -gt 0) { $out += $r }
     }
     return $out
 }
@@ -533,7 +533,7 @@ function Get-ParentalProblems([string]$Table, $Relationships, [string]$AllowedCo
     $out = @()
     foreach ($r in @($Relationships)) {
         $c = $r.CascadeConfiguration
-        $par = @('Delete', 'Assign', 'Share', 'Unshare', 'Reparent' | Where-Object { [string]$c.$_ -in 'Cascade', 'UserOwned' })
+        $par = @('Delete', 'Assign', 'Share', 'Unshare', 'Reparent' | Where-Object { [string]$c.$_ -in 'Cascade', 'Active', 'UserOwned' })
         if ($par.Count -gt 0 -and $r.ReferencingAttribute -ne $AllowedColumn) { $out += "$Table relationship $($r.SchemaName) ($($r.ReferencingAttribute)) cascades $($par -join ', '), but only $AllowedColumn may be parental" }
     }
     $allowed = @($Relationships | Where-Object { $_.ReferencingAttribute -eq $AllowedColumn }) | Select-Object -First 1
