@@ -186,6 +186,44 @@ public class OfficeEmailDocumentCommunicationLinkTests
         created.AccessPermission.Should().BeNull("an identified email's attachment is not Restricted");
         graph.RequestedPaths.Should().BeEmpty("Graph cannot address a message by its RFC Message-ID");
         store.Inserts.Should().Be(0);
+
+        // A client-sent Message-ID only links (K1); it never files a communication — filing needs the parent read from the
+        // caller's own mailbox, and nothing here asks for the caller's rights on it.
+        store.CommunicationWrites.Should().BeEmpty();
+        store.Probe.Verify(p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task EmailSave_FromAnOlderAddInSendingTheItemIdAsMessageId_NeverLooksUpByTheItemId_AndIsRestricted()
+    {
+        // An add-in older than task 121 put the Exchange item id in InternetMessageId (and sent no ExchangeItemId).
+        var store = new CommunicationStore { FailCapture = true };
+        var world = new OfficeVersionSaveWorld();
+        var logs = new RecordingLoggerProvider();
+        using var factory = Host(world, store, logs: logs);
+        var request = EmailSave();
+        request = new SaveRequest
+        {
+            ContentType = request.ContentType,
+            TargetEntity = request.TargetEntity,
+            Email = new EmailMetadata
+            {
+                Subject = Subject,
+                SenderEmail = Sender,
+                SentDate = request.Email!.SentDate,
+                InternetMessageId = ItemId,
+                Body = "<p>The email text</p>",
+                IsBodyHtml = true,
+                IsNameSystemDerived = true,
+            },
+        };
+
+        (await factory.CreateClient().PostAsJsonAsync("/api/office/save", request)).StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        store.LookedUpIds.Should().BeEmpty("an Exchange item id is never a Message-ID lookup key");
+        world.CreatedDocumentRequests.Should().ContainSingle().Which.AccessPermission.Should().Be(Restricted);
+        logs.Lines.Should().ContainSingle(l => l.Category == PersistenceCategory && l.Level == LogLevel.Error)
+            .Which.Message.Should().Contain("Message-ID present: False");
     }
 
     [Fact]
@@ -204,6 +242,12 @@ public class OfficeEmailDocumentCommunicationLinkTests
         created.RelatedCommunicationId.Should().Be(store.ByMessageId[RfcId]);
         created.AccessPermission.Should().BeNull();
         graph.RequestedPaths.Should().ContainSingle().Which.Should().EndWith($"/me/messages/{ItemId}");
+
+        // Captured as an email save would capture it: with its attachment list (read without the bytes).
+        graph.RequestedQueries.Should().ContainSingle().Which.Should().Contain("$expand=attachments($select=");
+        var communication = store.CaptureCreates.Should().ContainSingle().Subject;
+        communication["sprk_hasattachments"].Should().Be(true);
+        communication["sprk_attachmentcount"].Should().Be(1);
     }
 
     [Fact]
@@ -370,7 +414,7 @@ public class OfficeEmailDocumentCommunicationLinkTests
         {
             Dataverse
                 .Setup(d => d.CreateCommunicationRaceProofAsync(It.IsAny<DataverseEntity>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((DataverseEntity _, string? messageId, CancellationToken _) => Create(messageId));
+                .ReturnsAsync((DataverseEntity entity, string? messageId, CancellationToken _) => Create(entity, messageId));
             Dataverse
                 .Setup(d => d.GetCommunicationByInternetMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string messageId, CancellationToken _) => Find(messageId));
@@ -434,13 +478,17 @@ public class OfficeEmailDocumentCommunicationLinkTests
             }
         }
 
-        private (Guid Id, bool WasDuplicate) Create(string? messageId)
+        /// <summary>Every <c>sprk_communication</c> a capture asked to create (inserted or reconciled), in order.</summary>
+        public List<DataverseEntity> CaptureCreates { get; } = [];
+
+        private (Guid Id, bool WasDuplicate) Create(DataverseEntity entity, string? messageId)
         {
             if (FailCapture)
                 throw new InvalidOperationException("Test: Dataverse refused the sprk_communication create.");
 
             lock (_gate)
             {
+                CaptureCreates.Add(entity);
                 if (messageId is not null && ByMessageId.TryGetValue(messageId, out var existing))
                     return (existing, true);
 
@@ -480,11 +528,14 @@ public class OfficeEmailDocumentCommunicationLinkTests
 
         public List<string> RequestedPaths { get; } = [];
 
+        public List<string> RequestedQueries { get; } = [];
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             lock (RequestedPaths)
             {
                 RequestedPaths.Add(Uri.UnescapeDataString(request.RequestUri!.AbsolutePath));
+                RequestedQueries.Add(Uri.UnescapeDataString(request.RequestUri!.Query));
             }
 
             var json = $$"""
@@ -492,7 +543,9 @@ public class OfficeEmailDocumentCommunicationLinkTests
               "sentDateTime": "2026-10-08T09:30:00Z",
               "from": { "emailAddress": { "address": "{{Sender}}", "name": "Counsel" } },
               "toRecipients": [ { "emailAddress": { "address": "associate@test.com", "name": "Associate" } } ],
-              "body": { "contentType": "html", "content": "<p>The email text</p>" }, "hasAttachments": true }
+              "body": { "contentType": "html", "content": "<p>The email text</p>" }, "hasAttachments": true,
+              "attachments": [ { "@odata.type": "#microsoft.graph.fileAttachment", "id": "att-130", "name": "Settlement terms.pdf",
+                                 "size": 2048, "contentType": "application/pdf", "isInline": false } ] }
             """;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {

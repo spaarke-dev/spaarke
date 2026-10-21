@@ -866,15 +866,16 @@ public class OfficeDocumentPersistence
     }
 
     /// <summary>
-    /// The Message-ID an email-derived save is looked up by (task 130): the <c>.eml</c>'s
-    /// <see cref="EmailMetadata.InternetMessageId"/>; for a single attachment, the parent's RFC Message-ID read from the
+    /// The Message-ID an email-derived save is looked up by (task 130): the <c>.eml</c>'s RFC Message-ID
+    /// (<see cref="OfficeEmailEnricher.ResolveRfcMessageId"/>: an older add-in sent the item id in
+    /// <see cref="EmailMetadata.InternetMessageId"/>); for a single attachment, the parent's RFC Message-ID read from the
     /// parent itself (<paramref name="parentRfcMessageId"/>), else its <see cref="AttachmentMetadata.ParentEmailId"/> — but
     /// only when that has the RFC shape. An Exchange item id (what Graph addresses a message by) is never a Message-ID, so it
     /// is never a key: no communication carries it.
     /// </summary>
     internal static string? EmailMessageIdOf(SaveRequest request, string? parentRfcMessageId = null) => request.ContentType switch
     {
-        SaveContentType.Email => request.Email?.InternetMessageId,
+        SaveContentType.Email => request.Email is { } email ? OfficeEmailEnricher.ResolveRfcMessageId(email) : null,
         SaveContentType.Attachment => !string.IsNullOrWhiteSpace(parentRfcMessageId) ? parentRfcMessageId
             : OfficeEmailEnricher.IsRfcMessageId(request.Attachment?.ParentEmailId) ? request.Attachment!.ParentEmailId
             : null,
@@ -930,8 +931,8 @@ public class OfficeDocumentPersistence
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex,
-                    "FR-C2/C4 canonical resolve failed (non-fatal) for message {MessageId}.", internetMessageId);
+                // Ids only: the Message-ID is an email header (task 130).
+                _logger.LogWarning(ex, "FR-C2/C4 canonical resolve by Message-ID failed (non-fatal).");
                 return null;
             }
         }

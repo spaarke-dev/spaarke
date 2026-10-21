@@ -286,6 +286,9 @@ public class OfficeEmailEnricher
                         "subject", "from", "toRecipients", "ccRecipients", "bccRecipients", "body",
                         "internetMessageId", "conversationId", "sentDateTime", "receivedDateTime", "hasAttachments"
                     };
+                    // The attachment list (not its bytes), so a parent first captured here records its attachments as an
+                    // email save would (task 130 pass 2).
+                    requestConfig.QueryParameters.Expand = new[] { "attachments($select=id,name,size,contentType,isInline)" };
                 }, cancellationToken);
 
             return message is null ? null : ParentEmailFrom(message, parentEmailId);
