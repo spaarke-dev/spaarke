@@ -32,3 +32,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | F2: a real path in every newly provisioned environment once 040 lands |
 | **Owner task** | **040**: the seeder sets `sprk_syncmode` = Manual Refresh on seeded Copy rules; the deployment guide runs `Set-FieldMappingRuleSyncMode.ps1` after an upgrade |
 | **Failure** | Seeded Copy rules have an empty mode (One-time), so `/push`'s Manual Refresh selection ignores them until the script is run. On dev, 20 of 25 rules are empty |
+
+## DI-004 — Mapping reads the source app-only; field-secured source columns are copied
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-21, task 014 review K-4 (task 003 residual) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2188 |
+| **Class** | F1 once callers are re-pointed (017/018); dormant on master today (the service has no caller) |
+| **Owner task** | **Blocks 017**: fix before any caller is re-pointed. Option (a): read the source columns as the caller. Option (b): check the caller's field-security read per mapped column and drop with a warning. Either way, timing-equalised and fail closed |
+| **Failure** | Record-level Read probe, then an app-only read of the columns, so a column the caller cannot read is copied into a row they can read |

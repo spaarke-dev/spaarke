@@ -1,15 +1,15 @@
 # Current Task — field-mapping-server-write-path-r1
 
 > **Last updated**: 2026-10-21
-> **Phase**: Wave 2. Done (10/43): 001–006, 010–013. W1 complete except 005's live -Apply (owner OK). 013 awaiting UAC-r2 and ebilling-r1 review.
+> **Phase**: Wave 2. Done (11/43): 001–006, 010–014. On master: 001–006, 010–013. 005 -Apply and the 013/014 OWNER items are open.
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **HEAD** | PR #2184 MERGED to master at 2a38e6ce6c (tasks 001–006, 010–013); work branch even with master. Verified: sln 0/0, ArchTests 1214, targeted suites 2208, CI 42 pass / 5 skipping |
-| **Running** | the 014 agent (opus/xhigh, branch `task/fm-014`, base fad68a797b). It will need to merge with fix round 2: the Office file rename and the pipeline seam harness line |
-| **Next Action** | (1) Wait for the UAC-r2 and ebilling-r1 reviews of 013 (requested 2026-10-21). (2) Owner decisions: the 013 step-10 order, #1608, OWNER/017 and OWNER/017-018 (task-013-notes), and 005's -Apply. (3) Start **014** (deps 002, 003, 013 done; opus/xhigh): check its POML criteria, including the UAC-r2 D7 accessinheritance one, moneyAttributes for #2124, the Office pair, and FR-08 filing refusal |
+| **HEAD** | master 2a38e6ce6c (PR #2184: 001–006, 010–013) plus `task/fm-014` merged on the work branch (not on master yet). Verified: sln 0/0, ArchTests 1214, targeted suites 2280 passed / 7 skipped |
+| **Running** | nothing |
+| **Next Action** | (1) UAC-r2 reviews 014: the new refusal code `record_creation.server_set_filing_lookup`, the pre-plan AppendTo check, the D7 entry, and the 013-r2 test re-target question. ebilling-r1 gets a FYI. (2) Next task **015**: owner and search-index swap (deps 013, 014). (3) Owner decisions: see the open items below |
 
 ## How wave-2 agents are run (lessons)
 
@@ -39,6 +39,13 @@
    - The per-path server defaults.
    - The #1608 work assignment gap: the route refuses its container, securitybu and access permission; the chat
      create tool allows them. The owner decides in 013.
+
+5. **013 step 10 (FR-06):** UAC-r2's text is recommended: derive I-1/I-16 before the create (refuse on failure), then
+   re-derive after; documents stay post-create. This blocks re-pointing pre-create stamp writers (017/018).
+6. **Before 017:** caller-refused columns on projects and matters (#1608); the chat matter/project number (refuse, and
+   drop it from the tool description); SystemPrincipal (keep the refusal, or approve an app-only RequestedBy check).
+7. **014:** a mapped filing lookup that fails field security refuses with 403 (fail closed). Confirm.
+8. **DI-004 / #2188:** source field security. This blocks 017.
 
 ## Cross-project obligations
 

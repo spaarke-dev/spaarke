@@ -140,6 +140,7 @@
         - sprk_document.sprk_accesspermission is allowed for callers and refused for system principals, matching RefuseAppOnlyWrite.
         - Tests for each. UAC-r2 reviews.
       - Projects/matters caller-refused columns: owner decision before this task (#1608 related).</criterion>
+    <criterion testable="true">BLOCKING (DI-004 / #2188, 2026-10-21): before any caller is re-pointed, create-time mapping must not copy a source column the caller cannot read under field security. Read the source columns as the caller, or check field-security read per column. A denied column is dropped with a warning, timing-equalised and failing closed. Must-fire test: a field-secured source column the caller cannot read is not copied. Must-not-fire test: a readable column is copied. UAC-r2 reviews.</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-13 part 1, FR-12, NFR-07, NFR-08. Office quick-create is task 018; widening the route to sprk_matter and sprk_project is task 020. Release note: chat-created children now get the I-1 stamp, I-16 and sharee mirror.</notes>

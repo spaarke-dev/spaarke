@@ -22,7 +22,7 @@
 | 011 | [Extract `CallerWriteAuthorization` (pure move)](011-extract-caller-write-authorization.poml) | FR-08 | opus / xhigh | FULL | none | 010 | ✅ |
 | 012 | [Per-table rules registry](012-per-table-rules-registry.poml) | FR-11 | opus / high | FULL | W2-A | 010 | ✅ |
 | 013 | [Service Create mode: principals, pipeline, refusals](013-record-creation-service-create-pipeline.poml) | FR-06, FR-07, FR-12 | opus / xhigh | FULL | none | 011, 012 | ✅ |
-| 014 | [Mapping step + merged-payload authorization](014-mapping-step-and-merged-payload-authz.poml) | FR-06, FR-08 | opus / xhigh | FULL | none | 002, 003, 013 | 🔲 |
+| 014 | [Mapping step + merged-payload authorization](014-mapping-step-and-merged-payload-authz.poml) | FR-06, FR-08 | opus / xhigh | FULL | none | 002, 003, 013 | ✅ |
 | 015 | [Record-first owner + search-index default](015-record-first-owner-and-search-index.poml) | FR-09, FR-10 | opus / high | FULL | none | 014 | 🔲 |
 | 016 | [Repair mode](016-repair-mode.poml) | FR-14 | opus / high | FULL | none | 015 | 🔲 |
 | 017 | [Re-point route, chat and decision callers](017-repoint-route-chat-decision-callers.poml) | FR-13 | opus / high | FULL | none | 016 | 🔲 |
