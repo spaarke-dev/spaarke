@@ -56,7 +56,7 @@ public class UploadFinalizationEmailCommunicationLinkTests
 
         outcome.IsSuccess.Should().BeTrue();
         fixture.Created.Should().HaveCount(2, "both attachments become child documents")
-            .And.OnlyContain(r => r.RelatedCommunicationId == CommunicationId && r.AccessPermission == null);
+            .And.OnlyContain(r => r.RelatedCommunicationId == CommunicationId && r.AccessPermission == null && r.AccessInheritanceRecord == null);
     }
 
     [Fact]
