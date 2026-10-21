@@ -250,8 +250,8 @@ joined at 049 by `029 → 070 → 071 → 072 → 073 → 049`, and WP1 `029` ga
 | 103 | F-2 — approve with undecided Clean lines (assumed: allowed, implicitly Accepted in bulk) |
 | 104, 105 | F-7 — non-privileged Return of a blocked internal submission |
 | 162 | Any missed NFR-04 – NFR-06 target needs a recorded owner decision |
-| 080, 088, 115 | New schema under EB-D-148 (D-144 covered the old one): ontology-r1 full schema review PASS on the final script and -WhatIf; notices to ontology-r1 and uac-r2 before and after; owner OK for each dev run. 088's real run follows 080's |
-| 091 | Owner OK for any live Azure change; no Key Vault changes. **Escalation:** the stamp identity already holds Storage Blob Data Contributor at account scope (`storage-account.bicep:156-180`), so a container-scoped grant restricts nothing and K-3's mitigation does not hold; 091 stops and asks the owner if dev shows the same |
+| 080, 088, 115 | New schema under EB-D-148 (D-144 covered the old one): ontology-r1 full schema review PASS on the final script and -WhatIf; notices to ontology-r1 and uac-r2 before and after; owner OK for each dev run — **given 2026-10-21** (still after ontology-r1 PASS and notices). 088's real run follows 080's |
+| 091 | Owner OK for any live Azure change — **given 2026-10-21** for the dev storage change; no Key Vault changes. **Escalation:** the stamp identity already holds Storage Blob Data Contributor at account scope (`storage-account.bicep:156-180`), so a container-scoped grant restricts nothing and K-3's mitigation does not hold; 091 stops and asks the owner if dev shows the same |
 | 081, 086, 089, 090, 094, 095, 098, 099, 117 | uac-r2 review (auth / secure family / tenant isolation; 086 and 098 two adversarial passes) |
 | 093, 098 (external gate) | uac-r2 task 188 (`ExternalDocumentNarrowing`) merged. **Met: merged on master 446c83d927 (#2170), 2026-10-21.** 093 also R3 deploy pairing (BFF then SPA; SPA side is R4's) |
 | 095 (external gate) | #2177 merged and deployed — met on dev 2026-10-21 (master 84291ecea8) |
