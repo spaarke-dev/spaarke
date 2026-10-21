@@ -304,8 +304,8 @@ refusal per rule in its mapping step, and no exemption was added.
 its pair files nothing on its own on an event (the same answer Create gives). Only the mapping was the leak, and it is
 closed.
 
-**Residual:** an AMBIGUOUS or absent Secure Record owner team makes `IsSecureOwnerTeamAsync` answer "no", so (ii) then
-relies on the flag and on the owner gate (I-2) alone.
+**Residual (closed in pass 3):** in pass 2, a missing or ambiguous Secure Record owner team made `IsSecureOwnerTeamAsync`
+answer "no", so gate (ii) failed open. See "Pass 3" below.
 
 ### Reachability (UAC-r2 condition 5)
 
@@ -343,5 +343,58 @@ an empty allow list, with must-fire and must-not-fire controls. Task 052 must li
 - The same filtered `Sprk.Bff.Api.Tests` set: 2683 passed, 0 failed, 7 skipped (the same pre-existing skips).
 - Create is unchanged: the diff to `RecordCreationService.cs` lies inside `RepairOwnerAsync` only.
 
+## Pass 3: the residual, and the merge of the work branch
+
+**Residual closed.** When a team owns the mapping source (or the source is a flagged root and a team owns the row),
+Repair's gate now asks for the Secure Record owner team itself (`SecureChildShareSynchronizer.SecureOwnerTeamAsync`, a
+new internal wrapper over the existing `ResolveSecureOwnerTeamAsync`). If that team is missing or ambiguous, the
+source's owner cannot be told, so nothing is mapped (`record_repair.mapping_source_secure`). `IsSecureOwnerTeamAsync`
+and its other callers, and Create, are unchanged. A user-owned, unflagged source needs no team lookup and still maps.
+
+- Consequence: in an environment with no Secure Record business unit, Repair maps nothing from a team-owned source.
+- §11: (1) Existing: `IsSecureOwnerTeamAsync` collapses "missing" into "no". (2) Extension: an instance wrapper of the
+  existing static resolution, so the gate needs no new dependency. (3) Cost of doing nothing: gate (ii) fails open.
+- Test: `ATeamOwnedSource_WhenTheSecureTeamIsMissing_CopiesNothing_FailClosed` (must-fire). Must-not-fire:
+  `AnOrdinaryMatterFlaggedFalse_OwnedByItsUnitsTeam_StillMaps` (Secure team present, ordinary team owner).
+- Mutant (the missing-team branch returns `!flagged`, i.e. "not the Secure team"): killed by the must-fire test.
+
+**Merges** of `origin/work/field-mapping-server-write-path-r1`, at `4b3efc3ac1` and again at `3583ac04cb` (master
+`446c83d927`, UAC #2170): both clean, no conflicts. Against the work branch, `RecordCreationService.Mapping.cs` and
+`RecordTableRules.cs` are identical. `RecordCreationService.cs` differs only by the reviewed step-7/8 helper extraction
+and the Repair members.
+
+**#2170 alignment:** `RefuseAppOnlyWrite` now also refuses a document's D7 links. Repair's own link set and
+`record_repair.document_link_server_owned` were dropped. All four columns are skipped per rule with the refusal's code
+(`sdap.access.document_access_server_only` or `sdap.access.document_link_server_only`); the tests are kept.
+
+**`EveryGenericUpdateWriter_AsksTheAppOnlyRefusal` (#2170): FAILS. Stopped; not decided here.** The guard works per
+type (IL). `RecordCreationService` is listed in `GenericWritersThatUpdateNoDocument` for Create's step-11
+`UpdateRecordFieldsAsync` ("Creates only"). Repair's per-rule `RefuseAppOnlyWrite` call is in the same type, so the
+ratchet reports the entry as STALE ("it now asks the refusal — remove it"). Options:
+- (a) Remove the entry, as the ratchet says. The type then passes because of Repair's call, not Create's.
+- (b) Move Repair's refusal call to another type, so the entry stays accurate. That adds a type to satisfy a scanner.
+
+This is a decision on UAC's guard semantics, so it is left for the coordinator. Repair writes through
+`UpdateIfRowVersionMatchesAsync`, which the guard does not name.
+
+**`MappingSourceCallerMaskGuard` (#2188): fails on Repair only, as expected.** Repair has no caller to mask against,
+and the field-security approach is the owner's decision. No allow-list entry and no field-security skip were added:
+
+```
+A source entity reaches CreateTimeFieldMapping.Apply/ApplyFillOnly without MappingSourceCallerMask (#2188). ...
+src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs:307: the source is the expression
+'read.Record', not a masked local
+Failed!  - Failed: 1, Passed: 71, Total: 72
+```
+
+**Runs, pass 3** (after the merge at `3583ac04cb`):
+- `dotnet build Spaarke.sln`: 0 errors, 0 warnings. `dotnet build tests/Spaarke.ArchTests`: 0 errors, 0 warnings.
+- ArchTests: 1340 passed, 2 failed. One is #2188 on Repair's `ApplyFillOnly`, as expected. The other is #2170's stale
+  entry above (stopped).
+- `RecordRepairModeTests`: 50 passed.
+- The filtered `Sprk.Bff.Api.Tests` set, now with MappingSourceCallerMask: 2815 passed, 0 failed, 7 skipped.
+
 rework: review pass 1 (F1-a, F1-b, F1-c, F3, K2) fixed; F1-d stopped. Review pass 2 (F1-e, F1-f, the UAC-r2
-conditions, F3, K2) fixed. Escalation trigger 2 still awaits the owner.
+conditions, F3, K2) fixed. Pass 3: residual closed, work branch merged (twice), #2170 alignment done; #2170's
+stale-entry ratchet stopped for the coordinator. Open: escalation trigger 2, and the
+field-security approach for Repair (the #2188 guard fails on Repair by design until the owner decides).
