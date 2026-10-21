@@ -403,7 +403,7 @@ One definition, used by every "step 0" in this note (Upload, the Procedure and o
 2. `sprk_isexternal` **true → refuse.** **False or blank → internal** (the platform rule, uac-r2 round 67; `RecordContainerResolver.cs:2400`, `SpeContainerMembershipSync.cs:235`).
 3. **A fault reading the flag → refuse.**
 
-CIAM contacts never reach these routes: the workforce scheme rejects their tokens with 401 (`AuthorizationModule.cs:47-55`).
+CIAM contacts never reach these routes: the workforce scheme rejects their tokens with 401 (`AuthorizationModule.cs:183-200`).
 
 **Finance routes.** Step 0 is a check inside `FinanceAuthorizationFilter`, run **before any record read**, switched on by one flag at **route-group level**, and it answers with the route's own `Deny()`: 403 on `/review` and `/context`; `UniformNotFound` (404) on `/invoice-submissions/{id}` and `/blocked`, so the answer is the same whether or not the id exists. It is **not** placed in `InvoiceSubmissionService`, which the external submit route shares.
 
