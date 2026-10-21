@@ -677,6 +677,14 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                         changes = apRun.Changes.Select(c => new { table = c.Table, id = c.Id, from = c.From, to = c.To }).ToArray(),
                         carriedRows = accessPermission.CarriedRows,
                         tablesWithoutColumn = apRun.TablesWithoutColumn,
+                        // Task 189 (D7 T7a): documents' own-narrowing records written, documents held above their parents by
+                        // their own narrowing, and documents that changed between read and write (nothing written, carried).
+                        recordsWritten = apRun.RecordsWritten,
+                        ownKept = apRun.OwnKept,
+                        changedConcurrently = apRun.ChangedConcurrently,
+                        // Task 189 fix round C (K1+K2): documents whose own narrowing could not be known, raised to what their
+                        // parents give (value only; never lowered).
+                        raisedOnly = apRun.RaisedOnly,
                         failure = apRun.Failure,
                         sweep = new
                         {
@@ -779,9 +787,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             "[CHILD-ACCESS-PERMISSION] run={RunId} mode={Mode} since={Since:o} rowsChanged={RowsChanged} examined={Examined} " +
             "alreadyCorrect={AlreadyCorrect} changed={Changed} wouldChange={WouldChange} parentless={Parentless} " +
             "undetermined={Undetermined} failed={Failed} deferred={Deferred} writeCapReached={WriteCapReached} carried={Carried} " +
-            "sweepRows={SweepRows} sweepComplete={SweepComplete} failure={Failure}",
+            "sweepRows={SweepRows} sweepComplete={SweepComplete} recordsWritten={RecordsWritten} ownKept={OwnKept} " +
+            "changedConcurrently={ChangedConcurrently} raisedOnly={RaisedOnly} failure={Failure}",
             runId, mode, since, run.RowsChanged, run.Examined, run.AlreadyCorrect, run.Changed, run.WouldChange, run.Parentless,
-            run.Undetermined, run.Failed, run.Deferred, run.WriteCapReached, carriedRows, run.SweepRows, sweepComplete, run.Failure);
+            run.Undetermined, run.Failed, run.Deferred, run.WriteCapReached, carriedRows, run.SweepRows, sweepComplete,
+            run.RecordsWritten, run.OwnKept, run.ChangedConcurrently, run.RaisedOnly, run.Failure);
 
         return new AccessPermissionRunReport(mode, run, since, carriedRows, sweepAfter is not null, sweepComplete);
     }

@@ -222,8 +222,47 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    /// <summary>Task 189: access-record writes to THIS row succeed again.</summary>
+    public SecureChildShareWorld AcceptingAccessRecordWritesOf(Guid id)
+    {
+        _refusedAccessRecordWrites.Remove(id);
+        return this;
+    }
+
     /// <summary>Task 173: every <c>sprk_accesspermission</c> write, in order.</summary>
     public List<(string Table, Guid Id, int Value)> AccessPermissionWrites { get; } = new();
+
+    /// <summary>
+    /// Task 189: the updates that carried BOTH the value and the own-narrowing record (each is also in
+    /// <see cref="AccessPermissionWrites"/> and <see cref="AccessRecordWrites"/>).
+    /// </summary>
+    public List<(string Table, Guid Id)> CombinedAccessWrites { get; } = new();
+
+    /// <summary>
+    /// Task 189: this environment's documents lack the own-narrowing record column (<c>sprk_accessinheritance</c>) — the
+    /// schema script has not run. Read by the probe of <see cref="CoreAncestorsOver"/>. Fix round C (K2): a query, read or
+    /// write of a document that names the column then fails, as Dataverse refuses an attribute the table does not have.
+    /// </summary>
+    public bool DocumentsLackAccessRecordColumn { get; set; }
+
+    private void RefuseMissingAccessRecordColumn(string table, IEnumerable<string> columns)
+    {
+        if (DocumentsLackAccessRecordColumn && string.Equals(table, "sprk_document", StringComparison.OrdinalIgnoreCase)
+            && columns.Contains("sprk_accessinheritance", StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Test: sprk_document has no sprk_accessinheritance in this environment.");
+    }
+
+    private readonly List<(string Table, Guid Id, Action<SecureChildShareWorld> Change)> _beforeAccessRecordReads = new();
+
+    /// <summary>
+    /// Task 189: changes the world once, right BEFORE it answers a by-id read (<c>{table}id = id</c>) of this row that asks
+    /// for its own-narrowing record — a user's edit landing between the reconciler's listing and its re-read.
+    /// </summary>
+    public SecureChildShareWorld BeforeAccessRecordReadOf(string table, Guid id, Action<SecureChildShareWorld> change)
+    {
+        _beforeAccessRecordReads.Add((table, id, change));
+        return this;
+    }
 
     private readonly HashSet<Guid> _refusedAccessPermissionWrites = new();
 
@@ -376,6 +415,27 @@ internal sealed class SecureChildShareWorld
     /// </summary>
     public void Update(string table, Guid id, Dictionary<string, object> fields)
     {
+        RefuseMissingAccessRecordColumn(table, fields.Keys);
+        // Task 189 (D7 T7a): a document's value and its own-narrowing record, in ONE update. Both are recorded (in
+        // AccessPermissionWrites and AccessRecordWrites) before a refusal of either throws; neither lands when one is refused.
+        if (fields.Count == 2
+            && fields.TryGetValue("sprk_accesspermission", out var both) && both is OptionSetValue bothOption
+            && fields.TryGetValue("sprk_accessinheritance", out var bothRecord) && bothRecord is string bothText)
+        {
+            AccessPermissionWrites.Add((table, id, bothOption.Value));
+            AccessRecordWrites.Add((table, id, bothText));
+            CombinedAccessWrites.Add((table, id));
+            if (_refusedAccessPermissionWrites.Contains(id))
+                throw new InvalidOperationException("Test: Dataverse refused the Access Permission write.");
+            if (_refusedAccessRecordWrites.Contains(id))
+                throw new InvalidOperationException("Test: Dataverse refused the access-record write.");
+            if (!_rows.TryGetValue((table, id), out var bothTarget))
+                throw new InvalidOperationException($"Test: {table} {id} does not exist.");
+            bothTarget["sprk_accesspermission"] = bothOption;
+            bothTarget["sprk_accessinheritance"] = bothText;
+            return;
+        }
+
         // Task 173: the inherited Access Permission pass writes ONE column, sprk_accesspermission.
         if (fields.Count == 1 && fields.TryGetValue("sprk_accesspermission", out var level) && level is OptionSetValue option)
         {
@@ -450,6 +510,7 @@ internal sealed class SecureChildShareWorld
     public Entity Retrieve(string table, Guid id, string[]? columns)
     {
         RowReads++;
+        RefuseMissingAccessRecordColumn(table, columns ?? []);
         if (_failingRowReads.Contains((table, id)))
             throw new InvalidOperationException($"Test: this {table} row cannot be read.");
         if (!_rows.TryGetValue((table, id), out var row))
@@ -596,15 +657,23 @@ internal sealed class SecureChildShareWorld
     /// </summary>
     public static Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver CoreAncestorsOver(
         Func<SecureChildShareWorld> current, params string[] tablesWithoutAccessPermission) =>
-        new(EntitiesOver(current).Object, ColumnProbe(tablesWithoutAccessPermission),
+        new(EntitiesOver(current).Object, ProbeOver(current, tablesWithoutAccessPermission),
             NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance);
 
     /// <summary>
     /// Task 173: the column probe of this world — every lineage lookup, root column and stamp column exists, and so does
-    /// <c>sprk_accesspermission</c>, except on the tables named.
+    /// <c>sprk_accesspermission</c>, except on the tables named. Task 189: a document also has its own-narrowing record
+    /// column <c>sprk_accessinheritance</c>.
     /// </summary>
     public static Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.EntityColumnProbe ColumnProbe(
-        params string[] tablesWithoutAccessPermission) => (table, _) =>
+        params string[] tablesWithoutAccessPermission) => ProbeOver(null, tablesWithoutAccessPermission);
+
+    /// <summary>
+    /// <see cref="ColumnProbe"/>, with a document's record column absent while <paramref name="current"/>'s
+    /// <see cref="DocumentsLackAccessRecordColumn"/> is set (task 189).
+    /// </summary>
+    private static Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.EntityColumnProbe ProbeOver(
+        Func<SecureChildShareWorld>? current, string[] tablesWithoutAccessPermission) => (table, _) =>
     {
         var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (SecureChildLineage.Children.TryGetValue(table, out var lineage))
@@ -614,6 +683,9 @@ internal sealed class SecureChildShareWorld
         columns.UnionWith(Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute));
         if (!tablesWithoutAccessPermission.Contains(table, StringComparer.OrdinalIgnoreCase))
             columns.Add("sprk_accesspermission");
+        if (string.Equals(table, "sprk_document", StringComparison.OrdinalIgnoreCase)
+            && current?.Invoke().DocumentsLackAccessRecordColumn != true)
+            columns.Add("sprk_accessinheritance");
         return Task.FromResult<IReadOnlySet<string>>(columns);
     };
 
@@ -630,6 +702,16 @@ internal sealed class SecureChildShareWorld
     public EntityCollection Answer(QueryExpression query)
     {
         QueriedTables.Add(query.EntityName);
+        RefuseMissingAccessRecordColumn(query.EntityName, query.ColumnSet.Columns);
+        foreach (var hook in _beforeAccessRecordReads.Where(h =>
+                     string.Equals(h.Table, query.EntityName, StringComparison.OrdinalIgnoreCase)
+                     && query.ColumnSet.Columns.Contains("sprk_accessinheritance")
+                     && query.Criteria.Conditions.Any(c => c.AttributeName == query.EntityName + "id"
+                         && c.Operator == ConditionOperator.Equal && c.Values.Single() is Guid read && read == h.Id)).ToList())
+        {
+            _beforeAccessRecordReads.Remove(hook);
+            hook.Change(this);
+        }
         if (_failingTables.Contains(query.EntityName))
             throw QueryFault?.Invoke() ?? new InvalidOperationException($"Test: {query.EntityName} cannot be read.");
         if (query.Criteria.Conditions.Any(c =>

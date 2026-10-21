@@ -52,6 +52,14 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         int maxRetries,
         CancellationToken ct)
     {
+        // unified-access-control-r2 task 189 fix round C (K5): this handler writes a playbook's output mapping app-only (the
+        // output orchestrator), so it never writes a document's Access Permission or its own-narrowing record; only the
+        // document rule's writers do. Refused before anything is read or written.
+        if (InheritedAccessPermission.RefuseAppOnlyWrite(entityLogicalName, fields.Keys) is { } documentRefusal)
+        {
+            throw new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
+        }
+
         // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether
         // the record this write files it under is secure must be readable, or nothing is written (fail closed).
         if (await _rootFiling.CheckAsync(entityLogicalName, recordId, fields, ct).ConfigureAwait(false) is { } rootRefusal)
