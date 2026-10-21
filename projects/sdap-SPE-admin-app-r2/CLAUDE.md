@@ -166,6 +166,9 @@ Owner directives:
 - **r2 does not take the god-file refactor** — it lives in `sdap-SPE-admin-app-r3` Phase 1a/1b/2
   (r3 `design.md` §0, decided 2026-10-07).
 - Deploys: the operator decides BFF deploys; the SPE Admin page may be deployed by Claude (2026-10-05).
+- **Before any dev BFF deploy, message the external-access R3 session** (and R3 does the same), and run the
+  clobber check: read the live `Sprk.Bff.Api.dll` ProductVersion via Kudu, then `git merge-base --is-ancestor <live> <deploy>`;
+  abort if false. R3 once deployed a branch built on older master and dropped #1910 (2026-10-15).
 
 Identity (since 2026-10-04, PR #1291):
 - SPE Admin container work runs as the **BFF managed identity** `mi-bff-api-dev` (appId `5967251e-171c-46fe-a6c2-ef843c90309d`,
