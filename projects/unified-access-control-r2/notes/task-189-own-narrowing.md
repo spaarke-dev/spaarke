@@ -175,9 +175,12 @@ schema has not landed):
 
 - **When it is seen.** The edit moves `modifiedon`, so the next run's recent-changes listing picks the row up (≤ 2 min).
   §2.2 step 5 then classifies it:
-  - **stricter than the last floor:** own;
-  - **equal to the last floor:** cleared;
-  - **looser than the floor:** put back.
+  - **unchanged** (equal to max(own, last floor)): the own value stands, and the inherited part follows the live floor;
+  - **stricter than the last floor OR the live one:** own;
+  - **at or below both:** put back to the live floor. The own value is cleared, unless it is no looser than the edit
+    (task 175's value-first, record-last write, §8.7).
+
+  The first version compared an edit with the last floor only. That was a defect (the "K1 variant"), fixed in §8.7.
 - **Which paths can edit today.** The Document form still locks the control on a filed document. T5 changes that lock
   ("on a filed document the pill may be set to Restricted"); it is not part of 189. Until then the paths are grid/bulk
   edit, the Web API, imports, flows and the BFF writers.
@@ -247,13 +250,13 @@ refresh. Expected publish-size delta about 0, to be measured.
 
 ## 4. Known limits (K-class, stated up front)
 
-- **K1 — a coinciding narrowing.** A user narrows a document to exactly the value its parent turns to within the same
-  ≤ 2-minute window. The edit is classified inherited and follows a later widening. This needs two independent edits in one
-  window. The consequence is today's behaviour. **The same window class (found in implementation):** an edit made after
-  the parents' value changed but before the next run is judged against the LAST inherited value. Example: the matter
-  goes Restricted → Standard and, before the run, a user sets the document to Limited; Limited is below the last inherited
-  Restricted, so it reads as "put back" and the document follows to Standard. Task 175 has the same behaviour (shared
-  classification, D2). The same edit made after that run is judged against the new value and kept.
+- **K1 — a coinciding narrowing on a row with no record.** A user narrows a document that has no record yet (it has
+  only inherited Standard, or the sweep has not reached it) to exactly the value its parent turns to, within the same
+  ≤ 2-minute window. The backfill rule reads the edit as inherited, and it follows a later widening. This needs two
+  independent edits in one window, and the consequence is today's behaviour. With a record, the same edit is stricter
+  than the last inherited value and is kept.
+- **Not a known limit: the "K1 variant"** (an edit after the parents' value changed, before the next run, judged against
+  the LAST inherited value). The main session classed it as a defect. It is fixed for documents and for task 175 (§8.7).
 - **K2 — millisecond race.** The re-read narrows the listing-to-write race to milliseconds but cannot close it, because
   there is no conditional update.
 - **K3 — the form label.** The form still says "inherited from {parent}" on an own-narrowed filed document until T1/T5 read
@@ -337,7 +340,12 @@ Unchanged:
 | `5b8811fbe1` | BFF: `AccessInheritance.OwnPermissionOf` (extracted from `SecureRootInheritance.Decide`) and `OwnNarrowing`; `InheritedAccessPermission.RecordTables` / `DecideDocument`; the reconciler's document path (one update, re-read, counters, record-column check); `CoreAncestorResolver.RefreshInheritedAccessPermissionAsync` for documents; the job's report and log; 15 tests and the fixture |
 | `d76897f23c` | Schema: `scripts/Set-DocumentAccessPermissionSchema.ps1` (the record column; `-SelfTest` 17 checks), `scripts/README.md`, `sprk_Document/Entity.xml` (`IsSecured 0`) |
 | `afad901388` | `docs/data-model/child-access-permission.md`, `docs/data-model/access-inheritance.md`, `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` I-16 |
-| (this commit) | this file: §5 Q4 (D4), §2.3 un-file row, §4 K1 variant, §8 |
+| `7c2aa42548` | this file: §5 Q4 (D4), §2.3 un-file row, §4 K1 variant, §8 |
+| `85e7250116` | Fix round: the live comparison in `AccessInheritance.OwnPermissionOf` (§8.7) and 5 tests |
+| `3629c9131a` | Fix round: the reconciler's remark (a document's value is not display only; D7, task 188) |
+| `7a71342215` | Fix round: deploy order (customer deployment guide §7.4), the data-model docs, I-16 |
+| `36527b2470` | Fix round: `DocumentAccessPermissionWriterGuardTests` (§8.7) |
+| (this commit) | this file: §2.6, §4, §8.7 |
 
 ### 8.2 Tests
 
@@ -395,8 +403,8 @@ Every new test is red under at least one perturbation.
 
 ### 8.6 Found in implementation
 
-- **A K1 variant** (§4): an edit made inside the window in which the parents' value changed is judged against the last
-  inherited value. Same window class as K1; shared with task 175 by D2.
+- **A K1 variant** (§4): an edit made inside the window in which the parents' value changed was judged against the last
+  inherited value. Shared with task 175 by D2. Fixed in the fix round (§8.7).
 - **An un-filed document's last value is recorded as its own** (§2.3 new row). It follows from §2.2 step 3; it fails
   closed.
 - **Cost:** one extra column-metadata read per job run (the reconciler checks `sprk_document` for the record column), and
@@ -406,3 +414,103 @@ Every new test is red under at least one perturbation.
   `recordsWritten` stays 0.
 - **Deploy order** (§2.8): on dev the schema is in place, so a BFF with 189 reconciles documents from its first run. On
   any other environment, run the schema script first.
+
+### 8.7 Fix round (main session, 2026-10-20)
+
+**1. The "K1 variant" is a defect, fixed in the shared rule** (`AccessInheritance.OwnPermissionOf`; task 175 and task
+189 both use it). A stored value is read against the record (own, last floor) and the live floor:
+
+| Stored value | Own after | Why |
+|---|---|---|
+| equal to max(own, last floor) | own (unchanged) | no edit since the record was written; the inherited part follows the live floor both ways |
+| stricter than the last floor OR the live one | the stored value | a user's (or BFF writer's) narrowing |
+| at or below both | own if it is no looser than the stored value, else none | put back to the live floor; a user with Write removes an own narrowing (D3) |
+
+- **Before → after (the K1 variant).** The matter goes Restricted → Standard, and before the next run a user sets the
+  document (or work assignment) to Limited. Before, Limited was below the last floor, so it was put back and the record
+  went to Standard. After, Limited is stricter than the live Standard, so it is the record's own and stays Limited.
+- **Where it differs from the proposed rule, and why.** The proposal compared every changed value with the live value
+  alone. Taken literally, it widens in three cases, so these keep the stricter reading:
+  - an unchanged own narrowing equal to the last floor (the T8 fallback under a Restricted matter, `own R`, `floor R`)
+    would read as inherited and follow a widening;
+  - a narrowing set while the matter tightens to the same value (`floor L` → live R, the user sets R) would be cleared
+    and lost when the matter loosens;
+  - an own value widened by a user while the matter tightens (`own R`, `floor S` → live L, the user sets L) would be
+    cleared instead of kept at L.
+
+  The "no looser than the edit" clause protects task 175's write order. Its value goes first and its record last, so a
+  record write that fails after the value followed a LOWER floor leaves max(own, live floor) beside the old record.
+  Clearing own there would lose an own value hidden under the floor.
+- **Other behaviour change (both tasks).** An edit BELOW the floor now removes the own narrowing and is put back to the
+  live floor. Before, it kept the own value, so setting Standard under a Limited matter left an own Restricted at
+  Restricted, while setting Limited removed it. A looser edit now never ends stricter than an edit to the floor itself.
+- **Task 175's tests.** None encodes the old comparison against a moved floor. All pass unchanged: `ChildAccessCascadeTests`,
+  `SecureRootInheritance*`.
+- **New tests (5).**
+  - Reconciler (documents):
+    - `Run_ALimitedSetAfterItsMatterWidened_IsKeptAsTheDocumentsOwn` — the 189-shape must-fire, with the must-not-fire
+      beside it: an unchanged inherited Restricted follows back to Standard;
+    - `Run_ARestrictedSetWhileItsMatterTightened_IsKeptAsTheDocumentsOwn`;
+    - `Run_ADocumentEditedBelowItsFloor_DropsItsOwnNarrowing_AndIsPutBackToTheFloor`.
+  - Cascade (task 175):
+    - `ALimitedSetAfterTheParentWidened_IsKeptAsTheChildsOwn` — the 175-shape must-fire, with the same must-not-fire;
+    - `AnOwnLimitedUnderTheFloor_SurvivesARecordWriteThatFailedAsTheFloorDropped`.
+  - The existing must-not-fire tests (`Run_ADocumentsInheritedRestricted_FollowsItsMatter_BothWays`,
+    `TheJob_MakesAChildsAccessPermissionFollowItsMatter_BothWays…`) pass unchanged.
+- **Mutants** (the filter now also runs `ChildAccessCascadeTests` and `SecureRootInheritance*`; 315 tests):
+
+  | # | Perturbation | Red |
+  |---|---|---|
+  | M8 | revert to the last-applied comparison (the old body; this is also "fails before") | 3: the K1 variant (both shapes), the edit below the floor |
+  | M9 | an edit at or below both floors always clears own | 1: the failed record write |
+  | M10 | an edit judged against the live floor only (the proposal's comparison) | 1: the narrowing set while the matter tightens |
+  | M11 | an edit judged against the last floor only | 2: the K1 variant (both shapes) |
+
+**2. The writer guard** (`tests/Spaarke.ArchTests/DocumentAccessPermissionWriterGuardTests.cs`, enforcement ladder: an
+ArchTest source scan).
+- **What it does.** It finds every write of `sprk_accesspermission` in `src/server/**`, by its literal and by its
+  constants, and attributes each to its member (method or local function). There are 11 sites.
+- **Lists.**
+  - Approved document writers: the reconciler's `DecideDocumentAsync` and `CoreAncestorResolver.RefreshDocumentAccessPermissionAsync`.
+  - Non-document writers, six, each with its reason: the reconciler's and the refresh's non-document paths, task 175's
+    `WritePermissionAsync`, the communication association and draft, and the event create payload.
+  - **Ratchet baseline (existing violations):** `CoreAncestorResolver.StampAsync` (both overloads) and
+    `ApplyInheritedAccessPermissionAsync`. The shared stamp path writes the bare inherited value for any host that
+    `InheritedAccessPermission.AppliesTo` admits, documents included, without the record. It has no document caller
+    today (event, communication, To Do, decision record). Recommended follow-up: fence documents out of the stamp path.
+- **Checks.** NEW and STALE entries fail, and a second test fails on a new constant that holds the column. The control
+  runs the detector over an inline source:
+  - must fire: 12 sites in 11 members, including the outer method after a local function, a tuple return and a `}`
+    inside a string;
+  - must not fire: a read, a comparison, a column list, a set, a comment, another column's constant, a log message, a
+    one-argument `Add`.
+- **Guard mutants** (each one applied, ArchTests built, guard run, file restored). Each one fails the guard:
+
+  | # | Change | Result |
+  |---|---|---|
+  | G1 | a new writer in the BFF | NEW |
+  | G2 | a listed member renamed | NEW + STALE |
+  | G3 | a baseline entry for no member | lost signal |
+  | G4 | the key loses `InheritedAccessPermission.Column` | non-vacuity + control |
+  | G5 | a new constant holding the column | alias test |
+  | G6 | strings not blanked for the member detector | control |
+
+  G0 (nothing listed) printed all 11 sites with the expected members.
+
+**3. Also.**
+- The deploy-order rule is in `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.4 and the PR body: the schema first, then the
+  BFF. Until the column exists, the BFF writes no document's Access Permission.
+- An un-filed document keeps its last value as its own. This is stated in the PR body and fails closed.
+- `ChildAccessPermissionReconciler`'s remark now says a document's value is not display only (D7, task 188). The I-16
+  line conflicts textually with #2170, which carries the same meaning.
+
+**Gates.**
+- Build: 0 warnings, 0 errors.
+- Filtered baseline suite: 320 → **325, all pass**.
+- Wide run over 20 namespaces: **10044 passed, 0 failed, 9 skipped**.
+- ArchTests (full project): 1208 → **1211 / 1211**.
+- Publish size: master `4f5f22694c` 39,314,242 B; branch `36527b2470` 39,320,206 B; delta **+5,964 B**. Fresh
+  worktrees, same conditions as §8.4, 192 files and 4 PDBs each.
+- CVE: none; no package changed.
+- Conflicts (`git merge-tree`): #2170 has one hunk in I-16, as expected; #2150 has the known one hunk in
+  `SecureChildShareWorld`.
