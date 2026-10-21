@@ -461,7 +461,7 @@ Additions to §1.3 (proposed by ebilling from model §5.2, accepted here):
 
 | Table | Link to R | Disposition |
 |---|---|---|
-| `sprk_procedureassignment` | typed `sprk_matter` / `sprk_project` / `sprk_workassignment`, exactly one set | **Platform cascade** (Delete = Cascade, every other cascade NoCascade; ebilling 080), counted in the preview like `sprk_policy`, not deleted by the BFF. |
+| `sprk_procedureassignment` | typed `sprk_matter` / `sprk_project` / `sprk_workassignment`, exactly one set | **Delete** with R, through the planner, counted in the preview. The three core lookups are RemoveLink (ebilling 080: Dataverse allows one parental relationship per table, and `sprk_excludedpolicy` holds it). An assignment row left with no core lookup (a delete outside the planner) never applies (ebilling 082) and is removed by ebilling's O-17 sweep. |
 | `sprk_ruleset`, record-scoped (`sprk_scope` Record or Firm record) | typed lookup per core type, RemoveLink | **Kept, unlinked** (§12). Retired later by ebilling's sweep, never by the delete job. |
 | `sprk_policy` / `sprk_policyversion` of a record-scoped set | none (via the set) | Follow the set; untouched by the delete. Record rules live only in the record-scoped set. |
 | `sprk_storedfile`, invoice purposes | none (via `sprk_invoice`) | Covered: `sprk_invoice` **blocks** first. |
@@ -469,5 +469,5 @@ Additions to §1.3 (proposed by ebilling from model §5.2, accepted here):
 | `sprk_billingfirm` / `sprk_billingresponsible` | columns on R itself | Go with R; no other effect. |
 
 **Task 1 tests**:
-- must-fire: R's assignment rows are counted in the preview as platform cascade;
+- must-fire: R's assignment rows are deleted by the planner and counted in the preview;
 - must-not-fire: no `Delete` is issued for `sprk_ruleset`, `sprk_policy`, `sprk_policyversion`, `sprk_procedure` or `sprk_procedureversion`, and the plan writes no rule-set status.
