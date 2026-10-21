@@ -17,12 +17,16 @@ namespace Spaarke.ArchTests;
 ///
 /// <para><b>The rule.</b> At each call of <c>CreateTimeFieldMapping.Apply(</c> or <c>.ApplyFillOnly(</c> under
 /// <c>src/server/**</c>, the <c>source</c> argument (third positional, or named <c>source:</c>) is either the literal
-/// <c>null</c> / <c>default</c> (nothing read, nothing copied), or a plain local whose EVERY assignment in that file is
-/// <c>null</c>, <c>default</c> or exactly <c>(await )?MappingSourceCallerMask.ApplyAsync(…)</c> (optionally
-/// <c>.ConfigureAwait(false)</c>, nothing else). The name may not be a method parameter anywhere in the file, and may not be
-/// indexed or have a member used (the masked entity reaches the engine untouched). An expression, an
-/// <c>out</c>/<c>ref</c>/pattern binding or a <c>using static</c> import of the engine cannot be verified and fails. Review
-/// pass 1 (F3) added the coalesce, parameter and top-up shapes.</para>
+/// <c>null</c> / <c>default</c> (nothing read, nothing copied), or a plain local name. For a local name the rule is an
+/// ALLOW-LIST per occurrence (review pass 2, F3): every occurrence of that name in the file must be (1) an assignment or
+/// declaration, at the start of its statement, of <c>null</c>, <c>default</c> or exactly
+/// <c>(await )?MappingSourceCallerMask.ApplyAsync(…)</c> (optionally <c>.ConfigureAwait(false)</c>, nothing else); (2) a null
+/// check; or (3) an engine call's source argument — and at least one assignment must be a mask call. Anything else (a helper
+/// argument, an alias, a cast, a parameter, a lambda, pattern or query binding, a deconstruction, a member or field access,
+/// a <c>ref</c>) fails, as do an expression source and a <c>using static</c> import of the engine.</para>
+/// <para><b>Known limits</b> (accepted, review pass 2): the scan strips a line from the first <c>//</c>, so a <c>//</c> inside
+/// a string hides the rest of that line; the mask call's arguments are not checked; the name inside a string literal is a
+/// fail-closed false positive.</para>
 ///
 /// <para>Crude by design (<see cref="SourceScan"/>): text, not syntax. Paired with must-fire controls (a bypass in each shape
 /// fails) and must-not-fire controls (the masked Office shape and a literal null pass).</para>
@@ -133,9 +137,87 @@ public class MappingSourceCallerMaskGuardTests
             """
         },
         {
-            "(review pass 1, F3 a) the mask call followed by more than ConfigureAwait(false)",
+            "(review pass 2, F3 minor) the mask call followed by more than ConfigureAwait(false)",
             """
-            var source = (await MappingSourceCallerMask.ApplyAsync(caller, t, id, appRead, cols, _logger, ct).ConfigureAwait(false)).Clone();
+            var source = await MappingSourceCallerMask.ApplyAsync(caller, t, id, appRead, cols, _logger, ct).ConfigureAwait(false) switch { null => appRead, var m => m };
+            CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            """
+        },
+        {
+            "(review pass 2, F3) the masked local handed to a helper",
+            """
+            var source = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+            TopUp(source, appRead);
+            CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            """
+        },
+        {
+            "(review pass 2, F3) an alias of the masked local written through",
+            """
+            var source = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+            var a = source; a!["sprk_fee"] = appRead["sprk_fee"];
+            CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            """
+        },
+        {
+            "(review pass 2, F3) a cast of the masked local written through",
+            """
+            var source = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+            ((Entity)source!)["sprk_fee"] = appRead["sprk_fee"];
+            CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            """
+        },
+        {
+            "(review pass 2, F3) a lambda parameter of the same name",
+            """
+            var source = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+            CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            reads.ForEach(source => CreateTimeFieldMapping.ApplyFillOnly(rules, target, source, p, w, l));
+            """
+        },
+        {
+            "(review pass 2, F3) a parenthesised lambda parameter of the same name",
+            """
+            var source = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+            Func<Entity, int> f = (source) => { CreateTimeFieldMapping.ApplyFillOnly(rules, target, source, p, w, l); return 0; };
+            """
+        },
+        {
+            "(review pass 2, F3) an is { } pattern binding of the same name",
+            """
+            var source = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+            if (appRead is { } source) { CreateTimeFieldMapping.ApplyFillOnly(rules, target, source, p, w, l); }
+            """
+        },
+        {
+            "(review pass 2, F3) a case pattern binding of the same name",
+            """
+            var source = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+            switch (appRead) { case Entity source: CreateTimeFieldMapping.ApplyFillOnly(rules, target, source, p, w, l); break; }
+            """
+        },
+        {
+            "(review pass 2, F3) a deconstruction into the name",
+            """
+            Entity? source = null;
+            source = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+            (source, n) = (appRead, 1);
+            CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            """
+        },
+        {
+            "(review pass 2, F3) a query range variable of the same name",
+            """
+            var source = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+            CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
+            var q = from source in reads select Do(source);
+            """
+        },
+        {
+            "(review pass 2, F3) a field of the same name written",
+            """
+            var source = await MappingSourceCallerMask.ApplyAsync(c, t, i, appRead, cols, _logger, ct);
+            this.source = appRead;
             CreateTimeFieldMapping.Apply(rules, target, source, p, w, l);
             """
         },
@@ -199,6 +281,10 @@ public class MappingSourceCallerMaskGuardTests
                     source = await MappingSourceCallerMask
                         .ApplyAsync(_callerClient, sourceEntity, sourceRecordId, appRead, sourceColumns, _logger, ct)
                         .ConfigureAwait(false);
+                    if (source is null)
+                    {
+                        warnings.Add(SourceUnreadableWarning);
+                    }
                 }
             }
             CreateTimeFieldMapping.Apply(rules, target, source, protectedAttributes, warnings, _logger);
@@ -236,115 +322,153 @@ public class MappingSourceCallerMaskGuardTests
             violations.Add($"{SourceScan.LineOf(code, import.Index)}: imports the engine with using static, so its calls cannot be checked");
         }
 
+        // Every engine call's source argument, with where its text starts — the one sanctioned non-assignment use of the name.
+        var calls = new List<(int Line, string Source, int At)>();
         foreach (Match call in EngineCall.Matches(code))
         {
             var line = SourceScan.LineOf(code, call.Index);
-            var arguments = ArgumentsAt(code, call.Index + call.Length - 1);
-            var source = SourceArgument(arguments);
-            if (source is null)
+            if (SourceArgument(ArgumentsAt(code, call.Index + call.Length - 1)) is not { } source)
             {
                 violations.Add($"{line}: the source argument could not be found");
                 continue;
             }
 
-            if (source is "null" or "default")
+            if (source.Text is "null" or "default")
             {
                 continue;
             }
 
-            if (!Regex.IsMatch(source, @"^@?[A-Za-z_]\w*$"))
+            if (!Regex.IsMatch(source.Text, @"^@?[A-Za-z_]\w*$"))
             {
-                violations.Add($"{line}: the source is the expression '{source}', not a masked local");
+                violations.Add($"{line}: the source is the expression '{Shorten(source.Text)}', not a masked local");
                 continue;
             }
 
-            violations.AddRange(UnmaskedAssignments(code, source).Select(reason => $"{line}: '{source}' {reason}"));
+            var verbatim = source.Text.StartsWith('@') ? 1 : 0;
+            calls.Add((line, source.Text[verbatim..], source.At + verbatim));
+        }
+
+        foreach (var name in calls.Select(c => c.Source).Distinct(StringComparer.Ordinal))
+        {
+            var engineArguments = calls.Where(c => c.Source == name).Select(c => c.At).ToHashSet();
+            var line = calls.First(c => c.Source == name).Line;
+            violations.AddRange(UnsanctionedUses(code, name, engineArguments).Select(reason => $"{line}: '{name}' {reason}"));
         }
 
         return violations;
     }
 
-    /// <summary>Why the local <paramref name="name"/> is not provably masked in <paramref name="code"/> (empty when it is).</summary>
-    private static IEnumerable<string> UnmaskedAssignments(string code, string name)
+    /// <summary>
+    /// Review pass 2 (F3): an ALLOW-LIST per occurrence. Every occurrence of <paramref name="name"/> in the file must be one
+    /// of: (1) an assignment or declaration, at the start of its statement, whose right-hand side is <c>null</c>,
+    /// <c>default</c> or exactly a mask call; (2) a null check (<c>is null</c>, <c>is not null</c>, <c>== null</c>,
+    /// <c>!= null</c>); (3) an engine call's source argument. Anything else — a helper argument, an alias, a cast, a lambda,
+    /// pattern or query binding, a deconstruction, a member access, a <c>ref</c>, a parameter, a field write — is a violation.
+    /// </summary>
+    private static IEnumerable<string> UnsanctionedUses(string code, string name, IReadOnlySet<int> engineArguments)
     {
-        var id = Regex.Escape(name.TrimStart('@'));
+        var id = Regex.Escape(name);
+        var assigned = false;
 
-        // An out / ref argument, a pattern or foreach binding: assigned by something this scan cannot see.
-        if (Regex.IsMatch(code, $@"\b(?:out|ref)\s+(?:[\w.<>?]+\s+)?{id}\b|\bis\s+[\w.<>?]+\s+{id}\b|\bforeach\s*\([^)]*\b{id}\s+in\b"))
+        foreach (Match use in Regex.Matches(code, $@"(?<!\w)@?{id}\b"))
         {
-            yield return "is bound by out / ref / is / foreach, which cannot be checked";
-        }
+            var at = use.Value.StartsWith('@') ? use.Index + 1 : use.Index;
+            var line = SourceScan.LineOf(code, use.Index);
+            var after = code[(use.Index + use.Length)..];
 
-        // A parameter of ANY method in the file (a typed name in a parameter list): a second method could hand the engine a
-        // source it was given, while the file's only assignments of the name are masked ones (review pass 1, F3 b).
-        if (Regex.IsMatch(code,
-                $@"[(,]\s*(?:\[[^\]]*\]\s*)?(?:(?:this|ref|in|out|params|scoped)\s+)?[A-Za-z_][\w.]*(?:<[^()]*?>)?\??(?:\[\])?\??\s+@?{id}\s*[,)=]"))
-        {
-            yield return "is a method parameter in this file — mask the source where it is read, not in a caller";
-        }
+            if (use.Index > 0 && code[use.Index - 1] == '.')
+            {
+                yield return $"is used as a member at line {line} ('.{name}') — a field or another object's member is not the masked local";
+                continue;
+            }
 
-        // Any write into, or use of, the masked entity's members: the mask's answer could be topped up with app-read values
-        // afterwards (review pass 1, F3 c). Fail closed: the engine is the only consumer of the masked local.
-        if (Regex.IsMatch(code, $@"(?<![\w.])@?{id}\s*!?\s*\??\s*[\[.]"))
-        {
-            yield return "is indexed or has a member used (e.g. source[...] or source.Attributes...) — the masked entity must reach the engine untouched";
-        }
-
-        var assignments = Assignments(code, id).ToList();
-        if (assignments.Count == 0)
-        {
-            // A field, or a name this scan cannot see assigned: the source was read somewhere this call site cannot vouch for.
-            yield return "is never assigned in this file (a field?) — mask the source where it is read";
-        }
-
-        foreach (var rhs in assignments)
-        {
-            if (rhs is "null" or "default" || IsExactlyAMaskCall(rhs))
+            // (3) the engine's source argument.
+            if (engineArguments.Contains(at))
             {
                 continue;
             }
 
-            yield return $"is assigned from '{Shorten(rhs)}', not exactly from MappingSourceCallerMask.ApplyAsync(…)";
+            // (2) a null check.
+            if (Regex.IsMatch(after, @"^\s*(?:is\s+(?:not\s+)?null\b|[!=]=\s*null\b)"))
+            {
+                continue;
+            }
+
+            // (1) an assignment or declaration at the start of a statement, of exactly null / default / the mask call.
+            var assignment = Regex.Match(after, @"^\s*=(?![=>])");
+            if (assignment.Success && StartsAStatement(code, use.Index))
+            {
+                var rhs = RightHandSide(code, use.Index + use.Length + assignment.Length);
+                if (rhs is "null" or "default" || IsExactlyAMaskCall(rhs))
+                {
+                    assigned = true;
+                    continue;
+                }
+
+                yield return $"is assigned from '{Shorten(rhs)}' at line {line}, not exactly from MappingSourceCallerMask.ApplyAsync(…)";
+                continue;
+            }
+
+            var from = Math.Max(0, use.Index - 25);
+            yield return $"has an unsanctioned use at line {line}: '{Shorten(code[from..Math.Min(code.Length, use.Index + use.Length + 25)])}'";
+        }
+
+        if (!assigned)
+        {
+            yield return "is never assigned from the mask in this file (a parameter or field?) — mask the source where it is read";
         }
     }
 
-    /// <summary>The right-hand side of every assignment (<c>=</c> or <c>??=</c>) to <paramref name="id"/>, up to its <c>;</c>.</summary>
-    private static IEnumerable<string> Assignments(string code, string id)
+    /// <summary>
+    /// True when the occurrence at <paramref name="index"/> begins its statement: only whitespace, or a declaration's type
+    /// (<c>var</c>, <c>Entity?</c>, a qualified name), lies between it and the previous <c>;</c>, <c>{</c> or <c>}</c>.
+    /// </summary>
+    private static bool StartsAStatement(string code, int index)
     {
-        foreach (Match assignment in Regex.Matches(code, $@"(?<![\w.])@?{id}\s*(?:\?\?)?=(?![=>])"))
+        var start = index - 1;
+        while (start >= 0 && code[start] is not (';' or '{' or '}'))
         {
-            var start = assignment.Index + assignment.Length;
-            var depth = 0;
-            var end = start;
-            for (; end < code.Length; end++)
-            {
-                var c = code[end];
-                if (c is '(' or '[' or '{')
-                {
-                    depth++;
-                }
-                else if (c is ')' or ']' or '}')
-                {
-                    if (depth == 0)
-                    {
-                        break;
-                    }
+            start--;
+        }
 
-                    depth--;
-                }
-                else if (c == ';' && depth == 0)
+        var lead = code[(start + 1)..index].Trim();
+        return lead.Length == 0 || Regex.IsMatch(lead, @"^(?:var|[A-Za-z_][\w.]*\??)$");
+    }
+
+    /// <summary>The right-hand side of an assignment starting at <paramref name="start"/>, up to its top-level <c>;</c>.</summary>
+    private static string RightHandSide(string code, int start)
+    {
+        var depth = 0;
+        var end = start;
+        for (; end < code.Length; end++)
+        {
+            var c = code[end];
+            if (c is '(' or '[' or '{')
+            {
+                depth++;
+            }
+            else if (c is ')' or ']' or '}')
+            {
+                if (depth == 0)
                 {
                     break;
                 }
-            }
 
-            yield return code[start..end].Trim();
+                depth--;
+            }
+            else if (c == ';' && depth == 0)
+            {
+                break;
+            }
         }
+
+        return code[start..end].Trim();
     }
 
     /// <summary>
     /// True only for <c>(await )?MappingSourceCallerMask.ApplyAsync(&lt;balanced args&gt;)</c>, optionally followed by
     /// <c>.ConfigureAwait(false)</c>, and nothing else (no <c>?? appRead</c>, no further member access — review pass 1, F3 a).
+    /// Its arguments are not checked (known limit).
     /// </summary>
     private static bool IsExactlyAMaskCall(string rhs)
     {
@@ -372,12 +496,19 @@ public class MappingSourceCallerMaskGuardTests
         return close > 0 && Regex.IsMatch(rhs[(close + 1)..], @"^\s*(?:\.\s*ConfigureAwait\s*\(\s*false\s*\))?\s*$");
     }
 
-    /// <summary>The top-level arguments of the call whose '(' is at <paramref name="open"/>.</summary>
-    private static List<string> ArgumentsAt(string code, int open)
+    /// <summary>The top-level arguments of the call whose '(' is at <paramref name="open"/>: each trimmed, with where it starts.</summary>
+    private static List<(string Text, int At)> ArgumentsAt(string code, int open)
     {
-        var arguments = new List<string>();
+        var arguments = new List<(string Text, int At)>();
         var depth = 0;
         var start = open + 1;
+
+        void Add(int end)
+        {
+            var raw = code[start..end];
+            arguments.Add((raw.Trim(), start + (raw.Length - raw.TrimStart().Length)));
+        }
+
         for (var i = open; i < code.Length; i++)
         {
             var c = code[i];
@@ -390,13 +521,13 @@ public class MappingSourceCallerMaskGuardTests
                 depth--;
                 if (depth == 0)
                 {
-                    arguments.Add(code[start..i].Trim());
+                    Add(i);
                     break;
                 }
             }
             else if (c == ',' && depth == 1)
             {
-                arguments.Add(code[start..i].Trim());
+                Add(i);
                 start = i + 1;
             }
         }
@@ -404,19 +535,19 @@ public class MappingSourceCallerMaskGuardTests
         return arguments;
     }
 
-    /// <summary>The <c>source</c> argument: named <c>source:</c>, else the third positional one.</summary>
-    private static string? SourceArgument(IReadOnlyList<string> arguments)
+    /// <summary>The <c>source</c> argument (its value, and where the value starts): named <c>source:</c>, else the third positional one.</summary>
+    private static (string Text, int At)? SourceArgument(IReadOnlyList<(string Text, int At)> arguments)
     {
-        foreach (var argument in arguments)
+        foreach (var (text, at) in arguments)
         {
-            var named = Regex.Match(argument, @"^source\s*:\s*(?<value>[\s\S]+)$");
+            var named = Regex.Match(text, @"^source\s*:\s*");
             if (named.Success)
             {
-                return named.Groups["value"].Value.Trim();
+                return (text[named.Length..].Trim(), at + named.Length);
             }
         }
 
-        return arguments.Count > 2 && !Regex.IsMatch(arguments[2], @"^\w+\s*:") ? arguments[2] : null;
+        return arguments.Count > 2 && !Regex.IsMatch(arguments[2].Text, @"^\w+\s*:") ? arguments[2] : null;
     }
 
     private static string Shorten(string text)
