@@ -563,7 +563,7 @@ public class ExternalDocumentNarrowingGuardTests
     /// "{outermost type}::{source method}": a lambda, local function or async state machine is attributed to the method it
     /// was written in (the compiler's <c>&lt;Method&gt;</c> prefix), so a narrowing call inside a closure counts for it.
     /// </summary>
-    private static string SourceKey(Type caller, MethodBase callerMethod)
+    internal static string SourceKey(Type caller, MethodBase callerMethod)
     {
         var outermost = IlCallScan.Outermost(caller);
         if (IlCallScan.SourceMethod(caller, callerMethod) is { } source)
@@ -1168,6 +1168,20 @@ public class ExternalDocumentNarrowingGuardTests
             "link columns (sprk_parentdocument, sprk_relatedcommunication) and its Access Permission are never written by it " +
             "(task 188 round 4e, task 189 K5, #2170), or be listed as Type::Member in GenericWritersThatUpdateNoDocument with the " +
             "reason its payload never holds one:\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "#2170 K1: DataverseUpdateHandler's two listed private writers are reached only after UpdateAsync's refusal")]
+    public void DataverseUpdateHandlersPrivateWriters_AreReachedOnlyFromUpdateAsync()
+    {
+        var handler = typeof(Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler);
+        SortedSet<string> ReferencersOf(string member) => new(
+            IlCallScan.MethodReferences(BffTypes.Value)
+                .Where(r => r.Target.DeclaringType == handler && r.Target.Name == member)
+                .Select(r => SourceKey(r.Caller, r.CallerMethod)),
+            StringComparer.Ordinal);
+
+        Assert.Equal(new[] { $"{handler.FullName}::UpdateAsync" }, ReferencersOf("WriteAsync"));
+        Assert.Equal(new[] { $"{handler.FullName}::WriteAsync" }, ReferencersOf("UpdateWithOptimisticConcurrencyAsync"));
     }
 
     [Fact(DisplayName = "Task 188 r4e / #2170: negative control — per member: a write beside a refusing member, a mention only and the concrete service are found; a refusal in a lambda, a listed member and a typed update are not; stale member entries are reported")]

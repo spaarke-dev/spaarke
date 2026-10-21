@@ -554,3 +554,113 @@ Mutants (each applied alone, built, run, restored):
   the count check reports it too.
 
 Before the entry, the real fact failed on `Repair.cs:323`; with it, the fact passes.
+
+## UAC-r2 condition (b) review: fix round
+
+The Create path is unchanged: `git diff` shows no change to `RecordCreationService.cs` or `RecordCreationService.Mapping.cs`
+in this round. The F3-2 mutant edits `RecordCreationService.cs` temporarily and then restores it.
+
+**F1-1: columns Repair never maps, on any table** (`ColumnsRepairNeverMaps`, Repair.cs).
+- They are added on top of Create's protected set, which is left unchanged. The engine is handed the union, and each
+  column is reported with its own reason.
+- `sprk_issecure`, `sprk_accesspermission`, `sprk_accessinheritance`, `sprk_securitybu` and `sprk_containerid` get
+  **`record_repair.mapped_value_confers_access`**.
+- The regarding pair (`sprk_regardingrecordid`, `sprk_regardingrecordtype`) gets
+  **`record_repair.mapped_value_would_refile_pair`**.
+- The table's Assigned / access-conferring columns get **`record_repair.mapped_value_assigns_access`**. They come from
+  BOTH `MembershipOptionsDefaults.CanonicalAccessConferringRegistry` and the bound `MembershipOptions.AccessConferringRoles`.
+  The bound one is read through the existing `IServiceScopeFactory`, so there is no new dependency; it is the same
+  registry `AssignedAccessMaterializer.RegistryFor` reads. A fault reading it fails the mapping step, which then maps
+  nothing.
+- A column the row already holds is reported Present.
+- A document's access columns keep their `sdap.access.*` codes, because the document refusal is checked first.
+- Tests:
+  - must-fire: `AMattersBlankSecureFlag_IsNeverFilledFromItsProject_ScenarioA` and
+    `AMattersEmptyAssignedLawFirm_IsNeverFilledFromItsProject_ScenarioB`;
+  - must-not-fire: `AnOrdinaryColumn_IsStillFilledFromTheProject_F1_1MustNotFire`.
+- `TheSameColumnsOnAnotherTable_AreNotRefusedAsADocuments` (event, to-do) now expects the access columns skipped with
+  `mapped_value_confers_access`. Its must-not-fire on the document codes is kept.
+- Task 189's text guard (`DocumentAccessPermissionWriterGuardTests`) flagged the first form of the map, a dictionary
+  initializer `[InheritedAccessPermission.Column] = reason`, as a write of `sprk_accesspermission`. It is not a write:
+  the map lists columns that are NOT written. It is now built from column lists, a shape the guard's controls treat as
+  not a write. The guard and its lists are unchanged.
+
+**F2-1: step 8 only once the owner is settled on a team.** The row must be team-owned already, or re-owned in this
+patch. Otherwise each missing column is skipped with **`record_repair.search_index_owner_unsettled`**.
+- Tests:
+  - the BU skip: `AnOwnerKeptInItsUnitByTheBusinessUnitSkip_GetsNoSearchIndex`;
+  - the owner refused: `AnUnresolvableOwner_IsLeftUnchanged_WithATypedRefusal_AndNoSearchIndexIsFilled`;
+  - a kept secure root: `AUserOwnedSecureFlaggedRoot_KeepsItsOwner_AndGetsNoSearchIndexUntilItsOwnerIsSettled`;
+  - must-not-fire: `AUserOwnedRowReOwnedInThisPatch_GetsTheSearchIndexOfItsNewOwnersUnit` and the existing team-owned
+    `TheSearchIndexDefault_IsFilledOnlyWhereUnset`.
+
+**F3-1: reachability by IL.** `RecordRepairReachabilityTests` now references `IlCallScan.MethodReferences` over the BFF.
+- Any reference to `RecordCreationService.RepairAsync` (a call, a method group or a token) is keyed `Type::Member`, with
+  lambdas and state machines counted for their member. It must be listed in `AllowedReferences`, which is empty.
+- Unlisted references fail, and so do stale entries.
+- The control, `TheScan_FindsAWrapperAMethodGroupAndALambda_NotAnotherRepairAsync`:
+  - must-fire: a wrapper, a method group and a lambda;
+  - a caller of the wrapper is not reported itself, because the wrapper already is;
+  - must-not-fire: another method named `RepairAsync`.
+
+**F3-2: "status unknown".** `AnUnfiledRowWhoseOwnersStatusCannotBeTold_IsNotReOwned_NoOwnerSource` covers two cases:
+the systemuser read faults, or no row comes back. Both expect `record_owner_no_source` and no `ownerid`.
+
+**F4-1:** the `UnmaskedCallExemptions` reason now puts the 033 skip in the future ("will be skipped … (TODO task 033) …
+no production caller until then (RecordRepairReachabilityTests; 052 hard-blocked on 033)"). The rest is unchanged.
+
+**K1 (asserted by IL, cheaply):** `DataverseUpdateHandlersPrivateWriters_AreReachedOnlyFromUpdateAsync`.
+`WriteAsync` is referenced only by `UpdateAsync`, and `UpdateWithOptimisticConcurrencyAsync` only by `WriteAsync`.
+
+Mutants (each applied alone, built, run, restored):
+
+| Mutant | Killed by |
+|---|---|
+| F1a no never-mapped set | Scenario A, Scenario B, the must-not-fire, the event/to-do pair |
+| F1b registry columns not added | Scenario B |
+| F1c the secure flag not in the set | Scenario A, the must-not-fire |
+| F2a step 8 whatever the owner | the BU skip, the owner refused, the kept secure root (×2) |
+| F2b re-owned in this patch not counted | the re-owned must-not-fire |
+| F3-2 `== false` → `!= true` (RecordCreationService.cs:798) | both F3-2 cases |
+| F3-1a the scan matches nothing | the reachability control |
+| F3-1b keyed by type, not member | the reachability control |
+
+## Condition (b) statement
+
+**Owner and search index, per table, before and after Repair:**
+
+| Table (kind) | Owner before → after | Search index (matter, project, document only) |
+|---|---|---|
+| any table, team-owned | kept (`owner_team_owned`) | filled from the row's unit where missing |
+| child, user-owned, filed | re-owned to the team its parents resolve to (same unit; another unit only on a leaf table) | filled from the new team's unit |
+| child, user-owned, filed, team in another unit (ownership-parent table) | kept (`owner_moves_business_unit`) | not filled (`search_index_owner_unsettled`) |
+| child, user-owned, filed, owner refused or faulted | kept, typed refusal | not filled (`search_index_owner_unsettled`) |
+| any table, user-owned, unfiled | the person's team (I-6) | filled from that team's unit |
+| any table, application-owned or status unknown, unfiled | kept, `record_owner_no_source` | not filled (`search_index_owner_unsettled`) |
+| matter / project / work assignment, user-owned, flag not explicit false | kept (`owner_root_secure`) | not filled (`search_index_owner_unsettled`) |
+| matter / project / work assignment, user-owned, flag false | re-owned to the unit's team | filled from that team's unit |
+| communication, unfiled | kept (`owner_kept_by_exception`) | no search index |
+| decision record | never read or written (`table_append_only`) | no search index |
+
+**Order:**
+1. One read of the row.
+2. Owner (step 7).
+3. Mapping (step 3), gated by the owner decision.
+4. Search index (step 8), gated by the owner settling on a team.
+5. The missing I-1 stamp (step 10).
+6. The pre-write checks: the version, the invoice-family guard, and `RefuseAppOnlyWrite` over the patch.
+7. One write, conditional on the row version.
+8. After the write, only the membership-cache owner eviction (`EvictOwnerChangeAsync`), when `ownerid` was in the patch.
+   It also runs on an ambiguous write fault or a cancellation.
+
+**Create's post-create steps that Repair does NOT run:**
+- `SyncChildAsync` (the secure-child share sync);
+- `RefreshInheritedAccessPermissionAsync`;
+- the membership owner event (`IMembershipEventPublisher`);
+- `AssignedAccessMaterializer`.
+
+**Known limits:**
+- K1: the two `DataverseUpdateHandler` member exemptions are reason-only entries. Their sole-referencer claim is now also
+  asserted by IL (above).
+- K2: Repair runs no post-create steps. Access converges through `SecureChildReconciliationJob` and the nightly
+  membership reconciliation. Until then it is narrower, never wider: Repair writes no access-conferring column (F1-1).
