@@ -140,6 +140,16 @@
         - sprk_document.sprk_accesspermission is allowed for callers and refused for system principals, matching RefuseAppOnlyWrite.
         - Tests for each. UAC-r2 reviews.
       - Projects/matters caller-refused columns: owner decision before this task (#1608 related).</criterion>
+    <criterion testable="true">BLOCKING (DI-004 / #2188, 2026-10-21): before any caller is re-pointed, create-time mapping must not copy a source column the caller cannot read under field security. Read the source columns as the caller, or check field-security read per column. A denied column is dropped with a warning, timing-equalised and failing closed. Must-fire test: a field-secured source column the caller cannot read is not copied. Must-not-fire test: a readable column is copied. UAC-r2 reviews.</criterion>
+    <criterion testable="true">From UAC-r2's re-check of 014 (2026-10-21):
+      - R3-1: normalise ServerSetLookupColumns once (trimmed, case-insensitive) where the request is built, and have both the K-2/F-B guards and the existing AppendTo check read that normalised set. Test it.
+      - R3-2: if it falls out naturally, move step 6's AppendTo for server-set root filing lookups (work assignment, project) to before step 3, so a refused create reads no mapping source. This is not a blocker; record the outcome.
+    </criterion>
+    <criterion testable="true">From UAC-r2's task 015 review (2026-10-21), blocking before any route reaches the unified create:
+      - K1: a test where the catalog read in step 7 throws (`RetrieveMultipleAsync` faults) gets 503 `OwnerUnavailableCode` and nothing is written (RecordCreationService step 7, ~:609-630);
+      - K3: a caller payload holding an explicit null under lowercase `sprk_ai_search_index@odata.bind` must not produce two keys that differ only in case after step 8's fill. Normalise the bind key (or drop the null entry before filling); test the duplicate-key case and the canonical-case case.
+      Whichever of 017 or 018 lands first owns this; the other confirms it.
+    </criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-13 part 1, FR-12, NFR-07, NFR-08. Office quick-create is task 018; widening the route to sprk_matter and sprk_project is task 020. Release note: chat-created children now get the I-1 stamp, I-16 and sharee mirror.</notes>

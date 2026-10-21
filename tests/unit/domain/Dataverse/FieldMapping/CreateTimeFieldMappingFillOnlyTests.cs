@@ -433,6 +433,54 @@ public class CreateTimeFieldMappingFillOnlyTests
         warnings.Should().ContainSingle();
     }
 
+    // ───────────────────── the origin set (task 014, FR-08) ─────────────────────
+
+    [Fact]
+    public void MappedColumns_NamesExactlyTheColumnsARuleWrote_NeverASuppliedGuardedOrEmptyOne()
+    {
+        // Every rule kind that writes (Copy text, Copy lookup, Default, Concat), and every way a rule does not: the caller
+        // supplied the column, the target is the pair or protected, the source has no value, the default does not convert.
+        var assignee = new EntityReference("contact", Guid.Parse("a0140000-0000-4000-8000-0000000000c1"));
+        var source = new Entity("sprk_matter") { ["sprk_src_text"] = "copied", ["sprk_src_lookup"] = assignee, ["sprk_src_name"] = "Acme" };
+        var rules = new[]
+        {
+            CopyRule(Text, "sprk_src_text", "sprk_copied"),
+            CopyRule(Lookup, "sprk_src_lookup", "sprk_assignee"),
+            DefaultRule(Text, "fixed", "sprk_defaulted"),
+            ExpressionRule(Concat, Text, "{sprk_src_name} matter", "sprk_concatenated"),
+            CopyRule(Text, "sprk_src_text", "sprk_supplied"),
+            CopyRule(Text, "sprk_src_text", "sprk_regardingrecordid"),
+            CopyRule(Text, "sprk_src_text", "sprk_matternumber"),
+            CopyRule(Text, "sprk_src_absent", "sprk_nothingtocopy"),
+            DefaultRule(Number, "not a number", "sprk_unconvertible"),
+        };
+        var target = new Entity("sprk_event") { ["sprk_supplied"] = "the caller's" };
+        var protectedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_matternumber" };
+        var mapped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        CreateTimeFieldMapping.ApplyFillOnly(
+            rules, target, source, protectedColumns, new List<string>(), NullLogger.Instance, mappedColumns: mapped);
+
+        mapped.Should().BeEquivalentTo("sprk_copied", "sprk_assignee", "sprk_defaulted", "sprk_concatenated");
+        target["sprk_supplied"].Should().Be("the caller's");
+    }
+
+    [Fact]
+    public void MappedColumns_IsOptional_AndApplyWritesTheSameValuesWithoutIt()
+    {
+        var withSet = new Entity("sprk_event");
+        var without = new Entity("sprk_event");
+        var source = SourceWith(SourceColumn, "from the source");
+
+        CreateTimeFieldMapping.ApplyFillOnly(
+            new[] { CopyRule(Text) }, withSet, source, NoProtectedColumns, new List<string>(), NullLogger.Instance,
+            mappedColumns: new HashSet<string>());
+        CreateTimeFieldMapping.ApplyFillOnly(
+            new[] { CopyRule(Text) }, without, source, NoProtectedColumns, new List<string>(), NullLogger.Instance);
+
+        withSet.Attributes.Should().BeEquivalentTo(without.Attributes);
+    }
+
     // ───────────────────────────── helpers ─────────────────────────────
 
     private static List<string> FillOnly(IEnumerable<FieldMappingRuleEntity> rules, Entity target, Entity? source)

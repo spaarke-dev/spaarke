@@ -65,8 +65,11 @@ public class MappingSourceCallerMaskGuardTests
 
     private static readonly string[] EngineMethods = ["Apply", "ApplyFillOnly"];
 
-    /// <summary>The engine call sites in the tree today (the Office quick-create's mapping step); the scan must see at least these.</summary>
-    private const int KnownCallSites = 1;
+    /// <summary>
+    /// The engine call sites in the tree today (the Office quick-create's mapping step and the unified record-creation
+    /// service's step 3); the scan must see at least these.
+    /// </summary>
+    private const int KnownCallSites = 2;
 
     [Fact(DisplayName = "#2188: every source handed to the field-mapping engine was masked to the caller's view first")]
     public void EverySourceHandedToTheMappingEngine_PassedThroughTheCallerMask()

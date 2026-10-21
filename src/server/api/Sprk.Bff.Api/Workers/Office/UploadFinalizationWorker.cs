@@ -135,7 +135,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             return carried;
         }
 
-        return await ownershipResolver.ResolveOwningTeamAsync(
+        // field-mapping-server-write-path-r1 task 015 (FR-09): every create asks ResolveOwnerAsync, the record-first
+        // resolution; the target-style context (not ForParents) because ForParents would drop the friendly spelling.
+        var resolution = await ownershipResolver.ResolveOwnerAsync(
             new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
             {
                 // AssociationType may be the friendly spelling ("matter"); the resolver normalizes it.
@@ -144,6 +146,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
             },
             cancellationToken).ConfigureAwait(false);
+        return resolution.IsOwned ? resolution.OwningTeamId : null;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

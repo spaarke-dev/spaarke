@@ -12,7 +12,7 @@
     <effort>xhigh</effort>
     <parallel-group>W5-B</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>016, 050</deps>
+    <deps>016, 033, 050</deps>
     <tags>bff-api, jobs, security, ownership, testing</tags>
     <estimated-effort>14-20 hours</estimated-effort>
   </metadata>
@@ -38,6 +38,7 @@
     </relevant-files>
     <dependencies>
       <dependency task="016" status="pending">Repair mode (fill-only, idempotent per row).</dependency>
+      <dependency task="033" status="pending">HARD BLOCK (task 016 review pass 1 F1-d): the app-only column-metadata reader must be wired into Repair before any scheduled pass calls it; until then one mis-typed mapping rule fails a row's whole repair on every pass.</dependency>
       <dependency task="050" status="pending">Final repair-marker decision (createdby vs impersonation).</dependency>
     </dependencies>
   </context>

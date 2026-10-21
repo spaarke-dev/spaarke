@@ -22,8 +22,8 @@
 | 011 | [Extract `CallerWriteAuthorization` (pure move)](011-extract-caller-write-authorization.poml) | FR-08 | opus / xhigh | FULL | none | 010 | ✅ |
 | 012 | [Per-table rules registry](012-per-table-rules-registry.poml) | FR-11 | opus / high | FULL | W2-A | 010 | ✅ |
 | 013 | [Service Create mode: principals, pipeline, refusals](013-record-creation-service-create-pipeline.poml) | FR-06, FR-07, FR-12 | opus / xhigh | FULL | none | 011, 012 | ✅ |
-| 014 | [Mapping step + merged-payload authorization](014-mapping-step-and-merged-payload-authz.poml) | FR-06, FR-08 | opus / xhigh | FULL | none | 002, 003, 013 | 🔲 |
-| 015 | [Record-first owner + search-index default](015-record-first-owner-and-search-index.poml) | FR-09, FR-10 | opus / high | FULL | none | 014 | 🔲 |
+| 014 | [Mapping step + merged-payload authorization](014-mapping-step-and-merged-payload-authz.poml) | FR-06, FR-08 | opus / xhigh | FULL | none | 002, 003, 013 | ✅ |
+| 015 | [Record-first owner + search-index default](015-record-first-owner-and-search-index.poml) | FR-09, FR-10 | opus / high | FULL | none | 014 | ✅ |
 | 016 | [Repair mode](016-repair-mode.poml) | FR-14 | opus / high | FULL | none | 015 | 🔲 |
 | 017 | [Re-point route, chat and decision callers](017-repoint-route-chat-decision-callers.poml) | FR-13 | opus / high | FULL | none | 016 | 🔲 |
 | 018 | [Office quick-create adapter; delete Office service](018-office-quick-create-adapter.poml) | FR-13, FR-12 | opus / high | FULL | none | 016 | 🔲 |
@@ -63,7 +63,7 @@
 |---|---|---|---|---|---|---|---|
 | 050 | [Resolve W5 open questions (marker, quick-create flags)](050-resolve-w5-open-questions.poml) | spec UQ 1–2 | sonnet / high | STANDARD | W5-A | 019 | 🔲 |
 | 051 | [Native UI: ribbon New, quick create off, Assign hidden](051-native-ui-redirect-quickcreate-assign.poml) | FR-24 | sonnet / high | FULL | W5-B | 050, 029 | 🔲 |
-| 052 | [Repair pass `IScheduledJob` + on-demand trigger](052-repair-pass-scheduled-job.poml) | FR-25 | opus / xhigh | FULL | W5-B | 016, 050 | 🔲 |
+| 052 | [Repair pass `IScheduledJob` + on-demand trigger](052-repair-pass-scheduled-job.poml) | FR-25 | opus / xhigh | FULL | W5-B | 016, 033, 050 | 🔲 |
 | 053 | [W5 deploy + live 5-row import check](053-w5-deploy-and-live-import-check.poml) | FR-24, FR-25 | sonnet / high | FULL | none | 051, 052 | 🔲 |
 
 ## Phase 6 — W6 Standard, guards, docs, retirement
