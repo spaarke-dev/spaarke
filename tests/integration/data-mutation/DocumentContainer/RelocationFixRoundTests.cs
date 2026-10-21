@@ -440,6 +440,39 @@ public class RelocationFixRoundTests
         LedgerOf(world)?.Release.Should().BeNull(why);
     }
 
+    [Fact(DisplayName = "F3: an incomplete payload's dead-letter log names the document and the one recovery, never a resubmit")]
+    public async Task F3_AnIncompletePayload_IsLoggedWithItsDocumentAndTheRecovery()
+    {
+        // PR #2161 round 5 (K3): a payload queued before round 4 (no RootsAfter) is dead-lettered as incomplete; resubmitting
+        // it changes nothing, so the log names the document and the one recovery (file it back under the secure record
+        // holding its file, then re-file it with F3) — ids only.
+        var (_, rig) = RefiledToS2();
+        var job = RelocationReleaseRetryJobHandler.NewJob(APayload() with { RootsAfter = null });
+        var log = new HandlerLog();
+
+        (await new RelocationReleaseRetryJobHandler(rig.Relocator, log) { LockWait = TimeSpan.Zero }
+            .ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Poisoned);
+
+        var entry = log.Entries.Should().ContainSingle(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error).Subject;
+        entry.Message.Should().Contain(T.DocumentId.ToString()).And.Contain(job.JobId.ToString())
+            .And.Contain(DocumentContainerRelocator.UnreleasedRecovery);
+        entry.Message.Should().NotContainEquivalentOf("resubmit");
+    }
+
+    private sealed class HandlerLog : Microsoft.Extensions.Logging.ILogger<RelocationReleaseRetryJobHandler>
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
     [Fact(DisplayName = "F3: the retry waits up to two minutes per delivery, every five seconds")]
     public void F3_TheRetryWait()
     {

@@ -84,7 +84,12 @@ public sealed class RelocationReleaseRetryJobHandler : IJobHandler
 
         if (payload is null || !payload.IsWellFormed)
         {
-            _logger.LogError("[DOCUMENT-RELOCATE] Release-retry job {JobId} names no complete release; dead-lettering.", job.JobId);
+            // PR #2161 round 5 (K3): resubmitting cannot help — the payload is what is incomplete (one queued before round 4 has
+            // no RootsAfter) — so the log names the document and the one recovery.
+            _logger.LogError(
+                "[DOCUMENT-RELOCATE] Release-retry job {JobId} for document {DocumentId} names no complete release; "
+                + "dead-lettering. Its file stays held; recovery: {Recovery}.",
+                job.JobId, payload?.DocumentId, DocumentContainerRelocator.UnreleasedRecovery);
             return JobOutcome.Poisoned(job.JobId, JobType, "The DocumentRelocationReleaseRetry payload names no complete release.",
                 job.Attempt, TimeProvider.System.GetElapsedTime(started));
         }
