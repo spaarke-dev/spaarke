@@ -57,6 +57,11 @@ public class DocumentAccessPermissionWriterGuardTests
             "column), from DecideDocumentRaiseOnly, which only raises the value and never lowers it."),
         new Writer(Resolver, "RefreshDocumentAccessPermissionAsync",
             "Task 189: the child-records create refresh (L1). Same decision, one update."),
+        new Writer("src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs", "StageDocumentCommunicationFields",
+            "spaarkeai-word-add-in-r1 task 130 (D7 T8): an Office email-derived document's own Restricted, set only by " +
+            "OfficeDocumentPersistence.ApplyEmailCommunicationOutcome together with AccessInheritance.OwnNarrowing(Restricted) " +
+            "(CreateDocumentRequest.AccessInheritanceRecord). The stager writes both in the one create and refuses a value " +
+            "without its record (DocumentCommunicationFieldsStagingTests)."),
     };
 
     private static readonly IReadOnlyList<Writer> NonDocumentWriters = new[]
@@ -93,6 +98,7 @@ public class DocumentAccessPermissionWriterGuardTests
         ("src/server/api/Sprk.Bff.Api/Services/Dataverse/ParentLineage.cs", "Column"), // InheritedAccessPermission.Column
         ("src/server/api/Sprk.Bff.Api/Services/Access/SecureChildShareSynchronizer.cs", "AccessPermissionColumn"),
         ("src/server/api/Sprk.Bff.Api/Services/Access/SecureRootInheritance.cs", "AccessPermissionColumn"),
+        ("src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs", "AccessPermissionColumn"), // task 130
     };
 
     [Fact(DisplayName = "Task 189: only the approved writers write a document's sprk_accesspermission (every writer is listed)")]

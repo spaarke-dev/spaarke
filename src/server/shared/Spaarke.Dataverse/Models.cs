@@ -90,6 +90,16 @@ public class CreateDocumentRequest
     /// </summary>
     [JsonIgnore]
     public int? AccessPermission { get; set; }
+
+    /// <summary>
+    /// The document's own-narrowing record (<c>sprk_accessinheritance</c>, the task 175 / 189 JSON), written IN the same create
+    /// as <see cref="AccessPermission"/> (unified-access-control-r2 task 189, D7 T7a). Without it, a Restricted that equals the
+    /// parents' value reads as inherited and is widened when they widen. Set together with <see cref="AccessPermission"/>,
+    /// never alone; the create refuses a value without its record. 🔒 Never bound from a request body, as
+    /// <see cref="OwningTeamId"/>.
+    /// </summary>
+    [JsonIgnore]
+    public string? AccessInheritanceRecord { get; set; }
 }
 
 /// <summary>

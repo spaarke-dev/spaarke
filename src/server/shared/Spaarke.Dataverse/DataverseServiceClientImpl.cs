@@ -328,9 +328,11 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// Stages <see cref="CreateDocumentRequest.RelatedCommunicationId"/> (the <c>sprk_relatedcommunication</c> lookup to
     /// <c>sprk_communication</c>) and <see cref="CreateDocumentRequest.AccessPermission"/> (the <c>sprk_accesspermission</c>
     /// choice) onto the document <see cref="CreateDocumentAsync"/> creates, so both are part of the ONE create write
-    /// (spaarkeai-word-add-in-r1 task 130). An unset value writes nothing. Pure (no I/O) so the mapping is assertable, as
-    /// <see cref="StageAnalysisRegardingFields"/> is.
+    /// (spaarkeai-word-add-in-r1 task 130). An Access Permission goes with its <see cref="CreateDocumentRequest.AccessInheritanceRecord"/>
+    /// (<c>sprk_accessinheritance</c>) in the same write (UAC-r2 task 189), and a value without one is refused. An unset value
+    /// writes nothing. Pure (no I/O) so the mapping is assertable, as <see cref="StageAnalysisRegardingFields"/> is.
     /// </summary>
+    /// <exception cref="InvalidOperationException">An Access Permission without its own-narrowing record.</exception>
     internal static void StageDocumentCommunicationFields(Entity document, CreateDocumentRequest request)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -340,14 +342,23 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             document[DocumentRelatedCommunicationColumn] = new EntityReference(CommunicationEntityName, communicationId);
 
         if (request.AccessPermission is { } accessPermission)
-            document[DocumentAccessPermissionColumn] = new OptionSetValue(accessPermission);
+        {
+            // Task 189: a value alone reads as inherited when it equals the parents' value, and is widened when they widen.
+            if (string.IsNullOrWhiteSpace(request.AccessInheritanceRecord))
+                throw new InvalidOperationException(
+                    "A document's own Access Permission is created with its sprk_accessinheritance record in the same write (task 189).");
+
+            document[AccessPermissionColumn] = new OptionSetValue(accessPermission);
+            document[DocumentAccessInheritanceColumn] = request.AccessInheritanceRecord;
+        }
     }
 
     // Task 130: sprk_document.sprk_relatedcommunication → sprk_communication (DocumentLinkFields), and the document's own
     // Access Permission (docs/data-model/child-access-permission.md). The SDK writes by LOGICAL name.
     private const string DocumentRelatedCommunicationColumn = "sprk_relatedcommunication";
     private const string CommunicationEntityName = "sprk_communication";
-    private const string DocumentAccessPermissionColumn = "sprk_accesspermission";
+    private const string AccessPermissionColumn = "sprk_accesspermission";
+    private const string DocumentAccessInheritanceColumn = "sprk_accessinheritance";
 
     public async Task<DocumentEntity?> GetDocumentAsync(string id, CancellationToken ct = default)
     {

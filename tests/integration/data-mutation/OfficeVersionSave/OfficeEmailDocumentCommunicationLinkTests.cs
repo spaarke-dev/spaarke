@@ -62,6 +62,16 @@ public class OfficeEmailDocumentCommunicationLinkTests
 
     // ── Must fire ──────────────────────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>UAC-r2 task 189 (D7 T7a): a Restricted create carries the record that marks it the document's OWN narrowing,
+    /// so the reconciler never widens it to the parents' value.</summary>
+    private static void ShouldBeItsOwnRestriction(CreateDocumentRequest created)
+    {
+        var (record, unreadable) = AccessInheritance.Parse(created.AccessInheritanceRecord);
+        unreadable.Should().BeFalse();
+        record.Should().NotBeNull("the Restricted is written with its sprk_accessinheritance record in the same create");
+        record!.OwnPermission.Should().Be(Restricted);
+    }
+
     [Fact]
     public async Task EmailSave_IsCreatedLinkedToTheCapturesCommunication_EvenWhenTheMessageIdLookupWouldMiss()
     {
@@ -75,6 +85,7 @@ public class OfficeEmailDocumentCommunicationLinkTests
         var created = world.CreatedDocumentRequests.Should().ContainSingle().Subject;
         created.RelatedCommunicationId.Should().Be(captured, "the capture's own id is authoritative — no re-resolve needed");
         created.AccessPermission.Should().BeNull("a linked document keeps the default Access Permission");
+        created.AccessInheritanceRecord.Should().BeNull("no own narrowing to record");
         RelatedCommunicationQueued(world).Should().Be(captured.ToString(), "the worker creates the attachment children linked to it");
     }
 
@@ -106,6 +117,7 @@ public class OfficeEmailDocumentCommunicationLinkTests
         response.StatusCode.Should().Be(HttpStatusCode.Accepted, "an unidentified email is still saved");
         var created = world.CreatedDocumentRequests.Should().ContainSingle().Subject;
         created.AccessPermission.Should().Be(Restricted);
+        ShouldBeItsOwnRestriction(created);
         created.RelatedCommunicationId.Should().BeNull();
         RelatedCommunicationQueued(world).Should().BeNull("its attachment children are created Restricted too");
 
@@ -127,6 +139,7 @@ public class OfficeEmailDocumentCommunicationLinkTests
 
         var created = world.CreatedDocumentRequests.Should().ContainSingle().Subject;
         created.AccessPermission.Should().Be(Restricted);
+        ShouldBeItsOwnRestriction(created);
         created.RelatedCommunicationId.Should().BeNull();
         logs.Lines.Should().ContainSingle(l => l.Category == PersistenceCategory && l.Level == LogLevel.Error)
             .Which.Message.Should().Contain("Message-ID present: False", "no Message-ID existed to look up by");
@@ -163,7 +176,9 @@ public class OfficeEmailDocumentCommunicationLinkTests
         (await factory.CreateClient().PostAsJsonAsync("/api/office/save", AttachmentSave(parentEmailId: ItemId)))
             .StatusCode.Should().Be(HttpStatusCode.Accepted);
 
-        world.CreatedDocumentRequests.Should().ContainSingle().Which.AccessPermission.Should().Be(Restricted);
+        var created = world.CreatedDocumentRequests.Should().ContainSingle().Subject;
+        created.AccessPermission.Should().Be(Restricted);
+        ShouldBeItsOwnRestriction(created);
         logs.Lines.Should().ContainSingle(l => l.Category == PersistenceCategory && l.Level == LogLevel.Error)
             .Which.Message.Should().Contain("Message-ID present: True", "the parent's RFC Message-ID was the key looked up");
         store.LookedUpIds.Should().Equal(RfcId);
@@ -221,7 +236,9 @@ public class OfficeEmailDocumentCommunicationLinkTests
         (await factory.CreateClient().PostAsJsonAsync("/api/office/save", request)).StatusCode.Should().Be(HttpStatusCode.Accepted);
 
         store.LookedUpIds.Should().BeEmpty("an Exchange item id is never a Message-ID lookup key");
-        world.CreatedDocumentRequests.Should().ContainSingle().Which.AccessPermission.Should().Be(Restricted);
+        var created = world.CreatedDocumentRequests.Should().ContainSingle().Subject;
+        created.AccessPermission.Should().Be(Restricted);
+        ShouldBeItsOwnRestriction(created);
         logs.Lines.Should().ContainSingle(l => l.Category == PersistenceCategory && l.Level == LogLevel.Error)
             .Which.Message.Should().Contain("Message-ID present: False");
     }

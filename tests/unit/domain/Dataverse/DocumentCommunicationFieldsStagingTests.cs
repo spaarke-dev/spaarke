@@ -36,16 +36,35 @@ public class DocumentCommunicationFieldsStagingTests
         document.Contains("sprk_accesspermission").Should().BeFalse("a linked document keeps the default (Standard) value");
     }
 
+    private const string OwnRestrictedRecord = """{"v":1,"parents":[],"floorSecure":false,"floorPermission":100000000,"ownSecure":false,"ownPermission":100000002}""";
+
     [Fact]
-    public void StageDocumentCommunicationFields_Restricted_WritesTheOptionSetValue_AndNoLink()
+    public void StageDocumentCommunicationFields_Restricted_WritesTheOptionSetValue_AndItsOwnNarrowingRecord_AndNoLink()
     {
         var document = new Entity("sprk_document");
 
         DataverseServiceClientImpl.StageDocumentCommunicationFields(
-            document, new CreateDocumentRequest { Name = "Status.eml", ContainerId = "b!c", AccessPermission = 100000002 });
+            document,
+            new CreateDocumentRequest
+            {
+                Name = "Status.eml", ContainerId = "b!c", AccessPermission = 100000002, AccessInheritanceRecord = OwnRestrictedRecord,
+            });
 
         document["sprk_accesspermission"].Should().BeOfType<OptionSetValue>().Which.Value.Should().Be(100000002, "Restricted");
+        document["sprk_accessinheritance"].Should().Be(OwnRestrictedRecord, "task 189: the value and its record in one write");
         document.Contains("sprk_relatedcommunication").Should().BeFalse();
+    }
+
+    [Fact]
+    public void StageDocumentCommunicationFields_AnAccessPermissionWithoutItsRecord_IsRefused_AndStagesNoValue()
+    {
+        var document = new Entity("sprk_document");
+
+        var act = () => DataverseServiceClientImpl.StageDocumentCommunicationFields(
+            document, new CreateDocumentRequest { Name = "Status.eml", ContainerId = "b!c", AccessPermission = 100000002 });
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*sprk_accessinheritance*");
+        document.Contains("sprk_accesspermission").Should().BeFalse("a bare value would read as inherited and be widened");
     }
 
     [Fact]
