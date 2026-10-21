@@ -557,12 +557,18 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
 
     /// <param name="callerRead">#2191 K2: the caller's read of the mapping source (default: it reads what the app read did).</param>
     /// <param name="appReadFails">#2191 K2: the app-only read of the mapping source throws.</param>
-    /// <param name="mappedPairId">#2191 K2: the record the mapping's pair names (default: the source matter itself).</param>
+    /// <param name="mappedPairId">#2191 K2: what the mapping copies into the pair's id — a <see cref="Guid"/> or its text
+    /// (default: the source record's own id).</param>
     /// <param name="catalogHasRow">#2191 K2: the record-type catalog has the source table's row.</param>
+    /// <param name="catalogFails">#2191 K2: the record-type catalog read throws.</param>
+    /// <param name="flagReadFails">#2191 K2: the service's own read of the source's secure flag throws.</param>
+    /// <param name="mapsTheType">#2191 K2: the profile maps the pair's type as well as its id.</param>
+    /// <param name="sourceTable">#2191 K2: the table the project is created from (a matter by default, or a project).</param>
     private OfficeRecordCreationService OfficeCreator(
         Guid sourceMatter, Guid typeRef, FieldMappingRuleEntity? extraRule = null, bool withBearerToken = true,
-        MappingSourceCallerReadDouble? callerRead = null, bool appReadFails = false, Guid? mappedPairId = null,
-        bool catalogHasRow = true)
+        MappingSourceCallerReadDouble? callerRead = null, bool appReadFails = false, object? mappedPairId = null,
+        bool catalogHasRow = true, bool catalogFails = false, bool flagReadFails = false, bool mapsTheType = true,
+        string sourceTable = "sprk_matter")
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Loose);
         entities
@@ -579,19 +585,21 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                 return Task.FromResult(id);
             });
         entities
-            .Setup(e => e.RetrieveAsync("sprk_matter", sourceMatter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.RetrieveAsync(sourceTable, sourceMatter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string _, Guid _, string[] columns, CancellationToken _) =>
                 // #2191 K2: the service's own read of the source's secure flag answers from the fixture's Dataverse.
                 columns.SequenceEqual(new[] { OfficeRecordCreationService.SecureFlagAttribute })
-                    ? Task.FromResult(new Entity("sprk_matter", sourceMatter)
-                    {
-                        [OfficeRecordCreationService.SecureFlagAttribute] = World.ValueOf<bool?>("sprk_matter", sourceMatter, "sprk_issecure"),
-                    })
+                    ? flagReadFails
+                        ? Task.FromException<Entity>(new TimeoutException("flag read timed out"))
+                        : Task.FromResult(new Entity(sourceTable, sourceMatter)
+                        {
+                            [OfficeRecordCreationService.SecureFlagAttribute] = World.ValueOf<bool?>(sourceTable, sourceMatter, "sprk_issecure"),
+                        })
                     : appReadFails
                         ? Task.FromException<Entity>(new TimeoutException("app-only read timed out"))
-                        : Task.FromResult(new Entity("sprk_matter", sourceMatter)
+                        : Task.FromResult(new Entity(sourceTable, sourceMatter)
                         {
-                            ["sprk_matterid"] = mappedPairId ?? sourceMatter,
+                            [sourceTable + "id"] = mappedPairId ?? sourceMatter,
                             ["sprk_recordtype"] = new EntityReference("sprk_recordtype_ref", typeRef),
                         }));
 
@@ -600,35 +608,42 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             .Setup(e => e.RetrieveMultipleAsync(
                 It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == OfficeRecordCreationService.RecordTypeEntity),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => catalogHasRow
-                ? new EntityCollection(new List<Entity> { new(OfficeRecordCreationService.RecordTypeEntity, typeRef) })
-                : new EntityCollection());
+            .Returns(() => catalogFails
+                ? Task.FromException<EntityCollection>(new TimeoutException("catalog read timed out"))
+                : Task.FromResult(catalogHasRow
+                    ? new EntityCollection(new List<Entity> { new(OfficeRecordCreationService.RecordTypeEntity, typeRef) })
+                    : new EntityCollection()));
 
         // The maker's mapping profile files the new project under the matter it is created from (the polymorphic pair).
         var fieldMappings = new Mock<IFieldMappingDataverseService>();
         fieldMappings
-            .Setup(m => m.GetFieldMappingProfileWithRulesAsync("sprk_matter", "sprk_project", true, It.IsAny<CancellationToken>()))
+            .Setup(m => m.GetFieldMappingProfileWithRulesAsync(sourceTable, "sprk_project", true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FieldMappingProfileEntity
             {
                 Id = Guid.NewGuid(),
-                Name = "matter to project",
-                SourceEntity = "sprk_matter",
+                Name = "source to project",
+                SourceEntity = sourceTable,
                 TargetEntity = "sprk_project",
                 IsActive = true,
                 Rules =
                 [
                     new FieldMappingRuleEntity
                     {
-                        Id = Guid.NewGuid(), Name = "regarding id", SourceField = "sprk_matterid", SourceFieldType = 0,
+                        Id = Guid.NewGuid(), Name = "regarding id", SourceField = sourceTable + "id", SourceFieldType = 0,
                         TargetField = "sprk_regardingrecordid", TargetFieldType = 0, MappingType = 0, ExecutionOrder = 1,
                         IsActive = true,
                     },
-                    new FieldMappingRuleEntity
-                    {
-                        Id = Guid.NewGuid(), Name = "regarding type", SourceField = "sprk_recordtype", SourceFieldType = 1,
-                        TargetField = "sprk_regardingrecordtype", TargetFieldType = 1, MappingType = 0, ExecutionOrder = 2,
-                        IsActive = true,
-                    },
+                    .. (mapsTheType
+                        ? new[]
+                        {
+                            new FieldMappingRuleEntity
+                            {
+                                Id = Guid.NewGuid(), Name = "regarding type", SourceField = "sprk_recordtype", SourceFieldType = 1,
+                                TargetField = "sprk_regardingrecordtype", TargetFieldType = 1, MappingType = 0, ExecutionOrder = 2,
+                                IsActive = true,
+                            },
+                        }
+                        : Array.Empty<FieldMappingRuleEntity>()),
                     .. (extraRule is null ? Array.Empty<FieldMappingRuleEntity>() : new[] { extraRule }),
                 ],
             });
@@ -964,14 +979,15 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
 
     // ── #2191 review K2 (UAC-r2): the project is filed under the record it is created from, whatever the mapping read ─────
 
-    private Task<RecordCreationResult> OfficeCreateProjectFrom(Guid matter, OfficeRecordCreationService creator) =>
+    private Task<RecordCreationResult> OfficeCreateProjectFrom(
+        Guid matter, OfficeRecordCreationService creator, string sourceTable = "sprk_matter") =>
         creator.CreateAsync(new RecordCreationRequest
         {
             EntityType = QuickCreateEntityType.Project,
             Name = "Lease review",
             CallerUserId = "oid",
             OwnerSystemUserId = Creator.ToString("D"),
-            SourceEntityLogicalName = "sprk_matter",
+            SourceEntityLogicalName = sourceTable,
             SourceRecordId = matter,
         });
 
@@ -1097,6 +1113,118 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         result.Succeeded.Should().BeFalse();
         result.Failure!.Code.Should().Be(RecordOwnerRefusal.ParentUndetermined);
         _officeCreates.Should().BeEmpty();
+    }
+
+    // ── #2191 K2, review F3: the fail-closed branches of the refinement, each pinned ───────────────────────────────
+
+    /// <summary>
+    /// #2191 K2 review F3, must fire: under a SECURE source the mapping writes only HALF a pair (the id, no type) — not the
+    /// derived pair, so it may not stand: refused, nothing created.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_FromASecureMatter_WhenTheMappingWritesHalfAPair_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+
+        var result = await OfficeCreateProjectFrom(secure,
+            OfficeCreator(secure, RecordTypeRef(_fixture, "sprk_matter"), mapsTheType: false));
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Code.Should().Be(OfficeRecordCreationService.SecureSourceFilingMismatch);
+        _officeCreates.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// #2191 K2 review F3, must fire: the mapping names another record and the source's own secure flag cannot be told — the
+    /// read faults, or the flag reads EMPTY ("cannot be read", never "not secure") — so the mapped pair is not trusted to keep
+    /// isolation: refused, nothing created.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OfficeCreate_WhenTheMappingNamesAnotherRecord_AndTheSourceFlagCannotBeRead_IsRefused(bool readFaults)
+    {
+        var (secure, ordinary) = Matters();
+        if (!readFaults)
+            FlagUnreadable(secure);
+
+        var result = await OfficeCreateProjectFrom(secure,
+            OfficeCreator(secure, RecordTypeRef(_fixture, "sprk_matter"), mappedPairId: ordinary, flagReadFails: readFaults));
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Code.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        result.Failure.Detail.Should().EndWith("Try again.");
+        _officeCreates.Should().BeEmpty();
+    }
+
+    /// <summary>#2191 K2 review F3, must fire: the record-type catalog read FAULTS — refused (try again), nothing created.</summary>
+    [Fact]
+    public async Task OfficeCreate_WhenTheCatalogReadFails_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+
+        var result = await OfficeCreateProjectFrom(secure,
+            OfficeCreator(secure, RecordTypeRef(_fixture, "sprk_matter"), catalogFails: true));
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Code.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        result.Failure.Detail.Should().EndWith("Try again.");
+        _officeCreates.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// #2191 K2 review F3, must fire: a project created from a SECURE PROJECT whose mapping source cannot be read is still filed
+    /// under that project and created into isolation.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_FromASecureProject_WhenTheCallerReadOfTheSourceFails_IsStillFiledUnderIt_AndIsolated()
+    {
+        var parent = Guid.NewGuid();
+        SecureProject(_fixture, parent);
+        var typeRef = RecordTypeRef(_fixture, "sprk_project");
+        var failing = new MappingSourceCallerReadDouble(_ => null) { FailWithStatus = 500 };
+
+        var result = await OfficeCreateProjectFrom(parent,
+            OfficeCreator(parent, typeRef, callerRead: failing, sourceTable: "sprk_project"), sourceTable: "sprk_project");
+
+        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
+        var row = _officeCreates.Should().ContainSingle().Subject;
+        ShouldBeFiledUnder(row, parent, typeRef);
+        row.GetAttributeValue<bool?>("sprk_issecure").Should().BeTrue();
+        ShouldBeSecure(result.RecordId, "filed under the secure project it was created from");
+    }
+
+    /// <summary>
+    /// #2191 K2 review F3, must NOT fire: under a SECURE source the mapping writes the derived pair itself, its id in another
+    /// spelling (upper case, braces) — accepted, created into isolation, and the id written in the canonical spelling.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_FromASecureMatter_WhenTheMappingWritesItsOwnPairInAnotherSpelling_IsAccepted()
+    {
+        var (secure, _) = Matters();
+        var typeRef = RecordTypeRef(_fixture, "sprk_matter");
+
+        var result = await OfficeCreateProjectFrom(secure,
+            OfficeCreator(secure, typeRef, mappedPairId: secure.ToString("B").ToUpperInvariant()));
+
+        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
+        var row = _officeCreates.Should().ContainSingle().Subject;
+        row.GetAttributeValue<string>(SecureRootInheritance.PairIdColumn).Should().Be(secure.ToString("D"), "the canonical spelling");
+        ShouldBeSecure(result.RecordId, "filed under the secure matter it was created from");
+    }
+
+    /// <summary>
+    /// #2191 K2 review K1: no record-type row is a configuration gap — the refusal says to ask an administrator, not to retry.
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_WhenThePairCannotBeDerived_SaysToAskAnAdministrator_NotToRetry()
+    {
+        var (secure, _) = Matters();
+
+        var result = await OfficeCreateProjectFrom(secure,
+            OfficeCreator(secure, RecordTypeRef(_fixture, "sprk_matter"), catalogHasRow: false));
+
+        result.Failure!.Detail.Should().Contain("Ask an administrator").And.NotContain("Try again");
     }
 
     // ── (2) RE-FILE: dataverse.update_record ────────────────────────────────────────────────────────────────────────

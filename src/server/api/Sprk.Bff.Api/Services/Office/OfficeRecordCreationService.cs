@@ -804,9 +804,10 @@ public sealed class OfficeRecordCreationService
         FiledUnderPair? filedUnder = null;
         if (IsFiledUnderItsSource(request, out var parentTable, out var parentId))
         {
-            if (await DeriveFiledUnderPairAsync(parentTable, parentId, ct).ConfigureAwait(false) is not { } derived)
+            var (derived, retryable) = await DeriveFiledUnderPairAsync(parentTable, parentId, ct).ConfigureAwait(false);
+            if (derived is null)
             {
-                return FiledUnderUndetermined();
+                return FiledUnderUndetermined(retryable);
             }
 
             filedUnder = derived;
@@ -1010,9 +1011,10 @@ public sealed class OfficeRecordCreationService
     /// <summary>
     /// The pair naming <paramref name="table"/> <paramref name="id"/>: the id, and the active <see cref="RecordTypeEntity"/>
     /// row for the table (the lookup <c>OfficeSearchService.ResolveRegardingRecordTypeIdAsync</c> makes for a To Do). One
-    /// app-only catalog read; <see langword="null"/> when there is no such row or it cannot be read — never a guess.
+    /// app-only catalog read; no pair when there is no such row (a configuration gap — retrying will not help) or it cannot be
+    /// read (<c>Retryable</c>) — never a guess.
     /// </summary>
-    private async Task<FiledUnderPair?> DeriveFiledUnderPairAsync(string table, Guid id, CancellationToken ct)
+    private async Task<(FiledUnderPair? Pair, bool Retryable)> DeriveFiledUnderPairAsync(string table, Guid id, CancellationToken ct)
     {
         try
         {
@@ -1027,13 +1029,13 @@ public sealed class OfficeRecordCreationService
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             if (rows?.Entities.FirstOrDefault() is { } row && row.Id != Guid.Empty)
             {
-                return new FiledUnderPair(table, id, row.Id);
+                return (new FiledUnderPair(table, id, row.Id), false);
             }
 
             _logger.LogError(
                 "[RECORD-CREATE] No active {Catalog} row names {Table}, so a project created from it cannot be filed under it. "
                 + "Refused (fail closed).", RecordTypeEntity, table);
-            return null;
+            return (null, false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -1044,7 +1046,7 @@ public sealed class OfficeRecordCreationService
             _logger.LogError(ex,
                 "[RECORD-CREATE] The {Catalog} row for {Table} could not be read, so a project created from it cannot be filed "
                 + "under it. Refused (fail closed).", RecordTypeEntity, table);
-            return null;
+            return (null, true);
         }
     }
 
@@ -1085,6 +1087,9 @@ public sealed class OfficeRecordCreationService
         };
         if (sameId && mappedType is EntityReference type && type.Id == derived.TypeId)
         {
+            // The derived pair itself: written in the canonical spelling (lower-case "D"), whatever case or braces it was
+            // mapped in, so a text-equality reader of the pair's id matches it too.
+            entity[pairId] = derived.Id.ToString("D").ToLowerInvariant();
             return null;
         }
 
@@ -1094,7 +1099,7 @@ public sealed class OfficeRecordCreationService
                 return null; // an ordinary source: the mapped pair is kept, as before
 
             case null:
-                return FiledUnderUndetermined();
+                return FiledUnderUndetermined(retryable: true);
 
             default:
                 _logger.LogWarning(
@@ -1134,13 +1139,17 @@ public sealed class OfficeRecordCreationService
         }
     }
 
-    /// <summary>What the project would be filed under cannot be determined — the plan's own refusal for that, and its kind.</summary>
-    private static RecordCreationResult FiledUnderUndetermined() =>
+    /// <summary>
+    /// What the project would be filed under cannot be determined — the plan's own refusal for that, and its kind. A read that
+    /// failed says "try again"; a missing record-type row (configuration) says to ask an administrator, since a retry never helps.
+    /// </summary>
+    private static RecordCreationResult FiledUnderUndetermined(bool retryable) =>
         RecordCreationResult.Failed(new RecordCreationFailure(
             KindFor(Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined),
             Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined,
             "The project was not created: whether the record it is created from is secure could not be determined, and a "
-            + "project filed under a secure record must be created secure. Try again."));
+            + "project filed under a secure record must be created secure. "
+            + (retryable ? "Try again." : "Ask an administrator to check the record types configured in this environment.")));
 
     /// <summary>
     /// Task 158 r1 (owner round 31 item 2): a project — a ROOT — filed under a secure record is created INTO isolation: owned

@@ -21,7 +21,10 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// to the caller. No per-column field-security logic is built here: Dataverse answers it.</para>
 ///
 /// <para><b>One request shape</b> (#2191 review, K3): the caller read is <c>GET {entitySet}({id})</c> with no <c>$select</c>,
-/// whatever the source's columns hold, so neither its success nor its shape depends on the row's data.</para>
+/// whatever the source's columns hold, so neither its success nor its shape depends on the row's data. A mapped column the Web
+/// API does not return at all (a virtual name column, say) is therefore silently not copied — exactly like an empty one; it no
+/// longer fails the read. The read answers the whole row, so a column anywhere on the row that the Web API cannot serve fails
+/// the whole source (Unavailable, fail closed).</para>
 ///
 /// <para><b>The one test: null versus not-null, failing closed</b> (UAC-r2 condition 1). For each mapped column the app read
 /// returned a value for:</para>
