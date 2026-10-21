@@ -660,6 +660,7 @@ internal sealed class SecureChildShareWorld
         Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
         Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
         Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null,
+        Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? relocator = null,
         Microsoft.Extensions.Logging.ILogger<SecureChildReconciler>? logger = null,
         Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? sharesLogger = null)
     {
@@ -673,7 +674,7 @@ internal sealed class SecureChildShareWorld
         return new SecureChildReconciler(
             entities, resolver, synchronizer, webApi, configuration, logger ?? NullLogger<SecureChildReconciler>.Instance,
             gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
-            accessCacheInvalidator, threads, ownerPrivileges);
+            accessCacheInvalidator, threads, ownerPrivileges, relocator);
     }
 
     /// <summary>

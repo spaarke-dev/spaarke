@@ -98,6 +98,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // #2091 round 4: the reparent reads the row; a change that moves none of its parents (a rebind onto the parent it
         // holds) is written and is no re-file, so the step does not run.
         var refiled = false;
+        RecordOwnerResolution? refiledBy = null;
         if (parentChanges.Count == 0)
         {
             await WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, ct);
@@ -119,6 +120,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             }
 
             refiled = !reparent.ParentsUnchanged;
+            refiledBy = reparent;
         }
 
         // Task 156 (owner round 4 item 5, option b): this generic update can write what a to-do / event / communication /
@@ -137,7 +139,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // 129). Never throws; the write stands.
         if (refiled && wasIsolated is not null)
         {
-            await _children.AfterRefileAsync(refiledTable, recordId, wasIsolated, CancellationToken.None).ConfigureAwait(false);
+            await _children.AfterRefileAsync(refiledTable, recordId, wasIsolated, refiledBy, CancellationToken.None).ConfigureAwait(false);
         }
     }
 

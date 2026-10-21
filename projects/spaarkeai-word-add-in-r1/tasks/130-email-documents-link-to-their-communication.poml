@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="130" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Every document saved from an Outlook email links to that email's communication (#2126 / R3 ISS-015, UAC D7 T8)</title>
+    <phase>8 — UAT findings and cross-project fixes</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code on the Office save path; partner and AI-tool visibility of documents (access control, tenant data exposure).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive brownfield change across three save paths; UAC reviews under security rules (two passes).</model-tier-reason>
+    <effort>xhigh</effort>
+    <deps>none</deps>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares OfficeService and the Office save tests with task 131; run in the main session.</parallel-reason>
+    <tags>bff-api, office, communication, access-control, security, unit-test</tags>
+  </metadata>
+  <prompt>GitHub #2126 (R3 ISS-015). Owner decision 2026-10-20: (a) hide, broadened. Documents saved from an internal-only email (the .eml and its attachments) are not visible to partners. UAC D7 (design: `origin/work/unified-access-control-r2:projects/unified-access-control-r2/notes/2119-manage-access-all-forms-design.md` §6): the read side derives visibility from `sprk_document.sprk_relatedcommunication` (one parent hop through `sprk_parentdocument`, max 3) plus the 065 rule; UAC builds that (T7). This task is T8, the writer side. UAC brief 2026-10-20: one invariant — every document saved from an email carries the link to that email's `sprk_communication`.
+
+Code map (master c3ec5d6e5):
+- Gap 1 — attachments of a saved email: `UploadFinalizationWorker.ProcessSingleAttachmentAsync` (:1188-1306) sets `ParentDocumentLookup`, `EmailParentId`, `SourceType` and the association, but no communication link.
+- Gap 2 — single attachment save (`SaveContentType.Attachment`): no capture runs (`EmailUploadCaptureService.CaptureWithOutcomeAsync` :99 returns null for non-email), no link. `AttachmentMetadata.ParentEmailId` carries the parent Message-ID; `OfficeEmailEnricher.EnrichAttachmentFromGraphAsync` (OfficeService :393-396) already fetches the parent message from Graph.
+- Gap 3 — the .eml: `OfficeService.SaveAsync` :506-517 runs the capture and DISCARDS the communication id; `OfficeDocumentPersistence.MergeUploaderAndResolveCanonicalAsync` (:790-825) re-resolves by Message-ID and returns null on null services (:793), blank Message-ID, or a failed lookup; the link is a separate best-effort write after the create (:338, :834-842 via `CrossPathLink`). A capture that SKIPS (association or ownership refusal, EmailUploadCaptureService :117-167) leaves no communication at all.
+- Two document-create paths exist: `OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync` (OfficeService :966) and `UploadFinalizationWorker.CreateDocumentRecordAsync` (:614). Map which one each content type uses before editing.</prompt>
+  <goal>A document the Outlook add-in creates from an email (the .eml, each attachment of it, a single attachment saved on its own) is created linked to that email's sprk_communication; when the email truly cannot be identified it is created with its own Access Permission = Restricted. No save fails because of this.</goal>
+  <constraints>
+    <constraint>Carry the capture outcome's CommunicationId through the save (request → finalization payload → document create) instead of re-resolving it; keep the Message-ID lookup only as the fallback when the capture returned nothing. Reuse `EmailUploadCaptureService.CaptureWithOutcomeAsync` (race-proof per Message-ID) for attachment saves; no second capture or create path (CLAUDE.md §11).</constraint>
+    <constraint>Write the link IN the document create where the create path allows it (UAC: "no second write"). If a path can only link after the create, the link write is retried and its final failure is an Error log plus the Restricted fallback — never a silently unlinked document.</constraint>
+    <constraint>Restricted fallback (UAC D7 T8; owner acceptance relayed by UAC 2026-10-20, CONFIRM WITH THE OWNER before merge): only when no communication can be linked after capture and lookup. Use the existing Restricted constant (`ParentLineage` / `ExternalParticipationService.AccessPermissionRestricted` = 100000002); do not add a third literal. Log ids only (no subject, sender or body).</constraint>
+    <constraint>Null `ICommunicationDataverseService` / `IGenericEntityService` in `OfficeDocumentPersistence` is a wiring defect: production DI must supply them (assert in a DI test); only the bare test constructor may omit them.</constraint>
+    <constraint>Do not change what a linked document's own Access Permission is (stays default/Standard); the link alone hides nothing — the 065 rule decides. Do not touch UAC's read side (T7), ExternalCallerCommunicationGuard, or R3's external routes.</constraint>
+    <constraint>BFF §10 obligations (publish-size delta vs fresh master, CVE check, tests). Dev BFF deploy only with the owner's go and the standing deploy coordination with R3 (build must contain R3 077, 283466d40).</constraint>
+    <constraint>Owner decisions 2026-10-20 (this session): (1) D7 Restricted confirmed for a document whose email cannot be identified. (2) A single attachment save files its parent email to the save's record exactly as an email save would, through task 121's `ReconciledEmailFiling.FileIfUnfiledAsync`; an email already filed is never moved. (3) #2171 (a refused filing is silent) is task 131, not this task.</constraint>
+    <constraint>Before merge (UAC contract 2026-10-20): write `sprk_accessinheritance` with UAC task 189's own serializer of `AccessInheritance.OwnNarrowing(Restricted)` in the same create payload at every Restricted site (.eml, single attachment, children); list the sites in 189's writer guard if 189 merges first; pass #2150's F3 caller to the attachment-branch `FileIfUnfiledAsync` if #2150 merges first.</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step>Map the create path for each content type; carry the capture's communication id into the create; capture the parent for a single attachment.</step>
+    <step>Apply the link-or-Restricted outcome in every Office create; stage both fields in the Dataverse create; guard it (ArchTest) and test it end to end.</step>
+    <step>Two adversarial security passes, code-review, adr-check; publish-size delta; then the PR and UAC's two passes.</step>
+  </steps>  <acceptance-criteria>
+    <criterion testable="true">Must-fire: an email save with attachments — the .eml and every child document are created with sprk_relatedcommunication = the capture's communication.</criterion>
+    <criterion testable="true">Must-fire: a single attachment save links the canonical communication when it exists, else the communication the capture creates from the fetched parent message.</criterion>
+    <criterion testable="true">Must-fire: an .eml save whose Message-ID lookup misses is linked to the captured communication.</criterion>
+    <criterion testable="true">Must-fire: the capture is idempotent per Message-ID — a second save of the same email (or of its attachment) reuses the row, no duplicate.</criterion>
+    <criterion testable="true">Must-fire: an unidentifiable email (no Message-ID / capture refused / link write finally fails) → document created with own sprk_accesspermission = Restricted, an Error log with ids only, and the save succeeds.</criterion>
+    <criterion testable="true">Must-not-fire: a Word/Document save gets no communication link and no Restricted; an attachment of an identified, non-internal-only email is linked and stays Standard.</criterion>
+    <criterion testable="true">DI test: production OfficeDocumentPersistence resolves with both communication seams non-null.</criterion>
+    <criterion testable="true">Where ExternalCallerCommunicationGuard can be driven from a test, an internal-only email's .eml, child attachment and single attachment are hidden by it after the fix.</criterion>
+    <criterion testable="false">UAC two-pass security review of the PR before merge.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>EmailUploadCaptureService.CaptureWithOutcomeAsync, CrossPathLink, OfficeDocumentPersistence, UploadFinalizationWorker, CreateDocumentRequest (Spaarke.Dataverse), ParentLineage Restricted constant.</existing>
+    <extension>Yes: extend CreateDocumentRequest with the communication link and an optional access permission, and the finalization payload with the communication id; reuse the existing capture for attachments. No new service.</extension>
+    <cost-of-doing-nothing>Documents saved from internal-only emails are visible to partners in the SPA and to the AI chat tools (#2126).</cost-of-doing-nothing>
+  </justification>
+</task>

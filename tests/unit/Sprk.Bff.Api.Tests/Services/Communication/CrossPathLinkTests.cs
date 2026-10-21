@@ -21,75 +21,9 @@ public class CrossPathLinkTests
 {
     private static readonly ILogger Logger = NullLogger.Instance;
 
-    // ── LinkDocumentToCommunicationAsync (office side: capture-then-upload) ────────────────────
-
-    [Fact]
-    public async Task LinkDocumentToCommunicationAsync_WhenNotYetLinked_WritesTheLookup()
-    {
-        var documentId = Guid.NewGuid();
-        var communicationId = Guid.NewGuid();
-        var generic = new Mock<IGenericEntityService>();
-        generic.Setup(g => g.RetrieveAsync("sprk_document", documentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_document", documentId)); // no lookup set yet
-        Dictionary<string, object>? written = null;
-        generic.Setup(g => g.UpdateAsync("sprk_document", documentId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
-            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => written = f)
-            .Returns(Task.CompletedTask);
-
-        var linked = await CrossPathLink.LinkDocumentToCommunicationAsync(
-            generic.Object, documentId, communicationId, Logger, CancellationToken.None);
-
-        linked.Should().BeTrue("an unlinked document is linked to its captured communication");
-        written.Should().NotBeNull();
-        var reference = written![CrossPathLink.LinkedCommunicationAttribute].Should().BeOfType<EntityReference>().Subject;
-        reference.LogicalName.Should().Be("sprk_communication");
-        reference.Id.Should().Be(communicationId, "the document points at the ONE canonical communication (FR-C4)");
-    }
-
-    [Fact]
-    public async Task LinkDocumentToCommunicationAsync_WhenAlreadyLinkedToSameCommunication_DoesNotWrite()
-    {
-        var documentId = Guid.NewGuid();
-        var communicationId = Guid.NewGuid();
-        var alreadyLinked = new Entity("sprk_document", documentId);
-        alreadyLinked[CrossPathLink.LinkedCommunicationAttribute] = new EntityReference("sprk_communication", communicationId);
-
-        var generic = new Mock<IGenericEntityService>();
-        generic.Setup(g => g.RetrieveAsync("sprk_document", documentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(alreadyLinked);
-
-        var linked = await CrossPathLink.LinkDocumentToCommunicationAsync(
-            generic.Object, documentId, communicationId, Logger, CancellationToken.None);
-
-        linked.Should().BeFalse("re-processing the same pair is idempotent — no re-write");
-        generic.Verify(g => g.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
-            Times.Never, "a single-valued lookup already pointing at this communication must not be written again");
-    }
-
-    [Fact]
-    public async Task LinkDocumentToCommunicationAsync_WhenRetrieveThrows_IsNonFatalAndReturnsFalse()
-    {
-        var generic = new Mock<IGenericEntityService>();
-        generic.Setup(g => g.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("simulated Dataverse retrieve failure on sprk_relatedcommunication"));
-
-        var linked = await CrossPathLink.LinkDocumentToCommunicationAsync(
-            generic.Object, Guid.NewGuid(), Guid.NewGuid(), Logger, CancellationToken.None);
-
-        linked.Should().BeFalse("a link failure (e.g. the gated column not yet deployed) degrades, never throws (NFR-04)");
-    }
-
-    [Fact]
-    public async Task LinkDocumentToCommunicationAsync_WhenEmptyIds_IsNoOpWithoutTouchingDataverse()
-    {
-        var generic = new Mock<IGenericEntityService>(MockBehavior.Strict); // strict → any call fails the test
-
-        var a = await CrossPathLink.LinkDocumentToCommunicationAsync(generic.Object, Guid.Empty, Guid.NewGuid(), Logger, CancellationToken.None);
-        var b = await CrossPathLink.LinkDocumentToCommunicationAsync(generic.Object, Guid.NewGuid(), Guid.Empty, Logger, CancellationToken.None);
-
-        a.Should().BeFalse();
-        b.Should().BeFalse();
-    }
+    // LinkDocumentToCommunicationAsync's four tests were removed with the method (task 130, ADR-038 A3: subject deleted).
+    // Its replacement, the link written in the document create, is covered by
+    // tests/integration/data-mutation/OfficeVersionSave/OfficeEmailDocumentCommunicationLinkTests.cs.
 
     // ── FindAndLinkArchiveDocumentsAsync (capture side: upload-then-capture) ───────────────────
 

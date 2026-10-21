@@ -187,6 +187,20 @@ public record UploadFinalizationPayload
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? CreatedByPersonId { get; init; }
+
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 130 (#2126, UAC D7 T8): the <c>sprk_communication</c> the save's email-derived
+    /// document (the <c>.eml</c>, or a single attachment) was created linked to. The worker creates every document it makes
+    /// for an Email or Attachment save — the attachment children, and the fallback create — linked to the same one.
+    /// </summary>
+    /// <remarks>
+    /// For an Email or Attachment save, null means the email could not be identified: the save's document was created
+    /// with its own Access Permission = Restricted, and the worker creates its documents Restricted too. A message
+    /// enqueued before this field existed reads the same way (fail closed). Ignored for a Document save. Omitted from the
+    /// JSON when null.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? RelatedCommunicationId { get; init; }
 }
 
 /// <summary>

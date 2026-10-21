@@ -216,6 +216,7 @@ internal sealed class UpdateRecordActionCore
         // #2091 round 4: the reparent reads the row; a change that moves none of its parents (a rebind onto the parent it
         // holds) is written and is no re-file, so the step does not run.
         var refiled = false;
+        RecordOwnerResolution? refiledBy = null;
         Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller = null;
         if (parentChanges.Count == 0)
         {
@@ -249,6 +250,7 @@ internal sealed class UpdateRecordActionCore
             }
 
             refiled = !reparent.ParentsUnchanged;
+            refiledBy = reparent;
         }
 
         // After whichever path wrote the record (the plain PATCH or the re-file): task 156's re-stamp, then task 142's
@@ -264,9 +266,10 @@ internal sealed class UpdateRecordActionCore
             if (refiled)
             {
                 // #2143 round 7 (F1): with the person the re-file's F3 check acted for, so the thread that follows moves on it.
+                // #2159 slice 2: with the reparent's answer (its F3 permission), so a re-filed document's file release is recorded.
                 await children.AfterRefileAsync(
                     refiledTable, input.RecordId, wasIsolated, Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile,
-                    secureExitCaller, CancellationToken.None).ConfigureAwait(false);
+                    secureExitCaller, refiledBy, CancellationToken.None).ConfigureAwait(false);
             }
         }
         // Spaarkeai-word-add-in-r1 task 129: a re-file that could not run the step above (a host without the reconciler, logged
