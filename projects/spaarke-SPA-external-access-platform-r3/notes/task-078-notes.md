@@ -301,3 +301,26 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
 - Filed by UAC, non-blocking: #2167 (privilege answer for unlicensed users lists Create; safe because asked after RPA), #2168 (disabled/unlicensed refusal reported as a fault, not 403; fails closed). #1567 closed.
 - Flag stays ON. Rollback unchanged: delete `ExternalAccess__ImpersonatedRootSets__Enabled`.
 
+
+## Dev BFF deploy of master a10e814d02 (2026-10-21 14:34Z; owner: "yes approved to deploy a10e814d0")
+
+- **Requested by** UAC, for #2169 (task 189) and #2150. The build also contains 3531ed65e (#2166, SPA-only), 44063b347 (ontology 042c) and 2a38e6ce6 (field-mapping #2184).
+- **Peer OKs:** ontology, field-mapping, word-add-in, sdap-spe-admin and ebilling. Provisioning has a standing OK (dev BFF only). UAC passed on the owner's "yes deploy" from its session; it was not used as approval, and the owner approved directly in this session.
+- **Pre-checks:**
+  - Live DLL `4f5f22694`, an ancestor of a10e814d02. healthz 200.
+  - Does NOT contain e0df77339 (ebilling 015), so the `sprk_invoicestatus` delete stays blocked.
+  - Pre-existing exposure, not changed by this build: #2188 (fix #2191 is in UAC review).
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261021T143151Z` (222 files, DLL `4f5f22694`).
+- **Deploy:** `Deploy-BffApi.ps1` from a detached worktree `C:/wtbffe-a10`. Package 37.56 MB; 4 critical files SHA-256 verified; CORS OK.
+- **Read-back** (14:35:33Z):
+  - ProductVersion `1.0.0+a10e814d0200c4f20019647a17074219bb8161f9`.
+  - `/healthz` and `/healthz/dataverse` 200; `/api/me` anonymous 401.
+  - App settings unchanged (036 ON).
+- **secure-child-reconciliation:**
+  - Run 14:36:00–14:37:58Z: recordsWritten 279, failed 0, sweep incomplete (1000 rows).
+  - Run 14:38:00–14:38:43Z: the first complete sweep (66 rows). changed 0, failed 0, writeCapReached false, carriedRows 0, tablesWithoutColumn [], failure null.
+  - #2161 can start no earlier than 15:48:43Z.
+- **Exceptions after the deploy** (spe-insights-dev-67e2xz) at 14:43Z: no new exception class.
+  - BadImageFormatException: 2 at the 14:35 restart. One problemId was seen at earlier deploys.
+  - Graph ODataError "Invalid hostname for this tenancy": existing background noise.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T143151Z` (= `4f5f22694`). The 059 floor still holds; 4f5f22694 contains 077.
