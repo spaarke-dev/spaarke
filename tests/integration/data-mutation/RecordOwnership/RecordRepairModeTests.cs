@@ -604,6 +604,21 @@ public sealed class RecordRepairModeTests
     }
 
     [Fact]
+    public async Task ATeamOwnedSource_WhenTheSecureTeamIsMissing_CopiesNothing_FailClosed()
+    {
+        // Review pass 3: with no Secure Record owner team to compare against, the source's team owner cannot be told
+        // not to be it.
+        _world.ShareWorld = SecureChildShareWorld.WithoutSecureBusinessUnit;
+        var source = _world.MatterHolding(Directory.ChildBu, Directory.ChildTeam, isSecure: false, "Secret Client");
+        var id = EventOwnedByThePersonUnder(source);
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        NothingSecretWasWritten();
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping && f.ReasonCode == RecordRepairReason.MappingSourceSecure);
+    }
+
+    [Fact]
     public async Task ASourceReadThatFaults_CopiesNothing_FailClosed()
     {
         var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
@@ -904,6 +919,9 @@ internal sealed class RepairWorld
     /// <summary>When set, the resolver answers this instead of deciding (an owner decision the test dictates).</summary>
     public RecordOwnerResolution? ResolverAnswer { get; set; }
 
+    /// <summary>The share world the synchronizer reads the Secure Record owner team from (standard: present).</summary>
+    public Func<SecureChildShareWorld> ShareWorld { get; set; } = SecureChildShareWorld.Standard;
+
     /// <summary>When set, reading a mapping source's columns throws it.</summary>
     public Exception? SourceReadFault { get; set; }
 
@@ -1192,7 +1210,7 @@ internal sealed class RepairWorld
             new CapturingResolver(Directory.Resolver(), OwnerContexts, () => ResolverFault, () => ResolverAnswer), appOnly.Object, entities,
             SecureRootFilingGateFixtures.Over(entities),
             new CoreAncestorRestamper(_stamps.Service, _stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance),
-            SecureChildShareWorld.SynchronizerOver(SecureChildShareWorld.Standard, new FakeRecordShareTable()),
+            SecureChildShareWorld.SynchronizerOver(ShareWorld, new FakeRecordShareTable()),
             scopes, new Mock<IMembershipEventPublisher>().Object, NullLogger<RecordCreationService>.Instance);
     }
 

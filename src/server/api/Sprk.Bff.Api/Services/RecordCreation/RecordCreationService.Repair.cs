@@ -396,7 +396,8 @@ internal sealed partial class RecordCreationService
     /// Review F1-e (ii), belt and braces over the owner gate: whether the source's data may be copied into the row. Not when
     /// the source is a secure-flagged root whose flag is not an explicit <c>false</c> (empty reads as flagged), or is owned
     /// by the Secure Record owner team, unless the row is owned by that Secure team. Anything that cannot be told — an
-    /// owner that did not come back, a fault deciding the team — is secure (fail closed).
+    /// owner that did not come back, a fault deciding the team, or (review pass 3) a Secure Record owner team that is
+    /// missing or ambiguous when a team owns the source — is secure (fail closed).
     /// </summary>
     private async Task<bool> SourceMayBeCopiedAsync(string table, Entity row, MappingSource source, Entity read, CancellationToken ct)
     {
@@ -412,16 +413,32 @@ internal sealed partial class RecordCreationService
                 return false;
             }
 
-            var sourceSecureTeam = string.Equals(sourceOwner.LogicalName, "team", StringComparison.OrdinalIgnoreCase)
-                && await _shares.IsSecureOwnerTeamAsync(sourceOwner.Id, ct).ConfigureAwait(false);
+            var rowOwner = row.GetAttributeValue<EntityReference>(OwnerColumn);
+            var sourceTeamOwned = string.Equals(sourceOwner.LogicalName, "team", StringComparison.OrdinalIgnoreCase);
+            var rowTeamOwned = rowOwner is { LogicalName: "team" } && rowOwner.Id != Guid.Empty;
+            Guid? secureTeam = null;
+            if (sourceTeamOwned || (flagged && rowTeamOwned))
+            {
+                // Review pass 3: a Secure Record owner team that is missing or ambiguous cannot tell a Secure-team owner
+                // from any other, so the source's owner cannot be told: fail closed.
+                var resolved = await _shares.SecureOwnerTeamAsync(ct).ConfigureAwait(false);
+                if (resolved.TeamId is not { } known || known == Guid.Empty)
+                {
+                    _logger.LogWarning("[RECORD-REPAIR] {Table} {Id}: the Secure Record owner team is {State}, so whether the mapping " +
+                                       "source {Source} {SourceId} is secure cannot be told; nothing was mapped", table, row.Id,
+                        resolved.Refusal is null ? "missing" : "ambiguous", source.EntityLogicalName, source.RecordId);
+                    return false;
+                }
+
+                secureTeam = known;
+            }
+
+            var sourceSecureTeam = sourceTeamOwned && sourceOwner.Id == secureTeam;
             if (!flagged && !sourceSecureTeam)
                 return true;
 
-            var rowOwner = row.GetAttributeValue<EntityReference>(OwnerColumn);
-            var isolated = rowOwner is { LogicalName: "team" } rowTeam
-                && (sourceSecureTeam
-                    ? rowTeam.Id == sourceOwner.Id
-                    : await _shares.IsSecureOwnerTeamAsync(rowTeam.Id, ct).ConfigureAwait(false));
+            var isolated = rowTeamOwned
+                && (sourceSecureTeam ? rowOwner!.Id == sourceOwner.Id : rowOwner!.Id == secureTeam);
             if (!isolated)
             {
                 _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the mapping source {Source} {SourceId} is secure and the row " +
