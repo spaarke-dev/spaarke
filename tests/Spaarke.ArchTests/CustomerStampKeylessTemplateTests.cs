@@ -57,6 +57,29 @@ public class CustomerStampKeylessTemplateTests
         "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1",
     ];
 
+    private const string BlobDataActionPrefix = "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/";
+    private const string BlobTagsReadDataAction = "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/read";
+
+    /// <summary>Built-in Storage Blob Data Contributor's <c>actions</c>, verbatim (<c>az role definition list --name
+    /// "Storage Blob Data Contributor"</c>, 2026-10-21, recorded in ebilling-r1 notes/091-storage-provisioning.md §3).</summary>
+    private static readonly string[] ContributorActions =
+    [
+        "Microsoft.Storage/storageAccounts/blobServices/containers/delete",
+        "Microsoft.Storage/storageAccounts/blobServices/containers/read",
+        "Microsoft.Storage/storageAccounts/blobServices/containers/write",
+        "Microsoft.Storage/storageAccounts/blobServices/generateUserDelegationKey/action",
+    ];
+
+    /// <summary>Built-in Storage Blob Data Contributor's <c>dataActions</c>, verbatim (same read).</summary>
+    private static readonly string[] ContributorDataActions =
+    [
+        "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/delete",
+        "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read",
+        "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write",
+        "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/move/action",
+        "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action",
+    ];
+
     /// <summary>Any ARM <c>list*()</c> call (listKeys, listSecrets, listCredentials, listAccountSas, …), a key-bearing
     /// connection string, or a SAS authorization rule. Scanned over the template with descriptions removed.</summary>
     private static readonly Regex KeyMaterial = new(
@@ -291,6 +314,121 @@ public class CustomerStampKeylessTemplateTests
         Assert.Contains(violations, v => v.Contains("'unscoped'", StringComparison.Ordinal));
     }
 
+    // ---- eBilling file store (ebilling-r1 091, option A; unified-access-control-r2 conditions 1 and 4) -----------
+
+    [Fact(DisplayName = "091/uac-r2 c1: the file-store custom role is exactly Storage Blob Data Contributor plus blobs/tags/read")]
+    public void FileStoreRole_IsExactlyContributorPlusTagRead()
+    {
+        var definitions = Resources(FileStoreTemplate()).Select(r => r.Resource)
+            .Where(r => IsType(r, "Microsoft.Authorization/roleDefinitions")).ToList();
+
+        var definition = Assert.Single(definitions);
+        var violations = FileStoreRoleViolations(definition);
+        Assert.True(violations.Count == 0, "ebilling-file-store role differs from Storage Blob Data Contributor + tags/read (uac-r2 condition 1): " + string.Join("; ", violations));
+    }
+
+    [Fact(DisplayName = "091/uac-r2 c4: the file-store role is assigned per container only, never on the account or resource group")]
+    public void FileStoreRole_IsAssignedPerContainerOnly()
+    {
+        var violations = BlobDataRoleScopeViolations(FileStoreTemplate(), out var containerGrants);
+
+        Assert.True(containerGrants >= 1, "ebilling-file-store.json has no container-scoped grant of its role — the scan is no longer seeing the module's assignments.");
+        Assert.True(violations.Count == 0, "The file-store role must be assigned per container (uac-r2 condition 4): " + string.Join("; ", violations));
+    }
+
+    [Fact(DisplayName = "091/uac-r2 c1: must-not-fire — the exact set, in any order, is accepted")]
+    public void FileStoreRole_ExactSet_IsAccepted()
+    {
+        var definition = RoleDefinition(
+            ContributorActions.Reverse(),
+            ContributorDataActions.Append(BlobTagsReadDataAction).Reverse());
+
+        Assert.Empty(FileStoreRoleViolations(definition));
+    }
+
+    [Theory(DisplayName = "091/uac-r2 c1: must-fire — any widening, narrowing or wildcard of the file-store role is flagged")]
+    [InlineData("tags-write")]
+    [InlineData("tags-wildcard")]
+    [InlineData("blobs-wildcard")]
+    [InlineData("action-wildcard")]
+    [InlineData("star")]
+    [InlineData("missing-tags-read")]
+    [InlineData("missing-action")]
+    [InlineData("extra-action")]
+    [InlineData("not-data-actions")]
+    [InlineData("not-actions")]
+    [InlineData("second-permission-block")]
+    [InlineData("condition")]
+    [InlineData("subscription-assignable")]
+    [InlineData("account-assignable")]
+    public void FileStoreRole_Deviation_IsFlagged(string deviation)
+    {
+        var dataActions = ContributorDataActions.Append(BlobTagsReadDataAction);
+        var definition = deviation switch
+        {
+            "tags-write" => RoleDefinition(ContributorActions, dataActions.Append("Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/write")),
+            "tags-wildcard" => RoleDefinition(ContributorActions, ContributorDataActions.Append("Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/*")),
+            "blobs-wildcard" => RoleDefinition(ContributorActions, ["Microsoft.Storage/storageAccounts/blobServices/containers/blobs/*"]),
+            "action-wildcard" => RoleDefinition(ContributorActions.Append("Microsoft.Storage/storageAccounts/blobServices/*"), dataActions),
+            "star" => RoleDefinition(ContributorActions, dataActions.Append("*")),
+            "missing-tags-read" => RoleDefinition(ContributorActions, ContributorDataActions),
+            "missing-action" => RoleDefinition(ContributorActions.Skip(1), dataActions),
+            "extra-action" => RoleDefinition(ContributorActions.Append("Microsoft.Storage/storageAccounts/listKeys/action"), dataActions),
+            "not-data-actions" => RoleDefinition(ContributorActions, dataActions, notDataActions: [BlobTagsReadDataAction]),
+            "not-actions" => RoleDefinition(ContributorActions, dataActions, notActions: ["Microsoft.Storage/storageAccounts/blobServices/containers/delete"]),
+            "second-permission-block" => RoleDefinition(ContributorActions, dataActions, extraBlock: true),
+            "condition" => RoleDefinition(ContributorActions, dataActions, condition: "@Resource[x] StringEquals 'y'"),
+            "subscription-assignable" => RoleDefinition(ContributorActions, dataActions, assignableScope: "[subscription().id]"),
+            "account-assignable" => RoleDefinition(ContributorActions, dataActions, assignableScope: "[resourceId('Microsoft.Storage/storageAccounts', 'sa')]"),
+            _ => throw new ArgumentOutOfRangeException(nameof(deviation)),
+        };
+
+        Assert.NotEmpty(FileStoreRoleViolations(definition));
+    }
+
+    [Fact(DisplayName = "091/uac-r2 c4: negative control — account-, resource-group- and deployment-scope grants of a custom blob role are flagged; a container grant and a non-blob custom role are not")]
+    public void CustomBlobRoleScope_NegativeControl()
+    {
+        var template = JsonNode.Parse("""
+            { "resources": [
+                { "type": "Microsoft.Authorization/roleDefinitions", "name": "[guid(resourceGroup().id, 'file-store')]",
+                  "properties": { "permissions": [ { "actions": [], "dataActions": [ "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/read" ] } ] } },
+                { "type": "Microsoft.Authorization/roleDefinitions", "name": "[guid(resourceGroup().id, 'other')]",
+                  "properties": { "permissions": [ { "actions": [ "Microsoft.Web/sites/read" ], "dataActions": [] } ] } },
+                { "type": "Microsoft.Authorization/roleAssignments", "name": "account",
+                  "scope": "[resourceId('Microsoft.Storage/storageAccounts', 'sa')]",
+                  "properties": { "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, 'file-store'))]" } },
+                { "type": "Microsoft.Authorization/roleAssignments", "name": "resourceGroup",
+                  "scope": "[resourceGroup().id]",
+                  "properties": { "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, 'file-store'))]" } },
+                { "type": "Microsoft.Authorization/roleAssignments", "name": "deployment",
+                  "properties": { "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, 'file-store'))]" } },
+                { "type": "Microsoft.Authorization/roleAssignments", "name": "container",
+                  "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', 'sa', 'default', 'c')]",
+                  "properties": { "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, 'file-store'))]" } },
+                { "type": "Microsoft.Authorization/roleAssignments", "name": "web",
+                  "scope": "[resourceGroup().id]",
+                  "properties": { "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, 'other'))]" } }
+              ] }
+            """)!;
+
+        var violations = BlobDataRoleScopeViolations(template, out var containerGrants);
+
+        Assert.Equal(1, containerGrants);
+        Assert.Equal(3, violations.Count);
+        Assert.Contains(violations, v => v.Contains("'account'", StringComparison.Ordinal));
+        Assert.Contains(violations, v => v.Contains("'resourceGroup'", StringComparison.Ordinal));
+        Assert.Contains(violations, v => v.Contains("'deployment'", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "091: the file-store module emits no key material")]
+    public void FileStoreTemplate_ContainsNoKeyMaterial()
+    {
+        var hits = KeyMaterialHits(WithoutDescriptions(FileStoreTemplate()));
+
+        Assert.True(hits.Count == 0, "ebilling-file-store.json produces key material: " + string.Join("; ", hits));
+    }
+
     // ---- rules ------------------------------------------------------------------------------------------------
 
     private static List<string> LocalAuthViolations(JsonNode template)
@@ -425,18 +563,31 @@ public class CustomerStampKeylessTemplateTests
         return violations;
     }
 
-    /// <summary>Storage Blob Data Contributor / Owner / Reader role assignments whose scope is not a single blob
-    /// container (account, resource group or no scope at all).</summary>
+    /// <summary>Role assignments of Storage Blob Data Contributor / Owner / Reader, or of a custom role defined in the same
+    /// template with any blob data action (the eBilling file-store role), whose scope is not a single blob container
+    /// (account, resource group or no scope at all).</summary>
     private static List<string> BlobDataRoleScopeViolations(JsonNode template, out int containerGrants)
     {
         var violations = new List<string>();
         containerGrants = 0;
+
+        // A custom role is referenced by its name expression (a guid(...) call, or a literal), so match on that text.
+        var customBlobRoleNames = Resources(template).Select(r => r.Resource)
+            .Where(r => IsType(r, "Microsoft.Authorization/roleDefinitions")
+                && (r["properties"]?["permissions"] as JsonArray ?? new JsonArray())
+                    .SelectMany(p => p?["dataActions"] as JsonArray ?? new JsonArray())
+                    .Any(a => a?.GetValue<string>().StartsWith(BlobDataActionPrefix, StringComparison.OrdinalIgnoreCase) == true))
+            .Select(r => r["name"]?.GetValue<string>().Trim().TrimStart('[').TrimEnd(']') ?? string.Empty)
+            .Where(n => n.Length > 0)
+            .ToList();
+
         foreach (var (resource, variables) in Resources(template).Where(r => IsType(r.Resource, "Microsoft.Authorization/roleAssignments")))
         {
             var roleExpression = resource["properties"]?["roleDefinitionId"]?.GetValue<string>() ?? string.Empty;
             var variable = Regex.Match(roleExpression, @"variables\('([^']+)'\)").Groups[1].Value;
             var roleText = variable.Length > 0 ? variables?[variable]?.GetValue<string>() ?? roleExpression : roleExpression;
-            if (!BlobDataRoleIds.Any(id => roleText.Contains(id, StringComparison.OrdinalIgnoreCase)))
+            if (!BlobDataRoleIds.Any(id => roleText.Contains(id, StringComparison.OrdinalIgnoreCase))
+                && !customBlobRoleNames.Any(n => roleText.Contains(n, StringComparison.Ordinal)))
             {
                 continue;
             }
@@ -453,6 +604,103 @@ public class CustomerStampKeylessTemplateTests
         }
 
         return violations;
+    }
+
+    /// <summary>Every way <paramref name="definition"/> differs from the file-store role uac-r2 accepted: one permission
+    /// block whose actions are exactly <see cref="ContributorActions"/> and whose dataActions are exactly
+    /// <see cref="ContributorDataActions"/> plus <see cref="BlobTagsReadDataAction"/>; no wildcard; empty notActions and
+    /// notDataActions; no condition; assignable only at the deployment's resource group.</summary>
+    private static List<string> FileStoreRoleViolations(JsonObject definition)
+    {
+        var violations = new List<string>();
+        var properties = definition["properties"];
+        var permissions = properties?["permissions"] as JsonArray ?? new JsonArray();
+        if (permissions.Count != 1)
+        {
+            violations.Add($"{permissions.Count} permission blocks (expected exactly 1)");
+        }
+
+        static string[] Values(JsonNode? node, string key) =>
+            (node?[key] as JsonArray ?? new JsonArray()).Select(v => v?.GetValue<string>() ?? string.Empty).ToArray();
+
+        void CompareSet(string key, IEnumerable<string> actual, IEnumerable<string> expected)
+        {
+            var actualSet = actual.ToHashSet(StringComparer.Ordinal);
+            var expectedSet = expected.ToHashSet(StringComparer.Ordinal);
+            violations.AddRange(actualSet.Except(expectedSet).Select(a => $"{key} has unexpected '{a}'"));
+            violations.AddRange(expectedSet.Except(actualSet).Select(e => $"{key} lacks '{e}'"));
+        }
+
+        var block = permissions.FirstOrDefault();
+        var actions = permissions.SelectMany(p => Values(p, "actions")).ToList();
+        var dataActions = permissions.SelectMany(p => Values(p, "dataActions")).ToList();
+        CompareSet("actions", actions, ContributorActions);
+        CompareSet("dataActions", dataActions, ContributorDataActions.Append(BlobTagsReadDataAction));
+        violations.AddRange(actions.Concat(dataActions).Where(a => a.Contains('*', StringComparison.Ordinal)).Select(a => $"wildcard '{a}'"));
+        violations.AddRange(dataActions.Where(a => a.Contains("/tags/write", StringComparison.OrdinalIgnoreCase)).Select(a => $"tag write '{a}'"));
+        foreach (var key in new[] { "notActions", "notDataActions" })
+        {
+            var values = permissions.SelectMany(p => Values(p, key)).ToList();
+            if (values.Count > 0)
+            {
+                violations.Add($"{key} is not empty: {string.Join(", ", values)}");
+            }
+        }
+
+        if (block?["condition"] is not null || properties?["condition"] is not null)
+        {
+            violations.Add("has a condition");
+        }
+
+        var scopes = Values(properties, "assignableScopes");
+        if (scopes.Length != 1 || scopes[0] != "[resourceGroup().id]")
+        {
+            violations.Add($"assignableScopes is [{string.Join(", ", scopes)}] (expected only [resourceGroup().id])");
+        }
+
+        return violations;
+    }
+
+    private static JsonObject RoleDefinition(
+        IEnumerable<string> actions,
+        IEnumerable<string> dataActions,
+        string[]? notActions = null,
+        string[]? notDataActions = null,
+        bool extraBlock = false,
+        string? condition = null,
+        string assignableScope = "[resourceGroup().id]")
+    {
+        static JsonArray Array(IEnumerable<string> values) => new(values.Select(v => (JsonNode)JsonValue.Create(v)!).ToArray());
+
+        var block = new JsonObject
+        {
+            ["actions"] = Array(actions),
+            ["notActions"] = Array(notActions ?? []),
+            ["dataActions"] = Array(dataActions),
+            ["notDataActions"] = Array(notDataActions ?? []),
+        };
+        if (condition is not null)
+        {
+            block["condition"] = condition;
+        }
+
+        var permissions = new JsonArray(block);
+        if (extraBlock)
+        {
+            permissions.Add(new JsonObject { ["actions"] = new JsonArray(), ["dataActions"] = new JsonArray() });
+        }
+
+        return new JsonObject
+        {
+            ["type"] = "Microsoft.Authorization/roleDefinitions",
+            ["name"] = "[guid(resourceGroup().id, 'file-store')]",
+            ["properties"] = new JsonObject
+            {
+                ["type"] = "customRole",
+                ["permissions"] = permissions,
+                ["assignableScopes"] = Array([assignableScope]),
+            },
+        };
     }
 
     // ---- template walking -------------------------------------------------------------------------------------
@@ -497,4 +745,11 @@ public class CustomerStampKeylessTemplateTests
     private static JsonNode CustomerTemplate() =>
         JsonNode.Parse(File.ReadAllText(CustomerTemplatePath()))
         ?? throw new InvalidOperationException("customer.json did not parse.");
+
+    /// <summary>The checked-in compile of <c>modules/ebilling-file-store.bicep</c> (not yet wired into customer.bicep —
+    /// that is customer-provisioning-orchestration-r1's hand-off). Recompile with
+    /// <c>az bicep build --file ebilling-file-store.bicep --outfile ebilling-file-store.json</c> after any edit.</summary>
+    private static JsonNode FileStoreTemplate() =>
+        JsonNode.Parse(File.ReadAllText(Path.Combine(SourceScan.RepoRoot, "infrastructure", "bicep", "modules", "ebilling-file-store.json")))
+        ?? throw new InvalidOperationException("ebilling-file-store.json did not parse.");
 }
