@@ -29,7 +29,7 @@
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/CallerWriteAuthorization.cs (only to accept an origin tag per column if needed; existing behaviour for caller-supplied values stays byte-identical)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs (task 001)</file>
       <file role="canonical-reference">grep for the mapping-source resolver and FillOnlyMappingApplier symbols under src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/ (tasks 002, 003)</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs (ApplyFieldMappingsAsync - old behaviour to supersede, grep for the symbol)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs (ApplyFieldMappingsAsync - old behaviour to supersede, grep for the symbol)</file>
       <file role="new">tests/integration/data-mutation/RecordOwnership/MappedValueAuthorizationTests.cs (regression tests for #1614 and #1617 and the drop-with-warning rule)</file>
       <file role="canonical-reference">tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.BusinessOwnedAppendTo.cs (fixture style; must pass unchanged)</file>
     </relevant-files>
@@ -89,7 +89,7 @@
   </escalation>
 
   <justification>
-    <existing>Grep `ApplyFieldMappingsAsync` in src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs (explicit source only, overwrite semantics) and `CheckCallerMayCreateAsync` in Services/Dataverse/CallerWriteAuthorization.cs; the new test file has no existing neighbour covering mapped-value authorization (grep "Mapped" under tests/integration/data-mutation/RecordOwnership returned none).</existing>
+    <existing>Grep `ApplyFieldMappingsAsync` in src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs (explicit source only, overwrite semantics) and `CheckCallerMayCreateAsync` in Services/Dataverse/CallerWriteAuthorization.cs; the new test file has no existing neighbour covering mapped-value authorization (grep "Mapped" under tests/integration/data-mutation/RecordOwnership returned none).</existing>
     <extension>Yes for production code: this task extends the service from task 013 and the engine/resolver from 001-003; no new production file. The only new file is a test class, because the existing RecordOwnership suites are ADR-038 KEEP tests that must pass unchanged and should not be edited.</extension>
     <cost-of-doing-nothing>Mapped lookups bypass AppendTo (#1617) and Office Project AppendTo is checked for secure parents only (#1614), so a user can attach a record to a parent they cannot append to through mapping (spec FR-08 acceptance).</cost-of-doing-nothing>
   </justification>

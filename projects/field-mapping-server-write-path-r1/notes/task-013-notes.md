@@ -46,9 +46,10 @@ endpoint filter. Route-level authorization stays in the routes' filters. Cite pa
 
 ## Decisions
 
-1. **Office class rename (POML constraint):** renamed to `OfficeRecordCreationService` (preferred option); the file name
-   `Services/Office/RecordCreationService.cs` is kept (task 018 deletes it). 45 references updated in src and tests; prose
-   mentions in comments left as they were.
+1. **Office class rename (POML constraint):** renamed to `OfficeRecordCreationService` (preferred option). The file kept
+   its old name `Services/Office/RecordCreationService.cs` at first; fix round 2 (UAC-r2 F-3) renamed it to
+   `Services/Office/OfficeRecordCreationService.cs` too, because the census keys files by name (task 018 deletes it).
+   45 references updated in src and tests; prose mentions in comments left as they were.
 2. **Seam test folder:** `tests/integration/seam/RecordCreation/` (POML output said `seam/Office/`, "or the folder the
    README prescribes"). The csproj rule is `seam/{Module}/`; the module is RecordCreation, not Office (task 018 deletes the
    Office class). README sub-category added.
@@ -162,16 +163,39 @@ NFR-07: the Office adapter (018) must keep its own Office error codes — map th
 
 ## ESCALATION — step 10 order (POML trigger 1)
 
-Spec FR-06 step 10 says "I-1 stamp + I-16 derived **into the payload**" (before the create). Every existing path derives
-both AFTER the create (`CoreAncestorRestamper.AfterWriteAsync`, `RefreshInheritedAccessPermissionAsync`), and UAC-r2
-condition (b) requires the I-1 stamp to keep its ORDER. The two cannot both hold.
+Spec FR-06 step 10 says "I-1 stamp + I-16 derived **into the payload**" (before the create). 013 keeps the ROUTE order:
+re-stamp and I-16 in step 12, after the create (`CoreAncestorRestamper.AfterWriteAsync`,
+`RefreshInheritedAccessPermissionAsync`), because UAC-r2 condition (b) requires the I-1 stamp to keep its order.
 
-- Ordering A (implemented, behaviour-preserving): create, then re-stamp and I-16 in step 12 (route order). Cost: a
-  window in which the row exists without its stamp; the stamp job repairs a failed stamp within one cycle.
-- Ordering B (spec as written): derive the stamp and I-16 into the create payload. Changes the I-1 order (UAC (b)), and
-  needs a pre-create resolver read path the restamper does not expose today.
+**The earlier premise was false (corrected in fix round 2, UAC-r2 F-4).** This note first said every existing path derives
+both AFTER the create. Five writers stamp into the payload BEFORE the create and abort if the stamp fails
+(`_coreAncestors.StampAsync(...)`, then `Succeeded` is checked; verified by reading each call site):
 
-Recommendation: keep A and amend FR-06 step 10 to "derived after the create, in the post-create steps". Owner to choose.
+| Writer | Site | On a failed stamp |
+|---|---|---|
+| Office To Do (record regarding) | `OfficeService.cs:2207` | logs, returns `null` (create aborted) |
+| Office To Do (carrier-only) | `OfficeService.cs:2258` (and `ApplyInheritedAccessPermissionAsync` at `:2276`) | logs, returns `null` |
+| Workspace To Do | `TodoRegardingBuilder.cs:209` | throws `InvalidOperationException` (callers do not create) |
+| Playbook task | `TaskActionCore.cs:229` | returns `Guid.Empty`, task not created |
+| Communication | `CommunicationService.cs:2532` | throws `SdapProblemException` 502 |
+| Decision Record | `DecisionRecordWriter.cs:1508` | throws a refusal (permanent) or `FilingFailed` (503) |
+
+So the unified service's Ordering A is NOT behaviour-preserving for those writers once 017/018 re-point them: they would
+move from "never created unstamped" to "created, then stamped, and a failed stamp leaves the row unstamped until the job
+runs". The route and chat create (`ChildRecordEndpoints`, `OwnedChildWrite`) are the ones that already stamp after.
+
+**Recommended FR-06 amendment (UAC-r2's text):** "Derive I-1, and I-16 for To Do / Event / Communication, into the payload
+before the create, refusing if derivation fails. Re-derive after the create in the route's position, which closes any
+stale derivation. Documents stay post-create via DecideDocument (#2169), because a bare stale-high pre-create value would
+be recorded as the document's own narrowing and never widened."
+
+**This amendment is required before any pre-create stamp writer is re-pointed (tasks 017/018).** Until then no such writer
+calls the service, so nothing regresses today.
+
+**The risk if it is not made:** I-1 feeds `ExternalMultiRootRule`'s secure-root veto, so a row filed through an
+intermediate is visible to partners of the root it names directly until it is stamped.
+
+It stays an owner decision (spec amendment); 013 implements nothing for it.
 
 ## OWNER/017-018 — a system create filed under a record
 
@@ -204,8 +228,9 @@ kind of contract change decision 5 lists for the work assignment's server-owned 
 
 ### Census inventory additions (RecordOwnerAssignmentCensusTests)
 
-The census keys files by NAME, so the new `RecordCreationService.cs` is read together with the Office file of the same
-name. Added: owner writes `OwnedCreateFields` (Routed) and `IsolatedCreateFields` (Root); an `UnscannedWriter` for the
+The census keys files by NAME. When this task was first written the new `RecordCreationService.cs` was read together with
+the Office file of the same name (fixed in fix round 2: the Office file is now `OfficeRecordCreationService.cs`, and its
+three `OwnerWriteEntry` rows are keyed to it). Added: owner writes `OwnedCreateFields` (Routed) and `IsolatedCreateFields` (Root); an `UnscannedWriter` for the
 service (its table is a parameter, so the scanner sees no create site); `PersonBearingWriter` `DecideOwnerAsync`. No
 existing entry changed.
 
@@ -342,16 +367,11 @@ Two passes (security work). Pass 1 (opus) over `bad3195920..c09c73c1f7`; fix rou
 | A1-3 | A caller could set the autonumber column (latent: no path passes one today) | F | Fixed: step 2 BlockedColumn; retry only for the platform's own number (decision 11); R1-12, R1-13 killed |
 | A1-4 | A system create naming a person isolated a row and shared a secure root to that person, unchecked | F (security) | Fixed: decision 8, refused before the plan; R1-14, R1-15 killed |
 | A1-5 | Decision 8 was false and its branch unreachable | F | Fixed with A1-4; the dead guard removed; decision 8 rewritten |
-| A1-6 | The census entries for the new file cannot fail (K1 below) | K | Known limit, below |
+| A1-6 | The census entries for the new file cannot fail (name join) | K | Fixed in fix round 2 (UAC-r2 F-3): the Office file is renamed; no longer a known limit |
 | A1-7 | Two post-create calls sit outside `AfterCreateStepAsync` (K2 below) | K | Known limit, below |
 
 Known limits:
 
-- **K1 — census name join (expiry: task 018).** `RecordOwnerAssignmentCensusTests.ServerFiles()` keys files by name, so
-  `Services/RecordCreation/RecordCreationService.cs` and `Services/Office/RecordCreationService.cs` are read as one, and
-  the census entries this task added for the new service cannot fail on their own. The census is UAC-owned and is not
-  edited here. Task 018 deletes the Office file; its POML notes now say to re-verify the join then and key entries on the
-  relative path.
 - **K2 — never-throw callees outside `AfterCreateStepAsync`.** `SecureRootFilingGate.CompleteIsolatedCreateAsync` and
   `AssignedAccessMaterializer.RunAfterWriteAsync` are called directly in step 12, not through the step wrapper. Both are
   documented "Never throws" (the gate catches and answers a failed result; the materializer leaves a fault to its job),
@@ -373,4 +393,70 @@ before the new step-6 refusal).
 | A2-5 | A hand-built `MappedItem` whose body binds a filing lookup its `Lookups` omits passes the guard and the plan alike; `Columns` omitting a number the body sets misreports a 409 | K1 | No system caller exists; for 017/018: build system items only through `DataverseWriteItemMapper` |
 | A2-6 | A system item that names a taken number surfaces the 412 as an `HttpRequestException`, not a typed refusal | K3 | No system caller exists; the adapter that adds a system writer maps it |
 
-rework: fix-round-1 task 013
+## Fix round 2 (ebilling-r1 + UAC-r2 reviews)
+
+Tests only, plus two renames (the Office file; one harness resolver). No production behaviour changed: no test proved a
+defect. Every mutant below was applied to `RecordCreationService.cs` (or `RecordTableRules.cs`), run, and reverted.
+
+### Harness choice
+
+The new pre-write tests are a PARTIAL of the pipeline seam fixture, not a copy: `RecordCreationServicePipelineSeamTests`
+became `public sealed partial class` (one word) and the new tests live in
+`tests/integration/seam/RecordCreation/RecordCreationServicePreWriteRuleSeamTests.cs`, reusing the fixture's private
+journal, world, `Service()` and `Problem()`. Copying the ~250-line harness was the alternative; a partial keeps one
+harness. The concurrent task-014 agent edits the same file: this round's edits to it are the class modifier and ONE line in
+`Service()` (`_stamps.Resolver` becomes `InheritResolver()`, defined in the new file). If 014 restructures the harness,
+the new file's `_journal`, `_stamps`, `_tableRules` and `_user` uses are what to re-check.
+
+### ebilling-r1 review: the pre-write runner (step 5½)
+
+| # | Test | Mutant (killed unless noted) |
+|---|---|---|
+| 1 | `CreateAsync_APreWriteRule_IsAskedAboutTheExactItemWritten_AsTheCallersOwnClient` — the item the rule saw has the written body's properties, the filing lookup, and the caller's own client | A: the rule gets an empty item (`MappedItem("{}", [])`); B: the rule gets `null` for the caller (no caller / an app principal) |
+| 2 | `CreateAsync_AThrowingPreWriteRule_Is503CheckFailed_AndCreatesNothing` — 503 `check_failed`, no fault text in the body, no create attempt, no `Create` / `PostCreate` step, no membership event | the runner swallows a rule's exception and continues (the create then lands) |
+| 3 | `…WhenTheTokenIsCancelledWhileAPreWriteRuleRuns_PropagatesTheCancellation_AndCreatesNothing` | the `catch (OperationCanceledException) when (ct.IsCancellationRequested)` filter made never-true (a cancel then becomes a 503 refusal); the swallow mutant above also fails it |
+| 4 | `CreateAsync_APreWriteRuleNotFound_RendersTheSameBodyAsAMissingParent_AndNot400` — uniform 404, byte-identical to a missing parent's | the `{ ParentUnavailable: true }` arm demoted behind a null-tolerant generic arm (a not-found renders 400). A literal swap with the final `_` arm does not compile (CS8510), so the compiler already guards that half of the order |
+| 5 | `…RefusedWithACode_Is400_CarryingThatCodeAndDetail` — pins today's 400, `errorCode`, `reasonCode`, detail | the generic arm's kind changed `Invalid` to `Undecided` (500) |
+| 6 | `…APreWriteRuleRefusal_IsCarriedByReference_NotCopied` (theory: Refused, NotFound, Failed; Refused also checks `Code` and `Detail`) | `PreWrite = refusal with { }` in all three arms |
+| 7 | `RecordTableRulesPreWriteRatchetTests` (unit/domain): invoice-family tables with no pre-write rule are exactly `{sprk_invoice, sprk_billingevent}`, plus a must-fire control | registering `sprk_invoiceapproval` with no rule fails both tests |
+
+Test 7's family list is a COPY of `InvoiceFamilyCoreRecordGuard.CoreRecordLookups` (six keys), because that type exists only
+on `origin/work/ebilling-r1`. The baseline expires at task 017, when the invoice-family rule is registered on all six tables
+(then the baseline is empty and the reconciliation replaces the copy with the real key set).
+
+### UAC-r2 review
+
+- **F-1 (I-16 observable).** `Service()` now builds the restamper over `InheritResolver()`: the real `CoreAncestorResolver`
+  over the stamp world with the host's column probe (`SecureChildShareWorld.ColumnProbe()`, which has
+  `sprk_accesspermission`; `StampWorld`'s own probe has not, so the old harness's I-16 returned early on "column missing" and
+  a no-op passed). Reads and writes of that column are journaled as `inherit` when `_journalInherit` is set, so the existing
+  exact-journal assertions are unchanged. Test `…AnEventUnderARestrictedMatter_IsStoredRestricted_ByI16_BetweenTheRestampAndTheMirror`:
+  the matter holds Restricted, the new event is stored Restricted, and the journal contains `create, restamp, inherit, mirror`
+  in order. Mutants: I-16 replaced by a no-op (killed); I-16 moved after the mirror (killed).
+- **F-2 (plan callback key).** `…AssignedToAContactWithASecureMattersId_AndFiledUnderThatMatterByTheServer_IsTheUniformNotFound_AndCreatesNothing`
+  in `RecordCreationServiceSecureRootSeamTests`: a work assignment assigned to a contact whose id equals a secure matter's,
+  filed under the matter by a server-set lookup, is refused by the PLAN's AppendTo (`OwnerDecision.RefusalCode` is
+  `AccessDenied`), 404, nothing created. Mutant: `checkedRecords` matched by id only (killed). The pair shapes of
+  `SecureRootInheritanceWriterTests:1783` do not reach the callback here: step 5 asks the pair's record, and a work
+  assignment's pair alone is refused earlier as invalid, so a first port of those shapes passed against the mutant. The
+  server-set lookup is the shape that reaches it.
+- **F-3 (census can fire).** `git mv Services/Office/RecordCreationService.cs OfficeRecordCreationService.cs`; the three Office
+  `OwnerWriteEntry` rows re-keyed to the new name; the census logic is unchanged. Comments in `RecordCreatorPerson.cs`, the
+  census and the 014/015/018 POMLs name the new path. Mutant: `_ownership.ResolveOwnerAsync(` replaced in the new service:
+  two census tests fail ("every writer the scanner cannot see still calls the resolver"; "Routed owner writes sit in files that
+  call the resolver"). The K1 known-limit entry is removed (above), and its re-verify note is removed from the task 018 POML.
+  Not touched: historical references in task 001-003/012/013 notes and POMLs, `plan.md`, `spec.md` and other projects' notes
+  (they describe the file as it was).
+- **F-4 (escalation premise).** The step-10 escalation above is rewritten with the five pre-create stamping writers.
+
+### What stays for reconciliation (ebilling-r1 lands second, or task 017)
+
+- **F1:** register the invoice-family rule on all six tables (recipe in task 012 notes) and add the 012-recipe test (every
+  `CoreRecordLookups` key has a registry entry whose `PreWriteRules` contains the rule).
+- **F2:** an additive `PreWriteRefusal` kind that maps `read_failed` and `unknown_entity` to Undecided 500, with
+  `PreWriteRefusal.NotFound()` staying the only path to the 404. Today every `Refused` renders 400 (decision 6).
+- **F4:** a supersedes refusal keeps its `Code` and `Reason` (the ebilling outcome's richer refusal; `PreWriteRefusal` carries
+  only `Code` / `Detail` today).
+- Delete one copy of the verbatim strings (b): `NotAvailableToFileUnder` here and the chat create's identical text.
+
+rework: fix-round-2 task 013

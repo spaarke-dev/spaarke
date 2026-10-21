@@ -41,7 +41,7 @@ namespace Sprk.Bff.Api.Tests.Seam.RecordCreation;
 /// write. Refusals are rendered through <see cref="RecordCreationProblemMap"/> — the HTTP body a route will return.</para>
 /// </remarks>
 [Trait("status", "new")]
-public sealed class RecordCreationServicePipelineSeamTests
+public sealed partial class RecordCreationServicePipelineSeamTests
 {
     private static readonly Guid Caller = Guid.Parse("a0130000-0000-4000-8000-0000000000aa");
     private static readonly Guid CallerOid = Guid.Parse("a0130000-0000-4000-8000-0000000000ab");
@@ -692,7 +692,7 @@ public sealed class RecordCreationServicePipelineSeamTests
         restampEntities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
             .Returns((FetchExpression q, CancellationToken ct) => Journaled("restamp", () => _stamps.Service.RetrieveMultipleAsync(q, ct)));
-        var restamper = new CoreAncestorRestamper(restampEntities.Object, _stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance);
+        var restamper = new CoreAncestorRestamper(restampEntities.Object, InheritResolver(), NullLogger<CoreAncestorRestamper>.Instance);
 
         var shares = SecureChildShareWorld.SynchronizerOver(() =>
         {

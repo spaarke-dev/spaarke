@@ -29,7 +29,7 @@
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (read; add search-indexed flags only if task 012 left a TODO)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (ResolveOwnerAsync ~:1016, ResolveOwningTeamAsync ~:1008 - no longer used for creates, ForParents ~:346, UnfiledOwnership ~:162)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/SearchIndexNameResolver.cs (lookup column sprk_ai_search_index ~:105; reuse its BU lookup logic rather than forking it)</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs (only the ~:489 call site if still reachable before task 018 deletes the class)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs (only the ~:489 call site if still reachable before task 018 deletes the class)</file>
       <file role="new">tests/integration/data-mutation/RecordOwnership/CrossSurfaceOwnerTests.cs (same Project under same Matter, same owner)</file>
       <file role="new">tests/integration/data-mutation/RecordOwnership/SearchIndexDefaultTests.cs (Matter, Project, Document)</file>
       <file role="canonical-reference">tests/integration/data-mutation/RecordOwnership/OfficeRecordOwnershipTests.cs (fixture style)</file>

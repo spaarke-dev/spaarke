@@ -145,6 +145,33 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         _writes.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// UAC-r2 F-2: the plan callback's "already checked" set is keyed by (table, id), never by id alone. A client may pick a
+    /// new row's id, so a row assigned to a CONTACT whose id equals a secure matter's, and filed under that matter by a
+    /// lookup the SERVER set (so step 5 did not ask its AppendTo), must still have the matter's own AppendTo asked by the
+    /// plan callback: the contact's AppendTo, which step 5 did ask, does not stand in for it. Ported from
+    /// <c>SecureRootInheritanceWriterTests.ChatCreate_AssignedToAContactWithASecureMattersId_...</c>; the pair shapes of that
+    /// test are refused earlier here (step 5 asks the pair's record), so this drives the callback itself.
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_AssignedToAContactWithASecureMattersId_AndFiledUnderThatMatterByTheServer_IsTheUniformNotFound_AndCreatesNothing()
+    {
+        var secure = Guid.NewGuid();
+        SecureMatter(_fixture, secure);
+        _caller.NoAppendToIn.Add(("sprk_matters", secure)); // the caller may append to the CONTACT with that id, not the matter
+
+        var toSecure = await Service().CreateAsync(await AssignedToAContactWithTheMattersId(secure), AsCaller(), CancellationToken.None);
+
+        toSecure.Succeeded.Should().BeFalse("a row is never filed under a secure matter the caller may not append to");
+        toSecure.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
+        toSecure.Refusal.OwnerDecision!.RefusalCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied,
+            "refused by the plan's own AppendTo on the matter, not by step 5 (which asked only about the contact)");
+        var problem = Problem(toSecure);
+        problem.Status.Should().Be(StatusCodes.Status404NotFound, "the uniform not-found: never a 403 that says the matter exists and is secure");
+        JsonSerializer.Serialize(problem).Should().NotContain(secure.ToString("D"));
+        _writes.Should().BeEmpty("nothing is created");
+    }
+
     [Fact]
     public async Task CreateAsync_AsTheSystem_ForAPersonNobodyChecked_AWorkAssignmentUnderASecureMatter_Is403_AndNothingIsShared()
     {
@@ -215,6 +242,23 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         return new RecordCreationRequest("sprk_workassignment", new RecordCreationPayload.Mapped(mapped.Item!))
         {
             CorrelationId = FixedCorrelation,
+        };
+    }
+
+    /// <summary>A work assignment assigned to a contact whose id equals <paramref name="matter"/>'s, filed under it by a server-set lookup.</summary>
+    private async Task<RecordCreationRequest> AssignedToAContactWithTheMattersId(Guid matter)
+    {
+        var mapped = await DataverseWriteItemMapper.MapAsync(_caller, "sprk_workassignment", JsonSerializer.SerializeToElement(new
+        {
+            sprk_name = "Review the lease",
+            sprk_assignedto = new { relatedTable = "contact", recordId = matter },
+            sprk_regardingmatter = new { relatedTable = "sprk_matter", recordId = matter },
+        }), CancellationToken.None);
+        mapped.Item.Should().NotBeNull(mapped.ValidationError);
+        return new RecordCreationRequest("sprk_workassignment", new RecordCreationPayload.Mapped(mapped.Item!))
+        {
+            CorrelationId = FixedCorrelation,
+            ServerSetLookupColumns = new HashSet<string> { "sprk_regardingmatter" },
         };
     }
 
