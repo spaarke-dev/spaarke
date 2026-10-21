@@ -42,6 +42,7 @@ import {
 import type { DocumentIdentityState, ResolvedRelatedRecord } from '../services/documentIdentityService';
 import { fileDocumentToRecord } from '../services/documentFilingService';
 import { useAnnounce } from '../hooks/useAnnounce';
+import { describeEmailFilingProblem, type EmailFilingProblem } from '../services/emailFilingNotice';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
 import {
   clearReferenceListCache,
@@ -361,6 +362,12 @@ export interface SavedDocumentState {
   filedTo: FiledTo;
   /** Whether the save that produced this state created the document or added a version to it. */
   lastSave: SaveTarget['mode'];
+  /**
+   * Task 131 (#2171): set when the save worked but the email it reconciled to could not be filed to the chosen record
+   * (the server's `SaveResponse.emailFiling` was `NotPermitted` / `Failed`). Absent otherwise. Held here, with the saved
+   * document, so the notice survives a tab switch like the confirmation bar does.
+   */
+  emailFilingProblem?: EmailFilingProblem;
 }
 
 /**
@@ -672,7 +679,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     () => ({
       apiBaseUrl,
       getAccessToken,
-      onComplete: (docId, docUrl) => {
+      onComplete: (docId, docUrl, emailFilingProblem) => {
         const pending = pendingSaveRef.current;
         updateSavedState(prev => ({
           savedDocument: {
@@ -680,6 +687,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             savedName: pending?.name ?? '',
             filedTo: pending?.filedTo,
             lastSave: pending?.mode ?? 'create',
+            ...(emailFilingProblem ? { emailFilingProblem } : {}),
           },
           profileRefreshSignal: prev.profileRefreshSignal + 1,
           // task 094: a fresh save always clears the re-enable trigger — this save IS the content as
@@ -1733,6 +1741,17 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     </div>
   );
 
+  // Task 131 (#2171): the save worked, but the email it reconciled to could not be filed to the chosen record. A
+  // non-blocking warning beside the confirmation — never an error (the save succeeded) and never naming the record.
+  // Fluent's MessageBar announces its own text to screen readers when it mounts (its aria-live announcer), so this notice
+  // is deliberately NOT also announce()d — one channel only.
+  const renderEmailFilingNotice = (problem: EmailFilingProblem | undefined) =>
+    problem ? (
+      <MessageBar intent="warning" layout="multiline">
+        <MessageBarBody>{describeEmailFilingProblem(problem)}</MessageBarBody>
+      </MessageBar>
+    ) : null;
+
   // Task 117 (O3/W1): what Copy Link copies — the document's Spaarke record link, built exactly like View Document's
   // (`buildOpenRecordUrl`, ORG_URL + SPAARKE_APP_NAME). `null` when ORG_URL is unset: Copy Link is then HIDDEN, never
   // a fallback to the stored file's URL.
@@ -2306,6 +2325,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     return (
       <>
         {renderSavedBar(savedBarOf(saved))}
+        {renderEmailFilingNotice(saved.emailFilingProblem)}
         {renderDocumentHeader(canSaveNewVersion ? 'locked' : 'readonly', lockedName)}
         <div className={styles.section}>
           <DocumentProfileSection

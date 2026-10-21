@@ -254,14 +254,33 @@ internal sealed partial class RecordCreationService
 
         // FR-04: Read as the caller FIRST. Missing, denied, unmapped type, a failed probe or read: ONE outcome — nothing
         // mapped (not even a Default rule), one warning that names nothing.
+        var sourceColumns = CreateTimeFieldMapping.CollectSourceColumns(rules);
         var read = await MappingSourceReadProbe.ReadAsync(
-                mapping.Reader, source, CreateTimeFieldMapping.CollectSourceColumns(rules), _entities, _logger, ct)
+                mapping.Reader, source, sourceColumns, _entities, _logger, ct)
             .ConfigureAwait(false);
         if (!read.Readable)
         {
             warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingSourceUnavailableCode, null,
                 read.Warning ?? MappingSourceReadProbe.SourceUnavailableWarning));
             return unmapped;
+        }
+
+        // #2188 (DI-004): the app-only read ignores field-level security, so it is masked down to the columns the CALLER can
+        // read (one caller read of the same row) before any rule sees it. A caller read that cannot be made or answered makes
+        // the source unavailable — the same single warning as an unreadable source, never the app-read values (FR-04).
+        // A Default-only profile read nothing, so there is nothing to mask.
+        Entity? masked = null;
+        if (read.Record is not null)
+        {
+            masked = await MappingSourceCallerMask
+                .ApplyAsync(user, source.EntityLogicalName, source.RecordId, read.Record, sourceColumns, _logger, ct)
+                .ConfigureAwait(false);
+            if (masked is null)
+            {
+                warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingSourceUnavailableCode, null,
+                    MappingSourceReadProbe.SourceUnavailableWarning));
+                return unmapped;
+            }
         }
 
         // The target columns as the table declares them, read as the caller: its Money columns (DI-001 / #2124), and which
@@ -283,7 +302,7 @@ internal sealed partial class RecordCreationService
         var engineWarnings = new List<string>();
         var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         CreateTimeFieldMapping.ApplyFillOnly(
-            rules, target, read.Record, ProtectedFromMapping(table, rule, request.ServerSetLookupColumns), engineWarnings, _logger,
+            rules, target, masked, ProtectedFromMapping(table, rule, request.ServerSetLookupColumns), engineWarnings, _logger,
             moneyAttributes: attributes.Where(a => a.Value.Type == "Money").Select(a => a.Key).ToHashSet(StringComparer.OrdinalIgnoreCase),
             mappedColumns: written);
         warnings.AddRange(engineWarnings.Select(w => new RecordCreationWarning(RecordCreationWarning.MappingRuleSkippedCode, null, w)));

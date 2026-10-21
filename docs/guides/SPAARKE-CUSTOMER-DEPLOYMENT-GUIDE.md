@@ -1226,6 +1226,15 @@ it raises stays.** A document raised while the column is missing, whose parents 
 value. On the first run after the script, the job reads that value as the document's own narrowing (it is stricter than
 what its parents give, and the document has no record yet), records it so, and never widens it again.
 
+🔴 **A BFF carrying `spaarkeai-word-add-in-r1` task 130 (D7 T8) REQUIRES the column; it is not raise-only.** When the
+Outlook add-in saves a document from an email it cannot identify, the BFF creates that document Restricted and writes
+`sprk_accessinheritance` in the same create (write-path registry I-19). Without the column, that create fails:
+- a single `.eml` or single-attachment save returns a generic 500;
+- each Restricted attachment child fails inside `UploadFinalizationWorker`. The failure is logged only as a Warning and
+  the job still reports success, so the user sees a saved email whose attachments are missing.
+
+Nothing is exposed (it fails closed), but saves are lost. Run the script and `-Verify` before deploying such a BFF.
+
 **So deploy the schema BEFORE the BFF.** If the BFF went first, find and fix these documents after the script has run:
 
 1. From the window between the BFF deploy and the script, collect the documents the BFF raised: the job's

@@ -29,6 +29,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Documents;
 
 namespace Sprk.Bff.Api.Services.Access;
 
@@ -390,6 +391,9 @@ public sealed class SecureChildReconciler
     private readonly ILogger<SecureChildReconciler> _logger;
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator _accessCacheInvalidator;
     private readonly Sprk.Bff.Api.Services.Communication.IThreadResolver? _threads;
+
+    /// <summary>#2159 slice 2: the ONE writer of a document's relocation ledger, which records an F3 re-file's release of its file.</summary>
+    private readonly DocumentContainerRelocator? _relocator;
     private readonly Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? _ownerPrivileges;
     private readonly Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing _gateDecisionRecords;
 
@@ -418,8 +422,10 @@ public sealed class SecureChildReconciler
         Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing gateDecisionRecords,
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
         Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
-        Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null)
+        Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
+        DocumentContainerRelocator? relocator = null)
     {
+        _relocator = relocator;
         _threads = threads;
         _ownerPrivileges = ownerPrivileges;
         _gateDecisionRecords = gateDecisionRecords ?? throw new ArgumentNullException(nameof(gateDecisionRecords));
@@ -849,7 +855,18 @@ public sealed class SecureChildReconciler
     /// <returns>The descendants' pass, or <c>null</c> when none ran.</returns>
     public Task<SecureChildReconcileReport?> AfterRefileAsync(
         string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, CancellationToken ct) =>
-        AfterRefileAsync(childLogicalName, childId, wasIsolated, RefileThreadStep.Reconcile, ct);
+        AfterRefileCoreAsync(childLogicalName, childId, wasIsolated, RefileThreadStep.Reconcile, secureExitCaller: null, reparent: null, ct);
+
+    /// <summary>
+    /// <see cref="AfterRefileAsync(string, Guid, Func{Task{bool}}, CancellationToken)"/> for a writer that holds the reparent's
+    /// answer (<see cref="IRecordOwnershipResolver.ReparentAsync"/>). #2159 slice 2: when a re-filed DOCUMENT left a secure
+    /// root with the caller's F3 permission (<see cref="RecordOwnerResolution.SecureExitPermitted"/>), the release that lets its
+    /// file follow it from S1's own container into S2's is recorded FIRST (<see cref="DocumentContainerRelocator.RecordReleaseAsync"/>);
+    /// without it the widening guard holds the file in S1 (A1). Never throws; the re-file stands either way.
+    /// </summary>
+    public Task<SecureChildReconcileReport?> AfterRefileAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RecordOwnerResolution? reparent, CancellationToken ct) =>
+        AfterRefileCoreAsync(childLogicalName, childId, wasIsolated, RefileThreadStep.Reconcile, secureExitCaller: null, reparent, ct);
 
     /// <summary>
     /// <see cref="AfterRefileAsync(string, Guid, Func{Task{bool}}, CancellationToken)"/>, saying whether a re-filed communication's
@@ -858,7 +875,7 @@ public sealed class SecureChildReconciler
     /// </summary>
     public Task<SecureChildReconcileReport?> AfterRefileAsync(
         string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread, CancellationToken ct) =>
-        AfterRefileAsync(childLogicalName, childId, wasIsolated, thread, secureExitCaller: null, ct);
+        AfterRefileCoreAsync(childLogicalName, childId, wasIsolated, thread, secureExitCaller: null, reparent: null, ct);
 
     /// <summary>
     /// <see cref="AfterRefileAsync(string, Guid, Func{Task{bool}}, RefileThreadStep, CancellationToken)"/> for a re-file a PERSON
@@ -866,14 +883,51 @@ public sealed class SecureChildReconciler
     /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordReparent.SecureExitCaller"/>, carried into the thread reconcile
     /// (<see cref="Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync(Guid, Sprk.Bff.Api.Services.Communication.FilingReconcileHost, SecureRemovalCaller?, Func{CancellationToken, Task}?, CancellationToken)"/>),
     /// so a re-filed communication's move off a secure record's thread is decided on the rights the re-file was checked
-    /// against. Every user-initiated re-file writer calls this overload; <c>null</c> acts for nobody.
+    /// against. Every user-initiated re-file writer calls this overload, or the one that also takes the reparent's answer;
+    /// <c>null</c> acts for nobody.
     /// </summary>
-    public async Task<SecureChildReconcileReport?> AfterRefileAsync(
+    public Task<SecureChildReconcileReport?> AfterRefileAsync(
         string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread,
-        SecureRemovalCaller? secureExitCaller, CancellationToken ct)
+        SecureRemovalCaller? secureExitCaller, CancellationToken ct) =>
+        AfterRefileCoreAsync(childLogicalName, childId, wasIsolated, thread, secureExitCaller, reparent: null, ct);
+
+    /// <summary>
+    /// <see cref="AfterRefileAsync(string, Guid, Func{Task{bool}}, RefileThreadStep, SecureRemovalCaller?, CancellationToken)"/>
+    /// for a writer that also holds the reparent's answer (<see cref="IRecordOwnershipResolver.ReparentAsync"/>): the thread
+    /// reconcile acts for <paramref name="secureExitCaller"/> (#2143 round 7), and a re-file that left a secure root with that
+    /// caller's F3 permission (<see cref="RecordOwnerResolution.SecureExitPermitted"/>) records the release of its document's
+    /// file — and of the files of the documents filed under it — first (#2159 slice 2).
+    /// </summary>
+    public Task<SecureChildReconcileReport?> AfterRefileAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread,
+        SecureRemovalCaller? secureExitCaller, RecordOwnerResolution? reparent, CancellationToken ct) =>
+        AfterRefileCoreAsync(childLogicalName, childId, wasIsolated, thread, secureExitCaller, reparent, ct);
+
+    private async Task<SecureChildReconcileReport?> AfterRefileCoreAsync(
+        string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, RefileThreadStep thread,
+        SecureRemovalCaller? secureExitCaller, RecordOwnerResolution? reparent, CancellationToken ct)
     {
+        var permit = reparent?.SecureExitPermitted is { RootsLeft.Count: > 0 } given ? given : null;
+        if (permit is not null && string.Equals(childLogicalName.Trim(), DocumentTable, StringComparison.OrdinalIgnoreCase))
+        {
+            await RecordFileReleaseAsync(childId, permit, "re-filed", ct).ConfigureAwait(false);
+        }
+
         var report = await RefileStepsAsync(childLogicalName, childId, wasIsolated, thread, secureExitCaller, ct)
             .ConfigureAwait(false);
+
+        // #2159 slice 2c: the documents filed under the re-filed row followed it out of S1 under the same F3 act (owner round
+        // 24 item 2), so each of their files is released the same way — each checked by the relocator against the roots
+        // this re-file left (a document isolated under another secure record stays held). Slice 4: their lock waits share
+        // one budget (DocumentContainerRelocator.DescendantReleaseLockBudget).
+        if (permit is not null && report is { IsolatedDocumentIds.Count: > 0 })
+        {
+            var descendants = report.IsolatedDocumentIds.Where(id => id != childId).Distinct().ToList();
+            if (descendants.Count > 0)
+            {
+                await RecordDescendantReleasesAsync(childLogicalName.Trim(), childId, descendants, permit, ct).ConfigureAwait(false);
+            }
+        }
 
         // Ontology task 042b (D-169, uac-r2 choice A): after UAC's own steps, on EVERY communication re-file, its gate Decision Records
         // still owned by a user are re-owned to the resolver's team (a Secure answer is left to this engine). Never thrown.
@@ -891,6 +945,101 @@ public sealed class SecureChildReconciler
         }
 
         return report;
+    }
+
+    /// <summary>
+    /// #2159 slice 2 — the F3 release of one document's file (the re-filed document, or one filed under the re-filed row):
+    /// the re-file left at least one secure root with the caller's F3 permission, so the ONE ledger writer
+    /// (<see cref="DocumentContainerRelocator.RecordReleaseAsync"/>) records it under the document's lock, after checking the
+    /// file's secure record is one of those roots. Only a written re-file's own permission. Never throws — a release not
+    /// recorded inline (lock held, a fault) is retried through the job queue (<see cref="RelocationReleaseRetryJobHandler"/>);
+    /// until it is recorded, or when it cannot be (another secure record, no retry queued), the file stays held where it is
+    /// (fail closed); the re-file stands.
+    /// </summary>
+    private async Task RecordDescendantReleasesAsync(
+        string table, Guid rowId, IReadOnlyList<Guid> documentIds, SecureExitPermit permit, CancellationToken ct)
+    {
+        if (_relocator is null)
+        {
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} left {Count} secure record(s) with F3, but no relocator is available to "
+                + "record the releases of the files of the documents filed under it ({Documents}); they stay held where they are.",
+                table, rowId, permit.RootsLeft.Count, string.Join(", ", documentIds));
+            return;
+        }
+
+        IReadOnlyList<(Guid DocumentId, RelocationReleaseOutcome Outcome)> outcomes;
+        try
+        {
+            outcomes = await _relocator.RecordReleasesAsync(documentIds, permit, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex,
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed out of a secure record with F3, but the releases of the files "
+                + "of the documents filed under it could not be recorded and no retry was queued ({Documents}); their files stay "
+                + "held where they are. Recovery for each: {Recovery}.", table, rowId, string.Join(", ", documentIds),
+                DocumentContainerRelocator.UnreleasedRecovery);
+            return;
+        }
+
+        foreach (var (documentId, release) in outcomes)
+        {
+            _logger.Log(
+                release.State is RelocationReleaseState.Recorded or RelocationReleaseState.NotNeeded ? LogLevel.Information : LogLevel.Warning,
+                "[SECURE-CHILD-RECONCILE] sprk_document {Id} (filed under re-filed {Table} {RowId}) left {Count} secure record(s) "
+                + "with F3: release {State} ({Detail}).", documentId, table, rowId, permit.RootsLeft.Count, release.State, release.Detail);
+        }
+
+        // A file left held because its lock was busy or a write failed is retried through the job queue; one whose retry could
+        // not be queued is released only by a new F3 re-file out of the secure record holding it: name them all, by id.
+        var notReleased = outcomes
+            .Where(o => o.Outcome.State is RelocationReleaseState.LockHeld or RelocationReleaseState.Failed)
+            .ToList();
+        var queued = notReleased.Where(o => o.Outcome.RetryQueued).Select(o => o.DocumentId).ToList();
+        var stranded = notReleased.Where(o => !o.Outcome.RetryQueued).Select(o => o.DocumentId).ToList();
+        if (queued.Count > 0)
+        {
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed with F3, but the files of {Count} document(s) filed under it "
+                + "were not released yet (a busy lock or a failed write); a retry is queued for each: {Documents}.",
+                table, rowId, queued.Count, string.Join(", ", queued));
+        }
+
+        if (stranded.Count > 0)
+        {
+            _logger.LogError(
+                "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed with F3, but the files of {Count} document(s) filed under it "
+                + "were NOT released and no retry could be queued; they stay held: {Documents}. Recovery for each: {Recovery}.",
+                table, rowId, stranded.Count, string.Join(", ", stranded), DocumentContainerRelocator.UnreleasedRecovery);
+        }
+    }
+
+    private async Task RecordFileReleaseAsync(Guid childId, SecureExitPermit permit, string how, CancellationToken ct)
+    {
+        if (_relocator is null)
+        {
+            _logger.LogWarning(
+                "[SECURE-CHILD-RECONCILE] sprk_document {Id} left {Count} secure record(s) with F3, but no relocator is available "
+                + "to record the release of its file; the file stays held where it is.", childId, permit.RootsLeft.Count);
+            return;
+        }
+
+        try
+        {
+            var release = await _relocator.RecordReleaseAsync(childId, permit, ct).ConfigureAwait(false);
+            _logger.Log(
+                release.State is RelocationReleaseState.Recorded or RelocationReleaseState.NotNeeded ? LogLevel.Information : LogLevel.Warning,
+                "[SECURE-CHILD-RECONCILE] sprk_document {Id} ({How}) left {Count} secure record(s) with F3: release {State} ({Detail}).",
+                childId, how, permit.RootsLeft.Count, release.State, release.Detail);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex,
+                "[SECURE-CHILD-RECONCILE] sprk_document {Id} was re-filed out of a secure record with F3, but the release of its "
+                + "file could not be recorded and no retry was queued; the file stays held where it is. Recovery: {Recovery}.",
+                childId, DocumentContainerRelocator.UnreleasedRecovery);
+        }
     }
 
     private async Task<SecureChildReconcileReport?> RefileStepsAsync(

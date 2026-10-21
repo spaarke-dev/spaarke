@@ -458,10 +458,13 @@ internal sealed class CreateWorld
                 ],
             });
 
+        // #2191: a project created from a matter is filed under it only when the caller may AppendTo that matter.
+        var caller = OfficeCallerRightsSetup.Granting(AccessRights.Read | AccessRights.AppendTo);
         return new OfficeRecordCreationService(
             Entities(), fieldMappings.Object, new CountingResolver(_directory.Resolver(), () => _ownerQuestions++),
             IdentityNormalizationFixtures.NoLinkedContact(), SecureRootFilingGateFixtures.Over(Entities()),
-            AssignedAccessTestDoubles.InertMaterializer(), NullLogger<OfficeRecordCreationService>.Instance);
+            AssignedAccessTestDoubles.InertMaterializer(), NullLogger<OfficeRecordCreationService>.Instance,
+            caller.Probe, caller.Http);
     }
 
     // ── The app-only Dataverse every service here reads ───────────────────────────────────────────────────────────
@@ -477,6 +480,13 @@ internal sealed class CreateWorld
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(_directory.Answer(query)));
+        // #2191 K2: the Office create derives a project's filed-under pair from the catalog row named by the source's table,
+        // and the plan reads that row back by id; the directory's own catalog rows answer every other catalog query.
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => RecordTypeCatalogSetup.IsCatalogQuery(q)), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression query, CancellationToken _) =>
+                Task.FromResult(RecordTypeCatalogSetup.Answer(query) is { Entities.Count: > 0 } row ? row : _directory.Answer(query)));
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection());
@@ -516,12 +526,20 @@ internal sealed class CreateWorld
             });
         entities
             .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .Returns((string _, Guid id, string[] _, CancellationToken _) => Task.FromResult(new Entity("sprk_matter", id)
+            .Returns((string _, Guid id, string[] columns, CancellationToken _) =>
             {
-                ["sprk_matterid"] = id,
-                ["sprk_matternumber"] = "MAT-000015", // the number read-back of a created matter
-                ["sprk_recordtype"] = new EntityReference("sprk_recordtype_ref", MatterType),
-            }));
+                var matter = new Entity("sprk_matter", id)
+                {
+                    ["sprk_matterid"] = id,
+                    ["sprk_matternumber"] = "MAT-000015", // the number read-back of a created matter
+                    ["sprk_recordtype"] = new EntityReference("sprk_recordtype_ref", MatterType),
+                };
+
+                // #2191: the source's own secure flag, explicit (an empty flag is never read as not secure).
+                if (columns.Contains(OfficeRecordCreationService.SecureFlagAttribute))
+                    matter[OfficeRecordCreationService.SecureFlagAttribute] = id == SecureMatter;
+                return Task.FromResult(matter);
+            });
         entities
             .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Returns((Entity row, CancellationToken _) =>
