@@ -444,6 +444,15 @@ internal readonly record struct DocumentNarrowingCost(int Rows, int HopLevels, i
 /// </remarks>
 public delegate Task<DocumentNarrowingResult> AppOnlyDocumentNarrowing(IReadOnlyCollection<Guid> documentIds, CancellationToken ct);
 
+/// <summary>
+/// Task 188 round 3 slice B: THE document narrowing for the internal plane's document routes
+/// (<c>Api/Filters/InternalPlaneDocumentNarrowing</c>: the document filter, the bulk download and the container lists). The
+/// same app-only read and decision as <see cref="AppOnlyDocumentNarrowing"/> (<see cref="ExternalDataService.ReadAndNarrowDocumentsAsync"/>);
+/// a separate delegate only so its cost line says <c>plane=internal-routes</c> and so a test host can state these routes'
+/// narrowing without touching the assistant's. A failed read THROWS. Registered by <c>AddExternalAccess</c>.
+/// </summary>
+internal delegate Task<DocumentNarrowingResult> InternalRouteDocumentNarrowing(IReadOnlyCollection<Guid> documentIds, CancellationToken ct);
+
 /// <summary>A document's own Access Permission as the narrowing reads it.</summary>
 internal enum DocumentPermission
 {

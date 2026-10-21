@@ -1,6 +1,5 @@
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Context;
-using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Api.Filters;
@@ -14,17 +13,20 @@ namespace Sprk.Bff.Api.Api.Filters;
 /// </summary>
 /// <remarks>
 /// <para><b>Who is narrowed.</b> Every caller who is not a resolved INTERNAL systemuser
-/// (<see cref="ExternalCallerCommunicationGuard.IsExternalCallerAsync"/>: flagged <c>sprk_isexternal</c>, unresolved, or no
-/// principal). A lookup that FAILS counts as external, so the narrowing applies: a transient fault costs an internal user
+/// (the rule of <c>ExternalCallerCommunicationGuard.IsExternalCallerAsync</c>: flagged <c>sprk_isexternal</c>, unresolved,
+/// or no principal). A lookup that FAILS counts as external, so the narrowing applies: a transient fault costs an internal user
 /// only the documents it hides, never every request (the slice A rule). Internal systemusers are not narrowed and nothing is
 /// read for them.</para>
-/// <para><b>What decides.</b> The injected <see cref="AppOnlyDocumentNarrowing"/> (the one seam, registered by
-/// <c>AddExternalAccess</c>): the documents are re-read BY ID under the BFF's app-only identity and decided by
+/// <para><b>What decides.</b> The injected <see cref="InternalRouteDocumentNarrowing"/> (registered by
+/// <c>AddExternalAccess</c>; the same app-only read and decision as <see cref="AppOnlyDocumentNarrowing"/>, logged as
+/// <c>plane=internal-routes</c>): the documents are re-read BY ID under the BFF's app-only identity and decided by
 /// <see cref="ExternalDocumentNarrowing"/>; nothing of the rule is copied here. ONE call per request, over every id the
 /// request names. A document the narrowing does not return as visible is hidden (a fault hides every one).</para>
 /// <para><b>Component Justification (CLAUDE.md §11).</b> (1) Existing — the externality rule
-/// (<see cref="ExternalCallerCommunicationGuard.IsExternalCallerAsync"/>) and the narrowing seam
-/// (<see cref="AppOnlyDocumentNarrowing"/>) are reused as they are; <c>RetrievalAccessTrim</c> (slice A) applies the same two
+/// (<c>ExternalCallerCommunicationGuard.IsExternalCallerAsync</c>, applied over its own two resolvers, see
+/// <see cref="IsExternalOrUnknownCallerAsync"/>) and the narrowing seam
+/// (<see cref="ExternalDataService.ReadAndNarrowDocumentsAsync"/>, through <see cref="InternalRouteDocumentNarrowing"/>) are
+/// reused as they are; <c>RetrievalAccessTrim</c> (slice A) applies the same two
 /// privately to AI retrieval keys. (2) Extension — the three surfaces here are an endpoint filter, a bulk filter and two
 /// route handlers with no common service to extend, so one static helper carries the fault policy once instead of four
 /// times; no DI registration, no interface. (3) Cost of doing nothing — a systemuser flagged external with a share on a
@@ -44,7 +46,7 @@ internal static class InternalPlaneDocumentNarrowing
     /// <summary>
     /// Which of <paramref name="documentIds"/> the request's caller may see. For an internal systemuser nothing is
     /// narrowed (<see cref="CallerDocumentVisibility.Narrowed"/> false, no read). For any other caller, one
-    /// <see cref="AppOnlyDocumentNarrowing"/> call over the distinct GUID ids decides; an id that is not a GUID is not shown;
+    /// <see cref="InternalRouteDocumentNarrowing"/> call over the distinct GUID ids decides; an id that is not a GUID is not shown;
     /// a narrowing that faults shows none. An empty set makes no lookup and no read.
     /// </summary>
     /// <param name="httpContext">The request (its caller and its services).</param>
@@ -79,7 +81,7 @@ internal static class InternalPlaneDocumentNarrowing
         DocumentNarrowingResult narrowing;
         try
         {
-            var narrow = httpContext.RequestServices.GetRequiredService<AppOnlyDocumentNarrowing>();
+            var narrow = httpContext.RequestServices.GetRequiredService<InternalRouteDocumentNarrowing>();
             narrowing = await narrow(ids, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -108,8 +110,12 @@ internal static class InternalPlaneDocumentNarrowing
     }
 
     /// <summary>
-    /// True unless the request's caller is a resolved INTERNAL systemuser. A lookup that fails (the guard throws, or a
-    /// resolver cannot be resolved) counts as external, so the narrowing applies.
+    /// True unless the request's caller is a resolved INTERNAL systemuser: the externality rule of
+    /// <c>ExternalCallerCommunicationGuard.IsExternalCallerAsync</c> (flagged <c>sprk_isexternal</c>, unresolved, or no
+    /// principal is external), applied over the same two resolvers. It is not called from here because non-AI code may not
+    /// depend on <c>Services.Ai.Handlers.Dataverse</c> (ArchTest D-66). Under this helper's fault policy the guard's
+    /// "lookup-failed throws" and "unresolved is external" give the same answer, so a lookup that fails (an unresolved
+    /// <c>lookup-failed</c>, a throw, or a resolver that cannot be resolved) counts as external and the narrowing applies.
     /// </summary>
     private static async Task<bool> IsExternalOrUnknownCallerAsync(
         HttpContext httpContext, string surface, ILogger? logger, CancellationToken ct)
@@ -117,11 +123,15 @@ internal static class InternalPlaneDocumentNarrowing
         try
         {
             var services = httpContext.RequestServices;
-            return await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
-                new RequestContextAccessor(httpContext),
-                services.GetRequiredService<ICallerSystemUserResolver>(),
-                services.GetRequiredService<ISystemUserIdentityResolver>(),
-                ct).ConfigureAwait(false);
+            var resolution = await services.GetRequiredService<ICallerSystemUserResolver>()
+                .ResolveAsync(httpContext.User, ct).ConfigureAwait(false);
+            if (!resolution.IsResolved || !Guid.TryParse(resolution.SystemUserId, out var systemUserId))
+            {
+                return true;
+            }
+
+            return await services.GetRequiredService<ISystemUserIdentityResolver>()
+                .IsExternalAsync(systemUserId, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -134,19 +144,6 @@ internal static class InternalPlaneDocumentNarrowing
                 + "narrowing (fail closed: only documents it hides are withheld)",
                 surface);
             return true;
-        }
-    }
-
-    /// <summary>
-    /// Hands the guard THIS request without touching the ambient <see cref="HttpContextAccessor"/> (whose setter would reset
-    /// the async-local holder the rest of the pipeline reads).
-    /// </summary>
-    private sealed class RequestContextAccessor(HttpContext httpContext) : IHttpContextAccessor
-    {
-        public HttpContext? HttpContext
-        {
-            get => httpContext;
-            set { }
         }
     }
 }

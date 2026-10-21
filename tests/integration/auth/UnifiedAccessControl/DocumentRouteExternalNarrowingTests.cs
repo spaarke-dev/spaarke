@@ -320,7 +320,7 @@ public class DocumentRouteExternalNarrowingTests : IClassFixture<DocumentRouteNa
         var services = new ServiceCollection()
             .AddSingleton<ISystemUserIdentityResolver>(identity)
             .AddSingleton<ICallerSystemUserResolver>(new CallerSystemUserResolver(identity, NullLogger<CallerSystemUserResolver>.Instance))
-            .AddSingleton<AppOnlyDocumentNarrowing>((ids, ct) => _fixture.World.Narrowing(ids, ct))
+            .AddSingleton<InternalRouteDocumentNarrowing>((ids, ct) => _fixture.World.Narrowing(ids, ct))
             .BuildServiceProvider();
         var context = new DefaultHttpContext
         {
@@ -509,8 +509,8 @@ public class DocumentRouteNarrowingTestFixture : DocumentDestroyAuthorizationTes
                 new CallerSystemUserResolver(
                     sp.GetRequiredService<ISystemUserIdentityResolver>(), NullLogger<CallerSystemUserResolver>.Instance)));
 
-            services.RemoveAll<AppOnlyDocumentNarrowing>();
-            services.AddScoped<AppOnlyDocumentNarrowing>(_ => (ids, ct) => World.Narrowing(ids, ct));
+            services.RemoveAll<InternalRouteDocumentNarrowing>();
+            services.AddScoped<InternalRouteDocumentNarrowing>(_ => (ids, ct) => World.Narrowing(ids, ct));
         });
     }
 }

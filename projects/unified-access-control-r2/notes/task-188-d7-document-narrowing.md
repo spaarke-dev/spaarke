@@ -566,13 +566,7 @@ passed (of 114 in the trim, #1511 and Insights classes). After: 114 passed.
 
 ## 15. Round 3 slice B — the internal plane's document routes (security pass 1)
 
-Slices A (§14) and C (`sprk_analysis`, read_query, search_data) are not touched here.
-
-**STATUS: IN PROGRESS, not pushed.** The code, the new tests (44) and the ArchTest rule (2 new facts) pass. About 85
-EXISTING tests in about 9 test hosts now fail: their test principal is not a resolved internal systemuser (non-GUID
-`oid`, or no systemuser modelled), so the narrowing applies, its app-only read faults offline, and the route refuses.
-How those hosts state their caller is open (see the slice B report). Mutants, the full ArchTests, publish size and
-merge-tree are not run yet.
+Slices A (§14) and C (`sprk_analysis`, read_query, search_data) are not touched here. Coordinator decisions applied: Option A for the test hosts, the `internal-routes` plane, the list-cost limit (K-B1).
 
 **Also reached (not in the brief's 26).** `ComposeDocumentAuthorizationFilter` (6 compose routes:
 `ComposeAnnotationEndpoints.cs:37/61`, `ComposeDocumentEndpoints.cs:40`, `ComposeSaveEndpoints.cs:33`,
@@ -588,14 +582,22 @@ document a user marked Restricted, through any document-id route, the bulk downl
 **The fix.** One static helper, `Api/Filters/InternalPlaneDocumentNarrowing.ForCallerAsync`, used by all three surfaces:
 1. It runs only AFTER the root grants allowed; each route's own authorization is unchanged (no endpoint loses or changes
    its auth; no new status code, policy or registration).
-2. A caller who is not a resolved INTERNAL systemuser (`ExternalCallerCommunicationGuard.IsExternalCallerAsync`, reused:
-   flagged external, unresolved, or no principal) is narrowed by ONE `AppOnlyDocumentNarrowing` call over every document
-   id the request names (the injected app-only seam; the rule is not copied).
+2. A caller who is not a resolved INTERNAL systemuser (the rule of `ExternalCallerCommunicationGuard.IsExternalCallerAsync`:
+   flagged external, unresolved, or no principal) is narrowed by ONE `InternalRouteDocumentNarrowing` call over every
+   document id the request names. That delegate is the same app-only read and decision as `AppOnlyDocumentNarrowing`
+   (`ExternalDataService.ReadAndNarrowDocumentsAsync`); the D7 rule is not copied.
+   - The externality rule is applied over the guard's own two resolvers (`ICallerSystemUserResolver`,
+     `ISystemUserIdentityResolver`) rather than by calling the guard: non-AI code may not depend on
+     `Services.Ai.Handlers.Dataverse` (ArchTest D-66), and moving the guard would touch slice C's files. Under this
+     helper's fault policy the two give the same answer (pinned by mutants M3a, M3b, M6, M7).
 3. Internal systemusers: no narrowing call and no app-only read.
 4. Faults (the slice A rule): a failed externality lookup counts as EXTERNAL (the narrowing applies; it never refuses
    every request and never treats the caller as internal). A failed narrowing hides every document of the request.
-5. Logs: counts and reason codes (`[DOC-NARROWING] {surface}: {hidden} of {count} ...`), never ids. The cost line is
-   `ReadAndNarrowDocumentsAsync`'s own (`plane=assistant`; see K-B3).
+5. Logs: counts and reason codes (`[DOC-NARROWING] {surface}: {hidden} of {count} ...`), never ids. The one cost line
+   per request is `ReadAndNarrowDocumentsAsync`'s, with the plane now passed in: `plane=internal-routes` for these routes
+   (`ExternalDataService.InternalRoutesPlane`); `plane=assistant` is unchanged for `AppOnlyDocumentNarrowing`.
+6. A route id that is not a GUID is not narrowed. It names no document (`sprk_documentid` is a GUID), so the handler's
+   own validation answers as before (`/identity`'s 400, pinned by `DocumentIdentityByIdContractTests`).
 
 | Surface | Behaviour when hidden (or the narrowing faults) |
 |---|---|
@@ -655,3 +657,124 @@ that id like the rest.
 | Internal systemuser | Served | Served; no narrowing call, no app-only read |
 | Narrowing fault, external caller | n/a | Single route 403; bulk and lists drop the documents |
 | No right (root grants) | 403 | 403, before any narrowing |
+
+**Component justification (§11), slice B.**
+- `InternalPlaneDocumentNarrowing` (static helper, `Api/Filters`):
+  1. *Existing:* the externality rule and the app-only narrowing are reused.
+  2. *Extension:* the surfaces are an endpoint filter, a bulk filter and two route handlers with no common service, so one
+     helper holds the fault policy once instead of four times.
+  3. *Cost of doing nothing:* an external systemuser reads, edits or lists internal-only email and Restricted documents
+     through the internal plane.
+- `InternalRouteDocumentNarrowing` delegate + one scoped registration in `ExternalAccessModule` (coordinator condition 4):
+  1. *Existing:* `AppOnlyDocumentNarrowing` over the same reader.
+  2. *Extension:* passing a plane through `AppOnlyDocumentNarrowing` would change its signature and every lambda built for
+     it, including slice A's and slice C's surfaces and their tests. A sibling delegate passes `plane=internal-routes`, and
+     it lets a test host state these routes' narrowing without touching the assistant's.
+     `ReadAndNarrowDocumentsAsync` gains an optional `plane` parameter (default `assistant`).
+  3. *Cost of doing nothing:* the cost line for these routes says `plane=assistant`.
+- `CallerDocumentVisibility` (the helper's answer type). No new interface and no package.
+
+**Query cost (slice B).** One narrowing call per request, for external callers only (internal systemusers: 0 reads).
+Chunks of `ChunkSize` = 50 ids, `MaxChunksInFlight` = 4 (§4).
+
+| Surface | Worst case per request |
+|---|---|
+| Single-document route | 1 by-id + ≤ 3 hop + 1 communication + 1 thread = **≤ 6 requests** |
+| Bulk download (≤ 500 ids) | ⌈500/50⌉ = 10 by-id + ≤ 30 hop + ≤ 10 + ≤ 10 = **≤ 60 requests, about 15 rounds** |
+| Container lists (N = every document in the container) | ⌈N/50⌉ by-id (⌈N/200⌉ rounds) + ≤ 3·⌈P/50⌉ + ⌈C/50⌉ + ⌈T/50⌉ |
+
+**K-B1 (known limit, coordinator condition 5).** The list routes narrow the WHOLE container list, because paging must not
+count or skip hidden rows. So their by-id reads are ⌈N/50⌉ with N unbounded. The list already reads every page
+(`GetDocumentsByContainerAsync` → `RetrieveAllPagesAsync`). Both list routes are also unreachable on real data today (the
+`Guid.TryParse` container-id type bug, task 078 §4).
+
+**Test hosts (coordinator decision: Option A).** About 85 existing tests, in hosts whose principal is not a resolved
+internal systemuser (a non-GUID `oid`, or no systemuser modelled), hit the narrowing, whose app-only read cannot succeed
+offline. Those hosts are about other features. ONE shared double,
+`tests/unit/Sprk.Bff.Api.Tests/TestInfrastructure/AllVisibleDocumentNarrowing.cs`, replaces `InternalRouteDocumentNarrowing`
+only (the assistant's `AppOnlyDocumentNarrowing` is untouched). Each host registers it in one place, with a one-line pointer
+to `DocumentRouteExternalNarrowingTests`:
+- `CustomWebAppFactory` (and `DocumentIdentityTestWebAppFactory`);
+- `WorkspaceTestFixture` (and the document destroy and version fixtures);
+- `OfficeTestWebAppFactory` (and its version-save and generate-profile factories);
+- `ComposeCreateOnSaveFixture`;
+- `ComposeFidelitySeamFixture` (and its seam fixtures);
+- `DocumentFileAttachContractTests.AttachHost`;
+- the two filter unit tests that build a bare `DefaultHttpContext` (`CallerObjectIdResolutionTests`,
+  `ComposeDocumentAuthorizationFilterTests`).
+
+`DocumentRouteNarrowingTestFixture` overrides the double with the real predicate.
+
+**Production registers the real seam** (condition 2). `ExternalDocumentNarrowingRouteTests.TheInternalRoutesNarrowing_IsRegistered_OverTheAppOnlyReader`
+builds `AddExternalAccess`, resolves `InternalRouteDocumentNarrowing`, and sees it read app-only, decide (own and ancestor
+Restricted) and log `plane=internal-routes`. The double lives in the test assembly, which `src/` cannot reference.
+
+**Tests (slice B).**
+- `DocumentRouteExternalNarrowingTests` (44). Real host, real filters, real `AuthorizationService` over token-stated
+  rights, real `CallerSystemUserResolver`, and the REAL predicate behind the real seam (`AppOnlyDocumentWorld`).
+  - Must fire:
+    - own Restricted × internal-only communication × Restricted parent, on read, download, versions, preview, delete and
+      checkout (18 cases);
+    - a failed lookup (the resolver throws; the external flag is unreadable) narrows;
+    - a narrowing fault refuses read, download and delete;
+    - the bulk download drops every hidden id in ONE call (external caller and failed lookup); a bulk narrowing fault drops
+      all;
+    - both list routes remove hidden rows before paging (page 1: 2 of the 3 visible, `totalCount` 3, `hasNextPage` true;
+      page 2: the 3rd, `hasNextPage` false), also with a failed lookup, and drop every row on a narrowing fault.
+  - Must not fire:
+    - an internal user: a Restricted document is served and deleted, the bulk download zips it, the list is unchanged;
+      0 narrowing calls and 0 app-only reads;
+    - an external caller keeps a visible document (read 200, delete 204, the content routes pass the filter);
+    - with no right, the 403 comes first and nothing is narrowed (single and bulk).
+- `ExternalDocumentNarrowingRouteTests.TheInternalRoutesNarrowing_IsRegistered_OverTheAppOnlyReader` (above).
+- ArchTest `TheInternalPlaneDocumentRoutes_ReachTheNarrowing`. These must reach the narrowing, and a pin that disappears is
+  reported:
+  - `DocumentAuthorizationFilter::InvokeAsync`;
+  - `BulkDownloadAuthorizationFilter::InvokeAsync`;
+  - `DataverseDocumentsEndpoints::ListDocumentsAsync` and `::ListContainerDocumentsAsync`;
+  - every caller of `IDocumentDataverseService.GetDocumentsByContainerAsync`.
+
+  Control `InternalPlaneDetector_MustFireAndMustNotFire`: it fires for a filter that skips the narrowing and for a list that
+  does not narrow; it does not fire for a filter that narrows through a helper, or for a list that narrows.
+  `InternalRouteDocumentNarrowing.Invoke` is added to the narrowing primitives.
+
+**Mutation table (slice B).** Each mutant was applied to the source; the unit test project and the ArchTests were rebuilt;
+`DocumentRouteExternalNarrowingTests` + `ExternalDocumentNarrowingRouteTests` (110 cases) and
+`ExternalDocumentNarrowingGuardTests` (6) were run; then the source was restored and checked against its SHA-1. **8 of 8
+killed.** Runner: `.uac188/t188b_mutate.py` (untracked; deleted at the end).
+
+| Id | Mutation | Unit failing | ArchTest | Killed by (representative) |
+|---|---|---|---|---|
+| M1 | `DocumentAuthorizationFilter`'s narrowing removed | 28 | fails | `SingleDocumentRoute_ExternalCaller_HiddenDocument_IsRefused` (18 route × kind cases), lookup-fault and narrowing-fault cases |
+| M2 | the list routes skip the narrowing | 6 | fails | `List_ExternalCaller_RemovesHiddenRows_BeforePaging`, `List_LookupFault_Narrows`, `List_NarrowingFault_DropsEveryRow` (× 2 routes) |
+| M3a | a lookup that throws is treated as internal | 1 | passes | `SingleDocumentRoute_LookupFault_Narrows_ItDoesNotRefuseEverything(ExternalFlagFault)` |
+| M3b | `lookup-failed` (unresolved) is treated as internal | 4 | passes | `SingleDocumentRoute_LookupFault_…(LookupFault)`, `BulkDownload_ExternalCaller_DropsHiddenDocuments(LookupFault)`, `List_LookupFault_Narrows` (× 2) |
+| M4 | the bulk filter skips the narrowing | 3 | fails | `BulkDownload_ExternalCaller_DropsHiddenDocuments` (× 2), `BulkDownload_NarrowingFault_DropsEveryDocument` |
+| M5 | a narrowing fault shows everything | 6 | passes | `SingleDocumentRoute_NarrowingFault_IsRefused` (× 3), `BulkDownload_NarrowingFault_…`, `List_NarrowingFault_…` (× 2) |
+| M6 | the internal exemption is removed (everyone narrowed) | 4 | passes | `SingleDocumentRoute_InternalUser_IsNotNarrowed`, `BulkDownload_InternalUser_IsNotNarrowed`, `List_InternalUser_IsNotNarrowed` (× 2) |
+| M7 | every systemuser is treated as internal | 33 | passes | every external must-fire case |
+
+The ArchTest is the second net for M1, M2 and M4 (`TheInternalPlaneDocumentRoutes_ReachTheNarrowing`: 1 of 6 fails). M3, M5,
+M6 and M7 change the decision, not the wiring, so only the behaviour tests can see them.
+
+**`ExternalWorkforceLinkEndpointsTests` (coordinator condition 3).** One case
+(`GuestToken_FailingACheck_…(defect: "expired")`) failed twice, but only inside the long, heavily loaded broad runs: it got
+`guest_token_invalid` instead of `guest_token_expired`. It passes in isolation on `origin/master` `44063b3473` (35 of 35) and
+on this branch, and with the same filter on both (`AccessControl` | `ExternalAccess`: master 7,366 / 0 failed; branch
+7,536 / 0 failed). Slice B touches no guest-token or link code. So it is an intermittent, load-dependent failure, not a
+master failure and not caused here; no issue was filed (see the final run below).
+
+**Gates (slice B)**, on the final sources:
+
+| Gate | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | succeeded, 0 warnings |
+| Unit and integration, filtered (`AccessControl` \| `ContractTests` \| `Documents` \| `Filters` \| `FileAccess` \| `Office` \| `Compose` \| `Regression` \| `ExternalAccess` \| `UnifiedAccessControl` \| `Services.Ai.Handlers` \| `RetrievalAccessTrim`, `Category!=Live`) | 13,231 passed, 7 skipped, 2 failed: `ExternalWorkforceLinkEndpointsTests` (`expired`, above) and `ProvisionProjectIdempotencyTests.ProvisionProject_WhenRecordingTheContainerTimesOut_…` (a 1 m 26 s timeout under load). Neither touches slice B's code. The same filter on master is in the slice B report |
+| Same failing areas, smaller filter (`AccessControl` \| `ExternalAccess`) | master 7,366 / 0 failed; branch 7,536 / 0 failed |
+| `tests/Spaarke.ArchTests` (full project) | 1,214 passed, 0 failed (D-66 caught the first draft's dependency on `Services.Ai.Handlers.Dataverse`; fixed) |
+| Mutants | 8 of 8 killed; sources SHA-checked after every run |
+| Publish size (`dotnet publish -c Release`, framework-dependent, `Compress-Archive -CompressionLevel Optimal`, 4 PDBs each side) | branch 39,336,481 B vs a fresh `origin/master` `44063b3473` build 39,314,338 B: **+22,143 B (+0.02 MB)** for all of task 188 (rounds 1 to 3); raw +59,452 B. Total 39.3 MB |
+| `dotnet list package --vulnerable --include-transitive` | no vulnerable packages; no package changes |
+| `git merge-tree --write-tree origin/master HEAD` | clean |
+
+Not run, by the brief: the full unfiltered unit suite, any deploy, any Dataverse, Azure or Key Vault access.

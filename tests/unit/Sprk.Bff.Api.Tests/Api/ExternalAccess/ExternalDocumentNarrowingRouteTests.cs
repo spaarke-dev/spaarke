@@ -352,6 +352,46 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
         appOnly.KeyReads("sprk_documents").Should().ContainSingle("the documents by id; the parent came back with them");
     }
 
+    /// <summary>
+    /// Task 188 round 3 slice B: <c>AddExternalAccess</c> registers the internal document routes'
+    /// <see cref="InternalRouteDocumentNarrowing"/> over the SAME app-only reader and decision (not a test double), and its
+    /// one cost line says <c>plane=internal-routes</c>. Test hosts that are not about the narrowing replace it with
+    /// <c>AllVisibleDocumentNarrowing</c>; this pins that production does not.
+    /// </summary>
+    [Fact]
+    public async Task TheInternalRoutesNarrowing_IsRegistered_OverTheAppOnlyReader()
+    {
+        var appOnly = new ExternalRootEventReadTests.FakeDataverse();
+        var logger = new CapturingLogger();
+        var restricted = Guid.NewGuid();
+        var underRestricted = Guid.NewGuid();
+        var plain = Guid.NewGuid();
+        appOnly.AddAncestorDocument(restricted, Restricted, communication: null, parent: null);
+        appOnly.AddAncestorDocument(underRestricted, accessPermission: null, communication: null, parent: restricted);
+        appOnly.AddAncestorDocument(plain, accessPermission: null, communication: null, parent: null);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
+            .Build());
+        services.AddSingleton<Azure.Core.TokenCredential>(new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential());
+        services.AddExternalAccess();
+        services.AddHttpClient<ExternalDataService>().ConfigurePrimaryHttpMessageHandler(() => appOnly);
+        services.AddSingleton<Microsoft.Extensions.Logging.ILogger<ExternalDataService>>(logger);
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+
+        var narrowing = await scope.ServiceProvider.GetRequiredService<InternalRouteDocumentNarrowing>()(
+            new[] { restricted, underRestricted, plain }, CancellationToken.None);
+
+        narrowing.IsVisible(plain).Should().BeTrue();
+        narrowing.ReasonFor(restricted).Should().Be(DocumentNarrowingReason.OwnRestricted);
+        narrowing.ReasonFor(underRestricted).Should().Be(DocumentNarrowingReason.AncestorRestricted);
+        appOnly.KeyReads("sprk_documents").Should().ContainSingle("the documents by id, app-only; the parent came back with them");
+        logger.Lines.Should().ContainSingle(l => l.Contains("[EXT-NARROWING] cost")).Which.Should()
+            .Contain("plane=internal-routes").And.Contain("rows=3").And.Contain("hidden=2");
+    }
+
     [Fact]
     public async Task TheAssistantsNarrowing_LogsOneCostLine_IdsNeverLogged()
     {

@@ -114,6 +114,12 @@ public static class ExternalAccessModule
         services.AddScoped<AppOnlyDocumentNarrowing>(sp =>
             (documentIds, ct) => sp.GetRequiredService<ExternalDataService>().ReadAndNarrowDocumentsAsync(documentIds, ct));
 
+        // unified-access-control-r2 task 188 round 3 slice B: the same app-only narrowing for the internal plane's document
+        // routes (document filter, bulk download, container lists), logged as plane=internal-routes. Resolved lazily, as above.
+        services.AddScoped<InternalRouteDocumentNarrowing>(sp =>
+            (documentIds, ct) => sp.GetRequiredService<ExternalDataService>()
+                .ReadAndNarrowDocumentsAsync(documentIds, ct, ExternalDataService.InternalRoutesPlane));
+
         // Per-customer external-access switches (external-access-platform-r3 task 011, spec FR-06 / FR-19, ADR-028
         // A8). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for
         // their own requests and adds legal-front-door to their default modules. Read by the entitlement resolver

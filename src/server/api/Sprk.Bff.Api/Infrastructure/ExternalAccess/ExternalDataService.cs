@@ -1854,16 +1854,25 @@ public class ExternalDataService
     /// the external plane, so a column field security masks for the user can never read as "no link". The tool has already
     /// decided the caller is external. A failed read THROWS (the tool call fails with no data); a document that does not come
     /// back is not visible. Returns the decision only.
+    /// <para>Task 188 round 3 slice B: <paramref name="plane"/> labels the cost line — <see cref="AssistantPlane"/> for
+    /// <see cref="AppOnlyDocumentNarrowing"/> (the assistant's tools and the AI retrieval trim), <see cref="InternalRoutesPlane"/>
+    /// for <see cref="InternalRouteDocumentNarrowing"/> (the internal plane's document routes).</para>
     /// </summary>
     internal async Task<DocumentNarrowingResult> ReadAndNarrowDocumentsAsync(
-        IReadOnlyCollection<Guid> documentIds, CancellationToken ct)
+        IReadOnlyCollection<Guid> documentIds, CancellationToken ct, string plane = AssistantPlane)
     {
         ArgumentNullException.ThrowIfNull(documentIds);
         var narrowing = await ExternalDocumentNarrowing.ReadAndDecideAsync(documentIds, QueryRowsOrThrowAsync, ct);
         var distinct = documentIds.Distinct().ToList();
-        LogNarrowingCost("assistant", distinct.Count, distinct.Count(id => !narrowing.IsVisible(id)), narrowing);
+        LogNarrowingCost(plane, distinct.Count, distinct.Count(id => !narrowing.IsVisible(id)), narrowing);
         return narrowing;
     }
+
+    /// <summary>The cost line's plane for <see cref="AppOnlyDocumentNarrowing"/>.</summary>
+    internal const string AssistantPlane = "assistant";
+
+    /// <summary>The cost line's plane for <see cref="InternalRouteDocumentNarrowing"/> (task 188 round 3 slice B).</summary>
+    internal const string InternalRoutesPlane = "internal-routes";
 
     /// <summary>Reads above which a request's narrowing cost line is logged at Information (Debug otherwise).</summary>
     internal const int NarrowingCostInformationThreshold = 20;

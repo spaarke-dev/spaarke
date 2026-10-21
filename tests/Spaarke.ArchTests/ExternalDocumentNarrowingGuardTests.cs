@@ -327,7 +327,8 @@ public class ExternalDocumentNarrowingGuardTests
                 && method.Name is nameof(ExternalDataService.NarrowDocumentsAsync) or nameof(ExternalDataService.IsDocumentVisibleAsync)
                     or nameof(ExternalDataService.ReadAndNarrowDocumentsAsync))
             || (declaring == typeof(DocumentNarrower) && method.Name == nameof(DocumentNarrower.Invoke))
-            || (declaring == typeof(AppOnlyDocumentNarrowing) && method.Name == nameof(AppOnlyDocumentNarrowing.Invoke)));
+            || (declaring == typeof(AppOnlyDocumentNarrowing) && method.Name == nameof(AppOnlyDocumentNarrowing.Invoke))
+            || (declaring == typeof(InternalRouteDocumentNarrowing) && method.Name == nameof(InternalRouteDocumentNarrowing.Invoke)));
 
     private static string? SurfacePrimitive(MethodBase method) => method.DeclaringType switch
     {
