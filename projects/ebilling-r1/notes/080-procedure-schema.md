@@ -555,4 +555,4 @@ Escalation triggers read: none fired during authoring (no planned name exists wi
 - First attempt: refused at its first write (0x80048d19, the in-place cascade PUT had no `@odata.type`); nothing changed. Fix 11ead6c938 (Get-CascadeFixBody names OneToManyRelationshipMetadata); scoped re-check PASS from uac-r2 and ontology-r1.
 - Second attempt: exit 0, created 64, changed 20, skipped 40. Verify output: `notes/080-dev-run-2026-10-21.md`.
 - After-notices sent 2026-10-21. uac-r2 ACCEPTED after its own read-only read-back of the 18 secured columns. ontology-r1 confirmed its own metadata read-back matches (D-146 / #2132 holds).
-- Idempotence run: see below.
+- Idempotence run (2026-10-21, same script): exit 0, created 0, changed 0, skipped 86; every verify check passed.
