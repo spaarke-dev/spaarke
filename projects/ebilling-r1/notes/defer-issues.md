@@ -1013,3 +1013,16 @@ Each restamps afterwards, but none refuses any of these:
 **Description**: Task 115 runs only the AddedFee cap form. The other two forms are refused at save and at evaluation (`rule_form_not_supported`) until extraction gives a per-line fee kind and the invoice due date. Known limit: fee lines are matched on expense codes only.
 
 ---
+
+### DEF-033 — BFF fails to start with the AI gates off (ChatEndpoints IChatClient)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (pre-existing; not ebilling scope) |
+| **Urgency** | medium |
+| **Filed** | 2026-10-21 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2218 |
+
+**Description**: Found by task 099's fix round. With analysis/document-intelligence off, building the endpoint table throws "Failure to infer one or more parameters ... chatClient | UNKNOWN" because `ChatEndpoints` binds an unregistered `IChatClient`. `GateCombinationConstructibilityTests` does not build the endpoint data source, so it misses this. 099's AI-off registration guard therefore composes `CommunicationModule` + `NotificationsModule` directly instead of booting the host.
+
+---
