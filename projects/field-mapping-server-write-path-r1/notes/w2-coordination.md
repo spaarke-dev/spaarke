@@ -140,3 +140,5 @@ touch DecisionCommitService. ebilling sends the shas when the range lands; rebas
 - Dev has 0 mapping rules touching either access column (25 rules checked), so no owner decision is needed.
 - Resolved: UAC-r2 asked that 014 never map `sprk_document.sprk_accessinheritance` (skip with a warning, matching push)
   while `sprk_accesspermission` stays fill-only. Criteria added to 014 and 040.
+- #2169 landed: c8c591777f (PR #2169, draft). Pinning test: `DocumentAccessPermissionPushTargetTests` (3 methods, 6
+  cases), which 040 keeps green unchanged. Details in the 040 POML notes.

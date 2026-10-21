@@ -1,15 +1,15 @@
 # Current Task — field-mapping-server-write-path-r1
 
 > **Last updated**: 2026-10-21
-> **Phase**: Wave 2. Done (9/43): 001–006, 010, 011, 012. W1 complete except 005's live -Apply (owner OK). In flight: 013 (fix round 1).
+> **Phase**: Wave 2. Done (10/43): 001–006, 010–013. W1 complete except 005's live -Apply (owner OK). 013 awaiting UAC-r2 and ebilling-r1 review.
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **HEAD** | `036bc69bab` on `work/field-mapping-server-write-path-r1`, pushed; master merged at 44063b3473, no overlap with 013's files |
-| **Running** | (1) **013** agent (opus/xhigh), branch `task/fm-013` (base bad3195920, tip c09c73c1f7 before fixes), worktree `C:\code_files\spaarke\.claude\worktrees\agent-a87bbe45568936ca4`. Fix round 1 in progress: F1/F2 secure-root and autonumber-retry tests; F3 caller-set autonumber column refused as BlockedColumn; F4/F5 SystemPrincipal on an isolated/secure plan refused 403 `system_principal_unsupported` **before** PlanCreateAsync (main-session fail-closed decision); K1 census name join (expires 018); K2 never-throw post-create calls. Then a second adversarial pass (security). 004/005 merged (`task/fm-004-005`, 3 commits) |
-| **Next Action** | On each report: merge with `--no-ff`, verify (sln, ArchTests, suites), mark the POML and TASK-INDEX, push. After 013: send the range to UAC-r2 (refusal codes, owner, post-create order) and ebilling-r1 (registry rule, corrections a–c) for review before any master merge. 005 -Apply waits on the owner (item 3). Next task: **014** (deps 002, 003, 013) |
+| **HEAD** | work branch with `task/fm-013` merged (5 commits, bad3195920..123b632315) on top of 004/005 and master 44063b3473. Verified: sln 0/0, ArchTests 1214, full Sprk.Bff.Api.Tests 26098 passed; the 9 load failures pass in isolation |
+| **Running** | nothing |
+| **Next Action** | (1) Wait for the UAC-r2 and ebilling-r1 reviews of 013 (requested 2026-10-21). (2) Owner decisions: the 013 step-10 order, #1608, OWNER/017 and OWNER/017-018 (task-013-notes), and 005's -Apply. (3) Start **014** (deps 002, 003, 013 done; opus/xhigh): check its POML criteria, including the UAC-r2 D7 accessinheritance one, moneyAttributes for #2124, the Office pair, and FR-08 filing refusal |
 
 ## How wave-2 agents are run (lessons)
 
