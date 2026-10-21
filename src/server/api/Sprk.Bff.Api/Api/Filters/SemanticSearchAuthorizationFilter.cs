@@ -295,7 +295,7 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
 
         // Step 4: authorize the request against real records.
         var (authorization, denial) = await AuthorizeScopeAsync(
-            request, callerObjectId, callerToken, correlationId, httpContext.RequestAborted);
+            request, callerObjectId, callerToken, correlationId, httpContext, httpContext.RequestAborted);
 
         if (denial is not null)
         {
@@ -360,6 +360,7 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
         string callerObjectId,
         string callerToken,
         string correlationId,
+        HttpContext httpContext,
         CancellationToken ct)
     {
         // Case-INSENSITIVE comparison, deliberately, instead of the previous
@@ -381,7 +382,7 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
 
             case not null when Matches(scope, SearchScope.DocumentIds):
                 return await AuthorizeDocumentIdsScopeAsync(
-                    request, callerObjectId, callerToken, correlationId, ct);
+                    request, callerObjectId, callerToken, correlationId, httpContext, ct);
 
             case not null when Matches(scope, SearchScope.All):
                 // FILTERED, not refused — and not reduced to a pre-enumerated accessible set either.
@@ -527,14 +528,25 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
     }
 
     /// <summary>
-    /// <c>scope=documentIds</c>: authorize each named document through the document path, and carry the
-    /// permitted subset forward.
+    /// <c>scope=documentIds</c>: authorize each named document through the document path, then THE external document
+    /// narrowing, and carry the permitted subset forward.
     /// </summary>
+    /// <remarks>
+    /// <b>The narrowing is here, not only downstream (task 188 round 4d, #2199).</b> <c>POST /api/ai/search</c> trims its
+    /// rows afterwards (<c>IRetrievalAccessTrim</c>), but <c>POST /api/ai/search/count</c> has no rows to trim and counts
+    /// over exactly this set, so a document the narrowing hides answered "does it match the query" through the count.
+    /// Narrowing the SET makes both routes see only what the caller may see; refusing documentIds counts for every
+    /// caller who is not internal would also close it, but would take a working count away from callers counting
+    /// documents they may see. One call over the readable ids (an unreadable id is never sent); a document it hides is
+    /// dropped like an unreadable one (all hidden → the same 403); a narrowing fault hides every id; an internal
+    /// systemuser makes no call and no read.
+    /// </remarks>
     private async Task<(SemanticSearchAuthorization?, IResult?)> AuthorizeDocumentIdsScopeAsync(
         SemanticSearchRequest request,
         string callerObjectId,
         string callerToken,
         string correlationId,
+        HttpContext httpContext,
         CancellationToken ct)
     {
         var requested = request.DocumentIds;
@@ -606,6 +618,23 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
             if (snapshot.AccessRights.HasFlag(AccessRights.Read))
             {
                 authorized.Add(documentId);
+            }
+        }
+
+        // Task 188 round 4d (#2199): THE external document narrowing over the readable ids — see the remarks.
+        if (authorized.Count > 0)
+        {
+            var visibility = await InternalPlaneDocumentNarrowing.ForCallerAsync(
+                httpContext, authorized.Select(id => (string?)id).ToList(), "semantic-search-document-ids", _logger);
+            if (visibility.Narrowed)
+            {
+                var hidden = authorized.RemoveWhere(id => !visibility.IsShown(id));
+                if (hidden > 0)
+                {
+                    _logger?.LogInformation(
+                        "Semantic search: the external document narrowing withheld {Hidden} of {Readable} readable documents",
+                        hidden, hidden + authorized.Count);
+                }
             }
         }
 

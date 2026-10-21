@@ -1075,6 +1075,16 @@ public class SemanticSearchAuthorizationTestFixture : WebApplicationFactory<Prog
 
             services.RemoveAll<Sprk.Bff.Api.Services.Ai.PublicContracts.IRetrievalAccessTrim>();
             services.AddSingleton<Sprk.Bff.Api.Services.Ai.PublicContracts.IRetrievalAccessTrim>(Trim);
+
+            // unified-access-control-r2 task 188 round 4d (#2199): scope=documentIds now applies THE external document
+            // narrowing in the filter. It is not under test here (Sprk.Bff.Api.Tests' SemanticSearchCountNarrowingTests), so
+            // every asked id is visible and nothing is read (the AllVisibleDocumentNarrowing double, inline: this project
+            // does not compile Sprk.Bff.Api.Tests' helpers).
+            services.RemoveAll<Sprk.Bff.Api.Infrastructure.ExternalAccess.InternalRouteDocumentNarrowing>();
+            services.AddSingleton<Sprk.Bff.Api.Infrastructure.ExternalAccess.InternalRouteDocumentNarrowing>((documentIds, _) =>
+                Task.FromResult(Sprk.Bff.Api.Infrastructure.ExternalAccess.DocumentNarrowingResult.NotNarrowed(documentIds
+                    .Select(id => new Sprk.Bff.Api.Infrastructure.ExternalAccess.DocumentNarrowingRow(
+                        id, Sprk.Bff.Api.Infrastructure.ExternalAccess.DocumentPermission.NotNarrowed, Guid.Empty, Guid.Empty)))));
         });
 
         builder.UseEnvironment("Testing");

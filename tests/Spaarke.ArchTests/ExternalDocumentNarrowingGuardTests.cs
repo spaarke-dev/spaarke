@@ -870,26 +870,10 @@ public class ExternalDocumentNarrowingGuardTests
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> DocumentDecisionBaseline = new Dictionary<string, string>
     {
-        ["Sprk.Bff.Api.Api.Filters.SemanticSearchAuthorizationFilter::AuthorizeDocumentIdsScopeAsync"] =
-            "snapshot: results trimmed downstream by IRetrievalAccessTrim — POST /api/ai/search's rows go through " +
-            "SemanticSearchEndpoints.TrimToReadableDocumentsAsync, which applies THE narrowing (slice A). NOT true of " +
-            "POST /api/ai/search/count (scope=documentIds): it has no rows to trim — filed as #2199 (notes §19).",
         ["Sprk.Bff.Api.Api.Finance.FinanceEndpoints::ResolveConfirmTargets"] =
             "record path: finance.link_invoice on the confirmed document is declared AFTER the Document-path finance.confirm " +
             "check on the SAME id in the same declaration; the filter evaluates in order and stops at the first deny, and the " +
             "Document path narrows (round 4b, F1-2), so a hidden document never reaches the Record check.",
-        ["Sprk.Bff.Api.Api.Ai.RagEndpoints::ResolveIndexFileTargets"] =
-            "record path, WRITE: POST /api/ai/rag/index-file asks Write on the document it stamps; the bytes become index " +
-            "chunks that every retrieval trims (slice A). It answers a chunk count for a document the caller may write — " +
-            "filed as #2200 (notes §19).",
-        ["Sprk.Bff.Api.Api.Ai.RagEndpoints::SendToIndex"] =
-            "record path, WRITE: POST /api/ai/rag/send-to-index asks Write per document before indexing it; retrieval is " +
-            "trimmed (slice A). Its per-document result names the governing parent and a chunk count — filed as #2200 " +
-            "with the other document write routes (notes §19).",
-        ["Sprk.Bff.Api.Api.DataverseDocumentsEndpoints::AuthorizeRefileTargetsAsync"] =
-            "record path, WRITE: a re-file asks AppendTo on each new parent, which may be a document; nothing of the target " +
-            "is returned, and a document filed under a hidden parent is itself hidden (Restricted ancestor). " +
-            "Filed as #2200 (notes §19).",
     };
 
     [Fact(DisplayName = "Task 188 r4c (F1): every document rights snapshot and every Record-path check on sprk_documents reaches THE narrowing (or is listed)")]
@@ -897,15 +881,20 @@ public class ExternalDocumentNarrowingGuardTests
     {
         var problems = DocumentDecisionProblems(BffTypes.Value, DocumentDecisionBaseline, out var uses);
 
-        // Non-vacuity: the round-4c snapshot sites are seen using the shape.
+        // Non-vacuity: the round-4c snapshot sites, and the round-4d sites (a snapshot, two Record-path checks), are seen
+        // using a shape.
         foreach (var site in new[]
                  {
                      "Sprk.Bff.Api.Api.Office.OfficeEndpoints::WithholdCollisionIdentityIfUnauthorizedAsync",
                      "Sprk.Bff.Api.Api.PermissionsEndpoints::GetDocumentPermissionsAsync",
                      "Sprk.Bff.Api.Api.PermissionsEndpoints::GetBatchPermissionsAsync",
+                     // Round 4d (#2199, #2200): still a snapshot / a Record-path check on sprk_documents, now narrowed.
+                     "Sprk.Bff.Api.Api.Filters.SemanticSearchAuthorizationFilter::AuthorizeDocumentIdsScopeAsync",
+                     "Sprk.Bff.Api.Api.Ai.RagEndpoints::SendToIndex",
+                     "Sprk.Bff.Api.Api.DataverseDocumentsEndpoints::AuthorizeRefileTargetsAsync",
                  })
         {
-            Assert.True(uses.ContainsKey(site), $"{site} should be seen calling AuthorizationService.GetCallerAccessAsync — the scan lost its signal.");
+            Assert.True(uses.ContainsKey(site), $"{site} should be seen using a document decision shape (a snapshot or a Record-path check on sprk_documents) — the scan lost its signal.");
         }
 
         Assert.True(problems.Count == 0,

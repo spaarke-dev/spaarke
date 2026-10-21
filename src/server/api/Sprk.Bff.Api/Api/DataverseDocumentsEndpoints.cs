@@ -762,6 +762,8 @@ public static class DataverseDocumentsEndpoints
     /// route's filter. <c>null</c> when allowed; otherwise a 403 ProblemDetails that names no target and no reason about
     /// it — a caller without AppendTo learns nothing about the record (the owner refusal's detail is reached only by a
     /// caller authorized on every target). Fails closed: an unsupported type, an unanswerable question or a fault denies.
+    /// A parent that is itself a document takes the document path (task 188 round 4d, #2200): AppendTo, then THE external
+    /// document narrowing, so a caller who is not an internal systemuser cannot file under a document it hides.
     /// </summary>
     private static async Task<IResult?> AuthorizeRefileTargetsAsync(
         Spaarke.Core.Auth.AuthorizationService authorization,
@@ -794,10 +796,24 @@ public static class DataverseDocumentsEndpoints
             {
                 try
                 {
-                    var snapshot = await authorization.GetCallerRecordAccessAsync(userId, entitySet, target.Id, token, ct);
-                    denyReason = Spaarke.Core.Auth.OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, RefileTargetOperation)
-                        ? null
-                        : FinanceAuthorizationFilter.InsufficientRightsReasonCode;
+                    if (string.Equals(entitySet, FinanceAuthorizationFilter.DocumentEntitySet, StringComparison.Ordinal))
+                    {
+                        // Task 188 round 4d (#2200): a parent DOCUMENT is decided on the document path — the caller's
+                        // AppendTo, then THE external document narrowing (one call; none for an internal systemuser). A
+                        // parent the narrowing hides denies with the reason a caller without AppendTo gets, so filing
+                        // under it (which would hide this document too, a Restricted ancestor) answers nothing about it.
+                        var decision = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
+                            httpContext, authorization, userId, new[] { target.Id }, RefileTargetOperation, token,
+                            "document-refile-target", logger, ct);
+                        denyReason = decision.IsAllowed ? null : decision.ReasonCode;
+                    }
+                    else
+                    {
+                        var snapshot = await authorization.GetCallerRecordAccessAsync(userId, entitySet, target.Id, token, ct);
+                        denyReason = Spaarke.Core.Auth.OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, RefileTargetOperation)
+                            ? null
+                            : FinanceAuthorizationFilter.InsufficientRightsReasonCode;
+                    }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
