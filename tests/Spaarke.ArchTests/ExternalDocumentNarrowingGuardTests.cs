@@ -873,7 +873,7 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Api.Filters.SemanticSearchAuthorizationFilter::AuthorizeDocumentIdsScopeAsync"] =
             "snapshot: results trimmed downstream by IRetrievalAccessTrim — POST /api/ai/search's rows go through " +
             "SemanticSearchEndpoints.TrimToReadableDocumentsAsync, which applies THE narrowing (slice A). NOT true of " +
-            "POST /api/ai/search/count (scope=documentIds): it has no rows to trim — filed, see notes §19.",
+            "POST /api/ai/search/count (scope=documentIds): it has no rows to trim — filed as #2199 (notes §19).",
         ["Sprk.Bff.Api.Api.Finance.FinanceEndpoints::ResolveConfirmTargets"] =
             "record path: finance.link_invoice on the confirmed document is declared AFTER the Document-path finance.confirm " +
             "check on the SAME id in the same declaration; the filter evaluates in order and stops at the first deny, and the " +
@@ -881,15 +881,15 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Api.Ai.RagEndpoints::ResolveIndexFileTargets"] =
             "record path, WRITE: POST /api/ai/rag/index-file asks Write on the document it stamps; the bytes become index " +
             "chunks that every retrieval trims (slice A). It answers a chunk count for a document the caller may write — " +
-            "filed with the other document write routes (notes §19).",
+            "filed as #2200 (notes §19).",
         ["Sprk.Bff.Api.Api.Ai.RagEndpoints::SendToIndex"] =
             "record path, WRITE: POST /api/ai/rag/send-to-index asks Write per document before indexing it; retrieval is " +
-            "trimmed (slice A). Its per-document result names the governing parent and a chunk count — filed with the other " +
-            "document write routes (notes §19).",
+            "trimmed (slice A). Its per-document result names the governing parent and a chunk count — filed as #2200 " +
+            "with the other document write routes (notes §19).",
         ["Sprk.Bff.Api.Api.DataverseDocumentsEndpoints::AuthorizeRefileTargetsAsync"] =
             "record path, WRITE: a re-file asks AppendTo on each new parent, which may be a document; nothing of the target " +
-            "is returned, and a document filed under a hidden parent is itself hidden (Restricted ancestor). Filed with the " +
-            "other document write routes (notes §19).",
+            "is returned, and a document filed under a hidden parent is itself hidden (Restricted ancestor). " +
+            "Filed as #2200 (notes §19).",
     };
 
     [Fact(DisplayName = "Task 188 r4c (F1): every document rights snapshot and every Record-path check on sprk_documents reaches THE narrowing (or is listed)")]

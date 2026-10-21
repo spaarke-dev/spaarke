@@ -1348,11 +1348,13 @@ calls for one GET (was 1). Updated in `AnalysisDerivedContentNarrowingTests` (mu
 - **R4a-2, `sprk_regardingdocument`: fixed.** It is a third link in `AnalysisAuthorizationFilter.AnalysisDocumentColumns`
   (so `IsAnalysisDocumentHiddenFromCallerAsync`) and in the AI tools' `DocumentDerivedTables` map
   (`_sprk_regardingdocument_value`, `read_query` / `search_data` / `describe`).
-- **R4a-4, `GET /api/ai/chat/sessions/by-analysis/{analysisId}`: SAFE for D7.** It returns `AnalysisSessionSummary`
-  (`SessionId`, `MessageCount`, `IsArchived`, `CreatedOn`) and no content; every content route (`/sessions/{id}/history`,
-  `restore`, messages) carries `AddSessionOwnershipFilter` + `AddAiAuthorizationFilter`, which now narrow. Finding (not
-  fixed, task 164): it discloses a session's existence and message count with no owner or analysis-read check. Task 164's
-  analysis-read rule was not added here.
+- **R4a-4, `GET /api/ai/chat/sessions/by-analysis/{analysisId}`: CORRECTED in round 4c (§19).** The note below was wrong.
+  The route is ALWAYS 403 for a real analysis id: its `AddAiAuthorizationFilter` reads the route's `analysisId` as a
+  DOCUMENT id (`AiAuthorizationFilter.ExtractDocumentIds`, `case Guid`) and an analysis is never a readable document. That
+  is a functional break (introduced by `62990c328a`, analysis hub task 031; ledger `Pending`,
+  `RouteAuthorizationGuardTests.Ledger.cs:2764`), and the handler has NO owner check, so a naive "fix" of the filter would
+  disclose other users' sessions. Filed as #2197 (task 164). ~~SAFE for D7. It returns `AnalysisSessionSummary` and no
+  content; it discloses a session's existence and message count with no owner or analysis-read check.~~
 
 ### Guard (`ExternalDocumentNarrowingGuardTests`)
 
@@ -1449,3 +1451,146 @@ regarding document (MR1 + MR2) 11 → 0; ArchTest ban (MG) 1 → 0; K7 shapes 1 
 | `git merge-tree --write-tree origin/master HEAD` (master `2a38e6ce6c`) | clean (tree `bb50819272`) |
 
 Not run, by the brief: the full unfiltered unit suite, any deploy, any Dataverse, Azure or Key Vault access.
+
+## 19. Round 4c — the F1 bypasses (Office collision, permissions, workspace summary), ArchTest scan, F3, chat SPE hardening
+
+Commits `52ee5fc580` (F1 sites + tests), `8a9127a597` (ArchTest), `91fb23c10e` (chat SPE hardening + F3), and this notes
+commit. Scenario for every finding: a systemuser flagged `sprk_isexternal` (a B2B guest) with Read on matter M. The rule
+is unchanged (§1); every site reuses `InternalPlaneDocumentNarrowing` (`ForCallerAsync`, or the Document path of
+`FinanceAuthorizationFilter`, which is `AuthorizeDocumentsAsync`). Internal systemusers make no narrowing call and no
+app-only read at any site (pinned per site).
+
+### F1 — three decisions that bypassed the helper
+
+| Site | Before | After |
+|---|---|---|
+| `OfficeEndpoints.WithholdCollisionIdentityIfUnauthorizedAsync` (save-from-Office name collision) | a Restricted colliding document's name and id, `canSaveAsVersion=true` | after the Read check, ONE `ForCallerAsync`; hidden → the no-Read refusal (no name, no id, no `canSaveAsVersion`) |
+| `PermissionsEndpoints` single (`GET /api/documents/{id}/permissions`) and batch | `canPreview` / `canDownload` true from the rights snapshot | `HideNarrowedAsync`: ONE `ForCallerAsync` over the snapshots with any right; hidden → the same snapshot with `AccessRights.None` (the no-rights answer, same shape) |
+| `WorkspaceAiEndpoints.ResolveSummaryTargets` (`POST /api/workspace/ai/summary`, `sprk_document`) | `FinanceCheckPath.Record` (root grants only); the playbook ran over the name and MIME type | `FinanceCheckPath.Document`; hidden → the route's uniform 404 (identical to unreadable), the handler never runs. The other three types stay on the Record path |
+
+**Office: why the refusal, not "no collision".** Treating a hidden document as no collision cannot save under the same
+name: the create upload is `ConflictBehavior.Fail` (Graph refuses before any bytes move), so it would fail anyway, or need a
+silent rename the user did not choose. The safest correct behaviour is the refusal a caller without Read already gets:
+a hidden document cannot be told from an unreadable one, nothing is written, and "Keep both" (`AllowRename` →
+`ConflictBehavior.Rename`) saves a new, uniquely named file. The version retry over a hidden document is refused by
+`OfficeVersionSaveAuthorizationFilter` (it is `DocumentAuthorizationFilter`, which narrows, slice B) and writes nothing
+(pinned).
+
+### ArchTest (`ExternalDocumentNarrowingGuardTests`, region "Task 188 round 4c")
+
+`EveryDocumentSnapshotAndRecordPathDocumentCheck_ReachesTheNarrowing` scans two shapes the F1-2 rule could not see:
+- the rights SNAPSHOT: any method calling `AuthorizationService.GetCallerAccessAsync`;
+- a RECORD-path check on `sprk_documents`: a `FinanceAuthorizationCheck` initializer with `Path = Record` and
+  `EntitySetName` the literal (a const inlines to it); or `GetCallerRecordAccessAsync`, `FinanceAuthorizationTargets.FromRoute`
+  or `AddFinanceAuthorizationFilter(operation, entitySet, routeKey)` in a method that loads the literal.
+
+A use must reach THE narrowing (per-method transitive reach, as §9) or be in `DocumentDecisionBaseline`. A stale entry
+fails. Non-vacuity: the Office and both permissions sites are seen. Limit: an entity set computed at run time from a map is
+beyond the scan (the shared `EntityAccessFilter` map holds no `sprk_document`).
+
+Control `DocumentDecisionDetector_MustFireAndMustNotFire`: fires for a snapshot with no narrowing, a Record-path
+`FinanceAuthorizationCheck` on `DocumentEntitySet`, and `GetCallerRecordAccessAsync("sprk_documents")`; does not fire for a
+snapshot that narrows (listed → reported STALE), the Document path beside a Record check on `sprk_matters`, a Record check on
+`sprk_matters`, or a listed entry.
+
+**Ratchet baseline** (each reason checked in code):
+
+| Entry | Reason |
+|---|---|
+| `SemanticSearchAuthorizationFilter::AuthorizeDocumentIdsScopeAsync` | snapshot; `POST /api/ai/search` rows are trimmed downstream by `IRetrievalAccessTrim` (`TrimToReadableDocumentsAsync`, slice A). **The brief's reason is only half true:** `POST /api/ai/search/count` (scope=documentIds) has no rows to trim and counts hidden documents — a content oracle. Filed **#2199** (not fixed: outside the brief) |
+| `FinanceEndpoints::ResolveConfirmTargets` | Record `finance.link_invoice` declared after the Document-path `finance.confirm` on the same id; the filter stops at the first deny |
+| `RagEndpoints::ResolveIndexFileTargets`, `RagEndpoints::SendToIndex`, `DataverseDocumentsEndpoints::AuthorizeRefileTargetsAsync` | document WRITE routes on the Record path; no content (retrieval is trimmed), but chunk count / governing parent / existence of a hidden document. Filed **#2200** (D7 for writes needs an owner decision) |
+
+### F3 — the chat SPE-item test double
+
+`ChatContextAuthorizationContractTests.DocumentsOnTheItem` now matches the EXACT relative path
+(`sprk_documents?$select=sprk_documentid&$filter=sprk_graphitemid eq '<lit>' or sprk_driveitemid eq '<lit>'`), stated in
+the test, not computed from production code; the double is strict, so any other query faults and the filter denies. New
+cases: an item id with `'` (`01R4C'QUOTE` → `01R4C%27%27QUOTE` in both columns); the canonical id.
+
+### Hardening — chat SPE items (`AiAuthorizationFilter.IsSpeItemShownToCallerAsync`)
+
+For a caller who is not an internal systemuser (unchanged for internal callers: nothing read):
+1. the Compose gate's app-only lookup, `ComposeRecordResolution.ForDocumentLookups(...).TryFindDocumentByGraphItemIdAsync`
+   (`sprk_graphitemid`; it has NO `sprk_driveitemid` key);
+2. PLUS the caller's own read on both columns, as before — kept, because dropping it would lose the legacy
+   `sprk_driveitemid` rows the Compose lookup cannot find (a regression of round 4b);
+3. both keyed on the CANONICAL `FileHandleDto.Id` from the OBO read, not the stored string;
+4. no row from either → SPE's own check (as before); otherwise the ids go through `IAiAuthorizationService.AuthorizeAsync`
+   (Read, then THE narrowing, round 4a) and the item is shown when ANY id is authorized (slice A). A row with no usable id
+   cannot be shown; a failed caller read or a thrown lookup denies.
+
+Behaviour change (external callers only): a document row the caller cannot read no longer looks like no row — it denies
+(was: SPE's check). Cost: one app-only alternate-key retrieve + the AuthorizeAsync Read check per SPE item, external
+callers only. §11: no new registration, endpoint or package; it resolves the existing `IGenericEntityService`.
+
+**Limits (K).** (a) A legacy row keyed ONLY by `sprk_driveitemid` that the caller cannot read is still invisible to both
+lookups → SPE's check (the Compose gate has the same gap: **#2198**). (b) `TryFindDocumentByGraphItemIdAsync` turns a
+non-key `InvalidOperationException` into "not found"; here the caller's own read still applies (no regression), but the
+fault is not a deny (noted in #2198).
+
+### §18 correction and issues
+
+- §18's R4a-4 note was wrong (corrected in place): `GET /api/ai/chat/sessions/by-analysis/{analysisId}` is always 403 for a
+  real analysis id (`AiAuthorizationFilter.ExtractDocumentIds`, `case Guid`, reads it as a document id), a functional break
+  from `62990c328a`; the handler has no owner check (latent gap). **#2197** (task 164).
+- **#2198** Compose load: legacy rows keyed only by `sprk_driveitemid` miss the document gate (served OBO). Pre-existing.
+- **#2199** `/api/ai/search/count` scope=documentIds (found confirming the ratchet reason).
+- **#2200** document write routes on the Record path (found by the new scan).
+- **#2189** comment: `sprk_regardingcommunication` is not a `DocumentDerivedTables` link; an analysis tied only to an
+  internal-only email reaches `read_query`.
+
+### Tests
+
+- `DocumentSnapshotAndSummaryNarrowingTests` (new; real routes / declaration + filter, real `AuthorizationService`, real
+  narrowing over a stated caller and world): permissions single and batch, summary — must fire × the five cases
+  (`HiddenDocumentCases`: own Restricted, internal-only communication, Restricted parent, narrowing fault, lookup fault);
+  hidden == no-rights shape; summary 404 == unreadable 404, handler never runs, Document path only; must not fire: internal
+  (0 calls, no read), visible.
+- `OfficeCollisionDocumentNarrowingTests` (new; the real Office pipeline over `OfficeVersionSaveWorld`): collision × five
+  cases (no name/id/retry, Read asked first, 1 narrowing call, the existing file and version untouched, no row created);
+  version retry over a hidden document refused, writes nothing; must not fire: internal, visible.
+- `ChatContextAuthorizationContractTests`: the hidden-document theory × five cases × {caller read, app-only row};
+  row-the-caller-cannot-read 403; visible app-only row 200; app-only lookup fault 403; quoted id; canonical id; internal
+  (no read of either kind).
+- `WorkspaceAiSummaryAuthorizationContractTests`: `sprk_document` asks the Document path (never the Record path).
+- `TestInfrastructure/HiddenDocumentCases` (new): the five must-fire shapes over an `AppOnlyDocumentWorld`.
+
+
+### Before → after (round 4c)
+
+| Item | Before | After |
+|---|---|---|
+| Office save collision | A flagged-external caller with Read on a hidden document got its id, name and `canSaveAsVersion` | Identity withheld (409, no name/id/retry); a version retry over it is 403 and writes nothing |
+| `GET /api/permissions/{id}`, batch | Rights of a hidden document returned | The no-access answer (`AccessRights.None`), the same shape as no grant |
+| Workspace summary on `sprk_document` | Record path (root grant only) | Document path (`AuthorizeDocumentsAsync`); hidden == unreadable 404 |
+| Chat SPE item | Caller's OBO row read only | App-only Compose lookup (canonical `FileHandleDto.Id`) + caller read on both columns, then `AuthorizeAsync`; no row = SPE's check; any visible row allows |
+| ArchTest | Grant primitives only | Also `GetCallerAccessAsync` snapshots and Record-path checks on `sprk_documents`; ratchet of 5 listed sites |
+
+### Mutation table (round 4c) — 11 of 11 killed
+
+| Mutant | Unit failed | ArchTest failed |
+|---|---|---|
+| MO Office collision not narrowed | 6 | 1 |
+| MP1 permissions (single) not narrowed | 6 | 1 |
+| MP2 permissions (batch) not narrowed | 5 | 1 |
+| MW summary on the Record path | 7 | 1 |
+| MA1 ArchTest snapshot scan removed | — | 2 |
+| MA2 ArchTest Record-path scan removed | — | 2 |
+| MF3a chat read drops `or sprk_driveitemid eq` | 15 | — |
+| MF3b chat read filters the wrong column | 15 | — |
+| MF3c chat read leaves out the item id | 15 | — |
+| MH hardening reverted to OBO-only | 9 | — |
+| MC lookups keyed on the stored id, not the canonical one | 1 | — |
+
+Source SHA restored after every mutant.
+
+### Gates (round 4c)
+
+| Gate | Result |
+|---|---|
+| BFF build `--no-incremental` | 0 errors, 0 warnings (unit tests and ArchTests also 0 warnings) |
+| Filtered unit run (Office*, Permissions*, Workspace*, Communication*, Playbook*, Finance*, Analysis*, Chat*, Ai*, Retrieval*, UnifiedAccessControl, ExternalAccess, Compose*) | 15,781 passed, 12 failed, 10 skipped (15,803). The 12 are 2–3.5 min timeouts under machine load in unrelated classes; all re-pass in isolation |
+| ArchTests (full) | 1,226 passed, 0 failed; guard class 18/18 after the reason edit |
+| Publish size | 39,351,329 B (branch 91fb23c10e) vs 39,361,684 B (master 1cc7b39ff3): −10,355 B; +840 B vs round 4b. Packages unchanged |
+| `git merge-tree` vs `origin/master` 1cc7b39ff3 | CONFLICT, one line: the I-16 row of `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` (task 189 #2169 on master vs earlier task-188 rounds). Not caused by 4c; resolve at merge |
