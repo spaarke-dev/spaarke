@@ -493,19 +493,19 @@ describe('Escape and the backdrop never close; closing asks when anything is unr
     await u.click(button('Close'));
     expect(await screen.findByText('Discard unrecorded choices?')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
-    const check = await screen.findByRole('alertdialog');
+    const check = await screen.findByRole('alertdialog', { hidden: true });
     const buttons = within(check)
-      .getAllByRole('button')
+      .getAllByRole('button', { hidden: true })
       .map(b => b.textContent);
     expect(buttons.indexOf('Keep deciding')).toBeLessThan(buttons.indexOf('Discard and close'));
 
-    await u.click(within(check).getByRole('button', { name: 'Keep deciding' }));
+    await u.click(within(check).getByRole('button', { name: 'Keep deciding', hidden: true }));
     expect(onClose).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByText('Discard unrecorded choices?')).toBeNull());
-    expect(((await screen.findByRole('textbox', { name: /^To\b/ })) as HTMLInputElement).value).toBe('typed');
+    expect(((await screen.findByRole('textbox', { name: /^To\b/, hidden: true })) as HTMLInputElement).value).toBe('typed');
 
-    await u.click(button('Close'));
-    const again = await screen.findByRole('alertdialog');
+    await u.click(screen.getByRole('button', { name: exact('Close'), hidden: true }));
+    const again = await screen.findByRole('alertdialog', { hidden: true });
     // Fluent's focus manager (tabster) marks a re-opened nested dialog aria-hidden in jsdom; the button is still the real one.
     await u.click(within(again).getByRole('button', { name: 'Discard and close', hidden: true }));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -1097,6 +1097,60 @@ describe('a decided item whose plan cannot be read', () => {
     expect(await screen.findByTestId('status-bar')).toHaveAttribute('data-state', 'Decided');
     expect(await screen.findByTestId('step-confirm')).toBeInTheDocument();
     expect(screen.queryByTestId('item-error')).toBeNull();
+  });
+});
+
+describe('a closed item whose Decision Record was not supplied (the worklist closed sets, task 059)', () => {
+  // The Signal read route returns how an item closed, not the record. Claiming "Skipped" for every action would be false.
+  const noRecord = {
+    ...decidedItem,
+    resolution: { resolutionType: 'Acted' as const, decidedOn: '2026-10-09T09:00:00Z' },
+  };
+
+  it('opens read-only on What was found under its status bar, with no per-action steps to replay', async () => {
+    const service = makeService({ plans });
+    renderWizard({ service, loadItem: makeLoader([noRecord]), itemIds: [DECIDED_ID], startItemId: DECIDED_ID });
+    expect(await screen.findByTestId('status-bar')).toHaveAttribute('data-state', 'Decided');
+    expect(await screen.findByTestId('step-found')).toBeInTheDocument();
+    expect(screen.queryByTestId('step-confirm')).toBeNull();
+    expect(screen.queryByTestId('taken-badge')).toBeNull();
+    expect(screen.queryByRole('textbox')).toBeNull();
+  });
+
+  it('a record with steps is still replayed (the guard is on a missing record only)', async () => {
+    setup([decidedItem]);
+    expect(await screen.findByTestId('step-confirm')).toBeInTheDocument();
+  });
+
+  it('a suppressed item reads "To decide" with its own note, read-only', async () => {
+    const suppressed = {
+      ...decidedItem,
+      resolution: {
+        resolutionType: 'ConditionCleared' as const,
+        leftOpen: true,
+        note: 'Not raised again until 28 Oct',
+      },
+    };
+    const service = makeService({ plans });
+    renderWizard({ service, loadItem: makeLoader([suppressed]), itemIds: [DECIDED_ID], startItemId: DECIDED_ID });
+    const bar = await screen.findByTestId('status-bar');
+    expect(bar).toHaveAttribute('data-state', 'Open');
+    expect(bar).toHaveTextContent('Not raised again until 28 Oct');
+    expect(bar).not.toHaveTextContent('Inquiry sent');
+  });
+
+  it('a withheld evidence line reads "Details withheld (restricted record)", not "No value recorded"', async () => {
+    const withheld = {
+      ...noRecord,
+      evidence: [
+        { kind: 'sprk_communication', ref: 'c1', tier: 'Interpretation' as const, text: null, withheld: true },
+      ],
+    };
+    const service = makeService({ plans });
+    renderWizard({ service, loadItem: makeLoader([withheld]), itemIds: [DECIDED_ID], startItemId: DECIDED_ID });
+    const found = await screen.findByTestId('step-found');
+    expect(within(found).getByTestId('evidence-line')).toHaveTextContent('Details withheld (restricted record)');
+    expect(found).not.toHaveTextContent('No value recorded');
   });
 });
 

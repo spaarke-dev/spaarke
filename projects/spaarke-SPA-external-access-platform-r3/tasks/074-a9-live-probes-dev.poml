@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>A9 live probes on dev (BFF + SPA deploy, then registration, link and refusal probes)</title>
+    <phase>7 Deploy and verify</phase>
+    <gate>after 058, 059, 075; each deploy is owner-approved</gate>
+    <status>in-progress</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Live verification with a written result</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Guided live checks with explicit pass/fail</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>live, owner-gated</parallel-reason>
+    <deps>058, 059, 075</deps>
+    <tags>deploy, auth, integration-test</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the A9 BFF and SPA to dev (owner-approved) and run the design note §8 step 5 probes with the owner, recording masked evidence.</prompt>
+  <role>SPAARKE platform developer. Identity verification lead. Follow ADRs strictly.</role>
+  <goal>notes/task-074-a9-probes.md records pass/fail with masked claims and Dataverse read-backs for each probe in the acceptance criteria.</goal>
+
+  <context>
+    <background>Design note §4 (live email check), §8 step 5. Deploy BFF with /bff-deploy (scripts/Deploy-BffApi.ps1) and SPA with deploy-external-spa.yml, both from master. Test identities: a Dewey Cheatham member with no record; Ralph Dewey (licensed guest); an unlisted directory; a home guest (acct 1).</background>
+    <relevant-files>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r3/notes/task-074-a9-probes.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project security directives">Deploys and any Dataverse cleanup are owner-approved with rollback; reads are shown first; tokens are never pasted; claims are masked.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/a9-bff-design.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge; declare rigor/tier.</step>
+    <step order="1">Show the deploy plan and rollback; deploy BFF then SPA after approval; /healthz and S2a-style checks.</step>
+    <step order="2">Run each probe with the owner; record masked evidence.</step>
+    <step order="3">File any defect (fix in scope or /project-defer-issue-tracking); status + drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a probe shows a home token reaching a route outside /api/v1/external/*, STOP, report it as a security defect and propose rolling back the BFF deploy.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">Deploy scripts</tool>
+    <tool name="gh">SPA workflow</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-074-a9-probes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Member registration: new contact with tid/oid, plane WorkforceHome, owner = BU1 default team; workspace loads.</criterion>
+    <criterion testable="true">Resubmit: no second contact.</criterion>
+    <criterion testable="true">Existing-record bind: a pre-existing contact with the member's email is bound after confirmation; no duplicate.</criterion>
+    <criterion testable="true">Licensed user (Ralph Dewey): silent or popup link; systemuser has the home pair; /me resolves to the systemuser.</criterion>
+    <criterion testable="true">Unlisted directory → 401 at the BFF (and the not-set-up page in the SPA); home guest acct 1 → 401.</criterion>
+    <criterion testable="true">Home token on a non-external route (e.g. /api/v1/membership) → 401.</criterion>
+    <criterion testable="true">The Dewey Cheatham member token carries email; an unverified-domain address does not (or is recorded as not testable, with reason).</criterion>
+    <criterion testable="true">Intake submit as the new contact succeeds.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design §8 step 5. Teams live check is 071.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

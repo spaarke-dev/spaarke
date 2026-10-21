@@ -93,4 +93,5 @@ What to check live: issue #1428 body (056: Escape and backdrop no longer close D
   <completion>DEFERRED 2026-10-09 by owner decision D-106 (ontology critical path only): not required for ontology functionality. State and open findings are in notes/defer-issues.md (D-106 section) for review after the project.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion date="2026-10-17">NOT TO RUN FROM MASTER (R3, 2026-10-17): until R3 merges its SPA work (050–057, 061, 066, UAC 185) to master, an external SPA dev deploy must be dispatched from work/spaarke-SPA-external-access-platform-r3, by R3. R3 is redeploying from its branch head (contains master e702c3401) for 111 row 4. This task stays deferred.</completion>
 </task>

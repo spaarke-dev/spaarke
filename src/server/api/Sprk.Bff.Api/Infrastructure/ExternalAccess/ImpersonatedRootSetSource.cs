@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Communication;
 
@@ -79,8 +80,10 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
     /// Cache schema version per ADR-009. Bump whenever the QUERY SHAPE or the cached payload changes —
     /// entries written under an older shape may carry a silently different id set, and serving one is
     /// an authorization answer derived from a query nobody ran.
+    /// <para>2: task 036 decision (f) added <c>$orderby=modifiedon desc</c>, so a capped set written under v1 kept a
+    /// different 5,000 records.</para>
     /// </summary>
-    internal const int CacheVersion = 1;
+    internal const int CacheVersion = 2;
 
     /// <summary>
     /// 2-minute TTL (was 5), matching the membership cache — unified-access-control-r2 task 132, owner rounds 3 R3/R4
@@ -194,7 +197,10 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
         // Id-only $select with a bounded $top — one round trip per entity type (NFR-02). No expansion,
         // no fan-out. Any non-success status throws inside the primitive and propagates: this method
         // has NO catch, by design.
-        var odata = $"$select={idColumn}&$top={RowCap}";
+        //
+        // $orderby=modifiedon desc (task 036 decision (f), owner 2026-10-18): a capped set keeps the most recently
+        // modified records rather than Dataverse's default order. The cap is still flagged (Truncated) either way.
+        var odata = $"$select={idColumn}&$orderby=modifiedon desc&$top={RowCap}";
 
         var rows = await _query.QueryAsync(entitySet, odata, systemUserId, ct).ConfigureAwait(false);
 
@@ -246,22 +252,6 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
     internal static string CacheId(string userSegment, string entityTypeSegment) => $"{userSegment}:{entityTypeSegment}";
 
     /// <summary>
-    /// Removes <paramref name="systemUserId"/>'s cached set for <paramref name="entityType"/>, so the next read asks
-    /// Dataverse again. Called after that user's POA share on a record of that type changes (task 063): the set is
-    /// answered by an impersonated query, which sees shares natively, so an answer cached before the change is stale.
-    /// </summary>
-    /// <remarks>
-    /// <para>Non-fatal, and not bound to the request's token: the share has already been written, and a client that
-    /// disconnects must not stop the clean-up half-way. A miss is bounded by <see cref="CacheTtl"/>.</para>
-    /// <para>The tenant comes from the CALLER's token. When the caller and the affected user sign in to the same Entra
-    /// tenant — the case for users of one Dataverse environment — that is the namespace the user's own requests wrote
-    /// under; when they do not, the removal finds nothing and the entry lapses within <see cref="CacheTtl"/>.</para>
-    /// </remarks>
-    internal static Task InvalidateAsync(
-        ITenantCache cache, ClaimsPrincipal? caller, Guid systemUserId, string entityType, ILogger logger)
-        => InvalidateForTenantAsync(cache, CacheTenantFor(caller), systemUserId, entityType, logger);
-
-    /// <summary>
     /// The tenant namespace a systemuser's OWN reads write their set under, when there is no caller to take it from
     /// (task 143: the No Access reconciliation job). Systemusers sign in through the deployment's workforce tenant, so
     /// that is <c>AzureAd:TenantId</c> (legacy <c>TENANT_ID</c>) — the value <see cref="CacheTenantFor"/> reads from
@@ -277,6 +267,90 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
         }
 
         return string.IsNullOrWhiteSpace(tenant) ? null : tenant.Trim();
+    }
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 048, carrying 046 review K1): the tenant namespaces a removed user's root sets must be cleared
+    /// under — the caller-supplied <paramref name="cacheTenants"/> (blank and "anonymous" dropped) plus EVERY configured
+    /// customer home directory (<c>WorkforceIdentity:CustomerTenantIds</c>, in the <c>D</c> form a token's <c>tid</c>
+    /// carries). A licensed user with a stored home link reads under their CUSTOMER tenant's <c>tid</c> when they sign in
+    /// with their company account (<see cref="CacheTenantFor"/>), so clearing the deployment tenant alone would leave that
+    /// set visible for up to <see cref="CacheTtl"/>. Clearing a key nobody wrote is a no-op. Pure.
+    /// </summary>
+    internal static IReadOnlyList<string> EvictionTenants(
+        IEnumerable<string> cacheTenants, IReadOnlySet<Guid> customerTenantIds)
+    {
+        ArgumentNullException.ThrowIfNull(cacheTenants);
+        ArgumentNullException.ThrowIfNull(customerTenantIds);
+        return cacheTenants
+            .Where(t => !string.IsNullOrWhiteSpace(t) && t.Trim() != "anonymous")
+            .Select(t => t.Trim())
+            .Concat(customerTenantIds.Where(g => g != Guid.Empty).Select(g => g.ToString("D")))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
+    /// The configured customer home directories for <see cref="EvictionTenants"/> (r3 task 048). Never throws: it is read
+    /// inside clean-up <c>finally</c> blocks, where an invalid reloaded configuration (<c>OptionsValidationException</c>)
+    /// must not skip the eviction under the request's own tenants. Absent or unreadable → none, logged.
+    /// </summary>
+    internal static IReadOnlySet<Guid> CustomerTenantIdsOrNone(
+        IOptionsMonitor<WorkforceIdentityOptions>? workforceIdentity, ILogger logger)
+    {
+        if (workforceIdentity is null)
+        {
+            return new HashSet<Guid>();
+        }
+
+        try
+        {
+            return workforceIdentity.CurrentValue.ParsedCustomerTenantIds();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                "[EXT-ACCESS] WorkforceIdentity:CustomerTenantIds could not be read ({ExceptionType}): root sets are cleared "
+                + "under the request's tenants only; a linked user's home sign-in keeps its set until the cache TTL.",
+                ex.GetType().Name);
+            return new HashSet<Guid>();
+        }
+    }
+
+    /// <summary>
+    /// The same customer home directories read straight from configuration, for a class that holds
+    /// <see cref="IConfiguration"/> rather than the options (r3 task 048). Never throws; non-GUID entries are skipped.
+    /// </summary>
+    internal static IReadOnlySet<Guid> CustomerTenantIdsOrNone(IConfiguration? configuration)
+        => configuration?.GetSection(WorkforceIdentityOptions.SectionName + ":" + nameof(WorkforceIdentityOptions.CustomerTenantIds))
+               .GetChildren()
+               .Select(c => Guid.TryParse(c.Value?.Trim(), out var g) ? g : Guid.Empty)
+               .Where(g => g != Guid.Empty)
+               .ToHashSet()
+           ?? new HashSet<Guid>();
+
+    /// <summary>
+    /// Removes <paramref name="systemUserId"/>'s cached set for <paramref name="entityType"/>, so the next read asks
+    /// Dataverse again, under the caller's namespace AND every customer home directory (<see cref="EvictionTenants"/>,
+    /// r3 task 048). Called after that user's POA share on a record of that type changes (task 063): the set is answered
+    /// by an impersonated query, which sees shares natively, so an answer cached before the change is stale.
+    /// </summary>
+    /// <remarks>
+    /// <para>Non-fatal, and not bound to the request's token: the share has already been written, and a client that
+    /// disconnects must not stop the clean-up half-way. A miss is bounded by <see cref="CacheTtl"/>.</para>
+    /// <para>The caller's namespace comes from the CALLER's token. When the caller and the affected user sign in to the
+    /// same Entra tenant — the case for users of one Dataverse environment — that is the namespace the user's own requests
+    /// wrote under; <paramref name="customerTenantIds"/> covers a linked user's home sign-in. Where neither matches, the
+    /// removal finds nothing and the entry lapses within <see cref="CacheTtl"/>.</para>
+    /// </remarks>
+    internal static async Task InvalidateAsync(
+        ITenantCache cache, ClaimsPrincipal? caller, Guid systemUserId, string entityType,
+        IReadOnlySet<Guid> customerTenantIds, ILogger logger)
+    {
+        foreach (var tenant in EvictionTenants(new[] { CacheTenantFor(caller) }, customerTenantIds))
+        {
+            await InvalidateForTenantAsync(cache, tenant, systemUserId, entityType, logger).ConfigureAwait(false);
+        }
     }
 
     /// <summary>

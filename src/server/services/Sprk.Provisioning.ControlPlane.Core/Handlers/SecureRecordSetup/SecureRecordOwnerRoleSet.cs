@@ -184,5 +184,5 @@ public sealed class SecureRecordOwnerRoleSet
 /// <summary>One table of the codified set.</summary>
 /// <param name="LogicalName">The table (e.g. <c>sprk_todo</c>).</param>
 /// <param name="PrivilegeName">Its Read privilege's exact name from metadata (casing follows the schema name).</param>
-/// <param name="Kind"><c>root</c> (carries <c>sprk_issecure</c>) or <c>child</c>.</param>
+/// <param name="Kind"><c>root</c> (carries <c>sprk_issecure</c>), <c>child</c> or <c>grant</c> (<c>sprk_externalrecordaccess</c>).</param>
 public sealed record SecureRecordOwnerRoleTable(string LogicalName, string PrivilegeName, string Kind);

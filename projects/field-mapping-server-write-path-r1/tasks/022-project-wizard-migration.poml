@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Migrate Create Project wizard including secure Project (FR-16, FR-15)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>021 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx in Spaarke.UI.Components; tags include frontend, security, deploy, testing (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Secure-Project path crosses isolation/provisioning (security); needs judgment on what the server covers versus provisioning.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W3-wizards</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wizards migrate one at a time, each live-verified before the next (spec FR-16).</parallel-reason>
+    <deps>021</deps>
+    <tags>frontend, fluent-ui, security, field-mapping, deploy, testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Migrate the Create Project wizard (standard and secure Project) to create through POST /api/v1/child-records/sprk_project sending only user-entered values, with no applyFieldMappings. Do NOT touch CreateProjectWizard/closureService.ts or CloseProjectDialog.tsx: unified-access-control-r2 PR #2104 owns them.</prompt>
+  <role>SPAARKE platform developer, React 18 / Fluent UI v9 code pages, Dataverse. Follow ADRs strictly.</role>
+  <goal>projectService.createProject no longer calls applyFieldMappings; a standard Project is created through the route; a secure Project is created into isolation by the service with provisionSecureProject reduced to the steps task 020 left to it; mapped fields appear on first load; owner = team.</goal>
+
+  <context>
+    <background>spec.md FR-16, FR-15. projectService.ts builds the entity, calls applyFieldMappings at ~:378 and createRecord at ~:393, then for non-secure projects continues at ~:399; secure projects are made by provisionSecureProject (CreateProjectWizard.tsx ~:589), which marks the project secure as its first write. Task 020 documented the split. Host: src/solutions/CreateProjectWizard/src/main.tsx (web resource sprk_createprojectwizard).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/projectService.ts (applyFieldMappings ~:378 REMOVED; createRecord ~:393 to BFF adapter)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx (createRecord ~:334; provisionSecureProject call ~:589)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/provisioningService.ts (only the secure-path adjustment recorded by task 020)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/projectService.fieldMapping.test.ts (rewrite: payload only user-entered values)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/projectService.test.ts (adjust for the adapter create)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/provisioningService.test.ts (adjust only if the secure split changed calls)</file>
+      <file role="modify">src/solutions/CreateProjectWizard/src/main.tsx (host; only if it constructs the data service)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts (reference migration (task 021))</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (created by task 012; Project row)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="complete">Matter migrated; the payload-test and live-check shape is the reference.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this wizard only. One wizard per task, live-verified on dev before the next starts (spec FR-16). Do not edit another wizard's files or bffChildWriteAdapter.ts beyond what task 020 delivered; if the adapter needs a change, stop and escalate.</constraint>
+    <constraint source="project">Scope: the create payload. The wizard sends ONLY values the user entered or picked (plus the filing/regarding keys the route needs). It must not call applyFieldMappings, read a mapping profile or pre-fill mapped fields; mapping, owner, search-index and I-1 stamp are applied by the server (FR-02, FR-06, FR-09, FR-10).</constraint>
+    <constraint source="ADR-012">Scope: the shared UI library. Edits stay in Spaarke.UI.Components (or the named package) and the wizard's code-page host; no copy of shared logic into the host.</constraint>
+    <constraint source="ADR-021">Scope: any UI touched by this task. Fluent v9 tokens only, no hard-coded colors, dark mode must render correctly.</constraint>
+    <constraint source="project">Scope: deployment. Deploy through the code-page-deploy skill (build with the host's own npm script, never a hand-edited web resource). Rollback is redeploying the previous bundle; no runtime flag is added (spec rollout decision).</constraint>
+    <constraint source="CLAUDE.md §9">Scope: auth. The wizard sends no owner, owning-team or impersonation value; the BFF decides ownership from the caller (FR-09). The route stays authenticated (existing authenticatedFetch).</constraint>
+    <constraint source="project">Scope: files owned by others. Do not edit CreateProjectWizard/closureService.ts, CloseProjectDialog.tsx or their tests (UAC-r2 PR #2104); run /conflict-check before starting.</constraint>
+    <constraint source="CLAUDE.md §9">Scope: secure Project. Security fails closed: a secure Project must never exist outside isolation, even transiently; if the create succeeds and provisioning fails, the existing hold-back behaviour (SecureProvisioningOutcome, the secureHoldBack test) must be preserved.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Create Project wizard; secure Project provisioning; BFF child-records adapter</topic>
+    <files>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Lookup bind / option-set value shapes the payload still uses for user-entered fields.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-16 (and FR-15 and FR-16), the create-surface inventory in notes/design-review-2026-10-19.md, CreateProjectWizard/projectService.ts, and the existing tests listed in relevant-files. Re-grep the line numbers cited here before editing (they are approximate).</step>
+    <step order="1">Run /conflict-check against PR #2104 and #1501; record the result.</step>
+    <step order="2">Inventory every key on the project `entity` (object literal and assignments in projectService.ts); classify user-entered vs client default; confirm each default is in the Project row of the task-012 registry or drop it; list in task notes.</step>
+    <step order="3">Delete the applyFieldMappings call (~:378) and import (~:28).</step>
+    <step order="4">Create standard Projects via the BFF adapter (as 021); pass mappingSource only when the filed-under parent differs from the intended source.</step>
+    <step order="5">Secure path: create through the route and the secure-root plan as task 020 specified, then call provisionSecureProject only for the steps recorded as remaining; keep the hold-back path green.</step>
+    <step order="6">Rewrite projectService.fieldMapping.test.ts (payload = user-entered values only); run all CreateProjectWizard jest tests.</step>
+    <step order="7">Build library and src/solutions/CreateProjectWizard; deploy via code-page-deploy (sprk_createprojectwizard); live-check standard AND secure Project: mapped fields on first load, user value kept, owner = team, secure Project in isolation.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the secure-Project flow cannot be migrated without editing closureService.ts or CloseProjectDialog.tsx, STOP and escalate (UAC-r2 owns them).</trigger>
+    <trigger>If a secure Project can exist outside isolation at any point, STOP: security-sensitive, escalate per CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Project wizard renders"><steps><step>Open the Project wizard code page on dev from its launch command</step><step>Step through to the last step</step></steps><expected>All steps render with no console errors; Fluent v9 styling intact.</expected></test>
+    <test name="Project create flow"><steps><step>Fill the required fields and click Finish</step></steps><expected>The record is created through POST /api/v1/child-records/{table}; the success state shows the new record; no direct Xrm.WebApi create call for the table. A secure Project shows as secure and lands in isolation.</expected></test>
+    <test name="Mapped values visible on first load"><steps><step>Create the record under a parent that has an active field-mapping profile</step><step>Open the new record immediately (first load, no refresh or save)</step></steps><expected>Every field the active Mapping Profile maps from the parent is populated on the new record at first load; no client write filled them.</expected></test>
+    <test name="User value preserved"><steps><step>Type a value into a field the profile also maps</step><step>Finish and open the record</step></steps><expected>The user's own value is stored; the mapped value did not overwrite it (fill-only, FR-02).</expected></test>
+    <test name="ADR-021 dark mode"><steps><step>Switch the host to dark mode (theme toggle or prefers-color-scheme)</step><step>Open the wizard and step through every step</step></steps><expected>No unreadable text, no hard-coded light backgrounds, focus rings visible.</expected></test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/test the code page and shared library</tool><tool name="code-page-deploy">Deploy the wizard web resource to dev</tool><tool name="ui-test">Browser verification on dev</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/projectService.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/projectService.fieldMapping.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">projectService.ts contains no applyFieldMappings call or import; the payload holds only user-entered values (jest).</criterion>
+    <criterion testable="true">closureService.ts, CloseProjectDialog.tsx and their tests are unmodified (git diff shows no change).</criterion>
+    <criterion testable="true">A standard Project and a secure Project both create through the route; the secure Project is in isolation on dev.</criterion>
+    <criterion testable="true">Negative: a failed secure provisioning still leaves the held-back outcome (CreateProjectWizard.secureHoldBack test passes) and never an un-isolated secure Project.</criterion>
+    <criterion testable="true">Negative: with a user value and a mapped value for the same field, the user value is stored; a mapped field the user never touched is populated on first load of the new record; the wizard payload contains no key the user did not enter.</criterion>
+    <criterion testable="true">Deployed to dev via code-page-deploy; live check recorded in the task notes (mapped fields present on first load, user values kept, owner = owning team per FR-09); rollback bundle noted.</criterion>
+    <criterion testable="true">`applyFieldMappings` no longer appears in CreateProjectWizard/projectService.ts; jest for the shared library and the host build pass; no existing test outside this wizard changes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16, FR-15. UAC-r2 PR #2104 owns closure files. Secure-Project split recorded by task 020.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

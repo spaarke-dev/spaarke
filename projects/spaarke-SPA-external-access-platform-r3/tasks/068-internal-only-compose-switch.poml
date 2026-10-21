@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="068" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>"Internal Only" switch on the message and email compose surfaces; column and form label "Internal Only" (check-3 #5 follow-up)</title>
+    <phase>5b owner check fixes</phase>
+    <gate>startable after 065 merges (the BFF must accept and store isInternalOnly); every dev deploy is a live change shown to the owner first</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include pcf and react; modifies .ts/.tsx in shared components and three PCF controls</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive UI control on two existing shared components plus wiring; the server rules are already enforced by 065</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CHK3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>065</deps>
+    <tags>pcf, react, fluent-ui, frontend, dataverse</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Let an internal user mark a message or an email "Internal Only" while composing it. The value is sent to the BFF as isInternalOnly. The column and the Message form field are labelled "Internal Only".</prompt>
+  <role>SPAARKE platform developer. React / Fluent UI v9 / PCF. Follow ADRs strictly.</role>
+  <goal>
+    Every compose surface listed below shows one "Internal Only" switch, and its value reaches POST /api/communications/send as isInternalOnly.
+    The default is off. Owner 2026-10-14: filed communications are partner-visible unless marked Internal Only, and Internal Only hides a communication from every non-systemuser (CIAM partners and workforce contacts alike).
+    The column display name and the Message form label read "Internal Only".
+  </goal>
+
+  <context>
+    <background>
+      Owner decisions 2026-10-14 (current-task.md item 5; notes/task-065-notes.md).
+      Server side (task 065):
+      - SendCommunicationRequest.IsInternalOnly is persisted when present, else false.
+      - A Private, no-privacy or unreadable target thread forces true even on an explicit false.
+      - Replies and forwards raise to true when the source is internal.
+      - The external read hides true and null from every caller that is not an internal systemuser (CommunicationThreadReadService.FilterExternalMessagesAsync).
+      This task is the client half only. It changes no BFF code.
+      Changing the flag after the fact already works: the Message main form has the column, and the external read checks it on every load.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/TimelineComposeBox.tsx (ITimelineSendPayload at ~:50: add isInternalOnly; add the switch)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.tsx (handleSend passes it through)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx (passes it through, if it builds the send request)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/ (EmailComposer.types.ts, EmailComposer.reducer.ts, EmailComposer.tsx: state + switch + request field)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (SendCommunicationOptions ~:87 and the request body ~:371: isInternalOnly)</file>
+      <file role="modify">src/client/pcf/CommunicationMessageActions/CommunicationMessageActions/CommunicationMessageActionsApp.tsx (handleSend: pass payload.isInternalOnly)</file>
+      <file role="modify">src/client/pcf/CommunicationActions/ (the email send path) and src/client/pcf/CommunicationTimeline/ (send path): pass the value through; bump each PCF version per docs/guides/PCF-DEPLOYMENT-GUIDE.md (today 1.3.19, 1.0.5 and 1.0.4)</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Communication/Entity.xml (sprk_isinternalonly displayname "Is Internal Only" → "Internal Only")</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Communication/FormXml/main/{b58ec3d8-0982-f111-8076-7ced8ddc4cc6}.xml (form label → "Internal Only"; touch the _managed copy only if the repo keeps the two in step elsewhere)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>sprk_communication.sprk_isinternalonly (column, on the Message main form); SendCommunicationRequest.IsInternalOnly (task 065); PrivacyMarkers.tsx already shows the internal state on timeline rows.</existing>
+    <extension>Adds one optional field to two existing shared compose components and their send options. There is no new component, endpoint or column.</extension>
+    <cost-of-doing-nothing>Senders cannot keep a message or email from partners at the moment of sending. Every filed communication on a shared record is partner-visible until someone edits the record afterwards.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="owner 2026-10-14">The label is exactly "Internal Only" everywhere: the switch, the column display name and the form label. Optional helper text under the switch: "Only people in your organization can see this". Do not use other wording.</constraint>
+    <constraint source="owner 2026-10-14">Default off on a new message or email. Starts on when the surface is replying to or forwarding an item it already knows is internal-only. Shown on and disabled when the surface already knows the target thread is Private. Do not add a Dataverse read only to learn the thread privacy; the server floor (065) covers that case.</constraint>
+    <constraint source="project">The request always carries an explicit boolean isInternalOnly from these surfaces. Bulk send (CommunicationEndpoints bulk route) and the Office add-in are out of scope; record them in the notes as follow-ups. The Office add-in follow-up has two parts: the switch, and sending the email's In-Reply-To and References headers on save (Office.js getAllInternetHeadersAsync into EmailMetadata.InReplyTo/References, which task 065 added). That lets the BFF keep a reply quoting an Internal Only email internal. Owner 2026-10-14: until then, add-in saves stay visible.</constraint>
+    <constraint source="project">No change under src/server/**, src/client/external-spa/** or src/solutions/**. The external SPA never shows the switch, because external users cannot see internal items.</constraint>
+    <constraint source="ADR-021 / pcf.md">Fluent UI v9 Switch with tokens, no hard-coded colours, and works in dark mode. Each touched PCF gets its version bumped in every location the PCF deployment guide lists.</constraint>
+    <constraint source="CLAUDE.md §9 / project security directives">Building is local. Importing the PCFs or the solution to dev is a live change: show the owner the exact commands and the rollback (re-import the previous versions) and wait for approval.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/task-065-notes.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files and read the relevant files. Declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Add isInternalOnly to SendCommunicationOptions and the request body.</step>
+    <step order="2">Add the switch and the state to TimelineComposeBox and EmailComposer, and their payload and request types, with the default, reply and Private rules above.</step>
+    <step order="3">Pass the value through CommunicationTimeline, ConversationView and the three PCFs. Bump the PCF versions.</step>
+    <step order="4">Rename the column display name and the form label in the solution XML.</step>
+    <step order="5">Write the tests, then build: shared library tests, the three PCFs' `npm run build:prod`, and typecheck.</step>
+    <step order="6">Show the owner the dev import commands and the rollback. After approval, deploy, and the owner checks it on dev.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a compose surface listed above does not call communicationApi (it builds its own request), STOP and report rather than adding a second request shape.</trigger>
+    <trigger>If EmailComposer is also used by a flow that sends on the user's behalf without a person composing (a wizard auto-send), report it; do not show the switch there without owner direction.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">Shared compose components and communicationApi.ts; the three PCF send paths and versions</output>
+    <output type="code">sprk_Communication Entity.xml and Message form XML labels</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-068-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">TimelineComposeBox and EmailComposer each render one Switch labelled "Internal Only". It is off by default, and toggling it changes the isInternalOnly in the send payload.</criterion>
+    <criterion testable="true">sendCommunication sends isInternalOnly: true when the switch is on and isInternalOnly: false when it is off. It never omits the field from these surfaces.</criterion>
+    <criterion testable="true">A reply or forward whose source the surface knows is internal-only starts with the switch on. A surface that knows the target thread is Private shows the switch on and disabled.</criterion>
+    <criterion testable="true">The Message form PCF (CommunicationMessageActions), the email actions PCF (CommunicationActions) and the Communication Timeline PCF each pass the value to the BFF. Each PCF's version is bumped in every listed location, and npm run build:prod succeeds for each.</criterion>
+    <criterion testable="true">Entity.xml shows displayname "Internal Only" for sprk_isinternalonly, and the Message main form label reads "Internal Only". The XML parses.</criterion>
+    <criterion testable="true">No file under src/server/**, src/client/external-spa/** or src/solutions/** changed.</criterion>
+    <criterion testable="true">Test scope: the switch default, the toggled value in the request, the reply-starts-on case and the Private-disabled case, for each of the two shared components. Cover the stated contract plus these edge cases; anything beyond needs a one-line justification in the task notes. No seeding proof: the server enforces the security floor, and this is UI behaviour.</criterion>
+    <criterion testable="true">No dev import ran before the owner approved the commands. The notes list the commands, the rollback, and the follow-ups (Office add-in, bulk send).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Created 2026-10-14 from the owner's answer: "yes proceed; 'Internal Only' is sufficient; this should also apply so that workforce do not see records marked 'Internal Only'".
+    The workforce rule is already true on the server. Workforce and CIAM contacts are both non-systemuser callers and are both hidden from true and null (CommunicationThreadReadService.cs:549-556).
+    ConversationView and EmailComposer changes reach the Console and the CommunicationPage code page on their next build; deploying those is not in this task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

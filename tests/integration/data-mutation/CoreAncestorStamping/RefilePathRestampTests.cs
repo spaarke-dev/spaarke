@@ -43,6 +43,7 @@ public class RefilePathRestampTests
         var services = new ServiceCollection()
             .AddSingleton(world.Restamper)
             .AddSingleton<IRecordOwnershipResolver>(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble())
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
             .BuildServiceProvider();
         var core = new UpdateRecordActionCore(
             new Mock<IFieldMappingDataverseService>().Object,
@@ -85,7 +86,8 @@ public class RefilePathRestampTests
         var handler = new DataverseUpdateHandler(
             new Mock<IFieldMappingDataverseService>().Object, world.Service, world.Restamper,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance);
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureChildReconcilerFixtures.OverEmptyWorld());
 
         await handler.UpdateAsync(
             "sprk_communication", Communication,
@@ -177,7 +179,36 @@ public class RefilePathRestampTests
                 Lookups: [new RenderedLookup("sprk_regardingmatter", "sprk_matter", MatterB.ToString())]),
             CancellationToken.None);
 
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<CancellationToken>()), Times.Once);
+        // Outside the after-re-file step (no reconciler in this host), so the reconcile runs Standalone (#2110 re-check K2).
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(
+            Communication, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.Standalone, It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Once);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(
+            It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<CancellationToken>()), Times.Never,
+            "#2143 round 7: only the overload that carries the re-file's caller");
+    }
+
+    [Theory(DisplayName = "#2143 r7 F1: an UpdateRecord node's thread reconcile acts for the person it impersonates, and for nobody when it impersonates nobody")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UpdateRecordActionCore_ReFilingACommunication_ReconcilesItsThreadAsThePersonItImpersonates(bool impersonates)
+    {
+        var world = CommunicationWorld();
+        var threads = new Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+        var core = CoreWith(world, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), threads.Object);
+
+        await core.UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null, LegacyFields: null,
+                Lookups: [new RenderedLookup("sprk_regardingmatter", "sprk_matter", MatterB.ToString())],
+                ImpersonateSystemUserId: impersonates ? Guid.Parse("a2143000-0000-4000-8000-0000000000aa") : null),
+            CancellationToken.None);
+
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(
+            Communication, Sprk.Bff.Api.Services.Communication.FilingReconcileHost.Standalone,
+            It.Is<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(c => (c != null) == impersonates),
+            It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact(DisplayName = "Task 129: an UpdateRecord node whose re-file is refused, or that files nothing, never reconciles a thread")]
@@ -199,7 +230,9 @@ public class RefilePathRestampTests
                 LegacyFields: new Dictionary<string, string?> { ["sprk_triagesummary"] = "x" }, Lookups: null),
             CancellationToken.None);
 
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(
+            It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact(DisplayName = "Task 129: the playbook output orchestrator's DataverseUpdateHandler re-filing a communication reconciles its thread once")]
@@ -211,20 +244,20 @@ public class RefilePathRestampTests
             new Mock<IFieldMappingDataverseService>().Object, world.Service, world.Restamper,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
-            threads.Object);
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureChildReconcilerFixtures.OverEmptyWorld(threads.Object));
 
         await handler.UpdateAsync(
             "sprk_communication", Communication,
             new Dictionary<string, object?> { ["sprk_triagesummary"] = "x" }, ConcurrencyMode.None, maxRetries: 1,
             CancellationToken.None);
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never,
             "a write that files nothing is not a re-file");
 
         await handler.UpdateAsync(
             "sprk_communication", Communication,
             new Dictionary<string, object?> { ["sprk_regardingmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", MatterB) },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<CancellationToken>()), Times.Once);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static UpdateRecordActionCore CoreWith(
@@ -235,6 +268,7 @@ public class RefilePathRestampTests
                 .AddSingleton(world.Restamper)
                 .AddSingleton(ownership)
                 .AddSingleton(threads)
+                .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
                 .BuildServiceProvider()
                 .GetRequiredService<IServiceScopeFactory>(),
             NullLogger.Instance);

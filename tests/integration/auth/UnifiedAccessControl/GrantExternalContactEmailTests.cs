@@ -54,7 +54,7 @@ public class GrantExternalContactEmailTests
         Guid contactId, ExternalAccessLevel level = ExternalAccessLevel.Collaborate, DateOnly? expiry = null) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contactId, Guid.Empty, level, expiry, null, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
     private static GrantAccessResponse OkBody(IResult result) =>
@@ -133,7 +133,7 @@ public class GrantExternalContactEmailTests
 
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(Guid.Empty, Guid.Empty, ExternalAccessLevel.Collaborate, null, organization, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
         OkBody(result).NotificationFailed.Should().BeFalse();

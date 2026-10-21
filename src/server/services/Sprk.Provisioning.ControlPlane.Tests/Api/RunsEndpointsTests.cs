@@ -452,11 +452,10 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
 
-        // Enqueue side — ClearQuarantine action fired.
-        factory.Enqueuer.Enqueued.Should().ContainSingle();
-        var envelope = factory.Enqueuer.Enqueued.Single();
-        envelope.HandlerId.Should().Be("ClearQuarantine");
-        envelope.ParametersJson.Should().Contain(reason);
+        // The Cosmos transition is the whole action: nothing is enqueued (the old "ClearQuarantine" control
+        // envelope had no handler and was dead-lettered as NoHandler by the Worker).
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+        (await factory.Repository.ReadRunAsync(TestCustomerId, "run-q", default))!.Run.Status.Should().Be(RunStatus.Failed);
 
         // Audit-log side — QuarantineCleared record with actor tid + oid + reason.
         var record = factory.AuditLogSink.QuarantineClearedRecords.Should().ContainSingle().Subject;
@@ -571,7 +570,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     // -------------------------------------------------------------------------
 
     [Fact]
-    public async Task PostResume_WithOperator_Returns202AndEnqueuesResumeAction()
+    public async Task PostResume_FailedRun_Returns202_RunGoesRunning_AndTheRealCurrentHandlerIsEnqueued()
     {
         using var factory = new L2WebApplicationFactory();
         factory.Repository.Seed(new ProvisioningRun
@@ -583,6 +582,8 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             Profile = "spaarke-hosted-model2",
             Status = RunStatus.Failed,
             CurrentPhase = "H4",
+            ErrorDetail = "[h4-transient] Dataverse 503",
+            CompletedOn = DateTimeOffset.UtcNow.AddMinutes(-5),
         });
         var client = factory.CreateClient();
 
@@ -592,10 +593,321 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         var response = await client.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        response.Headers.Location!.OriginalString.Should().Be($"/api/runs/run-r?customerId={TestCustomerId}");
+
+        var stored = (await factory.Repository.ReadRunAsync(TestCustomerId, "run-r", default))!.Run;
+        stored.Status.Should().Be(RunStatus.Running);
+        stored.ErrorDetail.Should().BeNull();
+        stored.CompletedOn.Should().BeNull();
+        stored.HandlerRetryAttempts["H4"].Should().Be(1);
+
         var envelope = factory.Enqueuer.Enqueued.Should().ContainSingle().Subject;
-        envelope.HandlerId.Should().Be("Resume");
-        envelope.ParametersJson.Should().Contain("H4", "current-phase context is preserved into the resume envelope.");
+        envelope.HandlerId.Should().Be("H4", "resume re-dispatches the run's current phase — a real, keyed handler");
+        envelope.Attempt.Should().Be(1, "a bumped attempt gives a fresh Service Bus MessageId");
     }
+
+    [Fact]
+    public async Task PostResume_UnknownRun_Returns404()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/runs/nope/resume?customerId={TestCustomerId}");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(RunStatus.Running)]
+    [InlineData(RunStatus.WaitingOnGate)]
+    [InlineData(RunStatus.Completed)]
+    [InlineData(RunStatus.Cancelled)]
+    [InlineData(RunStatus.Quarantined)]
+    public async Task PostResume_NonFailedRun_Returns409_AndEnqueuesNothing(RunStatus status)
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.Repository.Seed(SeedRun("run-r", status, currentPhase: "H4"));
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/runs/run-r/resume?customerId={TestCustomerId}");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ErrorCodeAsync(response)).Should().Be("run-not-resumable");
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostResume_CustomerGuardHeldByAnotherRun_Returns409WithWinningRunId()
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.Repository.Seed(SeedRun("run-r", RunStatus.Failed, currentPhase: "H4"));
+        factory.ReplaceCustomerRunGuard(new SpyCustomerRunGuard
+        {
+            AcquireOutcome = new Sprk.Provisioning.ControlPlane.Concurrency.AcquireResult.Conflict(
+                TestCustomerId, "other-run", "AlreadyInFlight"),
+        });
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/runs/run-r/resume?customerId={TestCustomerId}");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        body["errorCode"]!.GetValue<string>().Should().Be("customer-run-in-flight");
+        body["winningRunId"]!.GetValue<string>().Should().Be("other-run");
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+        (await factory.Repository.ReadRunAsync(TestCustomerId, "run-r", default))!.Run.Status.Should().Be(RunStatus.Failed);
+    }
+
+    [Fact]
+    public async Task PostResume_CustomerGuardTransientFailure_Returns502()
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.Repository.Seed(SeedRun("run-r", RunStatus.Failed, currentPhase: "H4"));
+        factory.ReplaceCustomerRunGuard(new SpyCustomerRunGuard
+        {
+            AcquireOutcome = new Sprk.Provisioning.ControlPlane.Concurrency.AcquireResult.TransientFailure(
+                TestCustomerId, "run-r", "dataverse 503"),
+        });
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/runs/run-r/resume?customerId={TestCustomerId}");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadGateway);
+        (await ErrorCodeAsync(response)).Should().Be("run-guard-unavailable");
+    }
+
+    [Fact]
+    public async Task PostResume_EnqueueFailure_Returns503_AndTheRunIsLeftFailed()
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.Repository.Seed(SeedRun("run-r", RunStatus.Failed, currentPhase: "H4"));
+        factory.Enqueuer.Failure = new InvalidOperationException("service bus unavailable");
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/runs/run-r/resume?customerId={TestCustomerId}");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await ErrorCodeAsync(response)).Should().Be("handler-enqueue-failed");
+        (await factory.Repository.ReadRunAsync(TestCustomerId, "run-r", default))!.Run.Status.Should().Be(RunStatus.Failed,
+            "an operator whose resume got a 503 must be able to retry it");
+    }
+
+    [Fact]
+    public async Task PostCancel_RunningRun_Returns202_RunIsCancelled_GuardReleased_AndNothingIsEnqueued()
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.Repository.Seed(SeedRun("run-c", RunStatus.Running, currentPhase: "H4"));
+        var spyGuard = new SpyCustomerRunGuard();
+        factory.ReplaceCustomerRunGuard(spyGuard);
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/runs/run-c/cancel?customerId={TestCustomerId}");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var stored = (await factory.Repository.ReadRunAsync(TestCustomerId, "run-c", default))!.Run;
+        stored.Status.Should().Be(RunStatus.Cancelled);
+        stored.CompletedOn.Should().NotBeNull();
+        spyGuard.ReleaseCalls.Should().ContainSingle().Which.Should().Be((TestCustomerId, "run-c"));
+        factory.Enqueuer.Enqueued.Should().BeEmpty("cancel is a Cosmos transition; there is no 'Cancel' handler to dispatch");
+    }
+
+    [Theory]
+    [InlineData(RunStatus.Completed)]
+    [InlineData(RunStatus.Cancelled)]
+    [InlineData(RunStatus.Quarantined)]
+    public async Task PostCancel_FinalOrQuarantinedRun_Returns409(RunStatus status)
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.Repository.Seed(SeedRun("run-c", status, currentPhase: "H4"));
+        var spyGuard = new SpyCustomerRunGuard();
+        factory.ReplaceCustomerRunGuard(spyGuard);
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/runs/run-c/cancel?customerId={TestCustomerId}");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ErrorCodeAsync(response)).Should().Be("run-not-cancellable");
+        (await factory.Repository.ReadRunAsync(TestCustomerId, "run-c", default))!.Run.Status.Should().Be(status);
+        spyGuard.ReleaseCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostCancel_UnknownRun_Returns404()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/runs/nope/cancel?customerId={TestCustomerId}");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task PostGateAdvance_PendingGate_Returns202_AndEnqueuesTheGatesVerifierHandler()
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.Repository.Seed(SeedGatedRun("run-g", "admin-consent", GateState.Pending, "H0.5"));
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post,
+            $"/api/runs/run-g/gates/admin-consent/advance?customerId={TestCustomerId}");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var envelope = factory.Enqueuer.Enqueued.Should().ContainSingle().Subject;
+        envelope.HandlerId.Should().Be("H0.5", "gate-advance re-dispatches the gate's real verifier handler");
+        envelope.Attempt.Should().Be(1, "a bumped attempt gives a fresh Service Bus MessageId");
+        (await factory.Repository.ReadRunAsync(TestCustomerId, "run-g", default))!.Run
+            .HandlerRetryAttempts["H0.5"].Should().Be(1);
+    }
+
+    [Fact]
+    public async Task PostGateAdvance_UnknownGate_Returns404()
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.Repository.Seed(SeedGatedRun("run-g", "admin-consent", GateState.Pending, "H0.5"));
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post,
+            $"/api/runs/run-g/gates/no-such-gate/advance?customerId={TestCustomerId}");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await ErrorCodeAsync(response)).Should().Be("gate-not-found");
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostGateAdvance_RunNotWaitingOnGate_Returns409()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var run = SeedGatedRun("run-g", "admin-consent", GateState.Pending, "H0.5");
+        run.Status = RunStatus.Running;
+        factory.Repository.Seed(run);
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post,
+            $"/api/runs/run-g/gates/admin-consent/advance?customerId={TestCustomerId}");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ErrorCodeAsync(response)).Should().Be("run-not-waiting-on-gate");
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostGateAdvance_GateAlreadyVerified_Returns409()
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.Repository.Seed(SeedGatedRun("run-g", "admin-consent", GateState.Verified, "H0.5"));
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post,
+            $"/api/runs/run-g/gates/admin-consent/advance?customerId={TestCustomerId}");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ErrorCodeAsync(response)).Should().Be("gate-not-advanceable");
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// REGRESSION GUARD (2026-10-15 live defect): resume / cancel / gate-advance / clear-quarantine used to
+    /// enqueue control-tag envelopes ("Resume", "Cancel", "GateAdvance", "ClearQuarantine") that no keyed
+    /// IProvisioningHandler serves, so the Worker dead-lettered each as NoHandler and nothing happened.
+    /// Drives EVERY endpoint that can enqueue on a suitably seeded run and asserts the Api only ever puts a
+    /// dispatchable handler id on the wire.
+    /// </summary>
+    [Fact]
+    public async Task EveryEnvelopeTheApiEnqueues_IsADispatchableHandler()
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.Repository.Seed(SeedRun("run-pre", RunStatus.Running, currentPhase: "H0"));
+        factory.Repository.Seed(SeedRun("run-res", RunStatus.Failed, currentPhase: "H4"));
+        factory.Repository.Seed(SeedRun("run-can", RunStatus.Running, currentPhase: "H4"));
+        factory.Repository.Seed(SeedGatedRun("run-gate", "admin-consent", GateState.Pending, "H0.5"));
+        factory.Repository.Seed(SeedRun("run-quar", RunStatus.Quarantined, currentPhase: "H2a"));
+        var client = factory.CreateClient();
+
+        var requests = new List<(HttpMethod Method, string Path)>
+        {
+            (HttpMethod.Post, $"/api/runs/run-pre/preflight?customerId={TestCustomerId}"),
+            (HttpMethod.Post, $"/api/runs/run-res/resume?customerId={TestCustomerId}"),
+            (HttpMethod.Post, $"/api/runs/run-can/cancel?customerId={TestCustomerId}"),
+            (HttpMethod.Post, $"/api/runs/run-gate/gates/admin-consent/advance?customerId={TestCustomerId}"),
+            (HttpMethod.Post, $"/api/runs/run-quar/clear-quarantine?customerId={TestCustomerId}&reason=regression-guard"),
+        };
+
+        // POST /api/runs (create) — also enqueues.
+        var create = BuildValidCreateRunRequest("guardcus");
+        (await client.SendAsync(create)).StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        foreach (var (method, path) in requests)
+        {
+            var request = new HttpRequestMessage(method, path);
+            AttachAuth(request, roles: new[] { "Operator" });
+            (await client.SendAsync(request)).StatusCode.Should().Be(HttpStatusCode.Accepted, $"{method} {path}");
+        }
+
+        factory.Enqueuer.Enqueued.Should().NotBeEmpty();
+        factory.Enqueuer.Enqueued.Select(e => e.HandlerId).Should().OnlyContain(
+            id => Sprk.Provisioning.ControlPlane.Handlers.HandlerIds.Dispatchable.Contains(id),
+            "the Worker dead-letters any HandlerId without a keyed IProvisioningHandler as NoHandler");
+    }
+
+    private static ProvisioningRun SeedRun(string runId, RunStatus status, string? currentPhase) => new()
+    {
+        RunId = runId,
+        CustomerId = TestCustomerId,
+        EnvironmentId = "env-1",
+        TenancyModel = "Model1",
+        Profile = "spaarke-hosted-model2",
+        Status = status,
+        CurrentPhase = currentPhase,
+    };
+
+    private static ProvisioningRun SeedGatedRun(string runId, string gateId, GateState gateState, string verifier)
+    {
+        var run = SeedRun(runId, RunStatus.WaitingOnGate, currentPhase: verifier);
+        run.GateStates[gateId] = new GateEntry { Status = gateState, VerifierHandler = verifier };
+        return run;
+    }
+
+    private static async Task<string?> ErrorCodeAsync(HttpResponseMessage response)
+        => JsonNode.Parse(await response.Content.ReadAsStringAsync())?["errorCode"]?.GetValue<string>();
 
     [Fact]
     public async Task PostCancel_WithReader_Returns403()
@@ -621,33 +933,6 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     }
 
     [Fact]
-    public async Task PostGateAdvance_WithOperator_EnqueuesGateAdvanceAction()
-    {
-        using var factory = new L2WebApplicationFactory();
-        factory.Repository.Seed(new ProvisioningRun
-        {
-            RunId = "run-g",
-            CustomerId = TestCustomerId,
-            EnvironmentId = "env-1",
-            TenancyModel = "Model1",
-            Profile = "spaarke-hosted-model2",
-            Status = RunStatus.WaitingOnGate,
-        });
-        var client = factory.CreateClient();
-
-        var request = new HttpRequestMessage(HttpMethod.Post,
-            $"/api/runs/run-g/gates/admin-consent/advance?customerId={TestCustomerId}");
-        AttachAuth(request, roles: new[] { "Operator" });
-
-        var response = await client.SendAsync(request);
-
-        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        var envelope = factory.Enqueuer.Enqueued.Should().ContainSingle().Subject;
-        envelope.HandlerId.Should().Be("GateAdvance");
-        envelope.ParametersJson.Should().Contain("admin-consent");
-    }
-
-    [Fact]
     public async Task PostPreflight_UnknownRunId_Returns404()
     {
         using var factory = new L2WebApplicationFactory();
@@ -660,6 +945,37 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         var response = await client.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    // T186 L18: the Worker drops envelopes for a terminal run, so preflight there must refuse rather than 202.
+    [Theory]
+    [InlineData(RunStatus.Failed)]
+    [InlineData(RunStatus.Completed)]
+    [InlineData(RunStatus.Cancelled)]
+    [InlineData(RunStatus.Quarantined)]
+    public async Task PostPreflight_TerminalRun_Returns409_AndEnqueuesNothing(RunStatus status)
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.Repository.Seed(new ProvisioningRun
+        {
+            RunId = "run-p",
+            CustomerId = TestCustomerId,
+            EnvironmentId = "env-1",
+            TenancyModel = "Model1",
+            Profile = "spaarke-hosted-model2",
+            Status = status,
+            CurrentPhase = "H0",
+        });
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/runs/run-p/preflight?customerId={TestCustomerId}");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ErrorCodeAsync(response)).Should().Be("run-not-preflightable");
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
     }
 
     // -------------------------------------------------------------------------
@@ -2042,8 +2358,15 @@ public sealed class InMemoryHandlerEnqueuer : IHandlerEnqueuer
 {
     public List<HandlerEnvelope> Enqueued { get; } = new();
 
+    /// <summary>When set, <see cref="EnqueueAsync"/> throws it (a Service Bus outage).</summary>
+    public Exception? Failure { get; set; }
+
     public Task EnqueueAsync(HandlerEnvelope envelope, CancellationToken cancellationToken)
     {
+        if (Failure is not null)
+        {
+            throw Failure;
+        }
         Enqueued.Add(envelope);
         return Task.CompletedTask;
     }
@@ -2060,12 +2383,15 @@ internal sealed class SpyCustomerRunGuard : Sprk.Provisioning.ControlPlane.Concu
     public List<(string CustomerId, string RunId)> AcquireCalls { get; } = new();
     public List<(string CustomerId, string RunId)> ReleaseCalls { get; } = new();
 
+    /// <summary>When set, <see cref="TryAcquireAsync"/> returns it instead of Success.</summary>
+    public Sprk.Provisioning.ControlPlane.Concurrency.AcquireResult? AcquireOutcome { get; set; }
+
     public Task<Sprk.Provisioning.ControlPlane.Concurrency.AcquireResult> TryAcquireAsync(
         string customerId, string runId, CancellationToken cancellationToken)
     {
         AcquireCalls.Add((customerId, runId));
-        return Task.FromResult<Sprk.Provisioning.ControlPlane.Concurrency.AcquireResult>(
-            new Sprk.Provisioning.ControlPlane.Concurrency.AcquireResult.Success(customerId, runId));
+        return Task.FromResult(AcquireOutcome
+            ?? new Sprk.Provisioning.ControlPlane.Concurrency.AcquireResult.Success(customerId, runId));
     }
 
     public Task<Sprk.Provisioning.ControlPlane.Concurrency.ReleaseResult> ReleaseAsync(

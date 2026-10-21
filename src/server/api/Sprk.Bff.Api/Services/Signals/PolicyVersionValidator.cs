@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Telemetry;
@@ -37,6 +38,14 @@ public sealed record PolicyVersionValidationResult(bool IsValid, IReadOnlyList<s
 /// </summary>
 public sealed record PolicyVersionSnapshot(
     Guid PolicyVersionId, string PolicyCode, string? RuleType, string? RuleBody, string? MessageTemplate);
+
+/// <summary>
+/// What <see cref="PolicyVersionValidator.ValidateForAuthoring"/> decided (task 102a): the validation result, plus the fields a
+/// <c>sprk_messagetemplate</c> may name, which is the compiled predicate's <see cref="CompiledPredicate.TemplateEligibleFields"/> that are
+/// on <see cref="PolicyVersionValidator.AuthorableColumns"/>. The list is filled whenever the body compiled, even when the template or the
+/// allow-list refused it, so the editor can still offer the eligible fields. It is empty when the body did not compile.
+/// </summary>
+public sealed record PolicyVersionAuthoringResult(PolicyVersionValidationResult Validation, IReadOnlyList<string> TemplateEligibleFields);
 
 /// <summary>
 /// The single, reusable, fail-closed validation seam for a <c>sprk_policyversion</c>'s <c>sprk_rulebody</c> +
@@ -112,6 +121,78 @@ public sealed record PolicyVersionSnapshot(
 /// </remarks>
 public sealed class PolicyVersionValidator
 {
+    /// <summary>
+    /// The closed set of <c>(entity, column)</c> pairs a rule authored through the BFF may name (task 102a, owner option 101(b)). The
+    /// set covers every <c>when</c> field, the Threshold field, every <c>exists</c> and <c>notExists</c> filter field, and every join
+    /// <c>path</c> (<see cref="CompiledPredicate.ReadColumns"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why.</b> The dry run evaluates a draft AS THE EVALUATOR, which reads these tables org-wide (#39). A clause on any column
+    /// would make each dry run a one-bit-per-shown-row question about values the author may not be able to read, including a field-secured column.
+    /// Only the shown rows are filtered by the caller. A closed list of plain, non-secured columns NARROWS that oracle to the listed
+    /// columns; it does not close it.
+    /// <c>SignalPredicateTests.AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema</c> checks each entry against live metadata
+    /// (one run, one environment: field security enabled on a listed column later reopens the oracle for that column).</para>
+    /// <para><b>Residual (accepted: the owner re-signed the ADR-028 tension D-151(c) at this scope, option A, D-161).</b> An <c>exists</c> or
+    /// <c>notExists</c> filter on an allow-listed column of a joinable related table still lets a policy-version author learn that
+    /// column's value on a related row they cannot read, one bit per readable subject row per dry run. Today those columns are <c>sprk_communication</c>:
+    /// <c>sprk_triagecategory</c>, <c>sprk_reviewoutcome</c>, <c>sprk_receiveddate</c>, <c>statecode</c>;
+    /// <c>sprk_budgetrevision</c>: <c>sprk_revisedon</c>, <c>statecode</c>; and, since task 063's join, <c>sprk_budget</c>:
+    /// <c>statecode</c>, <c>sprk_budgetstartdate</c>, <c>sprk_budgetenddate</c>. The allow-list stays as it is (D-161); membership of
+    /// the related-table filter columns remains the owner's call.</para>
+    /// <para><b>Residual, derived Thresholds (accepted by the same re-signing, D-161).</b> A Threshold on <c>sprk_totalspendtodate</c>,
+    /// <c>sprk_totalbudget</c> or <c>sprk_budgetutilizationpercent</c> records only the stored subject column in
+    /// <see cref="CompiledPredicate.ReadColumns"/>, but the evaluator decides it from org-wide grouped sums
+    /// (<c>FinanceBaseValues.BuildGroupedSumFetchXml</c>) over <c>sprk_invoice.sprk_totalamount</c>,
+    /// <c>sprk_invoice.sprk_invoicestatus</c> and <c>sprk_budget.sprk_totalbudget</c>. Those base columns are not on this list and
+    /// not covered by the live <c>IsSecured</c> test. Repeated dry runs with a moving threshold reveal the current sum, including
+    /// invoices the author cannot read (the stored roll-up on the subject already shows a possibly stale copy).</para>
+    /// <para><b>Seed (2026-10-16), and nothing else.</b>
+    /// <list type="bullet">
+    /// <item>The columns the six live Ontology policies' current versions read on spaarkedev1 (POL-MATTER-NOBUDGET added
+    /// 2026-10-17).</item>
+    /// <item>The columns the authoring tests read: <c>statecode</c> on every table in
+    /// <see cref="PredicateCompiler.EvaluatorGlobalReadableEntities"/>, and <c>sprk_matter.sprk_matterid</c>.</item>
+    /// <item>The compiler's typed comparables: <see cref="PredicateCompiler.DateOnlyColumns"/> and
+    /// <see cref="PredicateCompiler.ThresholdColumns"/>.</item>
+    /// <item>The <see cref="PredicateCompiler.VerifiedJoins"/> paths.</item>
+    /// </list>
+    /// Adding a column is a code change with review, and the live test must stay green.</para>
+    /// <para><b>Where it is enforced.</b> Only by <see cref="ValidateForAuthoring"/>, which every authoring route (validate, dry run,
+    /// save, publish) calls. <see cref="ValidateForSave"/> and <see cref="TryPrepareForEvaluation"/> do not check it. The evaluator
+    /// shows its answers to no one, so a version written outside the BFF still evaluates as before.</para>
+    /// </remarks>
+    public static readonly FrozenSet<(string Entity, string Column)> AuthorableColumns =
+        new (string Entity, string Column)[]
+        {
+            // The six live Ontology policies (POL-COMMIT-BUDGET v2, POL-TASK-OVERDUE, POL-TASK-DUESOON, POL-WA-RESPONSE, POL-TODO-OVERDUE,
+            // and POL-MATTER-NOBUDGET, seeded Off by task 063 on 2026-10-17).
+            ("sprk_communication", "sprk_triagecategory"),
+            ("sprk_communication", "sprk_receiveddate"),
+            ("sprk_communication", "sprk_reviewoutcome"),
+            ("sprk_budgetrevision", "sprk_revisedon"),
+            ("sprk_event", "sprk_eventtype_ref"),
+            ("sprk_event", "statuscode"),
+            ("sprk_todo", "statuscode"),
+            ("sprk_workassignment", "statecode"),
+            ("sprk_matter", "createdon"), // POL-MATTER-NOBUDGET (task 063), a subject 'when' column
+            // The authoring tests (OntologyAdminAuthoringEndpointTests, OntologyAdminAuthoringLiveTests).
+            ("sprk_matter", "statecode"),
+            ("sprk_matter", "sprk_matterid"),
+            ("sprk_communication", "statecode"),
+            ("sprk_project", "statecode"),
+            ("sprk_todo", "statecode"),
+            ("sprk_event", "statecode"),
+            ("sprk_invoice", "statecode"),
+            ("sprk_budgetrevision", "statecode"),
+            ("sprk_budget", "statecode"),
+            ("sprk_memo", "statecode"),
+        }
+        .Concat(PredicateCompiler.DateOnlyColumns)
+        .Concat(PredicateCompiler.ThresholdColumns)
+        .Concat(PredicateCompiler.VerifiedJoins.Select(kv => (kv.Key.Related, kv.Value)))
+        .ToFrozenSet();
+
     private readonly RuleBodySchemaValidator _schemaValidator;
     private readonly PredicateCompiler _compiler;
     private readonly ILogger<PolicyVersionValidator> _logger;
@@ -137,8 +218,58 @@ public sealed class PolicyVersionValidator
     /// <param name="messageTemplate">The policy version's <c>sprk_messagetemplate</c>, or null/blank if none.</param>
     public PolicyVersionValidationResult ValidateForSave(string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate)
     {
-        var (result, _) = ValidateInternal(ruleTypeRaw, ruleBodyJson, messageTemplate, subjectId: null);
+        var (result, _) = ValidateInternal(ruleTypeRaw, ruleBodyJson, messageTemplate, subjectId: null, authoring: false);
         return result;
+    }
+
+    /// <summary>
+    /// <see cref="ValidateForSave"/> plus the authorable-column allow-list (task 102a, owner option 101(b)): a body naming a column
+    /// outside <see cref="AuthorableColumns"/> is refused with <see cref="OntologyWriterFailureReason.ColumnNotAuthorable"/>. The check
+    /// runs before the template check. This is the ONE validation every BFF authoring path uses (validate, dry run, save, publish), so
+    /// they cannot disagree. It is pure: no logging, no metering, and it never throws.
+    /// </summary>
+    public PolicyVersionAuthoringResult ValidateForAuthoring(string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate)
+    {
+        var (result, compiled) = ValidateInternal(ruleTypeRaw, ruleBodyJson, messageTemplate, subjectId: null, authoring: true);
+        return new PolicyVersionAuthoringResult(result, compiled is null ? Array.Empty<string>() : AuthorableTemplateFields(compiled));
+    }
+
+    /// <summary>The compiled predicate's template-eligible fields whose every read is on <see cref="AuthorableColumns"/>, in ordinal
+    /// order. Fails closed: with no recorded reads (<see cref="CompiledPredicate.ReadColumns"/> null) no field is eligible.</summary>
+    internal static IReadOnlyList<string> AuthorableTemplateFields(CompiledPredicate compiled)
+    {
+        if (compiled.ReadColumns is not { } reads)
+        {
+            return Array.Empty<string>();
+        }
+
+        return compiled.TemplateEligibleFields
+            .Where(field => reads.Where(r => r.Column == field).All(AuthorableColumns.Contains))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>The allow-list check of a compiled body: null when every read is on <see cref="AuthorableColumns"/>, otherwise the
+    /// <see cref="OntologyWriterFailureReason.ColumnNotAuthorable"/> refusal. Fails closed: a predicate whose reads were not recorded
+    /// (<see cref="CompiledPredicate.ReadColumns"/> null) cannot be shown to be on the list, so it is refused.</summary>
+    internal static PolicyVersionValidationResult? CheckAuthorableColumns(CompiledPredicate compiled)
+    {
+        if (compiled.ReadColumns is not { } reads)
+        {
+            return PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.ColumnNotAuthorable,
+                "The columns this rule reads were not recorded, so it cannot be checked against the authorable columns; it is refused.");
+        }
+
+        var unlisted = reads
+            .Where(c => !AuthorableColumns.Contains(c))
+            .Select(c => $"{c.Entity}.{c.Column}")
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        return unlisted.Length == 0
+            ? null
+            : PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.ColumnNotAuthorable,
+                $"The rule names column(s) a rule may not use: [{string.Join(", ", unlisted)}]. A rule may name only the " +
+                "authorable columns the catalog offers; adding one is a reviewed code change.");
     }
 
     /// <summary>
@@ -174,7 +305,7 @@ public sealed class PolicyVersionValidator
         PolicyVersionValidationResult result;
         try
         {
-            (result, compiled) = ValidateInternal(pv.RuleType, pv.RuleBody, pv.MessageTemplate, subjectId);
+            (result, compiled) = ValidateInternal(pv.RuleType, pv.RuleBody, pv.MessageTemplate, subjectId, authoring: false);
         }
         catch (Exception)
         {
@@ -215,8 +346,11 @@ public sealed class PolicyVersionValidator
     /// then the malformed-placeholder check, then the template-eligibility check. Returns the compiled predicate
     /// alongside a success result so <see cref="TryPrepareForEvaluation"/> never has to compile twice.
     /// </summary>
+    /// <remarks>Task 102a: with <paramref name="authoring"/>, the allow-list check runs between compilation and the template check. Once
+    /// the body has compiled, a refusal still returns the compiled predicate, so <see cref="ValidateForAuthoring"/> can report the
+    /// eligible fields. <see cref="TryPrepareForEvaluation"/> discards it on any refusal.</remarks>
     private (PolicyVersionValidationResult Result, CompiledPredicate? Compiled) ValidateInternal(
-        string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate, Guid? subjectId)
+        string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate, Guid? subjectId, bool authoring)
     {
         try
         {
@@ -285,6 +419,12 @@ public sealed class PolicyVersionValidator
                 return (PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.CompileRefused, ex.Message), null);
             }
 
+            // Task 102a (owner option 101(b)): only allow-listed columns, wherever the body names them.
+            if (authoring && CheckAuthorableColumns(compiled) is { } notAuthorable)
+            {
+                return (notAuthorable, compiled);
+            }
+
             if (!string.IsNullOrWhiteSpace(messageTemplate))
             {
                 if (SignalWriter.HasMalformedPlaceholder(messageTemplate))
@@ -294,7 +434,7 @@ public sealed class PolicyVersionValidator
                         "empty token, or a character outside [A-Za-z0-9_.] in the field name) that would " +
                         "otherwise render as literal text. Curly braces are reserved for {{field}} " +
                         "placeholders: a single literal brace in prose (e.g. \"(see {policy})\") or a full-width " +
-                        "brace is refused too -- write the prose without braces."), null);
+                        "brace is refused too -- write the prose without braces."), compiled);
                 }
 
                 var tokens = SignalWriter.ExtractTemplateTokens(messageTemplate);
@@ -329,7 +469,7 @@ public sealed class PolicyVersionValidator
                     return (PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.TemplateTokenOutsideReadSet,
                         "sprk_messagetemplate references {{...}} field(s) " + string.Join("; ", detail) +
                         ". Section 0.3 is binding: the sentence may assert only what the predicate actually " +
-                        "read for the firing subject."), null);
+                        "read for the firing subject."), compiled);
                 }
             }
 

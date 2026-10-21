@@ -686,6 +686,7 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     [Theory]
     [InlineData("SprkStd0123456789abcdef0123456789abcdef")]
     [InlineData("SprkJit0123456789abcdef0123456789abcdef")]
+    [InlineData("SprkDemo0123456789abcdef0123456789abcdef")] // #1363: demo self-registration grants
     [InlineData(" sprkjitANYTHING ")]
     public async Task CustomProperties_ThatWouldWriteAGrantMarker_Are403_AndNothingIsPatched(string name)
     {

@@ -59,6 +59,10 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <param name="Threshold">For a <see cref="RuleType.Threshold"/> body, the one comparison it makes (task 025b); null for Existence.
 /// When <see cref="ThresholdComparison.BaseDerived"/> the compared column is NOT trusted from the stored row: the evaluator
 /// removes this comparison's condition from <see cref="FetchXml"/> and judges the comparison itself from the base rows.</param>
+/// <param name="ReadColumns">Every <c>(entity, column)</c> the body names (task 102a, owner option 101(b)): each <c>when</c> field and
+/// the Threshold field on the subject, and each <c>exists</c> AND <c>notExists</c> filter field and join <c>path</c> on the clause
+/// table. Recorded only after the body compiled. <see cref="PolicyVersionValidator.ValidateForAuthoring"/> checks it against
+/// <see cref="PolicyVersionValidator.AuthorableColumns"/>; the evaluator does not read it.</param>
 public sealed record CompiledPredicate(
     string SubjectEntity,
     string SubjectIdAttribute,
@@ -69,7 +73,8 @@ public sealed record CompiledPredicate(
     IReadOnlySet<string> UnpinnedTemplateFields,
     int QuietWindowDays,
     IReadOnlySet<string> DateOnlyWhenFields,
-    ThresholdComparison? Threshold = null);
+    ThresholdComparison? Threshold = null,
+    IReadOnlySet<(string Entity, string Column)>? ReadColumns = null);
 
 /// <summary>
 /// The comparison of a Threshold body (task 025b). <see cref="FetchOperator"/> is <c>ge/gt/le/lt</c>; <see cref="Operand"/> is the
@@ -290,7 +295,10 @@ public sealed partial class PredicateCompiler
     /// The verified joins: for each <c>(subject, clause entity)</c> pair, the ONE lookup on the clause entity that
     /// targets the subject. Each entry was confirmed against the live <c>spaarkedev1</c> schema on 2026-10-04 (MCP
     /// <c>describe</c>: <c>sprk_communication.sprk_regardingmatter</c> → <c>sprk_matter</c>;
-    /// <c>sprk_budgetrevision.sprk_matter</c> → <c>sprk_matter</c>).
+    /// <c>sprk_budgetrevision.sprk_matter</c> → <c>sprk_matter</c>). <c>sprk_budget.sprk_matter</c> → <c>sprk_matter</c> was
+    /// confirmed on 2026-10-16 (task 063): the relationship <c>sprk_Matter_Budget_1n</c> on <c>sprk_budget</c>, whose
+    /// referencing attribute is <c>sprk_matter</c> and whose referenced entity is <c>sprk_matter</c>; it is the only lookup
+    /// from <c>sprk_budget</c> to the matter.
     /// </summary>
     /// <remarks>
     /// <b>Why a closed list and not "any lookup".</b> Dataverse joins <c>from</c>/<c>to</c> on any type-compatible
@@ -304,7 +312,43 @@ public sealed partial class PredicateCompiler
         {
             [("sprk_matter", "sprk_communication")] = "sprk_regardingmatter",
             [("sprk_matter", "sprk_budgetrevision")] = "sprk_matter",
+            // Task 063 (Know-promotion rule "this matter has no budget"): the budget ITSELF, not its revisions. A rule that says
+            // "no budget" must read sprk_budget; reading sprk_budgetrevision would claim something the predicate never tested (0.3).
+            [("sprk_matter", "sprk_budget")] = "sprk_matter",
         }.ToFrozenDictionary();
+
+    /// <summary>
+    /// The comparison operators a filter value may use (<c>{"op": v}</c>) and the FetchXML operator each compiles to. The ONE
+    /// operator table: <see cref="MapOperator"/>, the Threshold comparison and the D-40 date range all read it, and the task 101
+    /// authoring catalog offers exactly these, so the rule editor can offer nothing that does not compile (#46).
+    /// </summary>
+    internal static readonly FrozenDictionary<string, string> ComparisonOperators =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [">="] = "ge",
+            ["<="] = "le",
+            [">"] = "gt",
+            ["<"] = "lt",
+            ["<>"] = "ne",
+            ["="] = "eq",
+        }.ToFrozenDictionary(StringComparer.Ordinal);
+
+    /// <summary>The lower bounds of a D-40 two-bound date range (a subset of <see cref="ComparisonOperators"/>).</summary>
+    internal static readonly FrozenSet<string> LowerBoundOperators = new[] { ">=", ">" }.ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>The upper bounds of a D-40 two-bound date range (a subset of <see cref="ComparisonOperators"/>).</summary>
+    internal static readonly FrozenSet<string> UpperBoundOperators = new[] { "<=", "<" }.ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>The operators a <see cref="RuleType.Threshold"/> comparison may use: the two bound sets together.</summary>
+    internal static readonly FrozenSet<string> ThresholdOperators =
+        LowerBoundOperators.Concat(UpperBoundOperators).ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>The relative-date forms <see cref="RelativeDateToken"/> accepts, as the authoring catalog states them (task 101).
+    /// <c>{N}</c> is a whole number of days, 1 to <see cref="MaxRelativeDateDays"/>.</summary>
+    internal static readonly IReadOnlyList<string> RelativeDateForms = new[] { "now", "now-{N}d", "now+{N}d" };
+
+    /// <summary>The largest day count <see cref="RelativeDateToken"/> accepts (its <c>[0-9]{1,4}</c>).</summary>
+    internal const int MaxRelativeDateDays = 9999;
 
     /// <summary>Dataverse's limit on <c>link-entity</c> elements in one query. One clause = one link.</summary>
     public const int MaxClauses = 15;
@@ -477,6 +521,8 @@ public sealed partial class PredicateCompiler
         // Field name -> how it is read in POSITIVE positions ("when" / "exists"). NEVER populated for a
         // "notExists" clause: a firing subject has no matching row there, so its values are never readable.
         var positiveUses = new Dictionary<string, PositiveFieldUse>(StringComparer.Ordinal);
+        // Task 102a: every (entity, column) the body names, positive or not (CompiledPredicate.ReadColumns).
+        var readColumns = new HashSet<(string Entity, string Column)>();
 
         if (subjectId is { } id)
         {
@@ -496,6 +542,7 @@ public sealed partial class PredicateCompiler
             rootConditions.Add(condition);
             thresholdComparison = comparison;
             thresholdConditionCount = 1;
+            readColumns.Add((subject, comparison.Field));
         }
 
         var dateOnlyWhenFields = new List<string>();
@@ -524,6 +571,7 @@ public sealed partial class PredicateCompiler
                 }).ToList();
             whenConditionCount = whenConditions.Count;
             rootConditions.AddRange(whenConditions);
+            readColumns.UnionWith(when.EnumerateObject().Select(f => (subject, f.Name)));
         }
 
         if (clauses.GetArrayLength() == 0 && whenConditionCount == 0 && thresholdConditionCount == 0)
@@ -556,6 +604,8 @@ public sealed partial class PredicateCompiler
 
             var path = RequireVerifiedJoin(
                 subject, related, RequireIdentifier(clause.GetProperty("path").GetString(), where + ".path"), where + ".path");
+            readColumns.UnionWith(clause.GetProperty("filter").EnumerateObject().Select(f => (related, f.Name)));
+            readColumns.Add((related, path));
 
             entity.Add(new XElement("link-entity",
                 new XAttribute("name", related),
@@ -618,7 +668,8 @@ public sealed partial class PredicateCompiler
             UnpinnedTemplateFields: unpinned.ToFrozenSet(StringComparer.Ordinal),
             QuietWindowDays: quietWindowDays,
             DateOnlyWhenFields: dateOnlyWhenFields.ToFrozenSet(StringComparer.Ordinal),
-            Threshold: thresholdComparison);
+            Threshold: thresholdComparison,
+            ReadColumns: readColumns.ToFrozenSet());
     }
 
     /// <summary>
@@ -647,15 +698,11 @@ public sealed partial class PredicateCompiler
                 ". Adding one is a schema check plus a code change with review.");
         }
 
-        var op = (opEl.ValueKind == JsonValueKind.String ? opEl.GetString() : null) switch
-        {
-            ">=" => "ge",
-            ">" => "gt",
-            "<=" => "le",
-            "<" => "lt",
-            var other => throw new PredicateCompilationException(
-                $"{at}.operator: '{other}' is not a threshold comparison; use one of >, >=, <, <=."),
-        };
+        var written = opEl.ValueKind == JsonValueKind.String ? opEl.GetString() : null;
+        var op = written is not null && ThresholdOperators.Contains(written)
+            ? ComparisonOperators[written]
+            : throw new PredicateCompilationException(
+                $"{at}.operator: '{written}' is not a threshold comparison; use one of >, >=, <, <=.");
 
         if (valueEl.ValueKind != JsonValueKind.Number)
         {
@@ -924,15 +971,10 @@ public sealed partial class PredicateCompiler
 
         foreach (var bound in ops)
         {
-            var op = bound.Name switch
-            {
-                ">=" => "ge",
-                ">" => "gt",
-                "<=" => "le",
-                "<" => "lt",
-                _ => throw new PredicateCompilationException(
-                    $"{at}: '{bound.Name}' cannot bound a date range; use one of >= / > plus one of <= / < (D-40)."),
-            };
+            var op = LowerBoundOperators.Contains(bound.Name) || UpperBoundOperators.Contains(bound.Name)
+                ? ComparisonOperators[bound.Name]
+                : throw new PredicateCompilationException(
+                    $"{at}: '{bound.Name}' cannot bound a date range; use one of >= / > plus one of <= / < (D-40).");
 
             if (bound.Value.ValueKind != JsonValueKind.String
                 || !TryResolveRelativeDate(bound.Value.GetString(), nowUtc, out var instant))
@@ -1019,16 +1061,10 @@ public sealed partial class PredicateCompiler
             new XAttribute("operator", op),
             new XAttribute("value", value));
 
-    private static string MapOperator(string op, string at) => op switch
-    {
-        ">=" => "ge",
-        "<=" => "le",
-        ">" => "gt",
-        "<" => "lt",
-        "<>" => "ne",
-        "=" => "eq",
-        _ => throw new PredicateCompilationException($"{at}: unsupported operator '{op}'."),
-    };
+    private static string MapOperator(string op, string at) =>
+        ComparisonOperators.TryGetValue(op, out var fetchOperator)
+            ? fetchOperator
+            : throw new PredicateCompilationException($"{at}: unsupported operator '{op}'.");
 
     private static string FormatScalar(JsonElement value, DateTimeOffset nowUtc, string at)
     {

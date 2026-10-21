@@ -61,6 +61,28 @@ public class LookupChoicesResolverTests
         scope.Verify(s => s.QueryLookupValuesAsync("sprk_mattertype_refs", "sprk_mattertypename", It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task ResolveFromJps_TwoRowsWithOneName_AppearOnceInTheEnum_FirstSpellingKept_InOrder()
+    {
+        // Two enabled categories that differ only by case would put a duplicate in the constrained-decoding enum
+        // (a strict schema rejects it). Ontology task 103 fix round, K2.
+        var (sut, _) = Build(new[] { "Fee / rate change", "Invoice / Billing", "FEE / RATE CHANGE", "Scheduling", "invoice / billing" });
+
+        var result = await sut.ResolveFromJpsAsync(JpsWithLookup("lookup:sprk_triagecategory.sprk_name"));
+
+        result["lookup:sprk_triagecategory.sprk_name"].Should().Equal("Fee / rate change", "Invoice / Billing", "Scheduling");
+    }
+
+    [Fact]
+    public async Task ResolveFromJps_OnlyDuplicatesOfOneName_StillResolvesTheSingleValue()
+    {
+        var (sut, _) = Build(new[] { "Scheduling", "scheduling" });
+
+        var result = await sut.ResolveFromJpsAsync(JpsWithLookup("lookup:sprk_triagecategory.sprk_name"));
+
+        result["lookup:sprk_triagecategory.sprk_name"].Should().Equal("Scheduling");
+    }
+
     private const string TriageRef = "lookup:sprk_triagecategory.sprk_name";
 
     [Fact]

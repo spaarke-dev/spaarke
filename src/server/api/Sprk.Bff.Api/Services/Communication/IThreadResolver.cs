@@ -100,8 +100,39 @@ public interface IThreadResolver
     /// The grant audience is always R — the email's own regarding, just validated by the filing write — never a re-read of
     /// a thread column (#1629). Prior grants are not revoked. Best-effort / non-fatal (NFR-02): never throws; any failure is
     /// logged and the filing stands.
+    /// <para>This is the reconcile INSIDE the step after a re-file (<see cref="FilingReconcileHost.AfterRefileStep"/>): a join
+    /// it makes runs no step of its own. The backfill sweep, which runs it on its own, calls
+    /// <see cref="ReconcileThreadForFilingAsync(Guid, FilingReconcileHost, CancellationToken)"/>.</para>
     /// </summary>
     Task ReconcileThreadForFilingAsync(Guid communicationId, CancellationToken ct = default);
+
+    /// <summary>
+    /// <see cref="ReconcileThreadForFilingAsync(Guid, CancellationToken)"/>, saying whether it runs inside the step after a
+    /// re-file or on its own (#2110, <see cref="FilingReconcileHost"/>) — which decides whether a join it makes, filing the
+    /// email under a record it was not filed to, runs that step.
+    /// </summary>
+    Task ReconcileThreadForFilingAsync(Guid communicationId, FilingReconcileHost host, CancellationToken ct = default);
+
+    /// <summary>
+    /// <see cref="ReconcileThreadForFilingAsync(Guid, FilingReconcileHost, CancellationToken)"/> for a re-file a PERSON made
+    /// (#2143 round 7, F1): <paramref name="secureExitCaller"/> is that re-file's
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordReparent.SecureExitCaller"/>, carried into the join that moves the email
+    /// to its record's thread, so a move off a secure record's thread is decided on that person's F3 rights — the move the
+    /// re-file was already permitted to make. <c>null</c> (the other overloads) acts for nobody: a move out of a secure
+    /// record's thread is refused and the email keeps the thread's isolation.
+    /// <para>#2143 round 8 (F1-A): <paramref name="beforeMessageGrant"/>, when given, runs once the join that moves the email
+    /// to its record's thread has landed and BEFORE the email's #1629 grant to that record's members — the step after a re-file
+    /// takes the email's secure-child mirror off there when that join took it out of isolation, so the mirror's removal (every
+    /// direct share) never revokes the grant the move gives. <c>null</c>: nothing runs. Round 10 (F2-a): it runs once before the
+    /// #1629 grant on EVERY path that gives one — that move, rule 2's whole-thread anchor (before its grants), and a threadless
+    /// email's join (between the join and its grant).</para>
+    /// </summary>
+    Task ReconcileThreadForFilingAsync(
+        Guid communicationId,
+        FilingReconcileHost host,
+        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
+        Func<CancellationToken, Task>? beforeMessageGrant,
+        CancellationToken ct = default);
 
     /// <summary>
     /// spaarkeai-word-add-in-r1 task 129 (backfill sweep): gives an ACTIVE, Open thread that is anchored to a record (a typed
@@ -192,6 +223,34 @@ public interface IThreadResolver
 /// denormalized <c>sprk_regardingrecord*</c> pointer the resolver already stamps at thread create.
 /// </summary>
 public sealed record RecordThreadAnchor(string EntityType, string RecordId, string? RecordName);
+
+/// <summary>
+/// #2110 (ontology K2): what runs <see cref="IThreadResolver.ReconcileThreadForFilingAsync(Guid, FilingReconcileHost, CancellationToken)"/>,
+/// which decides whether a join it makes runs the step after a re-file. Its one join that can file an email under a NEW record
+/// is a threadless email joining the thread its conversation key finds — anchored to a record R2 the email is not filed to.
+/// </summary>
+/// <remarks>
+/// Component Justification (CLAUDE.md §11): (1) Existing — the reconcile's internal joins ran no step, on the premise that the
+/// step after a re-file was the one running it. (2) Extension — one argument of the existing reconcile, not a second one; the
+/// join reuses <c>ThreadResolver.JoinThreadAsync</c>'s step. (3) Cost of doing nothing — the backfill sweep runs the reconcile on
+/// its own, so its join under R2 re-owned the email (into a Secure record's isolation, say) with no mirror, no pass over what is
+/// filed under it and no gate Decision Record re-own.
+/// </remarks>
+public enum FilingReconcileHost
+{
+    /// <summary>
+    /// Inside <c>SecureChildReconciler.AfterRefileAsync</c> (every re-file writer): the step's mirror, its pass and its gate
+    /// Decision Record step run AFTER the reconcile and see any join it made, so a join runs no step of its own.
+    /// </summary>
+    AfterRefileStep,
+
+    /// <summary>
+    /// On its own — the backfill sweep (<c>CommunicationThreadFilingSweepJob</c>). A join that files the email under a record
+    /// it is NOT filed to runs the step after a re-file for that join, once (<c>RefileThreadStep.PlacedByWriter</c>); a join
+    /// under a record it is already filed to adds no parent — the filing the sweep follows ran the step — and runs none.
+    /// </summary>
+    Standalone,
+}
 
 /// <summary>What <see cref="IThreadResolver.ReconcileAnchoredThreadOwnerAsync"/> did (or, on a dry run, would do) for a thread.</summary>
 public enum ThreadOwnerReconcileOutcome
@@ -309,4 +368,13 @@ public sealed record ThreadResolutionRequest
     /// no-op (the resolver skips rather than creating an ungroupable thread).
     /// </summary>
     public string? AcsThreadId { get; init; }
+
+    /// <summary>
+    /// Owner decision D8 (external-access r3 task 065 fix round 6, 2026-10-14). True only for a partner's portal post. The
+    /// fallback ladder's per-record (and per-user) default-thread lookup then joins a default thread ONLY when it is
+    /// EXPLICITLY Open, and otherwise finds-or-creates a new Open default thread, so a post is never filed into a Private
+    /// default thread the partner cannot read back. False (the default) keeps the lookup exactly as it was for every
+    /// internal caller.
+    /// </summary>
+    public bool RequireOpenDefaultThread { get; init; }
 }

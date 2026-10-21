@@ -18,6 +18,8 @@ export type {
   IAccessGrantModalProps,
   IAccessGrantCandidate,
   IAccessGrantRecord,
+  // Task 099a: a capped grants read (the host states truncation, the modal shows it).
+  IExistingGrantsRead,
   IContactSearchResult,
   IOrganizationPick,
   // Re-exported 2026-09-21: both are `export interface` in ./types and are consumed by the

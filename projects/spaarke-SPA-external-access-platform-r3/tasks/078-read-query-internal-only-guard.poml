@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="078" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>ISS-010 quick fix: the generic Dataverse chat tools hide internal-only communications from licensed users flagged external</title>
+    <phase>R3 hardening (ISS-010)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api, security; changes what a chat tool returns to a class of callers</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Data-disclosure control on a generic query tool (tags security, tenant-isolation-adjacent)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Main session; BFF hot path</parallel-reason>
+    <deps>065</deps>
+    <tags>bff-api, security, ai, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>For a caller whose systemuser is flagged external (or cannot be resolved), make dataverse.read_query and dataverse.search_data return no communication that the external read side (task 065) would hide. Same rule as CommunicationThreadReadService: visible only when sprk_isinternalonly is false (true or unset hides) AND its thread is Open. Internal callers are unchanged. Two adversarial review passes.</prompt>
+  <role>SPAARKE platform developer. ASP.NET Core, Dataverse Web API and the chat tool pipeline. Follow ADRs strictly.</role>
+  <goal>A licensed user flagged sprk_isexternal (owner 2026-10-14: treated like a partner for Internal Only) cannot read an internal-only or Private-thread communication (email or message) through the assistant's generic Dataverse tools. Owner decision 2026-10-20 on ISS-010 (#1864): "use the quick fix … using the 'external user' and the external/internal flag on communication record (same for email and messages)". The model-driven app and direct Web API paths stay open; they are the real-fix decision (Dataverse security), not this task.</goal>
+
+  <context>
+    <background>ISS-010 (notes/defer-issues.md, GitHub #1864). Task 065 hides internal-only and Private-thread communications from external callers on the BFF's own reads (lists, counts, feed, attachment text, email AI tools; ISS-009 #1859 done). dataverse.read_query (DataverseReadQueryHandler) runs a translated SQL SELECT under the user's OBO token, so Dataverse security alone decides, and a licensed external user with read on a matter's communications can select sprk_body of internal-only rows. dataverse.search_data (DataverseSearchDataHandler) runs Dataverse search under the user's token and returns hit text from any search-enabled table, communications included if enabled. The ChatInvocationContext carries no caller systemuser id; EmailDraftToolHandler reads the request principal through IHttpContextAccessor, and ICallerSystemUserResolver (Services/Ai/Context/CallerSystemUserResolver.cs) resolves a principal to its systemuser. ISystemUserIdentityResolver.IsExternalAsync fails closed (external) on an unresolvable id.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseReadQueryHandler.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseSearchDataHandler.cs</file>
+      <file role="modify">their DI registration (find with Grep; constructor change only)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests (the existing DataverseReadQueryHandler / DataverseSearchDataHandler test classes)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs (IsExternalAsync use, InternalOnlyField, the Open-thread condition `openOnly`, ThreadLookupValue)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationInternalOnlyFloor.cs (sprk_isinternalonly, sprk_communicationthread.sprk_privacystate, fail-closed rule)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/EmailDraftToolHandler.cs ~:799 (principal from IHttpContextAccessor in a chat handler)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Context/CallerSystemUserResolver.cs</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>The communication rule lives in CommunicationThreadReadService / CommunicationInternalOnlyFloor; caller resolution in ICallerSystemUserResolver + ISystemUserIdentityResolver.</existing>
+    <extension>This adds the existing rule to the two generic tools that bypass it; no new service, interface, endpoint or setting. A small internal static helper for "is this a communication-family table" and the filter clause is allowed if both handlers need it.</extension>
+    <cost-of-doing-nothing>A licensed user flagged external reads internal-only email and message bodies through the assistant (ISS-010), which the owner decided must not happen.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="owner 2026-10-20">External = ISystemUserIdentityResolver.IsExternalAsync on the caller's systemuser. A caller whose systemuser cannot be resolved is treated as external (fail closed), unless the existing tool already refuses such a caller.</constraint>
+    <constraint source="065 rule">sprk_communication rows for an external caller: only sprk_isinternalonly eq false AND the thread reads Open. true, null, a missing thread, a Private thread or an unreadable thread all hide the row. Enforce it in the Dataverse query where possible (so row caps and TOP stay honest); if a part cannot be expressed in the query, filter after the read and say so in the notes.</constraint>
+    <constraint source="design">Other communication-family tables (logical names starting sprk_communication, e.g. sprk_communicationthread, attachments, participants; inventory them with Grep and the data-model docs) are refused for an external caller with a clear, model-actionable message and no data. Exception only if a table carries no communication content and no Private-thread name; record the reasoning.</constraint>
+    <constraint source="design">search_data for an external caller: no hit from a communication-family table reaches the result (drop it, and do not let an explicit entity filter for one through). Counts and warnings must not reveal that hits were dropped.</constraint>
+    <constraint source="design">Internal callers: byte-identical behaviour (same query text, same results). No change to any other tool, endpoint, ExternalAccessModule.cs or AccessibleRecordSetService.cs.</constraint>
+    <constraint source="ADR-015">No query text, body or row content in logs; a deny/filter log line carries the entity and a reason code only.</constraint>
+    <constraint source="ADR-013 / ADR-010">AI handlers may consume Communication/Identity services (EmailDraftToolHandler does); no new interface.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement statement, no new package, publish-size delta against a fresh master build, tests.</constraint>
+    <constraint source="owner">No live change in this task. It ships in the next dev BFF deploy, which needs fresh owner approval and the deploy round.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/defer-issues.md (ISS-010)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/task-065-notes.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; /conflict-check (BFF hot path); declare rigor/tier.</step>
+    <step order="1">Inventory: communication-family tables; every chat tool that can read them through a generic path (read_query, search_data; check others such as describe, any retrieve-record tool). Record the list.</step>
+    <step order="2">Write the tests in the acceptance criteria; confirm the negative cases fail before the change.</step>
+    <step order="3">Implement in both handlers.</step>
+    <step order="4">Seeding proofs: disable each guard in turn → its tests fail. Restore; record.</step>
+    <step order="5">Build, tests (both handler classes, the communication read tests, ArchTests), publish-size delta, notes/task-078-notes.md; two adversarial passes; fix F-class; ISS-010 entry updated (quick fix done, real fix still open); status, TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the caller principal is not reachable from the chat tool path (no HttpContext in some invocation route), STOP and escalate with the route.</trigger>
+    <trigger>If another chat tool returns communication content to an external caller through a path this task does not cover, report it (fix in scope if it is the same pattern; otherwise file it).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseReadQueryHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseSearchDataHandler.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests (handler tests)</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-078-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">read_query, external caller, sprk_communication: rows with sprk_isinternalonly true or null are absent; a row with false on an Open thread is returned; a row with false on a Private thread, or with no thread, is absent.</criterion>
+    <criterion testable="true">read_query, external caller, a WHERE clause the model wrote (including an OR) cannot widen the guard: the guard is ANDed around the model's whole predicate.</criterion>
+    <criterion testable="true">read_query, external caller, another communication-family table → refused, no Dataverse data request issued.</criterion>
+    <criterion testable="true">read_query, caller systemuser unresolvable → treated as external (or refused), never internal.</criterion>
+    <criterion testable="true">read_query, internal caller → the Dataverse request URL is identical to today's for the same SQL (communication and non-communication tables).</criterion>
+    <criterion testable="true">search_data, external caller: hits from communication-family tables are absent, including when the model's entity filter names them; other hits unchanged. Internal caller unchanged.</criterion>
+    <criterion testable="true">No log line written by the change contains query text or row content.</criterion>
+    <criterion testable="true">Existing DataverseReadQueryHandler / DataverseSearchDataHandler tests, the communication read-service tests and ArchTests pass.</criterion>
+    <criterion testable="true">Test scope: the contract above plus its edge cases; anything beyond needs a one-line justification in the notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Completed 2026-10-20 (rework: 1 review round + 1 scoped re-check fix). Also covers dataverse.describe and sprk_document rows linked to a communication, and refuses the email-content tables; see notes/task-078-notes.md. Filed from it: ISS-014 #2125, ISS-015 #2126, ISS-016 #2127. Origin: ISS-010 (#1864), owner decision 2026-10-20 "use the quick fix for now". Two adversarial passes (security). Tell UAC (ISS-010 is shared with unified-access-control-r2) when done.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

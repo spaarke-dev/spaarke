@@ -261,7 +261,6 @@ public sealed class BriefingAccuracyEvalSuiteTests
         {
             summary = tldrSummary ?? "You have items to review today.",
             keyTakeaways = Array.Empty<string>(),
-            topAction = string.Empty,
         });
 
         // Strict — the TL;DR action is the ONLY LLM call the narrator may make (task 010). Any other
@@ -289,7 +288,7 @@ public sealed class BriefingAccuracyEvalSuiteTests
         Id = Guid.NewGuid(),
         Name = TldrActionCode,
         SystemPrompt = "TLDR.",
-        OutputSchemaJson = """{"type":"object","properties":{"summary":{"type":"string"},"keyTakeaways":{"type":"array","items":{"type":"string"}},"topAction":{"type":"string"}},"required":["summary","keyTakeaways","topAction"],"additionalProperties":false}""",
+        OutputSchemaJson = """{"type":"object","properties":{"summary":{"type":"string"},"keyTakeaways":{"type":"array","items":{"type":"string"}}},"required":["summary","keyTakeaways"],"additionalProperties":false}""",
         SortOrder = 0,
         ExecutorType = ExecutorType.AiAnalysis,
         OwnerType = ScopeOwnerType.System,

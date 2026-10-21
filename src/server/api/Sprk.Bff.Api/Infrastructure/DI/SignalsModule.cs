@@ -2,6 +2,7 @@ using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.HealthChecks;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Ontology;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
@@ -67,6 +68,16 @@ public static class SignalsModule
         // shared regarding builder, then the core-ancestor stamp) -- no new registration.
         services.AddSingleton<DecisionRecordWriter>();
 
+        // GateDecisionRecordSharing (task 042b, D-169): the gate Decision Record of an UNFILED communication is shared Read with the
+        // communication's internal sharees (at write, and on each later grant of the communication), and re-owned to the resolver's team
+        // when any re-file of the communication runs SecureChildReconciler.AfterRefileAsync. Registered unconditionally, singleton over
+        // singletons (the shared sysadmin reader, the POA seam, the writer client above, the resolver, the cache invalidator), so the
+        // scoped SecureChildReconciler and the singleton DirectThreadAccessService take it as a REQUIRED dependency with no captive
+        // scope (GateDecisionRecordSharingRegistrationTests). DecisionRecordWriter takes it as a REQUIRED last parameter too. CLAUDE.md section 11: Existing: the writer (create-only, guarded), uac-r2's
+        // DirectThreadAccessService and SecureChildReconciler.ReownOrdinaryRowAsync (refuses a user-owned row). Extension: the writer cannot
+        // assign without breaking its create-only guard; the other two are uac-r2's. Cost of doing nothing: D-169 fails (owner-only record).
+        services.AddSingleton<GateDecisionRecordSharing>();
+
         // Decision plan read (task 036, FR-49/FR-50): the Signal-level access decision (as the caller, through the
         // caller-identity client, so scoped) and the plan resolver (the catalog itself is a static table). Both
         // unconditional -- the route that uses them is mapped unconditionally (bff-extensions.md F.1).
@@ -107,6 +118,13 @@ public static class SignalsModule
         // compiler and the shared sysadmin entity service, both singletons.
         services.AddSingleton<RuleBodyDescriber>();
 
+        // Task 100 (FR-57, D-22): the Ontology admin Rules routes' service. Scoped: it holds the CALLER's IDataverseUserClient, so every read
+        // and write runs as the caller. The delegate is task 033's immediate PolicyRetired closure (a seam so Retire's ordering and re-run
+        // rule are testable without the Signal writer's constructor). Unconditional: the routes map unconditionally.
+        services.AddScoped<Sprk.Bff.Api.Services.Ontology.PolicyRetiredClosure>(
+            sp => sp.GetRequiredService<SignalClosureService>().ClosePolicyRetiredNowAsync);
+        services.AddScoped<Sprk.Bff.Api.Services.Ontology.OntologyAdminRulesService>();
+
         // Task 031 (FR-11, FR-15, D-13): the side-effect-free evaluation core (reused by the event triggers, 032, and the admin
         // dry run, 101) and the ONE nightly re-evaluating job wrapping it with the writes. An ADR-036 IScheduledJob on the
         // shared Spaarke.Scheduling host (no timer BackgroundService, ADR-052: BFF placement), registered unconditionally
@@ -122,6 +140,12 @@ public static class SignalsModule
         services.AddScheduledJob<SignalReevaluationJob>(SignalReevaluationJob.DefaultCronSchedule);
         services.AddSingleton<SignalEvaluatorHealthCheck>();
 
+        // Task 101 (D-22 slice b): the Ontology admin rule-authoring service (scoped: every read and write is the request caller's
+        // through the caller-identity client) and its one seam onto the evaluator and the job above (singleton, as they are).
+        // Unconditional, like the routes that use them (bff-extensions.md F.1).
+        services.AddSingleton<IOntologyAdminAuthoringSignalEngine, OntologyAdminAuthoringSignalEngine>();
+        services.AddScoped<OntologyAdminAuthoringService>();
+
         // Task 148 (D-135 item 2, follow the assignee): every 5 minutes (recently changed To Dos) and nightly (all), a personal
         // To Do's Signals and Decision Records are re-owned to its current Assigned To's team, only through uac-r2's
         // SecureChildReconciler.ReownOrdinaryRowAsync. REPORT-ONLY unless Ontology:TodoAssigneeOwner:WritesEnabled=true (owner).
@@ -135,6 +159,13 @@ public static class SignalsModule
         // create and the association-confirmed filing path call. Unconditional (bff-extensions.md F.1).
         services.AddSingleton<SignalEvaluationTrigger>();
         services.AddSingleton<IJobHandler, SignalEvaluationTriggerHandler>();
+
+        // Task 149 (D-139): the communications gate queues its decision and acts at once; ONE ADR-004 IJobHandler writes the Decision Record
+        // (exactly one per communication + outcome) through the writer above. The enqueuer is a singleton (the gate consumer, a singleton,
+        // takes it); the handler is SCOPED because IIdempotencyService is (WorkersModule), and the job processor resolves its handlers from a
+        // scope. Unconditional (bff-extensions.md F.1): JobSubmissionService, IGenericEntityService and IIdempotencyService are too.
+        services.AddSingleton<GateDecisionRecordEnqueuer>();
+        services.AddScoped<IJobHandler, GateDecisionRecordJobHandler>();
         services.AddHealthChecks()
             .AddCatalogCheck<SignalEvaluatorHealthCheck>(
                 "signal-reevaluation",

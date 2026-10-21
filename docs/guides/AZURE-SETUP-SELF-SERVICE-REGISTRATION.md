@@ -329,7 +329,7 @@ az webapp config appsettings set \
     "DemoProvisioning__Licenses__PowerAutomateFreeSkuId=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
 
-> **Note**: The `DemoProvisioning__Environments__*` settings are deprecated and can be removed once `DemoExpirationService` is migrated to use `DataverseEnvironmentService`.
+> **Note**: The `DemoProvisioning__Environments__*` settings are deprecated and no longer read — demo expiry (`DemoExpirationJob`) resolves each request's own target environment through `DataverseEnvironmentService` (T186). They can be removed.
 
 ### Multiple Admin Notification Emails
 

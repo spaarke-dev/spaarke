@@ -146,17 +146,17 @@ public sealed class BudgetInquiryExecutor(
             return typed.Refusal;
 
         var item = BuildItem(request, typed.TypeId);
-        var me = await OwnedChildWrite.WhoAmIAsync(user, ct).ConfigureAwait(false);
+        var me = await CallerWriteAuthorization.WhoAmIAsync(user, ct).ConfigureAwait(false);
         if (me.Failure is not null)
             return new(BudgetInquiryOutcome.Refused, Error: me.Failure.ErrorMessage ?? "The calling user could not be identified.");
 
-        var check = await OwnedChildWrite.CheckCallerMayCreateAsync(user, me.SystemUserId, Table, item, null, ct).ConfigureAwait(false);
+        var check = await CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me.SystemUserId, Table, item, null, ct).ConfigureAwait(false);
         if (!check.Succeeded)
             return new(BudgetInquiryOutcome.Refused,
                 Error: check.Denied ?? check.ClientFailure?.ErrorMessage ?? "You do not have permission to send this inquiry.");
 
         var owner = await ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(OwnedChildWrite.ParentsOf(item), CallerObjectId(), me.SystemUserId) with
+            RecordOwnershipContext.ForParents(OwnedChildWrite.ParentsOf(Table, item), CallerObjectId(), me.SystemUserId) with
             {
                 RequestedBy = RecordRequester.Of(me.SystemUserId),
             },
@@ -189,7 +189,7 @@ public sealed class BudgetInquiryExecutor(
     /// <summary>
     /// The <c>sprk_recordtype_ref</c> catalog row for <c>sprk_matter</c>, read AS THE CALLER (the same read the pair rule makes
     /// of the type row). A <c>sprk_servicerequest</c> is a core table with no pair agreement column, so the ADR-024 pair
-    /// (<c>sprk_regardingrecordid</c>) is accepted only TYPED (<see cref="OwnedChildWrite.PairTargetAsync"/>); an untyped pair
+    /// (<c>sprk_regardingrecordid</c>) is accepted only TYPED (<see cref="CallerWriteAuthorization.PairTargetAsync"/>); an untyped pair
     /// is refused 400 Invalid, however the lookup beside it agrees.
     /// </summary>
     private async Task<(Guid TypeId, BudgetInquiryResult? Refusal)> ResolveMatterTypeAsync(CancellationToken ct)

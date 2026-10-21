@@ -11,10 +11,10 @@ public static class DocumentsModule
 {
     public static IServiceCollection AddDocumentsModule(this IServiceCollection services)
     {
-        // Clock for share-link expiry (unified-access-control-r2 task 072). TryAdd, matching the
+        // Clock (added for share-link expiry by unified-access-control-r2 task 072; that route was retired
+        // 2026-10-16, #1350, and other document services resolve TimeProvider too). TryAdd, matching the
         // idempotent convention in CommunicationModule / InsightsIngestModule / MembershipModule —
-        // whichever module loads first wins and the others no-op. Registered HERE so the share-link
-        // route does not depend on an unrelated module having been added.
+        // whichever module loads first wins and the others no-op.
         services.TryAddSingleton(TimeProvider.System);
 
         // ============================================================================

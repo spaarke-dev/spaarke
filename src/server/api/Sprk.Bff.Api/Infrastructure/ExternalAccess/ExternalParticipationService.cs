@@ -15,7 +15,8 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// </summary>
 public class ExternalParticipationService
 {
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
+    // internal (#2121 round 1, F1): AccessibleRecordSetService caches its Dataverse rights answers for the same TTL.
+    internal static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
     // Resource identifier for ITenantCache (FR-05). Cached value is per-Contact participation
     // data (project list), not an authorization decision per ADR-009.
     //
@@ -1009,7 +1010,7 @@ public class ExternalParticipationService
     /// record's own flags (<see cref="GetRootRecordFlagsAsync"/>) and those of every record it is filed under, through the
     /// ONE filing walk (<see cref="EffectiveRootFlags"/>). Every access decision asks this, not the own-row read: the
     /// read-time cancellation and Restricted veto fold the same walk themselves (<c>AccessibleRecordSetService</c>); the
-    /// grant policy, the grantor ceiling, the share-link refusal, the internal-user Restricted bar, the No Access enforcer,
+    /// grant policy, the grantor ceiling, the internal-user Restricted bar, the No Access enforcer,
     /// the Restricted share remover and the Assigned-To materializer read it here.
     /// </summary>
     /// <remarks>
@@ -1943,8 +1944,8 @@ public class ExternalParticipationService
         var token = await GetAppOnlyTokenAsync(ct).ConfigureAwait(false);
         string? next = $"{GetDataverseApiUrl()}/sprk_contactorganizations" +
                        $"?$filter={BuildColleagueByEmailFilter(organizationIds, email)}" +
-                       $"&$select={ColleagueByEmailSelect}" +
-                       $"&$expand={ColleagueByEmailExpand}";
+                       "&$select=" + ColleagueByEmailSelect +
+                       "&$expand=" + ColleagueByEmailExpand;
 
         var rows = new List<ColleagueMembershipRow>();
         var pages = 0;

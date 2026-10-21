@@ -48,7 +48,7 @@ internal static class ComposeServiceCollaborators
             new HttpClient(),
             new ConfigurationBuilder().Build(),
             NullLogger<CallerRecordAccessProbe>.Instance,
-            null!)
+            null!, null!)
         { CallBase = false };
 
         probe.Setup(p => p.GetCallerRightsAsync(

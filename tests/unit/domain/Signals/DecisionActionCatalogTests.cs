@@ -1,5 +1,6 @@
 using System.Diagnostics.Metrics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -10,6 +11,8 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Signals;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -567,7 +570,9 @@ public class DecisionActionCatalogTests
 
         var decision = await Access(users, coreSet: "subject_set").AuthorizeAsync(SignalId, CancellationToken.None);
 
-        decision.Outcome.Should().Be(SignalAccessOutcome.Allowed);
+        // Task 150 (D-141): a Do item is then visible only when its subject table has a worklist "mine" rule (the worklist shows
+        // a Do row on any other table to nobody), and the caller's "mine" read returns it.
+        decision.Outcome.Should().Be(SignalReadService.DoLaneMineRules.ContainsKey(subjectTable) ? SignalAccessOutcome.Allowed : SignalAccessOutcome.NotFound);
         Mock.Get(users).Verify(u => u.GetAsync($"subject_set({SubjectId})?$select=createdon", It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -607,7 +612,7 @@ public class DecisionActionCatalogTests
     {
         var entities = new Mock<IGenericEntityService>();
         entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("no answer"));
-        var access = new SignalCoreRecordAccess(Users(signal: NoCoreDoRow(), core: Ok(new { createdon = "x" })), entities.Object, NullLogger<SignalCoreRecordAccess>.Instance);
+        var access = new SignalCoreRecordAccess(Users(signal: NoCoreDoRow(), core: Ok(new { createdon = "x" })), entities.Object, CallerWithAContact(), NullLogger<SignalCoreRecordAccess>.Instance);
 
         (await access.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.Unavailable);
     }
@@ -752,7 +757,16 @@ public class DecisionActionCatalogTests
 
         entitiesMock.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", CoreTypeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>())).ReturnsAsync(typeRow);
         entitiesMock.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(coreSet);
-        return new SignalCoreRecordAccess(users, entities, NullLogger<SignalCoreRecordAccess>.Instance);
+        return new SignalCoreRecordAccess(users, entities, CallerWithAContact(), NullLogger<SignalCoreRecordAccess>.Instance);
+    }
+
+    /// <summary>Task 150: the caller's linked contact, which the Do-lane "mine" rule compares (D-141).</summary>
+    private static IIdentityNormalizationService CallerWithAContact()
+    {
+        var identity = new Mock<IIdentityNormalizationService>();
+        identity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) => new PersonIdentity(id, Guid.Parse("66666666-6666-6666-6666-666666666666")));
+        return identity.Object;
     }
 
     private static IDataverseUserClient Users(
@@ -763,6 +777,17 @@ public class DecisionActionCatalogTests
         users.Setup(u => u.GetAsync(It.Is<string>(p => !p.StartsWith("sprk_signals(", StringComparison.Ordinal) && p != "WhoAmI"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(core ?? Fail(404, DataverseUserClientErrorCodes.NotFound));
         users.Setup(u => u.GetAsync("WhoAmI", It.IsAny<CancellationToken>())).ReturnsAsync(who ?? Fail(0, DataverseUserClientErrorCodes.UserContextRequired));
+
+        // Task 150 (D-141): a Do-lane Signal also needs the worklist's "mine" read. Here every subject is the caller's own work
+        // (the read returns it); DoLanePrivacyTests covers who is and is not admitted.
+        users.Setup(u => u.GetAsync("WhoAmI()", It.IsAny<CancellationToken>())).ReturnsAsync(Ok(new { UserId = OwnerId }));
+        users.Setup(u => u.GetAsync(It.Is<string>(p => p.Contains("&$filter=", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string path, CancellationToken _) =>
+            {
+                var pk = Regex.Match(path, "PropertyName='(\\w+)'").Groups[1].Value;
+                var id = Regex.Match(path, "PropertyValues=\\['([0-9a-f-]{36})'").Groups[1].Value;
+                return Ok(new { value = new[] { new Dictionary<string, object> { [pk] = id } } });
+            });
         return users.Object;
     }
 

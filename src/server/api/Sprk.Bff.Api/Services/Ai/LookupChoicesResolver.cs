@@ -454,6 +454,10 @@ public sealed class LookupChoicesResolver
                 ? await _scopeResolver.QueryLookupValuesAsync(entitySetName, selectField, cancellationToken)
                 : await _scopeResolver.QueryLookupValuesAsync(entitySetName, selectField, additionalFilter, cancellationToken);
 
+            // Two rows with one name (case aside) would put a duplicate in the constrained-decoding enum, which a strict schema rejects.
+            // Keep the first of each, in the order the read returned them (ontology task 103 fix round, K2).
+            values = values.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
             if (values.Length == 0)
             {
                 _logger.LogWarning(

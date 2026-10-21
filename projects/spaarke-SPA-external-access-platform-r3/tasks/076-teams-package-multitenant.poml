@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="076" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Teams package and registration for A9: manifest client and domain, brk-multihub redirect, 043 pipeline</title>
+    <phase>4b A9 workforce home sign-in</phase>
+    <gate>after 075; the dev redirect is set in 059</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Manifest and pipeline configuration; no application code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Configuration following task 043's pipeline</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Follows 075; touches the same workflow as 058</parallel-reason>
+    <deps>075</deps>
+    <tags>deploy, config, auth</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Update the Teams app package and its build so the dev and production packages carry what the multitenant NAA sign-in needs (design §12), and record the per-customer Teams admin approval as an onboarding step owned by provisioning.</prompt>
+  <role>SPAARKE platform developer. Teams app manifest and GitHub Actions. Follow ADRs strictly.</role>
+  <goal>appPackage manifest(s) and env files carry the multitenant client id and the SPA domain in validDomains, with no webApplicationInfo; deploy-teams-app.yml / the 043 pipeline injects them from GitHub environment variables and fails closed when missing; the dev package builds.</goal>
+
+  <context>
+    <background>Design §12; task 043 built the production build + Teams package pipeline. Provisioning owns brk-multihub for the production origin (operator step on the shared multitenant client) and Teams admin approval (customer onboarding gate) — their A9 mapping note items 5 and 7. The dev brk-multihub redirect is in task 059.</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/appPackage/manifest.json</file>
+      <file role="modify">src/client/external-spa/appPackage/env.dev.json</file>
+      <file role="modify">.github/workflows/deploy-teams-app.yml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">No webApplicationInfo; no single-tenant client id in the manifest (AADSTS700016 lesson, task 071 background).</constraint>
+    <constraint source="project">Values come from GitHub environment variables; the workflow fails before packaging if any is missing or mis-shaped (match the 043 checks).</constraint>
+    <constraint source="project">Publishing to a tenant's Teams app catalog is an owner action; this task builds the package only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/a9-bff-design.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; read task 043's notes; declare rigor/tier.</step>
+    <step order="1">Update manifest/env and the workflow; run actionlint.</step>
+    <step order="2">Build the dev package locally (or a workflow dry run, owner-approved) and inspect the manifest.</step>
+    <step order="3">Send provisioning a note confirming items 5 and 7 match the package; notes/task-076-notes.md; status + drift check.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">Workflow run (owner-approved)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/appPackage/ and .github/workflows/deploy-teams-app.yml</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-076-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The built dev manifest has the SPA domain in validDomains and no webApplicationInfo.</criterion>
+    <criterion testable="true">The workflow fails before packaging when a required variable is missing.</criterion>
+    <criterion testable="true">actionlint passes.</criterion>
+    <criterion testable="true">Provisioning has the confirmation note.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design §12. Live check: 071.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

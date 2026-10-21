@@ -24,10 +24,12 @@
 //     3. Invoke HandleAsync + interpret the returned HandlerResult
 //        against the §4C rollback taxonomy.
 //
-//   Until the reconciler ships, H0 (this wave) is the only handler + its
-//   downstream H0.5 enqueue is done directly by the handler as a
-//   temporary bridge (see H0PreflightHandler for the code-comment
-//   rationale + the wave-C5 refactor path).
+//   The reconciler (Core/Reconciler) now owns handler-to-handler chaining
+//   (DagAdvancer.HandlerDependencies); handler bodies do NOT enqueue
+//   downstream handlers (the wave-C4 handler-side bridge was removed,
+//   T186 L19). The one deliberate exception is H0.5 -> H0, the Model 2 entry
+//   chain (both are DagAdvancer.EntryPointHandlers the reconciler never
+//   dispatches).
 //
 // IDEMPOTENCY:
 //   Every implementation MUST be idempotent (spec.md FR-22 + ADR-004).

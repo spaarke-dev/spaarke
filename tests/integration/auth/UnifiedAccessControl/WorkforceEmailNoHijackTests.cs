@@ -336,13 +336,19 @@ public class WorkforceEmailNoHijackTests
 
     [Theory]
     [MemberData(nameof(NonMembersWithAUserToken))]
-    public async Task ANonMember_StillResolvesThroughAnExistingOidBinding(string who, ClaimsPrincipal token, string _)
+    public async Task ANonMember_WithAnExistingOidBinding_IsRefusedWithItsMemberTestCode(
+        string who, ClaimsPrincipal token, string code)
     {
+        // #2128 round 1 (was "a non-member still resolves through an existing oid binding"): the member test gates every
+        // sign-in on this plane, so a stored binding never admits a caller who fails it today. Nothing read or written.
         _store.AddContact(ContactA, oid: Caller.ToString("D"), plane: IdentityPlaneMarker.Workforce);
 
         var result = await Resolve(token);
 
-        result.Principal!.ContactId.Should().Be(ContactA, $"a {who} caller resolves only through an existing oid binding");
+        result.IsResolved.Should().BeFalse($"a {who} caller is refused even with an existing oid binding");
+        result.DenyCode.Should().Be(code);
+        _store.Reads.Should().NotContain("oid", "the refusal comes before the oid lookup");
+        _store.Writes.Should().BeEmpty();
     }
 
     [Fact]

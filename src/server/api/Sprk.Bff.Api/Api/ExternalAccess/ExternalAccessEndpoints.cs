@@ -16,6 +16,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///                             Tier-2 record scope. Serves the standalone external SPA (CIAM) AND the
 ///                             Teams workforce host through ONE endpoint set. CIAM behavior is
 ///                             unchanged (FR-15 — the CIAM strategy reproduces the old filter exactly).
+///                             ADR-028 A9 (r3 task 045): the policy also accepts the WorkforceHome scheme (a
+///                             workforce contact's customer home-directory token); every route here is pinned by
+///                             AuthenticationSchemeCensusTests.
 ///   /api/v1/external-access — internal management endpoints. Workforce default scheme (Azure AD JWT).
 ///
 /// The transitional /api/v1/collab workforce group (ADR-028 A2 · teams-app-r1 task 020/030) was
@@ -36,6 +39,15 @@ public static class ExternalAccessEndpoints
     {
         MapExternalUserEndpoints(app);
         MapInternalManagementEndpoints(app);
+
+        // POST /api/v1/external/registration — ADR-028 A9 (r3 task 047). Its OWN group: the ExternalCollaboration policy
+        // WITHOUT CallerPrincipalAuthorizationFilter (the caller is by definition not yet resolved); the handler admits the
+        // WorkforceHome scheme only.
+        app.MapExternalRegistrationEndpoints();
+
+        // POST /api/v1/external/workforce/link — ADR-028 A9 (r3 task 048). Its OWN group, as registration: a licensed user
+        // signed in with their home account is not resolvable until the link exists. WorkforceHome scheme only.
+        app.MapExternalWorkforceLinkEndpoints();
 
         // GET /api/v1/records/{sprk_project|sprk_matter|sprk_workassignment}/{recordId}/no-access — the per-record No Access
         // read (task 064, owner round 59 item 3). NOT on the management group: its DelegationRuleFilter demands Write for
@@ -60,11 +72,16 @@ public static class ExternalAccessEndpoints
         var externalGroup = app.MapGroup("/api/v1/external")
             .WithTags("External Access")
             .RequireAuthorization(AuthPolicies.ExternalCollaboration)
-            .AddCallerPrincipalAuthorizationFilter();
+            .AddCallerPrincipalAuthorizationFilter()
+            // The workforce privilege ceiling (unified-access-control-r2 task 186): every route below declares its
+            // requirement set, or why it is checked in its handler or exempt (WorkforceCeilingEndpointFilter.cs). After the
+            // principal filter, which it needs; before every route filter and handler, so it decides before any record read.
+            .AddWorkforceCeilingFilter();
 
         // GET /api/v1/external/me — Returns the caller's project access context (either plane)
         externalGroup.MapGet("/me", ExternalUserContextEndpoint.Handle)
             .WithName("GetExternalUserContext")
+            .ExemptFromWorkforceCeiling("Identity: the caller's own access context, read to start the SPA; no table operation.")
             .WithSummary("Get the authenticated collaboration caller's project access context")
             .WithDescription(
                 "Returns the caller's project access list with access levels. Called by the external " +
@@ -83,6 +100,7 @@ public static class ExternalAccessEndpoints
         // /me above (Tier-2 record access). Same group → same dual-scheme policy + CallerPrincipal filter.
         externalGroup.MapGet("/me/entitlements", MeEntitlementsEndpoint.Handle)
             .WithName("GetExternalUserEntitlements")
+            .WorkforceCeilingInHandler("Module codes and intake types are intersected with the ceiling in the handler (review round 1 F2).")
             .WithSummary("Get the authenticated collaboration caller's Tier-1 module entitlement context")
             .WithDescription(
                 "Returns the caller's entitled module codes (Tier-1): default modules by server-resolved " +
@@ -174,6 +192,11 @@ public static class ExternalAccessEndpoints
         // the group filter's own verdict, so the client cannot be told something the enforcement point would
         // contradict. Detaching the filter would make it answer "yes" to everyone — see the endpoint's remarks.
         adminGroup.MapRecordAccessGateEndpoint();
+
+        // GET /api/v1/external-access/record-grants — the record's active external grants for Manage Access's Current
+        // Access (task 099a, #1010(a)). On this group so the delegation filter gates it with the /can-manage-access rule
+        // (Write and Share on the record): the reader is the dialog's audience, whatever business unit owns the grant rows.
+        adminGroup.MapRecordGrantsEndpoint();
 
         // POST /share-user · POST /unshare-user · GET /user-shares — internal system-user shares on a record
         // (spec FR-29, task 063): the server half of the Manage Access "+ User" picker (task 065). On this group so

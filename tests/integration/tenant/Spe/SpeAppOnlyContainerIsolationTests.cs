@@ -181,7 +181,7 @@ public class SpeAppOnlyContainerIsolationTests
         "UploadSmall", "ContainerDrive", "DriveSubscription", "DriveDelta",
         "MembershipGrant",
         // The app-only twins added by unified-access-control-r2 task 171 (broker-only SPE bytes).
-        "ItemCreator", "MetadataUncached", "DownloadVersion", "CurrentVersionId", "EmbedPreview", "SharingLink", "DriveItem",
+        "ItemCreator", "MetadataUncached", "DownloadVersion", "CurrentVersionId", "EmbedPreview", "DriveItem",
         "ReplaceContent", "UploadSession",
         "MembershipReadAccess", "MembershipReadMarkers", "MembershipGrantMarked", "MembershipRemoveMarked",
     };
@@ -219,7 +219,6 @@ public class SpeAppOnlyContainerIsolationTests
             "DownloadVersion" => () => drive.DownloadFileVersionAsync(ForeignContainer, "item", "1.0"),
             "CurrentVersionId" => () => drive.GetCurrentVersionIdAsync(ForeignContainer, "item"),
             "EmbedPreview" => () => drive.GetEmbedPreviewUrlAsync(ForeignContainer, "item"),
-            "SharingLink" => () => drive.CreateSharingLinkAsync(ForeignContainer, "item", "view", "organization"),
             "DriveItem" => () => drive.GetDriveItemAsync(ForeignContainer, "item"),
             "ReplaceContent" => () => upload.ReplaceFileContentAsync(ForeignContainer, "item", new MemoryStream(new byte[] { 1 }), ifMatch: null),
             "UploadSession" => () => upload.CreateUploadSessionAsync(ForeignContainer, "a.txt", Sprk.Bff.Api.Models.ConflictBehavior.Fail),
@@ -249,11 +248,12 @@ public class SpeAppOnlyContainerIsolationTests
         var graph = new RoutedGraph().Container(ForeignContainer, marker: OtherCustomer);
         var membership = new SpeContainerMembershipService(Guard(graph), NullLogger<SpeContainerMembershipService>.Instance);
 
-        var revoked = await membership.RevokeMembershipAsync(ForeignContainer, "x@contoso.test");
-        var removed = await membership.RemoveMembershipsAsync(ForeignContainer, new[] { "x@contoso.test", "y@contoso.test" });
+        var revoked = await membership.RevokeMembershipAsync(ForeignContainer, new SpeMembershipKey(null, "x@contoso.test"), TestInternalUserDirectory.Empty().Client);
+        var removed = await membership.RemoveMembershipsAsync(
+            ForeignContainer, new[] { new SpeMembershipKey(null, "x@contoso.test"), new SpeMembershipKey(null, "y@contoso.test") }, TestInternalUserDirectory.Empty().Client);
 
         revoked.Success.Should().BeFalse();
-        removed.Should().HaveCount(2).And.OnlyContain(r => !r.Value.Success);
+        removed.Results.Should().HaveCount(2).And.OnlyContain(r => !r.Value.Success);
         graph.Requests.Should().OnlyContain(r => r.Method == "GET" && r.Path == $"/v1.0/storage/fileStorage/containers/{ForeignContainer}");
     }
 
@@ -269,16 +269,18 @@ public class SpeAppOnlyContainerIsolationTests
         created!.Id.Should().Be("new-container");
         graph.Requests.Select(r => $"{r.Method} {r.Path}").Should().Equal(
             "POST /v1.0/storage/fileStorage/containers",
+            "POST /v1.0/storage/fileStorage/containers/new-container/activate",            // explicit activate (#1755 round 3)
             "PATCH /v1.0/storage/fileStorage/containers/new-container/customProperties",   // business-unit stamp (uac-r2 165)
             "GET /v1.0/storage/fileStorage/containers/new-container",                      // stamp read back
             "PATCH /v1.0/storage/fileStorage/containers/new-container/customProperties");  // ownership marker (T227d)
         graph.Requests[^1].Body.Should().Contain(SpeContainerOwnershipGuard.MarkerPropertyName).And.Contain(Customer);
     }
 
-    /// <summary>Graph for a create: POST answers <c>new-container</c>; its business-unit stamp reads back.</summary>
+    /// <summary>Graph for a create: POST answers <c>new-container</c>, its activate 204; its business-unit stamp reads back.</summary>
     private static RoutedGraph NewContainerGraph(string displayName, Guid businessUnit)
         => new RoutedGraph()
             .Respond("POST", "/v1.0/storage/fileStorage/containers", $$$"""{"id":"new-container","displayName":"{{{displayName}}}"}""")
+            .Respond("POST", "/v1.0/storage/fileStorage/containers/new-container/activate", "", HttpStatusCode.NoContent)
             .Respond("PATCH", "/v1.0/storage/fileStorage/containers/new-container/customProperties", "{}")
             .Respond("GET", "/v1.0/storage/fileStorage/containers/new-container",
                 System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>
