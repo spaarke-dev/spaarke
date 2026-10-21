@@ -39,6 +39,6 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 |---|---|
 | **Found** | 2026-10-21, task 014 review K-4 (task 003 residual) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2188 |
-| **Class** | F1 once callers are re-pointed (017/018); dormant on master today (the service has no caller) |
-| **Owner task** | **Blocks 017**: fix before any caller is re-pointed. Option (a): read the source columns as the caller. Option (b): check the caller's field-security read per mapped column and drop with a warning. Either way, timing-equalised and fail closed |
+| **Class** | F1. **Live on master** through the Office quick-create (`OfficeRecordCreationService.cs` ~1238-1246 reads the source app-only; UAC-r2 2026-10-21). The unified-service half is dormant until 017 |
+| **Owner task** | Office half: hotfix branch `fix/fm-2188-office-source-read` (its own PR to master). Service half: 014 fix round 3. Either way it **blocks 017**. Option (a): read the source columns as the caller. Option (b): check the caller's field-security read per mapped column and drop with a warning. Either way, timing-equalised and fail closed |
 | **Failure** | Record-level Read probe, then an app-only read of the columns, so a column the caller cannot read is copied into a row they can read |
