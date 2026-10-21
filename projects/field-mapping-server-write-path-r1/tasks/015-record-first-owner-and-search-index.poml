@@ -4,7 +4,7 @@
     <title>Record-first owner for roots and children, and search-index default from the owning business unit (FR-09, FR-10)</title>
     <phase>2 W2 Unified RecordCreationService</phase>
     <gate>014 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, security, ownership; owner assignment is a security-sensitive invariant (NFR-01); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -114,7 +114,15 @@
     <criterion testable="true">BFF build 0 errors; SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests, RouteAuthorizationGuardTests and RecordOwnerAssignmentCensusTests pass unchanged; publish-size delta, CVE result and /conflict-check result recorded in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-09, FR-10, FR-11, NFR-01. Owner decision Q9: record-first everywhere. Exceptions (notifications, direct threads, unfiled communications) are assessed in task 060, not here.</notes>
+  <notes>Spec FR-09, FR-10, FR-11, NFR-01. Owner decision Q9: record-first everywhere. Exceptions (notifications, direct threads, unfiled communications) are assessed in task 060, not here.
+Completed 2026-10-21.
+- What landed: the unified create (RecordCreationService step 7) resolves the owner record-first through ResolveOwnerAsync(ForParents(...) with RequestedBy) for roots and children; a project's ADR-024 pair counts as a parent only when it names a matter or project, read the same way as the secure-root plan; an isolated create takes the plan's named Secure team (I-2). Step 8: a fill-only search-index default from the owning BU on matter, project and document. ArchTest CreateOwnerResolutionGuardTests bans ResolveOwningTeamAsync in server code; the Office file is allow-listed for exactly one use until 018. Write-path doc I-5/I-6 updated.
+- Deferred: the Office record-first owner and Office index moved to task 018 (they changed live Office behaviour before the AppendTo checks gate the filing; review pass 1 F1/F2). The Office file is byte-identical to 58d1a3548d.
+- Reviews: two opus passes. Pass 1 F1-F3 fixed (fix round 1); pass 2 found one doc clause (I-6 isolation exception) and the allow-list count, both fixed (ccd4fff6b9). K-limits: the guard matches the name, not the behaviour; the malformed-pair case under a system principal reaches the Dataverse write and fails closed (no live caller yet).
+- Tests: CrossSurfaceOwnerTests, SearchIndexDefaultTests (data-mutation/RecordOwnership), guard ArchTests 15; mutants killed: F3 gate, K2 gate, isolated search-index skip, a guard call in UploadFinalizationWorker, the allow-list count.
+- Verified after merging into the work branch: sln 0/0, ArchTests 1232/1232, targeted suites 2521 passed / 7 skipped.
+- Publish: +27 KB.
+- UAC-r2 review (condition b, owner outcomes) was requested at merge.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
