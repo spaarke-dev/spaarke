@@ -118,6 +118,7 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
 - 2026-10-14 — **#1111 to master now (owner, D-140; supersedes Q8):** ebilling-r1 needs the Signal/rule/DR code; master-sync PR first, then #1111; the 035 dev BFF deploy follows from master as a separate operator step (merging does not deploy, see §6). eBilling's own changes come as their PRs, we review.
 - 2026-10-05 — SmartTodo's palette is the one due-urgency scheme (overdue red · 0–3 dark orange · 4–7 yellow · 8–10 grey).
 - 2026-10-07 — Writer credential vs tenant-isolation rule I5 (owner): tenant-pinned `DefaultAzureCredential` locked to the writer's own UAMI — every non-MI source excluded, `AZURE_TOKEN_CREDENTIALS` refused unless MI, both pinned by tests; I5 satisfied (spec §6 ADR-028 row).
+- 2026-10-21 — **ebilling Procedure model final (D-177, EB-D-148):** billing rules come from Procedures (assignments, record-scoped rule sets, rank key (Level, −Distance, FirmSpecific)); no business-unit filter; for billing, `sprk_currentversion` = latest published (D-14 unchanged for ontology); assignment rows are deleted by ebilling's 117 planner (core lookups RemoveLink); AddedFee replaces by (rule type, fee kind; for `other` plus the fee-code set); ontology matter-scoped rules stay as built (convergence: DI-121).
 
 ## 4. Coordination
 
