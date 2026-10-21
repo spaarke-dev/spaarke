@@ -509,3 +509,20 @@ Overall: roughly L/XL (about 8–12 agent-days including review loops). BFF-touc
   - *OAuth 2.0 On-Behalf-Of flow* (`entra/identity-platform/v2-oauth2-on-behalf-of-flow`; CA at OBO);
   - *Restrict access by location / CA on Microsoft Dataverse* (`power-platform/admin/restrict-access-online-trusted-ip-rules`).
 - Message Center: MC1486027 (mc.merill.net) and MC1465569: filtered record ownership public preview, October 2026.
+
+---
+
+## Owner decisions (rounds 114–115, 2026-10-21) — these supersede the recommendation above where they differ
+
+- **Visibility target.** The model-driven app and the SPA must match. A flagged-external user sees every record except:
+  - secure records, unless shared with them;
+  - Restricted records, unless they are on the access list;
+  - internal-only records.
+- **Mechanism, design A with automatic sharing.**
+  - Flagged-external users go into the "External Collaborators" business unit, with no business-unit depth.
+  - Everything else follows the round 115 decision in `session27-owner-decisions-and-research.md`: what the share job shares with the one "External Collaborators" team, when it withdraws, and how Restricted and secure records are handled.
+  - Spike S3 measures the cost in share (POA) rows.
+  - This supersedes §3's "shares only for records shared or assigned to them" and Q2's "would lose" list.
+- **Q3:** internal-only passes to records under or about a hidden record, using the SPA's exact rule.
+- **Q4:** about 2 minutes is accepted for changes made outside the product.
+- **Q5:** a scheduled BFF job moves a newly flagged user automatically, under the round 115 safeguards: one-way only, and it acts only on a flag read as definitely true. It alerts only when a move fails. This replaces the operator script for moving in.

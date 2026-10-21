@@ -1768,3 +1768,13 @@ Owner text, verbatim:
 
 Decided: **Q3** internal-only passes down to records under or about a hidden record, using the SPA's exact rule. **Q4** the ~2-minute window for out-of-product changes is accepted.
 Open (main session answered with facts; owner to confirm): **Q1/Q2** the target is "MDA = SPA: a flagged-external user sees every record except secure (unless shared), Restricted (unless on the access list) and internal-only". **Q5** the BFF app user is System Administrator (`SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md:76-77`), so a BFF job can move users.
+
+## Round 115 (owner, 2026-10-21)
+
+Owner text, verbatim: "yes deploy" / "yes for 191 approach".
+
+1. **Dev deploy of master a10e814d02 (#2169 + #2150): approved.** Relayed to R3, who deploys.
+2. **Task 191 approach (answers round 114 Q1, Q2, Q5):**
+   - **Q1:** design A with automatic sharing. Flagged-external users go into one "External Collaborators" business unit and team, with no business-unit depth. The share job shares every record that is not secure, Restricted or internal-only with that one team, and withdraws the share when a record becomes internal-only. Restricted records are shared only with people on their access list. Secure records keep their existing shares. The model-driven app and the SPA match by construction, because the 036 read set asks Dataverse.
+   - **Q2:** moot. Flagged-external users lose no ordinary records, so no "would lose" list is needed.
+   - **Q5:** a scheduled BFF job moves a newly flagged user into the external unit within about 2 minutes, with an alert only when a move fails. The move is one-way: un-flagging stays an operator step. The job acts only on a flag read as definitely true, never touches application users or administrators, and re-applies the external role after the move.
