@@ -406,3 +406,22 @@ Code checked at 70fc2cc616 and master a10e814d02. **Verdict: ACCEPT WITH CHANGES
 - **Scope (group rule, owner round 116 item 2):** every `/api/finance` route that reads or writes invoices or submissions, adding the missed `GET /api/finance/submissions/{submissionId}/blocked` (`SubmissionOverrideEndpoints.cs:40`; `BlockedFindingView` plus the override stamp with reviewer reason and id), the line-decision, accept-clean, related-work, override, return and internal submit routes, plus `/api/finance/rulesets/*` (`RuleSetService`; record-scoped rule sets hold override content). Out of scope: `/invoices/search`, `/matters/{id}/summary`. `/invoice-submissions/{id}` is in scope by the group rule only: it returns firm-visible facts (`InvoiceSubmissionContracts.cs:184`).
 - **Nothing breaks:** none of these routes is on master; no client calls `/review`, `/context` or `/invoice-submissions/{id}`; RuleReview calls only `rulesets`; the external SPA uses `/api/v1/external/*` only.
 - **Leftover:** the 081 row's "banner comparison on the invoice GET" → "on `/review` only".
+
+## 14. uac-r2 review of v5.5 (`13b310e1c4..f66eec5e25`), 2026-10-21: CHANGES-NEEDED
+
+Answers to our two questions: (1) yes, (a′) changes on the .eml; (2) yes, new exposure.
+
+| Finding | Summary | v5.6 |
+|---|---|---|
+| F1-a | The add-in .eml, filed to the core record and partner-visible on an Open thread (owner D6, `CommunicationInternalOnlyFloor.cs` `AddInSaveWithoutReplyHeadersIsShareable`), exposes firm F's invoice to every external participant; narrowing it hides the invoice from its own firm via (a′). | Owner decision, section 15 (options i/ii/iii; i recommended) |
+| F1-b | "Task 130 unchanged" holds only after #2177 is merged and deployed; refuse when no communication resolves. | Applied: prerequisite and refusal |
+| F1-c | An unidentifiable email saves Restricted and silently hides the firm's invoice. | Owner decision, section 15 (refuse recommended) |
+| F2-a | `from-email` must carry `/office/save`'s filters (`OfficeEndpoints.cs:185-195`) plus Finance's, step 0 first; overwrite `SelectedAttachmentFileNames` with `[]`. | Applied |
+| F2-b | Resolve the .eml from the communication (Message-ID, `sprk_relatedcommunication`, exactly one), not a returned id. | Applied (replaces word-add-in-r1's `JobResult.Artifact.Id`) |
+| F2-c | The job's byte read: one retrieve of drive/item/version; ordinal, name and SHA match; version pinned; id-only logs; failure handling. | Applied |
+| F1-d | Correction: re-check inside step 4 with If-Match on the old invoice; undo reopens it; Write on the old invoice, same `sprk_vendororg` and core record; (a′) does not follow the link. | Applied |
+| Q1 | (a′) rule 4 on the .eml is its `sprk_relatedcommunication`'s internal-only flag; evaluate rule 3 too. | Applied |
+| Minor | The Email attachment row contradicted the add-in flow; v5.4's table was stale. | Applied |
+
+Checked clean by uac-r2: `[]` means no children; invoice text stays out of email analysis.
+
