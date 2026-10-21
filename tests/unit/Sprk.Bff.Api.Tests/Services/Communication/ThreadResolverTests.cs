@@ -2092,12 +2092,17 @@ public class ThreadResolverTests
             "an inactive default thread is never joined");
     }
 
-    [Fact]
-    public async Task ReconcileThreadForFiling_WhenTheMoveToTheRecordsThreadIsRefused_LogsAnErrorNamingTheEmail_AndLeavesItInItsThread()
+    [Theory]
+    [InlineData(true, Microsoft.Extensions.Logging.LogLevel.Error)] // a person's re-file, F3-checked before it wrote: a race
+    [InlineData(false, Microsoft.Extensions.Logging.LogLevel.Warning)] // no person (the sweep): a legacy row it cannot move
+    public async Task ReconcileThreadForFiling_WhenTheMoveToTheRecordsThreadIsRefused_LogsItNamingTheEmail_AndLeavesItInItsThread(
+        bool aPersonsRefile, Microsoft.Extensions.Logging.LogLevel expected)
     {
         // #2143 round 7b (K-limit): the re-file asked F3 about every secure record the thread move leaves, so a refused move is
         // only a race (the thread re-filed between that check and this move) or a reconcile no person's re-file started. It is
-        // never silent: an Error names the email and the threads, and the email keeps its thread (nothing is assigned or granted).
+        // never silent: it names the email and the threads, and the email keeps its thread (nothing is assigned or granted).
+        // Round 8: an Error only for the race (a caller was carried); a person-less reconcile — the sweep, every run, for each
+        // legacy row it cannot move — logs a Warning.
         var communicationId = Guid.NewGuid();
         var threadId = Guid.NewGuid();
         var matter = Guid.NewGuid();
@@ -2114,12 +2119,20 @@ public class ThreadResolverTests
         _owners.RefusalCode = Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode;
         var log = new CapturingLogger<ThreadResolver>();
 
+        var caller = aPersonsRefile
+            ? new Sprk.Bff.Api.Services.Access.SecureRemovalCaller(
+                _ => Task.FromResult<Guid?>(Guid.NewGuid()), (_, _) => Task.FromResult(AccessRights.None))
+            : null;
+
         await new ThreadResolver(Array.Empty<IThreadKeyStrategy>(), _entity.Object, _owners, log, _grants.Object, SecureNames)
-            .ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+            .ReconcileThreadForFilingAsync(communicationId, FilingReconcileHost.AfterRefileStep, caller, beforeMessageGrant: null,
+                CancellationToken.None);
 
         VerifyAssigned(communicationId, recordThread, Times.Never());
         VerifyNoGrant();
-        log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error
+        log.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error).Should().HaveCount(
+            aPersonsRefile ? 1 : 0, "an Error only for a person's re-file");
+        log.Entries.Should().Contain(e => e.Level == expected
                                           && e.Message.Contains(communicationId.ToString(), StringComparison.Ordinal)
                                           && e.Message.Contains(threadId.ToString(), StringComparison.Ordinal)
                                           && e.Message.Contains(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode, StringComparison.Ordinal));

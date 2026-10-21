@@ -1227,8 +1227,11 @@ public sealed class ThreadResolver : IThreadResolver
             // #2143 round 7b: the re-file this move follows asked F3 about every secure record the move leaves (the resolver,
             // before the re-file wrote), so a refusal here is only a race — the thread was re-filed between that check and this
             // move — or a reconcile no person's re-file started. Fail-safe: the email keeps the thread and its owner (an
-            // isolated email stays isolated), named here for an operator; the filing sweep retries it.
-            _logger.LogError(
+            // isolated email stays isolated), named here for an operator; the filing sweep retries it. Round 8: an Error only
+            // for the race (a person's pre-checked re-file); a person-less reconcile (the sweep, on every run, for each legacy
+            // row it cannot move) is a Warning.
+            _logger.Log(
+                secureExitCaller is null ? LogLevel.Warning : LogLevel.Error,
                 "Filing reconcile could not move {CommunicationId} from thread {FromThreadId} to the default thread {ThreadId} of " +
                 "{RecordType}:{RecordId}: the move was refused ({Code}). The email keeps its thread and its owner (#2143).",
                 communicationId, fromThreadId, recordThreadId, regarding.RecordType, regarding.RecordId, refused.RefusalCode);
