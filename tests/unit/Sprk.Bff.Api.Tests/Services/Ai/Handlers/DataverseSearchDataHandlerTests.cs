@@ -858,8 +858,10 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
                     .Select(id =>
                     {
                         var row = new Dictionary<string, object?> { [pk] = id.ToString("D"), [link] = seed[id] };
-                        if (Uri.UnescapeDataString(p).Contains(",_sprk_outputfileid_value&"))
+                        if (Uri.UnescapeDataString(p).Contains(",_sprk_outputfileid_value"))
                             row["_sprk_outputfileid_value"] = outputFiles.GetValueOrDefault(id);
+                        if (Uri.UnescapeDataString(p).Contains(",_sprk_regardingdocument_value"))
+                            row["_sprk_regardingdocument_value"] = RegardingDocuments.GetValueOrDefault(id);
                         return row;
                     });
                 return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = rows }));
@@ -893,7 +895,37 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
                 because: "an analysis whose OUTPUT FILE is hidden or cannot be decided is dropped even when its source document " +
                          "is visible; a visible output file is unaffected");
         Uri.UnescapeDataString(userReads.Should().ContainSingle().Which).Should().StartWith(
-            "sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value,_sprk_outputfileid_value&$filter=");
+            "sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value,_sprk_outputfileid_value,_sprk_regardingdocument_value&$filter=");
+        _appOnly.Calls.Should().Be(1);
+    }
+
+    /// <summary>Task 188 r4b: the typed REGARDING document link the user's client returns for an analysis (absent: null).</summary>
+    private Dictionary<Guid, string?> RegardingDocuments { get; } = new();
+
+    [Fact(DisplayName = "Task 188 r4b: search_data drops an analysis hit whose typed REGARDING document is hidden or undecidable")]
+    public async Task ExecuteChatAsync_ExternalCallerAnalysisHits_DropsThoseWhoseRegardingDocumentIsHiddenOrUndecidable_Round4b()
+    {
+        AsExternalCaller();
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson($$"""
+            {
+              "value": [
+                { "entityname": "sprk_analysis", "objectid": "{{AnVisible:D}}" },
+                { "entityname": "sprk_analysis", "objectid": "{{AnOutputFileVisible:D}}" }
+              ]
+            }
+            """)));
+        SeedDerivedSources();
+        RegardingDocuments[AnVisible] = DocOwnRestricted.ToString("D");
+        RegardingDocuments[AnOutputFileVisible] = DocShared.ToString("D");
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"contoso"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("results").EnumerateArray()
+            .Select(r => r.GetProperty("recordId").GetString())
+            .Should().Equal(new[] { AnOutputFileVisible.ToString("D") },
+                because: "an analysis ABOUT a Restricted document is dropped even when its source document is visible");
         _appOnly.Calls.Should().Be(1);
     }
 

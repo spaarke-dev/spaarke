@@ -1234,6 +1234,9 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
     /// <summary>The OUTPUT FILE link (<c>_sprk_outputfileid_value</c>) the user's client returns for an analysis (absent: null).</summary>
     private readonly Dictionary<Guid, object?> _userOutputFiles = new();
 
+    /// <summary>Task 188 r4b: the typed REGARDING document link (<c>_sprk_regardingdocument_value</c>) the user's client returns.</summary>
+    private readonly Dictionary<Guid, object?> _userRegardingDocuments = new();
+
     private void SetupDerivedMetadata(string table, string set, string pk) =>
         _dataverse
             .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"EntityDefinitions(LogicalName='{table}')")), It.IsAny<CancellationToken>()))
@@ -1270,7 +1273,12 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
                     {
                         var row = new Dictionary<string, object?> { [pk] = id.ToString("D"), [links[0]] = _userSourceLinks[linkSet][id] };
                         foreach (var link in links.Skip(1))
-                            row[link] = link == "_sprk_outputfileid_value" ? _userOutputFiles.GetValueOrDefault(id) : null;
+                            row[link] = link switch
+                            {
+                                "_sprk_outputfileid_value" => _userOutputFiles.GetValueOrDefault(id),
+                                "_sprk_regardingdocument_value" => _userRegardingDocuments.GetValueOrDefault(id),
+                                _ => null,
+                            };
                         return row;
                     });
                 return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = rows }));
@@ -1322,7 +1330,7 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         reads.Should().HaveCount(2, "the model's query, then ONE batched read of the page's source links as the user");
         reads[0].Should().Be("sprk_analysises?$select=sprk_analysisid,sprk_name&$top=50", "nothing is injected into the user's query");
         Uri.UnescapeDataString(reads[1]).Should().StartWith(
-            "sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value,_sprk_outputfileid_value&$filter=");
+            "sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value,_sprk_outputfileid_value,_sprk_regardingdocument_value&$filter=");
         _appOnly.Calls.Should().Be(1, "ONE hide-only narrowing call for the page");
         _appOnly.Reads("sprk_documents")[0].Should().Contain(DocOwnRestricted.ToString("D")).And.Contain(DocNeverSeeded.ToString("D"))
             .And.NotContain("not-a-guid");
@@ -1366,6 +1374,30 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
             m.FormattedMessage.Contains("source_document_hidden=2") &&
             m.FormattedMessage.Contains("source_document_undecidable=1"),
             "the Restricted and the never-readable output files are decided hidden; the non-GUID link is undecidable");
+    }
+
+    [Fact(DisplayName = "Task 188 r4b: read_query hides an analysis whose typed REGARDING document is hidden or undecidable")]
+    public async Task ExecuteChatAsync_ExternalCallerOnAnalysis_HidesRowsWhoseRegardingDocumentIsHiddenOrUndecidable_Round4b()
+    {
+        AsExternalCaller();
+        SetupDerivedMetadata("sprk_analysis", "sprk_analysises", "sprk_analysisid");
+        SeedAnalyses();
+        var links = _userSourceLinks["sprk_analysises"];
+        foreach (var id in new[] { AnOutputFileHidden, AnOutputFileUndecidable, AnOutputFileVisible })
+            links[id] = DocShared.ToString("D");
+        _userRegardingDocuments[AnOutputFileHidden] = DocOwnRestricted.ToString("D");
+        _userRegardingDocuments[AnOutputFileUndecidable] = DocNeverSeeded.ToString("D");
+        _userRegardingDocuments[AnOutputFileVisible] = DocShared.ToString("D");
+        CaptureDerivedReads("sprk_analysises", DocRows(
+            AnalysisRow(AnOutputFileHidden), AnalysisRow(AnOutputFileUndecidable), AnalysisRow(AnOutputFileVisible)));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_name FROM sprk_analysis"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        AnalysisRowIds(result).Should().Equal(new[] { AnOutputFileVisible.ToString("D") },
+            because: "an analysis ABOUT a hidden or undecidable document is hidden even when its source document is visible");
+        _appOnly.Calls.Should().Be(1);
     }
 
     [Fact]

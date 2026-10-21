@@ -408,8 +408,9 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
             targets, FinanceDenial.UniformNotFound);
     }
 
-    /// <summary>The <c>sprk_analysis</c> columns naming the documents its content derives from (task 188, OD-C1).</summary>
-    internal static readonly string[] AnalysisDocumentColumns = ["sprk_documentid", "sprk_outputfileid"];
+    /// <summary>The <c>sprk_analysis</c> columns naming the documents its content derives from (task 188, OD-C1; round 4b:
+    /// the typed regarding document, <c>sprk_regardingdocument</c>, which the analysis-read rule also treats as an anchor).</summary>
+    internal static readonly string[] AnalysisDocumentColumns = ["sprk_documentid", "sprk_outputfileid", "sprk_regardingdocument"];
 
     /// <summary>The narrowing's log label for the analysis routes (no ids).</summary>
     private const string AnalysisNarrowingSurface = "analysis-derived-content";

@@ -686,7 +686,8 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
     /// links are <paramref name="sourceJson"/> and <paramref name="outputFileJson"/> (raw JSON); <paramref name="linkReturned"/>
     /// false: the link read does not return the analysis. Records every request.
     /// </summary>
-    private List<string> SetupDerivedRecords(string sourceJson, string outputFileJson = "null", bool linkReturned = true)
+    private List<string> SetupDerivedRecords(
+        string sourceJson, string outputFileJson = "null", bool linkReturned = true, string regardingJson = "null")
     {
         var requests = new List<string>();
         void Answer(Func<string, bool> match, string json) =>
@@ -704,7 +705,7 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
         Answer(p => p.StartsWith("sprk_analysisoutputs("),
             $$"""{ "sprk_analysisoutputid": "{{AnalysisOutputId:D}}", "sprk_name": "Output text" }""");
         Answer(p => p.StartsWith("sprk_analysises?"), linkReturned
-            ? $$"""{ "value": [ { "sprk_analysisid": "{{AnalysisId:D}}", "_sprk_documentid_value": {{sourceJson}}, "_sprk_outputfileid_value": {{outputFileJson}} } ] }"""
+            ? $$"""{ "value": [ { "sprk_analysisid": "{{AnalysisId:D}}", "_sprk_documentid_value": {{sourceJson}}, "_sprk_outputfileid_value": {{outputFileJson}}, "_sprk_regardingdocument_value": {{regardingJson}} } ] }"""
             : """{ "value": [] }""");
         Answer(p => p.StartsWith("sprk_analysisoutputs?"),
             $$"""{ "value": [ { "sprk_analysisoutputid": "{{AnalysisOutputId:D}}", "_sprk_analysisid_value": "{{AnalysisId:D}}" } ] }""");
@@ -803,8 +804,35 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
         result.Success.Should().BeTrue(result.ErrorMessage);
         result.Data!.Value.GetProperty("fields").GetProperty("sprk_name").GetString().Should().Be("Analysis text");
         Uri.UnescapeDataString(requests.Last()).Should().Be(
-            "sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value,_sprk_outputfileid_value" +
+            "sprk_analysises?$select=sprk_analysisid,_sprk_documentid_value,_sprk_outputfileid_value,_sprk_regardingdocument_value" +
             $"&$filter=sprk_analysisid eq {AnalysisId:D}&$top=1");
+    }
+
+    private static readonly Guid RegardingDocumentId = Guid.Parse("d0e00000-0000-0000-0000-0000000000d1");
+
+    [Theory(DisplayName = "Task 188 r4b: describe hides an analysis whose typed REGARDING document is hidden or undecidable (source visible)")]
+    [InlineData("restricted")]
+    [InlineData("unseeded")]
+    [InlineData("notguid")]
+    public async Task ExecuteChatAsync_ExternalCallerAnalysis_Task188R4b_RegardingDocumentHiddenOrUndecidable_AnswersLikeNotFound(string regarding)
+    {
+        AsExternalCaller();
+        SetupDerivedRecords(SeedLink(DocumentId, "visible"), regardingJson: SeedLink(RegardingDocumentId, regarding));
+
+        ShouldAnswerLikeNotFound(await DescribeDerivedAsync("sprk_analysis", AnalysisId));
+        CapturedLogMessages.Should().NotContain(m => m.FormattedMessage.Contains("Analysis text"));
+    }
+
+    [Fact(DisplayName = "Task 188 r4b: must not fire — describe returns an analysis whose regarding document is visible")]
+    public async Task ExecuteChatAsync_ExternalCallerAnalysis_Task188R4b_RegardingDocumentVisible_ReturnsRecord()
+    {
+        AsExternalCaller();
+        SetupDerivedRecords(SeedLink(DocumentId, "visible"), regardingJson: SeedLink(RegardingDocumentId, "visible"));
+
+        var result = await DescribeDerivedAsync("sprk_analysis", AnalysisId);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _appOnly.Calls.Should().Be(1);
     }
 
     [Fact]

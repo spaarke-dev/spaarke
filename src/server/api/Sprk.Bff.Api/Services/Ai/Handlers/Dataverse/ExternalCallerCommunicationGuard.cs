@@ -134,14 +134,15 @@ internal static class ExternalCallerCommunicationGuard
     /// <summary>
     /// Tables whose rows carry a document's content or text derived from it, keyed to the documents they derive from (task 188
     /// notes §16, the surface classification). An analysis follows its SOURCE document (<c>sprk_documentid</c>) AND its saved
-    /// OUTPUT FILE (<c>sprk_outputfileid</c>, the same text as a document; coordinator decision OD-C1); an output follows its
+    /// OUTPUT FILE (<c>sprk_outputfileid</c>, the same text as a document; coordinator decision OD-C1) AND its typed regarding
+    /// document (<c>sprk_regardingdocument</c>, task 188 round 4b: an analysis ABOUT a document); an output follows its
     /// analysis. Entity sets and lookups as read live (<c>SecureChildLineage</c>: note <c>sprk_analysises</c>).
     /// </summary>
     private static readonly IReadOnlyDictionary<string, DerivedTable> DocumentDerivedTables =
         new Dictionary<string, DerivedTable>(StringComparer.OrdinalIgnoreCase)
         {
             [AnalysisTable] = new("sprk_analysises", "sprk_analysisid",
-                new[] { "_sprk_documentid_value", "_sprk_outputfileid_value" }, Via: null),
+                new[] { "_sprk_documentid_value", "_sprk_outputfileid_value", "_sprk_regardingdocument_value" }, Via: null),
             [AnalysisOutputTable] = new("sprk_analysisoutputs", "sprk_analysisoutputid",
                 new[] { "_sprk_analysisid_value" }, Via: AnalysisTable),
         };

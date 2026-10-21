@@ -37,7 +37,7 @@ public class AnalysisDerivedContentNarrowingTests
         foreach (var @case in new[]
                  {
                      "source-own-restricted", "source-internal-only-communication", "source-restricted-parent",
-                     "output-file-restricted", "narrowing-fault", "lookup-fault", "link-read-fault",
+                     "output-file-restricted", "regarding-document-restricted", "narrowing-fault", "lookup-fault", "link-read-fault",
                  })
             data.Add(@case);
         return data;
@@ -62,6 +62,7 @@ public class AnalysisDerivedContentNarrowingTests
     {
         var world = host.World;
         Guid source;
+        Guid? regarding = null;
         var output = Visible(host);
         switch (@case)
         {
@@ -82,6 +83,11 @@ public class AnalysisDerivedContentNarrowingTests
                 source = Visible(host);
                 output = world.Document(Guid.NewGuid(), permission: Restricted);
                 break;
+            case "regarding-document-restricted":
+                // Task 188 round 4b: the typed regarding document (sprk_regardingdocument) is the third link.
+                source = Visible(host);
+                regarding = world.Document(Guid.NewGuid(), permission: Restricted);
+                break;
             case "narrowing-fault":
                 source = Visible(host);
                 world.Faults["sprk_documents"] = HttpStatusCode.ServiceUnavailable;
@@ -100,11 +106,18 @@ public class AnalysisDerivedContentNarrowingTests
         }
 
         var analysisId = Guid.NewGuid();
-        host.SeedAnalysis(analysisId, new Dictionary<string, (string Target, Guid Id)>
+        var links = new Dictionary<string, (string Target, Guid Id)>
         {
             ["sprk_documentid"] = ("sprk_document", source),
             ["sprk_outputfileid"] = ("sprk_document", output),
-        });
+        };
+        if (regarding is { } regardingId)
+        {
+            links["sprk_regardingdocument"] = ("sprk_document", regardingId);
+            host.Access.Grant(Documents, regardingId, AccessRights.Read);
+        }
+
+        host.SeedAnalysis(analysisId, links);
         host.Access.Grant(Documents, source, AccessRights.Read);
         host.Access.Grant(Documents, output, AccessRights.Read);
         if (@case == "link-read-fault")
@@ -160,7 +173,9 @@ public class AnalysisDerivedContentNarrowingTests
 
     [Theory(DisplayName = "Task 188 r4a F1-3 (GET analysis): must not fire — an internal user with a Restricted source, an external caller with visible documents")]
     [InlineData(NarrowingCallerMode.Internal, "internal-restricted", 0)]
-    [InlineData(NarrowingCallerMode.External, "visible", 1)]
+    // Round 4b (F1-2): the analysis-read rule's two anchor-document checks also go through the helper (one narrowing call
+    // each), then the derived-content check: 3 calls for an external caller.
+    [InlineData(NarrowingCallerMode.External, "visible", 3)]
     public async Task GetAnalysis_MustNotFire(NarrowingCallerMode mode, string @case, int narrowingCalls)
     {
         await using var host = await AnalysisAuthHost.StartAsync();
@@ -219,7 +234,8 @@ public class AnalysisDerivedContentNarrowingTests
 
     [Theory(DisplayName = "Task 188 r4a F1-3 (chat analysis host): must not fire — an internal user with a Restricted source, an external caller with visible documents")]
     [InlineData(NarrowingCallerMode.Internal, "internal-restricted", 0)]
-    [InlineData(NarrowingCallerMode.External, "visible", 1)]
+    // Round 4b (F1-2): as GetAnalysis_MustNotFire, the two anchor-document checks plus the derived-content check.
+    [InlineData(NarrowingCallerMode.External, "visible", 3)]
     public async Task ChatAnalysisHost_MustNotFire(NarrowingCallerMode mode, string @case, int narrowingCalls)
     {
         await using var host = await AnalysisAuthHost.StartAsync();
