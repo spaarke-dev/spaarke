@@ -8,7 +8,8 @@
 //     F3 a release a re-file could not record inline is retried durably (ADR-004 job), bound to the move the re-file
 //        permitted, and never records what the inline path would refuse;
 //     F4 a Make Secure move OUT of another secure record's own container needs the source proven the row's own;
-//     F5 a move cancelled after its copy exists removes the copy (never one the row may already name).
+//     F5 a move cancelled after its copy exists removes the copy (never one the row may already name); a re-point that
+//        FAULTS is checked the same way — the copy is deleted only when the re-read row provably does not name it.
 //
 // Doubles are module boundaries only (ADR-038 §4): the REAL RecordContainerResolver and relocator over task 166's
 // document-pointer world; Service Bus is the boundary of the job queue.
@@ -590,5 +591,109 @@ public class RelocationFixRoundTests
             "the row names the copy: deleting it would lose the document");
         rig.ItemOf(T.DocumentId).Should().Be(T.Rig.CopyItem);
         world.ItemFacts(T.CustomerBContainer, Item).Should().NotBeNull("the source is kept; the ledger owes its settle");
+    }
+
+    // F5 (any fault) — a re-point that FAULTS (a timeout, a 5xx after commit, a transport fault after send) may have
+    // landed: the row is read again, and the copy is deleted only when the row provably does not name it.
+
+    /// <summary>
+    /// The pointer write (the update that names the copy) throws a NON-cancellation fault: <paramref name="landed"/> = it
+    /// reached Dataverse first. <paramref name="rereadFails"/> = every read of the document row after it faults.
+    /// </summary>
+    private static void FailThePointerWrite(World world, bool landed, bool rereadFails)
+    {
+        var sent = false;
+        var service = Mock.Get(world.EntityService!);
+        service.Setup(s => s.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns((string entity, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
+            {
+                var pointerWrite = fields.TryGetValue("sprk_graphitemid", out var item) && Equals(item, T.Rig.CopyItem);
+                if (!pointerWrite || landed)
+                {
+                    world.Updates.Add((entity, id, fields));
+                    foreach (var (column, value) in fields)
+                    {
+                        if (value is DBNull)
+                            world.Rows[(entity, id)].Attributes.Remove(column);
+                        else
+                            world.Rows[(entity, id)][column] = value;
+                    }
+                }
+
+                if (pointerWrite)
+                {
+                    sent = true;
+                    return Task.FromException(new TimeoutException("the update did not answer"));
+                }
+
+                return Task.CompletedTask;
+            });
+        world.RetrieveFault = (entity, _) => sent && rereadFails && entity == "sprk_document"
+            ? new HttpRequestException("Dataverse is unreachable")
+            : null;
+    }
+
+    [Fact(DisplayName = "F5 must fire: a re-point that faults AFTER it landed keeps the copy the row names, and the move is committed")]
+    public async Task F5_AFaultedRePointThatLanded_KeepsTheCopy_AndCommits()
+    {
+        var (world, rig) = WithThreeVersions();
+        FailThePointerWrite(world, landed: true, rereadFails: false);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.LegacyMigration);
+
+        rig.Spe.Verify(s => s.DeleteFileAsync(T.CustomerA1Container, T.Rig.CopyItem, It.IsAny<CancellationToken>()), Times.Never,
+            "the row names the copy: deleting it would lose the document");
+        rig.ItemOf(T.DocumentId).Should().Be(T.Rig.CopyItem);
+        outcome.State.Should().NotBe(RelocationState.Failed, outcome.Detail);
+        outcome.TargetItem.Should().Be(T.Rig.CopyItem, "the landed re-point is the move's commit");
+    }
+
+    [Theory(DisplayName = "F5 must fire: a re-point that faults and whose row cannot be read again keeps the copy (a stray copy is recoverable, a dangling pointer is not)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task F5_AFaultedRePointWithAnUnreadableRow_KeepsTheCopy(bool landed)
+    {
+        var (world, rig) = WithThreeVersions();
+        FailThePointerWrite(world, landed, rereadFails: true);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.LegacyMigration);
+
+        outcome.State.Should().Be(RelocationState.Failed);
+        outcome.Detail.Should().Contain("could not be read again");
+        rig.Spe.Verify(s => s.DeleteFileAsync(T.CustomerA1Container, T.Rig.CopyItem, It.IsAny<CancellationToken>()), Times.Never,
+            "the row may name the copy");
+        world.ItemFacts(T.CustomerBContainer, Item).Should().NotBeNull("the source is never touched");
+    }
+
+    [Fact(DisplayName = "F5 must not fire: a re-point that faults and did NOT land (the row still names the source) removes the copy")]
+    public async Task F5_AFaultedRePointThatDidNotLand_RemovesTheCopy()
+    {
+        var (world, rig) = WithThreeVersions();
+        FailThePointerWrite(world, landed: false, rereadFails: false);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.LegacyMigration);
+
+        outcome.State.Should().Be(RelocationState.Failed);
+        outcome.Detail.Should().Be("the row could not be re-pointed");
+        rig.Spe.Verify(s => s.DeleteFileAsync(T.CustomerA1Container, T.Rig.CopyItem, It.IsAny<CancellationToken>()), Times.Once);
+        rig.DriveOf(T.DocumentId).Should().Be(T.CustomerBContainer);
+        world.ItemFacts(T.CustomerBContainer, Item).Should().NotBeNull();
+    }
+
+    [Fact(DisplayName = "F5 must fire: a released S1-to-S2 re-point that faults after it landed consumes the release once and is reported Relocated, never Failed")]
+    public async Task F5_AFaultedReleasedRePointThatLanded_ConsumesTheReleaseOnce()
+    {
+        var (world, rig) = RefiledToS2();
+        world.Rows[("sprk_document", T.DocumentId)][LedgerColumn] = (Ledger.EmptyLedger with { Release = AReleaseFor() }).Serialize();
+        FailThePointerWrite(world, landed: true, rereadFails: false);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(T.DocumentId, apply: true, RelocationPurpose.MakeSecure);
+
+        outcome.State.Should().Be(RelocationState.Relocated, outcome.Detail);
+        rig.DriveOf(T.DocumentId).Should().Be(R.SecondSecureContainer);
+        LedgerOf(world)?.Release.Should().BeNull("the landed re-point consumed it");
+        world.Updates.Count(u => u.Fields.TryGetValue("sprk_graphitemid", out var i) && Equals(i, T.Rig.CopyItem))
+            .Should().Be(1, "the re-point is written once, never repeated");
+        rig.Spe.Verify(s => s.DeleteFileAsync(R.SecondSecureContainer, T.Rig.CopyItem, It.IsAny<CancellationToken>()), Times.Never);
     }
 }

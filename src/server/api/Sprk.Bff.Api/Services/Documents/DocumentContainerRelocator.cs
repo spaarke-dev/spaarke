@@ -1955,14 +1955,15 @@ public sealed class DocumentContainerRelocator
         {
             if (pointerWriteStarted)
             {
-                var row = await ReadRowAsync(documentId, CancellationToken.None).ConfigureAwait(false);
-                if (row is null || SameItem(row.GetAttributeValue<string>(DriveColumn), row.GetAttributeValue<string>(ItemColumn),
-                        targetDrive, copyItem))
+                var names = await RowNamesCopyAsync(documentId, targetDrive, copyItem).ConfigureAwait(false);
+                if (names != CopyNamed.No)
                 {
                     _logger.LogWarning(
                         "[DOCUMENT-RELOCATE] the move of document {DocumentId} stopped while re-pointing it; the copy "
                         + "{TargetDrive}/{TargetItem} is kept ({Why}).", documentId, targetDrive, copyItem,
-                        row is null ? "the row could not be read again — an administrator must check whether it names the copy" : "the row names it");
+                        names == CopyNamed.Unknown
+                            ? "the row could not be read again — an administrator must check whether it names the copy"
+                            : "the row names it");
                     return;
                 }
             }
@@ -1977,6 +1978,45 @@ public sealed class DocumentContainerRelocator
             _logger.LogError(ex,
                 "[DOCUMENT-RELOCATE] the abandoned copy {TargetDrive}/{TargetItem} of document {DocumentId} could not be "
                 + "removed; an administrator must delete it.", targetDrive, copyItem, documentId);
+        }
+    }
+
+    /// <summary>What the row says about a copy whose re-point was sent but did not answer.</summary>
+    private enum CopyNamed
+    {
+        /// <summary>The row names something else: the re-point did not land, the copy is referenced by nothing.</summary>
+        No,
+
+        /// <summary>The row names the copy: the re-point (one atomic update) landed.</summary>
+        Yes,
+
+        /// <summary>The row could not be read again: it may name the copy, so the copy must be kept.</summary>
+        Unknown,
+    }
+
+    /// <summary>
+    /// After a re-point that was sent but did not answer (cancelled, timed out, a fault after send), reads the row again
+    /// with <see cref="CancellationToken.None"/> — the move's own token may be the cancelled one — to learn whether it
+    /// landed. Best effort: a read that faults or finds no row is <see cref="CopyNamed.Unknown"/>. Never throws.
+    /// </summary>
+    private async Task<CopyNamed> RowNamesCopyAsync(Guid documentId, string targetDrive, string copyItem)
+    {
+        try
+        {
+            var row = await ReadRowAsync(documentId, CancellationToken.None).ConfigureAwait(false);
+            if (row is null)
+            {
+                return CopyNamed.Unknown;
+            }
+
+            return SameItem(row.GetAttributeValue<string>(DriveColumn), row.GetAttributeValue<string>(ItemColumn), targetDrive, copyItem)
+                ? CopyNamed.Yes
+                : CopyNamed.No;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[DOCUMENT-RELOCATE] document {DocumentId} could not be read again after its re-point.", documentId);
+            return CopyNamed.Unknown;
         }
     }
 
@@ -2174,12 +2214,34 @@ public sealed class DocumentContainerRelocator
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogError(ex,
-                "[DOCUMENT-RELOCATE] re-point FAILED for document {DocumentId}; removing the copy {TargetDrive}/{TargetItem}; "
-                + "the row still points at {SourceDrive}/{SourceItem}.", documentId, targetDrive, copy.Id, sourceDrive, sourceItem);
-            await DeleteQuietlyAsync(targetDrive, copy.Id, ct).ConfigureAwait(false);
-            return MoveResult.Failed(DocumentRelocationOutcome.Of(
-                documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null, "the row could not be re-pointed"));
+            // The write was SENT: a timeout, a 5xx after commit or a transport fault after send may hide an update that
+            // landed. The row is read again (as F5 does for a cancellation) and the copy is deleted ONLY when the row
+            // provably does not name it — a stray copy is recoverable, a row pointing at a deleted file is not.
+            var names = await RowNamesCopyAsync(documentId, targetDrive, copy.Id).ConfigureAwait(false);
+            switch (names)
+            {
+                case CopyNamed.Yes:
+                    // The one atomic update landed (pointer, ledger, version record, release): the move is committed.
+                    _logger.LogWarning(ex,
+                        "[DOCUMENT-RELOCATE] document {DocumentId}: the re-point faulted but landed; the move is committed.",
+                        documentId);
+                    inFlight.Committed = true;
+                    break;
+                case CopyNamed.Unknown:
+                    _logger.LogError(ex,
+                        "[DOCUMENT-RELOCATE] document {DocumentId}: the re-point faulted and the row could not be read again; "
+                        + "the copy is kept — an administrator must check whether the row names it.", documentId);
+                    return MoveResult.Failed(DocumentRelocationOutcome.Of(
+                        documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null,
+                        "the re-point faulted and the row could not be read again; the copy is kept until it is checked"));
+                default:
+                    _logger.LogError(ex,
+                        "[DOCUMENT-RELOCATE] document {DocumentId}: the re-point faulted and did not land; the copy is removed.",
+                        documentId);
+                    await DeleteQuietlyAsync(targetDrive, copy.Id, ct).ConfigureAwait(false);
+                    return MoveResult.Failed(DocumentRelocationOutcome.Of(
+                        documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null, "the row could not be re-pointed"));
+            }
         }
 
         _logger.LogInformation(
