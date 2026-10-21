@@ -143,7 +143,7 @@ Everything the handlers read is already in `BillingFactSet`: line type, amount, 
 - `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors.
 - Unit tests, filter Signals | Finance | RuleSet | BillingRuleDraft (`Sprk.Bff.Api.Tests`): 5859 passed, 0 failed, 5 skipped.
 - `Spaarke.ArchTests` (full, including `BillingHandlerPurityGuardTests`): 1311 passed, 0 failed.
-- Integration filter Billing | RuleSet | PolicyDomain | Signals (`Sprk.Bff.Api.IntegrationTests`, including `BillingRuleDraftActionContractTests`): 69 passed, 2 skipped.
+- Integration filter Billing | RuleSet | PolicyDomain | Signals (`Sprk.Bff.Api.IntegrationTests`): 69 passed, 2 skipped. The drafting contract and seam tests (`BillingRuleDraftActionContractTests`, `BillingRuleDraftSeamTests`) compile into `Sprk.Bff.Api.Tests` and are among the 5859: 15 passed.
 - **Fail before.** With `PolicyVersionValidator.cs`, `InvoiceComplianceEvaluator.cs` and `Entity.xml` reverted to the base commit, 7 tests failed: `RuleTypeOptionSetSyncTests` ×2, the two form refusals at save, the two at the gate, and the D-20 EUR case. They pass with the change.
 - **Tests added:**
   - `AddedFeeHandlerTests` (14 cases) and `DiscountHandlerTests` (8 cases);
