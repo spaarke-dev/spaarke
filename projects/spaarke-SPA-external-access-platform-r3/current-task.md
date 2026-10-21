@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-21 03:05Z (dev SPA 3531ed65e with #2166 fix; dev BFF 4f5f22694 + 036 flag ON)
+> **Last Updated**: 2026-10-21 (dev SPA 3531ed65e with #2166 fix; dev BFF 4f5f22694 + 036 flag ON; R4 design.md drafted; ebilling file-route decisions in notes/decisions.md)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -42,7 +42,7 @@
 
 ## Open owner questions
 - 002: the owner reviews the live column table (notes/task-002-notes.md "Live capture 2026-10-20") and says what to change per tab.
-- R4: the owner is reviewing the design revisions (prototype audit at R4 `notes/prototype-audit-2026-10-20.md`); then R3 drafts R4 `design.md`.
+- R4: `design.md` DRAFTED (R4 branch `0239edf9a`, projects/spaarke-SPA-external-access-platform-r4/design.md); owner reviews its §9 (8 questions, incl. the prototype change list not yet received). Then a new R4 session runs `/design-to-spec`.
 - D7: accepted by the owner (round 110, relayed by UAC; the owner's later "ok" on item 2 agrees). word-add-in task 130 does the T8 writer fix; UAC does T7.
 - 073: routing choice (build-time VITE_BACKENDS vs T240c directory endpoint), DNS, prod GitHub environment + TEAMS_APP_ID, customer-tenant consent design (no v1 /adminconsent, C-1).
 
