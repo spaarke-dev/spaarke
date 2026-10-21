@@ -727,6 +727,40 @@ public sealed class InvoiceSubmissionExistingDocumentTests
         ShouldHaveWrittenNothing(h);
     }
 
+    /// <summary>
+    /// 050a round 4 (uac-r2 F3): a SECOND team carrying the Secure Record owner team's name, type and business unit. The walk cannot tell
+    /// which team isolates a row, so it answers Failed (an ambiguous owner team), never Completed or NotApplicable.
+    /// </summary>
+    internal static void AddAmbiguousSecureOwnerTeam(SecureChildShareWorld world) =>
+        world.Team(Guid.NewGuid(), world.OwnerTeamBusinessUnit, SecureChildShareWorld.SecureOwnerTeamName, isDefault: false, teamType: 0);
+
+    [Fact(DisplayName = "050a round 4 (uac-r2 F3, must fire): an ambiguous Secure Record owner team (the walk's Failed) at confirm is 503 record_unavailable and nothing is written, never 'allowed'")]
+    public async Task AmbiguousSecureOwnerTeam_AtConfirm_Is503_AndWritesNothing()
+    {
+        var h = ThreadJoinedAttachment(SecureMatterS);
+        h.Isolation.OrdinaryRoot("sprk_matter", MatterId);
+        AddAmbiguousSecureOwnerTeam(h.Isolation);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.CoreRecordUnavailable);
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "050a round 4 (uac-r2 F3, must not fire): an environment with no Secure Record business unit isolates nothing, so the document is received")]
+    public async Task NoSecureRecordBusinessUnit_IsReceived()
+    {
+        var h = NewHarness();
+        h.Isolation = SecureChildShareWorld.WithoutSecureBusinessUnit();
+        h.Isolation.UserOwnedChild("sprk_document", DocumentId);
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Confirm(), CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        h.Allocations.Should().ContainSingle();
+    }
+
     [Fact(DisplayName = "050a round 3 (must not fire): a truly unfiled document that is not isolated (user-owned, no parent) is received")]
     public async Task TrulyUnfiled_NotIsolated_IsReceived()
     {

@@ -1146,6 +1146,23 @@ public class InvoiceSubmissionPersisterTests
         store.Transactions.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "050a round 4 (uac-r2 F3, must fire): an ambiguous Secure Record owner team (the walk's Failed) at commit is a Retry (document_isolation_unreadable): no transaction, no invoice")]
+    public async Task ConfirmSubmission_AmbiguousSecureOwnerTeam_IsRetry_NothingCommitted()
+    {
+        var outcome = AsConfirmSubmission(await new ProcessorHarness().RunAsync());
+        var store = new Store();
+        IsolateUnderS(store.Isolation);
+        InvoiceSubmissionExistingDocumentTests.AddAmbiguousSecureOwnerTeam(store.Isolation);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Retry);
+        result.ReasonCode.Should().Be(InvoiceDocumentRefile.IsolationUnreadableCode);
+        result.InvoiceId.Should().BeNull();
+        store.Transactions.Should().BeEmpty();
+        store.Submission.GetAttributeValue<EntityReference>("sprk_invoice").Should().BeNull();
+    }
+
     [Fact(DisplayName = "050a round 3 (must not fire): a confirm submission whose document is isolated EXACTLY under the submission's own Secure matter commits")]
     public async Task ConfirmSubmission_IsolatedUnderItsOwnSecureMatter_Commits()
     {
