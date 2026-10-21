@@ -122,6 +122,11 @@
     <criterion testable="true">Negative: a caller who cannot AppendTo the parent gets the same uniform 404/403 on the route and the same refusal in chat as before; the service throwing or refusing creates nothing and no caller falls back to a direct create.</criterion>
     <criterion testable="true">Negative: a chat create of a table that is not in RecordTableRules is refused (no create call).</criterion>
     <criterion testable="true">BFF build 0 errors; SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests, RouteAuthorizationGuardTests, RecordOwnerAssignmentCensusTests and the decision (Signals) tests pass; publish-size delta, CVE result and /conflict-check result recorded in the task notes.</criterion>
+    <criterion testable="true">BLOCKING (ebilling-r1, 2026-10-21): do not re-point the child-record route or the chat create to RecordCreationService while master's OwnedChildWrite.CreateAsync carries the invoice-family guard (ebilling-r1 #1911) and RecordTableRules registers no invoice-family PreWriteRule for sprk_invoice and sprk_billingevent. The reconcile commit registers the rule and adds the 012-recipe test: every CoreRecordLookups key has an entry whose PreWriteRules contain the rule. It also retires the 013 ratchet baseline {sprk_invoice, sprk_billingevent}. It also adds:
+      - F2: an additive PreWriteRefusal kind that maps invoice_family_read_failed and invoice_family_unknown_entity to Undecided 500, with PreWriteRefusal.NotFound() remaining the only path to the uniform 404;
+      - F4: a test that a supersedes refusal keeps Code and Reason;
+      - and it deletes one copy of the verbatim NotAvailableToFileUnder strings.
+    Ask ebilling-r1 to review the reconcile commit.</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-13 part 1, FR-12, NFR-07, NFR-08. Office quick-create is task 018; widening the route to sprk_matter and sprk_project is task 020. Release note: chat-created children now get the I-1 stamp, I-16 and sharee mirror.</notes>

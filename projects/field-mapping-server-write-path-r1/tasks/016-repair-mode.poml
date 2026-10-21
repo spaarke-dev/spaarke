@@ -105,6 +105,7 @@
     <criterion testable="true">Negative: an unresolvable owner leaves ownerid unchanged, reports the typed refusal for that field, and still repairs the other fields; a registry exception table (unfiled communication) keeps its creator owner.</criterion>
     <criterion testable="true">Negative: Repair never runs caller authorization checks and never impersonates; a test asserts it uses the system principal path (no WhoAmI call).</criterion>
     <criterion testable="true">BFF build 0 errors; the tests from tasks 013-015, SecureChildOwnershipAiToolTests*, and RouteAuthorizationGuardTests pass unchanged; publish-size delta and CVE result recorded in the task notes.</criterion>
+    <criterion testable="true">ebilling-r1 (2026-10-21): repair writes stored rows with no pre-write step. When the invoice-family guard is on master (ebilling-r1 #1911), a repair write to a sprk_invoice or sprk_billingevent row calls InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync (app-only, D-96) before writing and skips the row with a logged reason on refusal. Test it with a must-fire case and a must-not-fire case. Do not widen pre-write rules to updates.</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-14, FR-25, NFR-03. Forward-only selection (go-live watermark) is task 052's job; Repair itself operates on any row it is given.</notes>

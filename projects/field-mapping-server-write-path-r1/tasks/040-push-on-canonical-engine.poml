@@ -102,6 +102,7 @@
     <criterion testable="true">The #1437 regression test passes: a failing child yields the fixed actionable text and the response contains no exception message, Dataverse error or id.</criterion>
     <criterion testable="true">Negative: `ReparentAsync`, the root filing gate, restamp and `AfterRefileAsync` still run on push, and `RefileWriterAfterRefileGuardTests` plus existing push contract tests pass unchanged.</criterion>
     <criterion testable="true">BFF build 0 errors; all tests green; publish-size delta and CVE result recorded in the task notes.</criterion>
+    <criterion testable="true">ebilling-r1 (2026-10-21): push writes stored rows with no pre-write step. When the invoice-family guard is on master (ebilling-r1 #1911), a push write to a sprk_invoice or sprk_billingevent child calls InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync (app-only, D-96) before writing. A refusal is a per-child Skipped/failed entry with a fixed message. Test it with a must-fire case and a must-not-fire case.</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-23, NFR-07. #2098 out of scope. The push web resource is unchanged unless it displays the error text.

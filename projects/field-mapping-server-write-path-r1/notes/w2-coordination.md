@@ -142,3 +142,17 @@ touch DecisionCommitService. ebilling sends the shas when the range lands; rebas
   while `sprk_accesspermission` stays fill-only. Criteria added to 014 and 040.
 - #2169 landed: c8c591777f (PR #2169, draft). Pinning test: `DocumentAccessPermissionPushTargetTests` (3 methods, 6
   cases), which 040 keeps green unchanged. Details in the 040 POML notes.
+
+## 2026-10-21 — ebilling-r1 review of 013 (bad3195920..123b632315)
+
+- **Verdict:** no objection to master once the 013 test gap is closed (fix round 2: the rule gets the exact item and
+  caller; a throwing rule; cancellation; the ParentUnavailable arm order). No existence leak and no fail-open on a live
+  path. merge-tree against work/ebilling-r1 is clean.
+- **Reconciliation items:** F1 (the rule is unregistered → a blocking 017 criterion plus a ratchet), F2 (500 for
+  read_failed and unknown_entity), F4 (supersedes keeps Code and Reason).
+- **014:** reassign the same `item`; MappedLookup gets a RelatedEntitySet; invoice-family core lookups go in
+  MappingProtectedColumns.
+- **016 and 040:** call `InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync` (app-only) on stored-row writes once
+  #1911 is on master.
+- **Updates:** do not widen pre-write rules to updates; RefileAsync stays in OwnedChildWrite. Correction (a)
+  (EffectiveLookups) is not needed for creates.
