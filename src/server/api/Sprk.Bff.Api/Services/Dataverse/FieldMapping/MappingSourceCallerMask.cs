@@ -20,14 +20,17 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// <see cref="IDataverseUserClient"/> (OBO, no app-only fallback) and keeps only the app-read columns that read as non-null
 /// to the caller. No per-column field-security logic is built here: Dataverse answers it.</para>
 ///
+/// <para><b>One request shape</b> (#2191 review, K3): the caller read is <c>GET {entitySet}({id})</c> with no <c>$select</c>,
+/// whatever the source's columns hold, so neither its success nor its shape depends on the row's data.</para>
+///
 /// <para><b>The one test: null versus not-null, failing closed</b> (UAC-r2 condition 1). For each mapped column the app read
 /// returned a value for:</para>
 /// <list type="bullet">
-/// <item>a lookup (<see cref="EntityReference"/>) is asked as <c>_col_value</c> and kept only when that is non-null — the id
-/// only; the target type of a polymorphic lookup is never compared;</item>
-/// <item>a scalar (text, whole/decimal/float number, money, choice, yes/no, date) is asked by its logical name and kept only
+/// <item>a lookup (<see cref="EntityReference"/>) is judged by the response's <c>_col_value</c> and kept only when that is
+/// non-null — the id only; the target type of a polymorphic lookup is never compared;</item>
+/// <item>a scalar (text, whole/decimal/float number, money, choice, yes/no, date) is judged by its logical name and kept only
 /// when non-null;</item>
-/// <item>a multi-select choice (<see cref="OptionSetValueCollection"/>) is asked by its logical name too: the Web API answers
+/// <item>a multi-select choice (<see cref="OptionSetValueCollection"/>) is judged by its logical name too: the Web API answers
 /// it as a string (<c>"1,2"</c>) or null, so the same null test applies (review pass 1, K2);</item>
 /// <item>a <see cref="Guid"/> is kept only for the source's own primary key (<c>{table}id</c>); any other GUID-valued column
 /// may be a file column and is UNREADABLE;</item>
@@ -122,7 +125,8 @@ internal static partial class MappingSourceCallerMask
         var mapped = new HashSet<string>(mappedColumns, StringComparer.OrdinalIgnoreCase);
         var primaryKey = sourceEntityLogicalName.Trim().ToLowerInvariant() + "id";
 
-        // Every candidate: (the app read's attribute key, the Web API property the caller read must answer non-null).
+        // Every candidate: (the app read's attribute key, the Web API property the caller read must answer non-null). Only the
+        // JUDGING depends on the app read's values; the request below does not.
         var candidates = new List<(string Key, string Property)>();
         foreach (var attribute in appRead.Attributes)
         {
@@ -139,10 +143,15 @@ internal static partial class MappingSourceCallerMask
             // else UNREADABLE by kind: not a candidate, so it is never copied.
         }
 
-        // The row's primary key is always selected, so the caller read is made — and has the same shape — whatever the
-        // source's columns hold (an empty column and a masked one cost the same request).
-        var select = candidates.Select(c => c.Property).Append(primaryKey).Distinct(StringComparer.Ordinal);
-        var path = $"{entitySet}({sourceRecordId:D})?$select={string.Join(",", select)}";
+        // #2191 review K3: the request has ONE shape for a source row — no $select at all — so nothing about it depends on
+        // what the row holds. A $select built from the app read's non-null columns did: a mapped column the Web API cannot
+        // select (a virtual name column) turned the read into a 400, and the source unavailable, only while that column held
+        // a value. Nor can a $select be built from every mapped column instead: a lookup is selectable only as _col_value
+        // and a scalar only by its name, and which one a column is cannot be told from an empty app read (and a Concat or
+        // Template placeholder declares no type). Without $select the Web API answers every column the caller can read —
+        // a field-secured one as null, a lookup as _col_value — and a mapped column it does not answer at all is ABSENT,
+        // which the null test below treats as unreadable. One row, read once; nothing from it is logged.
+        var path = $"{entitySet}({sourceRecordId:D})";
 
         DataverseUserResponse response;
         using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);

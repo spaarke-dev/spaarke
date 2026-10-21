@@ -13,7 +13,8 @@ namespace Sprk.Bff.Api.Tests.Auth.FieldMapping;
 /// </summary>
 /// <remarks>
 /// The caller's Dataverse is <see cref="MappingSourceCallerReadDouble"/> (the documented <c>IDataverseUserClient</c> mock
-/// boundary), which answers in the Web API's shape: a lookup only as <c>_col_value</c>, a field-secured column as null.
+/// boundary), which answers in the Web API's shape: every column, a lookup only as <c>_col_value</c>, a field-secured column as
+/// null.
 /// </remarks>
 public class MappingSourceCallerMaskTests
 {
@@ -56,15 +57,79 @@ public class MappingSourceCallerMaskTests
     }
 
     [Fact]
-    public async Task ApplyAsync_AsksOneCallerReadOfTheSameRow_WithLookupsAsTheirValueProperty()
+    public async Task ApplyAsync_AsksOneCallerReadOfTheSameRow_WithNoSelect()
     {
         var appRead = AppRead();
         var caller = CallerSeeing(appRead);
 
         await Mask(caller, appRead);
 
-        caller.Paths.Should().ContainSingle().Which.Should().Be(
-            $"sprk_projects({SourceId:D})?$select=sprk_clientreference,sprk_secretfee,_sprk_client_value,sprk_stage,sprk_projectid");
+        caller.Paths.Should().ContainSingle().Which.Should().Be($"sprk_projects({SourceId:D})",
+            "one request shape for the row: nothing in it depends on what the row holds (#2191 review, K3)");
+    }
+
+    /// <summary>
+    /// #2191 review K3: the request is the same whether the mapped columns hold values or not, so a column the Web API
+    /// cannot select can never turn the read into a 400 only while it holds a value.
+    /// </summary>
+    [Fact]
+    public async Task ApplyAsync_TheRequestIsIdentical_WhetherOrNotTheMappedColumnsHoldValues()
+    {
+        var full = AppRead();
+        var withValues = CallerSeeing(full);
+        await Mask(withValues, full);
+
+        var empty = new Entity(Table, SourceId);
+        var withoutValues = CallerSeeing(empty);
+        await Mask(withoutValues, empty);
+
+        withValues.Paths.Should().ContainSingle();
+        withoutValues.Paths.Should().ContainSingle().Which.Should().Be(withValues.Paths.Single());
+    }
+
+    /// <summary>
+    /// #2191 review K3: a mapped column that holds a value but that the caller read does not answer at all (a column the Web
+    /// API does not return, such as a virtual name column) is removed like a masked one — the rest of the source is still read.
+    /// </summary>
+    [Fact]
+    public async Task ApplyAsync_AMappedColumnTheCallerReadDoesNotAnswer_IsRemoved_AndTheSourceStaysAvailable()
+    {
+        var appRead = AppRead();
+        appRead["sprk_clientname"] = "Acme Corp";
+        var caller = CallerSeeing(appRead);
+        caller.Absent.Add("sprk_clientname");
+
+        var masked = await Mask(caller, appRead, Mapped.Append("sprk_clientname").ToArray());
+
+        masked.Should().NotBeNull("one unanswered column never makes the whole source unavailable");
+        masked!.Contains("sprk_clientname").Should().BeFalse();
+        masked.GetAttributeValue<string>("sprk_clientreference").Should().Be("ACME-REF");
+    }
+
+    public static TheoryData<string, object> ReadableScalarKinds() => new()
+    {
+        { "sprk_isbillable", true },
+        { "sprk_opened", new DateTime(2026, 10, 21, 9, 30, 0, DateTimeKind.Utc) },
+        { "sprk_headcount", 7 },
+        { "sprk_bignumber", 9_000_000_000L },
+        { "sprk_rate", 12.5m },
+        { "sprk_ratio", 0.25d },
+    };
+
+    /// <summary>
+    /// #2191 review K4: yes/no, date, whole number, big integer, decimal and float values the caller reads are kept — each one
+    /// the kind table lists. A kind dropped from it would fail closed silently (never copied); this pins every one.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ReadableScalarKinds))]
+    public async Task ApplyAsync_AReadableScalarOfEachListedKind_IsKept(string column, object value)
+    {
+        var appRead = new Entity(Table, SourceId) { [column] = value };
+
+        var masked = await Mask(CallerSeeing(appRead), appRead, new[] { column });
+
+        masked!.Contains(column).Should().BeTrue($"a readable {value.GetType().Name} is copied");
+        masked[column].Should().Be(value);
     }
 
     [Fact]
@@ -88,7 +153,7 @@ public class MappingSourceCallerMaskTests
         masked.Should().NotBeNull();
         masked!.Attributes.Should().BeEmpty();
         caller.Paths.Should().ContainSingle("an empty column and a masked one cost the same request")
-            .Which.Should().Be($"sprk_projects({SourceId:D})?$select=sprk_projectid");
+            .Which.Should().Be($"sprk_projects({SourceId:D})");
     }
 
     // ── must fire: what the caller cannot read is removed, exactly as if it were empty ───────────────────────────
@@ -165,8 +230,7 @@ public class MappingSourceCallerMaskTests
 
         var masked = await Mask(caller, appRead, new[] { column });
 
-        masked!.Contains(column).Should().BeFalse("file, image, party list, multi-select and unknown kinds fail closed");
-        caller.Paths.Single().Should().NotContain(column, "an unreadable kind is not even asked");
+        masked!.Contains(column).Should().BeFalse("file, image, party list and unknown kinds fail closed");
     }
 
     [Fact]
@@ -180,7 +244,6 @@ public class MappingSourceCallerMaskTests
 
         masked!.GetAttributeValue<OptionSetValueCollection>("sprk_tags").Should().BeSameAs(tags,
             "the Web API answers a multi-select as \"1,2\" or null, so the null test applies to it (review pass 1, K2)");
-        caller.Paths.Single().Should().Contain("sprk_tags");
     }
 
     [Fact]
@@ -212,7 +275,7 @@ public class MappingSourceCallerMaskTests
     }
 
     [Fact]
-    public async Task ApplyAsync_AColumnNameThatIsNotAPlainLogicalName_IsNeverAsked_NorKept()
+    public async Task ApplyAsync_AColumnNameThatIsNotAPlainLogicalName_IsNeverKept()
     {
         var appRead = new Entity(Table, SourceId) { ["sprk_x,_a_value"] = "injected" };
         var caller = CallerSeeing(appRead);
@@ -220,7 +283,7 @@ public class MappingSourceCallerMaskTests
         var masked = await Mask(caller, appRead, new[] { "sprk_x,_a_value" });
 
         masked!.Attributes.Should().BeEmpty();
-        caller.Paths.Single().Should().Be($"sprk_projects({SourceId:D})?$select=sprk_projectid");
+        caller.Paths.Single().Should().Be($"sprk_projects({SourceId:D})", "nothing from the app read reaches the request");
     }
 
     [Fact]

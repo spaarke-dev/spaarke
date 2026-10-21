@@ -9,20 +9,21 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 /// <summary>
 /// #2188 — an <see cref="IDataverseUserClient"/> (the documented mock boundary for user-OBO Dataverse access) that answers
-/// the ONE caller read <c>MappingSourceCallerMask</c> makes: <c>GET {entitySet}({id})?$select=a,_b_value,…</c>, in the Web
-/// API's shape. It answers from a row the test supplies — by default the row the app-only read returned
+/// the ONE caller read <c>MappingSourceCallerMask</c> makes: <c>GET {entitySet}({id})</c> with no <c>$select</c> (#2191 review
+/// K3), in the Web API's shape. It answers from a row the test supplies — by default the row the app-only read returned
 /// (<see cref="MirroringAppReads"/>), i.e. a caller who can read every column the application can.
 /// </summary>
 /// <remarks>
-/// <para>Web API fidelity that the mask's tests rely on: a lookup is answered only as <c>_col_value</c> (its id) — selecting
-/// it by its logical name is a 400, as Dataverse answers; a selected column with no value is <c>null</c>; a column under field
-/// security the caller cannot read (<see cref="Secured"/>) is <c>null</c>, which is how Dataverse masks it.</para>
+/// <para>Web API fidelity that the mask's tests rely on: every column of the row is answered — a lookup only as
+/// <c>_col_value</c> (its id), any other column by its logical name, the primary key always; a column under field security the
+/// caller cannot read (<see cref="Secured"/>) is <c>null</c>, which is how Dataverse masks it; a property in
+/// <see cref="Absent"/> is not answered at all. A read with a <c>$select</c> or any other shape is a 400.</para>
 /// <para>Global namespace, like <c>ReadableDocumentsUserClient</c>. Only GET is supported; any other call fails.</para>
 /// </remarks>
 public sealed class MappingSourceCallerReadDouble : IDataverseUserClient
 {
     private static readonly Regex ReadPath = new(
-        @"^(?<set>[a-z_]+)\((?<id>[0-9a-fA-F-]{36})\)\?\$select=(?<select>[a-z0-9_,]+)$",
+        @"^(?<set>[a-z_]+)\((?<id>[0-9a-fA-F-]{36})\)$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly Func<Guid, Entity?> _rows;
@@ -114,19 +115,12 @@ public sealed class MappingSourceCallerReadDouble : IDataverseUserClient
         using (var json = new Utf8JsonWriter(buffer))
         {
             json.WriteStartObject();
-            foreach (var property in match.Groups["select"].Value.Split(','))
+            var properties = row.Attributes
+                .Where(a => a.Key != primaryKey)
+                .Select(a => (Property: a.Value is EntityReference ? $"_{a.Key}_value" : a.Key, Column: a.Key, a.Value))
+                .Prepend((Property: primaryKey, Column: primaryKey, Value: row.Contains(primaryKey) ? row[primaryKey] : row.Id));
+            foreach (var (property, column, value) in properties)
             {
-                var isLookupProperty = property.StartsWith('_') && property.EndsWith("_value", StringComparison.Ordinal);
-                var column = isLookupProperty ? property[1..^"_value".Length] : property;
-                row.Attributes.TryGetValue(column, out var value);
-
-                // Dataverse's own 400s: a lookup selected by its logical name, or a non-lookup selected as _col_value.
-                if (value is EntityReference != isLookupProperty && value is not null)
-                {
-                    return Task.FromResult(DataverseUserResponse.Fail(
-                        400, DataverseUserClientErrorCodes.BadRequest, $"Could not find a property named '{property}'."));
-                }
-
                 if (Absent.Contains(property))
                 {
                     continue;
@@ -136,10 +130,6 @@ public sealed class MappingSourceCallerReadDouble : IDataverseUserClient
                 if (Secured.Contains(column))
                 {
                     json.WriteNullValue();
-                }
-                else if (value is null && property == primaryKey)
-                {
-                    json.WriteStringValue(row.Id.ToString("D"));
                 }
                 else
                 {
@@ -156,24 +146,15 @@ public sealed class MappingSourceCallerReadDouble : IDataverseUserClient
 
     /// <summary>
     /// For a host whose <see cref="IDataverseUserClient"/> already answers other caller reads (a scripted world): a client that
-    /// sends THIS double only the mapping-source caller read — a single-row <c>$select</c> every property of which is a column
-    /// of the row this double holds (or its primary key) — and every other call to <paramref name="other"/>.
+    /// sends THIS double only the mapping-source caller read — a single-row read with no <c>$select</c> of a row this double
+    /// holds — and every other call to <paramref name="other"/>.
     /// </summary>
     public IDataverseUserClient RoutedOver(IDataverseUserClient other) => new Router(this, other);
 
     private bool IsMappingSourceRead(string relativePath)
     {
         var match = ReadPath.Match(relativePath);
-        if (!match.Success || _rows(Guid.Parse(match.Groups["id"].Value)) is not { } row)
-        {
-            return false;
-        }
-
-        return match.Groups["select"].Value.Split(',').All(property =>
-            property == row.LogicalName + "id"
-            || row.Attributes.ContainsKey(property)
-            || (property.StartsWith('_') && property.EndsWith("_value", StringComparison.Ordinal)
-                && row.Attributes.ContainsKey(property[1..^"_value".Length])));
+        return match.Success && _rows(Guid.Parse(match.Groups["id"].Value)) is not null;
     }
 
     private sealed class Router(MappingSourceCallerReadDouble source, IDataverseUserClient other) : IDataverseUserClient

@@ -135,7 +135,7 @@ public class OfficeQuickCreateSourceFieldSecurityTests
         result.Matter.GetAttributeValue<EntityReference>("sprk_client").Should().BeEquivalentTo(new EntityReference("account", AccountId));
         result.Matter.GetAttributeValue<string>("sprk_matterdescription").Should().Be(Secret, "a column the caller CAN read copies");
         result.Matter.GetAttributeValue<string>("sprk_matternotes").Should().Be($"Fee: {Secret}");
-        result.CallerReads.Should().ContainSingle().Which.Should().StartWith($"sprk_projects({SourceProjectId:D})?$select=");
+        result.CallerReads.Should().ContainSingle().Which.Should().Be($"sprk_projects({SourceProjectId:D})");
     }
 
     // ── harness ─────────────────────────────────────────────────────────────────────────────────────────────────
