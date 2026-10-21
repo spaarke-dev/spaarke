@@ -14,17 +14,21 @@ namespace Spaarke.ArchTests;
 /// <c>nameof</c> — except the member's own declaration in <c>RecordOwnershipResolver.cs</c> and the files in
 /// <see cref="Allowlist"/>. Whole-line comments are not code and are skipped. Enforced here rather than by deleting the
 /// interface member: test doubles and the census still name it.</para>
-/// <para>An allow-list entry is keyed by repo-relative path, carries the reason and when it expires, and must still match
-/// (<see cref="EveryAllowlistEntry_StillUsesTheName"/>): an entry whose use is gone is removed, so the list only shrinks.</para>
+/// <para>An allow-list entry is keyed by repo-relative path, carries the number of uses it allows, the reason and when it
+/// expires. The file must have exactly that many uses: a second use added to an allow-listed file fails like any other, and
+/// an entry whose use is gone is removed (<see cref="EveryAllowlistEntry_StillUsesTheName"/>), so the list only shrinks.</para>
+/// <para>Known limit: the rule matches the member's name, not its behaviour. A reflection lookup by a computed string is
+/// not seen; both members run the same owner decision, so the owner written would be the same.</para>
 /// </remarks>
 public class CreateOwnerResolutionGuardTests
 {
-    /// <summary>Repo-relative paths allowed to use <c>ResolveOwningTeamAsync</c>, with why and until when.</summary>
-    public static readonly IReadOnlyDictionary<string, string> Allowlist = new Dictionary<string, string>
-    {
-        ["src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs"] =
-            "Office root owner moves to ResolveOwnerAsync in task 018 via the unified service; #1614. Expires at 018.",
-    };
+    /// <summary>Repo-relative paths allowed to use <c>ResolveOwningTeamAsync</c>: how many uses, why and until when.</summary>
+    public static readonly IReadOnlyDictionary<string, (int Uses, string Reason)> Allowlist =
+        new Dictionary<string, (int Uses, string Reason)>
+        {
+            ["src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs"] = (1,
+                "Office root owner moves to ResolveOwnerAsync in task 018 via the unified service; #1614. Expires at 018."),
+        };
 
     /// <summary>The file that declares the member (the interface and its implementation).</summary>
     internal const string DeclaringFile = "src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs";
@@ -43,8 +47,13 @@ public class CreateOwnerResolutionGuardTests
         var offenders = new List<string>();
         foreach (var (path, lines) in ServerFiles())
         {
-            if (Allowlist.ContainsKey(path))
+            if (Allowlist.TryGetValue(path, out var allowed))
+            {
+                var uses = lines.Count(l => IsUse(l, declaringFile: false));
+                if (uses > allowed.Uses)
+                    offenders.Add($"{path}: {uses} uses, the allow-list permits {allowed.Uses} ({allowed.Reason})");
                 continue;
+            }
 
             for (var i = 0; i < lines.Length; i++)
             {
