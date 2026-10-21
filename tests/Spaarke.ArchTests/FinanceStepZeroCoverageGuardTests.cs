@@ -1,7 +1,13 @@
+using System.Reflection;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Patterns;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Services.Identity;
 using Xunit;
 
 namespace Spaarke.ArchTests;
@@ -20,6 +26,12 @@ namespace Spaarke.ArchTests;
 /// missing or faulting refuses). Limit, stated exactly: presence is not behaviour. That the filter refuses on the flag is
 /// proven by FinanceStepZeroTests and, per route, by the Finance contract tests; this guard proves only that every
 /// <c>/api/finance</c> route asks for it.
+/// <para><b>Three selectors, same table.</b> A route is judged when its path is under <c>api/finance</c> (the prefix selector),
+/// OR its handler is declared in the <c>Sprk.Bff.Api.Api.Finance</c> namespace (read from the endpoint's
+/// <see cref="MethodInfo"/> metadata), OR it runs <see cref="FinanceAuthorizationFilter"/>
+/// (<see cref="FinanceAuthorizationFilterAttached"/>) from a handler not listed in <see cref="NonFinanceFilterUsers"/> - so a
+/// Finance handler mapped under another prefix (e.g. <c>/api/{area}/...</c>) cannot be missed. The filter is not Finance-only,
+/// hence that list.</para>
 /// </remarks>
 [Collection(BootedBffCollection.Name)]
 public sealed class FinanceStepZeroCoverageGuardTests
@@ -34,6 +46,22 @@ public sealed class FinanceStepZeroCoverageGuardTests
     /// decision and uac-r2 review.
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> Exempt = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The namespace whose handlers are finance handlers wherever they are mapped.</summary>
+    private const string FinanceHandlerNamespace = "Sprk.Bff.Api.Api.Finance";
+
+    /// <summary>
+    /// Handler classes OUTSIDE the Finance namespace that deliberately run <see cref="FinanceAuthorizationFilter"/> (it is the
+    /// platform's one multi-id record-rights filter, not finance-only) on routes that are NOT <c>/api/finance</c> routes, so step 0
+    /// does not apply to them (owner 2026-10-21: step 0 is every <c>/api/finance</c> route). Keyed by the outermost declaring type
+    /// of the handler. An entry needs an owner decision and uac-r2 review, and must still exist (a stale entry fails).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> NonFinanceFilterUsers = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["Sprk.Bff.Api.Api.ScorecardCalculatorEndpoints"] = "scorecard grade recalculation (/api/matters, /api/projects); not a finance route",
+        ["Sprk.Bff.Api.Api.Insights.InsightsSearchEndpoint"] = "insights search (/api/insights); not a finance route",
+        ["Sprk.Bff.Api.Api.Workspace.WorkspaceAiEndpoints"] = "workspace AI summary (/api/workspace/ai); not a finance route",
+    };
 
     private readonly BootedBff _booted;
 
@@ -50,9 +78,14 @@ public sealed class FinanceStepZeroCoverageGuardTests
             Assert.True(finance.Count >= 30,
                 $"{app.HostEnvironmentName}: only {finance.Count} /api/finance endpoints were booted; a mapping gate is off.");
 
+            // The handler selector is not vacuous either: the Finance-namespace handlers are the same ~35 routes.
+            var byHandler = app.Endpoints.Where(HandlerIsFinance).ToList();
+            Assert.True(byHandler.Count >= 30,
+                $"{app.HostEnvironmentName}: only {byHandler.Count} endpoints with a {FinanceHandlerNamespace} handler were found; the handler selector reads nothing (MethodInfo metadata missing?).");
+
             var violations = Violations(app.Endpoints);
             Assert.True(violations.Count == 0,
-                $"{app.HostEnvironmentName}: /api/finance endpoints without step 0. Add .RequireInternalFinanceCaller() to the route "
+                $"{app.HostEnvironmentName}: finance endpoints without step 0. Add .RequireInternalFinanceCaller() to the route "
                 + "group and authorize the route with .AddFinanceAuthorizationFilter(...) (section 5.3):\n"
                 + string.Join("\n", violations));
         }
@@ -95,6 +128,101 @@ public sealed class FinanceStepZeroCoverageGuardTests
         Assert.Empty(Violations(endpoints));
     }
 
+    [Fact(DisplayName = "Task 099: the NonFinanceFilterUsers list is current - the real table holds exactly those non-finance users of the Finance filter, no more, no fewer")]
+    public void TheNonFinanceFilterUsersListIsCurrent()
+    {
+        foreach (var app in new[] { _booted.Development, _booted.Production })
+        {
+            var outsiders = app.Endpoints
+                .Where(e => !IsFinance(e) && !HandlerIsFinance(e) && e.Metadata.GetMetadata<FinanceAuthorizationFilterAttached>() is not null)
+                .Select(e => OutermostHandlerType(e)?.FullName ?? "<unknown handler>")
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(n => n, StringComparer.Ordinal)
+                .ToList();
+
+            Assert.Equal(NonFinanceFilterUsers.Keys.OrderBy(n => n, StringComparer.Ordinal).ToList(), outsiders);
+        }
+    }
+
+    [Fact(DisplayName = "Task 099 must-fire: a real Finance-namespace handler mapped OUTSIDE /api/finance (method group and lambda), and an unlisted handler that runs the Finance filter, are reported")]
+    public void TheGuardFires_OnAFinanceHandlerUnderAnotherPrefix()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development });
+        using var app = builder.Build();
+        app.MapGet("/api/other/{id}/planted-method-group", Sprk.Bff.Api.Api.Finance.PlantedFinanceHandlers.Planted);
+        app.MapGet("/api/other/planted-lambda", Sprk.Bff.Api.Api.Finance.PlantedFinanceHandlers.PlantedLambda());
+        app.MapGet("/api/other/not-a-finance-handler", () => "ok").WithMetadata(FinanceAuthorizationFilterAttached.Instance);
+        app.MapGet("/api/other/innocent", () => "ok");
+        app.MapGet("/api/other/flagged", Sprk.Bff.Api.Api.Finance.PlantedFinanceHandlers.Planted)
+            .WithMetadata(FinanceInternalCallersOnly.Instance, FinanceAuthorizationFilterAttached.Instance);
+
+        var violations = Violations(EndpointsOf(app));
+
+        Assert.Equal(3, violations.Count);
+        Assert.Contains(violations, v => v.Contains("planted-method-group", StringComparison.Ordinal) && v.Contains("no step-0 flag", StringComparison.Ordinal));
+        Assert.Contains(violations, v => v.Contains("planted-lambda", StringComparison.Ordinal) && v.Contains("no step-0 flag", StringComparison.Ordinal));
+        Assert.Contains(violations, v => v.Contains("not-a-finance-handler", StringComparison.Ordinal) && v.Contains("no step-0 flag", StringComparison.Ordinal));
+        Assert.DoesNotContain(violations, v => v.Contains("innocent", StringComparison.Ordinal));
+        Assert.DoesNotContain(violations, v => v.Contains("/flagged", StringComparison.Ordinal)); // the same handler, flagged and filtered: not reported
+    }
+
+    [Fact(DisplayName = "Task 099 must-not-fire: a flagged and filtered Finance-namespace handler under another prefix is not reported, and neither is any endpoint of the real table")]
+    public void TheGuardDoesNotFire_OnACoveredFinanceHandlerUnderAnotherPrefix_OrOnTheRealTable()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development });
+        using var app = builder.Build();
+        app.MapGet("/api/other/covered", Sprk.Bff.Api.Api.Finance.PlantedFinanceHandlers.Planted)
+            .WithMetadata(FinanceInternalCallersOnly.Instance, FinanceAuthorizationFilterAttached.Instance);
+
+        Assert.Empty(Violations(EndpointsOf(app)));
+        Assert.Empty(Violations(_booted.Development.Endpoints));
+        Assert.Empty(Violations(_booted.Production.Endpoints));
+    }
+
+    [Fact(DisplayName = "Task 099: a request scope resolves the real caller resolvers step 0 needs, in the Development and Production boots")]
+    public void TheStepZeroResolversResolveInEveryBoot()
+    {
+        AssertStepZeroResolvers(_booted.Development);
+        AssertStepZeroResolvers(_booted.Production);
+    }
+
+    [Fact(DisplayName = "Task 099: with NO AI module composed, the Communication and Notifications modules alone register the caller resolvers step 0 needs (the AI module is not the only registrant)")]
+    public void TheStepZeroResolversAreRegisteredWithoutTheAiModule()
+    {
+        // Step 0 fails closed when a resolver is missing, which would refuse every caller on every /api/finance route. The AI
+        // module registers ICallerSystemUserResolver only inside AddAnalysisOrchestrationServices (Analysis AND DocumentIntelligence
+        // on); the unconditional registrant is CommunicationModule (TryAddScoped), ISystemUserIdentityResolver is NotificationsModule's.
+        // A booted host cannot stand in for "AI off": that combination does not start (GateCombinationConstructibilityTests ledger;
+        // ChatEndpoints binds an unregistered IChatClient), so the two modules are composed alone and the descriptors read.
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+        var services = new ServiceCollection();
+        Sprk.Bff.Api.Infrastructure.DI.CommunicationModule.AddCommunicationModule(services, configuration);
+        Sprk.Bff.Api.Infrastructure.DI.NotificationsModule.AddNotificationsModule(services, configuration);
+
+        var caller = Assert.Single(services, d => d.ServiceType == typeof(ICallerSystemUserResolver));
+        Assert.Equal(typeof(CallerSystemUserResolver), caller.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, caller.Lifetime);
+        var identity = Assert.Single(services, d => d.ServiceType == typeof(ISystemUserIdentityResolver));
+        Assert.Equal(typeof(SystemUserIdentityResolver), identity.ImplementationType);
+    }
+
+    private static void AssertStepZeroResolvers(BootedApp app)
+    {
+        using var scope = app.Services.CreateScope();
+        var caller = scope.ServiceProvider.GetService<ICallerSystemUserResolver>();
+        var identity = scope.ServiceProvider.GetService<ISystemUserIdentityResolver>();
+
+        Assert.True(caller is not null,
+            $"{app.Environment}: no ICallerSystemUserResolver is registered, so step 0 would refuse every caller (fail closed). CommunicationModule must TryAddScoped it.");
+        Assert.True(identity is not null,
+            $"{app.Environment}: no ISystemUserIdentityResolver is registered, so step 0 would refuse every caller (fail closed). NotificationsModule registers it.");
+        Assert.IsType<CallerSystemUserResolver>(caller);
+        Assert.IsType<SystemUserIdentityResolver>(identity);
+    }
+
+    private static List<RouteEndpoint> EndpointsOf(WebApplication app) =>
+        ((IEndpointRouteBuilder)app).DataSources.SelectMany(d => d.Endpoints).OfType<RouteEndpoint>().ToList();
+
     private static bool IsFinance(RouteEndpoint endpoint)
     {
         // Path-segment boundary from the parsed segments, not RawText: a pattern may begin "/", "~/" or nothing.
@@ -103,6 +231,33 @@ public sealed class FinanceStepZeroCoverageGuardTests
                || path.StartsWith(Prefix + "/", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>The handler's outermost declaring type (a lambda's closure class is nested in the class that maps it).</summary>
+    private static Type? OutermostHandlerType(RouteEndpoint endpoint)
+    {
+        var type = endpoint.Metadata.GetMetadata<MethodInfo>()?.DeclaringType;
+        while (type?.DeclaringType is { } outer)
+        {
+            type = outer;
+        }
+
+        return type;
+    }
+
+    /// <summary>Second selector: the handler is declared in <see cref="FinanceHandlerNamespace"/>, whatever the route path.</summary>
+    private static bool HandlerIsFinance(RouteEndpoint endpoint) =>
+        OutermostHandlerType(endpoint)?.Namespace is { } ns
+        && (ns.Equals(FinanceHandlerNamespace, StringComparison.Ordinal) || ns.StartsWith(FinanceHandlerNamespace + ".", StringComparison.Ordinal));
+
+    /// <summary>
+    /// Third selector: the route runs <see cref="FinanceAuthorizationFilter"/> from a handler that is not on
+    /// <see cref="NonFinanceFilterUsers"/>, so a new, unlisted user of the filter outside Finance has to be decided.
+    /// </summary>
+    private static bool RunsFinanceFilterUnlisted(RouteEndpoint endpoint) =>
+        endpoint.Metadata.GetMetadata<FinanceAuthorizationFilterAttached>() is not null
+        && !(OutermostHandlerType(endpoint)?.FullName is { } name && NonFinanceFilterUsers.ContainsKey(name));
+
+    private static bool IsJudged(RouteEndpoint endpoint) => IsFinance(endpoint) || HandlerIsFinance(endpoint) || RunsFinanceFilterUnlisted(endpoint);
+
     private static string PathOf(RouteEndpoint endpoint) =>
         string.Join("/", endpoint.RoutePattern.PathSegments.Select(segment =>
             string.Concat(segment.Parts.Select(part => part is RoutePatternLiteralPart literal ? literal.Content : "{}"))));
@@ -110,7 +265,7 @@ public sealed class FinanceStepZeroCoverageGuardTests
     private static List<string> Violations(IEnumerable<RouteEndpoint> endpoints)
     {
         var violations = new List<string>();
-        foreach (var endpoint in endpoints.Where(IsFinance))
+        foreach (var endpoint in endpoints.Where(IsJudged))
         {
             var methods = endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods;
             var verb = methods is { Count: > 0 } ? string.Join(",", methods) : "*";
