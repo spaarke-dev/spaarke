@@ -567,6 +567,69 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
         result.Data.Should().BeNull();
     }
 
+    // ── Task 188 (D7 T7, #2126): THE external document predicate in describe ──
+
+    private static readonly Guid ParentEmlId = Guid.Parse("e1880000-0000-0000-0000-0000000000d1");
+
+    private void SetupNarrowedDocumentRecord(string permissionJson, string parentJson)
+    {
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_document')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "EntitySetName": "sprk_documents", "PrimaryIdAttribute": "sprk_documentid" }""")));
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_documents(")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""
+                {
+                  "sprk_documentid": "{{DocumentId:D}}",
+                  "sprk_documentname": "attachment.pdf",
+                  "sprk_accesspermission": {{permissionJson}},
+                  "_sprk_relatedcommunication_value": null,
+                  "_sprk_parentdocument_value": {{parentJson}}
+                }
+                """)));
+    }
+
+    [Theory]
+    [InlineData("100000002", "null", null, null)]                          // own Restricted
+    [InlineData("null", "parent", "100000002", null)]                      // parent .eml Restricted, no link anywhere
+    [InlineData("null", "parent", "null", "internal")]                     // parent .eml of an internal-only email
+    public async Task ExecuteChatAsync_ExternalCallerDocument_Task188_HiddenByThePredicate_AnswersLikeNotFound(
+        string permissionJson, string parent, string? parentPermissionJson, string? parentCommunication)
+    {
+        AsExternalCaller();
+        SetupNarrowedDocumentRecord(permissionJson, parent == "parent" ? $"\"{ParentEmlId:D}\"" : "null");
+        DocumentNarrowingReads.AnswerByKey(_dataverse, "sprk_documents", "sprk_documentid", $$"""
+            { "sprk_documentid": "{{ParentEmlId:D}}", "sprk_accesspermission": {{parentPermissionJson ?? "null"}},
+              "_sprk_relatedcommunication_value": {{(parentCommunication is null ? "null" : $"\"{RelatedCommunicationId:D}\"")}},
+              "_sprk_parentdocument_value": null }
+            """);
+        SetupRelatedCommunication("true", $"\"{ThreadId:D}\"");
+        SetupThreadPrivacy(100000000);
+
+        var result = await DescribeDocumentAsync();
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.NotFound);
+        result.ErrorMessage.Should().Be(ExternalCallerCommunicationGuard.RecordNotVisibleMessage);
+        result.Data.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerDocument_Task188_StandardParentWithNoLink_ReturnsRecord()
+    {
+        AsExternalCaller();
+        SetupNarrowedDocumentRecord("null", $"\"{ParentEmlId:D}\"");
+        DocumentNarrowingReads.AnswerByKey(_dataverse, "sprk_documents", "sprk_documentid", $$"""
+            { "sprk_documentid": "{{ParentEmlId:D}}", "sprk_accesspermission": 100000000,
+              "_sprk_relatedcommunication_value": null, "_sprk_parentdocument_value": null }
+            """);
+
+        var result = await DescribeDocumentAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("fields").GetProperty("sprk_documentname").GetString().Should().Be("attachment.pdf");
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_InternalCallerDocumentWithInternalOnlyRelatedCommunication_UnchangedAndNoExtraRead()
     {

@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -210,13 +211,14 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             string odataQuery;
             var threadColumnInjected = false;
             var internalOnlyColumnInjected = false;
-            var relatedCommunicationColumnInjected = false;
+            var narrowingColumnsInjected = new List<string>();
             if (guardCommunications || guardDocuments)
             {
                 // ISS-010 (task 078): on sprk_communication the task 065 rule rides in the query: the model's whole
                 // predicate in parentheses, ANDed with flag-false, thread-set and thread-Open (review K1). The thread and
                 // flag columns are selected so both are re-checked after the read (review K4). On sprk_document the
-                // related-communication lookup is selected so each row's communication can be checked after the read.
+                // columns THE external document predicate reads (task 188: own Access Permission, related communication,
+                // parent document) are selected so each row can be decided after the read.
                 var guardedColumns = translation.Columns!
                     .Select(c => lookupAttributes.Contains(c) ? ToValueForm(c) : c)
                     .ToList();
@@ -227,8 +229,8 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                 }
                 else
                 {
-                    relatedCommunicationColumnInjected = AddColumnIfAbsent(
-                        guardedColumns, ExternalCallerCommunicationGuard.RelatedCommunicationLookupValue);
+                    narrowingColumnsInjected.AddRange(
+                        ExternalDocumentNarrowing.SelectColumns.Where(column => AddColumnIfAbsent(guardedColumns, column)));
                 }
 
                 var rewrittenFilter = RewriteLookupReferences(translation.RawFilter, lookupAttributes);
@@ -282,24 +284,24 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     cancellationToken).ConfigureAwait(false);
             }
 
-            // ISS-010 review round 1 (F1): a document whose related communication the caller may not see is hidden. One
-            // batched read of the related communications, then one thread-privacy read; a communication that does not
-            // come back is hidden; a fault throws into the error result below (no rows).
-            HashSet<Guid>? visibleCommunications = null;
+            // Task 188 (D7, #2126): THE external document predicate decides each document row (own or ancestor Restricted;
+            // the related communication of the document or, on a bounded parent walk, of its ancestor, under the 065 rule).
+            // Batched reads per hop level and for the communications; a fault throws into the error result below (no rows).
+            DocumentNarrowingResult? narrowing = null;
             if (guardDocuments &&
                 response.Body is { } documentBody && documentBody.TryGetProperty("value", out var documentValue) &&
                 documentValue.ValueKind == JsonValueKind.Array)
             {
-                visibleCommunications = await ExternalCallerCommunicationGuard.ReadVisibleCommunicationIdsAsync(
-                    _dataverse,
-                    documentValue.EnumerateArray().Select(ExternalCallerCommunicationGuard.RelatedCommunicationIdOf).ToList(),
+                narrowing = await ExternalDocumentNarrowing.DecideAsync(
+                    documentValue.EnumerateArray().Select(ExternalDocumentNarrowing.FromWebApi).ToList(),
+                    ExternalCallerCommunicationGuard.QueryOver(_dataverse),
                     cancellationToken).ConfigureAwait(false);
             }
 
             var rows = new List<Dictionary<string, object?>>();
             var citations = new List<ToolResultCitation>();
             var hiddenRows = 0;
-            var hiddenDocuments = 0;
+            var hiddenDocuments = new List<DocumentNarrowingRow>();
             if (response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
             {
                 foreach (var record in value.EnumerateArray())
@@ -313,11 +315,10 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     }
 
                     if (guardDocuments &&
-                        ExternalCallerCommunicationGuard.RelatedCommunicationIdOf(record) is var relatedCommunicationId &&
-                        relatedCommunicationId != Guid.Empty &&
-                        (visibleCommunications is null || !visibleCommunications.Contains(relatedCommunicationId)))
+                        ExternalDocumentNarrowing.FromWebApi(record) is var document &&
+                        (narrowing is null || !narrowing.IsVisible(document)))
                     {
-                        hiddenDocuments++;
+                        hiddenDocuments.Add(document);
                         continue;
                     }
 
@@ -355,9 +356,9 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     {
                         row.Remove(CommunicationInternalOnlyFloor.InternalOnlyField);
                     }
-                    if (relatedCommunicationColumnInjected)
+                    foreach (var injected in narrowingColumnsInjected)
                     {
-                        row.Remove(FromValueForm(ExternalCallerCommunicationGuard.RelatedCommunicationLookupValue, lookupAttributes));
+                        row.Remove(FromValueForm(injected, lookupAttributes));
                     }
 
                     if (recordId != Guid.Empty)
@@ -376,12 +377,14 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
                     translation.EntityLogicalName, "thread_not_open", context.DecisionId);
             }
-            if (hiddenDocuments > 0)
+            if (hiddenDocuments.Count > 0)
             {
-                // ADR-015: entity + reason code only — never query text or row content.
+                // ADR-015: entity + reason codes with counts only — never query text or row content.
                 _logger.LogInformation(
                     "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
-                    translation.EntityLogicalName, "related_communication_hidden", context.DecisionId);
+                    translation.EntityLogicalName,
+                    narrowing?.HiddenSummary(hiddenDocuments) ?? DocumentNarrowingResult.CodeOf(DocumentNarrowingReason.ReadFailed),
+                    context.DecisionId);
             }
 
             stopwatch.Stop();

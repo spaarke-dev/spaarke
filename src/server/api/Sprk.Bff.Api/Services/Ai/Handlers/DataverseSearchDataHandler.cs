@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -262,7 +263,8 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
             var results = new List<object>();
             var citations = new List<ToolResultCitation>();
             var droppedHits = 0;
-            var hiddenDocuments = 0;
+            var hiddenDocumentIds = new List<Guid>();
+            DocumentNarrowingResult? narrowing = null;
             var value = FindResultsArray(response.Body);
             if (value is { } resultsArray)
             {
@@ -288,34 +290,27 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                     hits.Add((hit, entityName, recordId));
                 }
 
-                // ISS-010 review round 1 (F1): for an external caller, a sprk_document hit whose related communication fails
-                // the rule is dropped silently (same posture as family hits). One batched read of the documents' related
-                // communication, then the communication check; a document that does not come back is dropped; a fault
+                // ISS-010 review round 1 (F1), task 188 (D7, #2126): for an external caller, a sprk_document hit THE external
+                // document predicate hides is dropped silently (same posture as family hits). One batched read of the hit
+                // documents, then the predicate's own batched reads; a document that does not come back is dropped; a fault
                 // throws into the error result below (no data).
-                HashSet<Guid>? hiddenDocumentIds = null;
                 var documentIds = hits
                     .Where(h => ExternalCallerCommunicationGuard.IsDocumentTable(h.EntityName))
                     .Select(h => h.RecordId)
                     .ToList();
                 if (documentIds.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
                 {
-                    var relatedByDocument = await ExternalCallerCommunicationGuard.ReadRelatedCommunicationIdsAsync(
-                        _dataverse, documentIds, cancellationToken).ConfigureAwait(false);
-                    var visibleCommunications = await ExternalCallerCommunicationGuard.ReadVisibleCommunicationIdsAsync(
-                        _dataverse, relatedByDocument.Values, cancellationToken).ConfigureAwait(false);
-                    hiddenDocumentIds = documentIds
-                        .Where(id => !relatedByDocument.TryGetValue(id, out var related) ||
-                                     (related != Guid.Empty && !visibleCommunications.Contains(related)))
-                        .ToHashSet();
+                    narrowing = await ExternalDocumentNarrowing.ReadAndDecideAsync(
+                        documentIds, ExternalCallerCommunicationGuard.QueryOver(_dataverse), cancellationToken).ConfigureAwait(false);
                 }
 
                 foreach (var (hit, entityName, recordId) in hits)
                 {
-                    if (hiddenDocumentIds is not null &&
+                    if (narrowing is not null &&
                         ExternalCallerCommunicationGuard.IsDocumentTable(entityName) &&
-                        hiddenDocumentIds.Contains(recordId))
+                        !narrowing.IsVisible(recordId))
                     {
-                        hiddenDocuments++;
+                        hiddenDocumentIds.Add(recordId);
                         continue;
                     }
 
@@ -360,12 +355,13 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                     "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
                     ExternalCallerCommunicationGuard.FamilyPrefix + "*", "family_hits_dropped", context.DecisionId);
             }
-            if (hiddenDocuments > 0)
+            if (hiddenDocumentIds.Count > 0)
             {
-                // ADR-015: entity + reason code only — never the query or hit content.
+                // ADR-015: entity + reason codes with counts only — never the query or hit content.
                 _logger.LogInformation(
                     "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
-                    ExternalCallerCommunicationGuard.DocumentTable, "related_communication_hidden", context.DecisionId);
+                    ExternalCallerCommunicationGuard.DocumentTable,
+                    narrowing!.HiddenSummary(hiddenDocumentIds), context.DecisionId);
             }
 
             stopwatch.Stop();

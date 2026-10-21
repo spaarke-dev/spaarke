@@ -1452,6 +1452,9 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                          // Task 187: the document's other parents, whose LIVE roots the rule takes in.
                          + ",_sprk_canonicaldocument_value,_sprk_invoice_value,_sprk_parentdocument_value,_sprk_relatedagreement_value"
                          + ",_sprk_relatedcommunication_value,_sprk_relatedevent_value,_sprk_relatedinvoice_value,_sprk_relatedtodo_value"
+                         // Task 188: the document's own Access Permission, which the document narrowing reads (its two
+                         // lookups, the related communication and the parent document, are already selected above).
+                         + ",sprk_accesspermission"
                          + "&$orderby=createdon desc,sprk_documentid asc");
     }
 

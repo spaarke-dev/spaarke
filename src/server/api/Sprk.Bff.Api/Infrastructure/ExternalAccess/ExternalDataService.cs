@@ -290,13 +290,15 @@ public class ExternalDataService
         TokenCredential credential,
         ILogger<ExternalDataService> logger,
         IGenericEntityService? filing = null,
-        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver? columns = null)
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver? columns = null,
+        Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? identity = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _credential = credential;
         _logger = logger;
         _filing = filing;
+        _identity = identity;
         // Task 187: which lineage lookups a parent table has in this environment (the 6h-cached metadata probe the stamp path
         // uses), so the live-parent walk never selects a column a later schema adds. Without one (a test double), every
         // lookup of the lineage map is taken as present.
@@ -308,6 +310,14 @@ public class ExternalDataService
                     : Array.Empty<string>(),
                 StringComparer.OrdinalIgnoreCase));
     }
+
+    /// <summary>
+    /// Task 188: who is an internal systemuser (the 065 rule's own exemption, <c>CommunicationThreadReadService</c>), so the
+    /// document narrowing (<see cref="NarrowDocumentsAsync"/>) leaves them as the internal plane does. Registered as a
+    /// singleton (NotificationsModule), so the typed-client factory supplies it. Without one (a test double), every caller is
+    /// narrowed (fail closed).
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? _identity;
 
     /// <summary>Task 187: the column probe the live-parent walk reads parent tables through (see the constructor).</summary>
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.EntityColumnProbe _columnProbe;
@@ -475,12 +485,30 @@ public class ExternalDataService
                 read.Rows.Count - readable.Count, read.Rows.Count, parentKind, parentId);
         }
 
+        // Task 188 (D7, #2126): THE document narrowing, after the root rule: own or ancestor Restricted, or an internal-only /
+        // non-Open communication on the bounded parent walk, hides a document from a caller who is not an internal systemuser.
+        var candidates = readable.Select(r => ExternalDocumentNarrowing.FromWebApi(DocumentIdOf(r), r.Extra)).ToList();
+        var narrowing = await NarrowDocumentsAsync(caller, candidates, ct);
+        var visible = readable.Where((_, i) => narrowing.IsVisible(candidates[i])).ToList();
+        if (visible.Count != readable.Count)
+        {
+            _logger.LogInformation(
+                "[EXT-DATA] documents: {Hidden} of {Total} document(s) of {ParentKind} {ParentId} hidden by the document narrowing ({Reasons})",
+                readable.Count - visible.Count, readable.Count, parentKind, parentId, narrowing.HiddenSummary(candidates));
+        }
+
         return new ExternalCollectionResponse<ExternalDocumentDto>
         {
-            Value = readable.Select(MapDocument).ToList(),
-            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count),
+            Value = visible.Select(MapDocument).ToList(),
+            Truncated = read.Truncated
+                        || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count)
+                        || (narrowing.Faulted && visible.Count < readable.Count),
         };
     }
+
+    /// <summary>A document row's id (<see cref="Guid.Empty"/> when it did not come back as a GUID: never visible).</summary>
+    private static Guid DocumentIdOf(DocumentRow row) =>
+        Guid.TryParse(row.SprkDocumentid, out var id) ? id : Guid.Empty;
 
     /// <summary>
     /// Review of 039 option B (K2): a list that withheld rows while the secure-flag read was INCOMPLETE (a failed chunk, a
@@ -639,6 +667,9 @@ public class ExternalDataService
                      + "_sprk_workassignment_value,_sprk_relatedworkassignment_value,createdon,"
                      + CreatorStampSelect
                      + LiveParentSelectSuffix(DocumentTable); // task 187: the parents whose live roots the rule takes in
+        // Task 188: the columns the document narrowing reads (the two lookups are already lineage parents; the own Access
+        // Permission is not), each once.
+        select = string.Join(",", select.Split(',').Concat(ExternalDocumentNarrowing.SelectColumns).Distinct(StringComparer.Ordinal));
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {parentId}");
         return $"{apiUrl}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc,sprk_documentid asc";
     }
@@ -904,6 +935,7 @@ public class ExternalDataService
         var columns = new[] { "sprk_documentname", binding.LookupValueAttribute }
             .Concat(DocumentRootLinks.SelectColumns)
             .Concat(ExternalMultiRootRule.LiveParentSelect(DocumentTable)) // task 187
+            .Concat(ExternalDocumentNarrowing.SelectColumns) // task 188: what the document narrowing reads
             .Distinct(StringComparer.Ordinal);
         var url = $"{GetApiUrl()}/sprk_documents({documentId})?$select={string.Join(",", columns)}";
 
@@ -1793,6 +1825,83 @@ public class ExternalDataService
     public Task<LiveParentRoots> ReadLiveParentRootsAsync(
         IEnumerable<IEnumerable<LiveParentLookup>> rowParents, CancellationToken ct = default) =>
         ExternalMultiRootRule.ReadLiveParentsAsync(GetLiveParentRootsAsync, rowParents, _logger, ct);
+
+    /// <summary>
+    /// Task 188 (D7, #2126): THE document narrowing (<see cref="ExternalDocumentNarrowing"/>) for document rows that passed
+    /// the root rule, read app-only. An internal systemuser (CallerPrincipal.SystemUserId set and
+    /// <see cref="Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver.IsExternalAsync"/> false) is not narrowed, the
+    /// 065 rule's own exemption; every other caller is. A failed read hides every row (<see cref="DocumentNarrowingResult.Faulted"/>).
+    /// The one seam every external document surface narrows through (the list, the single-document routes and the documents
+    /// module).
+    /// </summary>
+    internal async Task<DocumentNarrowingResult> NarrowDocumentsAsync(
+        CallerPrincipal caller, IReadOnlyCollection<DocumentNarrowingRow> rows, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(rows);
+        if (rows.Count == 0)
+            return DocumentNarrowingResult.NotNarrowed(rows);
+        if (await IsInternalSystemUserAsync(caller, ct))
+            return DocumentNarrowingResult.NotNarrowed(rows);
+        return await ExternalDocumentNarrowing.DecideOrFailClosedAsync(rows, QueryRowsOrThrowAsync, _logger, ct);
+    }
+
+    /// <summary>
+    /// Task 188: the single-document routes' narrowing (download, versions): whether <paramref name="document"/>, already
+    /// known to be readable under the route parent, survives <see cref="NarrowDocumentsAsync"/>. A <c>false</c> answers the
+    /// route's one "not part of this record" refusal, before any SPE pointer is resolved.
+    /// </summary>
+    public async Task<bool> IsDocumentVisibleAsync(
+        CallerPrincipal caller, Guid documentId, DocumentScopeRead document, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        var row = ExternalDocumentNarrowing.FromWebApi(documentId, document.Roots.Row);
+        var narrowing = await NarrowDocumentsAsync(caller, new[] { row }, ct);
+        if (narrowing.IsVisible(row))
+            return true;
+
+        _logger.LogInformation(
+            "[EXT-DATA] document {DocumentId} hidden by the document narrowing ({Reasons})",
+            documentId, narrowing.HiddenSummary(new[] { row }));
+        return false;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="caller"/> is an internal systemuser. A contact, a systemuser flagged external, an unknown one
+    /// and a lookup that fails are all NOT internal (the narrowing applies: under-deliver, never leak).
+    /// </summary>
+    private async Task<bool> IsInternalSystemUserAsync(CallerPrincipal caller, CancellationToken ct)
+    {
+        if (_identity is null || caller.SystemUserId is not { } systemUserId || systemUserId == Guid.Empty)
+            return false;
+        try
+        {
+            return !await _identity.IsExternalAsync(systemUserId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-DATA] The internal/external lookup for systemuser {SystemUserId} failed; the document narrowing applies.",
+                systemUserId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Task 188: the app-only OData reader the document narrowing (and the 065 rule inside it) reads through. A 404 or any
+    /// other failure THROWS (<see cref="DataverseUnavailableException"/>), so a fault never reads as "no rows".
+    /// </summary>
+    private async Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryRowsOrThrowAsync(
+        string entitySet, string odata, CancellationToken ct)
+    {
+        var page = await GetSingleOrThrowAsync<ODataResult<Dictionary<string, JsonElement>>>(
+            $"{GetApiUrl()}/{entitySet}?{odata}", ct);
+        return page?.Value ?? throw new DataverseUnavailableException($"The {entitySet} read returned no collection.");
+    }
 
     /// <summary>
     /// The walk's query count above which one request's live-parent read is logged at Information (task 187 fix round 2,

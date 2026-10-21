@@ -52,6 +52,25 @@ internal static class CommunicationOpenThreadGate
     /// <summary>Runs an OData query on <see cref="ThreadSet"/> under the caller's identity (app-only or impersonated).</summary>
     internal delegate Task<IReadOnlyList<Dictionary<string, JsonElement>>> ThreadRowQuery(string odata, CancellationToken ct);
 
+    /// <summary>
+    /// Runs an OData query on <paramref name="entitySet"/> under the caller's identity (app-only on the external plane, the
+    /// caller's own user client in the assistant's tools). A read that fails THROWS, so a fault never reads as "no rows".
+    /// </summary>
+    internal delegate Task<IReadOnlyList<Dictionary<string, JsonElement>>> RowQuery(
+        string entitySet, string odata, CancellationToken ct);
+
+    /// <summary>The communication entity set the visibility read targets.</summary>
+    internal const string CommunicationSet = "sprk_communications";
+
+    /// <summary>The communication primary key.</summary>
+    internal const string CommunicationPkField = "sprk_communicationid";
+
+    /// <summary>
+    /// Stands for a communication link that is present but unreadable (not null, not a GUID). Never read and never in a
+    /// visible set, so whatever carries it stays hidden (fail closed).
+    /// </summary>
+    internal static readonly Guid UnreadableLink = Guid.AllBitsSet;
+
     /// <summary>The columns every privacy read selects (pinned by a test: a dropped column would hide every row).</summary>
     internal static string SelectClause => $"{ThreadPkField},{CommunicationInternalOnlyFloor.ThreadPrivacyField}";
 
@@ -93,6 +112,53 @@ internal static class CommunicationOpenThreadGate
         }
 
         return open;
+    }
+
+    /// <summary>
+    /// THE task 065 rule over a set of communications (moved here from the assistant's guard by unified-access-control-r2
+    /// task 188, so the external document predicate and the assistant's tools share ONE copy): the subset of
+    /// <paramref name="communicationIds"/> a NON-internal caller may see. A communication is visible only when its
+    /// <see cref="CommunicationInternalOnlyFloor.InternalOnlyField"/> reads JSON <c>false</c> (true, null, absent or any other
+    /// value hides it), its thread lookup (<see cref="MessageThreadLookupValue"/>) is set, and that thread reads EXPLICITLY
+    /// Open now (<see cref="ReadOpenThreadIdsAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// One batched read of the communications (chunks of <see cref="ChunkSize"/> in one OR filter), then one batched
+    /// thread-privacy read. <see cref="Guid.Empty"/>, <see cref="UnreadableLink"/> and an id that does not come back are not
+    /// in the set (hidden, fail closed). A failed read THROWS. An empty input makes no query.
+    /// </remarks>
+    internal static async Task<HashSet<Guid>> ReadVisibleCommunicationIdsAsync(
+        IEnumerable<Guid> communicationIds, RowQuery query, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(communicationIds);
+        ArgumentNullException.ThrowIfNull(query);
+
+        var distinct = communicationIds.Where(id => id != Guid.Empty && id != UnreadableLink).Distinct().ToList();
+        var threadOf = new Dictionary<Guid, Guid>();
+        foreach (var chunk in distinct.Chunk(ChunkSize))
+        {
+            var filter = string.Join(" or ", chunk.Select(id => $"{CommunicationPkField} eq {id:D}"));
+            var rows = await query(CommunicationSet,
+                $"$select={CommunicationPkField},{CommunicationInternalOnlyFloor.InternalOnlyField},{MessageThreadLookupValue}" +
+                $"&$filter={filter}&$top={chunk.Length}", ct).ConfigureAwait(false);
+            foreach (var row in rows)
+            {
+                if (TryGuid(row, CommunicationPkField) is not { } id || id == Guid.Empty || !chunk.Contains(id)) continue;
+                if (!(row.TryGetValue(CommunicationInternalOnlyFloor.InternalOnlyField, out var flag) && flag.ValueKind == JsonValueKind.False))
+                    continue;
+                if (TryGuid(row, MessageThreadLookupValue) is not { } threadId || threadId == Guid.Empty) continue;
+                threadOf[id] = threadId;
+            }
+        }
+
+        if (threadOf.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+
+        var openThreads = await ReadOpenThreadIdsAsync(
+            threadOf.Values, (odata, c) => query(ThreadSet, odata, c), ct).ConfigureAwait(false);
+        return threadOf.Where(kv => openThreads.Contains(kv.Value)).Select(kv => kv.Key).ToHashSet();
     }
 
     private static Guid? TryGuid(Dictionary<string, JsonElement> row, string key) =>

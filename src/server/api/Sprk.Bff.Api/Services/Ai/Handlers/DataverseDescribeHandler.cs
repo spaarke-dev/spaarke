@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -403,7 +404,7 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         }
 
         // ISS-010 (task 078): the task 065 rule on the one record — flag explicitly false AND a thread that reads Open
-        // now; for a document, the same rule on its related communication (none: visible). A hidden record answers with
+        // now; for a document, THE external document predicate (task 188). A hidden record answers with
         // the same code and message as a guarded not-found above; a read fault throws (no data).
         if (guardCommunication || guardDocument)
         {
@@ -419,11 +420,12 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
             }
             else
             {
-                var relatedCommunicationId = ExternalCallerCommunicationGuard.RelatedCommunicationIdOf(record);
-                visible = relatedCommunicationId == Guid.Empty ||
-                    (await ExternalCallerCommunicationGuard.ReadVisibleCommunicationIdsAsync(
-                        _dataverse, new[] { relatedCommunicationId }, ct).ConfigureAwait(false))
-                    .Contains(relatedCommunicationId);
+                // Task 188 (D7, #2126): THE external document predicate (own or ancestor Restricted; the related
+                // communication of the document or, on a bounded parent walk, of its ancestor, under the 065 rule).
+                var document = ExternalDocumentNarrowing.FromWebApi(recordId, record);
+                visible = (await ExternalDocumentNarrowing.DecideAsync(
+                        new[] { document }, ExternalCallerCommunicationGuard.QueryOver(_dataverse), ct).ConfigureAwait(false))
+                    .IsVisible(document);
             }
 
             if (!visible)

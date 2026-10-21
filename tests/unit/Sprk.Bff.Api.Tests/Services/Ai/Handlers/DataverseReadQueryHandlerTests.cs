@@ -897,9 +897,12 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
 
         result.Success.Should().BeTrue(result.ErrorMessage);
+        // Task 188: the columns THE external document predicate reads (own Access Permission, related communication,
+        // parent document) are selected for the guard.
         documentQueries.Should().ContainSingle().Which.Should().Be(
-            "sprk_documents?$select=sprk_documentid,sprk_documentname,_sprk_relatedcommunication_value&$top=50",
-            because: "the related-communication lookup is selected for the guard");
+            "sprk_documents?$select=sprk_documentid,sprk_documentname,sprk_accesspermission,_sprk_relatedcommunication_value" +
+            ",_sprk_parentdocument_value&$top=50",
+            because: "the predicate's columns are selected for the guard");
         communicationReads.Should().ContainSingle().Which.Should().Be(
             "sprk_communications?$select=sprk_communicationid,sprk_isinternalonly,_sprk_communicationthread_value" +
             $"&$filter=sprk_communicationid eq {CommShared:D} or sprk_communicationid eq {CommInternal:D} or " +
@@ -962,8 +965,10 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
 
         result.Success.Should().BeTrue(result.ErrorMessage);
+        // Task 188: the lookup the model asked for is not selected twice; the predicate's other two columns are added.
         documentQueries.Should().ContainSingle().Which.Should().Be(
-            "sprk_documents?$select=sprk_documentid,sprk_documentname,_sprk_relatedcommunication_value&$top=50");
+            "sprk_documents?$select=sprk_documentid,sprk_documentname,_sprk_relatedcommunication_value,sprk_accesspermission" +
+            ",_sprk_parentdocument_value&$top=50");
         result.Data!.Value.GetProperty("rows").EnumerateArray().Single()
             .GetProperty("sprk_relatedcommunication").GetString().Should().Be(CommShared.ToString("D"),
                 because: "a column the model asked for is never stripped");
@@ -1062,6 +1067,73 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         result.Data!.Value.GetProperty("rowCount").GetInt32().Should().Be(1,
             because: "an internal caller sees a document whose related communication is internal-only");
         _dataverse.Verify(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_communications?")), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── Task 188 (D7 T7, #2126): THE external document predicate in read_query ──
+
+    private static readonly Guid DocOwnRestricted = Guid.Parse("d1880000-0000-0000-0000-000000000001");
+    private static readonly Guid DocUnderRestrictedEml = Guid.Parse("d1880000-0000-0000-0000-000000000002");
+    private static readonly Guid DocUnderInternalEml = Guid.Parse("d1880000-0000-0000-0000-000000000003");
+    private static readonly Guid DocUnderStandardEml = Guid.Parse("d1880000-0000-0000-0000-000000000004");
+    private static readonly Guid DocUnderRestrictedGrandparent = Guid.Parse("d1880000-0000-0000-0000-000000000005");
+    private static readonly Guid EmlRestricted = Guid.Parse("e1880000-0000-0000-0000-000000000001");
+    private static readonly Guid EmlInternal = Guid.Parse("e1880000-0000-0000-0000-000000000002");
+    private static readonly Guid EmlStandard = Guid.Parse("e1880000-0000-0000-0000-000000000003");
+    private static readonly Guid EmlUnderRestricted = Guid.Parse("e1880000-0000-0000-0000-000000000004");
+
+    private static string NarrowedDocRow(Guid id, int? permission = null, Guid? parent = null, Guid? communication = null) =>
+        $$"""{ "sprk_documentid": "{{id:D}}", "sprk_documentname": "Doc {{id:N}}", "sprk_accesspermission": {{(permission?.ToString() ?? "null")}}, "_sprk_relatedcommunication_value": {{(communication is { } c ? $"\"{c:D}\"" : "null")}}, "_sprk_parentdocument_value": {{(parent is { } p ? $"\"{p:D}\"" : "null")}} }""";
+
+    [Fact]
+    public async Task ExecuteChatAsync_ExternalCallerOnDocument_Task188_OwnOrAncestorRestrictedOrInternalOnlyParent_Hidden()
+    {
+        AsExternalCaller();
+        SetupDocumentMetadata();
+        CaptureDocumentQueries("{ \"value\": [ " + string.Join(", ",
+            DocRow(DocNoComm, null),
+            NarrowedDocRow(DocOwnRestricted, permission: 100000002),
+            NarrowedDocRow(DocUnderRestrictedEml, parent: EmlRestricted),
+            NarrowedDocRow(DocUnderInternalEml, parent: EmlInternal),
+            NarrowedDocRow(DocUnderStandardEml, parent: EmlStandard),
+            NarrowedDocRow(DocUnderRestrictedGrandparent, parent: EmlUnderRestricted)) + " ] }");
+        var hopReads = DocumentNarrowingReads.AnswerByKey(_dataverse, "sprk_documents", "sprk_documentid",
+            NarrowedDocRow(EmlRestricted, permission: 100000002),
+            NarrowedDocRow(EmlInternal, communication: CommInternal),
+            NarrowedDocRow(EmlStandard, permission: 100000000),
+            NarrowedDocRow(EmlUnderRestricted, parent: EmlRestricted));
+        CaptureCommunicationQueries(RelatedCommunicationsJson);
+        CaptureThreadReads(RelatedThreadsJson);
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_documentname FROM sprk_document"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("rows").EnumerateArray()
+            .Select(r => r.GetProperty("sprk_documentid").GetString())
+            .Should().Equal(new[] { DocNoComm.ToString("D"), DocUnderStandardEml.ToString("D") },
+                because: "own Restricted, a Restricted parent or grandparent and a parent .eml of an internal-only email hide the " +
+                         "document; a Standard parent with no link does not");
+        hopReads.Should().ContainSingle("one batched read of the parents; the grandparent was among them, so it is not read again");
+        hopReads[0].Should().Contain(EmlRestricted.ToString("D")).And.Contain(EmlInternal.ToString("D"))
+            .And.Contain(EmlStandard.ToString("D")).And.Contain(EmlUnderRestricted.ToString("D"));
+        foreach (var row in result.Data!.Value.GetProperty("rows").EnumerateArray())
+        {
+            row.TryGetProperty("sprk_accesspermission", out _).Should().BeFalse("selected only for the predicate");
+            row.TryGetProperty("_sprk_parentdocument_value", out _).Should().BeFalse("selected only for the predicate");
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_InternalCallerOnDocument_Task188_OwnRestricted_StillVisible_NoExtraRead()
+    {
+        SetupDocumentMetadata();
+        CaptureDocumentQueries("{ \"value\": [ " + NarrowedDocRow(DocOwnRestricted, permission: 100000002, parent: EmlRestricted) + " ] }");
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_documentname FROM sprk_document"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Data!.Value.GetProperty("rowCount").GetInt32().Should().Be(1, "the narrowing is for external callers only");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
